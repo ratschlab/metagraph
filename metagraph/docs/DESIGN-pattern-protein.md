@@ -1,6 +1,8 @@
 # Design: pattern search on protein graphs (E16)
 
-Status: implemented on gr/mg-e16-protein-pattern (lane C of the every-route engine work). The owner's decision of
+Status (2026-11-07, branch gr/mg-e16-protein-pattern, lane C of the every-route engine work): the engine, the
+route and the capabilities are implemented behind `_PROTEIN_GRAPH`; the contract is SPEC-pattern-search.md §29;
+the tests and the CI job are listed in section 9 with what has run (see the lane's progress note). Not deployed. The owner's decision of
 2026-10-31: "patterns must work on UniParc too". The language is the minimum of the suite's plan row E16
 (docs/PLAN-multigraph-implementation.md of metagraph-suite) and of the engine's note of 2026-10-31, section 6; this
 note settles only what those two leave to the implementation, and lists those choices in section 8.
@@ -57,7 +59,9 @@ The request names it as before: `patterns[i].protein`. One position per characte
 - `strands`: `"both"` (the default) and `"forward"` search the one strand; `"reverse"` is 400 `invalid_request`.
   The entry's `strands` is `["+"]`, `by_strand` has the key `+` alone; `palindromic` is false.
 - `predicate_strands`: accepted with both values and evaluated as `"context"` (a context's own row: there is no
-  reverse complement whose row "either" could read). The answers' echo states `"context"`.
+  reverse complement whose row "either" could read). Every answer with a predicate states the effective value:
+  `predicate.strands` and `limits.predicate_strands` are `"context"`, and each selected context's
+  `selection_strands` lists `"context"` per label.
 - Every other field as on a DNA graph: modes, scopes, caps, `long_search`, labels (`output.labels`), predicates
   (SPEC §19, §20.9, §25), `max_mismatches`.
 
@@ -103,15 +107,16 @@ the Protein build:
 | `scopes_by_graph_mode` | `basic` only | basic, canonical, primary |
 | `mismatches.max`, `.unit` | `{"protein": cap}`, `{"protein": "residue"}` | three kinds each |
 | `mismatches.protein_substitutes` | `"residues"` | `"sense_codons"` |
-| `graph_summary.pairs[].alphabet` (multi-graph `GET /capabilities`) | the pair's alphabet | absent |
 
-The gate block of `GET /traverse/capabilities` (SPEC §23.2) projects `protein_reading` too when the full block
-states it (the DNA block does not, so its projection is unchanged). A client gates on `kinds` and
-`protein_reading`; `alphabet` names the unit.
+The gate block of `GET /traverse/capabilities` (SPEC §23.2) is the projection onto its listed keys, unchanged: it
+carries `kinds`, `protein_residues`, `genetic_codes` and `default_genetic_code`, which tell a client of that block
+alone the residue reading (`kinds` without `dna`, `genetic_codes` empty). `alphabet` (per graph) names the unit.
+`graph_summary` (multi-graph `GET /capabilities`) gains no field here: E17 adds the alphabet per pair for every
+build.
 
 ## 7. What the DNA build keeps byte for byte
 
-Every change in `pattern_search.{hpp,cpp}`, `pattern.cpp` and `server.cpp` is either inside `#if _PROTEIN_GRAPH` or
+Every change in `pattern_search.{hpp,cpp}` and `pattern.cpp` is either inside `#if _PROTEIN_GRAPH` or
 an identity in the DNA build: named constants that equal the old literals there (the 4 bases, their mask, the
 estimate's 4 strings per position), a helper that returns the old table entry. The proof is the DNA build's own:
 the DNA unit and integration pattern suites, the byte comparison of the old and new DNA binaries' answers on a
@@ -128,6 +133,8 @@ request set (the pattern fixtures and the integration requests), and the contrac
 5. Substitutions in the DNA schema, `expected` the position's text.
 6. The capabilities' additions are the Protein build's only: the DNA build's documents, the contract samples among
    them, are unchanged.
+7. The protein fixtures sit in `api/python/tests/data/traverse/pattern_protein/`, beside `pattern/` (whose
+   directory list is the DNA generator's, `scripts/traversal/pattern_fixtures.py`, and checked as a whole).
 
 ## 9. Tests
 
@@ -136,8 +143,33 @@ request set (the pattern fixtures and the integration requests), and the contrac
   unmasked counts) and `tests/cli/test_pattern_protein_route.cpp` (the route: kinds, refusals, the entry, the
   capabilities, labels and a predicate). The DNA-only pattern suites are compiled out under `_PROTEIN_GRAPH`.
 - Integration: `integration_tests/test_pattern_protein.py`, skipped in DNA mode: the plan row's scenarios on a
-  small protein index built in the test (an exact peptide of at most 15 residues, one with X, one with B, Z or J, a
-  bracket and a negated class, mismatches 1 to 3 on a 15-mer, an exact peptide longer than 15, a label predicate,
-  the refusals), through `metagraph pattern` and the server.
-- CI: the job `Linux-Protein-pattern` of `.github/workflows/dev-branch.yml` (the Protein build, the `*Pattern*`
-  unit tests and the protein integration module), beside the protein traversal job of E15.
+  small protein index built in the test at k = 15 (an exact peptide of at most 15 residues, one with X, one with B,
+  Z or J, a bracket and a negated class, mismatches 1 to 3 on a 15-mer, an exact peptide longer than 15, a label
+  predicate, the refusals), through `metagraph pattern` and the server; and the fixtures
+  `api/python/tests/data/traverse/pattern_protein/` (a capabilities document and one answer), pinned byte for byte
+  apart from timings (`TestPatternProteinFixtures`).
+- CI: one Protein build in CI, E15's job `Linux-Protein` of `.github/workflows/dev-branch.yml`: its unit filter
+  already holds `*Pattern*` (PatternProtein, PatternProteinRoute, the predicate and mask suites a Protein build
+  compiles); its integration filters gain `*(test_pattern_protein.*` (section 10). No job of its own.
+
+## 10. Landing after E15 (protein traversal lands first)
+
+E15 asserts the old refusal in places that flip with E16 (its review, 2026-11-07). At the rebase onto E15:
+
+1. E15's commit "Leave pattern search out of a Protein build's unit tests; test its refusal" is in this branch as
+   a cherry-pick (same patch): the rebase drops it; this branch's later commit removes
+   `PatternRoute.ProteinGraphIsRefused` and rewords the guards of the DNA suites (they stay DNA-only: they send
+   `dna` and `iupac` patterns, which a protein graph refuses).
+2. `integration_tests/test_traverse.py` (E15's lines marked "until E16 (pattern on protein graphs)": two in
+   `TestTraverseAPI`, one in `test_capabilities_answer_in_the_envelope`): flip to /pattern served on a protein
+   graph (`available` true, `kinds` `["protein"]`).
+3. `tests/cli/test_task_resources.cpp` (`PatternStatesCpuPerRequestAndPerEntry`, compiled out by E15 in a Protein
+   build): drop E15's guard; this branch sends the build's kind (`protein` on a Protein build).
+4. `tests/cli/test_server_multigraph.cpp` (`LoadSharesTheResidentRecordMapping`, the /pattern block E15 guards):
+   a conflict; keep this branch's version (the build's kind), drop the guard. `RequestLevelChecksNeedNoGraph`:
+   this branch's `#if` (genetic_code is 400 invalid_request on a Protein build).
+5. `docs/SPEC-labeled-traversal-core.md` §6.12 ("Not offered": /pattern on a protein graph) and its T66 row: offered
+   now, SPEC-pattern-search.md §29.
+6. `.github/workflows/dev-branch.yml`: E15's comment on the Protein job (the pattern search left out) reworded; the
+   job's `integration_test_filters` gain `*(test_pattern_protein.*`.
+7. Then the Protein and DNA builds of every target, the suites of section 9 and the GCC 13 check again.

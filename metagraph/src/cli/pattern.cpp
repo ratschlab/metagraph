@@ -18,6 +18,7 @@
 #include "graph/representation/canonical_dbg.hpp"
 #include "graph/representation/succinct/dbg_succinct.hpp"
 #include "graph/traversal/label_oracle.hpp"
+#include "kmer/alphabets.hpp"
 #include "config/config.hpp"
 #include "json_helpers.hpp"
 #include "load/load_annotated_graph.hpp"
@@ -72,13 +73,27 @@ constexpr const char kLevelBest[] = "best";
 // The residues a protein pattern may hold (DESIGN §6): the 20 amino acids, the ambiguity codes
 // X, B, Z, J and the stop '*' (a stop codon of the request's genetic code), as the engine's
 // Pattern::parse reads them; listed in the capabilities
+#if _PROTEIN_GRAPH
+// On a protein graph (the Protein build, DESIGN-pattern-protein.md §2) a protein pattern is read
+// one residue per position: the 22 residues read as themselves (the 20 amino acids, U, O), then
+// the ambiguity codes X, B, Z, J; no stop. Classes ([..], [^..]) of these letters are listed
+// in protein_classes, the reading in protein_reading
+constexpr const char kProteinResidues[] = "ACDEFGHIKLMNPQRSTVWYUOXBZJ";
+constexpr const char kProteinReading[] = "residues";
+#else
 constexpr const char kProteinResidues[] = "ACDEFGHIKLMNPQRSTVWYXBZJ*";
+#endif
 
 // The two prose fields of the capabilities, references to the SPEC (pattern_capabilities_json):
 // §4.5 classifies every cap (a request field's maximum or the server's policy), §12.2 states
 // how a peptide is read
 constexpr const char kCapsRule[] = "SPEC-pattern-search.md section 4.5";
+#if _PROTEIN_GRAPH
+// (on a protein graph: the residue reading, SPEC §29 and DESIGN-pattern-protein.md)
+constexpr const char kProteinRule[] = "SPEC-pattern-search.md section 29";
+#else
 constexpr const char kProteinRule[] = "SPEC-pattern-search.md section 12.2";
+#endif
 
 // Bounded mismatches (SPEC §21). The slot error of a pattern whose max_mismatches is above
 // the cap applied to it: its kind's (--pattern-max-mismatches, --pattern-max-mismatches-protein),
@@ -89,7 +104,12 @@ constexpr const char kProteinRule[] = "SPEC-pattern-search.md section 12.2";
 // complete) and what is not served with substitutions yet (the patterns longer than k, the
 // labels of the contexts found, a predicate's selection among them, the supported paths)
 constexpr const char kSlotMismatchesAboveCap[] = "mismatches_above_cap";
+#if _PROTEIN_GRAPH
+// (on a protein graph: the 22 residues read as themselves, outside the position's set)
+constexpr const char kProteinSubstitutes[] = "residues";
+#else
 constexpr const char kProteinSubstitutes[] = "sense_codons";
+#endif
 constexpr const char kMismatchEdits[] = "substitution";
 constexpr const char kMismatchOrder[] = "mismatches_first";
 constexpr const char kLevelsRule[] = "SPEC-pattern-search.md section 21.4";
@@ -409,11 +429,25 @@ ParsedRequest parse_request(const Json::Value &json, const PatternLimits &limits
                       "than k is searched as 'long' whatever is named)");
     }
     const std::string strands = f.str("strands", to_string(Strands::BOTH));
+#if _PROTEIN_GRAPH
+    // one strand (DESIGN-pattern-protein.md §3): "both" and "forward" search it
+    if (strands == to_string(Strands::REVERSE)) {
+        throw invalid(f.path("strands") + ": \"reverse\" on a protein graph, which has one strand "
+                      "(no reverse complement); send both or forward");
+    }
+    if (auto s = parse_strands(strands)) {
+        req.request.strands = *s;
+    } else {
+        throw invalid(f.path("strands") + ": expected one of both|forward (a protein graph has "
+                      "one strand)");
+    }
+#else
     if (auto s = parse_strands(strands)) {
         req.request.strands = *s;
     } else {
         throw invalid(f.path("strands") + ": expected one of both|forward|reverse");
     }
+#endif
     req.request.stop_at_threshold = f.boolean("stop_at_threshold",
                                               req.request.stop_at_threshold);
 
@@ -526,7 +560,15 @@ ParsedRequest parse_request(const Json::Value &json, const PatternLimits &limits
     }
 
     // the genetic code of the request's peptides, an NCBI translation table id; accepted with
-    // any request, it acts on protein patterns only
+    // any request, it acts on protein patterns only. On a protein graph, which reads residues,
+    // no genetic code applies: named at all, 400 (DESIGN-pattern-protein.md §3)
+#if _PROTEIN_GRAPH
+    if (f.has("genetic_code")) {
+        throw invalid(f.path("genetic_code") + ": a protein graph is read in residues, not "
+                      "codons: no genetic code applies (the capabilities' genetic_codes is "
+                      "empty); remove the field");
+    }
+#endif
     if (f.has("genetic_code")) {
         const Json::Value &v = f.raw("genetic_code");
         if (!v.isIntegral()) {
@@ -577,6 +619,11 @@ ParsedRequest parse_request(const Json::Value &json, const PatternLimits &limits
         throw invalid(f.path("predicate_strands") + ": expected one of either|context");
     }
     req.selection.either = predicate_strands == kPredicateStrandsEither;
+#if _PROTEIN_GRAPH
+    // one strand: a context's own row is the only one ("either" has no reverse complement to
+    // read), evaluated and echoed as "context" (DESIGN-pattern-protein.md §3)
+    req.selection.either = false;
+#endif
     // bounded mismatches (SPEC §21.2): 0 to kMaxMismatches, 0 (the default) the field's
     // absence; never lowered to a cap, since it changes what is searched: the caps are per
     // kind and checked per pattern (its slot answers mismatches_above_cap)
@@ -646,8 +693,13 @@ std::string support_message(const GraphSupport &support) {
         return "pattern: a PRIMARY graph is served only wrapped in CanonicalDBG";
     }
     if (support.reason == "alphabet_unsupported") {
+#if _PROTEIN_GRAPH
+        return "pattern: the graph's alphabet '" + support.alphabet + "' is not the Protein "
+               "build's (" + std::string(kmer::alphabets::kBOSSAlphabetProtein) + ")";
+#else
         return "pattern: the graph's alphabet '" + support.alphabet + "' is not $ACGT (a DNA4 "
                "build; $ACGTN, a DNA5 build, is not served yet either)";
+#endif
     }
     if (support.reason == "alphabet_untested") {
         return "pattern: the graph's alphabet is $ACGTN (a DNA5 build): the pattern search is "
@@ -763,7 +815,9 @@ Result above_cap_result(const Pattern &pattern, size_t k, const Request &request
     r.mismatch_information_bits = pattern.mismatch_information_bits(m);
     if (L > k) {
         const bool forward = r.palindromic || request.strands != Strands::REVERSE;
-        const bool reverse = !r.palindromic && request.strands != Strands::FORWARD;
+        // (one strand on a protein graph: its windows are P's)
+        const bool reverse = !r.palindromic && request.strands != Strands::FORWARD
+                                && !kResidueGraph;
         double least = std::numeric_limits<double>::infinity();
         double least_within = least;
         if (forward) {
@@ -808,6 +862,17 @@ Result above_cap_result(const Pattern &pattern, size_t k, const Request &request
 Json::Value substitutions_json(const Pattern &pattern, const Context &c,
                                const std::string &instance) {
     Json::Value list(Json::arrayValue);
+#if _PROTEIN_GRAPH
+    // residues, in the schema substitution: expected is the position as written, a letter or a
+    // class (DESIGN-pattern-protein.md §4)
+    for (const Substitution &s : substitutions(pattern, c.orientation, instance)) {
+        Json::Value v;
+        v["position"] = uint_json(s.position);
+        v["expected"] = std::string(pattern.position_text(s.position));
+        v["found"] = std::string(1, s.found);
+        list.append(std::move(v));
+    }
+#else
     if (pattern.kind() == PatternKind::PROTEIN) {
         for (const ResidueSubstitution &s : residue_substitutions(pattern, c.orientation,
                                                                   instance)) {
@@ -827,6 +892,7 @@ Json::Value substitutions_json(const Pattern &pattern, const Context &c,
             list.append(std::move(v));
         }
     }
+#endif
     if (list.size() != c.mismatches) {
         throw std::logic_error("pattern: the engine released a context at level "
                                + std::to_string(c.mismatches) + " whose instance holds "
@@ -906,9 +972,16 @@ Json::Value entry_json(const PatternSpec &spec, const Result *result, Mode mode,
     // L, in bases, whatever the kind (a peptide's 3m)
     e["length"] = uint_json(spec.pattern->length());
     if (spec.kind == PatternKind::PROTEIN) {
+#if _PROTEIN_GRAPH
+        // read one residue per position: L residues (a class is one), no genetic code
+        // (DESIGN-pattern-protein.md §5)
+        e["residues"] = uint_json(spec.pattern->length());
+        e["genetic_code"] = Json::Value();
+#else
         // a peptide's residues (m) and the genetic code it was read in
         e["residues"] = uint_json(spec.pattern->text().size());
         e["genetic_code"] = spec.pattern->genetic_code();
+#endif
     }
     e["information_bits"] = result->information_bits;
     e["anchor_information_bits"] = result->anchor_information_bits
@@ -1353,6 +1426,10 @@ void put_plain_cut(Json::Value *entry, Mode mode) {
 
 
 std::string alphabet_refusal(const std::string &alphabet) {
+#if _PROTEIN_GRAPH
+    // the Protein build serves its own alphabet (DESIGN-pattern-protein.md)
+    return alphabet == kmer::alphabets::kBOSSAlphabetProtein ? "" : "alphabet_unsupported";
+#endif
     if (alphabet == "$ACGT")
         return "";
     // the engine counts on $ACGTN, but no DNA5 build has run its tests; the route serves it
@@ -2937,7 +3014,15 @@ Json::Value pattern_capabilities_json(const AnnotatedDBG *anno_graph,
     p["projections_later_increment"] = Json::Value(Json::arrayValue);
     // output.occurrences with output.labels "all": placed where the index can place
     p["default_occurrences"] = true;
+#if _PROTEIN_GRAPH
+    // a protein graph holds residues: the protein kind alone (dna and iupac are refused in their
+    // slot, bad_alphabet), read one residue per position, with classes (DESIGN-pattern-protein.md)
+    p["kinds"] = strings_json({ "protein" });
+    p["protein_reading"] = kProteinReading;
+    p["protein_classes"] = strings_json({ "[...]", "[^...]" });
+#else
     p["kinds"] = strings_json({ "dna", "iupac", "protein" });
+#endif
     p["kinds_later_increment"] = Json::Value(Json::arrayValue);
     // the residues a protein pattern may hold, the genetic codes (NCBI translation table ids)
     // and the default
@@ -2947,11 +3032,17 @@ Json::Value pattern_capabilities_json(const AnnotatedDBG *anno_graph,
     }
     p["protein_residues"] = std::move(residues);
     Json::Value codes(Json::arrayValue);
+#if _PROTEIN_GRAPH
+    // no genetic code applies to residues (a request naming one is refused)
+    p["genetic_codes"] = std::move(codes);
+    p["default_genetic_code"] = Json::Value();
+#else
     for (int id : GeneticCode::ids()) {
         codes.append(id);
     }
     p["genetic_codes"] = std::move(codes);
     p["default_genetic_code"] = GeneticCode::kStandard;
+#endif
     // a reference, not the rule: the capabilities document a service's MCP tool returns in one
     // piece has a ceiling of 32 KiB (api/python/metagraph/traverse/mcp_tools.py
     // CAPABILITIES_MAX_BYTES), which the document of the mini index nearly filled; the rule is
@@ -2961,9 +3052,12 @@ Json::Value pattern_capabilities_json(const AnnotatedDBG *anno_graph,
     p["default_scope"] = to_string(Scope::ANY_OFFSET);
     Json::Value by_mode;
     by_mode["basic"] = strings_json({ "suffix", "any_offset" });
+#if ! _PROTEIN_GRAPH
+    // (a protein graph is basic only)
     by_mode["canonical"] = strings_json({ "suffix", "any_offset" });
     // a virtual suffix of the wrapper is a stored prefix (§4.1): not a BOSS range
     by_mode["primary"] = strings_json({ "any_offset" });
+#endif
     p["scopes_by_graph_mode"] = std::move(by_mode);
     // what a pattern longer than k gets without the option (paths are opt-in: SPEC §12)
     p["long_patterns"] = "anchors_counted";
@@ -2971,7 +3065,12 @@ Json::Value pattern_capabilities_json(const AnnotatedDBG *anno_graph,
     p["long_search"] = strings_json({ kLongSearchAnchors, kLongSearchPaths,
                                       kLongSearchSupported });
     p["default_long_search"] = kLongSearchAnchors;
+#if _PROTEIN_GRAPH
+    // one strand: both and forward search it
+    p["strands"] = strings_json({ "both", "forward" });
+#else
     p["strands"] = strings_json({ "both", "forward", "reverse" });
+#endif
     p["default_strands"] = to_string(Strands::BOTH);
     p["graph_cleaned"] = "unknown";
     p["records_shorter_than_k"] = "not_indexed";
@@ -3028,14 +3127,18 @@ Json::Value pattern_capabilities_json(const AnnotatedDBG *anno_graph,
     // object exists, within its kind's max, and with none of the latter)
     Json::Value mismatches;
     Json::Value max_per_kind;
+#if ! _PROTEIN_GRAPH
     max_per_kind[to_string(PatternKind::DNA)] = uint_json(limits.max_mismatches);
     max_per_kind[to_string(PatternKind::IUPAC)] = uint_json(limits.max_mismatches);
+#endif
     max_per_kind[to_string(PatternKind::PROTEIN)] = uint_json(limits.max_mismatches_protein);
     mismatches["max"] = std::move(max_per_kind);
     mismatches["default"] = 0;
     Json::Value unit;
+#if ! _PROTEIN_GRAPH
     unit[to_string(PatternKind::DNA)] = "base";
     unit[to_string(PatternKind::IUPAC)] = "base";
+#endif
     unit[to_string(PatternKind::PROTEIN)] = "residue";
     mismatches["unit"] = std::move(unit);
     mismatches["protein_substitutes"] = kProteinSubstitutes;

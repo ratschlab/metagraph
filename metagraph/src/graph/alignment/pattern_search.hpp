@@ -209,13 +209,47 @@ enum class PatternKind { DNA, IUPAC, PROTEIN };
  * bases cannot express that symbol at all. The engine maps each base to its BOSS code with
  * the graph's encode(); the unconstrained flanks of `any_offset` (§4.1) are not pattern
  * positions and do admit N.
+ *
+ * The Protein build (_PROTEIN_GRAPH, a graph of the Protein alphabet: DESIGN-pattern-protein.md)
+ * reads a pattern one residue per position: a position's set is a set of residues, bit (c - 'A')
+ * for the letter c, of the 22 residues read as themselves (kAllResidues); the stored ambiguity
+ * letters B, J, Z and X are in no set (matched by nothing). The bases below (kBaseA .. kBaseT)
+ * are then the codon automaton's only, which that build never runs.
  */
+#if _PROTEIN_GRAPH
+using BaseSet = uint32_t;
+// the graph is read one residue per position (DESIGN-pattern-protein.md)
+constexpr bool kResidueGraph = true;
+#else
 using BaseSet = uint8_t;
+constexpr bool kResidueGraph = false;
+#endif
 constexpr BaseSet kBaseA = 1;
 constexpr BaseSet kBaseC = 2;
 constexpr BaseSet kBaseG = 4;
 constexpr BaseSet kBaseT = 8;
 constexpr BaseSet kAllBases = kBaseA | kBaseC | kBaseG | kBaseT;
+
+#if _PROTEIN_GRAPH
+// a residue's bit (|upper|: an upper-case letter A to Z)
+constexpr BaseSet residue_bit(char upper) {
+    return BaseSet(1) << (upper - 'A');
+}
+// the residues read as themselves: the 20 amino acids, U (selenocysteine) and O (pyrrolysine).
+// B, J, Z and X, the ambiguity letters a record may hold, are not among them
+constexpr char kLiteralResidues[] = "ACDEFGHIKLMNPQRSTVWYUO";
+constexpr uint32_t kNumResidues = sizeof(kLiteralResidues) - 1;
+constexpr BaseSet literal_residues() {
+    BaseSet set = 0;
+    for (size_t i = 0; i < kNumResidues; ++i) {
+        set |= residue_bit(kLiteralResidues[i]);
+    }
+    return set;
+}
+// X's set: every residue read as itself
+constexpr BaseSet kAllResidues = literal_residues();
+static_assert(kNumResidues == 22);
+#endif
 
 /**
  * What may come next along an instance: the automaton the extension (§4.2) asks at every
@@ -368,10 +402,22 @@ class Pattern final : public Model {
      * Refused with "bad_alphabet": U (selenocysteine), O (pyrrolysine), '-', digits,
      * whitespace and every other character outside these 24 letters and '*', naming the
      * first such 0-based residue position, and an empty text.
+     *
+     * The Protein build (a graph of the Protein alphabet, DESIGN-pattern-protein.md §2): both
+     * parse() read |text| one residue per position, |code| unread. PROTEIN is the only kind:
+     * DNA and IUPAC are refused with "bad_alphabet". A position is one of the 22 residues read
+     * as themselves (kLiteralResidues), X (any of them), B (D or N), Z (E or Q), J (I or L), or
+     * a class: '[' letters ']' (the union of the letters' sets) or '[^' letters ']' (the 22
+     * less that union), the letters those 26. Refused with "bad_alphabet", naming the first
+     * offending character and its 0-based place in |text|: '*', any other character, an empty
+     * text, an empty class or negation, an unclosed or nested class, a ']' without its '['.
      */
     static Pattern parse(PatternKind kind, std::string_view text, const GeneticCode &code);
 
     PatternKind kind() const { return kind_; }
+    // a peptide read through its codon automaton (§6): never on a protein graph, where a
+    // PROTEIN pattern is read one residue per position (DESIGN-pattern-protein.md)
+    bool codon_automaton() const { return kind_ == PatternKind::PROTEIN && !kResidueGraph; }
     /**
      * The pattern in upper case; for a DNA or IUPAC reverse complement, the IUPAC complement
      * reversed. A peptide's is its residues (the route's `pattern`); a peptide's reverse
@@ -379,8 +425,13 @@ class Pattern final : public Model {
      * reverse order (a diagnostic only, never parsed back).
      */
     const std::string& text() const { return text_; }
-    // L, in bases: 3m for a peptide of m residues
+    // L, in bases: 3m for a peptide of m residues (on a protein graph, in residues: m)
     size_t length() const override { return positions_.size(); }
+
+#if _PROTEIN_GRAPH
+    // position |i| as written in text(): its letter, or its class ("[STA]", "[^P]")
+    std::string_view position_text(size_t i) const;
+#endif
     /**
      * Per position the bases it admits. For DNA and IUPAC exactly the pattern; for a peptide
      * the union over the residue's codons at that codon position, a superset of what the
@@ -528,6 +579,13 @@ class Pattern final : public Model {
   private:
     Pattern(PatternKind kind, std::string text, std::vector<BaseSet> positions)
           : kind_(kind), text_(std::move(text)), positions_(std::move(positions)) {}
+
+#if _PROTEIN_GRAPH
+    // the residue reading of both parse() (DESIGN-pattern-protein.md §2)
+    static Pattern parse_residues(PatternKind kind, std::string_view text);
+    // per position, where it starts in text_ (position_text)
+    std::vector<uint32_t> text_begin_;
+#endif
 
     PatternKind kind_;
     std::string text_;
@@ -1050,7 +1108,8 @@ struct GraphSupport {
      */
     bool mask_present = false;
     size_t k = 0;
-    // the BOSS alphabet, sentinel first: "$ACGT" (DNA4) or "$ACGTN" (DNA5)
+    // the BOSS alphabet, sentinel first: "$ACGT" (DNA4) or "$ACGTN" (DNA5); on the Protein
+    // build "$ABCDEFGHIJKLMNOPQRSTUVWYZX", the only one it serves (a BASIC graph only)
     std::string alphabet;
     // true on BASIC only: FORWARD/REVERSE are the + and - strands
     bool strand_stated = false;
@@ -1432,6 +1491,11 @@ struct Substitution {
  * (Context::mismatches). O(L). Throws std::invalid_argument for a peptide
  * (residue_substitutions), for an instance of another length, and for a base other than A, C,
  * G, T (no context spells one at a pattern position).
+ * The Protein build: the pattern is a protein pattern read in residues, FORWARD only (one
+ * strand); a position holds a substitution when the instance's residue is outside its set;
+ * |expected| is the position's first letter (the route writes Pattern::position_text, a class
+ * whole); a residue other than the 22 read as themselves throws (no context spells one at a
+ * pattern position).
  */
 std::vector<Substitution> substitutions(const Pattern &pattern, Orientation orientation,
                                         std::string_view instance);

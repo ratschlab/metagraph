@@ -22,6 +22,7 @@
 #include "graph/representation/succinct/boss.hpp"
 #include "graph/representation/succinct/dbg_succinct.hpp"
 #include "common/seq_tools/reverse_complement.hpp"
+#include "kmer/alphabets.hpp"
 
 
 namespace mtg {
@@ -97,9 +98,44 @@ CodonSet residue_codons(char residue, const GeneticCode &code) {
     }
 }
 
+#if _PROTEIN_GRAPH
+// a letter of the protein pattern language (upper case) as its set (DESIGN-pattern-protein.md
+// §2): one of the 22 residues read as themselves, X (all of them), B (D or N), Z (E or Q), J (I
+// or L); 0 for anything else ('*' included)
+BaseSet residue_letter_set(char upper) {
+    switch (upper) {
+        case 'X': return kAllResidues;
+        case 'B': return residue_bit('D') | residue_bit('N');
+        case 'Z': return residue_bit('E') | residue_bit('Q');
+        case 'J': return residue_bit('I') | residue_bit('L');
+        default:
+            return upper && std::strchr(kLiteralResidues, upper) ? residue_bit(upper) : 0;
+    }
+}
+
+// the set bit of a residue read from the graph: 0 for $ and the stored ambiguity letters B, J, Z
+// and X (matched by nothing, DESIGN-pattern-protein.md §2)
+BaseSet residue_of_char(char c) {
+    return c >= 'A' && c <= 'Z' ? residue_bit(c) & kAllResidues : 0;
+}
+
+// the set bit of a symbol a model's precondition checks (Pattern::next, prev; asserts only)
+[[maybe_unused]] BaseSet spelled_bit(char c) {
+    return residue_of_char(c);
+}
+#else
+[[maybe_unused]] BaseSet spelled_bit(char c) {
+    return iupac_set(c);
+}
+#endif
+
 } // namespace
 
 Pattern Pattern::parse(PatternKind kind, std::string_view text) {
+#if _PROTEIN_GRAPH
+    // one residue per position, no genetic code (DESIGN-pattern-protein.md §2)
+    return parse_residues(kind, text);
+#endif
     if (kind == PatternKind::PROTEIN)
         return parse(kind, text, GeneticCode::standard());
 
@@ -130,6 +166,10 @@ Pattern Pattern::parse(PatternKind kind, std::string_view text) {
 }
 
 Pattern Pattern::parse(PatternKind kind, std::string_view text, const GeneticCode &code) {
+#if _PROTEIN_GRAPH
+    (void)code;
+    return parse_residues(kind, text);
+#endif
     if (kind != PatternKind::PROTEIN)
         return parse(kind, text);
 
@@ -179,9 +219,103 @@ Pattern Pattern::parse(PatternKind kind, std::string_view text, const GeneticCod
     return pattern;
 }
 
+#if _PROTEIN_GRAPH
+Pattern Pattern::parse_residues(PatternKind kind, std::string_view text) {
+    if (kind != PatternKind::PROTEIN) {
+        throw PatternError("bad_alphabet", "pattern: the " + std::string(to_string(kind))
+                           + " kind is not served on a protein graph (its graph holds residues, "
+                             "no nucleotides): send the pattern as 'protein'");
+    }
+    if (text.empty())
+        throw PatternError("bad_alphabet", "pattern: empty");
+
+    auto refuse = [&](size_t i, const char *why) {
+        std::ostringstream msg;
+        msg << "pattern: character '" << text[i] << "' at position " << i << " " << why
+            << " (the protein alphabet of a protein graph: A C D E F G H I K L M N P Q R S T V "
+               "W Y U O, X B Z J, and classes [..] and [^..] of these letters)";
+        throw PatternError("bad_alphabet", msg.str());
+    };
+
+    std::string upper;
+    upper.reserve(text.size());
+    std::vector<BaseSet> positions;
+    std::vector<uint32_t> begins;
+    for (size_t i = 0; i < text.size(); ) {
+        const char c = std::toupper(static_cast<unsigned char>(text[i]));
+        begins.push_back(static_cast<uint32_t>(upper.size()));
+        if (c == ']')
+            refuse(i, "closes no class");
+        if (c != '[') {
+            const BaseSet set = residue_letter_set(c);
+            if (!set)
+                refuse(i, "is not in the alphabet");
+            upper.push_back(c);
+            positions.push_back(set);
+            ++i;
+            continue;
+        }
+        // a class: '[' ['^'] letters ']'
+        const size_t open = i;
+        upper.push_back('[');
+        ++i;
+        const bool negated = i < text.size() && text[i] == '^';
+        if (negated) {
+            upper.push_back('^');
+            ++i;
+        }
+        BaseSet set = 0;
+        bool closed = false;
+        size_t listed = 0;
+        for (; i < text.size(); ++i) {
+            const char d = std::toupper(static_cast<unsigned char>(text[i]));
+            if (d == ']') {
+                closed = true;
+                break;
+            }
+            if (d == '[')
+                refuse(i, "opens a class inside a class");
+            if (d == '^')
+                refuse(i, "negates a class only right after its '['");
+            const BaseSet letter = residue_letter_set(d);
+            if (!letter)
+                refuse(i, "is not in the alphabet");
+            set |= letter;
+            upper.push_back(d);
+            ++listed;
+        }
+        if (!closed)
+            refuse(open, "opens a class that is not closed");
+        // a class lists one letter at least ([] and [^] are empty)
+        if (!listed)
+            refuse(open, "opens an empty class");
+        upper.push_back(']');
+        if (negated)
+            set = kAllResidues & ~set;
+        if (!set) {
+            refuse(open, negated ? "opens a class whose negation is empty"
+                                 : "opens an empty class");
+        }
+        positions.push_back(set);
+        ++i;
+    }
+
+    Pattern pattern(kind, std::move(upper), std::move(positions));
+    pattern.text_begin_ = std::move(begins);
+    return pattern;
+}
+
+std::string_view Pattern::position_text(size_t i) const {
+    assert(i < positions_.size() && text_begin_.size() == positions_.size());
+    const size_t begin = text_begin_[i];
+    const size_t end = i + 1 < text_begin_.size() ? text_begin_[i + 1] : text_.size();
+    return std::string_view(text_).substr(begin, end - begin);
+}
+#endif
+
 BaseSet Pattern::allowed(size_t position, std::string_view spelled) const {
     assert(position < positions_.size());
-    if (kind_ != PatternKind::PROTEIN)
+    if (!codon_automaton())
         return positions_[position];
 
     // the codon automaton (§6): the residue's codons agreeing with the bases spelled so far
@@ -212,7 +346,7 @@ int codon_prefix_base(Model::State s, size_t i) {
 } // namespace
 
 Model::State Pattern::start(std::string_view anchor_kmer) const {
-    if (kind_ != PatternKind::PROTEIN)
+    if (!codon_automaton())
         return 0;
 
     // the last j bases of the anchor, as allowed(|anchor_kmer|.size(), anchor_kmer) reads them
@@ -229,7 +363,7 @@ Model::State Pattern::start(std::string_view anchor_kmer) const {
 
 BaseSet Pattern::bases(State s, uint32_t position) const {
     assert(position < positions_.size());
-    if (kind_ != PatternKind::PROTEIN)
+    if (!codon_automaton())
         return positions_[position];
     if (s & kCodonDead)
         return 0;
@@ -241,8 +375,8 @@ BaseSet Pattern::bases(State s, uint32_t position) const {
 Model::State Pattern::next(State s, uint32_t position, char base) const {
     assert(position < positions_.size());
     // |base| is one the state admits (the precondition of Model::next)
-    assert(bases(s, position) & iupac_set(base));
-    if (kind_ != PatternKind::PROTEIN)
+    assert(bases(s, position) & spelled_bit(base));
+    if (!codon_automaton())
         return 0;
 
     const size_t j = position % 3;
@@ -263,7 +397,7 @@ Model::State Pattern::next(State s, uint32_t position, char base) const {
 
 double Pattern::information_bits(size_t begin, size_t end) const {
     assert(begin <= end && end <= positions_.size());
-    if (kind_ == PatternKind::PROTEIN) {
+    if (codon_automaton()) {
         // per residue covered: the positions of [begin, end) inside its codon, and the
         // number of distinct strings its codons spell there
         double bits = 0;
@@ -280,9 +414,21 @@ double Pattern::information_bits(size_t begin, size_t end) const {
     // log2(4 / |set|) per set size, each computed once by the expression a per-position sum
     // would use, so that the sums are the same doubles bit for bit (one table read per base
     // instead of a log2: the O(L) pass of a long pattern)
+#if _PROTEIN_GRAPH
+    // on a protein graph log2(22 / |set|): X, every residue read as itself, carries 0 bits
+    // (DESIGN-pattern-protein.md §4)
+    static const std::array<double, kNumResidues + 1> kBits = [] {
+        std::array<double, kNumResidues + 1> bits {};
+        for (uint32_t s = 1; s <= kNumResidues; ++s) {
+            bits[s] = std::log2(static_cast<double>(kNumResidues) / s);
+        }
+        return bits;
+    }();
+#else
     static const std::array<double, 5> kBits {
         0, std::log2(4.0 / 1u), std::log2(4.0 / 2u), std::log2(4.0 / 3u), std::log2(4.0 / 4u)
     };
+#endif
     double bits = 0;
     for (size_t i = begin; i < end; ++i) {
         bits += kBits[set_size(positions_[i])];
@@ -296,6 +442,11 @@ bool Pattern::is_exact() const {
 }
 
 Pattern Pattern::reverse_complement() const {
+#if _PROTEIN_GRAPH
+    // a protein graph has one strand (DESIGN-pattern-protein.md §1): nothing searches rc(P)
+    throw std::logic_error("pattern: a protein pattern on a protein graph has no reverse "
+                           "complement (one strand)");
+#endif
     std::vector<BaseSet> positions(positions_.rbegin(), positions_.rend());
     if (kind_ == PatternKind::PROTEIN) {
         // the reverse-complemented automaton (§6): residues reversed, each codon set
@@ -327,6 +478,10 @@ Pattern Pattern::reverse_complement() const {
 }
 
 bool Pattern::is_palindromic() const {
+#if _PROTEIN_GRAPH
+    // one strand: no reverse complement to equal
+    return false;
+#endif
     if (kind_ == PatternKind::PROTEIN) {
         // the instances are the product of the residues' codon sets: equal to rc's product
         // iff residue by residue (fixed-length factors)
@@ -376,7 +531,7 @@ double Pattern::mismatch_information_bits(size_t begin, size_t end,
             f[u] = log2_add(kept, added);
         }
     };
-    if (kind_ == PatternKind::PROTEIN) {
+    if (codon_automaton()) {
         // per residue covered: the strings its codons spell over its positions in [begin, end)
         // (one at least, as information_bits), and the strings its substitutes spell there
         // that none of its codons spells (a cut codon agreeing with one of its own is not
@@ -391,11 +546,18 @@ double Pattern::mismatch_information_bits(size_t begin, size_t end,
                    other ? std::log2(static_cast<double>(other)) : kEmpty);
         }
     } else {
+#if _PROTEIN_GRAPH
+        // on a protein graph per position of set size s: s matching residues, 22 - s
+        // substituting ones (none at X; a stored ambiguity letter never substitutes)
+        constexpr uint32_t kAll = kNumResidues;
+#else
+        constexpr uint32_t kAll = 4;
+#endif
         // per position of set size s: s matching bases, 4 - s substituting ones (none at N)
         for (size_t i = begin; i < end; ++i) {
             const uint32_t s = set_size(positions_[i]);
             extend(std::log2(static_cast<double>(s)),
-                   s < 4 ? std::log2(static_cast<double>(4 - s)) : kEmpty);
+                   s < kAll ? std::log2(static_cast<double>(kAll - s)) : kEmpty);
         }
     }
     double ball = kEmpty;
@@ -404,11 +566,39 @@ double Pattern::mismatch_information_bits(size_t begin, size_t end,
     }
     // a ball holds at most every string over the positions (all of them: 0 bits), which the
     // rounding of the log-space sums must not turn into a negative information
+#if _PROTEIN_GRAPH
+    return std::max(0.0, std::log2(static_cast<double>(kNumResidues))
+                            * static_cast<double>(end - begin) - ball);
+#else
     return std::max(0.0, 2.0 * static_cast<double>(end - begin) - ball);
+#endif
 }
 
 std::vector<Substitution> substitutions(const Pattern &pattern, Orientation orientation,
                                         std::string_view instance) {
+#if _PROTEIN_GRAPH
+    // residues, one strand (DESIGN-pattern-protein.md §4)
+    const size_t m = pattern.length();
+    if (instance.size() != m) {
+        throw std::invalid_argument("pattern: an instance of " + std::to_string(instance.size())
+                                    + " residues for a pattern of " + std::to_string(m));
+    }
+    if (orientation == Orientation::REVERSE)
+        throw std::invalid_argument("pattern: a protein graph has one strand");
+    std::vector<Substitution> found;
+    for (size_t i = 0; i < m; ++i) {
+        const BaseSet residue = residue_of_char(instance[i]);
+        if (!residue) {
+            throw std::invalid_argument(std::string("pattern: the instance holds '")
+                                        + instance[i] + "', not a residue read as itself");
+        }
+        if (!(pattern.positions()[i] & residue)) {
+            found.push_back(Substitution { static_cast<uint32_t>(i),
+                                           pattern.position_text(i).front(), instance[i] });
+        }
+    }
+    return found;
+#endif
     if (pattern.kind() == PatternKind::PROTEIN) {
         throw std::invalid_argument("pattern: a peptide's substitutions are residues "
                                     "(residue_substitutions)");
@@ -440,6 +630,13 @@ std::vector<Substitution> substitutions(const Pattern &pattern, Orientation orie
 std::vector<ResidueSubstitution> residue_substitutions(const Pattern &pattern,
                                                        Orientation orientation,
                                                        std::string_view instance) {
+#if _PROTEIN_GRAPH
+    // a protein graph's patterns are read in residues: their substitutions are substitutions()
+    (void)pattern;
+    (void)orientation;
+    (void)instance;
+    throw std::invalid_argument("pattern: a protein graph reads no codons (substitutions)");
+#endif
     if (pattern.kind() != PatternKind::PROTEIN) {
         throw std::invalid_argument("pattern: residue substitutions are a peptide's "
                                     "(substitutions)");
@@ -535,7 +732,7 @@ Model::State with_left_codon_base(Model::State s, size_t i, int b) {
 } // namespace
 
 Model::State Pattern::start_at(uint32_t offset, std::string_view anchor_kmer) const {
-    if (kind_ != PatternKind::PROTEIN)
+    if (!codon_automaton())
         return 0;
 
     // the codon prefix at position offset + |anchor_kmer|: its last j bases, as start() reads
@@ -552,7 +749,7 @@ Model::State Pattern::start_at(uint32_t offset, std::string_view anchor_kmer) co
 }
 
 Model::State Pattern::start_left(uint32_t offset, std::string_view anchor_kmer) const {
-    if (kind_ != PatternKind::PROTEIN)
+    if (!codon_automaton())
         return 0;
 
     // the codon of position offset - 1 starts before it: its positions offset % 3 .. 2 lie at
@@ -570,7 +767,7 @@ Model::State Pattern::start_left(uint32_t offset, std::string_view anchor_kmer) 
 
 BaseSet Pattern::bases_left(State s, uint32_t position) const {
     assert(position < positions_.size());
-    if (kind_ != PatternKind::PROTEIN)
+    if (!codon_automaton())
         return positions_[position];
     if (s & kCodonDead)
         return 0;
@@ -594,8 +791,8 @@ BaseSet Pattern::bases_left(State s, uint32_t position) const {
 Model::State Pattern::prev(State s, uint32_t position, char base) const {
     assert(position < positions_.size());
     // |base| is one the state admits (the precondition of Model::prev)
-    assert(bases_left(s, position) & iupac_set(base));
-    if (kind_ != PatternKind::PROTEIN)
+    assert(bases_left(s, position) & spelled_bit(base));
+    if (!codon_automaton())
         return 0;
 
     const size_t j = position % 3;
@@ -732,6 +929,14 @@ std::vector<BaseSet> reverse_complement_sets(std::vector<BaseSet> q) {
 
 // the orientations a request searches, in search order: a palindromic P once (§3)
 std::vector<Orientation> searched_orientations(const Pattern &pattern, Strands strands) {
+#if _PROTEIN_GRAPH
+    // one strand (DESIGN-pattern-protein.md §3): "both" and "forward" search it; the route
+    // refuses "reverse"
+    if (strands == Strands::REVERSE)
+        throw std::invalid_argument("pattern: a protein graph has one strand: strands reverse");
+    (void)pattern;
+    return { Orientation::FORWARD };
+#endif
     if (pattern.is_palindromic())
         return { Orientation::PALINDROMIC };
     if (strands == Strands::FORWARD)
@@ -1229,7 +1434,8 @@ struct Key {
 };
 
 // the BaseSet bit of a spelled base; 0 for N and $, which no pattern position allows (§3)
-BaseSet base_of_char(char c) {
+// (unread on a protein graph, whose symbols are residues: symbol_of_char)
+[[maybe_unused]] BaseSet base_of_char(char c) {
     switch (c) {
         case 'A': return kBaseA;
         case 'C': return kBaseC;
@@ -1238,6 +1444,40 @@ BaseSet base_of_char(char c) {
         default: return 0;
     }
 }
+
+/**
+ * The symbols a position's set is over: bit b of a BaseSet is symbol_char(b), and kAllSymbols
+ * every symbol a pattern position can admit (an N or X position's set). A, C, G, T; on a
+ * protein graph the letters A to Z, of which the 22 residues read as themselves can be in a
+ * set (DESIGN-pattern-protein.md §2). symbol_of_char: the bit of a symbol read from the graph,
+ * 0 for $ and for a symbol no position admits (N; B, J, Z, X on a protein graph).
+ * kStringsPerPosition: the strings per position of the planning estimates (estimated_cost).
+ */
+#if _PROTEIN_GRAPH
+constexpr size_t kSymbolCount = 26;
+constexpr BaseSet kAllSymbols = kAllResidues;
+constexpr double kStringsPerPosition = kNumResidues;
+
+char symbol_char(size_t b) {
+    return static_cast<char>('A' + b);
+}
+
+BaseSet symbol_of_char(char c) {
+    return residue_of_char(c);
+}
+#else
+constexpr size_t kSymbolCount = 4;
+constexpr BaseSet kAllSymbols = kAllBases;
+constexpr double kStringsPerPosition = 4;
+
+char symbol_char(size_t b) {
+    return "ACGT"[b];
+}
+
+BaseSet symbol_of_char(char c) {
+    return base_of_char(c);
+}
+#endif
 
 // the bases of an exact pattern (every position one base)
 std::string exact_bases(const Pattern &pattern) {
@@ -1302,15 +1542,18 @@ class PatternRun {
             checkable_(check_limit_ > 0),
             window_(window ? std::optional<WindowSpec>(*window) : std::nullopt) {
         assert(!window || long_);
-        for (char base : { 'A', 'C', 'G', 'T' }) {
-            codes_.push_back(boss_.encode(base));
+        for (size_t b = 0; b < kSymbolCount; ++b) {
+            codes_.push_back(boss_.encode(symbol_char(b)));
         }
+#if ! _PROTEIN_GRAPH
+        // (the codon automaton's: a protein graph runs none)
         for (BaseSet set = 0; set <= kAllBases; ++set) {
             for (size_t b = 0; b < 4; ++b) {
                 if (set & (1 << b))
                     codes_of_set_[set].push_back(codes_[b]);
             }
         }
+#endif
         plan();
         // nothing to release: nothing to keep
         if (prune_ && !cap_)
@@ -1683,10 +1926,25 @@ class PatternRun {
     // window's level range records of the bases it spells
     std::vector<int8_t> index_of_code_;
 
+    // per symbol (symbol_char), its BOSS code
     std::vector<TAlphabet> codes_;
     // the BOSS codes of every BaseSet's bases, in A, C, G, T order (a peptide window's
-    // symbols at a range, symbols_at)
+    // symbols at a range, symbols_at); empty on a protein graph, whose sets codes_of() spells
     std::array<std::vector<TAlphabet>, kAllBases + 1> codes_of_set_;
+
+    // the BOSS codes of a set's symbols, in symbol order
+#if _PROTEIN_GRAPH
+    std::vector<TAlphabet> codes_of(BaseSet set) const {
+        std::vector<TAlphabet> codes;
+        for (size_t b = 0; b < kSymbolCount; ++b) {
+            if (set & (BaseSet(1) << b))
+                codes.push_back(codes_[b]);
+        }
+        return codes;
+    }
+#else
+    const std::vector<TAlphabet>& codes_of(BaseSet set) const { return codes_of_set_[set]; }
+#endif
     std::vector<BaseSearch> searches_;
     std::vector<OrientationPlan> plans_;
     std::vector<Orientation> searched_;
@@ -1762,8 +2020,8 @@ class PatternRun {
         }
         for (size_t i = search.lead; i < q.size(); ++i) {
             search.codes.emplace_back();
-            for (size_t b = 0; b < 4; ++b) {
-                if (q[i] & (1 << b))
+            for (size_t b = 0; b < kSymbolCount; ++b) {
+                if (q[i] & (BaseSet(1) << b))
                     search.codes.back().push_back(codes_[b]);
             }
         }
@@ -1798,7 +2056,7 @@ class PatternRun {
         const auto &positions = pattern_.positions();
         const size_t L = positions.size();
         const size_t m = std::min(L, k_);
-        const bool protein = pattern_.kind() == PatternKind::PROTEIN;
+        const bool protein = pattern_.codon_automaton();
         // the window's start in Q: 0 but for a segment window
         const size_t s = window_ ? window_->offset : 0;
         assert(s + m <= L);
@@ -2365,7 +2623,7 @@ class PatternRun {
         double cost = 0;
         for (const auto &symbols : search.codes) {
             combinations *= symbols.size();
-            strings *= 4;
+            strings *= kStringsPerPosition;
             cost += combinations * std::min(1.0, edges / strings);
         }
         return cost;
@@ -2440,8 +2698,8 @@ class PatternRun {
             search.substitutes.assign(core, {});
             for (size_t x = core; x-- > 0; ) {
                 const BaseSet set = search.q[search.lead + x];
-                search.substitutes[x] = codes_of_set_[kAllBases & ~set];
-                search.left[x] = search.left[x + 1] + (set != kAllBases);
+                search.substitutes[x] = codes_of(kAllSymbols & ~set);
+                search.left[x] = search.left[x + 1] + (set != kAllSymbols);
             }
         }
     }
@@ -2570,7 +2828,7 @@ class PatternRun {
             for (size_t u = f.size(); u-- > 0; ) {
                 f[u] = f[u] * same + (u ? f[u - 1] * other : 0);
             }
-            strings *= 4;
+            strings *= kStringsPerPosition;
             double ball = 0;
             for (double level : f) {
                 ball += level;
@@ -2993,7 +3251,7 @@ class PatternRun {
             call_outgoing(path.back(), spelled, [&](node_index next, char c) {
                 if (!charged || !(charged = charge_edge()))
                     return;
-                if (!(allowed & base_of_char(c)))
+                if (!(allowed & symbol_of_char(c)))
                     return;
                 assert(level.size < level.children.size());
                 if (level.size < level.children.size())
@@ -3468,7 +3726,12 @@ bool PatternRun::extend_listed(bool keep, const std::vector<Context> &anchors) {
         work_.steps = budget_.steps_used() - steps_before_;
         return false;
     }
+#if _PROTEIN_GRAPH
+    // one strand: no anchor is REVERSE (searched_orientations)
+    const Pattern &rc = pattern_;
+#else
     const Pattern rc = pattern_.reverse_complement();
+#endif
     for (const Context &anchor : anchors) {
         // the clock before every anchor: its spelling (k - 1 BOSS steps) is work no step
         // charges, and the anchors' DFS charges too few steps to cross a stride (674 anchors
@@ -3686,7 +3949,12 @@ class SegmentRun {
             k_(support.k),
             wrapper_offset_(wrapper_offset),
             pattern_(pattern),
+#if _PROTEIN_GRAPH
+            // (one strand: no window is REVERSE)
+            rc_(pattern),
+#else
             rc_(pattern.reverse_complement()),
+#endif
             request_(request),
             budget_(budget),
             sink_(*request.segment_sink),
@@ -4065,7 +4333,7 @@ class SegmentRun {
             call_outgoing(level.node, spelled, [&](node_index next, char c) {
                 if (!charged || !(charged = charge_edge()))
                     return;
-                if (!(allowed & base_of_char(c)))
+                if (!(allowed & symbol_of_char(c)))
                     return;
                 assert(level.size < level.children.size());
                 if (level.size < level.children.size())
@@ -4176,7 +4444,7 @@ class SegmentRun {
                 return false;
             const BaseSet allowed = model.bases_left(level.state, t - 1);
             auto add = [&](char c, node_index prev, BwdPair pair) {
-                if (!(allowed & base_of_char(c)))
+                if (!(allowed & symbol_of_char(c)))
                     return;
                 if (t - 1 < horizon) {
                     ++work_.left_horizon_cuts;
@@ -4357,10 +4625,23 @@ GraphSupport PatternSearch::support(const DeBruijnGraph &graph) {
         result.scopes = { Scope::SUFFIX, Scope::ANY_OFFSET };
     }
 
+#if _PROTEIN_GRAPH
+    // the Protein build serves its own alphabet, on BASIC graphs (the only mode it builds; one
+    // strand): DESIGN-pattern-protein.md §1
+    if (result.alphabet != kmer::alphabets::kBOSSAlphabetProtein) {
+        result.reason = "alphabet_unsupported";
+        return result;
+    }
+    if (result.mode != GraphMode::BASIC) {
+        result.reason = "representation_unsupported";
+        return result;
+    }
+#else
     if (result.alphabet != "$ACGT" && result.alphabet != "$ACGTN") {
         result.reason = "alphabet_unsupported";
         return result;
     }
+#endif
     if (result.k < 2) {
         // a BOSS node is a (k-1)-mer: the range narrowing needs one symbol at least
         result.reason = "representation_unsupported";
@@ -5021,7 +5302,8 @@ Result PatternSearch::run(const Pattern &pattern, const Request &request, Budget
                     && request.sink->stopped_at_threshold()));
     const bool budget_stop = result.stop && !threshold_stop;
     bool low_complexity = false;
-    if (pattern.is_exact() && !budget_stop) {
+    // (not on a protein graph: sdust is a nucleotide measure, DESIGN-pattern-protein.md §4)
+    if (pattern.is_exact() && !budget_stop && !kResidueGraph) {
         const std::optional<bool> flagged = is_low_complexity(
                 pattern.kind() == PatternKind::PROTEIN ? exact_bases(pattern) : pattern.text(),
                 budget);
@@ -5323,7 +5605,7 @@ Result PatternSearch::segments(const Pattern &pattern, const Request &request,
 
     // the low-complexity diagnostic as for every exact pattern, never after a stop
     bool low_complexity = false;
-    if (pattern.is_exact() && !result.stop) {
+    if (pattern.is_exact() && !result.stop && !kResidueGraph) {
         const std::optional<bool> flagged = is_low_complexity(
                 pattern.kind() == PatternKind::PROTEIN ? exact_bases(pattern) : pattern.text(),
                 budget);

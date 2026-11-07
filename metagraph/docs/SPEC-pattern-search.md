@@ -4939,3 +4939,59 @@ no other stored body changes. Tests:
 `WindowedMaximumBucketsAndLateNotes`, `ObservedMaximumUnderConcurrentNotes`, `ObservedWindowFlagIsValidated`;
 integration `TestTraverseAttempts.test_observed_window_is_validated_and_stated` (a 5 s window: the piece of one
 `/traverse` stated on both routes, gone 2.2 s later; the flag's refusals).
+
+## 29. Protein graphs (the Protein build, E16)
+
+The owner's decision of 2026-10-31 ("patterns must work on UniParc too"); the design is
+`DESIGN-pattern-protein.md`. A server or CLI of the Protein build (`metagraph_Protein`, `_PROTEIN_GRAPH`) serves
+`/pattern` on graphs of its alphabet `$ABCDEFGHIJKLMNOPQRSTUVWYZX` (BASIC, one strand; UniParc at k = 15). Everything
+not stated here is as on a DNA graph. The DNA builds' answers and documents do not change.
+
+**The pattern.** `patterns[i].protein`, read one residue per position (no codon automaton, §12.2 does not apply):
+the 22 residues read as themselves (A C D E F G H I K L M N P Q R S T V W Y, U, O) as literals; `X` any of the 22,
+`B` D or N, `Z` E or Q, `J` I or L; a class `[...]` (the union of its letters, each one of these 26 read as above)
+and a negated class `[^...]` (the 22 less that union). Any case; `pattern` is the text in upper case, brackets kept.
+L, `length` and `residues` count positions (a class is one); every offset and length of the answer is in residues.
+A stored ambiguity letter (B, J, Z, X in a record) is matched by no position and substitutes none; the free flanks
+of `any_offset` admit it.
+
+**Refused.** In the pattern's slot with `bad_alphabet`: the `dna` and `iupac` kinds, `*`, any other character,
+an empty text, an empty class or negation (`[]`, `[^]`, `[^X]`), an unclosed or nested class, a `]` without its
+`[`, a `^` not right after `[` (the message names the character and its 0-based place in the text). As the
+request's 400 `invalid_request`: `genetic_code` named with any value, `strands: "reverse"`.
+
+**One strand.** `strands` `"both"` (the default) and `"forward"` search the one strand: the entry's `strands` is
+`["+"]`, `by_strand` has the key `+` alone, `palindromic` is false. `predicate_strands` is accepted with both values
+and evaluated as `"context"` (no reverse complement whose row `"either"` could read); every answer with a predicate
+states the effective value: `predicate.strands` and `limits.predicate_strands` are `"context"`, and each selected
+context's `selection_strands` lists `"context"` per label.
+
+**Mismatches** (§21) for L <= k, 0 to 3, the cap `mismatches.max.protein` (`--pattern-max-mismatches-protein`): a
+substitution is one of the 22 residues outside the position's set (none at X). `substitutions` use the schema
+`substitution`: `position`, `expected` (the position as written: a letter or a class such as `[ST]`), `found`; no
+`codon`. A pattern longer than k is answered in its slot with `mismatches_above_cap` (cap 0).
+
+**Bits.** A position of s residues carries log2(22 / s) bits; within m substitutions the ball over the 22 residues
+(§21.5). The floor (§7.8) gates as on DNA; `low_complexity_pattern` is not computed (sdust is a nucleotide measure).
+
+**The entry.** `kind` `"protein"`, `length` = `residues` = L, `genetic_code` null (the key kept).
+
+**Capabilities** (`GET /pattern/capabilities`, `GET /capabilities`' `pattern`; the gate block projects its keys as
+§23.2 lists them): `alphabet` (per graph) `$ABCDEFGHIJKLMNOPQRSTUVWYZX`; `kinds` `["protein"]`; `protein_residues`
+the 22 then X B Z J; `protein_reading` `"residues"` and `protein_classes` `["[...]", "[^...]"]` (the Protein build's
+only: a DNA build's block has neither, its peptides are read in codons, §12.2); `genetic_codes` `[]` and
+`default_genetic_code` null; `protein_rule` `"SPEC-pattern-search.md section 29"`; `strands` `["both", "forward"]`;
+`scopes_by_graph_mode` `basic` only; `mismatches.max` and `mismatches.unit` the `protein` key only,
+`mismatches.protein_substitutes` `"residues"`.
+
+**Fixtures.** `api/python/tests/data/traverse/pattern_protein/` (README.md there): `capabilities` (GET
+/pattern/capabilities of a protein index) and `entry` (a request and its answer: the plan row's scenarios on that
+index), answered by `metagraph_Protein pattern` and pinned by `integration_tests/test_pattern_protein.py`
+(`TestPatternProteinFixtures`). They sit beside `pattern/`, whose fixtures the DNA build answers on the mini index
+(`scripts/traversal/pattern_fixtures.py`).
+
+Tests: `PatternProtein.*` (`tests/graph/alignment/test_pattern_protein.cpp`: the parser against its own table, the
+bits, one strand, contexts and their levels against a brute-force oracle with and without the mask, long patterns'
+anchors and paths), `PatternProteinRoute.*` (`tests/cli/test_pattern_protein_route.cpp`), and
+`integration_tests/test_pattern_protein.py`, all in the Protein build (CI: the development workflow's Protein job,
+`Linux-Protein`, whose filters name them).
