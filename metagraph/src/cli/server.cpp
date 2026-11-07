@@ -253,10 +253,11 @@ namespace {
  *    and its connection is closed. A partial result written now would state a cause that is
  *    not true ("cancelled": POST /traverse/cancel), and a ledger treats an attempt without an
  *    answer as unanswered (not_after_ms, bound_ms), which is the truth;
- *  - once they returned, or after kDrainMs, the HTTP server stops (its acceptor and every
- *    connection closed, a response still being sent cut: incomplete, never a shorter complete
- *    one, its Content-Length unmet) and the process exits from run_server (_Exit: returning
- *    would join an index load still in progress in the loader's destructor);
+ *  - once they returned, or after kDrainMs, the HTTP server's workers stop, and once they have
+ *    returned its acceptor and every connection are closed (a response still being sent cut:
+ *    incomplete, never a shorter complete one, its Content-Length unmet) and the process exits
+ *    from run_server (_Exit: returning would join an index load still in progress in the
+ *    loader's destructor);
  *  - a handler that does not return within kExitMs more (a long /search, /align, or one
  *    uninterruptible annotation read) does not hold the process: the log is flushed and the
  *    process exits (_Exit, the state is in memory only).
@@ -333,6 +334,7 @@ class Shutdown {
         while (::read(pipe_[0], &sig, 1) < 0 && errno == EINTR) {}
         std::unique_lock<std::mutex> lock(mutex_);
         stopping_.store(true, std::memory_order_release);
+        logger->info("[Server] Shutting down...");
         if (!server_) {
             logger->info("[Server] Signal {} before the server accepted connections: exiting", sig);
             logger->flush();
@@ -353,7 +355,11 @@ class Shutdown {
             logger->warn("[Server] {} traversal(s) still running: their connections are closed",
                          left);
         }
-        server->stop();
+        // Only the HTTP workers are stopped here (their io_service): closing the acceptor and
+        // the connections from this thread would race with the accept and read handlers the
+        // workers run, which crashed in asio (master's #681). run_server closes them once the
+        // workers have returned (HttpServer::stop after the server thread's join)
+        server->io_service->stop();
         lock.lock();
         if (!changed_.wait_for(lock, std::chrono::milliseconds(kExitMs),
                                [&]() { return finished_; })) {
@@ -2708,6 +2714,9 @@ int run_server(Config *config) {
     std::thread server_thread = start_server(server, *config, num_server_threads,
                                              [&]() { shutdown.started(&server); });
     server_thread.join();
+    // No HTTP worker is left: close the acceptor and the open connections (a response still
+    // being sent is cut)
+    server.stop();
     // The server stopped (only a shutdown stops it): the process exits here, without returning
     // through this function's destructors. They join what may still run: graph_loader an index
     // load in progress (single-index mode serves 503 while it loads, so a stop can come before

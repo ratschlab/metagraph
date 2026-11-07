@@ -116,6 +116,8 @@ class TestServerShutdown(TestingBase):
     def test_shutdown_during_startup(self, name, shutdown_signal):
         # Hold startup at the index-list read, after signal registration but
         # before graph loading or HTTP startup. The FIFO synchronizes the signal.
+        # A signal before the server accepts connections ends the process at once
+        # (exit status 0): it neither loads the graphs nor starts serving.
         with tempfile.TemporaryDirectory() as tmp:
             index_list = os.path.join(tmp, 'indexes.csv')
             os.mkfifo(index_list)
@@ -157,14 +159,17 @@ class TestServerShutdown(TestingBase):
                         self.fail('Server did not read the index list entry')
 
                     process.send_signal(shutdown_signal)
+                    # the exit does not wait for the end of the index list
+                    returncode = process.wait(timeout=30)
                     os.close(writer)
                     writer = None
-                    returncode = process.wait(timeout=30)
                     log.seek(0)
                     output = log.read()
                     self.assertEqual(returncode, 0, output)
-                    self.assertIn('[Server] All graphs were loaded', output)
                     self.assertIn('[Server] Shutting down...', output)
+                    self.assertIn('before the server accepted connections: exiting', output)
+                    self.assertNotIn('[Server] All graphs were loaded', output)
+                    self.assertNotIn('[Server] Listening on port', output)
                 finally:
                     if writer is not None:
                         os.close(writer)
