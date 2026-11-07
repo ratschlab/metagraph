@@ -222,6 +222,9 @@ TEST(TaskResources, ResolveStatesCpu) {
     }
 }
 
+// The pattern search refuses a protein graph (alphabet_unsupported,
+// PatternRoute.ProteinGraphIsRefused) until E16 serves one
+#if ! _PROTEIN_GRAPH
 TEST(TaskResources, PatternStatesCpuPerRequestAndPerEntry) {
     Fixture f;
     PatternLimits caps;
@@ -245,6 +248,7 @@ TEST(TaskResources, PatternStatesCpuPerRequestAndPerEntry) {
         }
     }
 }
+#endif // ! _PROTEIN_GRAPH
 
 } // namespace
 
