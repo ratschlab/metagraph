@@ -1,7 +1,37 @@
+#include <algorithm>
+#include <limits>
+
 #include "gtest/gtest.h"
 #include "coordinate_test_graph.hpp"
 
 namespace mtg::test {
+namespace {
+// The records of |coords| (every record get_kmer_coordinates returns, num_top_labels unlimited)
+// as get_top_labels returns them: the score reported (the coordinates matched if |weighted|,
+// the query positions matched otherwise), the top |top| in the contract's order (C5,
+// SPEC-multigraph-envelope.md section 3: score descending, then the header's bytes; a
+// coordinate annotation holds no abundances)
+template <class Coordinates>
+std::vector<std::pair<std::string, size_t>>
+contract_top(const Coordinates &coords, size_t top, bool weighted) {
+    std::vector<std::pair<std::string, size_t>> rows;
+    for (const auto &[label, count, positions, length] : coords) {
+        size_t value = count;
+        if (weighted) {
+            value = 0;
+            for (const auto &tuple : positions)
+                value += tuple.size();
+        }
+        rows.emplace_back(label, value);
+    }
+    std::stable_sort(rows.begin(), rows.end(), [](const auto &a, const auto &b) {
+        return a.second != b.second ? a.second > b.second : a.first < b.first;
+    });
+    rows.resize(std::min(rows.size(), top));
+    return rows;
+}
+} // namespace
+
 TEST(HeaderCounts, CountsMixedKmersAndTheirOccurrences) {
     auto graph = coordinate_test_graph(3, {{"ACGACGACG", "F", "first"},
                                             {"ACGTTT", "F", "second"},
@@ -33,21 +63,23 @@ TEST(HeaderCounts, MatchesCoordinatesForThresholdsLimitsAndRepeats) {
     for (const auto &query : {"ACGACGACG", "ACGTTT", "ACGNNNACG", "TTTACG", "TTTTTT", "AC"}) {
         for (double discovery : {0., 0.5, 1.}) {
             for (double presence : {0., 0.5, 1.}) {
+                // every record above the thresholds
+                auto all = graph->get_kmer_coordinates(query, std::numeric_limits<size_t>::max(),
+                                                       discovery, presence);
                 for (size_t top : {size_t(0), size_t(1), size_t(2), size_t(100)}) {
-                    auto coords = graph->get_kmer_coordinates(query, top, discovery, presence);
+                    // the top N by the score reported, with the counts by the coordinates
+                    // matched (the contract's order: a record is not selected by its k-mer
+                    // matches and then reported with its coordinates)
                     for (bool weighted : {false, true}) {
-                        std::vector<std::pair<std::string, size_t>> expected;
-                        for (const auto &[label, count, positions, length] : coords) {
-                            size_t value = count;
-                            if (weighted) {
-                                value = 0;
-                                for (const auto &tuple : positions)
-                                    value += tuple.size();
-                            }
-                            expected.emplace_back(label, value);
-                        }
-                        EXPECT_EQ(expected, graph->get_top_labels(query, top, discovery, presence, weighted));
+                        EXPECT_EQ(contract_top(all, top, weighted),
+                                  graph->get_top_labels(query, top, discovery, presence, weighted));
                     }
+                    // without the counts, the records and the order get_kmer_coordinates returns
+                    auto coords = graph->get_kmer_coordinates(query, top, discovery, presence);
+                    std::vector<std::pair<std::string, size_t>> expected;
+                    for (const auto &[label, count, positions, length] : coords)
+                        expected.emplace_back(label, count);
+                    EXPECT_EQ(expected, graph->get_top_labels(query, top, discovery, presence));
                 }
                 auto counts = graph->get_top_labels(query, 100, discovery, presence);
                 std::vector<std::string> expected;
@@ -98,12 +130,18 @@ TEST(HeaderCounts, BRWTRowsAndRepeatedQueryPositions) {
     }
 }
 
-TEST(HeaderCounts, PreservesSelectionBeforeAbundanceWeighting) {
+TEST(HeaderCounts, SelectsByTheReportedScore) {
     auto graph = coordinate_test_graph(3, {{"AAAA", "F", "short"}, {"AAAAAAAA", "F", "long"}});
-    // Both records have one matched query position. The existing tie break
-    // selects the first record before replacing that count with its abundance.
-    const std::vector<std::pair<std::string, size_t>> expected{{"short", 2}};
-    EXPECT_EQ(expected, graph->get_top_labels("AAA", 1, 0, 0, true));
+    // Both records have one matched query position, "long" six coordinates of AAA and "short"
+    // two. The top N is taken by the score reported (C5, SPEC-multigraph-envelope.md
+    // section 3): with the counts, by the coordinates matched; without them, the tie of the
+    // positions matched by the header's bytes
+    EXPECT_EQ((std::vector<std::pair<std::string, size_t>>{{"long", 6}}),
+              graph->get_top_labels("AAA", 1, 0, 0, true));
+    EXPECT_EQ((std::vector<std::pair<std::string, size_t>>{{"long", 6}, {"short", 2}}),
+              graph->get_top_labels("AAA", 2, 0, 0, true));
+    EXPECT_EQ((std::vector<std::pair<std::string, size_t>>{{"long", 1}}),
+              graph->get_top_labels("AAA", 1, 0, 0, false));
 }
 
 TEST(HeaderCounts, CountsQueryPositionsInsteadOfDistinctKmers) {

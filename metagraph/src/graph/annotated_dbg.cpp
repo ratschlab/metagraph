@@ -2,6 +2,7 @@
 
 #include <cstdlib>
 #include <numeric>
+#include <span>
 
 #include <tsl/hopscotch_set.h>
 #include <tsl/hopscotch_map.h>
@@ -266,13 +267,12 @@ std::vector<Label> AnnotatedDBG::get_labels(std::string_view sequence,
         return {};
 
     if (coord_to_header_) {
-        auto kmer_coord_res = get_kmer_coordinates(sequence, std::numeric_limits<size_t>::max(),
-                                                   discovery_fraction, presence_fraction);
+        auto counts = get_top_labels(sequence, std::numeric_limits<size_t>::max(),
+                                     discovery_fraction, presence_fraction);
         std::vector<Label> result;
-        result.reserve(kmer_coord_res.size());
-        for (auto &[label, count, coords, num_kmers_in_target] : kmer_coord_res) {
+        result.reserve(counts.size());
+        for (auto &[label, count] : counts)
             result.emplace_back(std::move(label));
-        }
         return result;
     }
 
@@ -786,21 +786,14 @@ AnnotatedDBG::get_top_labels(std::string_view sequence,
 
     if (coord_to_header_) {
         // the records ranked by the score reported: with |with_kmer_counts| the number of
-        // their coordinates matched, which the counts below sum up
-        auto kmer_coord_res = query_kmer_coordinates(sequence, num_top_labels,
-                                                     discovery_fraction, presence_fraction,
-                                                     cut, with_kmer_counts);
+        // their coordinates matched
+        auto counts = get_header_results<size_t>(sequence, num_top_labels,
+                                                 discovery_fraction, presence_fraction,
+                                                 with_kmer_counts, cut);
         std::vector<StringCountPair> result;
-        result.reserve(kmer_coord_res.size());
-        for (auto &[label, count, coords, num_kmers_in_target] : kmer_coord_res) {
-            if (with_kmer_counts) {
-                count = 0;
-                for (const auto &tuple : coords) {
-                    count += tuple.size();
-                }
-            }
+        result.reserve(counts.size());
+        for (auto &[label, matches, count] : counts)
             result.emplace_back(std::move(label), count);
-        }
         return result;
     }
 
@@ -841,6 +834,193 @@ AnnotatedDBG::get_top_labels(std::string_view sequence,
     assert(with_kmer_counts || std::all_of(result.begin(), result.end(),
                                     [&](const auto &pair) { return pair.second <= num_kmers; }));
 
+    return result;
+}
+
+
+namespace {
+using Header = std::pair<Column, size_t>; // (column, seq_id)
+
+// A record of a CoordToHeader mapping the query's k-mers match: the query positions they
+// cover, and the number of the record's coordinates they match
+struct HeaderMatch {
+    Header header;
+    size_t kmers;
+    uint64_t coordinates;
+};
+
+/**
+ * The records the rows |rows| match (their coordinates packed by map_to_local_coords), each
+ * matched at |min_count| query positions or more, the top |num_top_labels| of them in the C5
+ * order (search_top_n) of the score reported: the number of their coordinates matched if
+ * |by_coordinates|, of the query positions otherwise; ties by the header's bytes (coordinates
+ * are positions, not abundances), a header in two columns in (column, seq_id) order. |weights|:
+ * the number of query positions each row stands for (one each if empty), so that a row the
+ * query repeats is decoded once. |cut| states the cut. Returns the records with their headers.
+ */
+std::vector<std::pair<HeaderMatch, std::string>>
+top_header_matches(const std::vector<MultiIntMatrix::RowTuples> &rows,
+                   const annot::CoordToHeader &mapping,
+                   size_t min_count, size_t num_top_labels, bool by_coordinates,
+                   std::span<const size_t> weights, SearchCut *cut) {
+    assert(weights.empty() || weights.size() == rows.size());
+    std::vector<HeaderMatch> candidates;
+    {
+        VectorMap<Header, std::pair<size_t, uint64_t>> counts_map;
+        tsl::hopscotch_set<Header> matches;
+        for (size_t r = 0; r < rows.size(); ++r) {
+            const size_t weight = weights.empty() ? 1 : weights[r];
+            matches.clear();
+            for (const auto &[column, coords] : rows[r]) {
+                for (uint64_t coord : coords) {
+                    Header h(column, coord % mapping.num_sequences(column));
+                    matches.emplace(h);
+                    if (by_coordinates)
+                        counts_map[h].second += weight;
+                }
+            }
+            for (const Header &h : matches) {
+                counts_map[h].first += weight;
+            }
+        }
+        for (auto &[h, c] : to_vector(std::move(counts_map))) {
+            // the records with too few k-mer matches are no candidates
+            if (c.first >= min_count)
+                candidates.push_back({ h, c.first, c.second });
+        }
+    }
+    // the records in (column, seq_id) order, so that a header in two columns is returned in
+    // the same order by every request
+    std::sort(candidates.begin(), candidates.end(),
+              [](const HeaderMatch &a, const HeaderMatch &b) { return a.header < b.header; });
+
+    std::vector<size_t> scores;
+    scores.reserve(candidates.size());
+    for (const HeaderMatch &c : candidates) {
+        scores.push_back(by_coordinates ? c.coordinates : c.kmers);
+    }
+    auto top = search_top_n(scores, num_top_labels, [&](size_t i) -> const std::string & {
+        const auto &[column, seq_id] = candidates[i].header;
+        return mapping.get_headers(column)[seq_id];
+    }, {}, cut);
+
+    std::vector<std::pair<HeaderMatch, std::string>> result;
+    result.reserve(top.size());
+    for (auto &[i, label] : top) {
+        result.emplace_back(candidates[i], std::move(label));
+    }
+    return result;
+}
+} // namespace
+
+
+template <class Values>
+std::vector<std::tuple<Label, size_t, Values>>
+AnnotatedDBG::get_header_results(std::string_view sequence, size_t num_top_labels,
+                                 double discovery_fraction, double presence_fraction,
+                                 bool with_kmer_counts, SearchCut *cut) const {
+    static_assert(utils::is_one_of_v<Values, size_t, std::vector<size_t>, sdsl::bit_vector>);
+    assert((!with_kmer_counts || std::is_same_v<Values, size_t>));
+    assert(coord_to_header_);
+    const size_t num_kmers = sequence.size() - dbg_.get_k() + 1;
+    // Repeated query positions still count separately, but their annotation row is decoded
+    // once. Only the results per position keep the positions.
+    using Positions = std::conditional_t<std::is_same_v<Values, size_t>,
+                                         size_t, std::vector<size_t>>;
+    std::vector<std::pair<row_index, Positions>> index_counts;
+    size_t num_present = 0;
+    {
+        VectorMap<row_index, Positions> counts;
+        counts.reserve(num_kmers);
+        size_t position = 0;
+        dbg_.map_to_nodes(sequence, [&](node_index node) {
+            if (node) {
+                auto &positions = counts[graph_to_anno_index(node)];
+                if constexpr (std::is_same_v<Values, size_t>) {
+                    ++positions;
+                } else {
+                    positions.push_back(position);
+                }
+                ++num_present;
+            }
+            ++position;
+        });
+        index_counts = to_vector(std::move(counts));
+    } // the hash table is released before the rows are decoded
+    const size_t min_count = get_min_count(discovery_fraction, presence_fraction,
+                                           num_kmers, num_present);
+    if (num_present < min_count)
+        return {};
+
+    std::vector<row_index> rows;
+    std::vector<size_t> weights;
+    rows.reserve(index_counts.size());
+    weights.reserve(index_counts.size());
+    for (const auto &[row, positions] : index_counts) {
+        rows.push_back(row);
+        if constexpr (std::is_same_v<Values, size_t>) {
+            weights.push_back(positions);
+        } else {
+            weights.push_back(positions.size());
+        }
+    }
+
+    const auto *matrix = dynamic_cast<const MultiIntMatrix *>(&annotator_->get_matrix());
+    if (!matrix) {
+        logger->error("k-mer coordinates are not indexed in this annotator");
+        exit(1);
+    }
+    if (annotator_->num_labels() != coord_to_header_->num_columns()) {
+        logger->error("Incompatible number of columns in CoordToHeader and annotation matrix: "
+                      "{} != {}", coord_to_header_->num_columns(), annotator_->num_labels());
+        exit(1);
+    }
+    auto tuples = matrix->get_row_tuples(rows);
+    coord_to_header_->map_to_local_coords(&tuples);
+    // Now each coord in `tuples` is `coord = local_coord * num_sequences[j] + seq_id`
+
+    auto top = top_header_matches(tuples, *coord_to_header_, min_count, num_top_labels,
+                                  with_kmer_counts, weights, cut);
+
+    std::vector<std::tuple<Label, size_t, Values>> result;
+    result.reserve(top.size());
+    if constexpr (std::is_same_v<Values, size_t>) {
+        for (auto &[match, label] : top) {
+            result.emplace_back(std::move(label), match.kmers,
+                                with_kmer_counts ? match.coordinates : match.kmers);
+        }
+    } else {
+        tsl::hopscotch_map<Header, Values> values;
+        values.reserve(top.size());
+        for (const auto &[match, label] : top) {
+            values.emplace(match.header, num_kmers);
+        }
+        // the occurrences of a record in a row, written to each query position of the row
+        tsl::hopscotch_map<Header, size_t> occurrences;
+        for (size_t i = 0; i < tuples.size(); ++i) {
+            occurrences.clear();
+            for (const auto &[column, coords] : tuples[i]) {
+                for (uint64_t coord : coords) {
+                    ++occurrences[{ column, coord % coord_to_header_->num_sequences(column) }];
+                }
+            }
+            for (const auto &[h, count] : occurrences) {
+                auto it = values.find(h);
+                if (it == values.end())
+                    continue;
+                for (size_t position : index_counts[i].second) {
+                    if constexpr (std::is_same_v<Values, sdsl::bit_vector>) {
+                        it.value()[position] = true;
+                    } else {
+                        it.value()[position] = count;
+                    }
+                }
+            }
+        }
+        for (auto &[match, label] : top) {
+            result.emplace_back(std::move(label), match.kmers, std::move(values.at(match.header)));
+        }
+    }
     return result;
 }
 
@@ -991,18 +1171,9 @@ AnnotatedDBG::get_kmer_counts(std::string_view sequence,
         return {};
 
     if (coord_to_header_) {
-        auto kmer_coord_res = get_kmer_coordinates(sequence, num_top_labels,
-                                                   discovery_fraction, presence_fraction, cut);
-        std::vector<std::tuple<std::string, size_t, std::vector<size_t>>> result;
-        result.reserve(kmer_coord_res.size());
-        for (auto &[label, count, coords, num_kmers_in_target] : kmer_coord_res) {
-            result.emplace_back(std::move(label), count, coords.size());
-            auto &counts = std::get<2>(result.back());
-            for (size_t i = 0; i < coords.size(); ++i) {
-                counts[i] = coords[i].size();
-            }
-        }
-        return result;
+        return get_header_results<std::vector<size_t>>(sequence, num_top_labels,
+                                                       discovery_fraction, presence_fraction,
+                                                       false, cut);
     }
 
     size_t num_kmers = sequence.size() - dbg_.get_k() + 1;
@@ -1064,17 +1235,6 @@ AnnotatedDBG::get_kmer_coordinates(std::string_view sequence,
                                    double discovery_fraction,
                                    double presence_fraction,
                                    SearchCut *cut) const {
-    return query_kmer_coordinates(sequence, num_top_labels, discovery_fraction,
-                                  presence_fraction, cut, false);
-}
-
-std::vector<std::tuple<Label, size_t, std::vector<SmallVector<uint64_t>>, size_t>>
-AnnotatedDBG::query_kmer_coordinates(std::string_view sequence,
-                                     size_t num_top_labels,
-                                     double discovery_fraction,
-                                     double presence_fraction,
-                                     SearchCut *cut,
-                                     bool score_by_coordinates) const {
     assert(discovery_fraction >= 0.);
     assert(discovery_fraction <= 1.);
     assert(presence_fraction >= 0.);
@@ -1121,57 +1281,15 @@ AnnotatedDBG::query_kmer_coordinates(std::string_view sequence,
         coord_to_header_->map_to_local_coords(&rows_tuples);
         // Now each coord in `rows_tuples` is `coord = local_coord * num_sequences[j] + seq_id`
 
-        // Before splitting coords across sequences, filter them by the number of k-mer matches
-        using Header = std::pair<Column, size_t>; // (column, seq_id)
+        // the records ranked by the number of query positions they match
         using Count = size_t;
-        // per record: the query's k-mers it matches, and (|score_by_coordinates|) the number
-        // of its coordinates they match
-        std::vector<std::pair<Header, std::pair<Count, uint64_t>>> candidates;
-        {
-            VectorMap<Header, std::pair<Count, uint64_t>> counts_map;
-            tsl::hopscotch_set<Header> matches;
-            for (const auto &row : rows_tuples) {
-                matches.clear();
-                for (auto &[col, coords] : row) {
-                    for (uint64_t coord : coords) {
-                        size_t header = coord % coord_to_header_->num_sequences(col);
-                        matches.emplace(col, header);
-                        if (score_by_coordinates)
-                            counts_map[Header(col, header)].second++;
-                    }
-                }
-                for (const Header &h : matches) {
-                    counts_map[h].first++;
-                }
-            }
-            candidates = to_vector(std::move(counts_map));
-        }
-
-        // remove sequences with insufficient number of k-mer matches
-        candidates.erase(std::remove_if(candidates.begin(), candidates.end(),
-                                        [&](const auto &c) { return c.second.first < min_count; }),
-                         candidates.end());
-        // the records in (column, seq_id) order, so that a header in two columns is
-        // returned in the same order by every request
-        std::sort(candidates.begin(), candidates.end(), utils::LessFirst());
-
-        // keep only the top-n sequences, by the score reported, ties by their header (C5:
-        // coordinates are positions, not abundances)
-        std::vector<size_t> scores;
-        scores.reserve(candidates.size());
-        for (const auto &[h, c] : candidates) {
-            scores.push_back(score_by_coordinates ? c.second : c.first);
-        }
-        auto top = search_top_n(scores, num_top_labels, [&](size_t i) -> const std::string & {
-            const auto &[col, header] = candidates[i].first;
-            return coord_to_header_->get_headers(col)[header];
-        }, {}, cut);
+        auto top = top_header_matches(rows_tuples, *coord_to_header_, min_count,
+                                      num_top_labels, false, {}, cut);
         std::vector<std::pair<Header, Count>> counts;
         counts.reserve(top.size());
-        for (const auto &[i, label] : top) {
-            counts.emplace_back(candidates[i].first, candidates[i].second.first);
+        for (const auto &[match, label] : top) {
+            counts.emplace_back(match.header, match.kmers);
         }
-        candidates = decltype(candidates)();
 
         // split coordinates across sequences
         tsl::hopscotch_map<Header, std::vector<Tuple>> coords_map;
@@ -1268,21 +1386,9 @@ AnnotatedDBG::get_top_label_signatures(std::string_view sequence,
     }
 
     if (coord_to_header_) {
-        auto kmer_coord_res = get_kmer_coordinates(sequence, num_top_labels,
-                                                   discovery_fraction, presence_fraction, cut);
-        std::vector<std::tuple<Label, size_t, sdsl::bit_vector>> result;
-        result.reserve(kmer_coord_res.size());
-        for (auto &[label, count, coords, num_kmers_in_target] : kmer_coord_res) {
-            assert(coords.size() == sequence.size() - dbg_.get_k() + 1);
-            result.emplace_back(std::move(label), count, coords.size());
-            auto &mask = std::get<2>(result.back());
-            for (size_t i = 0; i < coords.size(); ++i) {
-                if (coords[i].size())
-                    mask[i] = true;
-            }
-        }
-        assert(same_results(result, get_top_labels(sequence, num_top_labels, discovery_fraction, presence_fraction)));
-        return result;
+        return get_header_results<sdsl::bit_vector>(sequence, num_top_labels,
+                                                    discovery_fraction, presence_fraction,
+                                                    false, cut);
     }
 
     // kmers in the graph and their positions in the query sequence

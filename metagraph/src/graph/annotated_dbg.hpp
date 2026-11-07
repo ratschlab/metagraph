@@ -294,16 +294,17 @@ class AnnotatedDBG : public AnnotatedSequenceGraph {
                              SearchCut *cut = nullptr) const;
 
   private:
-    // get_kmer_coordinates, with the records of a CoordToHeader mapping ranked by the number
-    // of their coordinates the query's k-mers match if |score_by_coordinates| (the score
-    // get_top_labels reports with |with_kmer_counts|), by the number of k-mers otherwise
-    std::vector<std::tuple<Label, size_t, std::vector<SmallVector<uint64_t>>, size_t>>
-    query_kmer_coordinates(std::string_view sequence,
-                           size_t num_top_labels,
-                           double discovery_fraction,
-                           double presence_fraction,
-                           SearchCut *cut,
-                           bool score_by_coordinates) const;
+    // get_top_labels, get_kmer_counts and get_top_label_signatures on a CoordToHeader
+    // mapping, without the coordinates (each distinct row decoded once, weighted by the query
+    // positions it stands for): (header, k-mer matches, value), the records ranked by the
+    // score reported (the coordinates matched with |with_kmer_counts|, the k-mer matches
+    // otherwise) in the C5 order. Values: the score (size_t), the coordinates matched per query
+    // position (std::vector<size_t>) or whether any is matched there (sdsl::bit_vector)
+    template <class Values>
+    std::vector<std::tuple<Label, size_t, Values>>
+    get_header_results(std::string_view sequence, size_t num_top_labels,
+                       double discovery_fraction, double presence_fraction,
+                       bool with_kmer_counts, SearchCut *cut) const;
 
     // The integer matrix to read the abundances of a search's ties from: the annotation's
     // matrix when it holds k-mer counts (has_kmer_abundances), null otherwise
