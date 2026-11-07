@@ -1921,15 +1921,20 @@ TEST(ServerFanout, SamplesNamingOneAttemptDescribeOneExecution) {
 TEST(ServerFanout, FinishByCapsTheAttemptBound) {
     AttemptSettings settings;
     settings.clock_skew_ms = 2000;
-    Attempt attempt(1, std::chrono::system_clock::now(), settings, "inst", true);
+    // finish_by_ms stated from the attempt's own receipt, so that the bound does not depend on
+    // the time between the receipt and the call (5 ms on a slow CI runner made it 5005)
+    const auto received = std::chrono::system_clock::now();
+    const uint64_t received_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+            received.time_since_epoch()).count();
+    Attempt attempt(1, received, settings, "inst", true);
     attempt.set_ids(AttemptIds());
-    attempt.set_finish_by(now_ms() + 2000 + 5000);
+    attempt.set_finish_by(received_ms + 2000 + 5000);
     EXPECT_FALSE(attempt.managed());
     EXPECT_TRUE(attempt.enforced());
-    EXPECT_LE(attempt.bound_ms(), 5001);
-    EXPECT_GE(attempt.bound_ms(), 4000);
+    // finish_by_ms less the skew, on the receipt's clock
+    EXPECT_EQ(5000.0, attempt.bound_ms());
     attempt.set_bound(1, 60'000);
-    EXPECT_LE(attempt.bound_ms(), 5001);
+    EXPECT_EQ(5000.0, attempt.bound_ms());
     EXPECT_EQ("finish_by_ms", attempt.usage_json("completed")["bound"]["capped_by"].asString());
     // without finish_by_ms an unmanaged attempt is not enforced, as before
     Attempt plain(2, std::chrono::system_clock::now(), settings, "inst", true);
