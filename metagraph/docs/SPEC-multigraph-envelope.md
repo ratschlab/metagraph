@@ -188,20 +188,21 @@ The answer keeps its upstream shape (a list of `{seq_description, results, ...}`
   pattern `^[A-Za-z0-9._:-]{1,128}$`, compared as given, **with `request_id` only**. Anything else (null, a
   non-string, `""`, more than 128 characters, another character), or the field without `request_id`, is a 400
   naming the field, one of the request's own 400s (before every 409). A server whose own `server_instance` is
-  another refuses the request before its admission: **409** `{error, state: "instance_mismatch",
+  another refuses the request at its admission, before anything is registered: **409** `{error, state: "instance_mismatch",
   expect_server_instance, server_instance, request_id, not_after_ms?}`. Nothing runs and nothing is registered:
   `GET /requests/{id}` on that server answers 404 (never admitted). It is the first of the admission refusals:
   `instance_mismatch`, then the repeated id, then `expired` (section 4), the order `/traverse` has. On a
   multi-graph server it is request-level: no pair starts and no envelope is written. The CLI, whose instance is
   its own and random, refuses any value it is given (the 409 body on stdout, exit status 1), as for `/traverse`.
-- A request's ADMISSION is the point where the server decides to run it: the check of a repeated id (the 409
-  below) and of an expired `not_after_ms` (section 4), made together, after which a request with an id is
+- A request's ADMISSION is the point where the server decides to run it: the check of `expect_server_instance`
+  (`instance_mismatch`, above), of a repeated id (the 409 below) and of an expired `not_after_ms` (section 4),
+  made together in that order, after which a request with an id is
   registered under it. On `/resolve` and `/pattern` it comes after the request's own 400s (below), on `/traverse`
   before its fields are parsed (its body read as JSON, its ids and `finish_by_ms` checked). A request without an
   id is admitted at the same point, without an entry.
 - On `/resolve` and `/pattern` the request's own 400s (the body, the selection, the fields; on `/resolve` also what
   the request and k decide of its explicit seeds: a `kmer_interval` empty or out of range, a seed label that is not
-  one of `labels`) come before the registry's 409 and the expired 409: a malformed request with an expired
+  one of `labels`) come before every admission 409 (`instance_mismatch`, the repeated id, `expired`): a malformed request with an expired
   `not_after_ms` gets 400. The seeds are checked in their order, the work's, which checks a seed's labels before
   the next seed: under a discovery the seeds after the first that names labels are checked by the work. An
   HTTP-level 400 never holds a `request_id`: one that only the work can find (a seed not fully present in the graph,

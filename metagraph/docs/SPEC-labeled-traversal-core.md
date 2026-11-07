@@ -465,10 +465,13 @@ deadline. `src/cli/traverse.cpp` `process_resolve_request`, `src/graph/traversal
   lists as not observed (§7.3). *E5b's verification sweep* (2026-11-07; per-seed budgets of 64 MiB to 4 GiB under
   R = 8 GiB, 1 to 64 seeds, results of up to 97 MiB of text, request bodies of a few KB) found a server's peak
   physical footprint above its idle at most 2.6 GiB, and on Linux under a cgroup limit of R + 256 MiB + the idle
-  charge no case killed: R plus a fixed overhead of 256 MiB holds a request whose body is capped at 8 MiB
-  (`--max-request-body-mb 8`): the structures outside the account take up to about 10–20 times the body (an
-  explicit list of short labels, parsed and copied per seed). With a larger cap, or none (the default), a large
-  body's structures are held beside R outside every bound.
+  charge no case killed: R plus a fixed overhead of 256 MiB held every request of the sweep. The overhead assumes a
+  capped body (`--max-request-body-mb`), as the structures outside the account grow with it: jsoncpp's parsed
+  request alone is about 12 to 28 times the body for an explicit list of labels of 6 to 1 characters (measured on
+  macOS in the review of train 2; more on Linux), also for a body that is refused 400 afterwards, and each per-seed
+  copy of the list adds about 3 to 6 times. The cap that 256 MiB holds has not been measured; the estimate is a few
+  MiB, below 8 MiB. With a larger cap, or none (the default), a large body's structures are held beside R outside
+  every bound.
   A seed the bound left unstarted is sent again in a new request (the action `split_request`).
 - **Attempt fields** (`DESIGN-traverse-graphlet.md` §14 and §14.1: the frozen wire contract's request fields;
   stage 4, backend half — the ledger itself lives in the search service): top-level `attempt_id`, `budget_id`
@@ -516,7 +519,7 @@ deadline. `src/cli/traverse.cpp` `process_resolve_request`, `src/graph/traversal
   text states this order *(review of 2026-10-06, C24)*. A fraction, a sign, a string or a value above
   2⁵³ − 1 is a 400 naming the field, without `usage`. It is echoed as `usage.not_after_ms` and in the
   attempt's state, only when given. The CLI applies the same check (the 409 body on stdout, exit
-  status 1). `/resolve` does not accept it (400, unknown field).
+  status 1). `/resolve` and `/pattern` read it too, since release 10 (`SPEC-multigraph-envelope.md` §4).
 - **`expect_server_instance`** *(review of pass 5; with `attempt_id` only; `/resolve` and `/pattern` take it
   with `request_id` since F3b, `SPEC-multigraph-envelope.md` §5)*: the `server_instance` (§10.3) the
   request is meant for, a string matching the ids' pattern `^[A-Za-z0-9._:-]{1,128}$` (as every
@@ -533,8 +536,8 @@ deadline. `src/cli/traverse.cpp` `process_resolve_request`, `src/graph/traversal
   attempts with this field *(the finished state: review of levels 4–5, finding 6)*. Without
   `attempt_id` it is a 400 naming the field. The CLI, whose instance is its own and random, refuses any
   well-formed value (the 409 body on stdout, exit status 1; a malformed one gets the 400's error output, exit
-  status 1). `/resolve` does not accept it (400, unknown field), nor does a server below feature level 5 (400,
-  unknown field).
+  status 1). A server below feature level 5 does not accept it (400, unknown field); `/resolve` and `/pattern` take
+  it with `request_id` only from F3b, where `GET /capabilities` lists them under `expect_server_instance`.
 - `direction`: `both | left | right`. `support`: `kmer | trace` (`trace` rejected unless coordinates are indexed
   and the regime is basic).
 - **`seeds[].labels` is optional.** Omitting it is the default and realizes the design note's

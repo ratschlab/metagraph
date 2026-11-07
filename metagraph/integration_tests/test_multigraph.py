@@ -2030,7 +2030,9 @@ class TestMultiGraphServer(TestingBase):
                 for bad in ({'expect_server_instance': instance},
                             dict(request, expect_server_instance=''),
                             dict(request, expect_server_instance=None),
-                            dict(request, expect_server_instance='a b')):
+                            dict(request, expect_server_instance='a b'),
+                            # one of the request's own 400s: ahead of an expired not_after_ms
+                            dict(request, expect_server_instance='a b', not_after_ms=1)):
                     ret = server.post(route, dict(body, **bad))
                     self.assertEqual(400, ret.status_code, ret.text[:2000])
                     self.assertIn('request.expect_server_instance', ret.json()['error'])
