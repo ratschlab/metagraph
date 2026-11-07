@@ -94,9 +94,37 @@ RequestHandles read_request_handles(const Json::Value &request) {
         }
         handles.request_id = v.asString();
     }
+    if (request.isMember("expect_server_instance")) {
+        // the server_instance is 16 hex digits; any token is compared as given (another one is
+        // refused, 409), as /traverse's attempt_ids reads it
+        const Json::Value &v = request["expect_server_instance"];
+        if (!v.isString() || !valid_attempt_id(v.asString())) {
+            throw InvalidRequest("request.expect_server_instance: expected a string of 1 to 128 "
+                                 "characters from [A-Za-z0-9._:-]");
+        }
+        // it pins the admission of an id: without request_id nothing is admitted under one
+        if (!handles.request_id)
+            throw InvalidRequest("request.expect_server_instance: given without request.request_id");
+        handles.expect_server_instance = v.asString();
+    }
     handles.not_after_ms = read_not_after_ms(request, "request");
     handles.finish_by_ms = read_finish_by_ms(request, "request");
     return handles;
+}
+
+bool instance_mismatch(const RequestHandles &handles, const std::string &instance) {
+    return handles.expect_server_instance && *handles.expect_server_instance != instance;
+}
+
+Json::Value instance_mismatch_json(const RequestHandles &handles, const std::string &instance) {
+    assert(handles.request_id && handles.expect_server_instance);
+    AttemptIds ids;
+    ids.expect_server_instance = handles.expect_server_instance.value_or("");
+    ids.not_after_ms = handles.not_after_ms;
+    // /traverse's body without attempt ids (none given), its request_id in their place
+    Json::Value j = instance_mismatch_json(ids, instance);
+    j["request_id"] = handles.request_id.value_or("");
+    return j;
 }
 
 // ---------------------------------------------------------------- the deadlines
@@ -461,7 +489,8 @@ Json::Value RequestRegistry::unknown_json(const std::string &request_id,
     Json::Value j;
     // the three cases of SPEC-multigraph-envelope.md section 5
     j["error"] = "request_id '" + request_id + "' is not known on this server: not admitted yet, "
-                 "never admitted (an HTTP-level 400 or the expired 409; or never received), or "
+                 "never admitted (an HTTP-level 400, the expired 409 or the instance_mismatch "
+                 "409; or never received), or "
                  "ended and no longer retained (" + retention_text() + ")";
     j["request_id"] = request_id;
     j["server_instance"] = shared_->settings.server_instance;
@@ -608,6 +637,21 @@ std::optional<Json::Value> IdAdmission::start_request(const std::shared_ptr<Requ
         return expired_request_json(not_after_ms, attempts_.now_ms(),
                                     attempts_.server_instance(), id);
     });
+}
+
+std::optional<Json::Value> IdAdmission::admit(const std::shared_ptr<RequestEntry> &entry,
+                                              const RequestHandles &handles) {
+    // a request meant for another server_instance first, before either registry is asked: it
+    // is not admitted and leaves nothing registered (the instance is constant, so no lock is
+    // needed for it), as /traverse refuses it ahead of a repeated id and of expiry
+    if (instance_mismatch(handles, attempts_.server_instance()))
+        return instance_mismatch_json(handles, attempts_.server_instance());
+    // with a request_id the not_after_ms check reads the clock inside the request registry's
+    // critical section (start_request): never read it here for it
+    if (handles.request_id)
+        return start_request(entry, handles.not_after_ms);
+    return expired_request_json(handles.not_after_ms, attempts_.now_ms(),
+                                attempts_.server_instance(), std::nullopt);
 }
 
 std::optional<AttemptRegistry::StartRefusal> IdAdmission::start_attempt(

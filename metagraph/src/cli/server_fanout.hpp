@@ -39,19 +39,33 @@ using WallClock = std::chrono::system_clock;
 
 /**
  * The request-level fields of section 4 and 5 that /resolve and /pattern read before anything
- * runs: request_id (attempt_id's token rule, valid_attempt_id), not_after_ms (the latest START,
- * as /traverse's) and finish_by_ms (the completion deadline), each absent or as given. Read by
- * the routes' strict parsers too, which refuse any other spelling.
+ * runs: request_id (attempt_id's token rule, valid_attempt_id), expect_server_instance (the
+ * server_instance the request is meant for, the same token rule, with request_id only: F3b),
+ * not_after_ms (the latest START, as /traverse's) and finish_by_ms (the completion deadline),
+ * each absent or as given. Read by the routes' strict parsers too, which refuse any other
+ * spelling.
  */
 struct RequestHandles {
     std::optional<std::string> request_id;
+    std::optional<std::string> expect_server_instance;
     std::optional<uint64_t> not_after_ms;
     std::optional<uint64_t> finish_by_ms;
 };
-// The three fields of |request| (an object; anything else: none of them), checked: throws
-// InvalidRequest (traverse.hpp) naming request.<field> for a request_id that is not a token, or
+// The four fields of |request| (an object; anything else: none of them), checked: throws
+// InvalidRequest (traverse.hpp) naming request.<field> for a request_id or an
+// expect_server_instance that is not a token, an expect_server_instance without request_id, or
 // a not_after_ms or finish_by_ms that is not an integer in [0, kMaxNotAfterMs]
 RequestHandles read_request_handles(const Json::Value &request);
+
+// Whether a request carrying |handles| is meant for another server_instance than |instance|
+// (its expect_server_instance, given only with request_id, is another): it is refused before
+// its admission, with instance_mismatch_json's 409
+bool instance_mismatch(const RequestHandles &handles, const std::string &instance);
+// The 409 body of such a request (SPEC-multigraph-envelope.md section 5, F3b): {error, state:
+// "instance_mismatch", expect_server_instance, server_instance (|instance|, this server's),
+// request_id, not_after_ms (when given)}, its error /traverse's (instance_mismatch_json of its
+// AttemptIds)
+Json::Value instance_mismatch_json(const RequestHandles &handles, const std::string &instance);
 
 // ---------------------------------------------------------------- the deadlines
 
@@ -314,6 +328,15 @@ class IdAdmission {
     // without one, so that no admission skips the expiry check by leaving it out
     std::optional<Json::Value> start_request(const std::shared_ptr<RequestEntry> &entry,
                                              std::optional<uint64_t> not_after_ms);
+    // The admission of a /resolve or /pattern request (SPEC-multigraph-envelope.md sections 4
+    // and 5): the 409 body that refuses it, in /traverse's order: a request meant for another
+    // server_instance (expect_server_instance: instance_mismatch, the attempt registry's
+    // instance), then with a request_id start_request (the repeated id, then expired), without
+    // one an expired not_after_ms (expired_request_json, the attempts' clock); none when it is
+    // admitted, |entry| then registered under its request_id (a request without one is not).
+    // Nothing is registered for a refused request
+    std::optional<Json::Value> admit(const std::shared_ptr<RequestEntry> &entry,
+                                     const RequestHandles &handles);
     // AttemptRegistry::start of |attempt|; the id held by a request is refused like a running
     // or retained attempt_id, its body the attempt-shaped request (request_as_attempt_json)
     std::optional<AttemptRegistry::StartRefusal> start_attempt(

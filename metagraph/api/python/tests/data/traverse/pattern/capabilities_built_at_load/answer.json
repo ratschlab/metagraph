@@ -50,7 +50,7 @@
   "release_rule": "SPEC-labeled-traversal-core.md section 10.3, the release rule",
   "retention_count": 10000,
   "retention_s": 3600,
-  "server_instance": "445609c6677fae9f",
+  "server_instance": "94466d8492136038",
   "state": "GET /traverse/attempt/{attempt_id}",
   "suppression": "SPEC-labeled-traversal-core.md section 10.3, POST /traverse/cancel: the tombstone",
   "tombstone_max_s": 86400
@@ -68,6 +68,11 @@
   "poll_stride": 8,
   "rule": "SPEC-labeled-traversal-core.md section 6.8, chunked deadlines"
  },
+ "expect_server_instance": [
+  "/traverse",
+  "/resolve",
+  "/pattern"
+ ],
  "feature_level": 6,
  "features": [
   "search",
@@ -334,5 +339,5 @@
   "traverse_capabilities": "GET /traverse/capabilities"
  },
  "schema_version": 1,
- "server_instance": "445609c6677fae9f"
+ "server_instance": "94466d8492136038"
 }

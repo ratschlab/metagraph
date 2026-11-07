@@ -517,7 +517,8 @@ deadline. `src/cli/traverse.cpp` `process_resolve_request`, `src/graph/traversal
   2⁵³ − 1 is a 400 naming the field, without `usage`. It is echoed as `usage.not_after_ms` and in the
   attempt's state, only when given. The CLI applies the same check (the 409 body on stdout, exit
   status 1). `/resolve` does not accept it (400, unknown field).
-- **`expect_server_instance`** *(review of pass 5; with `attempt_id` only)*: the `server_instance` (§10.3) the
+- **`expect_server_instance`** *(review of pass 5; with `attempt_id` only; `/resolve` and `/pattern` take it
+  with `request_id` since F3b, `SPEC-multigraph-envelope.md` §5)*: the `server_instance` (§10.3) the
   request is meant for, a string matching the ids' pattern `^[A-Za-z0-9._:-]{1,128}$` (as every
   `server_instance` does), compared as given. Any other value — null, a non-string, `""`, more than 128
   characters, another character — is a 400 naming the field, without `usage`: nothing runs and nothing is
@@ -2991,7 +2992,9 @@ search's routes, `POST /pattern` and `GET /pattern/capabilities`, are `SPEC-patt
     below, multi-graph mode), and in both modes `max_request_body_mb` (below, the caps: the largest request body
     the server reads, `null` when unlimited) and `headers_unique` (E22: whether every sequence header names one
     record; at the top level in single-graph mode, `null` while the index loads, and in `graph_summary` in
-    multi-graph mode; `SPEC-multigraph-envelope.md` §9).
+    multi-graph mode; `SPEC-multigraph-envelope.md` §9), and `expect_server_instance` (F3b: the routes that take
+    the field, `["/traverse", "/resolve", "/pattern"]`; at the top level in single-graph mode, beside
+    `routes.requests`, and in the `multigraph` block in multi-graph mode; `SPEC-multigraph-envelope.md` §8).
   - **`deadline_check`** (both capabilities routes, feature level 3): `chunk_target_ms` (integer,
     `--traverse-chunk-target-ms`, an integer in [0, 2⁵³ − 1]; 0: reads are not chunked), `max_uninterruptible_ms`
     (null: no bound on one row's decode exists before stage 3c, and it stays null after stage 3c-ii, whose

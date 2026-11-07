@@ -222,6 +222,100 @@ TEST(ServerFanout, RequestHandles) {
                  InvalidRequest);
 }
 
+// F3b (SPEC-multigraph-envelope.md section 5): expect_server_instance on /resolve and /pattern,
+// with request_id only, under the ids' token rule; every other spelling, and the field without
+// request_id, is a 400 naming it
+TEST(ServerFanout, ExpectServerInstanceHandles) {
+    const RequestHandles pinned = read_request_handles(parse(
+            R"({"request_id": "r1", "expect_server_instance": "7c1e0f3a9b24d6e8"})"));
+    EXPECT_EQ("7c1e0f3a9b24d6e8", *pinned.expect_server_instance);
+    EXPECT_FALSE(read_request_handles(parse(R"({"request_id": "r1"})")).expect_server_instance);
+    // compared as given: any token is read (another one is refused 409, never 400)
+    EXPECT_EQ("a.b:c-D_9", *read_request_handles(parse(
+            R"({"request_id": "r1", "expect_server_instance": "a.b:c-D_9"})")).expect_server_instance);
+    const std::string long_token(129, 'a');
+    for (const std::string &bad : { std::string("null"), std::string("7"), std::string("\"\""),
+                                    "\"" + long_token + "\"", std::string("\"a b\""),
+                                    std::string("\"a/b\""), std::string("[\"x\"]") }) {
+        try {
+            read_request_handles(parse(R"({"request_id": "r1", "expect_server_instance": )" + bad
+                                       + "}"));
+            ADD_FAILURE() << bad << " was accepted";
+        } catch (const InvalidRequest &e) {
+            EXPECT_EQ(0u, std::string(e.what()).find("request.expect_server_instance: expected "
+                                                     "a string of 1 to 128 characters"))
+                << bad << ": " << e.what();
+        }
+    }
+    EXPECT_EQ(128u, read_request_handles(parse(
+            R"({"request_id": "r1", "expect_server_instance": ")" + std::string(128, 'a')
+            + "\"}")).expect_server_instance->size());
+    // without request_id: nothing would be admitted under an id it could pin
+    try {
+        read_request_handles(parse(R"({"expect_server_instance": "7c1e0f3a9b24d6e8"})"));
+        ADD_FAILURE() << "accepted without request_id";
+    } catch (const InvalidRequest &e) {
+        EXPECT_EQ("request.expect_server_instance: given without request.request_id",
+                  std::string(e.what()));
+    }
+    // /resolve's strict parser accepts it, and refuses what the reader refuses
+    EXPECT_NO_THROW(parse_resolve_request(parse(
+            R"({"sequence": "ACGT", "labels": ["x"], "request_id": "r1",
+                "expect_server_instance": "7c1e0f3a9b24d6e8"})")));
+    EXPECT_THROW(parse_resolve_request(parse(
+            R"({"sequence": "ACGT", "labels": ["x"], "expect_server_instance": "x"})")),
+            InvalidRequest);
+}
+
+// The 409 of a request meant for another server_instance: exactly {error, state:
+// "instance_mismatch", expect_server_instance, server_instance (this server's), request_id,
+// not_after_ms when given}, its error /traverse's
+TEST(ServerFanout, InstanceMismatchBody) {
+    RequestHandles handles;
+    handles.request_id = "svc-res-0000-26";
+    EXPECT_FALSE(instance_mismatch(handles, "inst"));
+    handles.expect_server_instance = "0000000000000000";
+    EXPECT_TRUE(instance_mismatch(handles, "inst"));
+    EXPECT_FALSE(instance_mismatch(handles, "0000000000000000"));
+    handles.not_after_ms = 1793438459000;
+    const Json::Value body = instance_mismatch_json(handles, "inst");
+    EXPECT_EQ((std::vector<std::string>{ "error", "expect_server_instance", "not_after_ms",
+                                         "request_id", "server_instance", "state" }),
+              body.getMemberNames());
+    EXPECT_EQ("instance_mismatch", body["state"].asString());
+    EXPECT_EQ("0000000000000000", body["expect_server_instance"].asString());
+    EXPECT_EQ("inst", body["server_instance"].asString());
+    EXPECT_EQ("svc-res-0000-26", body["request_id"].asString());
+    EXPECT_EQ(1793438459000u, body["not_after_ms"].asUInt64());
+    AttemptIds ids;
+    ids.expect_server_instance = "0000000000000000";
+    EXPECT_EQ(instance_mismatch_json(ids, "inst")["error"], body["error"]);
+    EXPECT_EQ("expect_server_instance '0000000000000000' is not this server's instance ('inst'; "
+              "the process restarted, or the request reached another server): it was not started",
+              body["error"].asString());
+    handles.not_after_ms.reset();
+    EXPECT_FALSE(instance_mismatch_json(handles, "inst").isMember("not_after_ms"));
+}
+
+// Sample 26 (F3b, a real run): the 409 body is what the server writes for the sample's request
+// (its handles read as /resolve reads them) on the server it names, member for member
+TEST(ServerFanout, Sample26IsTheInstanceMismatchBody) {
+    const Json::Value s26 = sample("26_resolve_instance_mismatch.json");
+    ASSERT_EQ(409, s26["status"].asInt());
+    const Json::Value &body = s26["body"];
+    const RequestHandles handles = read_request_handles(s26["request"]);
+    ASSERT_TRUE(handles.request_id && handles.expect_server_instance && handles.not_after_ms);
+    const std::string instance = body["server_instance"].asString();
+    EXPECT_TRUE(instance_mismatch(handles, instance));
+    EXPECT_FALSE(instance_mismatch(handles, *handles.expect_server_instance));
+    Json::StreamWriterBuilder builder;
+    builder["indentation"] = "";
+    EXPECT_EQ(Json::writeString(builder, instance_mismatch_json(handles, instance)),
+              Json::writeString(builder, body));
+    // the request a client would send: /resolve's strict parser accepts it
+    EXPECT_NO_THROW(parse_resolve_request(s26["request"]));
+}
+
 // ---------------------------------------------------------------- the deadlines
 
 TEST(ServerFanout, EffectiveDeadlineAndCutoff) {
@@ -1239,8 +1333,8 @@ TEST(ServerFanout, RetentionThen404) {
     EXPECT_EQ(0u, body["error"].asString().find("request_id 'r1' is not known on this server"));
     // the three cases of SPEC-multigraph-envelope.md section 5, as sample 20 names them
     EXPECT_EQ("request_id 'r1' is not known on this server: not admitted yet, never admitted (an "
-              "HTTP-level 400 or the expired 409; or never received), or ended and no longer "
-              "retained (requests are kept 60 s after they finish, at most 2)",
+              "HTTP-level 400, the expired 409 or the instance_mismatch 409; or never received), or "
+              "ended and no longer retained (requests are kept 60 s after they finish, at most 2)",
               body["error"].asString());
     EXPECT_EQ(200, registry.state("r2").first);
     // by period: 60 s after it ended
@@ -1504,6 +1598,61 @@ TEST_F(IdNamespace, NoWindowAdmitsBoth) {
     for (size_t i = 0; i < rounds; ++i) {
         EXPECT_EQ(1, request_won[i] + attempt_won[i]) << i;
     }
+}
+
+// F3b: the admission of a /resolve or /pattern request (IdAdmission::admit) refuses one meant for
+// another server_instance first, ahead of a repeated id (on either registry) and of an expired
+// not_after_ms, in /traverse's order; it registers nothing (GET /requests/{id} answers 404), and
+// the same request pinned to this server's instance is admitted as without the field
+TEST_F(IdNamespace, AnotherInstanceIsRefusedFirstAndRegistersNothing) {
+    const std::string here = attempts_.server_instance();
+    auto pinned = [](const std::string &id, const std::string &instance,
+                     std::optional<uint64_t> not_after_ms = std::nullopt) {
+        RequestHandles h;
+        h.request_id = id;
+        h.expect_server_instance = instance;
+        h.not_after_ms = not_after_ms;
+        return h;
+    };
+    auto state_of = [](const std::optional<Json::Value> &refused) {
+        return refused ? (*refused)["state"].asString() : std::string("admitted");
+    };
+    // nothing held: refused, nothing registered
+    auto refused = admission_.admit(entry("m"), pinned("m", "0000000000000000"));
+    ASSERT_TRUE(refused);
+    EXPECT_EQ("instance_mismatch", state_of(refused));
+    EXPECT_EQ(here, (*refused)["server_instance"].asString());
+    EXPECT_EQ("m", (*refused)["request_id"].asString());
+    EXPECT_EQ(404, requests_.state("m").first);
+    EXPECT_EQ(404, admission_.state("m").first);
+    // ahead of a repeated request_id (running) ...
+    ASSERT_FALSE(admission_.admit(entry("r"), pinned("r", here)));
+    EXPECT_EQ(200, requests_.state("r").first);
+    EXPECT_EQ("instance_mismatch", state_of(admission_.admit(entry("r"),
+                                                              pinned("r", "0000000000000000"))));
+    // (the same copy pinned here is the repeated id's 409, which carries the entry)
+    refused = admission_.admit(entry("r"), pinned("r", here));
+    ASSERT_TRUE(refused);
+    EXPECT_FALSE(refused->isMember("state") && (*refused)["state"] == "instance_mismatch");
+    EXPECT_EQ(requests_.repeated_text("r"), (*refused)["error"].asString());
+    // ... and of an attempt_id holding the id
+    ASSERT_FALSE(admission_.start_attempt(attempt("t")));
+    EXPECT_EQ("instance_mismatch", state_of(admission_.admit(entry("t"),
+                                                              pinned("t", "0000000000000000"))));
+    // ahead of an expired not_after_ms (1 ms after the epoch has passed)
+    EXPECT_EQ("instance_mismatch", state_of(admission_.admit(entry("e"),
+                                                              pinned("e", "0000000000000000", 1))));
+    EXPECT_EQ("expired", state_of(admission_.admit(entry("e"), pinned("e", here, 1))));
+    EXPECT_EQ(404, requests_.state("e").first);
+    // pinned here and not expired: admitted and registered, as without the field
+    EXPECT_EQ("admitted", state_of(admission_.admit(entry("ok"), pinned("ok", here))));
+    EXPECT_EQ(200, requests_.state("ok").first);
+    // without request_id (no expect_server_instance either): only the expiry
+    RequestHandles none;
+    none.not_after_ms = 1;
+    EXPECT_EQ("expired", state_of(admission_.admit(entry("x"), none)));
+    none.not_after_ms.reset();
+    EXPECT_EQ("admitted", state_of(admission_.admit(entry("x"), none)));
 }
 
 // GET /requests/{id} (IdAdmission::state) as the route answers it: a request_id's entry, an

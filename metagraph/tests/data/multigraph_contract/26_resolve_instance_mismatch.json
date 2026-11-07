@@ -1,0 +1,23 @@
+{
+ "route": "POST /resolve",
+ "status": 409,
+ "note": "F3b (SPEC section 5): /resolve and /pattern take expect_server_instance, the server_instance the request is meant for (the ids' token rule), with request_id only (without it, or malformed: 400 naming the field). A server whose instance is another refuses the request before its admission: 409 {error, state: \"instance_mismatch\", expect_server_instance, server_instance (this server's, current), request_id, not_after_ms (when given)}, the error /traverse's; ahead of a repeated id and of an expired not_after_ms. Nothing runs and nothing is registered: GET /requests/svc-res-0000-26 then answered 404 (never admitted, server_time_ms 1794088541626). On a multi-graph server it is request-level: no pair starts, no envelope. The same request pinned to the server's own instance ran (200, the envelope) and its entry ended on that instance (reason \"answered\"). A real run (two pairs, as sample 20's), its server named SERVER_INSTANCE as every sample's; the capabilities list the routes that take the field (expect_server_instance, sample 12's multigraph block; a single-graph server's top level). The CLI, whose instance is its own, refuses any value (the 409 body, exit status 1).",
+ "request": {
+  "sequence": "TATGTACTGATTGCTTAAAGGAATATCATCTACGCTGGGATAGATGTTCAACATCGCGCAAAAGTGATGTCGATCGCGCAGTTATGCCACGCCGCATTCG",
+  "graph": "bact_other",
+  "discover": {
+   "max_labels": 2
+  },
+  "request_id": "svc-res-0000-26",
+  "not_after_ms": 1794088601000,
+  "expect_server_instance": "0000000000000000"
+ },
+ "body": {
+  "error": "expect_server_instance '0000000000000000' is not this server's instance ('7c1e0f3a9b24d6e8'; the process restarted, or the request reached another server): it was not started",
+  "expect_server_instance": "0000000000000000",
+  "not_after_ms": 1794088601000,
+  "request_id": "svc-res-0000-26",
+  "server_instance": "7c1e0f3a9b24d6e8",
+  "state": "instance_mismatch"
+ }
+}

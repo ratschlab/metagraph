@@ -310,11 +310,12 @@ ParsedRequest parse_request(const Json::Value &json, const PatternLimits &limits
     ParsedRequest req;
     f.has("in_ram");
     // the request's handles (SPEC-multigraph-envelope.md sections 4 and 5: request_id,
-    // not_after_ms, finish_by_ms), read by the server before the request runs by the same rule
-    // (read_request_handles), checked here too (last, where, unknown before release 10, they
-    // were refused), so that the CLI refuses what the server refuses and a request with
-    // another fault keeps its words
-    for (const char *field : { "request_id", "not_after_ms", "finish_by_ms" }) {
+    // expect_server_instance, not_after_ms, finish_by_ms), read by the server before the
+    // request runs by the same rule (read_request_handles), checked here too (last, where,
+    // unknown before release 10, they were refused), so that the CLI refuses what the server
+    // refuses and a request with another fault keeps its words
+    for (const char *field : { "request_id", "expect_server_instance", "not_after_ms",
+                               "finish_by_ms" }) {
         f.has(field);
     }
 
@@ -3176,6 +3177,20 @@ bool write_pattern_answer(const std::string &content,
     PatternDelivery delivery;
     try {
         const Json::Value json = parse_pattern_body(content);
+        // a request meant for another server_instance is not started, as the server refuses it
+        // at its admission (409 instance_mismatch, after the request's own 400s, F3b): this
+        // process's instance is its own, random (local_instance), so any one named is another's
+        // (only a request that names one is checked here: every other is answered as before)
+        if (json.isObject() && json.isMember("expect_server_instance")) {
+            validate_pattern_request(json, limits);
+            const RequestHandles handles = read_request_handles(json);
+            if (instance_mismatch(handles, local_instance())) {
+                const Json::Value body = instance_mismatch_json(handles, local_instance());
+                logger->error("Request in {} not started: {}", name, body["error"].asString());
+                out << Json::writeString(builder, body) << std::endl;
+                return false;
+            }
+        }
         const std::string text = Json::writeString(
                 builder, process_pattern_request(json, anno_graph, limits, release, identity,
                                                  &delivery, nullptr, hooks));

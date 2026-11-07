@@ -4513,11 +4513,14 @@ class TestPatternRegression(TestingBase):
         only_gains(a['features'], b['features'], set() if base_pattern else {'pattern'},
                    'features')
         # `headers_unique` (whether a header label names one record, SPEC-multigraph-envelope.md
-        # "headers_unique (E22)"; test_multigraph.py checks its values) is a gain over every base
-        only_gains(a, b, {'headers_unique'} | (set() if base_pattern else {
+        # "headers_unique (E22)"; test_multigraph.py checks its values) is a gain over every base,
+        # and so is `expect_server_instance` (F3b: the routes that take the field, at the top level
+        # of a single-graph server, SPEC-multigraph-envelope.md section 8)
+        only_gains(a, b, {'headers_unique', 'expect_server_instance'} | (set() if base_pattern else {
             'pattern', 'resolve', 'in_ram', 'graph_summary', 'max_graphs_without_selection',
             'max_request_body_mb'}), 'members')
         self.assertIn('headers_unique', b)
+        self.assertEqual(['/traverse', '/resolve', '/pattern'], b['expect_server_instance'])
         only_gains(a['routes'], b['routes'],
                    {'requests'} | (set() if base_pattern else {'pattern', 'pattern_capabilities'}),
                    'routes')

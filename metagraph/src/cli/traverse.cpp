@@ -487,11 +487,13 @@ ResolveRequest parse_resolve_request(const Json::Value &json) {
     s.strings("graphs");
     s.boolean("in_ram", false);
     // the request's handles (SPEC-multigraph-envelope.md sections 4 and 5: request_id,
-    // not_after_ms, finish_by_ms): the server reads them before the request runs, by the same
-    // rule (read_request_handles); declared here so that strict parsing accepts them, and
-    // checked at the end (where, unknown before release 10, they were refused) so that the
-    // CLI refuses what the server refuses and a request with another fault keeps its words
-    for (const char *field : { "request_id", "not_after_ms", "finish_by_ms" }) {
+    // expect_server_instance, not_after_ms, finish_by_ms): the server reads them before the
+    // request runs, by the same rule (read_request_handles); declared here so that strict
+    // parsing accepts them, and checked at the end (where, unknown before release 10, they
+    // were refused) so that the CLI refuses what the server refuses and a request with another
+    // fault keeps its words
+    for (const char *field : { "request_id", "expect_server_instance", "not_after_ms",
+                               "finish_by_ms" }) {
         s.has(field);
     }
     req.sequence = s.str("sequence", "");
@@ -4994,10 +4996,15 @@ static Json::Value labels_not_in_graph_seed_to_json(const Seed &seed,
 
 // A request with attempt_id outside the server (the CLI, a test): its usage is stated as the
 // server states it, with the bound computed but not enforced (no lease to protect)
-static const std::string& local_instance() {
+const std::string& local_instance() {
     static const std::string instance = AttemptRegistry(AttemptSettings()).server_instance();
     return instance;
 }
+
+// A request the CLI refuses at its admission, as a server refuses it there (the 409's body)
+struct NotAdmitted {
+    Json::Value body;
+};
 
 static std::unique_ptr<Attempt> local_attempt(const AttemptIds &ids) {
     AttemptSettings settings;
@@ -6058,6 +6065,18 @@ int traverse_graph(Config *config) {
                 if (!ids.attempt_id.empty())
                     attempt = local_attempt(ids);
             }
+            // a /resolve meant for another server_instance is not started, as the server
+            // refuses it at its admission (409 instance_mismatch, after the request's own 400s,
+            // F3b): this process's instance is its own, random, so any one named is another's
+            // (only for a request that names one: every other is answered as before)
+            std::function<void()> admit_locally;
+            if (json.isObject() && json.isMember("expect_server_instance")) {
+                admit_locally = [&json]() {
+                    const RequestHandles handles = read_request_handles(json);
+                    if (instance_mismatch(handles, local_instance()))
+                        throw NotAdmitted { instance_mismatch_json(handles, local_instance()) };
+                };
+            }
             // operator-run: no caps; the reads are chunked under a deadline as on the server
             TraverseLimits limits;
             limits.chunk_target_ms = static_cast<double>(config->traverse_chunk_target_ms);
@@ -6067,7 +6086,7 @@ int traverse_graph(Config *config) {
             ResolveDelivery delivery;
             Json::Value out = config->traverse_resolve
                 ? process_resolve_request(json, *anno_graph, config->index_release, 0, &identity,
-                                          nullptr, {}, &delivery)
+                                          nullptr, {}, &delivery, nullptr, false, admit_locally)
                 : process_traverse_request(json, *anno_graph, config->index_release, limits,
                                            &identity, attempt.get());
             const std::string text = Json::writeString(builder, out);
@@ -6076,6 +6095,10 @@ int traverse_graph(Config *config) {
         } catch (const ResolveDeadline &e) {
             logger->error("Request in {} not answered: {}", file, e.what());
             std::cout << Json::writeString(builder, resolve_deadline_body(e)) << std::endl;
+            status = 1;
+        } catch (const NotAdmitted &e) {
+            logger->error("Request in {} not started: {}", file, e.body["error"].asString());
+            std::cout << Json::writeString(builder, e.body) << std::endl;
             status = 1;
         } catch (const InvalidRequest &e) {
             logger->error("Invalid request in {}: {}", file, e.what());

@@ -1,11 +1,11 @@
 {
  "route": "GET /requests/svc-res-0000-9",
  "status": 404,
- "note": "E4: an id this server instance does not hold: 404, in three cases (SPEC section 5): not admitted yet (the window before its admission), never admitted (an HTTP-level 400 or the expired 409; or never received), or ended and dropped by time or count (past its retention). The service treats it as unresolved (no re-ask) when server_instance is the one it dispatched to. server_time_ms is the server's clock, read in the critical section of the lookup that found nothing: when it is strictly greater than a request's not_after_ms, no request with this id and that not_after_ms is admitted on this server_instance after the lookup (section 5). A real run: the service lost a /resolve with this request_id and not_after_ms 1794065251000 (never received here); this 404 states 1794065252566, past it, and the request sent after it was refused 409 expired (server_time_ms 1794065252568). A 404 from an engine without this guarantee has no server_time_ms: a client then has no proof from that 404.",
+ "note": "E4: an id this server instance does not hold: 404, in three cases (SPEC section 5): not admitted yet (the window before its admission), never admitted (an HTTP-level 400, the expired 409 or the instance_mismatch 409; or never received), or ended and dropped by time or count (past its retention). The service treats it as unresolved (no re-ask) when server_instance is the one it dispatched to. server_time_ms is the server's clock, read in the critical section of the lookup that found nothing: when it is strictly greater than a request's not_after_ms, no request with this id and that not_after_ms is admitted on this server_instance after the lookup (section 5). A real run: the service lost a /resolve with this request_id and not_after_ms 1794088540000 (never received here); this 404 states 1794088541619, past it, and the request sent after it was refused 409 expired (server_time_ms 1794088541621). A 404 from an engine without this guarantee has no server_time_ms: a client then has no proof from that 404.",
  "body": {
-  "error": "request_id 'svc-res-0000-9' is not known on this server: not admitted yet, never admitted (an HTTP-level 400 or the expired 409; or never received), or ended and no longer retained (requests are kept 3600 s after they finish, at most 10000)",
+  "error": "request_id 'svc-res-0000-9' is not known on this server: not admitted yet, never admitted (an HTTP-level 400, the expired 409 or the instance_mismatch 409; or never received), or ended and no longer retained (requests are kept 3600 s after they finish, at most 10000)",
   "request_id": "svc-res-0000-9",
   "server_instance": "7c1e0f3a9b24d6e8",
-  "server_time_ms": 1794065252566
+  "server_time_ms": 1794088541619
  }
 }

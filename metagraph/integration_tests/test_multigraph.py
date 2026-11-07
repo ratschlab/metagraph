@@ -679,9 +679,11 @@ class TestMultiGraphServer(TestingBase):
         # SPEC-multigraph-envelope.md section 4: not_after_ms is checked at admission
         'expired_409': ("when the request's handler started", "at the request's admission"),
         # SPEC-multigraph-envelope.md section 5: the three cases of GET /requests' 404
+        # (F3b: the never-admitted case names the instance_mismatch 409 too)
         'requests_404': ("never received, or no longer retained",
-                         "not admitted yet, never admitted (an HTTP-level 400 or the expired "
-                         "409; or never received), or ended and no longer retained"),
+                         "not admitted yet, never admitted (an HTTP-level 400, the expired 409 "
+                         "or the instance_mismatch 409; or never received), or ended and no "
+                         "longer retained"),
         # F3, section 5: the 404 states the server's clock read in its lookup
         'requests_404_member': 'server_time_ms',
     }
@@ -1958,6 +1960,139 @@ class TestMultiGraphServer(TestingBase):
                     self.assertEqual(404, server.get(f'requests/{lost}').status_code)
         finally:
             server.stop()
+
+    def _expect_server_instance_panel(self, server, bodies, multi):
+        """F3b on one server: each route of |bodies| (/resolve, /pattern) with request_id and
+        expect_server_instance (SPEC-multigraph-envelope.md section 5)"""
+        caps = server.get('capabilities').json()
+        instance = caps['server_instance']
+        routes = ['/traverse', '/resolve', '/pattern']
+        # the capabilities key: in the multigraph block, or at the top level of a single-graph
+        # server beside routes.requests (one reader for both modes)
+        if multi:
+            self.assertEqual(routes, caps['multigraph']['expect_server_instance'])
+            self.assertNotIn('expect_server_instance', caps)
+        else:
+            self.assertNotIn('multigraph', caps)
+            self.assertEqual(routes, caps['expect_server_instance'])
+            self.assertEqual('GET /requests/{request_id}', caps['routes']['requests'])
+        other = '0000000000000000'
+        self.assertNotEqual(other, instance)
+        for route, body in bodies.items():
+            with self.subTest(route=route, multi=multi):
+                rid = f'f3b-{"multi" if multi else "single"}-{route}'
+                not_after = int(time.time() * 1000) + 120000
+                request = dict(body, request_id=rid, not_after_ms=not_after,
+                               expect_server_instance=other)
+                # another instance: 409 before the admission, request-level (no envelope)
+                ret = server.post(route, request)
+                self.assertEqual(409, ret.status_code, ret.text[:2000])
+                out = ret.json()
+                self.assertEqual({'error', 'state', 'expect_server_instance', 'server_instance',
+                                  'request_id', 'not_after_ms'}, set(out))
+                self.assertEqual(('instance_mismatch', other, instance, rid, not_after),
+                                 (out['state'], out['expect_server_instance'],
+                                  out['server_instance'], out['request_id'],
+                                  out['not_after_ms']))
+                self.assertEqual(f"expect_server_instance '{other}' is not this server's instance "
+                                 f"('{instance}'; the process restarted, or the request reached "
+                                 "another server): it was not started", out['error'])
+                # nothing registered: never admitted
+                ret = server.get(f'requests/{rid}')
+                self.assertEqual(404, ret.status_code, ret.text[:2000])
+                self.assertIn('never admitted (an HTTP-level 400, the expired 409 or the '
+                              'instance_mismatch 409; or never received)', ret.json()['error'])
+                self.assertIs(type(ret.json()['server_time_ms']), int)
+                # this server's instance: runs, and the entry ends on it
+                ret = server.post(route, dict(request, expect_server_instance=instance))
+                self.assertEqual(200, ret.status_code, ret.text[:2000])
+                if multi:
+                    self.assertEqual((rid, instance), (ret.json()['request_id'],
+                                                       ret.json()['server_instance']))
+                for _ in range(100):
+                    entry = server.get(f'requests/{rid}')
+                    if entry.status_code == 200 and entry.json()['state'] == 'ended':
+                        break
+                    time.sleep(0.05)
+                self.assertEqual(200, entry.status_code, entry.text[:2000])
+                self.assertEqual(('ended', instance, 'answered'),
+                                 (entry.json()['state'], entry.json()['server_instance'],
+                                  entry.json()['reason']))
+                # ahead of the repeated id (retained) and of an expired not_after_ms
+                ret = server.post(route, request)
+                self.assertEqual((409, 'instance_mismatch'),
+                                 (ret.status_code, ret.json().get('state')), ret.text[:2000])
+                ret = server.post(route, dict(request, request_id=rid + '-late', not_after_ms=1))
+                self.assertEqual((409, 'instance_mismatch'),
+                                 (ret.status_code, ret.json().get('state')), ret.text[:2000])
+                self.assertEqual(404, server.get(f'requests/{rid}-late').status_code)
+                # the field's 400s: without request_id, or not a token
+                for bad in ({'expect_server_instance': instance},
+                            dict(request, expect_server_instance=''),
+                            dict(request, expect_server_instance=None),
+                            dict(request, expect_server_instance='a b')):
+                    ret = server.post(route, dict(body, **bad))
+                    self.assertEqual(400, ret.status_code, ret.text[:2000])
+                    self.assertIn('request.expect_server_instance', ret.json()['error'])
+
+    def test_expect_server_instance_pins_resolve_and_pattern(self):
+        """F3b (SPEC-multigraph-envelope.md sections 5 and 8), on a multi-graph and a
+        single-graph server: a /resolve or /pattern with request_id and expect_server_instance
+        naming another instance is refused 409 instance_mismatch {error, state,
+        expect_server_instance, server_instance, request_id, not_after_ms} before its admission
+        (no pair starts, no envelope, GET /requests answers 404), ahead of a repeated id and of
+        an expired not_after_ms; pinned to this server's instance it runs (200, the entry ended
+        on it); without request_id, or malformed, a 400 naming the field. GET /capabilities
+        lists the routes (the multigraph block; a single-graph server's top level)."""
+        kleb = self.records['kleb'][0]
+        seed = kleb[3000:3100]
+        self._expect_server_instance_panel(self.server, {
+            'resolve': {'sequence': seed, 'graph': 'kleb', 'discover': {'max_labels': 2}},
+            'pattern': {'patterns': [{'dna': seed[:20]}], 'mode': 'count',
+                        'graphs': ['kleb', 'pseudo']},
+        }, True)
+        server = self._single_server('f3b')
+        try:
+            self._expect_server_instance_panel(server, {
+                'resolve': {'sequence': seed[:80], 'discover': {'max_labels': 2}},
+                'pattern': {'patterns': [{'dna': seed[:20]}], 'mode': 'count'},
+            }, False)
+        finally:
+            server.stop()
+
+    def test_the_cli_refuses_expect_server_instance(self):
+        """F3b: the CLI's /resolve (traverse --resolve) and /pattern, whose instance is their own
+        and random, refuse any expect_server_instance given with request_id: the 409 body on
+        stdout, exit status 1, as the CLI's /traverse; without the field the request runs"""
+        graph, anno = self.pairs['kleb']
+        seed = self.records['kleb'][0][3000:3100]
+        cases = {
+            ('traverse', '--resolve'): {'sequence': seed[:80], 'discover': {'max_labels': 2}},
+            ('pattern',): {'patterns': [{'dna': seed[:20]}], 'mode': 'count'},
+        }
+        for command, body in cases.items():
+            with self.subTest(command=command):
+                path = os.path.join(self.tempdir.name, f'f3b-cli-{command[0]}.json')
+                for pinned in (True, False):
+                    request = dict(body, request_id='f3b-cli')
+                    if pinned:
+                        request['expect_server_instance'] = '0000000000000000'
+                    with open(path, 'w') as f:
+                        json.dump(request, f)
+                    res = subprocess.run(shlex.split(METAGRAPH) + list(command)
+                                         + ['--json', '-i', graph, '-a', anno, path],
+                                         stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+                    if not pinned:
+                        self.assertEqual(0, res.returncode, res.stderr.decode()[-2000:])
+                        continue
+                    self.assertEqual(1, res.returncode, res.stdout.decode()[:2000])
+                    out = json.loads(res.stdout.decode())
+                    self.assertEqual({'error', 'state', 'expect_server_instance',
+                                      'server_instance', 'request_id'}, set(out))
+                    self.assertEqual(('instance_mismatch', '0000000000000000', 'f3b-cli'),
+                                     (out['state'], out['expect_server_instance'],
+                                      out['request_id']))
+                    self.assertNotEqual('0000000000000000', out['server_instance'])
 
     def _single_server(self, name, *args, binary=None):
         """A single-graph server on the kleb pair"""

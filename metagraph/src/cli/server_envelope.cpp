@@ -200,6 +200,14 @@ Json::Value max_concurrent_json(const RouteCaps &caps) {
     return m;
 }
 
+Json::Value expect_server_instance_routes_json() {
+    Json::Value routes(Json::arrayValue);
+    for (const char *route : { "/traverse", "/resolve", "/pattern" }) {
+        routes.append(route);
+    }
+    return routes;
+}
+
 Json::Value multigraph_capabilities_json(uint64_t max_request_memory_mb, const RouteCaps &caps) {
     auto strings = [](std::initializer_list<const char *> values) {
         Json::Value out(Json::arrayValue);
@@ -229,6 +237,9 @@ Json::Value multigraph_capabilities_json(uint64_t max_request_memory_mb, const R
     m["not_after_ms"] = strings({ "/traverse", "/resolve", "/pattern" });
     m["finish_by_ms"] = strings({ "/traverse", "/resolve", "/pattern" });
     m["request_id"] = strings({ "/resolve", "/pattern" });
+    // the routes that take expect_server_instance (section 5; /resolve and /pattern since F3b,
+    // with request_id), as a single-graph server states it at the top level
+    m["expect_server_instance"] = expect_server_instance_routes_json();
     m["requests_route"] = kRequestsRoute;
     m["unknown_labels"] = true;
     m["search_cuts"] = true;
