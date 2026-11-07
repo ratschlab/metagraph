@@ -1091,7 +1091,8 @@ TEST(BitmapVector, SharedMappedViewOwnsMutationSeparately) {
         // Immutable copies share storage, while mutable conversion has its own buffer.
         EXPECT_EQ(view.data().data(), alias.data().data());
         auto owned = view.convert_to<sdsl::bit_vector>();
-        ASSERT_NE(owned.data(), alias.data().data());
+        ASSERT_NE(static_cast<const void *>(owned.data()),
+                  static_cast<const void *>(alias.data().bytes().data()));
         owned[7] = 0;
         owned[17] = 1;
         EXPECT_TRUE(alias[7]);
@@ -1105,6 +1106,51 @@ TEST(BitmapVector, SharedMappedViewOwnsMutationSeparately) {
         in.seekg(offset);
         ASSERT_TRUE(restored.load(in));
         EXPECT_EQ(expected, restored.to_vector());
+    }
+}
+
+
+TEST(BitmapVector, SharedMappedDenseUnionBoundaries) {
+    const auto filename = test_dump_basename + "_mapped_union";
+    for (uint64_t size : {0, 1, 63, 64, 65, 257, 4097}) {
+        sdsl::bit_vector source_bits(size, 0), target_bits(size, 0);
+        for (uint64_t i = 0; i < size; ++i) {
+            source_bits[i] = i % 3 == 0;
+            target_bits[i] = i % 5 == 0;
+        }
+        if (size) {
+            source_bits[size - 1] = 1;
+            target_bits[size - 1] = 0;
+        }
+        auto expected = target_bits;
+        expected |= source_bits;
+        for (size_t offset = 0; offset < 8; ++offset) {
+            {
+                std::ofstream out(filename, std::ios::binary);
+                out << std::string(offset, 'x');
+                bit_vector_stat(source_bits).serialize(out);
+            }
+            auto file_bytes = [&] {
+                std::ifstream in(filename, std::ios::binary);
+                return std::string(std::istreambuf_iterator<char>(in), {});
+            };
+            const auto before = file_bytes();
+            bit_vector_stat source;
+            {
+                sdsl::shared_mapper_ifstream in(filename);
+                in.seekg(offset);
+                ASSERT_TRUE(source.load(in));
+            }
+            auto target = target_bits;
+            source.add_to(&target);
+            EXPECT_EQ(expected, target);
+            bitmap_vector accumulator(target_bits);
+            accumulator |= source;
+            accumulator |= source;
+            reference_based_test(accumulator, expected);
+            EXPECT_EQ(source_bits, source.to_vector());
+            EXPECT_EQ(before, file_bytes());
+        }
     }
 }
 
@@ -1169,8 +1215,12 @@ TEST(BitmapVector, SharedViewSequentialLoadAndFailedLoad) {
         b.serialize(owned);
         first.load(owned);
         second.load(owned);
-        EXPECT_FALSE(first.is_mapped());
         EXPECT_EQ(a, first.to_owned());
+        const void *allocation = first.bytes().data();
+        auto editable = std::move(first).into_owned();
+        EXPECT_EQ(allocation, static_cast<const void *>(editable.data()));
+        EXPECT_EQ(a, editable);
+        EXPECT_TRUE(first.empty());
         EXPECT_EQ(b, second.to_owned());
         EXPECT_EQ(a, moved.to_owned());
     }

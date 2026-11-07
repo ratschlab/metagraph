@@ -1,102 +1,54 @@
 #ifndef MTG_MAPPED_VECTOR_VIEW_HPP
 #define MTG_MAPPED_VECTOR_VIEW_HPP
-
-#include <cassert>
-#include <memory>
-#include <ranges>
-#include <sdsl/int_vector.hpp>
-
+#include <sdsl/packed_vector_view.hpp>
+#include <sdsl/shared_mapper.hpp>
 namespace mtg::detail {
-
-// Share immutable packed storage; materialize at an owning boundary.
-// Iterators do not retain the owner; this intentionally is not a borrowed_range.
-template <uint8_t Width>
-class mapped_vector_view : public std::ranges::view_interface<mapped_vector_view<Width>> {
+// MetaGraph's legacy file headers stay outside the format-independent SDSL view.
+template <uint8_t Width> class mapped_vector_view : public sdsl::packed_vector_view<Width> {
+    using base = sdsl::packed_vector_view<Width>;
     using vector_type = sdsl::int_vector<Width>;
-    vector_type mapped_;
-    std::shared_ptr<sdsl::mmap_context> context_;
-    uint64_t offset_ = 0;
-    std::shared_ptr<vector_type> storage_;
-    const uint64_t *words_ = nullptr;
 
   public:
     mapped_vector_view() = default;
-    mapped_vector_view(const mapped_vector_view &other)
-        : context_(other.context_), offset_(other.offset_), storage_(other.storage_), words_(other.words_) {
-        if (context_) mapped_.load(context_, offset_);
-    }
-    mapped_vector_view(mapped_vector_view &&) = default;
-    mapped_vector_view &operator=(mapped_vector_view &&) = default;
-    mapped_vector_view &operator=(const mapped_vector_view &other) {
-        if (this != &other) *this = mapped_vector_view(other);
-        return *this;
-    }
-    explicit mapped_vector_view(vector_type value) {
-        if constexpr (Width != 0) {
-            if (value.empty()) return;
-        }
-        // An ordinary vector argument can itself carry a read-only mapping.
-        // load() validates embedded bounds for zero-copy; this path owns its value.
-        storage_ = value.is_mapped() ? std::make_shared<vector_type>(value)
-                                    : std::make_shared<vector_type>(std::move(value));
-        words_ = storage_->data();
-    }
-
-    const vector_type &packed() const {
-        if (context_) return mapped_;
-        if (storage_) return *storage_;
-        static const vector_type empty;
-        return empty;
-    }
-    auto begin() const { return packed().begin(); }
-    auto end() const { return packed().end(); }
-    uint64_t size() const { return packed().size(); }
-    uint8_t width() const { return packed().width(); }
-    uint64_t operator[](uint64_t i) const {
-        assert(i < size());
-        const uint8_t bits = Width ? Width : width();
-        return sdsl::bits::read_int(words_ + ((i * bits) >> 6), (i * bits) & 63, bits);
-    }
-    uint64_t get_int(uint64_t bit, uint8_t length) const {
-        assert(bit + length <= packed().bit_size());
-        return length ? sdsl::bits::read_int(words_ + (bit >> 6), bit & 63, length) : 0;
-    }
-    bool is_mapped() const { return static_cast<bool>(context_); }
-
-    vector_type to_owned() const { return packed(); }
-    vector_type into_owned() && {
-        if (!context_ && storage_ && storage_.use_count() == 1) {
-            auto result = std::move(*storage_);
-            storage_.reset();
-            words_ = nullptr;
-            return result;
-        }
-        return to_owned();
-    }
-
+    explicit mapped_vector_view(vector_type value)
+        : base(value.is_mapped() ? vector_type(value) : std::move(value)) {}
+    const base &packed() const { return *this; }
     void load(std::istream &in) {
-        mapped_vector_view next;
+        base next;
         if (auto *stream = dynamic_cast<sdsl::mmap_ifstream *>(&in)) {
-            const auto position = in.tellg();
-            if (position < 0) throw std::ios_base::failure("Invalid mapped vector position");
-            next.context_ = stream->get_mmap_context();
-            next.offset_ = static_cast<uint64_t>(position);
-            const auto bytes = next.mapped_.load(next.context_, next.offset_);
-            in.seekg(bytes, std::ios_base::cur);
+            auto owner = stream->get_mmap_context();
+            auto pos = in.tellg();
+            if (pos < 0 || !owner)
+                throw std::ios_base::failure("Invalid mapped vector position");
+            uint64_t offset = pos, header = 8 + (Width == 0), bits;
+            if (offset > owner->file_size_bytes() || header > owner->file_size_bytes() - offset)
+                throw std::ios_base::failure("Packed vector header outside file");
+            std::memcpy(&bits, owner->data() + offset, 8);
+            uint8_t width = Width ? Width : owner->data()[offset + 8];
+            std::span<const std::byte> file(reinterpret_cast<const std::byte *>(owner->data()),
+                                            owner->file_size_bytes());
+            next = base::from_bytes(owner, file.subspan(offset + header), bits, width);
+            in.seekg(header + next.bytes().size(), std::ios_base::cur);
         } else {
-            next.storage_ = std::make_shared<vector_type>();
-            next.storage_->load(in);
+            vector_type value;
+            value.load(in);
+            next = base(std::move(value));
         }
-        if (!in) throw std::ios_base::failure("Cannot load packed vector view");
-        next.words_ = next.packed().data();
-        *this = std::move(next);
+        if (!in)
+            throw std::ios_base::failure("Cannot load packed vector view");
+        static_cast<base &>(*this) = std::move(next);
     }
-    void serialize(std::ostream &out) const { packed().serialize(out); }
+    void serialize(std::ostream &out) const {
+        auto bits = this->bit_size();
+        out.write(reinterpret_cast<const char *>(&bits), 8);
+        if constexpr (Width == 0) {
+            auto w = this->width();
+            out.write(reinterpret_cast<const char *>(&w), 1);
+        }
+        auto bytes = this->bytes();
+        if (!bytes.empty())
+            out.write(reinterpret_cast<const char *>(bytes.data()), bytes.size());
+    }
 };
-
-static_assert(std::ranges::view<mapped_vector_view<1>>);
-static_assert(std::ranges::sized_range<const mapped_vector_view<1>>);
-static_assert(!std::ranges::borrowed_range<mapped_vector_view<1>>);
-
 } // namespace mtg::detail
 #endif

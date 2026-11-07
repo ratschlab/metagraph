@@ -32,11 +32,25 @@ bool bitmap::operator==(const bitmap &other) const {
         }
         if (dynamic_cast<const bitmap_vector*>(bitmap_p[i])) {
             bv_p[i] = &dynamic_cast<const bitmap_vector&>(*bitmap_p[i]).data();
-        } else if (dynamic_cast<const bit_vector_stat*>(bitmap_p[i])) {
-            bv_p[i] = &dynamic_cast<const bit_vector_stat&>(*bitmap_p[i]).data();
         }
     }
 
+    auto stat0 = dynamic_cast<const bit_vector_stat *>(bitmap_p[0]);
+    auto stat1 = dynamic_cast<const bit_vector_stat *>(bitmap_p[1]);
+    auto equal_words = [](const auto &a, const auto &b) {
+        for (uint64_t i = 0; i < a.size(); i += 64) {
+            auto n = std::min<uint64_t>(64, a.size() - i);
+            if (a.get_int(i, n) != b.get_int(i, n))
+                return false;
+        }
+        return true;
+    };
+    if (stat0 && stat1)
+        return equal_words(stat0->data(), stat1->data());
+    if (stat0 && bv_p[1])
+        return equal_words(stat0->data(), *bv_p[1]);
+    if (bv_p[0] && stat1)
+        return equal_words(*bv_p[0], stat1->data());
     if (bv_p[0] && bv_p[1]) {
         return *bv_p[0] == *bv_p[1];
     } else if (dynamic_cast<const bitmap_set*>(bitmap_p[0])
@@ -210,7 +224,7 @@ bitmap_vector& bitmap_vector::operator|=(const bitmap &other) {
         *this |= dynamic_cast<const bitmap_adaptive &>(other).data();
 
     } else if (dynamic_cast<const bit_vector_stat*>(&other)) {
-        bit_vector_ |= dynamic_cast<const bit_vector_stat &>(other).data();
+        other.add_to(&bit_vector_);
         num_set_bits_ = sdsl::util::cnt_one_bits(bit_vector_);
 
     } else if (dynamic_cast<const bit_vector_adaptive*>(&other)) {

@@ -75,7 +75,7 @@ class bit_vector_sdsl : public bit_vector {
 
     inline sdsl::bit_vector to_vector() const override;
 
-    inline const bv_type& data() const { return packed(); }
+    inline const auto &data() const { return packed(); }
 
     /**
      * Predict space taken by the vector with given its parameters in bits.
@@ -90,7 +90,7 @@ class bit_vector_sdsl : public bit_vector {
   private:
     using storage_type = std::conditional_t<std::is_same_v<bv_type, sdsl::bit_vector>,
         mtg::detail::mapped_vector_view<1>, bv_type>;
-    const bv_type &packed() const {
+    const auto &packed() const {
         if constexpr(std::is_same_v<bv_type, sdsl::bit_vector>) return vector_.packed();
         else return vector_;
     }
@@ -330,7 +330,10 @@ bit_vector_sdsl<bv_type, rank_1_type, select_1_type, select_0_type>
     assert(other->size() == size());
 
     if constexpr(std::is_same_v<bv_type, sdsl::bit_vector>) {
-        *other |= packed();
+        auto words = packed().data();
+        const uint64_t num_words = (size() + 63) / 64;
+        for (uint64_t i = 0; i < num_words; ++i)
+            other->data()[i] |= words[i];
     } else {
         bit_vector::add_to_adaptive(other,
             bv_traits<bv_type>::SEQ_BITWISE_WORD_ACCESS_VS_SELECT_FACTOR
@@ -418,25 +421,24 @@ struct bit_vector_sdsl<bv_type, rank_1_type, select_1_type, select_0_type>
 };
 
 template <class bv_type, class rank_1_type, class select_1_type, class select_0_type>
-template <uint8_t t_b, uint8_t t_pat_len>
-struct bit_vector_sdsl<bv_type, rank_1_type, select_1_type, select_0_type>
-::bv_traits<sdsl::rank_support_v5<t_b, t_pat_len>> {
+template <uint8_t t_b, uint8_t t_pat_len, class Vector>
+struct bit_vector_sdsl<bv_type, rank_1_type, select_1_type,
+                       select_0_type>::bv_traits<sdsl::rank_support_v5<t_b, t_pat_len, Vector>> {
     static inline uint64_t predict_size(uint64_t size, uint64_t /*num_set_bits*/) {
-        return sizeof(sdsl::rank_support_v5<t_b, t_pat_len>) * 8
-            + footprint_rank_support_v5(size);
+        return sizeof(sdsl::rank_support_v5<t_b, t_pat_len, Vector>) * 8 +
+               footprint_rank_support_v5(size);
     }
 };
 
 template <class bv_type, class rank_1_type, class select_1_type, class select_0_type>
-template <uint8_t t_b, uint8_t t_pat_len>
-struct bit_vector_sdsl<bv_type, rank_1_type, select_1_type, select_0_type>
-::bv_traits<sdsl::select_support_mcl<t_b, t_pat_len>> {
+template <uint8_t t_b, uint8_t t_pat_len, class Vector>
+struct bit_vector_sdsl<bv_type, rank_1_type, select_1_type,
+                       select_0_type>::bv_traits<sdsl::select_support_mcl<t_b, t_pat_len, Vector>> {
     static inline uint64_t predict_size(uint64_t size, uint64_t num_set_bits) {
-        return sizeof(sdsl::select_support_mcl<t_b, t_pat_len>) * 8
-            + footprint_select_support_mcl(size, num_set_bits);
+        return sizeof(sdsl::select_support_mcl<t_b, t_pat_len, Vector>) * 8 +
+               footprint_select_support_mcl(size, num_set_bits);
     }
 };
-
 
 template <uint32_t k_sblock_rate = 16>
 using bit_vector_hyb
@@ -459,10 +461,9 @@ using bit_vector_rrr
                       typename sdsl::rrr_vector<block_size>::select_1_type,
                       typename sdsl::rrr_vector<block_size>::select_0_type>;
 
-using bit_vector_stat
-    = bit_vector_sdsl<sdsl::bit_vector,
-                      sdsl::rank_support_v5<1>,
-                      sdsl::select_support_mcl<1>,
-                      sdsl::select_support_scan<0>>;
+using bit_vector_stat =
+    bit_vector_sdsl<sdsl::bit_vector, sdsl::rank_support_v5<1, 1, sdsl::packed_vector_view<1>>,
+                    sdsl::select_support_mcl<1, 1, sdsl::packed_vector_view<1>>,
+                    sdsl::select_support_scan<0, 1, sdsl::packed_vector_view<1>>>;
 
 #endif // __BIT_VECTOR_SDSL_HPP__
