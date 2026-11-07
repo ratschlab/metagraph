@@ -89,6 +89,7 @@ import filecmp
 import glob
 import json
 import os
+import platform
 import shutil
 import socket
 import subprocess
@@ -2664,6 +2665,89 @@ def blanked(answer):
     return a
 
 
+# The bodies are the reference platform's answers: Linux, where the servers run (the CI's
+# Linux build writes and checks them byte for byte once blanked). On another platform --check
+# also leaves out what that platform states differently without answering differently:
+# - ACCOUNTING_FIELDS: the memory account counts the platform's object sizes (libstdc++ and
+#   libc++ lay out std::string and the structs holding one differently; SPEC-labeled-traversal-
+#   core.md section 6.8);
+# - ORDER_FIELDS: join_chains (pattern_retrieval.cpp) orders a path's coordinate lists by size
+#   with std::sort, whose order of equal sizes differs between the two standard libraries, which
+#   changes how many steps the verification takes, not what it finds;
+# and a pattern stopped by its memory budget (stop.reason max_memory) is checked by what it
+# states (memory_stop_problems) instead of its counts, refusals, work and results.
+REFERENCE_PLATFORM = 'Linux'
+ACCOUNTING_FIELDS = ((('work',), 'memory_bytes'), (('patterns', '[]', 'work'), 'memory_bytes'))
+ORDER_FIELDS = ((('patterns', '[]', 'work'), 'verification_steps'),)
+
+
+def drop_fields(answer, fields):
+    """|answer| (a single-graph body, or a multi-graph one with its pairs' in answers) without
+    |fields|: (path, key) pairs, '[]' every element of a list"""
+    a = copy.deepcopy(answer)
+
+    def drop(node, path, key):
+        if not path:
+            if isinstance(node, dict):
+                node.pop(key, None)
+            return
+        head, rest = path[0], path[1:]
+        if head == '[]':
+            for x in node if isinstance(node, list) else []:
+                drop(x, rest, key)
+        elif isinstance(node, dict) and head in node:
+            drop(node[head], rest, key)
+    for body in a.get('answers', [a]) if isinstance(a, dict) else []:
+        for path, key in fields:
+            drop(body, path, key)
+    return a
+
+
+def memory_stop_problems(stored, answer):
+    """The patterns of |stored| (the reference's answer) its memory budget stopped, against
+    |answer|'s: the same stop, the same relation and search state of every count (a stopped
+    search states its counts at_least), every refused row refused for want of memory
+    (needed_bytes above available_bytes) in the stop's phase. Those patterns' counts, refusals,
+    work, results and returned are then blanked in both. -> (the statements that do not hold,
+    stored, answer)"""
+    problems = []
+    stored, answer = copy.deepcopy(stored), copy.deepcopy(answer)
+    pairs = (zip(stored.get('answers', []), answer.get('answers', []))
+             if 'answers' in stored else [(stored, answer)])
+    for s, a in pairs:
+        for i, (ps, pa) in enumerate(zip(s.get('patterns', []), a.get('patterns', []))):
+            stop = ps.get('stop') or {}
+            if stop.get('reason') != 'max_memory':
+                continue
+            if pa.get('stop') != stop:
+                problems.append(f'patterns[{i}].stop {pa.get("stop")}, the reference {stop}')
+            for name, c in (ps.get('counts') or {}).items():
+                ca = (pa.get('counts') or {}).get(name)
+                if isinstance(c, dict) and isinstance(ca, dict):
+                    for k in ('relation', 'search', 'unit', 'level'):
+                        if c.get(k) != ca.get(k):
+                            problems.append(f'patterns[{i}].counts.{name}.{k}: {ca.get(k)!r}')
+            for r in pa.get('rows_refused', []):
+                if r.get('reason') != 'max_memory' or r.get('phase') != stop.get('phase') \
+                        or not r.get('needed_bytes', 0) > r.get('available_bytes', 0):
+                    problems.append(f'patterns[{i}].rows_refused: {r}')
+            for p in (ps, pa):
+                for k in ('counts', 'rows_refused', 'work', 'results', 'returned'):
+                    if k in p:
+                        p[k] = BLANK
+    return problems, stored, answer
+
+
+def portable_equal(stored, answer, name):
+    """--check on a platform other than the reference: |stored| and |answer| (both blanked)
+    equal but for ACCOUNTING_FIELDS, ORDER_FIELDS and the run of a memory-stopped pattern"""
+    problems, stored, answer = memory_stop_problems(stored, answer)
+    for p in problems:
+        print(f'{name}: {p}', file=sys.stderr)
+    fields = ACCOUNTING_FIELDS + ORDER_FIELDS
+    return not problems and dumps(drop_fields(stored, fields)) == dumps(drop_fields(answer, fields))
+
+
 def read_text(path):
     if not os.path.isfile(path):
         return None
@@ -2783,7 +2867,24 @@ def main():
     parser.add_argument('--work', default=None)
     parser.add_argument('--check', action='store_true')
     parser.add_argument('--only', nargs='+', default=None)
+    parser.add_argument('--platform-mode', choices=('auto', 'reference', 'portable'),
+                        default='auto',
+                        help='--check: every byte once blanked (reference: the Linux answers '
+                             'the fixtures are) or portable (also without the accounting and '
+                             'order fields, a memory-stopped pattern by its statements); auto: '
+                             'reference on Linux')
     args = parser.parse_args()
+    mode = args.platform_mode
+    if mode == 'auto':
+        mode = 'reference' if platform.system() == REFERENCE_PLATFORM else 'portable'
+    if args.check:
+        if mode == 'reference':
+            print(f'check mode: reference (every byte once blanked, the {REFERENCE_PLATFORM} '
+                  'answers)', flush=True)
+        else:
+            print(f'check mode: portable on {platform.system()} (every byte once blanked but '
+                  + ', '.join('.'.join(p + (k,)) for p, k in ACCOUNTING_FIELDS + ORDER_FIELDS)
+                  + '; a memory-stopped pattern by its statements)', flush=True)
     # the PRIMARY index is built with its directory as the working directory (its column
     # labels are file names), where a relative binary path would name nothing
     args.metagraph = os.path.abspath(args.metagraph)
@@ -2813,6 +2914,9 @@ def main():
             # the stored file must be in canonical form, and equal once blanked
             same_answer = (stored_text == dumps(stored)
                            and dumps(blanked(stored)) == dumps(blanked(answer)))
+            if not same_answer and args.check and mode == 'portable' \
+                    and stored_text == dumps(stored):
+                same_answer = portable_equal(blanked(stored), blanked(answer), f.name)
         else:
             same_answer = False
         same_request = read_text(req_path) == dumps(request)

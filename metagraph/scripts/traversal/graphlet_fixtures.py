@@ -38,7 +38,9 @@ import copy
 import difflib
 import json
 import os
+import platform
 import random
+import re
 import shutil
 import subprocess
 import sys
@@ -911,6 +913,109 @@ def build_compare(metagraph, root, name):
     return run_traverse(metagraph, graph, annotation, r)['results'][0]['graphlet']
 
 
+# The CLI fixtures are the reference platform's answers: Linux, where the servers run (the
+# CI's Linux build writes and checks them byte for byte). The memory account counts the
+# platform's object sizes (libstdc++ and libc++ lay out std::string and the structs holding
+# one differently; SPEC-labeled-traversal-core.md section 6.8), so another platform states other
+# byte counts and stops a memory-bounded walk elsewhere. There --check compares every byte but
+# the ACCOUNTING_FIELDS, and checks a memory-stopped answer by what it states
+# (memory_stop_problems) instead of its bytes.
+REFERENCE_PLATFORM = 'Linux'
+# the modelled byte counts of a document: (path from the document, key), '[]' every element
+ACCOUNTING_FIELDS = (
+    (('work',), 'memory_bytes'),
+    (('results', '[]', 'work'), 'memory_bytes'),
+)
+CHECK_MODE = None   # 'reference' (byte for byte) or 'portable', set by main()
+
+
+def without_accounting(doc):
+    """|doc| without its ACCOUNTING_FIELDS"""
+    doc = copy.deepcopy(doc)
+
+    def drop(node, path, key):
+        if not path:
+            if isinstance(node, dict):
+                node.pop(key, None)
+            return
+        head, rest = path[0], path[1:]
+        if head == '[]':
+            for x in node if isinstance(node, list) else []:
+                drop(x, rest, key)
+        elif isinstance(node, dict) and head in node:
+            drop(node[head], rest, key)
+    for path, key in ACCOUNTING_FIELDS:
+        drop(doc, path, key)
+    return doc
+
+
+def memory_stopped(doc):
+    """whether a document's walk was stopped by its memory budget"""
+    return any((r.get('resource_stop') or {}).get('resource') == 'memory'
+               for r in doc.get('results', []))
+
+
+def memory_stop_problems(have, new):
+    """A memory-stopped answer of a platform other than the reference, checked by what it
+    states: the same stop (resource, phase, scope, budget, actions) and outcome as the
+    reference's; each arm's complete_to_bp where the stop's message says the walk stopped and
+    where its cap_trigger stands, no longer than its walks; its output_bp at least that and
+    equal to its bases; its peak within the budget plus the soft excess it states. -> the
+    statements that do not hold (empty: the answer is true to itself)"""
+    out = []
+    if len(have.get('results', [])) != len(new.get('results', [])):
+        return ['a different number of results']
+    for i, (a, b) in enumerate(zip(have['results'], new['results'])):
+        sa, sb = a.get('resource_stop') or {}, b.get('resource_stop') or {}
+        for k in ('resource', 'phase', 'scope', 'requested', 'actions'):
+            if sa.get(k) != sb.get(k):
+                out.append(f'results[{i}].resource_stop.{k}: {sb.get(k)!r}, '
+                           f'the reference states {sa.get(k)!r}')
+        if a.get('outcome') != b.get('outcome'):
+            out.append(f'results[{i}].outcome: {b.get("outcome")!r}')
+        m = re.search(r'stopped the walk at (\d+) bp on the (\w+) arm', sb.get('message', ''))
+        for name, arm in (b.get('arms') or {}).items():
+            done = arm.get('complete_to_bp')
+            trigger = arm.get('cap_trigger') or {}
+            counts, counters = arm.get('counts') or {}, arm.get('counters') or {}
+            if trigger and trigger.get('at_bp') != done:
+                out.append(f'{name} arm: cap_trigger.at_bp {trigger.get("at_bp")} '
+                           f'!= complete_to_bp {done}')
+            if m and m.group(2) == name and int(m.group(1)) != done:
+                out.append(f'{name} arm: the stop says {m.group(1)} bp, complete_to_bp {done}')
+            if counts.get('max_bp') is not None and done is not None and done > counts['max_bp']:
+                out.append(f'{name} arm: complete_to_bp {done} > max_bp {counts["max_bp"]}')
+            if 'output_bp' in counters and done is not None and counters['output_bp'] < done:
+                out.append(f'{name} arm: output_bp {counters["output_bp"]} < complete_to_bp')
+            if 'bases' in counts and 'output_bp' in counters \
+                    and counts['bases'] != counters['output_bp']:
+                out.append(f'{name} arm: bases {counts["bases"]} != output_bp')
+        budget = sb.get('requested')
+        soft = max([l.get('observed') or 0 for l in b.get('limitations', [])
+                    if l.get('kind') == 'memory_bound_soft'] or [0])
+        peak = (b.get('work') or {}).get('memory_bytes')
+        if budget is not None and peak is not None and peak > (budget + soft) * 2**20:
+            out.append(f'results[{i}]: peak {peak} bytes over the budget {budget} MiB '
+                       f'and the soft excess {soft} MiB')
+    return out
+
+
+def mgt_statements(text):
+    """a graphlet's records that state the walk's frame and stop: its header, seed, labels
+    and options lines whole, the stop (Q) by its scope, resource and phase, the limitations
+    (K) by their kind"""
+    keep = []
+    for line in text.split('\n'):
+        fields = line.split(' ')
+        if fields[0] in ('H', 'S', 'L', 'O'):
+            keep.append(line)
+        elif fields[0] == 'Q':
+            keep.append(' '.join(fields[:4]))
+        elif fields[0] == 'K':
+            keep.append(' '.join(fields[:3]))
+    return sorted(keep)
+
+
 def differs(path, text):
     if not os.path.exists(path):
         return True
@@ -918,7 +1023,19 @@ def differs(path, text):
     if have == text:
         return False
     if path.endswith('.json'):
-        return json.loads(have) != json.loads(text)
+        old, new = json.loads(have), json.loads(text)
+        if CHECK_MODE == 'portable':
+            if memory_stopped(old):
+                problems = memory_stop_problems(old, new)
+                for p in problems:
+                    print(f'{os.path.basename(path)}: {p}', file=sys.stderr)
+                return bool(problems)
+            return without_accounting(old) != without_accounting(new)
+        return old != new
+    if CHECK_MODE == 'portable' and path.endswith('.mgt'):
+        companion = path[:-len('.mgt')] + '.graphlet.json'
+        if os.path.exists(companion) and memory_stopped(json.loads(read_text(companion))):
+            return mgt_statements(have) != mgt_statements(text)
     return True
 
 
@@ -952,7 +1069,27 @@ def main(argv=None):
                     help='regenerate (or with --check verify) the CLI fixtures')
     ap.add_argument('--only', nargs='*')
     ap.add_argument('--keep', metavar='DIR', help='build the indexes here and keep them')
+    ap.add_argument('--platform-mode', choices=('auto', 'reference', 'portable'),
+                    default='auto',
+                    help='--check: byte for byte (reference: the Linux answers the fixtures are) '
+                         'or portable (every byte but the accounting fields, a memory-stopped '
+                         'answer by its statements); auto: reference on Linux')
     args = ap.parse_args(argv)
+    global CHECK_MODE
+    CHECK_MODE = args.platform_mode
+    if CHECK_MODE == 'auto':
+        CHECK_MODE = 'reference' if platform.system() == REFERENCE_PLATFORM else 'portable'
+    if not args.from_cli:
+        # the hand-made documents are written by this script, the same on every platform
+        CHECK_MODE = 'reference'
+    if args.check and args.from_cli:
+        if CHECK_MODE == 'reference':
+            print('check mode: reference (byte for byte, the %s answers)' % REFERENCE_PLATFORM,
+                  flush=True)
+        else:
+            print('check mode: portable on %s (byte for byte but %s; a memory-stopped answer '
+                  'by its statements)' % (platform.system(), ', '.join(
+                      '.'.join(path + (key,)) for path, key in ACCOUNTING_FIELDS)), flush=True)
     stale = []
     if args.from_cli:
         args.from_cli = resolve_cli(args.from_cli)
