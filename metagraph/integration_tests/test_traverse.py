@@ -3960,8 +3960,12 @@ class TestTraverseMultiGraph(TestTraverseBase):
                                     out['answers'][4]['index_meta_fp'])
             else:
                 self.assertEqual(one, out['answers'][0])
-                self.assertEqual(('basic', K, True),
+                # pattern search is served on DNA graphs only (SPEC-pattern-search.md): a
+                # protein graph's block says it is not available and why
+                self.assertEqual(('basic', K, not PROTEIN_MODE),
                                  (one['graph_mode'], one['k'], one['available']))
+                if PROTEIN_MODE:
+                    self.assertEqual('alphabet_unsupported', one['unavailable_reason'])
         server = self._Server(self, self.csv, flags=('--max-graphs-without-selection', '2'))
         try:
             self.assertTrue(server.ready, server.text()[-2000:])
