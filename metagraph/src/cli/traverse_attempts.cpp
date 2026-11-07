@@ -734,8 +734,9 @@ Json::Value Attempt::usage_json(const std::string &reason, bool per_seed) const 
     u["seeds"] = seeds_json();
     // The request: work adds up; memory is held at once by the seed being walked and the
     // results of the seeds before it, which stay until the response is written — a walked
-    // result its account at the end, a failed or never started one its priced echo
-    // (final_bytes). Under a memory budget a seed's walk holds at most the budget and its soft
+    // result its account at the end without the budget's cache allotments (they end with its
+    // walk), a failed or never started one its priced echo (final_bytes). Under a memory
+    // budget a seed's walk holds at most the budget (its allotments included) and its soft
     // excess (as observed): what the request held at once is bounded by that, the results
     // before it included
     uint64_t work = 0, held = 0, peak = 0, soft = 0, bound = 0;

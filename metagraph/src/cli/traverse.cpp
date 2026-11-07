@@ -5481,7 +5481,9 @@ Json::Value process_traverse_request(const Json::Value &json,
             put_memory(&rj, without_allotments(r.account.memory_peak, r.account),
                        without_allotments(r.account.memory_final, r.account));
             const std::string outcome = rj["outcome"]["walks"].asString();
-            append(std::move(rj), seconds, meter.memory_final, meter.memory_coordinates);
+            // the delivery reserve's sample: the walk's account at its end, as the walk's
+            // progress states it (the allotments included)
+            append(std::move(rj), seconds, r.account.memory_final, meter.memory_coordinates);
             delivered(outcome);
         } catch (const SeedDerivationError &e) {
             // The permitted set could not be derived from THIS seed (nothing carries it

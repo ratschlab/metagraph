@@ -3780,7 +3780,13 @@ void Walker::write_meter() const noexcept {
     // admitted)
     const uint64_t peak = std::max(peak_, accounted());
     m.memory_peak = mem_limit_ ? std::min(peak, mem_limit_) : peak;
-    m.memory_final = accounted();
+    // What the result holds until the response is written: the account when the walk ended
+    // without the budget's fixed cache allotments (allotted_: the label cache's and the
+    // lookahead's), which end with the walk — the caches are this walker's, freed when
+    // traverse_seed returns, and the row-diff path cache within the label cache's allotment is
+    // cleared then (PathCacheScope). The same with and without a budget that does not bind
+    const uint64_t held = accounted();
+    m.memory_final = held > allotted_ ? held - allotted_ : 0;
     m.soft_excess = overshoot_;
     m.walked = true;
     m.memory_coordinates = coord_account_;

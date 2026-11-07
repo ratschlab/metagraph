@@ -239,11 +239,14 @@ struct SeedUsage {
     std::string outcome = "not_started";
     // what stopped it, when a resource did: memory | work | time | cancelled | attempt_deadline
     std::string stopped_by;
-    // The walker's meter, as the result states it: for a failed or never started seed, whose
-    // result is not the walk's, |memory_final| is what that result holds until the response is
-    // written (its fixed part and its echo of seed_id, as failed_soft prices it) and
-    // |soft_excess| what its memory_bound_soft states (the echo included); |memory_peak| is at
-    // most the budget (what the budget admitted)
+    // The walker's meter, as the result states it: |memory_final| is what the seed's result
+    // holds until the response is written — for a walked result its account when the walk
+    // ended without the memory budget's cache allotments (the label cache's and the
+    // lookahead's, which end with the walk), for a failed or never started seed, whose
+    // result is not the walk's, its fixed part and its echo of seed_id (as failed_soft prices
+    // it) — and |soft_excess| what its memory_bound_soft states (for such a seed, the echo
+    // included); |memory_peak| is at most the budget (what the budget admitted, the
+    // allotments included: the caches are held while the seed is walked)
     graph::traversal::AttemptMeter meter;
     // the demand a memory budget refused when it stopped or failed the seed (bytes at that
     // budget: a head, a read, or the seed's depth-0 state); none when no memory budget did
@@ -399,8 +402,9 @@ class Attempt {
     // the seed's outcome once its result is built, and its elapsed time with the building
     void seed_delivered(size_t index, const std::string &outcome, double elapsed_ms);
     // What the results of seeds 0 to |before| - 1 hold until the response is written: their
-    // final_bytes summed (a walked result's account when its walk ended; a failed, refused,
-    // not-in-graph or never started one's priced echo), an abandoned walk's left out — the
+    // final_bytes summed (a walked result's account when its walk ended, without the memory
+    // budget's cache allotments, which end with the walk; a failed, refused, not-in-graph or
+    // never started one's priced echo), an abandoned walk's left out — the
     // `held` of usage_json's totals as far as those seeds. The request-wide memory bound
     // (TraverseLimits::max_request_memory_mb) compares it with the bound before seed |before|
     uint64_t held_bytes(size_t before) const;

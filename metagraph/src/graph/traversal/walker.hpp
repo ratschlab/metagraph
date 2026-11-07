@@ -1022,7 +1022,8 @@ struct ResourceAccount {
     // (memory_allotments(memory_limit), charged in the account with the depth-0 state and held
     // to its end: part of memory_peak and memory_final; 0 without a memory budget, or when the
     // seed failed before they were charged). Subtracted, the account is the same with and
-    // without a budget that does not bind: what work.memory_bytes states (SPEC §7.2.2)
+    // without a budget that does not bind: what work.memory_bytes states (SPEC §7.2.2), and
+    // what a walked result holds once its walk ended (AttemptMeter::memory_final, SPEC §7.3)
     uint64_t allotted = 0;
 };
 
@@ -1248,7 +1249,11 @@ struct AttemptMeter {
     uint64_t work_units = 0;         // ResourceAccount::work_used
     uint64_t work_seed = 0;          // ResourceAccount::work_seed
     uint64_t memory_peak = 0;        // the modelled account's peak (bytes)
-    uint64_t memory_final = 0;       // what the result holds when the walk ended
+    // What the result holds until the response is written: the account when the walk ended
+    // without a memory budget's cache allotments (ResourceAccount::allotted: the label cache
+    // and the lookahead end with the walk), so the same with and without a budget that does
+    // not bind; ResourceAccount::memory_final - allotted
+    uint64_t memory_final = 0;
     uint64_t soft_excess = 0;        // ResourceAccount::soft_overshoot (0 without a budget)
     bool walked = false;             // the walker ran (false: the strategy was refused first)
     // the part of the account that is recorded coordinates (ResourceAccount::coordinates)
