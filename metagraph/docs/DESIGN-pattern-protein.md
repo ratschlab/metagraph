@@ -128,15 +128,16 @@ the DNA unit and integration pattern suites; `scripts/traversal/pattern_fixtures
 
 ## 8. Choices this note makes (the engine note and the plan row leave them open)
 
-1. X is any of the 22 residues (U and O included, being literals); B, Z, J the usual pairs. Bits are log2(22 / s)
-   so that X carries 0.
+1. X is any of the 22 residues (U and O included, being literals: UniParc stores selenocysteine and pyrrolysine);
+   B, Z, J the usual pairs. Bits are log2(22 / s) so that X carries 0. Accepted by the coordinator, 2026-11-07.
 2. A class holds letters of the language (the 22 and X, B, Z, J, each as its set); `^` negates within the 22.
 3. `genetic_code` named on a protein graph: 400 `invalid_request` (the plan row: "a 400"); `strands: "reverse"`:
    400 `invalid_request`; `predicate_strands` evaluated as `"context"`.
 4. The entry's `genetic_code` is null (the key kept, so that a protein entry has the same keys on both builds).
 5. Substitutions in the DNA schema, `expected` the position's text.
 6. The capabilities' additions are the Protein build's only: the DNA build's documents, the contract samples among
-   them, are unchanged.
+   them, are unchanged (the coordinator, 2026-11-07: DNA builds do not gain `protein_reading`; E17 adds the alphabet
+   and the annotation form per pair for every build).
 7. The protein fixtures sit in `api/python/tests/data/traverse/pattern_protein/`, beside `pattern/` (whose
    directory list is the DNA generator's, `scripts/traversal/pattern_fixtures.py`, and checked as a whole).
 
@@ -158,15 +159,18 @@ the DNA unit and integration pattern suites; `scripts/traversal/pattern_fixtures
 
 ## 10. Landing after E15 (protein traversal lands first)
 
-E15 asserts the old refusal in places that flip with E16 (its review, 2026-11-07). At the rebase onto E15:
+E15 asserts the old refusal in places that flip with E16 (its review, 2026-11-07). The rebase goes onto E15's
+rebased head (E14, E13 and E15 stacked on 0c27d36fa of gr/labeled-traversal: master merged, C++20, and E23's fix of
+the `benchmarks` link error, 82e738c73), in fresh build directories after `git submodule sync --recursive && git -c
+protocol.file.allow=always submodule update --init --recursive`. There:
 
 1. E15's commit "Leave pattern search out of a Protein build's unit tests; test its refusal" is in this branch as
    a cherry-pick (same patch): the rebase drops it; this branch's later commit removes
    `PatternRoute.ProteinGraphIsRefused` and rewords the guards of the DNA suites (they stay DNA-only: they send
    `dna` and `iupac` patterns, which a protein graph refuses).
-2. `integration_tests/test_traverse.py` (E15's lines marked "until E16 (pattern on protein graphs)": two in
-   `TestTraverseAPI`, one in `test_capabilities_answer_in_the_envelope`): flip to /pattern served on a protein
-   graph (`available` true, `kinds` `["protein"]`).
+2. Every site E15 marks "until E16 (pattern on protein graphs)" (`grep` finds all 20; among them two in
+   `TestTraverseAPI` and one in `test_capabilities_answer_in_the_envelope` of `integration_tests/test_traverse.py`):
+   flip to /pattern served on a protein graph (`available` true, `kinds` `["protein"]`).
 3. `tests/cli/test_task_resources.cpp` (`PatternStatesCpuPerRequestAndPerEntry`, compiled out by E15 in a Protein
    build): drop E15's guard; this branch sends the build's kind (`protein` on a Protein build).
 4. `tests/cli/test_server_multigraph.cpp` (`LoadSharesTheResidentRecordMapping`, the /pattern block E15 guards):

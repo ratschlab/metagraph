@@ -4948,7 +4948,9 @@ The owner's decision of 2026-10-31 ("patterns must work on UniParc too"); the de
 not stated here is as on a DNA graph. The DNA builds' answers and documents do not change.
 
 **The pattern.** `patterns[i].protein`, read one residue per position (no codon automaton, §12.2 does not apply):
-the 22 residues read as themselves (A C D E F G H I K L M N P Q R S T V W Y, U, O) as literals; `X` any of the 22,
+the 22 residues read as themselves (A C D E F G H I K L M N P Q R S T V W Y, U, O) as literals; `X` any of the 22
+(U and O included: UniParc stores selenocysteine and pyrrolysine, and "any residue" covers them; the coordinator's
+decision of 2026-11-07),
 `B` D or N, `Z` E or Q, `J` I or L; a class `[...]` (the union of its letters, each one of these 26 read as above)
 and a negated class `[^...]` (the 22 less that union). Any case; `pattern` is the text in upper case, brackets kept.
 L, `length` and `residues` count positions (a class is one); every offset and length of the answer is in residues.
