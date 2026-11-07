@@ -1293,19 +1293,12 @@ int run_server(Config *config) {
      */
     auto admit = [&](const std::shared_ptr<RequestEntry> &entry, const RequestHandles &handles,
                      size_t request_id) {
-        auto expired = [&]() -> std::optional<Json::Value> {
-            AttemptIds ids;
-            ids.not_after_ms = handles.not_after_ms;
-            const uint64_t now = attempts.now_ms();
-            if (!not_after_passed(ids, now))
-                return std::nullopt;
-            Json::Value body = expired_json(ids, now, attempts.server_instance());
-            if (handles.request_id)
-                body["request_id"] = *handles.request_id;
-            return body;
-        };
-        std::optional<Json::Value> refused
-                = handles.request_id ? id_admission.start_request(entry, expired) : expired();
+        // with a request_id the not_after_ms check reads the clock inside the request
+        // registry's critical section (IdAdmission::start_request): never read it here for it
+        std::optional<Json::Value> refused = handles.request_id
+                ? id_admission.start_request(entry, handles.not_after_ms)
+                : expired_request_json(handles.not_after_ms, attempts.now_ms(),
+                                       attempts.server_instance(), std::nullopt);
         if (refused) {
             logger->info("[Server] Request {}: not started, {}", request_id,
                          refused->get("error", "").asString());

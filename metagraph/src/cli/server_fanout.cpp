@@ -447,10 +447,12 @@ std::string RequestRegistry::retention_text() const {
 }
 
 uint64_t RequestRegistry::now_ms() const {
-    if (shared_->settings.now_ms)
-        return shared_->settings.now_ms();
+    const RequestSettings &s = shared_->settings;
+    if (s.now_ms)
+        return s.now_ms();
+    const WallClock::time_point t = s.clocks.wall ? s.clocks.wall() : WallClock::now();
     const auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(
-            WallClock::now().time_since_epoch()).count();
+            t.time_since_epoch()).count();
     return ms > 0 ? static_cast<uint64_t>(ms) : 0;
 }
 
@@ -570,9 +572,22 @@ Json::Value request_as_attempt_json(const Json::Value &entry) {
     return attempt;
 }
 
-std::optional<Json::Value> IdAdmission::start_request(
-        const std::shared_ptr<RequestEntry> &entry,
-        const std::function<std::optional<Json::Value>()> &admission) {
+std::optional<Json::Value> expired_request_json(std::optional<uint64_t> not_after_ms,
+                                                uint64_t now_ms,
+                                                const std::string &server_instance,
+                                                const std::optional<std::string> &request_id) {
+    AttemptIds ids;
+    ids.not_after_ms = not_after_ms;
+    if (!not_after_passed(ids, now_ms))
+        return std::nullopt;
+    Json::Value body = expired_json(ids, now_ms, server_instance);
+    if (request_id)
+        body["request_id"] = *request_id;
+    return body;
+}
+
+std::optional<Json::Value> IdAdmission::start_request(const std::shared_ptr<RequestEntry> &entry,
+                                                      std::optional<uint64_t> not_after_ms) {
     assert(entry->request_id());
     std::lock_guard<std::mutex> lock(mutex_);
     return requests_.start(entry, [&]() -> std::optional<Json::Value> {
@@ -585,7 +600,13 @@ std::optional<Json::Value> IdAdmission::start_request(
             body["error"] = requests_.repeated_text(id);
             return body;
         }
-        return admission ? admission() : std::nullopt;
+        if (!not_after_ms)
+            return std::nullopt;
+        // the clock read HERE, under the request registry's lock after its lookup of the id,
+        // never before: GET /requests/{id}'s 404 reads it in this lock's critical section too, so
+        // an admission after that 404 reads its server_time_ms or a later time (section 5)
+        return expired_request_json(not_after_ms, attempts_.now_ms(),
+                                    attempts_.server_instance(), id);
     });
 }
 
