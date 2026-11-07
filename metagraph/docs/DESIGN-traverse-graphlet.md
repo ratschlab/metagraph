@@ -1403,7 +1403,7 @@ A ledger may release an attempt's capacity:
   retention 0, after it finished);
 - **on an `expired` 409**: the id's registration is checked before the expiry, under one lock, so no copy was running
   or registered on that `server_instance` and none can start there later. It settles nothing (an earlier copy may
-  have run and left retention), and it assumes the server's clock does not step back below `not_after_ms`;
+  have run and left retention), and it assumes the server's clock does not step back to `not_after_ms` or earlier;
 - **otherwise, by the clock**: after `not_after_ms + clock_skew_allowance_ms + bound_ms`. After `not_after_ms` +
   skew an unanswered attempt cannot start subsequently (it may already be running; `bound_ms` covers that, apart
   from the run past the bound of §15.2). The library holds the clock release while the last answer said `running`

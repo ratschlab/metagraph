@@ -309,9 +309,11 @@ class IdAdmission {
     // inside the request registry's critical section, after its lookup of the id: GET
     // /requests/{id}'s 404 reads the same clock under the same lock (RequestRegistry::state),
     // which makes its server_time_ms a proof (SPEC-multigraph-envelope.md section 5). The clock
-    // must never be read for the check outside that critical section, e.g. before this call
+    // must never be read for the check outside that critical section, e.g. before this call.
+    // |not_after_ms| has no default: a caller states the request's, or std::nullopt for a request
+    // without one, so that no admission skips the expiry check by leaving it out
     std::optional<Json::Value> start_request(const std::shared_ptr<RequestEntry> &entry,
-                                             std::optional<uint64_t> not_after_ms = std::nullopt);
+                                             std::optional<uint64_t> not_after_ms);
     // AttemptRegistry::start of |attempt|; the id held by a request is refused like a running
     // or retained attempt_id, its body the attempt-shaped request (request_as_attempt_json)
     std::optional<AttemptRegistry::StartRefusal> start_attempt(

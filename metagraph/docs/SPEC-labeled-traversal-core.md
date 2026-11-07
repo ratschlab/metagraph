@@ -512,7 +512,7 @@ deadline. `src/cli/traverse.cpp` `process_resolve_request`, `src/graph/traversal
   request's `not_after_ms`; a held or tombstoned id's refusal extends that hold, §10.3), the expiry
   last — so an `expired` 409 always means that no attempt with that id existed on that
   `server_instance` when the request was judged, and no copy can start there later while its clock
-  does not step back below `not_after_ms` (a release ground, §10.3). The capabilities' `not_after`
+  does not step back to `not_after_ms` or earlier (a release ground, §10.3). The capabilities' `not_after`
   text states this order *(review of 2026-10-06, C24)*. A fraction, a sign, a string or a value above
   2⁵³ − 1 is a 400 naming the field, without `usage`. It is echoed as `usage.not_after_ms` and in the
   attempt's state, only when given. The CLI applies the same check (the 409 body on stdout, exit
@@ -3614,9 +3614,10 @@ search's routes, `POST /pattern` and `GET /pattern/capabilities`, are `SPEC-patt
     the id's registration (running, retained, held, tombstoned) before the expiry, under one lock (§5), so no copy
     of the request was running or registered on that `server_instance` when it was judged, and none can start
     there later. It **settles nothing**: an earlier copy may have run, finished and left retention, and its usage
-    is then unknown. It assumes that this server's clock does not step back below `not_after_ms` (the 409 states
-    `server_time_ms`; `server_time_ms − not_after_ms` is the step it survives, and once that exceeds
-    `clock_skew_allowance_ms` the step is the one assumed below) and, for an attempt sent without
+    is then unknown. It assumes that this server's clock does not step back to `not_after_ms` or earlier (the 409
+    states `server_time_ms`; it survives a backward step SMALLER than `server_time_ms − not_after_ms`, a step of
+    exactly that admitting a copy at `not_after_ms`, and once that difference exceeds `clock_skew_allowance_ms`
+    the step is the one assumed below) and, for an attempt sent without
     `expect_server_instance`, that no copy of the request reaches another server at the same address while it
     could still be admitted there *(LRG-R2: the search service releases on it; the rule's list omitted it)*.
     **The clock release** takes the attempt as stopped once the ledger's clock passes `not_after_ms +

@@ -231,9 +231,10 @@ The answer keeps its upstream shape (a list of `{seq_description, results, ...}`
   admitted on this `server_instance` after the lookup: a copy that arrives later, or a re-send, is not admitted. The
   proof holds for a `request_id` of `/resolve` and `/pattern` and for an `attempt_id` of `/traverse` alike. It
   covers the `server_instance` that answered: a 404 from another one (a restarted server) proves nothing about the
-  instance the request was sent to. It assumes that the server's wall clock does not step back below
-  `not_after_ms` between the lookup and a later admission: `server_time_ms − not_after_ms` is the backward clock
-  step the proof survives (a client may require it to exceed `clock_skew_allowance_ms`). It says nothing about
+  instance the request was sent to. It assumes that the server's wall clock does not step back to `not_after_ms`
+  or earlier between the lookup and a later admission: the proof survives a backward clock step SMALLER than
+  `server_time_ms − not_after_ms` (a step of exactly that brings the clock to `not_after_ms`, which admission
+  accepts; a client may require the difference to exceed `clock_skew_allowance_ms`). It says nothing about
   earlier runs: an id that ran and was dropped, or that a 400 freed, also answers 404. With `server_time_ms` <=
   `not_after_ms` the 404 proves nothing; the request may still be admitted. The field's presence is the marker: it
   is absent in a 404 from an engine without this guarantee, and a client then has no proof from that 404 (its own

@@ -1390,7 +1390,7 @@ class IdNamespace : public ::testing::Test {
 
 TEST_F(IdNamespace, ARequestHoldsItsIdAgainstAnAttempt) {
     auto e = entry("x");
-    ASSERT_FALSE(admission_.start_request(e));
+    ASSERT_FALSE(admission_.start_request(e, std::nullopt));
     // running
     auto refused = admission_.start_attempt(attempt("x"));
     ASSERT_TRUE(refused);
@@ -1414,7 +1414,7 @@ TEST_F(IdNamespace, ARequestHoldsItsIdAgainstAnAttempt) {
     EXPECT_EQ(200, attempts_.state("x").first);
     EXPECT_EQ(404, requests_.state("x").first);
     // and holds the id in its turn
-    EXPECT_TRUE(admission_.start_request(entry("x")));
+    EXPECT_TRUE(admission_.start_request(entry("x"), std::nullopt));
 }
 
 TEST_F(IdNamespace, AnAttemptHoldsItsIdAgainstARequest) {
@@ -1434,13 +1434,13 @@ TEST_F(IdNamespace, AnAttemptHoldsItsIdAgainstARequest) {
     EXPECT_EQ(404, requests_.state("y").first);
     // retained
     attempts_.finish(a, "completed", 200, 10);
-    refused = admission_.start_request(entry("y"));
+    refused = admission_.start_request(entry("y"), std::nullopt);
     ASSERT_TRUE(refused);
     EXPECT_EQ("ended", (*refused)["state"].asString());
     EXPECT_EQ(404, requests_.state("y").first);
     // past its retention: the request runs
     pass(60);
-    EXPECT_FALSE(admission_.start_request(e));
+    EXPECT_FALSE(admission_.start_request(e, std::nullopt));
     EXPECT_EQ(200, requests_.state("y").first);
     EXPECT_EQ(404, attempts_.state("y").first);
     EXPECT_TRUE(admission_.start_attempt(attempt("y")));
@@ -1450,8 +1450,8 @@ TEST_F(IdNamespace, AnAttemptHoldsItsIdAgainstARequest) {
 // an attempt_id only (no request ran with it, GET /requests does not answer it)
 TEST_F(IdNamespace, ARepeatOnOneRouteAnswersAsBefore) {
     auto e = entry("r");
-    ASSERT_FALSE(admission_.start_request(e));
-    auto repeated = admission_.start_request(entry("r"));
+    ASSERT_FALSE(admission_.start_request(e, std::nullopt));
+    auto repeated = admission_.start_request(entry("r"), std::nullopt);
     auto direct = requests_.start(entry("r"));
     ASSERT_TRUE(repeated);
     ASSERT_TRUE(direct);
@@ -1465,7 +1465,7 @@ TEST_F(IdNamespace, ARepeatOnOneRouteAnswersAsBefore) {
     EXPECT_FALSE(again->body.isMember("route"));
 
     attempts_.cancel("cancelled", 0);
-    EXPECT_FALSE(admission_.start_request(entry("cancelled")));
+    EXPECT_FALSE(admission_.start_request(entry("cancelled"), std::nullopt));
     ASSERT_TRUE(admission_.start_attempt(attempt("cancelled")));
 }
 
@@ -1490,7 +1490,7 @@ TEST_F(IdNamespace, NoWindowAdmitsBoth) {
     std::thread a([&]() {
         for (size_t i = 0; i < rounds; ++i) {
             wait_turn(i);
-            request_won[i] = !admission_.start_request(entries[i]);
+            request_won[i] = !admission_.start_request(entries[i], std::nullopt);
         }
     });
     std::thread b([&]() {
@@ -1510,7 +1510,7 @@ TEST_F(IdNamespace, NoWindowAdmitsBoth) {
 // attempt_id's (the attempt as traverse_request_json builds it), and for an id neither holds, a
 // tombstoned attempt_id among them, the request registry's 404 with the server's clock (F3)
 TEST_F(IdNamespace, GetRequestsReadsBothRegistries) {
-    ASSERT_FALSE(admission_.start_request(entry("r")));
+    ASSERT_FALSE(admission_.start_request(entry("r"), std::nullopt));
     int status = 0;
     Json::Value body;
     std::tie(status, body) = admission_.state("r");

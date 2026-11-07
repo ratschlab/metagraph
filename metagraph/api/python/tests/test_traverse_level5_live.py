@@ -236,8 +236,8 @@ class TestLevel5Live(unittest.TestCase):
         v = release_verdict(cm.exception, cm.exception.sent, attempts=attempts)
         self.assertEqual((True, False, 'expired', ('sent_without_expect_server_instance',)),
                          (v.release, v.early, v.code, v.assumptions), v.why)
-        # without a skew to compare the 409's margin with, the clock's step back below
-        # not_after_ms is assumed, stated
+        # without a skew to compare the 409's margin with, the clock's step back to
+        # not_after_ms or earlier is assumed, stated
         v = release_verdict(cm.exception, cm.exception.sent)
         self.assertEqual(('server_clock_step_back', 'sent_without_expect_server_instance'),
                          v.assumptions, v.why)
@@ -249,7 +249,7 @@ class TestLevel5Live(unittest.TestCase):
         self.assertEqual(('expired', ()), (v.code, v.assumptions), v.why)
         # a request just late (a margin of a few ms against the server's
         # clock_skew_allowance_ms) holds later copies off only while the server's clock does
-        # not step back below not_after_ms -- the server's release_rule says so, and the
+        # not step back to not_after_ms or earlier -- the server's release_rule says so, and the
         # release states it
         with self.assertRaises(AttemptExpired) as cm:
             self.c.traverse([SEED], STRATEGY, attempt_id=_id('just-late'),
@@ -259,7 +259,7 @@ class TestLevel5Live(unittest.TestCase):
         v = release_verdict(cm.exception, cm.exception.sent, attempts=attempts)
         self.assertEqual((True, 'expired', ('server_clock_step_back',)),
                          (v.release, v.code, v.assumptions), v.why)
-        self.assertIn('(%d ms) is the step it survives' % margin, v.why)
+        self.assertIn('smaller than server_time_ms - not_after_ms (%d ms)' % margin, v.why)
         if 'An expired 409' in attempts['release_rule']:
             # a server whose release_rule states the expired ground (an older level-5 build's
             # need not) states this assumption with it

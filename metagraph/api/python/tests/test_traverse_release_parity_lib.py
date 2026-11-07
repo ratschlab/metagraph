@@ -654,9 +654,9 @@ class TestReleaseGrounds(unittest.TestCase):
     def test_r2_the_server_clock_step_back(self):
         # Later copies are refused only while the server's clock reads later than
         # not_after_ms (a strict check, no allowance), and the server's release_rule assumes
-        # its clock does not step back below it. Every release assumes a step back of at most
-        # clock_skew_allowance_ms, so the expired release states the step of its own wherever
-        # the 409's margin is within that, or cannot be judged
+        # its clock does not step back to it or earlier. Every release assumes a step back of
+        # at most clock_skew_allowance_ms, so the expired release states the step of its own
+        # wherever the 409's margin is within that, or cannot be judged
         body = DISPATCH['expired'][0][1]
 
         def at(margin):
@@ -673,9 +673,10 @@ class TestReleaseGrounds(unittest.TestCase):
                 self.assertEqual(('server_clock_step_back',) if stated else (),
                                  v.assumptions, v.why)
                 if stated:
-                    self.assertIn("this server's clock does not step back below "
-                                  'not_after_ms', v.why)
-        self.assertIn('server_time_ms - not_after_ms (3 ms) is the step it survives, within '
+                    self.assertIn("this server's clock does not step back to "
+                                  'not_after_ms or earlier', v.why)
+        self.assertIn('it survives a backward step smaller than server_time_ms - not_after_ms '
+                      '(3 ms), within '
                       'the clock_skew_allowance_ms (2000 ms)', self.verdict(at(3)).why)
         self.assertIn('states no server_time_ms', self.verdict(at(None)).why)
         # the call's allowance overrides the block's, as everywhere in release_verdict()
