@@ -305,9 +305,8 @@ Json::Value memory_request(const Fixture &f, const std::string &detail, const st
 // work.memory_bytes (SPEC §7.2.2) on every request, budgeted or not: per seed and per request,
 // the same in every run, and the same without a budget as under budgets that do not bind —
 // whose answers differ from the unbudgeted one only in what a budget states by design (its
-// echo, the arms' charged work_units, memory_bound_soft, a memory budget's whole-row reads of
-// the column annotation; in a graphlet the body's A counters and K records of them), never in
-// memory_bytes or anything else
+// echo, the arms' charged work_units, memory_bound_soft; in a graphlet the body's A counters
+// and K records of them), never in memory_bytes or anything else
 TEST(TaskResources, TraverseMemoryIsDeterministicAndBudgetFree) {
     Fixture f;
     for (const std::string detail : { "full", "summary", "graphlet" }) {
@@ -347,19 +346,13 @@ TEST(TaskResources, TraverseMemoryIsDeterministicAndBudgetFree) {
                 }
                 std::vector<std::string> differ;
                 diff_paths(plain, budgeted, "", &differ);
-                const bool memory = bounds.find("max_memory_mb") != std::string::npos;
                 for (const std::string &path : differ) {
-                    // under a memory budget the column annotation of the fixture is read
-                    // budget-aware (each row alone, since E14): by whole rows, where without
-                    // one a few labels are read cell by cell (the access path and its reads)
                     const bool by_design
                         = path == ".strategy.bounds.max_memory_mb"
                        || path == ".strategy.bounds.max_work_units"
                        || path.find(".counters.work_units") != std::string::npos
-                       || (path.find(".limitations") != std::string::npos && memory)
-                       || ((path.find(".annotation.access_path") != std::string::npos
-                            || path.find(".annotation.direct_reads") != std::string::npos)
-                           && memory)
+                       || (path.find(".limitations") != std::string::npos
+                           && bounds.find("max_memory_mb") != std::string::npos)
                        || (detail == "graphlet"
                            && (path.find(".graphlet") != std::string::npos));
                     EXPECT_TRUE(by_design) << what << ": " << path;

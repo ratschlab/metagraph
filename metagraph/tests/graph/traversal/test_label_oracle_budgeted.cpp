@@ -364,6 +364,128 @@ TEST(LabelOracleBudgetedQuery, PlainBrwtRecorderNamesTheLabelsOfItsUnbudgetedRea
     }
 }
 
+// A plain annotation with direct access (column, plain BRWT) asked for at most 16 labels:
+// LabelQuery's Access::AUTO picks single-cell reads (direct) under a budget as without one,
+// and the budget-aware fetch reads those cells charged (DESIGN-traverse-graphlet.md §14.3,
+// "ColumnMajor read as column-wise charged pairs"): the unbudgeted hits, the same direct_reads
+// and no row read, no dependency units, each key admitted against its demand, the hits held,
+// and a budget that holds no key's cells refuses the fetch whole
+TEST(LabelOracleBudgetedQuery, PlainAnnotationsReadFewLabelsCellByCell) {
+    Fixture fx(false);
+    auto column = test::build_anno_graph<DBGSuccinct, annot::ColumnCompressed<>>(
+            kK, fx.seqs, fx.labels, DeBruijnGraph::BASIC);
+    auto brwt = brwt_of(*column, interleaved_partitioner());
+    for (const AnnotatedDBG *anno : { column.get(), brwt.get() }) {
+        const std::vector<std::string> names { "F", "L3", "L5" };
+        LabelOracle plain_oracle(*anno);
+        LabelOracle oracle(*anno);
+        ASSERT_TRUE(oracle.decode_charged());
+        LabelQuery plain(plain_oracle, refs(plain_oracle, names), false);
+        ASSERT_STREQ("direct", plain.access_path());
+        LabelQuery budgeted(oracle, refs(oracle, names), false);
+        ASSERT_STREQ("direct", budgeted.access_path());
+        budgeted.set_max_cache_bytes(1 << 20);
+        size_t checked = 0;
+        for (const auto &batch : fx.batches(oracle)) {
+            const auto expected = plain.fetch(batch);
+            std::vector<LabelQuery::NodeHits> hits;
+            std::vector<KeyCost> costs;
+            hits.reserve(batch.size());
+            costs.reserve(batch.size());
+            DecodeBudget budget;
+            size_t refused = 0;
+            ASSERT_TRUE(budgeted.fetch(batch.data(), batch.size(), budget, &hits, &costs,
+                                       &refused));
+            ASSERT_EQ(expected, hits);
+            uint64_t held = 0;
+            for (size_t i = 0; i < batch.size(); ++i) {
+                held += LabelQuery::held_bytes(hits[i]);
+                if (batch[i] == npos)
+                    continue;
+                EXPECT_EQ(0u, costs[i].dependency_units);
+                EXPECT_EQ(names.size(), costs[i].entries);
+                EXPECT_GE(costs[i].demand, LabelQuery::held_bytes(hits[i]));
+                checked++;
+            }
+            EXPECT_EQ(held, budget.held());
+            DecodeBudget warm_budget;
+            budgeted.warm(batch, warm_budget);
+            EXPECT_EQ(0u, warm_budget.held());
+        }
+        EXPECT_GT(checked, 400u);
+        EXPECT_GT(oracle.counters().direct_reads, 0u);
+        EXPECT_EQ(0u, oracle.counters().rows_fetched);
+        // The same single-cell reads as without a budget, call by call: the unbudgeted fetch
+        // reads a key once per call, the budget-aware one once per run of misses (a key
+        // repeated in a run is copied, not read again). Without repeats in a call, the same
+        // count
+        {
+            LabelOracle plain_counted(*anno);
+            LabelOracle counted(*anno);
+            LabelQuery plain_query(plain_counted, refs(plain_counted, names), false);
+            LabelQuery query(counted, refs(counted, names), false);
+            query.set_max_cache_bytes(1 << 20);
+            for (auto batch : fx.batches(counted)) {
+                batch.erase(std::remove(batch.begin(), batch.end(), npos), batch.end());
+                std::sort(batch.begin(), batch.end());
+                batch.erase(std::unique(batch.begin(), batch.end()), batch.end());
+                const auto expected = plain_query.fetch(batch);
+                std::vector<LabelQuery::NodeHits> hits;
+                std::vector<KeyCost> costs;
+                hits.reserve(batch.size());
+                costs.reserve(batch.size());
+                DecodeBudget budget;
+                size_t refused = 0;
+                ASSERT_TRUE(query.fetch(batch.data(), batch.size(), budget, &hits, &costs,
+                                        &refused));
+                ASSERT_EQ(expected, hits);
+            }
+            EXPECT_EQ(plain_counted.counters().direct_reads, counted.counters().direct_reads);
+            EXPECT_GT(counted.counters().direct_reads, 0u);
+            EXPECT_EQ(0u, counted.counters().rows_fetched);
+            // a key repeated within a run is read once
+            const std::vector<node_index> keys = counted.keys_of_sequence(fx.seqs[1]);
+            std::vector<node_index> twice { keys[0], keys[1], keys[0] };
+            LabelQuery cold(counted, refs(counted, names), false);
+            const uint64_t before = counted.counters().direct_reads;
+            std::vector<LabelQuery::NodeHits> hits;
+            std::vector<KeyCost> costs;
+            hits.reserve(3);
+            costs.reserve(3);
+            DecodeBudget budget;
+            size_t refused = 0;
+            ASSERT_TRUE(cold.fetch(twice.data(), 3, budget, &hits, &costs, &refused));
+            EXPECT_EQ(2 * names.size(), counted.counters().direct_reads - before);
+            EXPECT_EQ(hits[0], hits[2]);
+            EXPECT_EQ(costs[0].demand, costs[2].demand);
+        }
+        // a key read alone holds at most its demand
+        const std::vector<node_index> keys = oracle.keys_of_sequence(fx.seqs[0]);
+        for (node_index key : keys) {
+            LabelQuery cold(oracle, refs(oracle, names), false);
+            std::vector<LabelQuery::NodeHits> one;
+            std::vector<KeyCost> cost;
+            one.reserve(1);
+            cost.reserve(1);
+            DecodeBudget alone;
+            size_t refused = 0;
+            ASSERT_TRUE(cold.fetch(&key, 1, alone, &one, &cost, &refused));
+            EXPECT_LE(alone.peak(), cost[0].demand);
+        }
+        // a budget that holds no key's cells refuses the fetch whole
+        std::vector<LabelQuery::NodeHits> hits;
+        std::vector<KeyCost> costs;
+        hits.reserve(keys.size());
+        costs.reserve(keys.size());
+        LabelQuery cold(oracle, refs(oracle, names), false);
+        DecodeBudget none(16);
+        size_t refused = 0;
+        EXPECT_FALSE(cold.fetch(keys.data(), keys.size(), none, &hits, &costs, &refused));
+        EXPECT_EQ(0u, none.held());
+        EXPECT_TRUE(hits.empty());
+    }
+}
+
 // The rows of the fixture counted from its sequences alone (an oracle independent of the
 // annotation and its decoders): per k-mer as spelled (BASIC), the columns it occurs in and
 // its occurrences in them (one coordinate each)

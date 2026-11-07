@@ -566,14 +566,12 @@ LabelQuery::LabelQuery(const LabelOracle &oracle,
             path_ = Path::ROWS;
             break;
         case LabelOracle::Access::AUTO:
-            // a few single-cell reads beat reconstructing the whole row. A trap for the
-            // budget-aware fetch, which reads whole rows only (decode_run asserts the path is
-            // not DIRECT): AUTO picks DIRECT for <= 16 columns wherever the annotation has
-            // direct access, so a budgeted caller asks for ROWS explicitly. Reachable: the
-            // plain brwt and column annotations are read budget-aware
-            // (LabelOracle::decode_charged()) and have direct access, while the row-diff
-            // family has none, so AUTO is ROWS there (the test
-            // LabelOracleAccess.AutoPicksDirectForAtMost16Columns pins both)
+            // a few single-cell reads beat reconstructing the whole row: DIRECT for <= 16
+            // columns wherever the annotation has direct access (the plain column and brwt
+            // annotations; the row-diff family has none, so AUTO is ROWS there: the test
+            // LabelOracleAccess.AutoPicksDirectForAtMost16Columns pins both), whether or not
+            // the reads are budget-aware -- the budget-aware fetch reads DIRECT cell by cell,
+            // charged (decode_cells), so a budget does not change the access path
             path_ = oracle_.supports_direct() && direct_columns_.size() <= 16 ? Path::DIRECT
                                                                               : Path::ROWS;
             break;
@@ -1133,8 +1131,8 @@ static DecodeStatus decode_keys(const LabelOracle &oracle, const node_index *key
 DecodeStatus LabelQuery::decode_run(const node_index *keys, size_t n, DecodeBudget &budget,
                                     std::vector<NodeHits> *out, size_t at,
                                     std::vector<KeyCost> *costs, size_t *built) {
-    // whole rows only: a budgeted caller asks for Access::ROWS, not AUTO (see the constructor)
-    assert(path_ != Path::DIRECT);
+    if (path_ == Path::DIRECT)
+        return decode_cells(keys, n, budget, out, at, costs, built);
     // each row's hits replace its raw row; a key's demand: decoding it alone, the row
     // vector of one key, and what building its hits holds beside its raw row
     return decode_keys(oracle_, keys, n, budget, path_ == Path::TUPLES,
@@ -1143,6 +1141,74 @@ DecodeStatus LabelQuery::decode_run(const node_index *keys, size_t n, DecodeBudg
             return hits_budgeted(row, budget, &(*out)[at + i], peak);
         },
         [](size_t) { return uint64_t(0); }, costs->data() + at, built);
+}
+
+// The budget-aware read of the DIRECT path (DESIGN-traverse-graphlet.md §14.3: a column or
+// plain BRWT annotation read as column-wise charged cells): for each key, the cells of the
+// requested columns read one by one, in column order, as the unbudgeted path reads them
+// (LabelOracle::get, one direct_read each), into a scratch charged at one column per cell read
+// (an upper bound of the columns present), then its hits, charged at their size and kept; the
+// scratch is released. A key's costs: no dependency units, |entries| the cells read, and its
+// demand what reading it alone holds at its peak (the scratch and its hits). A key repeated
+// within the run is not read again: its hits are a copy of the first's, with the same costs
+// (the unbudgeted path reads a key once per call). A key whose hits do not fit drops the rest
+// of the run (REFUSED), as decode_keys does.
+DecodeStatus LabelQuery::decode_cells(const node_index *keys, size_t n, DecodeBudget &budget,
+                                      std::vector<NodeHits> *out, size_t at,
+                                      std::vector<KeyCost> *costs, size_t *built) {
+    *built = 0;
+    const uint64_t scratch_bytes = buffer_bytes(direct_columns_.size(), sizeof(Column));
+    std::vector<Column> present;
+    for (size_t i = 0; i < n; ++i) {
+        assert(keys[i] != npos);
+        NodeHits &hits = (*out)[at + i];
+        KeyCost &cost = (*costs)[at + i];
+        // a repeat of an earlier key of the run: its hits again, charged as such
+        size_t first = i;
+        for (size_t j = 0; j < i; ++j) {
+            if (keys[j] == keys[i]) {
+                first = j;
+                break;
+            }
+        }
+        if (first < i) {
+            const NodeHits &earlier = (*out)[at + first];
+            if (!budget.charge(held_bytes(earlier)))
+                return DecodeStatus::REFUSED;
+            hits = earlier;
+            cost = (*costs)[at + first];
+            ++*built;
+            continue;
+        }
+        if (!budget.charge(scratch_bytes))
+            return DecodeStatus::REFUSED;
+        present.reserve(direct_columns_.size());
+        const Row row = AnnotatedDBG::graph_to_anno_index(keys[i]);
+        for (Column c : direct_columns_) {
+            if (oracle_.get(row, c))
+                present.push_back(c);
+        }
+        const uint64_t hits_bytes = buffer_bytes(present.size(), sizeof(Hit));
+        if (!budget.charge(hits_bytes)) {
+            std::vector<Column>().swap(present);
+            budget.release(scratch_bytes);
+            return DecodeStatus::REFUSED;
+        }
+        hits.reserve(present.size());
+        for (Column c : present) {
+            hits.push_back(Hit{ column_labels_.at(c), {} });
+        }
+        // columns are visited in column order, hits are sorted by label id
+        std::sort(hits.begin(), hits.end(),
+                  [](const Hit &a, const Hit &b) { return a.label < b.label; });
+        std::vector<Column>().swap(present);
+        budget.release(scratch_bytes);
+        cost.dependency_units = 0;
+        cost.entries = saturate_units(direct_columns_.size());
+        cost.demand = scratch_bytes + hits_bytes;
+        ++*built;
+    }
+    return DecodeStatus::OK;
 }
 
 bool LabelQuery::cache_budgeted(const node_index *keys, size_t n, const NodeHits *hits,

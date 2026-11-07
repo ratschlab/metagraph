@@ -1247,11 +1247,9 @@ void Walker::validate_seed() {
             throw SeedLabelsNotInGraph("none of the seed's labels is in this graph: " + names,
                                        unknown);
         }
-        // read by whole rows under the budget-aware reads (fetch_seed_hits): a plain brwt or
-        // column annotation has direct access, which AUTO would pick for at most 16 labels
-        LabelQuery validation(oracle_, seed_refs, trace_,
-                              decode_charged_ ? LabelOracle::Access::ROWS
-                                              : LabelOracle::Access::AUTO);
+        // AUTO with a budget or without: a plain brwt or column annotation is read cell by cell
+        // for at most 16 labels, charged under the budget-aware reads (LabelQuery::decode_cells)
+        LabelQuery validation(oracle_, seed_refs, trace_);
         hits = fetch_seed_hits(validation, keys);
     }
     if (request_of_ref.empty()) {
@@ -6379,11 +6377,9 @@ void Walker::seed_phase() {
                 oracle_.coord_to_header() ? LabelKind::HEADER : LabelKind::COLUMN);
         recorder_ = std::make_unique<LabelRecorder>(oracle_, kind, strategy_.max_labels_per_node);
     } else {
-        // the budget-aware fetch reads whole rows (never AUTO's DIRECT, which a plain brwt or
-        // column annotation would get for at most 16 labels)
-        query_ = std::make_unique<LabelQuery>(oracle_, result_.label_dict, trace_,
-                                              decode_charged_ ? LabelOracle::Access::ROWS
-                                                              : LabelOracle::Access::AUTO);
+        // AUTO, as without a budget: the budget-aware fetch reads a plain brwt or column
+        // annotation cell by cell for at most 16 labels, charged (LabelQuery::decode_cells)
+        query_ = std::make_unique<LabelQuery>(oracle_, result_.label_dict, trace_);
     }
     scratch_.init(result_.label_dict.size());
     label_stamp_.assign(result_.label_dict.size(), 0);

@@ -351,9 +351,10 @@ class LabelOracle {
     // over BRWT (row_diff_int_brwt, read as presence), or a plain BRWT or ColumnMajor (brwt,
     // column: each row read alone) — and the reads themselves (IRowDiff::decode_rows /
     // decode_row_tuples, annot::matrix::BudgetedRows: every buffer charged to |budget| before
-    // it is allocated, a read that does not fit refused whole). A caller reading budget-aware
-    // asks LabelQuery for whole rows (Access::ROWS): a plain BRWT or ColumnMajor also has
-    // direct access, which AUTO would pick for at most 16 labels. The physical counters
+    // it is allocated, a read that does not fit refused whole). A plain BRWT or ColumnMajor
+    // also has direct access, which LabelQuery's AUTO picks for at most 16 labels with a
+    // budget or without; its budget-aware fetch reads those cells charged
+    // (LabelQuery::decode_cells). The physical counters
     // (timing) count the rows a read returns and the time of every read, a refused one's
     // included — also when the LabelQuery / LabelRecorder fetch that issued it is refused
     // afterwards: the decoding was done. The unbudgeted reads above are untouched by these.
@@ -589,9 +590,9 @@ class LabelQuery {
 
     // Throws std::invalid_argument if the requested access path is not available for this
     // annotation (no silent fallback). AUTO picks DIRECT for at most 16 columns when the
-    // annotation has direct access, which the budget-aware fetch and warm do not read
-    // (they decode whole rows); no annotation they serve has direct access, so AUTO is
-    // ROWS there.
+    // annotation has direct access (a column or plain BRWT annotation), with a budget or
+    // without: the budget-aware fetch and warm read DIRECT cell by cell, charged (decode_run),
+    // and the other paths by whole rows.
     LabelQuery(const LabelOracle &oracle,
                std::vector<LabelRef> labels,
                bool with_coords,
@@ -757,6 +758,12 @@ class LabelQuery {
                                            annot::matrix::DecodeBudget &budget,
                                            std::vector<NodeHits> *out, size_t at,
                                            std::vector<KeyCost> *costs, size_t *built);
+    // decode_run on the DIRECT path: each key's cells of the requested columns read one by
+    // one (LabelOracle::get, counted as direct_reads), charged
+    annot::matrix::DecodeStatus decode_cells(const node_index *keys, size_t n,
+                                             annot::matrix::DecodeBudget &budget,
+                                             std::vector<NodeHits> *out, size_t at,
+                                             std::vector<KeyCost> *costs, size_t *built);
     // the hits of one raw row built with exact reservations, every buffer charged before
     // it is allocated; |*peak| what building it held beside the raw row at most
     bool hits_budgeted(const annot::matrix::BinaryMatrix::SetBitPositions &row,
