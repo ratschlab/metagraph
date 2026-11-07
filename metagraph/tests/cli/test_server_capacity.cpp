@@ -185,8 +185,10 @@ TEST(ServerCapacity, BusyIsAnswered503WithRetryAfter) {
             // the members in byte order, as every answer of the server; compact on the
             // traversal routes
             EXPECT_LT(answer.body.find("\"code\""), answer.body.find("\"error\""));
-            if (compact)
-                EXPECT_EQ(0u, answer.body.find("{\"code\":\"busy\",\"error\":")) << answer.body;
+            if (compact) {
+                EXPECT_EQ(0u, answer.body.find("{\"code\":\"busy\",\"error\":"))
+                    << answer.body;
+            }
         }
     }
     // a route whose client is gone (or a server that stops) writes nothing
