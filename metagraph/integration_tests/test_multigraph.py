@@ -30,12 +30,15 @@ and the server's answers without the new fields.
 import json
 import os
 import random
+import re
 import shlex
 import shutil
+import signal
 import socket
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 import unittest
 
@@ -666,6 +669,125 @@ class TestMultiGraphServer(TestingBase):
             base.stop()
             new.stop()
 
+    # The differences to a release-10 base binary that E23 (the merge of master 33ad588d2)
+    # intends, each pinned by test_align_expired_and_404_against_the_base_binary
+    INTENDED_DIFFERENCES = {
+        # master's #722: /align refuses an invalid max_alternative_alignments (release 10 fell
+        # back to 1, or failed on a value that is no integer)
+        'max_alternative_alignments':
+            {'error': "'max_alternative_alignments' must be a positive integer."},
+        # SPEC-multigraph-envelope.md section 4: not_after_ms is checked at admission
+        'expired_409': ("when the request's handler started", "at the request's admission"),
+        # SPEC-multigraph-envelope.md section 5: the three cases of GET /requests' 404
+        'requests_404': ("never received, or no longer retained",
+                         "not admitted yet, never admitted (an HTTP-level 400 or the expired "
+                         "409; or never received), or ended and no longer retained"),
+    }
+
+    @unittest.skipUnless(BASE_BINARY and os.path.isfile(BASE_BINARY),
+                         '$METAGRAPH_BASE_BINARY (a release-10 binary, 5c7b45b74) is not set')
+    def test_align_expired_and_404_against_the_base_binary(self):
+        """/align (single-graph and multi-graph), the expired 409 of /resolve, /pattern and
+        /traverse, and GET /requests' 404 against a release-10 base binary on the same files:
+        byte for byte the same answers but for INTENDED_DIFFERENCES, each checked as stated
+        there (a release-9 base, which has no request registry, skips this test)."""
+        d = self.tempdir.name
+        graph, anno = self.pairs['kleb']
+        seed = self.records['kleb'][0][1000:1100]
+        fasta = '>q\n' + seed
+        base_multi = Server([self.csv, '--mmap', '--mem-cap-gb', '1'],
+                            os.path.join(d, 'server_base_r10.log'), binary=BASE_BINARY)
+        servers = [base_multi]
+        try:
+            if 'request_id' not in base_multi.get('capabilities').json().get('multigraph', {}):
+                self.skipTest('the base binary has no request registry (before release 10)')
+            base_single = Server(['-i', graph, '-a', anno],
+                                 os.path.join(d, 'server_base_r10_single.log'), binary=BASE_BINARY)
+            servers.append(base_single)
+            new_single = Server(['-i', graph, '-a', anno],
+                                os.path.join(d, 'server_new_single.log'))
+            servers.append(new_single)
+
+            def raw(server, route, data):
+                return requests.post(server.url(route), data=data, timeout=300)
+
+            # /align on a single-graph server: (what, body, the base's status)
+            same = [
+                ('bad json', '{"FASTA": ">q\\nACGT",', 400),
+                ('min_exact_match above 1', json.dumps({'FASTA': fasta, 'min_exact_match': 1.5}),
+                 400),
+                ('min_exact_match below 0', json.dumps({'FASTA': fasta, 'min_exact_match': -0.5}),
+                 400),
+                # no FASTA: no query, an empty answer
+                ('no FASTA', json.dumps({'min_exact_match': 0.5}), 200),
+            ]
+            for what, data, status in same:
+                with self.subTest(align=what):
+                    a, b = raw(base_single, 'align', data), raw(new_single, 'align', data)
+                    self.assertEqual(status, a.status_code, a.text[:500])
+                    self.assertEqual((a.status_code, a.content), (b.status_code, b.content))
+            refusal = self.INTENDED_DIFFERENCES['max_alternative_alignments']
+            for value in (-1, 0, None, True, 1.5, '2', 2147483648):
+                with self.subTest(max_alternative_alignments=value):
+                    data = json.dumps({'FASTA': fasta, 'max_alternative_alignments': value})
+                    a, b = raw(base_single, 'align', data), raw(new_single, 'align', data)
+                    self.assertEqual((400, refusal), (b.status_code, b.json()))
+                    self.assertNotEqual((400, refusal), (a.status_code, a.json()))
+            data = json.dumps({'FASTA': fasta, 'max_alternative_alignments': 2})
+            self.assertEqual((200, 200), (raw(base_single, 'align', data).status_code,
+                                          raw(new_single, 'align', data).status_code))
+
+            # /align on a multi-graph server: the refusal in release 10's words
+            data = json.dumps({'FASTA': fasta})
+            a, b = raw(base_multi, 'align', data), raw(self.server, 'align', data)
+            self.assertEqual(400, a.status_code, a.text[:500])
+            self.assertEqual((a.status_code, a.content), (b.status_code, b.content))
+
+            # the expired 409: the same body but its wording and the server's clock
+            old, new = self.INTENDED_DIFFERENCES['expired_409']
+            clock = re.compile(r"server's clock \(\d+, [^)]*\)")
+            for route, body in (
+                    ('resolve', {'sequence': seed, 'graphs': ['kleb'],
+                                 'discover': {'max_labels': 2}, 'not_after_ms': 1,
+                                 'request_id': 'it-expired-base-resolve'}),
+                    ('resolve', {'sequence': seed, 'graph': 'kleb',
+                                 'discover': {'max_labels': 2}, 'not_after_ms': 1}),
+                    ('pattern', {'patterns': [{'dna': seed[:20]}], 'mode': 'count',
+                                 'graphs': ['kleb', 'pseudo'], 'not_after_ms': 1,
+                                 'request_id': 'it-expired-base-pattern'}),
+                    ('traverse', {'seeds': [{'sequence': seed}], 'graph': 'kleb',
+                                  'not_after_ms': 1, 'attempt_id': 'it-expired-base-traverse'}),
+                    ('traverse', {'seeds': [{'sequence': seed}], 'graph': 'kleb',
+                                  'not_after_ms': 1})):
+                with self.subTest(expired=route, body=sorted(body)):
+                    a, b = base_multi.post(route, body), self.server.post(route, body)
+                    self.assertEqual((409, 409), (a.status_code, b.status_code), b.text[:500])
+                    a, b = a.json(), b.json()
+                    self.assertEqual('expired', b['state'])
+                    self.assertIn(old, a['error'])
+                    self.assertNotIn(old, b['error'])
+                    self.assertIn(new, b['error'])
+                    self.assertEqual(clock.sub('', a['error'].replace(old, new)),
+                                     clock.sub('', b['error']))
+                    self.assertEqual(set(a), set(b))
+                    varying = ('error', 'server_time_ms', 'server_instance')
+                    self.assertEqual({k: v for k, v in a.items() if k not in varying},
+                                     {k: v for k, v in b.items() if k not in varying})
+
+            # GET /requests' 404: the same members, the text naming the three cases
+            old, new = self.INTENDED_DIFFERENCES['requests_404']
+            a = base_multi.get('requests/it-never-sent')
+            b = self.server.get('requests/it-never-sent')
+            self.assertEqual((404, 404), (a.status_code, b.status_code))
+            a, b = a.json(), b.json()
+            self.assertEqual(set(a), set(b))
+            self.assertEqual(a['request_id'], b['request_id'])
+            self.assertIn(old, a['error'])
+            self.assertEqual(a['error'].replace(old, new), b['error'])
+        finally:
+            for server in servers:
+                server.stop()
+
     def test_unmasked_pairs_are_sampled_at_load(self):
         """The dummy fraction of every graph without its mask is sampled at start-up, in its
         loading thread, as a single-graph server samples its graph: the first /pattern on an
@@ -1222,6 +1344,55 @@ class TestMultiGraphServer(TestingBase):
             self.assertLess(took, 5)
         finally:
             server.stop()
+
+    def test_sigterm_during_a_multi_pair_resolve_writes_no_complete_answer(self):
+        """SIGTERM while a two-pair /resolve runs (class Shutdown in server.cpp, master's #681:
+        the signal thread stops the HTTP workers only, the acceptor and the connections are
+        closed after their join): the server exits with status 0 within its bounds (the drain,
+        then kExitMs for a handler that does not return), and the client receives no
+        complete-looking answer, only a closed connection or a body short of its
+        Content-Length. b_big's resolve of the whole record runs for seconds; the signal comes
+        once the request is logged as started."""
+        server = Server([self._cutoff_csv(), '--traverse-max-time-ms', '600000'],
+                        os.path.join(self.tempdir.name, 'server_sigterm_resolve.log'), threads=2)
+        got = {}
+
+        def post():
+            try:
+                got['response'] = server.post('resolve', dict(self._slow_resolve(100000000),
+                                                              graphs=['a_kleb', 'b_big'],
+                                                              request_id='it-sigterm-1'))
+            except requests.exceptions.RequestException as e:
+                got['error'] = e
+        client = threading.Thread(target=post)
+        try:
+            client.start()
+            deadline = time.time() + 60
+            while 'request_id it-sigterm-1' not in server.text():
+                self.assertLess(time.time(), deadline, server.text()[-3000:])
+                self.assertTrue(client.is_alive(), got)
+                time.sleep(0.05)
+            time.sleep(0.3)
+            self.assertTrue(client.is_alive(), 'the request ended before the signal')
+            started = time.time()
+            server.process.send_signal(signal.SIGTERM)
+            self.assertEqual(0, server.process.wait(timeout=60))
+            took = time.time() - started
+            client.join(timeout=60)
+            self.assertFalse(client.is_alive())
+            # the drain (3 s, traversals only) and kExitMs (3 s) bound the exit; slack for load
+            self.assertLess(took, 20)
+            self.assertNotIn('response', got,
+                             got.get('response') is not None and
+                             (got['response'].status_code, got['response'].text[:300]))
+            self.assertIsInstance(got['error'], (requests.exceptions.ConnectionError,
+                                                 requests.exceptions.ChunkedEncodingError))
+            text = server.text()
+            self.assertIn('[Server] Shutting down...', text)
+            self.assertIn('Signal 15: shutting down', text)
+        finally:
+            server.stop()
+            client.join(timeout=60)
 
     def test_finish_by_ms_cuts_a_pair_and_the_registry_states_its_end(self):
         """finish_by_ms (E20) on /resolve without a budget: the effective deadline is
