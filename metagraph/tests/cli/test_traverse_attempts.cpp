@@ -1035,7 +1035,7 @@ TEST(GraphletAttempt, DeliveryReserveMovesTheWalkUntil) {
     s.delivery_compress_mbps = 50;     // 50,000 bytes per ms
     s.delivery_build_mbps = 5;         // 5,000 bytes per ms
     s.delivery_stop_ms = 100;
-    // the ratios this arithmetic is written for (the defaults are 30 and 50)
+    // the ratios this arithmetic is written for (the defaults are 6 and 50)
     s.account_per_text_byte_json = 20;
     s.account_per_text_byte_graphlet = 40;
     auto reserve = [](double model, double stop = 100) { return 1.25 * model + stop; };
@@ -1207,6 +1207,59 @@ TEST(GraphletAttempt, DeliveryReserveMovesTheWalkUntil) {
     g->set_bound(1, 30'000);
     g->progress(40 * 1'000'000ull);
     EXPECT_NEAR(reserve(1e6 / 404e3 + 1e6 / 104e3, 300), g->reserve_ms(), 1e-6);
+}
+
+// A detail writing a text byte per more than 896 account bytes (summary on an SRA-like index)
+// never writes kMeasuredTextBytes of text below a 896 MiB account: a seed holding at least
+// kMeasuredAccountBytes of account beside its record coordinates' share measures its ratio
+// whatever its text, so that the configured ratio (6: a 900 MB account estimated as 150 MB of
+// text) does not hold such a detail's walks far short of their walk-until for good (E5b
+// review, F1)
+TEST(GraphletAttempt, LargeAccountsMeasureTheRatio) {
+    FakeClock clock;
+    AttemptSettings s = settings_with(&clock);
+    s.allowance_ms = 10'000;
+    s.delivery_compress_mbps = 50;     // 50,000 bytes per ms
+    s.delivery_build_mbps = 10;        // 10,000 bytes per ms
+    s.delivery_stop_ms = 1000;
+    auto reserve = [](double model) { return 1.25 * model + 1000; };
+    AttemptRegistry registry(s);
+    // 50 KB of text: no ratio below the account's threshold, and its ratio at it
+    auto a = attempt_of(registry, "summary-1");
+    a->set_delivery_detail("summary");
+    a->set_bound(1, 30'000);
+    a->note_delivered(50'000, 0.01, kMeasuredAccountBytes - 1);
+    EXPECT_EQ(0.0, a->own_account_per_text_byte());
+    a->note_delivered(50'000, 0.01, kMeasuredAccountBytes);
+    const double ratio = static_cast<double>(kMeasuredAccountBytes) / 50'000;
+    EXPECT_EQ(ratio, a->own_account_per_text_byte());
+    // the threshold reads the account without the record coordinates' share
+    auto c = attempt_of(registry, "summary-2");
+    c->set_delivery_detail("summary");
+    c->set_bound(1, 30'000);
+    c->note_delivered(50'000, 0.01, kMeasuredAccountBytes + 10, 20, 100);
+    EXPECT_EQ(0.0, c->own_account_per_text_byte());
+    // the server measures it for its next attempts (as on_written does) ...
+    registry.note_account_per_text_byte("summary", a->own_account_per_text_byte());
+    EXPECT_EQ(ratio, registry.measured().account_per_text_byte.at("summary"));
+    // ... whose 900 MB walk is estimated at that ratio: about 670 KB of text, the floor
+    auto b = attempt_of(registry, "summary-3");
+    b->set_measured(registry.measured());
+    b->set_delivery_detail("summary");
+    b->set_bound(1, 30'000);           // 40,000 ms
+    b->progress(900'000'000);
+    const double text = std::ceil(900e6 / ratio);
+    EXPECT_NEAR(reserve(text / 5e4 + text / 1e4), b->reserve_ms(), 1e-6);
+    EXPECT_EQ(35'000, b->walk_until_ms());
+    // never measured, the configured ratio estimates 150 MB of text: the walk-until 16.5 s earlier
+    AttemptRegistry fresh(s);
+    auto f = attempt_of(fresh, "summary-4");
+    f->set_delivery_detail("summary");
+    f->set_bound(1, 30'000);
+    f->progress(900'000'000);
+    EXPECT_EQ(6.0, s.account_per_text_byte_json);
+    EXPECT_NEAR(40'000 - reserve(150e6 / 5e4 + 150e6 / 1e4), f->walk_until_ms(), 1e-6);
+    EXPECT_LT(f->walk_until_ms(), 18'500);
 }
 
 // usage.bound.walk_until_ms, when no walk-until stopped the walk, is the lowest walk-until that

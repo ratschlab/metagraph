@@ -167,7 +167,10 @@ struct AttemptSettings {
     // attempt's own seeds of at least kMeasuredTextBytes — and how many bytes of the walker's
     // modelled account one byte of a seed's text is at most taken for (the model prices every
     // delivered byte several times over). The ratios are starting estimates, which a server
-    // replaces by its own measurements once a seed of the detail ran: for the JSON details 6,
+    // replaces by its own measurement once a seed of the detail wrote at least kMeasuredTextBytes
+    // of text or held at least kMeasuredAccountBytes of account (beside its record
+    // coordinates' share; the smallest of its last kRateWindow such seeds, or the attempt's own
+    // where smaller): for the JSON details 6,
     // just below the smallest ratio measured without the memory budget's cache allotments (6.15,
     // JSON results whose text is mostly 12,000-character label names: E5b's fix, 2026-11-07),
     // to be re-measured on staging once the merged engine is deployed; it was 30, below ratios
@@ -218,6 +221,15 @@ constexpr uint64_t kCoordinateAccountPerTextByte = 12;
 // a seed's text (or a response) of at least this many bytes measures a delivery rate (smaller
 // ones are dominated by fixed costs)
 constexpr uint64_t kMeasuredTextBytes = 1 << 20;
+// ... and a seed's account per text byte, which a seed whose account (without its record
+// coordinates' share) is at least this many bytes measures too, whatever its text: a detail
+// writing a text byte per more than 896 account bytes (summary on an SRA-like index, 1,344 with
+// the allotments) never writes 1 MiB of text below a 896 MiB account, so it would keep the
+// configured ratio for good (6: a 900 MB account estimated as 150 MB of text, which on a 30 s
+// bound moves the walk-until from about 24.5 s to 6.5 s). At 64 MiB the result's fixed part
+// is under 1% of the account; below about 160 MB the walk-until's floor (allowance / 2) holds
+// whatever the ratio
+constexpr uint64_t kMeasuredAccountBytes = uint64_t(64) << 20;
 // the delivery rates the server measured on its own responses: the slowest of the last this
 // many measurements replaces the configured rate (a machine slower than assumed is seen at
 // once, a temporarily slow response is remembered for a while)

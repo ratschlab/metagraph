@@ -1084,10 +1084,15 @@ response is delivered whole (`outcome.delivery: inline`, §7.0; spooled / paged 
     measured ratio would have understated 2.6–4.1 times on coordinate-heavy seeds (`DESIGN-traverse-graphlet.md`
     §18.8, M2); a ratio is
     measured as (A − C) / (the text − the text the coordinates wrote, counted exactly from digits and
-    punctuation), on a rest of at least 1 MiB, so that a request with coordinates measures what the same walk
-    without them would, and the server's measured ratios do not depend on whether one came first; A is the
-    walk's account at its end without the allotments, its `final_bytes` (§7.3), the account E is estimated
-    from — *E5b's fix: with the allotments in both, a seed of 1 MiB of text under a budget of 1 GiB or more
+    punctuation), on a rest of at least 1 MiB of text or of at least 64 MiB of account (*E5b's review, F1*: a
+    detail writing a text byte per more than 896 account bytes — `summary` on an SRA-like index, 1,344 with the
+    allotments — never writes 1 MiB of text below a 896 MiB account and would keep the configured ratio for
+    good: at 6 a 900 MB account is estimated as 150 MB of text, which on a 30 s bound moves the walk-until from
+    about 24.5 s to 6.5 s; at 64 MiB the result's fixed part is under 1% of its account), so that a request with
+    coordinates measures what the same walk without them would, and the server's measured ratios do not depend
+    on whether one came first; the sample's A is the walk's account at its end without the allotments, its
+    `final_bytes` (§7.3), and E is estimated from the account the walk publishes at every level's end, likewise
+    without them — *E5b's fix: with the allotments in both, a seed of 1 MiB of text under a budget of 1 GiB or more
     measured a ratio of at least 128 and the estimate of a larger seed after it fell short by as much: on
     servers at budgets of 64 MiB to 4 GiB with results growing to 97 MiB of text, up to 3.3 times too little
     text, or 12 times too much the other way, against 0.92 to 1.07 times the text without them*),
@@ -1101,7 +1106,9 @@ response is delivered whole (`outcome.delivery: inline`, §7.0; spooled / paged 
     smallest SRA JSON ratio), whose accounts included the allotments, which overstate every budgeted seed's
     ratio); the graphlet's 50 (58.4 and more measured then) is not re-measured. They stay conservative: a
     server's first large attempt of a detail can be cut early until it has measured that detail itself, its
-    measured ratio replacing the configured one once a seed of the detail ran — on a warm SRA server the first
+    measured ratio replacing the configured one once a seed of the detail wrote at least 1 MiB of text or held
+    at least 64 MiB of account beside its record coordinates (in this attempt, or in one of the server's last 16
+    that did) — on a warm SRA server the first
     `tree` and `full` attempts of a 16S beam with a 40 s bound were cut at 3-5 s with 20/40 and with 30/50 alike,
     the `tree` text measuring 115-129 account units a byte (with the allotments) against the 30 assumed; the
     earlier report of 18.2 s instead of 11.0 s on a fresh server came from a cold walk against an intermediate
@@ -1110,7 +1117,8 @@ response is delivered whole (`outcome.delivery: inline`, §7.0; spooled / paged 
     `compress_mbps` (`--traverse-delivery-compress-mbps`, default 50) and `build_mbps`
     (`--traverse-delivery-build-mbps`, default 10) until the server has measured its own: then, for each, the
     slowest rate — or for the detail the smallest ratio — of its last 16 measurements on `/traverse` responses
-    and seeds' results of at least 1 MiB of text, and the attempt's own seeds' where more conservative, so
+    and seeds' results of at least 1 MiB of text (a ratio also on a seed of at least 64 MiB of account), and the
+    attempt's own seeds' where more conservative, so
     that a machine slower than assumed is seen at once and a fast one is not held to the guess (both
     capabilities routes state the measurements). On the M5 Max of the measurements the configured guesses
     alone stopped the walk of a 403 MB SRA response at 2.3 s of its 35 s walk-until (account 35.6 GB, 88 per

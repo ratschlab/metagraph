@@ -1521,7 +1521,9 @@ reserve = 1.25 × ( (text written so far + walked seed's estimated text) / compr
   (12 account bytes per text byte, §18.6), the rest at the ratio in use.
 - The configured rates (`--traverse-delivery-compress-mbps` 50, `--traverse-delivery-build-mbps` 10) and ratios
   (6 account bytes per text byte for JSON, 50 for a graphlet) apply until the server has measured its own on
-  responses and seeds of 1 MiB or more: then the slowest rate and the smallest ratio (per detail) of its last 16
+  responses and seeds of 1 MiB or more (a ratio also on a seed of 64 MiB of account or more, whatever its text:
+  a detail of more than 896 account bytes per text byte never writes 1 MiB below that): then the slowest rate and
+  the smallest ratio (per detail) of its last 16
   measurements, and the attempt's own where more conservative. The JSON ratio starts just below the smallest
   measured without the memory budget's cache allotments (6.15, results whose text is mostly long label names;
   E5b's fix, 2026-11-07, to be re-measured on staging; it was 30, below ratios of real responses whose accounts
