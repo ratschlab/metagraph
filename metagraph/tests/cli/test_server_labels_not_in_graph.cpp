@@ -18,6 +18,7 @@
 #include "graph/annotated_dbg.hpp"
 #include "graph/representation/succinct/dbg_succinct.hpp"
 #include "annotation/representation/column_compressed/annotate_column_compressed.hpp"
+#include "tests/source_path.hpp"
 
 
 // Labels a pair of a multi-graph server does not hold (SPEC-multigraph-envelope.md section 2):
@@ -258,10 +259,10 @@ TEST(LabelsNotInGraph, ASeedOfAbsentLabelsIsNotWalked) {
 // its seed, outcome and limitations, under the sample request's memory budget and without
 // coordinates asked for
 TEST(LabelsNotInGraph, TheSampleStatesTheSeedResultsShape) {
-    // run from the build directory, like every test reading ../tests/data
-    std::ifstream in("../tests/data/multigraph_contract/09_traverse_entry_labels_not_in_graph.json",
+    std::ifstream in(source_path("tests/data/multigraph_contract/"
+                                 "09_traverse_entry_labels_not_in_graph.json"),
                      std::ios::binary);
-    ASSERT_TRUE(in.good()) << "sample 09 not found (run from the build directory)";
+    ASSERT_TRUE(in.good()) << "sample 09 not found";
     const std::string text { std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>() };
     const Json::Value sample = parse(text)["body"]["answers"][0]["results"][0];
     const Pair pair;

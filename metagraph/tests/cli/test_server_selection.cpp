@@ -14,6 +14,7 @@
 #include "cli/server_checks.hpp"
 #include "cli/server_selection.hpp"
 #include "cli/traverse.hpp"
+#include "tests/source_path.hpp"
 
 
 // The selection of a multi-graph server's pairs (server_selection.hpp) on a small graph list:
@@ -35,10 +36,9 @@ Json::Value parse(const std::string &text) {
 
 // A reference sample of SPEC-multigraph-envelope.md, {route, status, note, request?, body}
 Json::Value sample(const std::string &name) {
-    // run from the build directory, like every test reading ../tests/data
-    const std::string path = "../tests/data/multigraph_contract/" + name;
+    const std::string path = source_path("tests/data/multigraph_contract/" + name);
     std::ifstream in(path, std::ios::binary);
-    EXPECT_TRUE(in.good()) << path << " not found (run from the build directory)";
+    EXPECT_TRUE(in.good()) << path << " not found";
     const std::string text { std::istreambuf_iterator<char>(in),
                              std::istreambuf_iterator<char>() };
     return parse(text);

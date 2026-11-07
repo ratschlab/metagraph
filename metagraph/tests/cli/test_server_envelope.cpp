@@ -16,6 +16,7 @@
 #include "cli/server_checks.hpp"
 #include "cli/server_envelope.hpp"
 #include "cli/traverse.hpp"
+#include "tests/source_path.hpp"
 
 
 // The multi-graph envelope's builders (server_envelope.hpp) against the reference samples of
@@ -37,10 +38,9 @@ Json::Value parse(const std::string &text) {
 
 // A reference sample, {route, status, note, request?, body}
 Json::Value sample(const std::string &name) {
-    // run from the build directory, like every test reading ../tests/data
-    const std::string path = "../tests/data/multigraph_contract/" + name;
+    const std::string path = source_path("tests/data/multigraph_contract/" + name);
     std::ifstream in(path, std::ios::binary);
-    EXPECT_TRUE(in.good()) << path << " not found (run from the build directory)";
+    EXPECT_TRUE(in.good()) << path << " not found";
     const std::string text { std::istreambuf_iterator<char>(in),
                              std::istreambuf_iterator<char>() };
     return parse(text);
@@ -185,8 +185,8 @@ TEST(ServerEnvelope, MemberOrderIsTheWritersAndTheSpecSaysSo) {
     EXPECT_EQ(sorted, in_text);
     EXPECT_NE("envelope_version", in_text.front());
 
-    std::ifstream in("../docs/SPEC-multigraph-envelope.md", std::ios::binary);
-    ASSERT_TRUE(in.good()) << "the spec not found (run from the build directory)";
+    std::ifstream in(source_path("docs/SPEC-multigraph-envelope.md"), std::ios::binary);
+    ASSERT_TRUE(in.good()) << "the spec not found";
     const std::string spec { std::istreambuf_iterator<char>(in),
                              std::istreambuf_iterator<char>() };
     EXPECT_EQ(std::string::npos, spec.find("Members, in this order"));

@@ -4,6 +4,7 @@
 #include <string>
 
 #include "seq_io/kmc_parser.hpp"
+#include "tests/source_path.hpp"
 
 
 namespace {
@@ -12,7 +13,7 @@ using namespace mtg;
 
 using mtg::seq_io::read_kmers;
 
-const std::string kTestDataDir = "../tests/data";
+const std::string kTestDataDir = source_path("tests/data");
 // constructed with '-b' flag in KMC
 const std::string kTestKMCDatabase = kTestDataDir + "/transcripts_1000_kmc_counters";
 // constructed without '-b' flag in KMC

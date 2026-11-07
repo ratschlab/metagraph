@@ -9,6 +9,7 @@
 
 #include "common/seq_tools/reverse_complement.hpp"
 #include "kmer/alphabets.hpp"
+#include "tests/source_path.hpp"
 
 
 namespace {
@@ -19,7 +20,7 @@ using namespace mtg::graph::align;
 using namespace mtg::test;
 using namespace mtg::kmer;
 
-const std::string test_data_dir = "../tests/data";
+const std::string test_data_dir = source_path("tests/data");
 const bool PICK_REV_COMP = true;
 
 inline bool is_exact_match(const Alignment &alignment) {

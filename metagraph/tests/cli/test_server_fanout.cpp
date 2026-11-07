@@ -32,6 +32,7 @@
 #include "cli/traverse.hpp"
 #include "cli/traverse_attempts.hpp"
 #include "common/threads/threading.hpp"
+#include "tests/source_path.hpp"
 
 
 // The multi-graph fan-out of /resolve and /pattern (server_fanout.hpp; SPEC-multigraph-envelope.md
@@ -56,10 +57,9 @@ Json::Value parse(const std::string &text) {
 
 // A reference sample of SPEC-multigraph-envelope.md, {route, status, note, request?, body}
 Json::Value sample(const std::string &name) {
-    // run from the build directory, like every test reading ../tests/data
-    const std::string path = "../tests/data/multigraph_contract/" + name;
+    const std::string path = source_path("tests/data/multigraph_contract/" + name);
     std::ifstream in(path, std::ios::binary);
-    EXPECT_TRUE(in.good()) << path << " not found (run from the build directory)";
+    EXPECT_TRUE(in.good()) << path << " not found";
     const std::string text { std::istreambuf_iterator<char>(in),
                              std::istreambuf_iterator<char>() };
     return parse(text);
@@ -570,8 +570,8 @@ TEST(ServerFanout, TheSpecStatesTheInlinePairRule) {
     EXPECT_GT(SteadyClock::now(), d.cutoff + 50ms);
     wait_for_workers();
 
-    std::ifstream in("../docs/SPEC-multigraph-envelope.md", std::ios::binary);
-    ASSERT_TRUE(in.good()) << "the spec not found (run from the build directory)";
+    std::ifstream in(source_path("docs/SPEC-multigraph-envelope.md"), std::ios::binary);
+    ASSERT_TRUE(in.good()) << "the spec not found";
     std::string spec;
     bool space = false;
     for (char c; in.get(c); ) {
@@ -1802,13 +1802,13 @@ TEST(ServerFanout, NoIdIsAdmittedAfterA404WithAnEarlierClock) {
 // so is every attempt_id and request_id (the request's, its attempt's, the attempt's usage). A
 // reader that checks identity must accept every sample (GPT review 3, finding 10).
 TEST(ServerFanout, EachSampleNamesOneServerAndOneExecution) {
-    const std::string dir = "../tests/data/multigraph_contract";
+    const std::string dir = source_path("tests/data/multigraph_contract");
     std::vector<std::string> names;
     for (const auto &file : std::filesystem::directory_iterator(dir)) {
         if (file.path().extension() == ".json")
             names.push_back(file.path().filename().string());
     }
-    ASSERT_LE(23u, names.size()) << dir << " (run from the build directory)";
+    ASSERT_LE(23u, names.size()) << dir;
     for (const std::string &name : names) {
         std::set<std::string> instances;
         std::set<std::string> ids;
@@ -1934,7 +1934,7 @@ TEST(ServerFanout, EachSampleDeadlineTellsOneTimeline) {
     size_t checked = 0;
     size_t traverse_checked = 0;
     size_t usages_checked = 0;
-    for (const auto &file : std::filesystem::directory_iterator("../tests/data/multigraph_contract")) {
+    for (const auto &file : std::filesystem::directory_iterator(source_path("tests/data/multigraph_contract"))) {
         if (file.path().extension() != ".json")
             continue;
         const std::string name = file.path().filename().string();
@@ -2142,7 +2142,7 @@ TEST(ServerFanout, EachRegistrySampleIsRetainedForItsRetention) {
     ASSERT_NE(std::string::npos, at) << kept;
     const int64_t requests_s = std::stoll(kept.substr(at + std::string("requests are kept ").size()));
     size_t checked = 0;
-    for (const auto &file : std::filesystem::directory_iterator("../tests/data/multigraph_contract")) {
+    for (const auto &file : std::filesystem::directory_iterator(source_path("tests/data/multigraph_contract"))) {
         if (file.path().extension() != ".json")
             continue;
         const std::string name = file.path().filename().string();
@@ -2173,7 +2173,7 @@ TEST(ServerFanout, EachRegistrySampleIsRetainedForItsRetention) {
 TEST(ServerFanout, SamplesNamingOneAttemptDescribeOneExecution) {
     std::map<std::string, std::pair<std::string, Json::Value>> recorded;
     std::vector<std::pair<std::string, Json::Value>> attempts;
-    for (const auto &file : std::filesystem::directory_iterator("../tests/data/multigraph_contract")) {
+    for (const auto &file : std::filesystem::directory_iterator(source_path("tests/data/multigraph_contract"))) {
         if (file.path().extension() != ".json")
             continue;
         const std::string name = file.path().filename().string();

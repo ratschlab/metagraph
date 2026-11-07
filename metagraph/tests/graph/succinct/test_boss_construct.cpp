@@ -19,6 +19,7 @@
 #include "graph/representation/succinct/boss_construct.hpp"
 #include "kmer/kmer_collector.hpp"
 #include "tests/utils/gtest_patch.hpp"
+#include "tests/source_path.hpp"
 
 
 namespace mtg::graph::boss {
@@ -44,7 +45,7 @@ using namespace mtg::graph::boss;
 
 using mtg::kmer::KmerExtractorBOSS;
 
-const std::string test_data_dir = "../tests/data";
+const std::string test_data_dir = source_path("tests/data");
 const std::string test_fasta = test_data_dir + "/test_construct.fa";
 const std::string test_dump_basename = test_dump_dir() + "/graph_dump_test";
 
