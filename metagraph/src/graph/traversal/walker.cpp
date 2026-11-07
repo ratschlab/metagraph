@@ -3793,7 +3793,7 @@ void Walker::write_meter() const noexcept {
     // traverse_seed returns, and the row-diff path cache within the label cache's allotment is
     // cleared then (PathCacheScope). The same with and without a budget that does not bind
     const uint64_t held = accounted();
-    m.memory_final = held > allotted_ ? held - allotted_ : 0;
+    m.memory_final = without_allotments(held, allotted_);
     m.soft_excess = overshoot_;
     m.walked = true;
     m.memory_coordinates = coord_account_;
@@ -5091,7 +5091,7 @@ void Walker::run_level(ArmState &arm, uint64_t depth) {
     // understate a larger seed's text) nor add text to the estimate
     if (control_ && control_->progress) {
         const uint64_t account = accounted();
-        control_->progress(account > allotted_ ? account - allotted_ : 0, coord_account_);
+        control_->progress(without_allotments(account, allotted_), coord_account_);
     }
 }
 
@@ -6640,10 +6640,14 @@ uint64_t memory_allotments(uint64_t budget) {
          + std::min<uint64_t>(budget / 16, uint64_t(64) << 20);
 }
 
+uint64_t without_allotments(uint64_t bytes, uint64_t allotted) {
+    return bytes > allotted ? bytes - allotted : 0;
+}
+
 uint64_t memory_budget_holding(uint64_t need, uint64_t allotted) {
     constexpr uint64_t kMiB = uint64_t(1) << 20;
     // what the account holds whatever the budget: the need without this budget's allotments
-    const uint64_t own = need > allotted ? need - allotted : 0;
+    const uint64_t own = without_allotments(need, allotted);
     if (!allotted || own > std::numeric_limits<uint64_t>::max() / 2)
         return std::max<uint64_t>(1, (own + kMiB - 1) / kMiB) * kMiB;
     // B - memory_allotments(B) never decreases with B (its slope is 11/16, 15/16 or 1), so

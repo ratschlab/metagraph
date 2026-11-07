@@ -4405,13 +4405,6 @@ static uint64_t failed_result_bytes(const Strategy &st, const Seed &seed) {
         + (d.name ? d.name(seed.seed_id, DeliveryCosts::Name::SEED_ID) : 0);
 }
 
-// The walk's modelled account without a memory budget's fixed cache allotments (|bytes| is the
-// account's peak or final; ResourceAccount::allotted): the same with and without a budget that
-// does not bind, as work.memory_bytes states it (SPEC §7.2.2)
-static uint64_t without_allotments(uint64_t bytes, const ResourceAccount &account) {
-    return bytes > account.allotted ? bytes - account.allotted : 0;
-}
-
 // memory_bound_soft's observed excess (bytes) for a seed failed or refused without an
 // admitted result. Such a result is not admitted, and it echoes the request's seed_id,
 // which only the request's size bounds: a seed_id that the depth-0 admission refused still
@@ -5479,8 +5472,10 @@ Json::Value process_traverse_request(const Json::Value &json,
                        true, r.resource_stop ? refused_of(*r.resource_stop) : std::nullopt,
                        names);
                 const std::string outcome = refused["outcome"]["walks"].asString();
-                // the walk's peak; its result is the refusal
-                put_memory(&refused, without_allotments(r.account.memory_peak, r.account),
+                // the walk's peak without a memory budget's fixed cache allotments (the same with
+                // and without a budget that does not bind, as work.memory_bytes states it, SPEC
+                // §7.2.2); its result is the refusal
+                put_memory(&refused, without_allotments(r.account.memory_peak, r.account.allotted),
                            failed_result_bytes(req.strategy, seed) + names);
                 append(std::move(refused), 0);
                 delivered(outcome);
@@ -5507,8 +5502,8 @@ Json::Value process_traverse_request(const Json::Value &json,
                 put_thread_usage(&rj["timing"], seed_usage.elapsed());
             }
             // after the graphlet's text: JSON beside its body, never in it
-            put_memory(&rj, without_allotments(r.account.memory_peak, r.account),
-                       without_allotments(r.account.memory_final, r.account));
+            put_memory(&rj, without_allotments(r.account.memory_peak, r.account.allotted),
+                       without_allotments(r.account.memory_final, r.account.allotted));
             const std::string outcome = rj["outcome"]["walks"].asString();
             // the delivery reserve's sample: the walk's account at its end without the
             // budget's cache allotments (final_bytes), as the walk's progress states it
@@ -5542,7 +5537,8 @@ Json::Value process_traverse_request(const Json::Value &json,
             state_unknown_labels(&failed, seed);
             // what the account held when the budget failed the seed, and what its result holds
             const uint64_t names = put_failed_memory(
-                    &failed, seed, without_allotments(e.account().memory_peak, e.account()));
+                    &failed, seed, without_allotments(e.account().memory_peak,
+                                                      e.account().allotted));
             walked("failed", resource_name(e.stop().resource), true, refused_of(e.stop()),
                    names);
             append(std::move(failed), 0);
