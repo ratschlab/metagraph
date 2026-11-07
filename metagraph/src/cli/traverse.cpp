@@ -1684,12 +1684,16 @@ static Json::Value memory_bound_soft(const Strategy &st, const ResourceAccount &
                       uint_json((account.soft_overshoot + (1 << 20) - 1) >> 20),
                       account.decode_charged
                       // (at most 640 bytes, kEffect: every limitation's effect is priced at
-                      // that width.) Not observed beside the header lookup and the dictionary's
-                      // first table: the seed phase's two further copies of its label names (its
-                      // resolved references and the names kept for the result; the dictionary's
-                      // two are observed), bounded by max_seed_labels x the longest name twice,
-                      // not by the budget (E5b's sweep: 121 MiB beyond the account and the
-                      // observed excess for 4,096 names of 12,000 B under 64 MiB)
+                      // that width; 634 here.) Not observed beside the header lookup and the
+                      // dictionary's first table: the seed phase's two further copies of its
+                      // label names (its resolved references and the names kept for the result;
+                      // the dictionary's two are observed), bounded by twice the seed's labels x
+                      // the longest name, not by the budget: a derived set has at most
+                      // max_seed_labels labels, an explicit list as many as the request body
+                      // holds (E5b's sweep: 121 MiB beyond the account and the observed excess for
+                      // 4,096 names of 12,000 B under 64 MiB). The seed's cost dictionary below
+                      // (dict) copies an explicit list once more, outside the account like the
+                      // parsed request: bounded by the request body (SPEC §5)
                       ? "the memory budget is enforced on the walker's modelled state, this "
                         "response's output and the annotation reads (rows and coordinates are "
                         "charged before they are held; a read not fitting is refused whole); "
@@ -1697,8 +1701,8 @@ static Json::Value memory_bound_soft(const Strategy &st, const ResourceAccount &
                         "keys and rows until its heads are done, the seed phase's intersection, "
                         "hits, dictionary, a failed result's echo of seed_id (observed: the "
                         "largest excess, MiB, rounded up) and, not observed, an index-wide header "
-                        "lookup, two more copies of the seed's label names (at most 2 x "
-                        "max_seed_labels x the longest) and the dictionary's first table and "
+                        "lookup, two more copies of the label names (at most twice the seed's "
+                        "labels x the longest) and the dictionary's first table and "
                         "growth copy (1.5 KB)"
                       : "the memory budget is enforced on the walker's modelled state and on "
                         "this response's output, admitted per head; the annotation rows the "

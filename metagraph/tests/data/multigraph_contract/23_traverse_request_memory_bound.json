@@ -5,7 +5,7 @@
  "request": {
   "graph": "bact_other",
   "attempt_id": "svc-trv-91aa07-2",
-  "not_after_ms": 1794073640000,
+  "not_after_ms": 1794093258000,
   "seeds": [
    {
     "seed_id": "s0",
@@ -44,10 +44,10 @@
   "request_id": "svc-trv-91aa07-2",
   "server_instance": "7c1e0f3a9b24d6e8",
   "deadline": {
-   "cutoff_at": "2026-11-07T16:48:55.331Z",
-   "effective_deadline_at": "2026-11-07T16:49:00.331Z",
+   "cutoff_at": "2026-11-07T22:15:53.216Z",
+   "effective_deadline_at": "2026-11-07T22:15:58.216Z",
    "finish_by_ms": null,
-   "not_after_ms": 1794073640000
+   "not_after_ms": 1794093258000
   },
   "usage": {
    "attempt_id": "svc-trv-91aa07-2",
@@ -60,17 +60,17 @@
     "walk_until_ms": 95000
    },
    "bound_ms": 100000,
-   "elapsed_ms": 3,
+   "elapsed_ms": 4,
    "memory": {
     "held_bound_bytes": 1755948,
     "peak_admitted_bytes": 1745200,
     "soft_excess_bytes": 0
    },
-   "not_after_ms": 1794073640000,
+   "not_after_ms": 1794093258000,
    "observed_max_uninterruptible_ms": 1,
    "per_seed": [
     {
-     "elapsed_ms": 2,
+     "elapsed_ms": 3,
      "final_bytes": 707372,
      "index": 0,
      "outcome": "partial",
@@ -107,7 +107,7 @@
     }
    ],
    "reason": "completed",
-   "received_at": "2026-11-07T16:47:20.331Z",
+   "received_at": "2026-11-07T22:14:18.216Z",
    "seeds": {
     "abandoned": 0,
     "finished": 2,
@@ -115,9 +115,9 @@
     "started": 2
    },
    "server_instance": "7c1e0f3a9b24d6e8",
-   "stopped_at": "2026-11-07T16:47:20.333Z",
+   "stopped_at": "2026-11-07T22:14:18.219Z",
    "timing": {
-    "cpu_ms": 2.190417
+    "cpu_ms": 3.611708
    },
    "work": {
     "memory_bytes": 1745200
@@ -492,7 +492,7 @@
       ],
       "limitations": [
        {
-        "effect": "the memory budget is enforced on the walker's modelled state, this response's output and the annotation reads (rows and coordinates are charged before they are held; a read not fitting is refused whole); held beyond the admitted account, able to exceed the budget: a level's keys and rows until its heads are done, the seed phase's intersection, hits, dictionary, a failed result's echo of seed_id (observed: the largest excess, MiB, rounded up) and, not observed, an index-wide header lookup, two more copies of the seed's label names (at most 2 x max_seed_labels x the longest) and the dictionary's first table and growth copy (1.5 KB)",
+        "effect": "the memory budget is enforced on the walker's modelled state, this response's output and the annotation reads (rows and coordinates are charged before they are held; a read not fitting is refused whole); held beyond the admitted account, able to exceed the budget: a level's keys and rows until its heads are done, the seed phase's intersection, hits, dictionary, a failed result's echo of seed_id (observed: the largest excess, MiB, rounded up) and, not observed, an index-wide header lookup, two more copies of the label names (at most twice the seed's labels x the longest) and the dictionary's first table and growth copy (1.5 KB)",
         "kind": "memory_bound_soft",
         "knob": "bounds.max_memory_mb",
         "limit": 1,
@@ -546,20 +546,20 @@
        "validated_seed_id": "1353044a3eb27ba8"
       },
       "timing": {
-       "annotation_fetch_ms": 0.470415,
+       "annotation_fetch_ms": 0.8084589999999999,
        "cache_hits": 388,
        "coords_mapped": 990,
-       "cpu_ms": 1.3835,
+       "cpu_ms": 2.267791,
        "deadline": {
         "longest_piece": {
          "coordinates": 162,
          "kind": "read",
-         "ms": 0.11379194259643555,
+         "ms": 0.2538340091705322,
          "rows": 108
         },
         "stopped_by": "memory"
        },
-       "elapsed_ms": 1.3183330297470093,
+       "elapsed_ms": 2.248458981513977,
        "label_resolve_ms": 0.0,
        "path_cache": {
         "bytes_kept": 36752,
@@ -569,9 +569,9 @@
         "stored_rows_read": 740
        },
        "rows_fetched": 0,
-       "seed_fetch_ms": 0.070041,
-       "seed_phase_ms": 0.1789170503616333,
-       "serialize_ms": 0.054292,
+       "seed_fetch_ms": 0.112458,
+       "seed_phase_ms": 0.36020898818969727,
+       "serialize_ms": 0.077,
        "tuple_rows_fetched": 570
       },
       "unknown_labels": [],
@@ -817,7 +817,7 @@
       ],
       "limitations": [
        {
-        "effect": "the memory budget is enforced on the walker's modelled state, this response's output and the annotation reads (rows and coordinates are charged before they are held; a read not fitting is refused whole); held beyond the admitted account, able to exceed the budget: a level's keys and rows until its heads are done, the seed phase's intersection, hits, dictionary, a failed result's echo of seed_id (observed: the largest excess, MiB, rounded up) and, not observed, an index-wide header lookup, two more copies of the seed's label names (at most 2 x max_seed_labels x the longest) and the dictionary's first table and growth copy (1.5 KB)",
+        "effect": "the memory budget is enforced on the walker's modelled state, this response's output and the annotation reads (rows and coordinates are charged before they are held; a read not fitting is refused whole); held beyond the admitted account, able to exceed the budget: a level's keys and rows until its heads are done, the seed phase's intersection, hits, dictionary, a failed result's echo of seed_id (observed: the largest excess, MiB, rounded up) and, not observed, an index-wide header lookup, two more copies of the label names (at most twice the seed's labels x the longest) and the dictionary's first table and growth copy (1.5 KB)",
         "kind": "memory_bound_soft",
         "knob": "bounds.max_memory_mb",
         "limit": 1,
@@ -847,19 +847,19 @@
        "validated_seed_id": "0ba0302632c9db6a"
       },
       "timing": {
-       "annotation_fetch_ms": 0.130333,
+       "annotation_fetch_ms": 0.23887399999999992,
        "cache_hits": 138,
        "coords_mapped": 390,
-       "cpu_ms": 0.405375,
+       "cpu_ms": 0.715792,
        "deadline": {
         "longest_piece": {
          "coordinates": 160,
          "kind": "read",
-         "ms": 0.05533301830291748,
+         "ms": 0.10350000858306885,
          "rows": 55
         }
        },
-       "elapsed_ms": 0.36412501335144043,
+       "elapsed_ms": 0.6928750276565552,
        "label_resolve_ms": 0.0,
        "path_cache": {
         "bytes_kept": 11520,
@@ -869,9 +869,9 @@
         "stored_rows_read": 210
        },
        "rows_fetched": 0,
-       "seed_fetch_ms": 0.02666700000000002,
-       "seed_phase_ms": 0.06104111671447753,
-       "serialize_ms": 0.023958,
+       "seed_fetch_ms": 0.035833,
+       "seed_phase_ms": 0.08458304405212404,
+       "serialize_ms": 0.05125,
        "tuple_rows_fetched": 170
       },
       "unknown_labels": [],
@@ -890,7 +890,7 @@
         "observed": 2
        },
        {
-        "effect": "the memory budget is enforced on the walker's modelled state, this response's output and the annotation reads (rows and coordinates are charged before they are held; a read not fitting is refused whole); held beyond the admitted account, able to exceed the budget: a level's keys and rows until its heads are done, the seed phase's intersection, hits, dictionary, a failed result's echo of seed_id (observed: the largest excess, MiB, rounded up) and, not observed, an index-wide header lookup, two more copies of the seed's label names (at most 2 x max_seed_labels x the longest) and the dictionary's first table and growth copy (1.5 KB)",
+        "effect": "the memory budget is enforced on the walker's modelled state, this response's output and the annotation reads (rows and coordinates are charged before they are held; a read not fitting is refused whole); held beyond the admitted account, able to exceed the budget: a level's keys and rows until its heads are done, the seed phase's intersection, hits, dictionary, a failed result's echo of seed_id (observed: the largest excess, MiB, rounded up) and, not observed, an index-wide header lookup, two more copies of the label names (at most twice the seed's labels x the longest) and the dictionary's first table and growth copy (1.5 KB)",
         "kind": "memory_bound_soft",
         "knob": "bounds.max_memory_mb",
         "limit": 1,
@@ -989,9 +989,9 @@
      "support": "kmer"
     },
     "timing": {
-     "cpu_ms": 2.105625,
-     "elapsed_ms": 2.2378329999999997,
-     "serialize_ms": 0.07825
+     "cpu_ms": 3.473042,
+     "elapsed_ms": 3.755875,
+     "serialize_ms": 0.12825
     },
     "unknown_labels": [],
     "walk_rule": "every walk of at most complete_to_bp bases from the seed boundary is present when it uses no (k+1)-mer edge twice on its own path (edges are compared as (k+1)-mers), enters no seed node, and takes every step regardless of strand (a single-strand graph has no hairpins); after a reconvergence the merged walk is also barred from every edge used by any route merged into it (edge histories are united under on_reconverge: merge, so fewer walks are present than per path; on_reconverge: keep gives the per-path set); it is followed while some permitted label supports every node of it under the strategy's label rules",
@@ -1001,7 +1001,7 @@
    }
   ],
   "timing": {
-   "elapsed_ms": 2.421
+   "elapsed_ms": 4.021416
   },
   "work": {
    "memory_bytes": 1745200

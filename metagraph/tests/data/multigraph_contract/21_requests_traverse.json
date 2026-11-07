@@ -7,15 +7,15 @@
   "server_instance": "7c1e0f3a9b24d6e8",
   "route": "/traverse",
   "state": "ended",
-  "received_at": "2026-11-07T16:47:19.951Z",
-  "finished_at": "2026-11-07T16:47:19.953Z",
+  "received_at": "2026-11-07T22:14:17.758Z",
+  "finished_at": "2026-11-07T22:14:17.764Z",
   "reason": "completed",
   "response": {
-   "bytes": 3578,
+   "bytes": 3577,
    "status": 200,
    "written": true
   },
-  "retained_until": "2026-11-07T17:47:19.953Z",
+  "retained_until": "2026-11-07T23:14:17.764Z",
   "pairs": [
    {
     "graph": "bact_other",
@@ -30,14 +30,14 @@
    "attempt_id": "svc-trv-91aa07-1",
    "bound_ms": 70000,
    "cancel_requested_at": null,
-   "deadline_at": "2026-11-07T16:48:29.951Z",
-   "elapsed_ms": 2,
-   "finished_at": "2026-11-07T16:47:19.953Z",
-   "not_after_ms": 1794070099000,
+   "deadline_at": "2026-11-07T22:15:27.758Z",
+   "elapsed_ms": 6,
+   "finished_at": "2026-11-07T22:14:17.764Z",
+   "not_after_ms": 1794089717000,
    "reason": "completed",
-   "received_at": "2026-11-07T16:47:19.951Z",
+   "received_at": "2026-11-07T22:14:17.758Z",
    "response": {
-    "bytes": 3578,
+    "bytes": 3577,
     "status": 200,
     "written": true
    },
@@ -51,7 +51,7 @@
    "state": "finished",
    "stop_requested_at": null,
    "stop_requested_by": null,
-   "stopped_at": "2026-11-07T16:47:19.952Z",
+   "stopped_at": "2026-11-07T22:14:17.763Z",
    "usage": {
     "attempt_id": "svc-trv-91aa07-1",
     "bound": {
@@ -63,16 +63,16 @@
      "walk_until_ms": 65000
     },
     "bound_ms": 70000,
-    "elapsed_ms": 2,
+    "elapsed_ms": 6,
     "memory": {
      "held_bound_bytes": 536870912,
      "peak_admitted_bytes": 101316182,
      "soft_excess_bytes": 0
     },
-    "not_after_ms": 1794070099000,
+    "not_after_ms": 1794089717000,
     "observed_max_uninterruptible_ms": 1,
     "reason": "completed",
-    "received_at": "2026-11-07T16:47:19.951Z",
+    "received_at": "2026-11-07T22:14:17.758Z",
     "seeds": {
      "abandoned": 0,
      "finished": 1,
@@ -80,9 +80,9 @@
      "started": 1
     },
     "server_instance": "7c1e0f3a9b24d6e8",
-    "stopped_at": "2026-11-07T16:47:19.952Z",
+    "stopped_at": "2026-11-07T22:14:17.763Z",
     "timing": {
-     "cpu_ms": 1.672875
+     "cpu_ms": 3.725166
     },
     "work": {
      "memory_bytes": 652886

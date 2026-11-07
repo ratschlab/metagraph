@@ -2156,7 +2156,7 @@ TEST(ServerFanout, TraverseRequestFromTheAttempt) {
     EXPECT_EQ("/traverse", j["route"].asString());
     EXPECT_EQ("ended", j["state"].asString());
     EXPECT_EQ("completed", j["reason"].asString());
-    EXPECT_EQ("2026-11-07T17:47:19.953Z", j["retained_until"].asString());
+    EXPECT_EQ("2026-11-07T23:14:17.764Z", j["retained_until"].asString());
     EXPECT_EQ(s21["pairs"], j["pairs"]);
     EXPECT_EQ(s21["response"], j["response"]);
     // a running attempt on a single-graph server: null tags, no response yet
