@@ -3760,11 +3760,15 @@ search's routes, `POST /pattern` and `GET /pattern/capabilities`, are `SPEC-patt
     them (its `index_fp` changes once; after that, adding a mask leaves it unchanged).
   - **The sequence header index** (header name → `(column, seq_id)`) is built while the index loads, before the
     server answers traversal requests, and logged with its size and time (`[Server] Sequence header index built:
-    N headers in S s`; 4.6 s for 33 M synthetic headers on the M5 Max): built by the first request naming a header
+    N entries, M distinct headers, in S s (B MiB)`: an entry per record, M the distinct headers among them, fewer
+    when a header names several records, `headers_unique`, `SPEC-multigraph-envelope.md` §9; E11's sorted array
+    builds 20 M synthetic headers in 0.59 s on four threads, the hash table before it 33 M in 4.6 s on the M5
+    Max): built by the first request naming a header
     instead, it cost that request seconds inside its time budget and outside every read timer (R10: staging,
-    refseq33m, a first header-named walk ran 9,947 ms on a 1,000 ms budget, 689 ms of it reading). It holds a
-    hash entry per header (on refseq33m, 33 M headers, on the order of 1-2 GB), which a server that serves header
-    labels would have built anyway. The CLI builds it once before its requests. A copy of a pair loaded into RAM
+    refseq33m, a first header-named walk ran 9,947 ms on a 1,000 ms budget, 689 ms of it reading). It holds 16
+    bytes per header (the header's 64-bit hash, its column and its record; on refseq33m, 33 M headers, about
+    0.53 GB; the hash table before E11 took about 40 bytes per header, on the order of 1-2 GB there), which a
+    server that serves header labels would have built anyway. The CLI builds it once before its requests. A copy of a pair loaded into RAM
     for one request (`in_ram`, multi-graph mode) shares the resident pair's mapping and so its index: the load
     neither reads the `.seqs` nor builds (the log holds the one start-up line per pair with a mapping, none per
     request).
