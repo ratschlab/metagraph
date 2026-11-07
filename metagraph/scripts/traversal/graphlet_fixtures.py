@@ -35,6 +35,7 @@ these files, not the other way round.
 
 import argparse
 import copy
+import difflib
 import json
 import os
 import random
@@ -921,6 +922,28 @@ def differs(path, text):
     return True
 
 
+def show_diff(path, text, limit=40):
+    """--check: the first |limit| lines of a unified diff of the committed fixture |path|
+    against the regenerated |text| (a JSON document both re-indented, its keys in their
+    order), on stderr, so that a failed check shows what differs"""
+    have = read_text(path) if os.path.exists(path) else ''
+    a, b = have, text
+    if path.endswith('.json') and have:
+        try:
+            a = json.dumps(json.loads(have), indent=1, ensure_ascii=False) + '\n'
+            b = json.dumps(json.loads(text), indent=1, ensure_ascii=False) + '\n'
+        except ValueError:
+            pass
+    lines = list(difflib.unified_diff(a.splitlines(keepends=True), b.splitlines(keepends=True),
+                                      'committed/' + os.path.basename(path),
+                                      'regenerated/' + os.path.basename(path), n=2))
+    sys.stderr.writelines(lines[:limit])
+    if len(lines) > limit:
+        print('... (%d more diff lines)' % (len(lines) - limit), file=sys.stderr)
+    elif lines and not lines[-1].endswith('\n'):
+        print(file=sys.stderr)
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.split('\n\n')[0])
     ap.add_argument('--dir', default=DEFAULT_DIR)
@@ -950,6 +973,7 @@ def main(argv=None):
                         continue
                     if args.check:
                         stale.append(fname)
+                        show_diff(path, text)
                     else:
                         with open(path, 'w', encoding='utf-8', newline='') as f:
                             f.write(text)
@@ -970,6 +994,7 @@ def main(argv=None):
                         continue
                     if args.check:
                         stale.append(fname)
+                        show_diff(path, text)
                     else:
                         with open(path, 'w', encoding='utf-8', newline='') as f:
                             f.write(text)
@@ -984,6 +1009,7 @@ def main(argv=None):
                     continue
                 if args.check:
                     stale.append(fname)
+                    show_diff(path, text)
                 else:
                     with open(path, 'w', encoding='utf-8', newline='') as f:
                         f.write(text)
@@ -1001,6 +1027,7 @@ def main(argv=None):
                     continue
                 if args.check:
                     stale.append(fname)
+                    show_diff(path, text)
                 else:
                     with open(path, 'w', encoding='utf-8', newline='') as f:
                         f.write(text)
