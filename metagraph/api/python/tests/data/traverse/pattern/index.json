@@ -14,6 +14,7 @@
   "masked_small_predicate_cap": "server_query -i {work}/masked/graph_k31.dbg -a {work}/masked/annotation.relaxed.relabeled.row_diff_brwt_coord.annodbg --pattern-max-predicate-labels 4 --index-name mini_refseq --index-release fixtures-mini_refseq  (the masked copy; a predicate may list 4 names)",
   "masked_protein_cap": "server_query -i {work}/masked/graph_k31.dbg -a {work}/masked/annotation.relaxed.relabeled.row_diff_brwt_coord.annodbg --pattern-max-mismatches-protein 1 --index-name mini_refseq --index-release fixtures-mini_refseq  (the masked copy; a peptide may be searched within 1 substituted residue, a dna or iupac pattern within 3)",
   "hash": "server_query -i {work}/hash/graph.orhashdbg -a {work}/hash/anno.column.annodbg --index-release fixtures-mini_refseq  (a hash graph of 1296536.fa at k = 31, column annotation by file name)",
+  "counts": "server_query -i {work}/counts/graph.dbg -a {work}/counts/anno.row_diff_int_brwt.annodbg --index-release fixtures-mini_refseq  (a BASIC graph of 1296536.fa and 546.fa at k = 31 with --mask-dummy; annotate --anno-filename --count-kmers, the row-diff stages with --count-kmers, transform_anno --anno-type row_diff_int_brwt --greedy, relax_brwt: a count annotation, its counts read as presence)",
   "utf8_labels": "server_query -i {work}/utf8/graph.dbg -a {work}/utf8/anno.column.annodbg --index-release fixtures-mini_refseq  (a BASIC graph at k = 31 of two records, A x 40 under the raw header bytes label\\xff, which are not UTF-8, and C x 40 under the valid header label\\ufffd, built with --mask-dummy; column annotation by header)"
  },
  "fixtures": {
@@ -187,6 +188,24 @@
    "hand_made": false,
    "headers": {},
    "shows": "the same PRIMARY server on the route of the full block: strand_stated false, the predicate's access rows (the block the server's answers are validated against)"
+  },
+  "traverse_capabilities_counts": {
+   "server": "counts",
+   "method": "GET",
+   "path": "/traverse/capabilities",
+   "status": 200,
+   "hand_made": false,
+   "headers": {},
+   "shows": "GET /traverse/capabilities of the counts server (a BASIC graph with its mask file, a row_diff_int_brwt annotation that stores a count per k-mer and label, as kingsford's index): `counts: \"presence_only\"` (SPEC-labeled-traversal-core.md §10.3, E14: /resolve and /traverse read the counts as presence, a label carrying a k-mer where its count is not zero), a member every other index's document leaves out; the gate block budgeted (a row-diff form read budget-aware), placement none (no coordinates)"
+  },
+  "pattern_capabilities_counts": {
+   "server": "counts",
+   "method": "GET",
+   "path": "/pattern/capabilities",
+   "status": 200,
+   "hand_made": false,
+   "headers": {},
+   "shows": "the same counts server on the route of the full block (the block its answers are validated against): annotation budgeted, placement none, support label_intersection"
   },
   "capabilities_representation_unsupported": {
    "server": "hash",

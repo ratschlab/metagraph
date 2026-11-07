@@ -3828,6 +3828,35 @@ class TestPatternFixtures(unittest.TestCase):
                 self.assertIsNotNone(full['k'])
                 self.assertEqual(set(SCHEMA['capabilities']), set(full))
 
+    def test_counts_is_stated_on_a_count_annotation_only(self):
+        """SPEC-labeled-traversal-core.md §10.3 (E14): GET /traverse/capabilities of a count
+        annotation states `counts: "presence_only"` (traverse_capabilities_counts, the counts
+        server's row_diff_int_brwt: /resolve and /traverse read its counts as presence), and the
+        probe of every other fixture server has no `counts` member, so that its document keeps
+        its bytes; the count annotation is a row-diff form the pattern route reads
+        budget-aware. (The capabilities block of a /resolve or /traverse answer on that server
+        is the probe's fields with the probe's values, `counts` among them.)"""
+        probes = {name: f['server'] for name, f in self.fixtures.items()
+                  if f['method'] == 'GET' and f['status'] == 200 and not f['hand_made']
+                  and f['path'].split('?')[0] == '/traverse/capabilities'}
+        self.assertEqual('counts', probes.get('traverse_capabilities_counts'))
+        self.assertLess(1, len(set(probes.values())))
+        for name, server in sorted(probes.items()):
+            with self.subTest(fixture=name):
+                doc = self.bodies[name][1]
+                if server == 'counts':
+                    self.assertEqual('presence_only', doc.get('counts'))
+                    self.assertEqual('budgeted', doc['pattern']['annotation'])
+                    self.assertEqual('budgeted', self.capabilities_of(server)['annotation'])
+                    self.assertFalse(doc['has_coordinates'])
+                else:
+                    self.assertNotIn('counts', doc)
+        # and on no other route's document (GET /capabilities states no index's fields)
+        for name, f in self.fixtures.items():
+            if f['method'] == 'GET' and f['path'].split('?')[0] != '/traverse/capabilities':
+                with self.subTest(fixture=name):
+                    self.assertNotIn('counts', self.bodies[name][1])
+
     def test_caps_rule_section_classifies_every_cap(self):
         """caps_rule refers to SPEC §4.5, and §4.5 classifies every cap of every fixture
         server's block: each named once, as a request field's maximum or as the server's

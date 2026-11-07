@@ -48,6 +48,10 @@ Servers (each a server_query on 127.0.0.1, started and stopped by this script):
              its slot (mismatches_above_cap), a dna pattern within 3
   hash       a hash graph (build --graph hash) of one mini record (1296536.fa) with a column
              annotation: a graph the engine does not recognise (representation_unsupported)
+  counts     a BASIC graph with --mask-dummy of two mini records (1296536.fa, 546.fa) with a
+             count annotation, row_diff_int_brwt by file name (--count-kmers, as kingsford's
+             index): the traversal routes read its counts as presence and say so
+             (capabilities `counts: "presence_only"`, SPEC-labeled-traversal-core.md §10.3)
 
 Three fixtures are HAND-MADE (index.json "hand_made": true): the bodies a server cannot be
 made to produce on demand (an answer that overran its finalisation reserve; a request during
@@ -148,6 +152,8 @@ SCAN_10 = 'ATGCCGGTGA'
 SCAN_STEPS = 20
 # the record the hash graph is built from (a graph the engine does not recognise)
 HASH_RECORD = '1296536.fa'
+# the records of the counts server's graph and its count annotation (two small mini records)
+COUNT_RECORDS = ['1296536.fa', '546.fa']
 # graphs without the dummy-edge mask (DESIGN-pattern-search.md §4.4): the first 16 bases of an
 # E. coli record (562.fa, NZ_CP021206.1) whose first k-mer no k-mer enters, so that the graph's
 # source dummies ($^j and its first k - j bases, 1 <= j <= 15) hold it at offsets 1 to 15: 17
@@ -739,6 +745,14 @@ def gate_only_k(doc):
         check(b[f] is None, (f, b[f]))
 
 
+def counts_presence_only(doc):
+    """GET /traverse/capabilities of a count annotation (SPEC-labeled-traversal-core.md §10.3,
+    E14): `counts: "presence_only"` (absent on every other index), and the pattern route reads
+    its row-diff form budget-aware."""
+    check(doc.get('counts') == 'presence_only', doc.get('counts'))
+    check(doc['pattern']['annotation'] == 'budgeted', doc['pattern'])
+
+
 def loading_block(full):
     """The full block of a single-graph server while its index loads, from the block of the
     loaded server: what pattern_capabilities_json writes without the graph -- available,
@@ -900,6 +914,20 @@ FIXTURES = [
                    lambda doc: check(doc['graph_mode'] == 'primary'
                                      and doc['strand_stated'] is False
                                      and doc['scopes'] == ['any_offset'], doc))),
+    get('traverse_capabilities_counts', 'counts', '/traverse/capabilities',
+        'GET /traverse/capabilities of the counts server (a BASIC graph with its mask file, a '
+        'row_diff_int_brwt annotation that stores a count per k-mer and label, as kingsford\'s '
+        'index): `counts: "presence_only"` (SPEC-labeled-traversal-core.md §10.3, E14: /resolve '
+        'and /traverse read the counts as presence, a label carrying a k-mer where its count is '
+        'not zero), a member every other index\'s document leaves out; the gate block '
+        'budgeted (a row-diff form read budget-aware), placement none (no coordinates)',
+        expect_all(gate_block(True, mask='file', counting='exact'), counts_presence_only)),
+    get('pattern_capabilities_counts', 'counts', '/pattern/capabilities',
+        'the same counts server on the route of the full block (the block its answers are '
+        'validated against): annotation budgeted, placement none, support label_intersection',
+        expect_all(full_block(True, mask='file', counting='exact'),
+                   lambda doc: check(doc['annotation'] == 'budgeted'
+                                     and doc['placement'] == 'none', doc))),
     get('capabilities_representation_unsupported', 'hash', '/capabilities',
         'a graph the engine does not recognise (a hash graph): the feature and route listed, '
         'the block available false, unavailable_reason representation_unsupported, graph_mode '
@@ -2371,6 +2399,12 @@ SERVERS = {
     'hash': 'server_query -i {work}/hash/graph.orhashdbg -a {work}/hash/anno.column.annodbg'
             ' --index-release ' + INDEX_RELEASE + '  (a hash graph of ' + HASH_RECORD
             + ' at k = 31, column annotation by file name)',
+    'counts': 'server_query -i {work}/counts/graph.dbg -a {work}/counts/'
+              'anno.row_diff_int_brwt.annodbg --index-release ' + INDEX_RELEASE
+              + '  (a BASIC graph of ' + ' and '.join(COUNT_RECORDS) + ' at k = 31 with '
+                '--mask-dummy; annotate --anno-filename --count-kmers, the row-diff stages with '
+                '--count-kmers, transform_anno --anno-type row_diff_int_brwt --greedy, relax_brwt: '
+                'a count annotation, its counts read as presence)',
     'utf8_labels': 'server_query -i {work}/utf8/graph.dbg -a {work}/utf8/anno.column.annodbg'
                    ' --index-release ' + INDEX_RELEASE + '  (a BASIC graph at k = 31 of two '
                    'records, A x 40 under the raw header bytes label\\xff, which are not UTF-8, '
@@ -2525,6 +2559,32 @@ def build_indexes(binary, mini, work):
             if res.returncode:
                 raise RuntimeError(f'failed: {" ".join(cmd)} (log: {log})')
 
+    counts = os.path.join(work, 'counts')
+    if not os.path.isfile(os.path.join(counts, 'anno.row_diff_int_brwt.annodbg')):
+        os.makedirs(os.path.join(counts, 'rd'), exist_ok=True)
+        for f in COUNT_RECORDS:
+            shutil.copy(os.path.join(mini, 'fasta', f), os.path.join(counts, f))
+        # a count annotation as kingsford's index is made (integration_tests/
+        # test_traverse_forms.py builds it so): columns with their k-mer counts, the row-diff
+        # stages with the counts, then the BRWT of the counts' diffs, relaxed
+        for cmd in ([binary, 'build', '-p', '1', '--graph', 'succinct', '-k', str(MINI_K),
+                     '--mask-dummy', '--in-ram', '-o', 'graph'] + COUNT_RECORDS,
+                    [binary, 'annotate', '-p', '1', '-i', 'graph.dbg', '--anno-filename',
+                     '--anno-type', 'column', '--count-kmers', '-o', 'anno'] + COUNT_RECORDS,
+                    *([binary, 'transform_anno', '-p', '1', '--anno-type', 'row_diff',
+                       '--row-diff-stage', stage, '--count-kmers', '-i', 'graph.dbg',
+                       '-o', 'rd/out', 'anno.column.annodbg'] for stage in ('0', '1', '2')),
+                    [binary, 'transform_anno', '-p', '1', '--anno-type', 'row_diff_int_brwt',
+                     '--greedy', '-i', 'graph.dbg', '-o', 'anno', 'rd/anno.column.annodbg'],
+                    [binary, 'relax_brwt', '-p', '1', '-o', 'anno',
+                     'anno.row_diff_int_brwt.annodbg']):
+            with open(log, 'ab') as f:
+                f.write(('$ (cd counts) ' + ' '.join(cmd) + '\n').encode())
+                f.flush()
+                res = subprocess.run(cmd, stdout=f, stderr=subprocess.STDOUT, cwd=counts)
+            if res.returncode:
+                raise RuntimeError(f'failed: {" ".join(cmd)} (log: {log})')
+
     with open(os.path.join(work, 'graphs.csv'), 'w') as f:
         f.write(f'{MULTI_GRAPH_NAME},{graph},{os.path.join(masked, MINI_ANNO)}\n')
     with open(os.path.join(work, 'mixed.csv'), 'w') as f:
@@ -2571,6 +2631,11 @@ def server_args(name, mini, work):
         utf8 = os.path.join(work, 'utf8')
         return ['-i', os.path.join(utf8, 'graph.dbg'),
                 '-a', os.path.join(utf8, 'anno.column.annodbg'),
+                '--index-release', INDEX_RELEASE]
+    if name == 'counts':
+        counts = os.path.join(work, 'counts')
+        return ['-i', os.path.join(counts, 'graph.dbg'),
+                '-a', os.path.join(counts, 'anno.row_diff_int_brwt.annodbg'),
                 '--index-release', INDEX_RELEASE]
     if name == 'primary':
         primary = os.path.join(work, 'primary')
