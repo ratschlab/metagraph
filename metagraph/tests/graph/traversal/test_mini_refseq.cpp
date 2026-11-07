@@ -126,6 +126,10 @@ std::string reduce(const SeedResult &r) {
 class MiniRefSeq : public ::testing::Test {
   protected:
     void SetUp() override {
+#if _PROTEIN_GRAPH
+        GTEST_SKIP() << "the mini index is a DNA index (nucleotide records, a DNA build's "
+                        "graph): a Protein build does not load it";
+#endif
         if (!index_available()) {
             GTEST_SKIP() << "mini_refseq index not found in " << std::filesystem::current_path()
                          << "/" << kIndexDir << " (build it with scripts/traversal/build_mini_refseq.sh)";

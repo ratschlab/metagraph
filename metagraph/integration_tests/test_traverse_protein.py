@@ -381,7 +381,10 @@ class TestTraverseProtein(TestingBase):
                 for s, t in entry['occurrences']:
                     self.assertEqual(own, record[s:t], (side, s, t))
                     checked += 1
-        self.assertGreater(checked, 6)
+        # the seed's three occurrences (one in each protein) and the six runs' own (the right
+        # arm's C1 under prot1 and prot3 and C2 under prot2, the left arm's N1 under prot1 and
+        # prot2 and N2 under prot3), one occurrence each
+        self.assertEqual(9, checked)
 
     def test_graphlet_round_trip(self):
         """The graphlet (MGT v1) of a protein walk: its H record names the protein alphabet
@@ -424,9 +427,20 @@ class TestTraverseProtein(TestingBase):
             self.assertEqual(normalize_result(full), normalize_result(gg.to_json()), case)
             self.assertEqual([], gg.check_rules(full), case)
 
+    @classmethod
+    def _untimed(cls, value):
+        """|value| (a parsed body) without its `timing` members, which the server and the CLI
+        each measure for themselves."""
+        if isinstance(value, dict):
+            return {k: cls._untimed(v) for k, v in value.items() if k != 'timing'}
+        if isinstance(value, list):
+            return [cls._untimed(v) for v in value]
+        return value
+
     def test_api_bodies_are_the_cli_output(self):
-        """The server's /traverse and /resolve answer a protein request with the bytes of
-        `metagraph traverse --json`."""
+        """The server's /traverse answers a protein request with the bytes of `metagraph
+        traverse --json` (timing off), and its /resolve with the body of `metagraph traverse
+        --resolve --json` but for the timing, which each measures for itself."""
         req = {'seeds': [{'sequence': self.domain},
                          {'sequence': self.n1[-20:] + self.domain, 'labels': ['prot1']}],
                'strategy': {'direction': 'both', 'bounds': {'max_extension_bp': BLOCK},
@@ -441,6 +455,11 @@ class TestTraverseProtein(TestingBase):
         ret = self._post('resolve', req)
         self.assertEqual(200, ret.status_code, ret.text)
         out = ret.json()
+        cli, rc, _ = self._traverse(req, resolve=True, json_flag=True)
+        self.assertEqual(0, rc, cli.get('error'))
+        self.assertIn('timing', out)
+        self.assertEqual(json.dumps(self._untimed(cli), sort_keys=True),
+                         json.dumps(self._untimed(out), sort_keys=True))
         supported = {l['label']: l['kmers_supported'] for l in out['labels']}
         self.assertEqual({'prot1': 2 * BLOCK - K + 1, 'prot2': 3 * BLOCK - K + 1,
                           'prot3': BLOCK - K + 1}, supported)

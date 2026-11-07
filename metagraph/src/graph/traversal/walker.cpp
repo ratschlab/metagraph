@@ -114,9 +114,10 @@ namespace {
  *   the merge position as its route boundary so that continuations (spelled through
  *   first parents) only list labels covering the spelled tail. Under trace support
  *   the live coordinates of a label on both parents are united.
- * - Edge identity: 2-bit packed (k+1)-mer when it fits 64 bits, otherwise a 128-bit
- *   FNV-1a pair; two distinct (k+1)-mers colliding on the pair are treated as the
- *   same edge (conservative: blocks), the full string is not kept.
+ * - Edge identity: the (k+1)-mer packed at the alphabet's bits per character (2 on DNA,
+ *   5 on protein; '$' not counted) when it fits 64 bits, otherwise a 128-bit FNV-1a
+ *   pair; two distinct (k+1)-mers colliding on the pair are treated as the same edge
+ *   (conservative: blocks), the full string is not kept.
  * - Annotate mode (§6.9) shares the level loop, the structural admissibility
  *   (check_structure: hairpin, seed re-entry, per-path edge reuse), the caps, merging
  *   and the segment DAG with constrain mode, and nothing of the label state: items
