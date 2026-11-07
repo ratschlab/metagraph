@@ -1035,7 +1035,7 @@ TEST(GraphletAttempt, DeliveryReserveMovesTheWalkUntil) {
     s.delivery_compress_mbps = 50;     // 50,000 bytes per ms
     s.delivery_build_mbps = 5;         // 5,000 bytes per ms
     s.delivery_stop_ms = 100;
-    // the ratios this arithmetic is written for (the defaults are 6 and 50)
+    // the ratios this arithmetic is written for (the defaults are 6 and 6)
     s.account_per_text_byte_json = 20;
     s.account_per_text_byte_graphlet = 40;
     auto reserve = [](double model, double stop = 100) { return 1.25 * model + stop; };
@@ -1152,7 +1152,8 @@ TEST(GraphletAttempt, DeliveryReserveMovesTheWalkUntil) {
     const AttemptSettings defaults;
     // 6: below the smallest ratio measured without the budget's cache allotments (E5b)
     EXPECT_EQ(6, defaults.account_per_text_byte_json);
-    EXPECT_EQ(50, defaults.account_per_text_byte_graphlet);
+    // 6: below the smallest graphlet ratio measured without the allotments (6.36; E5b review, F2)
+    EXPECT_EQ(6, defaults.account_per_text_byte_graphlet);
     EXPECT_EQ(1000, defaults.delivery_stop_ms);
     EXPECT_EQ(1.25, r["margin"].asDouble());
     EXPECT_TRUE(r["stop_ms"].isIntegral());

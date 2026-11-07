@@ -1096,15 +1096,17 @@ response is delivered whole (`outcome.delivery: inline`, §7.0; spooled / paged 
     measured a ratio of at least 128 and the estimate of a larger seed after it fell short by as much: on
     servers at budgets of 64 MiB to 4 GiB with results growing to 97 MiB of text, up to 3.3 times too little
     text, or 12 times too much the other way, against 0.92 to 1.07 times the text without them*),
-    with the configured values `account_per_text_byte` (6 for the JSON details, 50 for a graphlet — the JSON one
-    *since E5b's fix, 2026-11-07*: just below the smallest ratio measured without the memory budget's cache
+    with the configured values `account_per_text_byte` (6 for the JSON details and 6 for a graphlet — *since
+    E5b's fix and its review, 2026-11-07*: the JSON one just below the smallest ratio measured without the memory budget's cache
     allotments, 6.15 on JSON results whose text is mostly 12,000-character label names (a name is priced at its
     escaped bytes three times beside its tree: the least account a byte of JSON text carries), to be re-measured
     on staging once the merged engine is deployed; a smaller ratio estimates more text and keeps a larger
     reserve, the safe direction. It was 30 (*calibrated in the efficiency pass, feature level 4*: just below the
     smallest account/text ratios measured on real responses, 33.5 (UHGG `full`) to 1,344 (SRA `summary`; 37.2 the
     smallest SRA JSON ratio), whose accounts included the allotments, which overstate every budgeted seed's
-    ratio); the graphlet's 50 (58.4 and more measured then) is not re-measured. They stay conservative: a
+    ratio); the graphlet's just below the smallest measured without the allotments, 6.36 on graphlets of 64 to
+    4,096 such names (3 to 47 MiB of text; the review's F2: it was 50, below 58.4 measured then with the
+    allotments, and a fresh server under-estimated a name-heavy graphlet's text about 8 times). They stay conservative: a
     server's first large attempt of a detail can be cut early until it has measured that detail itself, its
     measured ratio replacing the configured one once a seed of the detail wrote at least 1 MiB of text or held
     at least 64 MiB of account beside its record coordinates (in this attempt, or in one of the server's last 16
@@ -1193,7 +1195,7 @@ response is delivered whole (`outcome.delivery: inline`, §7.0; spooled / paged 
   | starting estimate | value | measured | why this value |
   |---|---|---|---|
   | `account_per_text_byte.json` | 6 | account bytes per text byte without the memory budget's cache allotments (E5b's fix, 2026-11-07): 6.15 on JSON results whose text is mostly long label names; with them, on real responses (feature level 4, the value 30 then): 33.5 (UHGG `full`) to 1,344 (SRA `summary`), 37.2 the smallest SRA JSON ratio | just below the smallest ratio measured without the allotments (a smaller ratio, a larger reserve: the safe direction); re-measured on staging once the merged engine is deployed; one starting ratio for every JSON detail, since one locus is too narrow a measurement to start a detail's reserve from |
-  | `account_per_text_byte.graphlet` | 50 | 58.4 and more | just below the smallest ratio measured |
+  | `account_per_text_byte.graphlet` | 6 | without the allotments (E5b's review, F2): 6.36 on graphlets whose text is mostly long label names (64 to 4,096 names of 12,000 characters, 3 to 47 MiB of text); with them, on real responses (feature level 4, the value 50 then): 58.4 and more | just below the smallest ratio measured without the allotments; re-measured on staging once the merged engine is deployed |
   | `stop_ms` | `chunk_target_ms` + 950 | from the walk-until to the walk's end: 352 ms on a quiet SRA server, 1,001 ms on a loaded one, 1,699 ms once (under load, a 400 MB result) | 950 ms for the heads between two readings of the clock and the stopped seed's finalisation; the rest of a finalisation that grows with the result is covered by the margin while it runs faster than 4 × `build_mbps`; a longer stop measured replaces it (`measured_stop_ms`) |
   | `compress_mbps` | 50 | 460–670 MB/s on SRA responses at zlib level 1 | conservative |
   | `build_mbps` | 10 | 13.6–51 MB/s on SRA responses | conservative |
@@ -3361,8 +3363,8 @@ search's routes, `POST /pattern` and `GET /pattern/capabilities`, are `SPEC-patt
   `client_check_ms` (100), `clock_skew_allowance_ms` (`--traverse-clock-skew-ms`, default 2000: what a ledger adds
   to `not_after_ms`, §5; the server's own check adds nothing), `bound` and `not_after` (references to §6.8, the
   attempt's bound, and to §5, `not_after_ms`) and
-  `delivery_reserve` (`compress_mbps`, `build_mbps`, `account_per_text_byte: {json, graphlet}` (6 and 50; the
-  JSON one 30 until E5b's fix, §6.8),
+  `delivery_reserve` (`compress_mbps`, `build_mbps`, `account_per_text_byte: {json, graphlet}` (6 and 6; 30 and 50 until E5b's
+  fix and its review, §6.8),
   `coordinate_account_per_text_byte` (feature level 6: 12, an integer, so that a ledger can reproduce the
   reserve, §6.8),
   `margin` (1.25), `stop_ms` (the configured time from the walk-until to the walk's end:

@@ -176,15 +176,16 @@ struct AttemptSettings {
     // to be re-measured on staging once the merged engine is deployed; it was 30, below ratios
     // of real responses whose accounts included the allotments (33.5 UHGG full to 1,344 SRA
     // summary), which overstate every budgeted seed's ratio. A smaller ratio estimates more
-    // text and keeps a larger reserve, the safe direction. For a graphlet 50 (58.4 and more on
-    // real responses; not re-measured without the allotments). Conservative: a server's first
+    // text and keeps a larger reserve, the safe direction. For a graphlet 6 too: 6.36 the
+    // smallest measured without the allotments (graphlets of 64 to 4,096 such names, 3 to 47
+    // MiB of text; it was 50, below 58.4 measured on real responses with them). Conservative: a server's first
     // large attempt of a detail can be cut early until it measured that detail (a warm SRA
     // server cut the first tree and full attempts of a 16S beam at 3-5 s of 40 s with 20/40
     // and with 30/50 alike, the tree measuring 115-129 with the allotments)
     double delivery_compress_mbps = 50;
     double delivery_build_mbps = 10;
     double account_per_text_byte_json = 6;
-    double account_per_text_byte_graphlet = 50;
+    double account_per_text_byte_graphlet = 6;
     // The walk does not stop at its walk-until but at the first poll that reads the clock after
     // it — after a chunk of an annotation read, a lookahead's poll, the heads between two
     // readings of the clock (one poll in poll_stride reads it) — and its stopped
