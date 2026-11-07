@@ -1195,7 +1195,7 @@ TEST(ServerFanout, DuplicateRequestIdStartsNoWork) {
     EXPECT_EQ(404, registry.state("svc-res-2").first);
 }
 
-// Retention by period and count, then 404 {error, request_id, server_instance}
+// Retention by period and count, then 404 {error, request_id, server_instance, server_time_ms}
 TEST(ServerFanout, RetentionThen404) {
     auto t = std::make_shared<std::atomic<int64_t>>(0);
     RequestSettings rs;
@@ -1205,6 +1205,8 @@ TEST(ServerFanout, RetentionThen404) {
     rs.clocks.steady = [t]() {
         return std::chrono::steady_clock::time_point(std::chrono::milliseconds(t->load()));
     };
+    // the server's clock (the admission's), here the steady one plus an epoch
+    rs.now_ms = [t]() { return static_cast<uint64_t>(1'793'438'400'000 + t->load()); };
     RequestRegistry registry(rs);
     auto end = [&](const std::string &id) {
         auto e = std::make_shared<RequestEntry>(id, "/pattern", "inst",
@@ -1230,6 +1232,10 @@ TEST(ServerFanout, RetentionThen404) {
     EXPECT_EQ(members(sample20), members(body));
     EXPECT_EQ("r1", body["request_id"].asString());
     EXPECT_EQ("inst", body["server_instance"].asString());
+    // an integer, the clock when the lookup found nothing (F3)
+    ASSERT_EQ(Json::uintValue, body["server_time_ms"].type()) << body.toStyledString();
+    EXPECT_EQ(1'793'438'402'000u, body["server_time_ms"].asUInt64());
+    EXPECT_TRUE(sample20["server_time_ms"].isIntegral());
     EXPECT_EQ(0u, body["error"].asString().find("request_id 'r1' is not known on this server"));
     // the three cases of SPEC-multigraph-envelope.md section 5, as sample 20 names them
     EXPECT_EQ("request_id 'r1' is not known on this server: not admitted yet, never admitted (an "
@@ -1500,6 +1506,219 @@ TEST_F(IdNamespace, NoWindowAdmitsBoth) {
     b.join();
     for (size_t i = 0; i < rounds; ++i) {
         EXPECT_EQ(1, request_won[i] + attempt_won[i]) << i;
+    }
+}
+
+// GET /requests/{id} (IdAdmission::state) as the route answers it: a request_id's entry, an
+// attempt_id's (the attempt as traverse_request_json builds it), and for an id neither holds, a
+// tombstoned attempt_id among them, the request registry's 404 with the server's clock (F3)
+TEST_F(IdNamespace, GetRequestsReadsBothRegistries) {
+    ASSERT_FALSE(admission_.start_request(entry("r")));
+    int status = 0;
+    Json::Value body;
+    std::tie(status, body) = admission_.state("r");
+    EXPECT_EQ(200, status);
+    EXPECT_EQ(requests_.state("r").second, body);
+    EXPECT_FALSE(body.isMember("server_time_ms"));
+
+    ASSERT_FALSE(admission_.start_attempt(attempt("t")));
+    std::tie(status, body) = admission_.state("t");
+    EXPECT_EQ(200, status);
+    EXPECT_EQ("/traverse", body["route"].asString());
+    EXPECT_EQ("t", body["attempt"]["attempt_id"].asString());
+    EXPECT_FALSE(body.isMember("server_time_ms"));
+
+    attempts_.cancel("cancelled", 0);
+    EXPECT_EQ(404, attempts_.state("cancelled").first);
+    for (const char *id : { "cancelled", "never" }) {
+        const uint64_t before = attempts_.now_ms();
+        std::tie(status, body) = admission_.state(id);
+        const uint64_t after = attempts_.now_ms();
+        EXPECT_EQ(404, status) << id;
+        ASSERT_EQ(Json::uintValue, body["server_time_ms"].type()) << id;
+        const uint64_t read = body["server_time_ms"].asUInt64();
+        EXPECT_LE(before, read) << id;
+        EXPECT_LE(read, after) << id;
+        EXPECT_EQ(requests_.unknown_json(id, read), body) << id;
+        EXPECT_EQ(std::set<std::string>({ "error", "request_id", "server_instance",
+                                          "server_time_ms" }), members(body)) << id;
+    }
+}
+
+// F3: GET /requests/{id}'s 404 reads the server's clock (server_time_ms) under the request
+// registry's lock, in the critical section of the lookup that found nothing. An admission of the
+// id asked while the clock is read, on either route, waits for that lookup (it cannot register
+// the id between the lookup and the reading) and then reads the clock itself, as late or later:
+// past the request's not_after_ms when server_time_ms is, it is refused expired. (Were the clock
+// read after the lock, both admissions would end during the reading, admitted at the earlier
+// time, while the 404 states a later one.)
+TEST(ServerFanout, A404ReadsTheClockUnderItsLookupsLock) {
+    const uint64_t not_after = 1'793'438'400'000;
+    std::atomic<uint64_t> now { not_after };
+    std::atomic<bool> armed { false };
+    std::function<void()> on_reading;
+    AttemptSettings as;
+    as.retention_s = 60;
+    as.wall_clock = [&]() {
+        if (armed.exchange(false))
+            on_reading();
+        return std::chrono::system_clock::time_point(std::chrono::milliseconds(now.load()));
+    };
+    AttemptRegistry attempts(as);
+    // as the server wires it: one clock for both registries
+    RequestSettings rs;
+    rs.server_instance = attempts.server_instance();
+    rs.now_ms = [&attempts]() { return attempts.now_ms(); };
+    RequestRegistry requests(rs);
+    IdAdmission admission(requests, attempts);
+
+    auto request = std::make_shared<RequestEntry>(std::string("x"), "/resolve",
+                                                  rs.server_instance,
+                                                  std::chrono::system_clock::now(),
+                                                  refs_of({ kPairs[0] }));
+    // the route's admission of a /resolve (server.cpp, admit): refused once not_after_ms passed
+    auto expired = [&]() -> std::optional<Json::Value> {
+        AttemptIds ids;
+        ids.not_after_ms = not_after;
+        const uint64_t t = attempts.now_ms();
+        if (!not_after_passed(ids, t))
+            return std::nullopt;
+        return expired_json(ids, t, attempts.server_instance());
+    };
+    auto attempt = std::make_shared<Attempt>(0, std::chrono::system_clock::time_point(),
+                                             attempts.settings(), attempts.server_instance(),
+                                             true, nullptr);
+    AttemptIds ids;
+    ids.attempt_id = "x";
+    ids.not_after_ms = not_after;
+    attempt->set_ids(ids);
+
+    std::future<std::optional<Json::Value>> request_admitted;
+    std::future<std::optional<AttemptRegistry::StartRefusal>> attempt_admitted;
+    bool ended_during_reading = false;
+    on_reading = [&]() {
+        request_admitted = std::async(std::launch::async, [&]() {
+            return admission.start_request(request, expired);
+        });
+        attempt_admitted = std::async(std::launch::async, [&]() {
+            return admission.start_attempt(attempt);
+        });
+        ended_during_reading = request_admitted.wait_for(200ms) == std::future_status::ready
+                            || attempt_admitted.wait_for(200ms) == std::future_status::ready;
+        // the reading: a millisecond past not_after_ms
+        now = not_after + 1;
+    };
+    armed = true;
+    const auto [status, body] = admission.state("x");
+    EXPECT_FALSE(ended_during_reading);
+    EXPECT_EQ(404, status);
+    EXPECT_EQ(not_after + 1, body["server_time_ms"].asUInt64());
+    // both admissions came after the lookup and read that time: refused expired, nothing held
+    const auto refused_request = request_admitted.get();
+    ASSERT_TRUE(refused_request);
+    EXPECT_EQ("expired", (*refused_request)["state"].asString());
+    const auto refused_attempt = attempt_admitted.get();
+    ASSERT_TRUE(refused_attempt);
+    EXPECT_TRUE(refused_attempt->expired);
+    EXPECT_EQ(404, admission.state("x").first);
+    EXPECT_EQ(0u, requests.size());
+    EXPECT_EQ(404, attempts.state("x").first);
+}
+
+namespace {
+
+// the last reading of NoIdIsAdmittedAfterA404WithAnEarlierClock's clock on this thread
+thread_local uint64_t last_reading_ms = 0;
+
+} // namespace
+
+// F3, the property the 404's server_time_ms proves, under contention: an id admitted while
+// GET /requests/{id} looks it up, on either route, is found (200), or the lookup answered 404
+// and the admission read the server's clock after it did. Never absent from a 404 and admitted
+// with an earlier reading (the clock below only moves forward: every reading is later than the
+// ones before it). An admission compares that reading with not_after_ms, so a 404 whose
+// server_time_ms is past a request's not_after_ms is followed by no admission of it
+TEST(ServerFanout, NoIdIsAdmittedAfterA404WithAnEarlierClock) {
+    std::atomic<uint64_t> ticks { 1'793'438'400'000 };
+    AttemptSettings as;
+    as.retention_s = 60;
+    as.retention_count = 100'000;
+    as.wall_clock = [&ticks]() {
+        last_reading_ms = ++ticks;
+        return std::chrono::system_clock::time_point(std::chrono::milliseconds(last_reading_ms));
+    };
+    AttemptRegistry attempts(as);
+    RequestSettings rs;
+    rs.server_instance = attempts.server_instance();
+    rs.retention_count = 100'000;
+    rs.now_ms = [&attempts]() { return attempts.now_ms(); };
+    RequestRegistry requests(rs);
+    IdAdmission admission(requests, attempts);
+
+    // even rounds a /resolve request_id, odd ones a /traverse attempt_id
+    const size_t rounds = 2000;
+    std::vector<std::shared_ptr<RequestEntry>> entries(rounds);
+    std::vector<std::shared_ptr<Attempt>> tries(rounds);
+    for (size_t i = 0; i < rounds; ++i) {
+        const std::string id = "id" + std::to_string(i);
+        if (i % 2 == 0) {
+            entries[i] = std::make_shared<RequestEntry>(id, "/resolve", rs.server_instance,
+                                                        std::chrono::system_clock::now(),
+                                                        refs_of({ kPairs[0] }));
+        } else {
+            tries[i] = std::make_shared<Attempt>(0, std::chrono::system_clock::time_point(),
+                                                 attempts.settings(),
+                                                 attempts.server_instance(), true, nullptr);
+            AttemptIds ids;
+            ids.attempt_id = id;
+            tries[i]->set_ids(ids);
+        }
+    }
+    std::vector<int> status(rounds, 0);
+    std::vector<uint64_t> server_time(rounds, 0);
+    std::vector<int> admitted(rounds, 0);
+    std::vector<uint64_t> admission_time(rounds, 0);
+    std::atomic<size_t> go { 0 };
+    auto wait_turn = [&](size_t i) {
+        ++go;
+        while (go.load() < 2 * (i + 1)) {
+            std::this_thread::yield();
+        }
+    };
+    std::thread lookup([&]() {
+        for (size_t i = 0; i < rounds; ++i) {
+            wait_turn(i);
+            const auto [s, body] = admission.state("id" + std::to_string(i));
+            status[i] = s;
+            if (s == 404)
+                server_time[i] = body["server_time_ms"].asUInt64();
+        }
+    });
+    std::thread admit([&]() {
+        for (size_t i = 0; i < rounds; ++i) {
+            wait_turn(i);
+            if (i % 2 == 0) {
+                // the route's admission reads the clock (its not_after_ms check)
+                admitted[i] = !admission.start_request(
+                        entries[i], [&]() -> std::optional<Json::Value> {
+                            admission_time[i] = attempts.now_ms();
+                            return std::nullopt;
+                        });
+            } else {
+                admitted[i] = !admission.start_attempt(tries[i]);
+                // the reading of its not_after_ms check, the last on this thread
+                admission_time[i] = last_reading_ms;
+            }
+        }
+    });
+    lookup.join();
+    admit.join();
+    for (size_t i = 0; i < rounds; ++i) {
+        ASSERT_TRUE(admitted[i]) << i;
+        if (status[i] == 200)
+            continue;
+        ASSERT_EQ(404, status[i]) << i;
+        EXPECT_LT(server_time[i], admission_time[i]) << i;
     }
 }
 

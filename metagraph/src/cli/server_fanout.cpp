@@ -446,7 +446,16 @@ std::string RequestRegistry::retention_text() const {
                        s.retention_count);
 }
 
-Json::Value RequestRegistry::unknown_json(const std::string &request_id) const {
+uint64_t RequestRegistry::now_ms() const {
+    if (shared_->settings.now_ms)
+        return shared_->settings.now_ms();
+    const auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+            WallClock::now().time_since_epoch()).count();
+    return ms > 0 ? static_cast<uint64_t>(ms) : 0;
+}
+
+Json::Value RequestRegistry::unknown_json(const std::string &request_id,
+                                          uint64_t server_time_ms) const {
     Json::Value j;
     // the three cases of SPEC-multigraph-envelope.md section 5
     j["error"] = "request_id '" + request_id + "' is not known on this server: not admitted yet, "
@@ -454,6 +463,7 @@ Json::Value RequestRegistry::unknown_json(const std::string &request_id) const {
                  "ended and no longer retained (" + retention_text() + ")";
     j["request_id"] = request_id;
     j["server_instance"] = shared_->settings.server_instance;
+    j["server_time_ms"] = uint_json(server_time_ms);
     return j;
 }
 
@@ -510,8 +520,11 @@ std::pair<int, Json::Value> RequestRegistry::state(const std::string &request_id
     std::lock_guard<std::mutex> lock(shared_->mutex);
     shared_->expire_locked();
     auto it = shared_->entries.find(request_id);
-    if (it == shared_->entries.end())
-        return { 404, unknown_json(request_id) };
+    if (it == shared_->entries.end()) {
+        // the clock read under the lock of the lookup (section 5): an admission of the id after
+        // it reads the clock under this lock too, so it reads this time or a later one
+        return { 404, unknown_json(request_id, now_ms()) };
+    }
     return { 200, it->second->json(shared_->settings.retention_s) };
 }
 
@@ -585,6 +598,19 @@ std::optional<AttemptRegistry::StartRefusal> IdAdmission::start_attempt(
             return std::nullopt;
         return request_as_attempt_json(entry);
     });
+}
+
+std::pair<int, Json::Value> IdAdmission::state(const std::string &id) {
+    // the request registry first: its 404 reads the clock (server_time_ms) before the attempt
+    // registry is asked, the order that makes the clock bind an attempt admitted after it too
+    auto [status, body] = requests_.state(id);
+    if (status == 200)
+        return { status, std::move(body) };
+    Json::Value pair;
+    auto [attempt_status, attempt] = attempts_.state(id, &pair);
+    if (attempt_status == 200 && attempt.get("state", "").asString() != "unknown")
+        return { 200, traverse_request_json(attempt, pair, attempts_.settings().retention_s) };
+    return { status, std::move(body) };
 }
 
 // ---------------------------------------------------------------- the fan-out
