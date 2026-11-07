@@ -14,8 +14,8 @@
   "content_timeout_s": 900,
   "delivery_reserve": {
    "account_per_text_byte": {
-    "graphlet": 50.0,
-    "json": 30.0
+    "graphlet": 6.0,
+    "json": 6.0
    },
    "build_mbps": 10.0,
    "calibration": "SPEC-labeled-traversal-core.md section 6.8, the delivery reserve: calibration",
@@ -50,7 +50,7 @@
   "release_rule": "SPEC-labeled-traversal-core.md section 10.3, the release rule",
   "retention_count": 10000,
   "retention_s": 3600,
-  "server_instance": "20654f9fcd6b31ac",
+  "server_instance": "c2f0014b6401197d",
   "state": "GET /traverse/attempt/{attempt_id}",
   "suppression": "SPEC-labeled-traversal-core.md section 10.3, POST /traverse/cancel: the tombstone",
   "tombstone_max_s": 86400
@@ -353,5 +353,5 @@
   "traverse_capabilities": "GET /traverse/capabilities"
  },
  "schema_version": 1,
- "server_instance": "20654f9fcd6b31ac"
+ "server_instance": "c2f0014b6401197d"
 }
