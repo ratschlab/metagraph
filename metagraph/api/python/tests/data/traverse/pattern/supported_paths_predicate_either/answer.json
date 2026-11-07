@@ -135,11 +135,15 @@
     "-"
    ],
    "timing": {
-    "cpu_ms": 0.112416,
-    "elapsed_ms": 0.104334,
-    "extension_ms": 0.092,
-    "selection_ms": 0.004917,
-    "support_ms": 0.08133500000000002
+    "cpu_ms": 0.300041,
+    "elapsed_ms": 0.282,
+    "extension_ms": 0.248583,
+    "page_faults": {
+     "major": 0,
+     "minor": 0
+    },
+    "selection_ms": 0.009209,
+    "support_ms": 0.20983499999999988
    },
    "withheld": null,
    "work": {
@@ -150,7 +154,7 @@
     "extension_branches": 0,
     "extension_edges": 18,
     "mask_scans": 0,
-    "memory_bytes": 67121346,
+    "memory_bytes": 67121426,
     "mirror_rows": 0,
     "predicate_lookups": 0,
     "predicate_rows": 0,
@@ -176,10 +180,14 @@
   "vacuous": true
  },
  "timing": {
-  "cpu_ms": 0.134334,
-  "elapsed_ms": 0.121584
+  "cpu_ms": 0.34525,
+  "elapsed_ms": 0.317125,
+  "page_faults": {
+   "major": 0,
+   "minor": 0
+  }
  },
  "work": {
-  "memory_bytes": 67121346
+  "memory_bytes": 67121426
  }
 }

@@ -439,7 +439,7 @@
     "validated_seed_id": "3b323ea27d2ea165"
    },
    "work": {
-    "memory_bytes": 661935
+    "memory_bytes": 662535
    }
   }
  ],
@@ -499,6 +499,6 @@
  },
  "walk_rule": "every walk of at most complete_to_bp bases from the seed boundary is present when it uses no (k+1)-mer edge twice on its own path (edges are compared as (k+1)-mers), enters no seed node, and takes every step regardless of strand (a single-strand graph has no hairpins); every such walk is followed and the labels present at its nodes are recorded",
  "work": {
-  "memory_bytes": 661935
+  "memory_bytes": 662535
  }
 }

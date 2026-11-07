@@ -38,51 +38,51 @@
   {
    "annotation": {
     "access_path": "direct",
-    "direct_reads": 34,
-    "keys_mapped": 35,
-    "rows_requested": 35
+    "direct_reads": 32,
+    "keys_mapped": 33,
+    "rows_requested": 33
    },
    "arms": {
     "right": {
-     "branch_events_total": 16,
+     "branch_events_total": 15,
      "cap_trigger": {
-      "at_bp": 16,
+      "at_bp": 15,
       "exact": true,
       "live_labels": 1,
-      "live_paths": 1,
+      "live_paths": 2,
       "reason": "resource_limit",
-      "segment": 32
+      "segment": 29
      },
-     "complete_to_bp": 16,
+     "complete_to_bp": 15,
      "completeness_scope": "per_path",
      "counters": {
       "edge_reuse_probes": 0,
       "max_reminimisation_rounds": 0,
-      "output_bp": 32,
+      "output_bp": 30,
       "pair_evaluations": 0,
       "refusal_scans": 0,
       "reminimisation_rounds": 0,
-      "steps": 32,
-      "successor_enumerations": 33,
+      "steps": 30,
+      "successor_enumerations": 31,
       "switch_sources_cut": 0,
-      "work_units": 538
+      "work_units": 506
      },
      "counts": {
-      "bases": 32,
+      "bases": 30,
       "label_ends": {
-       "dead_end": 16,
-       "resource_limit": 1
+       "dead_end": 14,
+       "resource_limit": 2
       },
-      "leaves": 17,
+      "leaves": 16,
       "leaves_by_reason": {
-       "resource_limit": 1,
-       "semantic": 16
+       "resource_limit": 2,
+       "semantic": 14
       },
-      "max_bp": 16,
+      "max_bp": 15,
       "merges": 0,
-      "runs": 17,
-      "segments": 33,
-      "splits": 16
+      "runs": 16,
+      "segments": 31,
+      "splits": 15
      },
      "evidence": {
       "complete": true,
@@ -91,7 +91,7 @@
      "frontier_remaining": {
       "exact": true,
       "live_labels": 1,
-      "live_paths": 1
+      "live_paths": 2
      },
      "labels_per_node": {
       "cap": 64,
@@ -100,7 +100,7 @@
      },
      "limitations": [
       {
-       "complete_to_bp": 16,
+       "complete_to_bp": 15,
        "effect": "every walk of at most complete_to_bp bp is present, longer walks may be missing: the request's budget did not admit the next head, and the exploration stopped there (resource_limit; see resource_stop) (observed: what admitting it needed, MiB rounded up to the smallest budget that admits it with the caches' allotments, which grow with the budget); raise the knob",
        "kind": "walk_domain",
        "knob": "bounds.max_memory_mb",
@@ -111,9 +111,9 @@
      "status": "truncated"
     }
    },
-   "graphlet": "H mgt 1 15 basic $ACGT c k k 64 0 0 walk fixtures * dacc7dcb84187de4\nS 8322b11da77e686c 15 1 1 CTCCAGTTTCTTATC\nL c 0 * 0 comb.fa\nO p c c i\nQ locus memory traversal i:1 i:1 i:1 i:0 raise_memory_budget,use_graphlet,drop_sequences,continue_from_leaves the memory budget (bounds.max_memory_mb) stopped the walk at 16 bp on the right arm: every walk up to each arm's complete_to_bp is present and the heads not expanded end with resource_limit; memory is modelled (the walker's state and the output in the requested detail, charged per head; detail graphlet costs the least), annotation decoding is not charged yet (memory_bound_soft); a continuation from a leaf is a new traversal\nK * memory_bound_soft bounds.max_memory_mb i:1 i:1 * . the memory budget is enforced on the walker's modelled state and on this response's output, admitted per head; the annotation rows the seed phase and each level decode (with an annotate dictionary's growth and a cache beyond its allotment), and a failed result's echo of seed_id, are held before they can be charged, so the peak can exceed the budget by them (observed: the excess seen, MiB, rounded up)\nK r walk_domain bounds.max_memory_mb i:1 i:2 16 . every walk of at most complete_to_bp bp is present, longer walks may be missing: the request's budget did not admit the next head, and the exploration stopped there (resource_limit; see resource_stop) (observed: what admitting it needed, MiB rounded up to the smallest budget that admits it with the caches' allotments, which grow with the budget); raise the knob\nA r t 16 p 1 1 1 1 0 steps=32,successor_enumerations=33,output_bp=32,pair_evaluations=0,edge_reuse_probes=0,reminimisation_rounds=0,max_reminimisation_rounds=0,refusal_scans=0,switch_sources_cut=0,work_units=538 Y,16,32,1,1,1,2 16 * 33 17 17 16 0 32\nB 0 2 1 2 1 32 0 16 16 0 0 0 0 D:16,Y:1\nV 0 0 CG 1,1 0 . .\nV 1 1 CG 1,1 0 . .\nV 2 3 AC 1,1 0 . .\nV 3 5 AC 1,1 0 . .\nV 4 7 AC 1,1 0 . .\nV 5 9 GT 1,1 0 . .\nV 6 11 CG 1,1 0 . .\nV 7 13 AC 1,1 0 . .\nV 8 15 GT 1,1 0 . .\nV 9 17 CG 1,1 0 . .\nV 10 19 AC 1,1 0 . .\nV 11 21 CG 1,1 0 . .\nV 12 23 CG 1,1 0 . .\nV 13 25 AC 1,1 0 . .\nV 14 27 GT 1,1 0 . .\nV 15 29 AT 1,1 0 . .\nG * 0 0 * * * * 1 * .\nG 0 0 1 0 * * * 1 * C\nG 0 0 1 0 * * * * * G\nT * 0:0:1:0\nG 1 1 1 0 * * * 1 * C\nG 1 1 1 0 * * * * * G\nT * 0:0:2:0\nG 3 2 1 0 * * * 1 * A\nG 3 2 1 0 * * * * * C\nT * 0:0:3:0\nG 5 3 1 0 * * * 1 * A\nG 5 3 1 0 * * * * * C\nT * 0:0:4:0\nG 7 4 1 0 * * * 1 * A\nG 7 4 1 0 * * * * * C\nT * 0:0:5:0\nG 9 5 1 0 * * * 1 * G\nG 9 5 1 0 * * * * * T\nT * 0:0:6:0\nG 11 6 1 0 * * * 1 * C\nG 11 6 1 0 * * * * * G\nT * 0:0:7:0\nG 13 7 1 0 * * * 1 * A\nG 13 7 1 0 * * * * * C\nT * 0:0:8:0\nG 15 8 1 0 * * * 1 * G\nG 15 8 1 0 * * * * * T\nT * 0:0:9:0\nG 17 9 1 0 * * * 1 * C\nG 17 9 1 0 * * * * * G\nT * 0:0:10:0\nG 19 10 1 0 * * * 1 * A\nG 19 10 1 0 * * * * * C\nT * 0:0:11:0\nG 21 11 1 0 * * * 1 * C\nG 21 11 1 0 * * * * * G\nT * 0:0:12:0\nG 23 12 1 0 * * * 1 * C\nG 23 12 1 0 * * * * * G\nT * 0:0:13:0\nG 25 13 1 0 * * * 1 * A\nG 25 13 1 0 * * * * * C\nT * 0:0:14:0\nG 27 14 1 0 * * * 1 * G\nG 27 14 1 0 * * * * * T\nT * 0:0:15:0\nG 29 15 1 0 * * * * * A\nT * 0:0:16:0\nG 29 15 1 0 * * * * * T\nT Y 0:0:16:0\nC 0 0 16 0\nR 31 0 0 16 D 0 * * 0 16 0\nR 2 0 0 1 D 0 * * 0 1 0\nR 4 0 0 2 D 0 * * 0 2 0\nR 6 0 0 3 D 0 * * 0 3 0\nR 8 0 0 4 D 0 * * 0 4 0\nR 10 0 0 5 D 0 * * 0 5 0\nR 12 0 0 6 D 0 * * 0 6 0\nR 14 0 0 7 D 0 * * 0 7 0\nR 16 0 0 8 D 0 * * 0 8 0\nR 18 0 0 9 D 0 * * 0 9 0\nR 20 0 0 10 D 0 * * 0 10 0\nR 22 0 0 11 D 0 * * 0 11 0\nR 24 0 0 12 D 0 * * 0 12 0\nR 26 0 0 13 D 0 * * 0 13 0\nR 28 0 0 14 D 0 * * 0 14 0\nR 30 0 0 15 D 0 * * 0 15 0\nR 32 0 0 16 Y 0 * * 0 16 0\nZ 94\n",
-   "graphlet_bytes": 3583,
-   "graphlet_lines": 94,
+   "graphlet": "H mgt 1 15 basic $ACGT c k k 64 0 0 walk fixtures * dacc7dcb84187de4\nS 8322b11da77e686c 15 1 1 CTCCAGTTTCTTATC\nL c 0 * 0 comb.fa\nO p c c i\nQ locus memory traversal i:1 i:1 i:1 i:0 raise_memory_budget,use_graphlet,drop_sequences,continue_from_leaves the memory budget (bounds.max_memory_mb) stopped the walk at 15 bp on the right arm: every walk up to each arm's complete_to_bp is present and the heads not expanded end with resource_limit; memory is modelled (the walker's state and the output in the requested detail, charged per head; detail graphlet costs the least), annotation decoding is not charged yet (memory_bound_soft); a continuation from a leaf is a new traversal\nK * memory_bound_soft bounds.max_memory_mb i:1 i:1 * . the memory budget is enforced on the walker's modelled state and on this response's output, admitted per head; the annotation rows the seed phase and each level decode (with an annotate dictionary's growth and a cache beyond its allotment), and a failed result's echo of seed_id, are held before they can be charged, so the peak can exceed the budget by them (observed: the excess seen, MiB, rounded up)\nK r walk_domain bounds.max_memory_mb i:1 i:2 15 . every walk of at most complete_to_bp bp is present, longer walks may be missing: the request's budget did not admit the next head, and the exploration stopped there (resource_limit; see resource_stop) (observed: what admitting it needed, MiB rounded up to the smallest budget that admits it with the caches' allotments, which grow with the budget); raise the knob\nA r t 15 p 2 1 1 1 0 steps=30,successor_enumerations=31,output_bp=30,pair_evaluations=0,edge_reuse_probes=0,reminimisation_rounds=0,max_reminimisation_rounds=0,refusal_scans=0,switch_sources_cut=0,work_units=506 Y,15,29,2,1,1,2 15 * 31 16 16 15 0 30\nB 0 2 1 2 1 30 0 15 15 0 0 0 0 D:14,Y:2\nV 0 0 CG 1,1 0 . .\nV 1 1 CG 1,1 0 . .\nV 2 3 AC 1,1 0 . .\nV 3 5 AC 1,1 0 . .\nV 4 7 AC 1,1 0 . .\nV 5 9 GT 1,1 0 . .\nV 6 11 CG 1,1 0 . .\nV 7 13 AC 1,1 0 . .\nV 8 15 GT 1,1 0 . .\nV 9 17 CG 1,1 0 . .\nV 10 19 AC 1,1 0 . .\nV 11 21 CG 1,1 0 . .\nV 12 23 CG 1,1 0 . .\nV 13 25 AC 1,1 0 . .\nV 14 27 GT 1,1 0 . .\nG * 0 0 * * * * 1 * .\nG 0 0 1 0 * * * 1 * C\nG 0 0 1 0 * * * * * G\nT * 0:0:1:0\nG 1 1 1 0 * * * 1 * C\nG 1 1 1 0 * * * * * G\nT * 0:0:2:0\nG 3 2 1 0 * * * 1 * A\nG 3 2 1 0 * * * * * C\nT * 0:0:3:0\nG 5 3 1 0 * * * 1 * A\nG 5 3 1 0 * * * * * C\nT * 0:0:4:0\nG 7 4 1 0 * * * 1 * A\nG 7 4 1 0 * * * * * C\nT * 0:0:5:0\nG 9 5 1 0 * * * 1 * G\nG 9 5 1 0 * * * * * T\nT * 0:0:6:0\nG 11 6 1 0 * * * 1 * C\nG 11 6 1 0 * * * * * G\nT * 0:0:7:0\nG 13 7 1 0 * * * 1 * A\nG 13 7 1 0 * * * * * C\nT * 0:0:8:0\nG 15 8 1 0 * * * 1 * G\nG 15 8 1 0 * * * * * T\nT * 0:0:9:0\nG 17 9 1 0 * * * 1 * C\nG 17 9 1 0 * * * * * G\nT * 0:0:10:0\nG 19 10 1 0 * * * 1 * A\nG 19 10 1 0 * * * * * C\nT * 0:0:11:0\nG 21 11 1 0 * * * 1 * C\nG 21 11 1 0 * * * * * G\nT * 0:0:12:0\nG 23 12 1 0 * * * 1 * C\nG 23 12 1 0 * * * * * G\nT * 0:0:13:0\nG 25 13 1 0 * * * 1 * A\nG 25 13 1 0 * * * * * C\nT * 0:0:14:0\nG 27 14 1 0 * * * * * G\nT Y 0:0:15:0\nC 0 0 15 0\nG 27 14 1 0 * * * * * T\nT Y 0:0:15:0\nC 0 0 15 0\nR 29 0 0 15 Y 0 * * 0 15 0\nR 2 0 0 1 D 0 * * 0 1 0\nR 4 0 0 2 D 0 * * 0 2 0\nR 6 0 0 3 D 0 * * 0 3 0\nR 8 0 0 4 D 0 * * 0 4 0\nR 10 0 0 5 D 0 * * 0 5 0\nR 12 0 0 6 D 0 * * 0 6 0\nR 14 0 0 7 D 0 * * 0 7 0\nR 16 0 0 8 D 0 * * 0 8 0\nR 18 0 0 9 D 0 * * 0 9 0\nR 20 0 0 10 D 0 * * 0 10 0\nR 22 0 0 11 D 0 * * 0 11 0\nR 24 0 0 12 D 0 * * 0 12 0\nR 26 0 0 13 D 0 * * 0 13 0\nR 28 0 0 14 D 0 * * 0 14 0\nR 30 0 0 15 Y 0 * * 0 15 0\nZ 90\n",
+   "graphlet_bytes": 3485,
+   "graphlet_lines": 90,
    "label_mode": "constrain",
    "limitations": [
     {
@@ -138,7 +138,7 @@
      "continue_from_leaves"
     ],
     "effective": 1,
-    "message": "the memory budget (bounds.max_memory_mb) stopped the walk at 16 bp on the right arm: every walk up to each arm's complete_to_bp is present and the heads not expanded end with resource_limit; memory is modelled (the walker's state and the output in the requested detail, charged per head; detail graphlet costs the least), annotation decoding is not charged yet (memory_bound_soft); a continuation from a leaf is a new traversal",
+    "message": "the memory budget (bounds.max_memory_mb) stopped the walk at 15 bp on the right arm: every walk up to each arm's complete_to_bp is present and the heads not expanded end with resource_limit; memory is modelled (the walker's state and the output in the requested detail, charged per head; detail graphlet costs the least), annotation decoding is not charged yet (memory_bound_soft); a continuation from a leaf is a new traversal",
     "phase": "traversal",
     "remaining": 0,
     "requested": 1,
@@ -160,7 +160,7 @@
     "validated_seed_id": "8322b11da77e686c"
    },
    "work": {
-    "memory_bytes": 719594
+    "memory_bytes": 714879
    }
   }
  ],
@@ -221,6 +221,6 @@
  },
  "walk_rule": "every walk of at most complete_to_bp bases from the seed boundary is present when it uses no (k+1)-mer edge twice on its own path (edges are compared as (k+1)-mers), enters no seed node, and takes every step regardless of strand (a single-strand graph has no hairpins); it is followed while some permitted label supports every node of it under the strategy's label rules",
  "work": {
-  "memory_bytes": 719594
+  "memory_bytes": 714879
  }
 }

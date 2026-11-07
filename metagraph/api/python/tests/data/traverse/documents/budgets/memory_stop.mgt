@@ -2,11 +2,11 @@ H mgt 1 15 basic $ACGT c k k 64 0 0 walk fixtures * dacc7dcb84187de4
 S 8322b11da77e686c 15 1 1 CTCCAGTTTCTTATC
 L c 0 * 0 comb.fa
 O p c c i
-Q locus memory traversal i:1 i:1 i:1 i:0 raise_memory_budget,use_graphlet,drop_sequences,continue_from_leaves the memory budget (bounds.max_memory_mb) stopped the walk at 16 bp on the right arm: every walk up to each arm's complete_to_bp is present and the heads not expanded end with resource_limit; memory is modelled (the walker's state and the output in the requested detail, charged per head; detail graphlet costs the least), annotation decoding is not charged yet (memory_bound_soft); a continuation from a leaf is a new traversal
+Q locus memory traversal i:1 i:1 i:1 i:0 raise_memory_budget,use_graphlet,drop_sequences,continue_from_leaves the memory budget (bounds.max_memory_mb) stopped the walk at 15 bp on the right arm: every walk up to each arm's complete_to_bp is present and the heads not expanded end with resource_limit; memory is modelled (the walker's state and the output in the requested detail, charged per head; detail graphlet costs the least), annotation decoding is not charged yet (memory_bound_soft); a continuation from a leaf is a new traversal
 K * memory_bound_soft bounds.max_memory_mb i:1 i:1 * . the memory budget is enforced on the walker's modelled state and on this response's output, admitted per head; the annotation rows the seed phase and each level decode (with an annotate dictionary's growth and a cache beyond its allotment), and a failed result's echo of seed_id, are held before they can be charged, so the peak can exceed the budget by them (observed: the excess seen, MiB, rounded up)
-K r walk_domain bounds.max_memory_mb i:1 i:2 16 . every walk of at most complete_to_bp bp is present, longer walks may be missing: the request's budget did not admit the next head, and the exploration stopped there (resource_limit; see resource_stop) (observed: what admitting it needed, MiB rounded up to the smallest budget that admits it with the caches' allotments, which grow with the budget); raise the knob
-A r t 16 p 1 1 1 1 0 steps=32,successor_enumerations=33,output_bp=32,pair_evaluations=0,edge_reuse_probes=0,reminimisation_rounds=0,max_reminimisation_rounds=0,refusal_scans=0,switch_sources_cut=0,work_units=538 Y,16,32,1,1,1,2 16 * 33 17 17 16 0 32
-B 0 2 1 2 1 32 0 16 16 0 0 0 0 D:16,Y:1
+K r walk_domain bounds.max_memory_mb i:1 i:2 15 . every walk of at most complete_to_bp bp is present, longer walks may be missing: the request's budget did not admit the next head, and the exploration stopped there (resource_limit; see resource_stop) (observed: what admitting it needed, MiB rounded up to the smallest budget that admits it with the caches' allotments, which grow with the budget); raise the knob
+A r t 15 p 2 1 1 1 0 steps=30,successor_enumerations=31,output_bp=30,pair_evaluations=0,edge_reuse_probes=0,reminimisation_rounds=0,max_reminimisation_rounds=0,refusal_scans=0,switch_sources_cut=0,work_units=506 Y,15,29,2,1,1,2 15 * 31 16 16 15 0 30
+B 0 2 1 2 1 30 0 15 15 0 0 0 0 D:14,Y:2
 V 0 0 CG 1,1 0 . .
 V 1 1 CG 1,1 0 . .
 V 2 3 AC 1,1 0 . .
@@ -22,7 +22,6 @@ V 11 21 CG 1,1 0 . .
 V 12 23 CG 1,1 0 . .
 V 13 25 AC 1,1 0 . .
 V 14 27 GT 1,1 0 . .
-V 15 29 AT 1,1 0 . .
 G * 0 0 * * * * 1 * .
 G 0 0 1 0 * * * 1 * C
 G 0 0 1 0 * * * * * G
@@ -66,15 +65,13 @@ T * 0:0:13:0
 G 25 13 1 0 * * * 1 * A
 G 25 13 1 0 * * * * * C
 T * 0:0:14:0
-G 27 14 1 0 * * * 1 * G
+G 27 14 1 0 * * * * * G
+T Y 0:0:15:0
+C 0 0 15 0
 G 27 14 1 0 * * * * * T
-T * 0:0:15:0
-G 29 15 1 0 * * * * * A
-T * 0:0:16:0
-G 29 15 1 0 * * * * * T
-T Y 0:0:16:0
-C 0 0 16 0
-R 31 0 0 16 D 0 * * 0 16 0
+T Y 0:0:15:0
+C 0 0 15 0
+R 29 0 0 15 Y 0 * * 0 15 0
 R 2 0 0 1 D 0 * * 0 1 0
 R 4 0 0 2 D 0 * * 0 2 0
 R 6 0 0 3 D 0 * * 0 3 0
@@ -89,6 +86,5 @@ R 22 0 0 11 D 0 * * 0 11 0
 R 24 0 0 12 D 0 * * 0 12 0
 R 26 0 0 13 D 0 * * 0 13 0
 R 28 0 0 14 D 0 * * 0 14 0
-R 30 0 0 15 D 0 * * 0 15 0
-R 32 0 0 16 Y 0 * * 0 16 0
-Z 94
+R 30 0 0 15 Y 0 * * 0 15 0
+Z 90

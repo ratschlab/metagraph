@@ -111,10 +111,14 @@
     "-"
    ],
    "timing": {
-    "cpu_ms": 0.182042,
-    "elapsed_ms": 0.174875,
-    "extension_ms": 0.149917,
-    "support_ms": 0.12904200000000002
+    "cpu_ms": 0.179875,
+    "elapsed_ms": 0.169334,
+    "extension_ms": 0.153542,
+    "page_faults": {
+     "major": 0,
+     "minor": 0
+    },
+    "support_ms": 0.13704
    },
    "work": {
     "anchor_rows": 2,
@@ -124,7 +128,7 @@
     "extension_branches": 0,
     "extension_edges": 18,
     "mask_scans": 0,
-    "memory_bytes": 67117366,
+    "memory_bytes": 67117438,
     "ranges_visited": 62,
     "row_cache_evictions": 0,
     "row_cache_hits": 0,
@@ -250,22 +254,30 @@
     "-"
    ],
    "timing": {
-    "cpu_ms": 0.0285,
-    "elapsed_ms": 0.027375
+    "cpu_ms": 0.033791,
+    "elapsed_ms": 0.031542,
+    "page_faults": {
+     "major": 0,
+     "minor": 0
+    }
    },
    "work": {
     "mask_scans": 0,
-    "memory_bytes": 67117366,
+    "memory_bytes": 67117438,
     "ranges_visited": 122,
     "steps": 122
    }
   }
  ],
  "timing": {
-  "cpu_ms": 0.241958,
-  "elapsed_ms": 0.221125
+  "cpu_ms": 0.260459,
+  "elapsed_ms": 0.226333,
+  "page_faults": {
+   "major": 0,
+   "minor": 0
+  }
  },
  "work": {
-  "memory_bytes": 67117366
+  "memory_bytes": 67117438
  }
 }
