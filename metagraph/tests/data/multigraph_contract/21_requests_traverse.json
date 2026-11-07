@@ -1,21 +1,21 @@
 {
  "route": "GET /requests/svc-trv-91aa07-1",
  "status": 200,
- "note": "E4: for /traverse the attempt_id is the request handle; GET /requests answers from the attempt registry (attempt = the object GET /traverse/attempt/{id} returns; its usage is the final usage).",
+ "note": "E4: for /traverse the attempt_id is the request handle; GET /requests answers from the attempt registry (attempt = the object GET /traverse/attempt/{id} returns; its usage is the final usage). The attempt is the one sample 05 records (05's run: its state as GET /traverse/attempt answered right after it, on the same server); retained_until is its finished_at plus the attempts' retention (retention_s, 3600 s).",
  "body": {
   "request_id": "svc-trv-91aa07-1",
   "server_instance": "7c1e0f3a9b24d6e8",
   "route": "/traverse",
   "state": "ended",
-  "received_at": "2026-10-21T09:14:28.688Z",
-  "finished_at": "2026-10-21T09:14:29.385Z",
+  "received_at": "2026-11-07T07:52:34.085Z",
+  "finished_at": "2026-11-07T07:52:34.095Z",
   "reason": "completed",
   "response": {
-   "bytes": 3604,
+   "bytes": 3589,
    "status": 200,
    "written": true
   },
-  "retained_until": "2026-10-31T10:14:29.385Z",
+  "retained_until": "2026-11-07T08:52:34.095Z",
   "pairs": [
    {
     "graph": "bact_other",
@@ -28,15 +28,16 @@
   ],
   "attempt": {
    "attempt_id": "svc-trv-91aa07-1",
-   "bound_ms": 25000,
+   "bound_ms": 70000,
    "cancel_requested_at": null,
-   "deadline_at": "2026-10-21T09:14:53.688Z",
-   "elapsed_ms": 698,
-   "finished_at": "2026-10-21T09:14:29.385Z",
+   "deadline_at": "2026-11-07T07:53:44.085Z",
+   "elapsed_ms": 11,
+   "finished_at": "2026-11-07T07:52:34.095Z",
+   "not_after_ms": 1794038014000,
    "reason": "completed",
-   "received_at": "2026-10-21T09:14:28.688Z",
+   "received_at": "2026-11-07T07:52:34.085Z",
    "response": {
-    "bytes": 3604,
+    "bytes": 3589,
     "status": 200,
     "written": true
    },
@@ -50,7 +51,7 @@
    "state": "finished",
    "stop_requested_at": null,
    "stop_requested_by": null,
-   "stopped_at": "2026-10-21T09:14:29.385Z",
+   "stopped_at": "2026-11-07T07:52:34.092Z",
    "usage": {
     "attempt_id": "svc-trv-91aa07-1",
     "bound": {
@@ -58,19 +59,20 @@
      "capped_by": null,
      "enforced": true,
      "seeds": 1,
-     "time_budget_ms": 15000.0,
-     "walk_until_ms": 20000
+     "time_budget_ms": 60000.0,
+     "walk_until_ms": 65000
     },
-    "bound_ms": 25000,
-    "elapsed_ms": 698,
+    "bound_ms": 70000,
+    "elapsed_ms": 11,
     "memory": {
      "held_bound_bytes": 536870912,
-     "peak_admitted_bytes": 101404284,
+     "peak_admitted_bytes": 101316182,
      "soft_excess_bytes": 0
     },
-    "observed_max_uninterruptible_ms": 69,
+    "not_after_ms": 1794038014000,
+    "observed_max_uninterruptible_ms": 1,
     "reason": "completed",
-    "received_at": "2026-10-21T09:14:28.688Z",
+    "received_at": "2026-11-07T07:52:34.085Z",
     "seeds": {
      "abandoned": 0,
      "finished": 1,
@@ -78,18 +80,14 @@
      "started": 1
     },
     "server_instance": "7c1e0f3a9b24d6e8",
-    "stopped_at": "2026-10-21T09:14:29.385Z",
+    "stopped_at": "2026-11-07T07:52:34.092Z",
     "timing": {
-     "cpu_ms": 167.004554,
-     "page_faults": {
-      "major": 6931,
-      "minor": 5123
-     }
+     "cpu_ms": 3.931375
     },
     "work": {
-     "memory_bytes": 740988
+     "memory_bytes": 652886
     },
-    "work_units": 1025295
+    "work_units": 120561
    }
   }
  }
