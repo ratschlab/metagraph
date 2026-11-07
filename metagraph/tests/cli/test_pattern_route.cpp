@@ -37,6 +37,12 @@ namespace {
 using namespace mtg;
 using namespace mtg::graph;
 using namespace mtg::cli;
+
+// The pattern search is served on DNA graphs only (SPEC-pattern-search.md: the route refuses a
+// protein graph, alphabet_unsupported, PatternRoute.ProteinGraphIsRefused below), so a Protein
+// build runs none of the DNA search's tests, as test_pattern_search.cpp
+#if ! _PROTEIN_GRAPH
+
 using Clock = pattern::Deadline::Clock;
 
 const size_t kK = 7;
@@ -2344,5 +2350,40 @@ TEST(PatternRoute, TheCountersOfTheExtensionAndOfTheLabels) {
     EXPECT_EQ(0u, e["work"]["extension_branches"].asUInt64());
     EXPECT_EQ(0u, e["work"]["extension_edges"].asUInt64());
 }
+
+#endif // ! _PROTEIN_GRAPH
+
+#if _PROTEIN_GRAPH
+// A protein graph is refused, whatever the request: the route (`/pattern` and `metagraph
+// pattern`) answers 400 alphabet_unsupported naming the graph's alphabet, and the capabilities
+// say it is not available and why. This is the state until E16 (pattern search on protein
+// graphs) lands: E16 replaces this test, and its guard, with the tests of the search it serves.
+TEST(PatternRoute, ProteinGraphIsRefused) {
+    auto anno_graph = test::build_anno_graph<DBGSuccinct, annot::ColumnCompressed<>>(
+            5, { "MKVLAAGIVGLLLAQSEWHT", "MKVLAAGPVGRWHEDNQ" }, { "p1", "p2" },
+            DeBruijnGraph::BASIC);
+    const pattern::GraphSupport route = route_support(anno_graph->get_graph());
+    EXPECT_FALSE(route.supported);
+    EXPECT_EQ("alphabet_unsupported", route.reason);
+    PatternLimits limits;
+    limits.min_information_bits = 4;
+    const Json::Value caps = pattern_capabilities_json(anno_graph.get(), limits, false);
+    EXPECT_FALSE(caps["available"].asBool());
+    EXPECT_EQ("alphabet_unsupported", caps["unavailable_reason"].asString());
+    for (const char *body : { "{\"patterns\": [{\"dna\": \"AACGTT\"}]}",
+                              "{\"patterns\": [{\"protein\": \"MKVLAAG\"}]}" }) {
+        try {
+            process_pattern_request(parse_pattern_body(body), *anno_graph, limits, "rel");
+            ADD_FAILURE() << "a protein graph was searched: " << body;
+        } catch (const PatternRefusal &e) {
+            EXPECT_EQ(400, e.status()) << body;
+            EXPECT_EQ("alphabet_unsupported", e.code()) << body;
+            EXPECT_NE(std::string::npos, std::string(e.what()).find(
+                    anno_graph->get_graph().alphabet())) << e.what();
+        }
+    }
+}
+
+#endif // _PROTEIN_GRAPH (replaced by E16)
 
 } // namespace

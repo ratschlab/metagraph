@@ -30,6 +30,7 @@
 #include "graph/annotated_dbg.hpp"
 #include "graph/representation/canonical_dbg.hpp"
 #include "graph/representation/succinct/dbg_succinct.hpp"
+#include "kmer/kmer_extractor.hpp"
 
 
 // The dummy-edge mask that makes the pattern search's counts exact (DESIGN-pattern-search.md
@@ -139,7 +140,12 @@ void expect_same_mask(const DBGSuccinct &expected, const DBGSuccinct &actual) {
     EXPECT_EQ(expected.num_nodes(), actual.num_nodes());
 }
 
+#if ! _PROTEIN_GRAPH
 const std::vector<std::string> kModes = { "basic", "canonical", "primary" };
+#else
+// a protein graph has one strand: a Protein build refuses the canonical and primary modes
+const std::vector<std::string> kModes = { "basic" };
+#endif
 const std::vector<std::string> kStates = { "stat", "fast", "small" };
 
 TEST(PatternMask, TransformWritesTheMaskOfBuild) {
@@ -297,8 +303,11 @@ TEST(PatternMask, CountsOfTheMask) {
             for (const std::string &record : kRecords) {
                 for (size_t i = 0; i + kK <= record.size(); ++i) {
                     const std::string kmer = record.substr(i, kK);
+#if ! _PROTEIN_GRAPH
+                    // N is no nucleotide (a residue, asparagine, on a protein graph)
                     if (kmer.find('N') != std::string::npos)
                         continue;
+#endif
                     kmers.insert(kmer);
                     if (mode == "canonical")
                         kmers.insert(rc(kmer));
@@ -308,6 +317,11 @@ TEST(PatternMask, CountsOfTheMask) {
         }
     }
 }
+
+// The pattern search is served on DNA graphs only (a protein graph is refused,
+// alphabet_unsupported: PatternRoute.ProteinGraphIsRefused): what the mask means to it is
+// tested in DNA builds
+#if ! _PROTEIN_GRAPH
 
 // The capabilities' mask and counting, through the loader the server and the CLI use
 // (initialize_annotated_dbg with the Config of `metagraph pattern`)
@@ -518,6 +532,8 @@ TEST(PatternMask, MaskWithAValidSentinelIsRefused) {
     EXPECT_EQ(2u, answer["patterns"][0]["counts"]["contexts"]["value"].asUInt64());
 }
 
+#endif // ! _PROTEIN_GRAPH
+
 
 // ---------------------------------------------------------------- without the mask (#16)
 
@@ -558,8 +574,10 @@ TEST(PatternMask, WritersOfANewGraphRemoveAStaleMask) {
     EXPECT_FALSE(fs::exists(dir + "/merged.edgemask"));
     EXPECT_EQ(nullptr, load(dir + "/merged.dbg")->get_mask());
 
-    // a chunked build: the chunks of every suffix, then concatenate
-    for (const std::string suffix : { "$", "A", "C", "G", "T" }) {
+    // a chunked build: the chunks of every suffix (every character of the build's alphabet,
+    // '$' included), then concatenate
+    for (char c : kmer::KmerExtractorBOSS::alphabet) {
+        const std::string suffix(1, c);
         ASSERT_EQ(0, build_graph(make_config({ "build", "--in-ram", "-k", std::to_string(kK),
                                                "--suffix", suffix, "-o", dir + "/chunks",
                                                records }).get()));

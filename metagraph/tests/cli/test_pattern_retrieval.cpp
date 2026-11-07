@@ -34,6 +34,11 @@
 
 namespace {
 
+// The pattern search is served on DNA graphs only (SPEC-pattern-search.md: the route refuses a
+// protein graph, alphabet_unsupported, PatternRoute.ProteinGraphIsRefused), so a Protein build
+// runs none of this suite, as test_pattern_search.cpp
+#if ! _PROTEIN_GRAPH
+
 using namespace mtg;
 using namespace mtg::graph;
 using namespace mtg::cli;
@@ -1642,5 +1647,7 @@ TEST(PatternRetrieval, TheOccurrencesReadTheClock) {
     EXPECT_GT(out["patterns"][0]["work"]["memory_bytes"].asUInt64(), 19994u * 64);
 }
 
+
+#endif // ! _PROTEIN_GRAPH
 
 } // namespace
