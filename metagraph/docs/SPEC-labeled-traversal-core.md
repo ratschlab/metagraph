@@ -2788,7 +2788,9 @@ search's routes, `POST /pattern` and `GET /pattern/capabilities`, are `SPEC-patt
     `max_query_bp`; from feature level 4 also `max_memory_mb` and `max_work_units`, the server's maxima of the
     budgets, 0 when off, below; from E5b `max_request_memory_mb` beside them, the request-wide memory bound, an
     integer, 0 when off (its presence says that the server can leave seeds unstarted for it, §5), which GET
-    /capabilities' `multigraph` block states too, below), the request budgets it accepts (`budgets:
+    /capabilities' `multigraph` block states too, below; from E19 `max_concurrent`, the caps on the requests
+    the server runs at once per route, `{"/pattern": n, "/resolve": n, "/traverse": n}`, 0 for a route without
+    one, which the `multigraph` block states too: "Handler capacity" below), the request budgets it accepts (`budgets:
     ["max_memory_mb", "max_work_units"]`), `work_check_interval` (`W` of §6.8, in work units), `work_bound` (a
     reference to §6.8, work units: what
     `bounds.max_work_units` counts and how far a work stop can exceed it — deterministic logical work, not
@@ -3313,8 +3315,9 @@ search's routes, `POST /pattern` and `GET /pattern/capabilities`, are `SPEC-patt
   `clamped`. The CLI (`metagraph traverse`), being operator-run, applies no caps. A request pinned to another
   `release` is a 400 naming both ids.
 - Errors: a new `InvalidRequest` exception → 400 with the message; every other exception → 500 with context
-  (small change to `process_request`). 503 while the index loads. Handlers run on the io threads: `-p ≥ 2` is
-  documented as required for serving `/traverse` beside `/search`.
+  (small change to `process_request`). 503 while the index loads. Handlers run on the HTTP server's handler
+  threads (`--http-threads`, `-p` when not given): more than the long calls in flight are needed for the other
+  routes to answer beside them ("Handler capacity" below).
 - **Attempts** (requests with `attempt_id`, §5; stage 4, backend half). Both capabilities routes state them
   under `attempts` (the same block): `fields` (`["attempt_id", "budget_id", "locus_id", "not_after_ms",
   "expect_server_instance"]`; the last from feature level 5), `cancel_fields` (`["attempt_id", "wait_ms",
@@ -3537,13 +3540,51 @@ search's routes, `POST /pattern` and `GET /pattern/capabilities`, are `SPEC-patt
     <status>, <bytes> bytes, <ms> ms`, or `no response written (the client is gone)`), a request without
     `attempt_id` whose client is gone too (`[Server] Request <n>: client gone, walk stopped at …; no response
     written`).
-  - Threads: the cancel and state routes run on the same io threads as the traversals; with every thread busy
-    they wait. `-p` must exceed the number of concurrent traversals (by one at least) for a cancel or a state
-    query to be answered while they run; the attempt's clock starts when its header is read, so a request queued
-    behind busy threads is not yet on it.
+  - Threads: the cancel and state routes run on the same handler threads as the traversals; with every thread
+    busy they wait. The handler threads (`--http-threads`) must exceed the concurrent long calls (by one at least)
+    for a cancel or a state query to be answered while they run ("Handler capacity" below); the attempt's clock
+    starts when its header is read, so a request queued behind busy threads is not yet on it.
+- **Handler capacity** (E19): every route's handler runs on one of the HTTP server's handler threads, from the
+  moment its request (header and body) has been read until its response is handed to the transport; a request
+  that finds every thread busy waits unread, the light routes too (`GET /capabilities`, `GET
+  /traverse/capabilities`, `GET /pattern/capabilities`, `GET /requests/{id}`, `GET /traverse/attempt/{attempt_id}`,
+  `POST /traverse/cancel`). Two kinds of flags keep a thread for them:
+  - `--http-threads N`: the handler threads, in [0, 4096]. 0, the default, takes `-p`'s value, as every server
+    had them before E19. `-p` keeps its other roles: the graphs' pool (the pooled pairs of a fan-out, `/search`'s
+    graphs) and the threads that load a graph list.
+  - `--traverse-max-concurrent`, `--resolve-max-concurrent`, `--pattern-max-concurrent`, each in [0, 4096] (0, the
+    default: no cap): the most requests of the route whose handlers run at once. A request counts from its
+    handler's start to its return: the wait for the memory of an `in_ram` load and the load, the work, the
+    writing and the compression of its answer, and a request whose client left until its handler notices. A
+    fan-out (`/resolve` or `/pattern` on two or more pairs) counts once: its pooled pairs run on the graphs' pool,
+    and a pooled pair still working after its request was answered no longer counts. The caps that are set must
+    sum to less than the handler threads (else the server refuses to start, naming the flags), so that while every
+    capped route runs its most a thread is left for the light routes and for the refusal below.
+  - A request of a route at its cap is refused when its handler starts: after the 503 of a single index still
+    loading, before its body is parsed, so before every 400 and 409 and before its `attempt_id` or `request_id` is
+    registered. HTTP 503, `Retry-After: 1`, body `{"code": "busy", "error": …}`, no `usage`, never wrapped in the
+    envelope, on single-graph and multi-graph servers alike (`SPEC-multigraph-envelope.md` §1.1). Nothing of it
+    ran and nothing of it is held: a re-send, under the same id too, is admitted as a first copy would be. It says
+    nothing about other copies of its id, so, like the loading 503, it is no ground of the release rule (above): a
+    ledger re-sends after `Retry-After`, or releases on the rule's own grounds. 429 stays the cancel's alone (a 429
+    releases nothing). During a shutdown nothing new is served: a request the cap would refuse gets no answer, its
+    connection closed, as one whose client is gone.
+  - `/search`, `/align`, `/column_labels` and `/stats` have no cap. The search service admits its search,
+    pattern and traversal calls against one cap per database server (`DESIGN-pattern-search.md` §9), and a new
+    refusal on `/search` would change that service's route. The light routes answer within their own time
+    (milliseconds) whenever the requests in flight leave a thread free: a deployment sets `--http-threads` above
+    its admission cap, and the engine's caps bound what a client outside that admission can take of the threads.
+  - Stated by every `/traverse` capabilities probe beside its maxima and by GET /capabilities' `multigraph` block
+    as `max_concurrent: {"/pattern": n, "/resolve": n, "/traverse": n}` (0 for no cap;
+    `SPEC-multigraph-envelope.md` §8). Logged at start-up: `[Server] Maximum connections: N` (the handler
+    threads, as before) and, with any of the flags given, a line naming the threads and the caps.
+  - The saturation test (`integration_tests/test_traverse.py`, `TestTraverseAttempts.test_saturation_*`): with
+    every `/traverse` slot held by a slow walk, the light routes answer within a stated bound, a further
+    `/traverse` is refused `busy` with nothing registered, and its re-send runs once a slot is free.
 - **Deployment** (`DESIGN-traverse-graphlet.md` §17.5):
-  - `-p` must exceed the number of concurrent traversals by one at least, so that the cancel, state and
-    capabilities routes find an io thread while traversals run.
+  - `--http-threads` (`-p` when not given) must exceed the concurrent long calls by one at least (the search
+    service's admission cap per server; the engine's caps where they are set: "Handler capacity" above), so that
+    the cancel, state and capabilities routes find a thread while long calls run.
   - A reverse proxy in front of the server must forward `POST /traverse/cancel`, `GET /traverse/attempt/*`,
     `GET /capabilities` and `GET /traverse/capabilities` with their query strings (`?graph=…&graph_path=…`,
     percent-encoded), must close its upstream connection when its client goes (the server stops a traversal whose
