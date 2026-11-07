@@ -1,7 +1,7 @@
 {
  "route": "GET /traverse/capabilities",
  "status": 200,
- "note": "E3: without ?graph= every pair of the index (up to max_graphs_without_selection) in the envelope; ?graph=&graph_path=&annotation_path= (E12) select one pair, which answers in a one-entry envelope.",
+ "note": "E3: without ?graph= every pair of the index (up to max_graphs_without_selection) in the envelope; ?graph=&graph_path=&annotation_path= (E12) select one pair, which answers in a one-entry envelope. Each probe states the server's maxima, max_request_memory_mb (E5b) and max_concurrent (E19: the caps on the requests of each long route run at once, 0 = none) among them.",
  "body": {
   "envelope_version": 1,
   "route": "/traverse/capabilities",
@@ -147,6 +147,11 @@
      "constrain",
      "annotate"
     ],
+    "max_concurrent": {
+     "/pattern": 0,
+     "/resolve": 0,
+     "/traverse": 0
+    },
     "max_memory_mb": 0,
     "max_query_bp": 10000,
     "max_request_memory_mb": 0,
@@ -443,6 +448,11 @@
      "constrain",
      "annotate"
     ],
+    "max_concurrent": {
+     "/pattern": 0,
+     "/resolve": 0,
+     "/traverse": 0
+    },
     "max_memory_mb": 0,
     "max_query_bp": 10000,
     "max_request_memory_mb": 0,

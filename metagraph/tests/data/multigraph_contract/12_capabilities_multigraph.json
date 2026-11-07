@@ -1,7 +1,7 @@
 {
  "route": "GET /capabilities",
  "status": 200,
- "note": "E3/E4/E9/E12/E20 advertised: composite_fp (C3, with its rule) beside graph_summary; the multigraph block lists the envelope routes, the selectors per route, the routes that read not_after_ms, finish_by_ms and request_id, and the registry route. Clients switch on these, never by date.",
+ "note": "E3/E4/E9/E12/E20 advertised: composite_fp (C3, with its rule) beside graph_summary; the multigraph block lists the envelope routes, the selectors per route, the routes that read not_after_ms, finish_by_ms and request_id, and the registry route, max_request_memory_mb (E5b) and max_concurrent (E19: the caps on the requests of each long route run at once, 0 = none; above one 503 busy, sample 24). Clients switch on these, never by date.",
  "body": {
   "algorithm_version": "traverse-0.2",
   "attempts": {
@@ -625,7 +625,12 @@
    "search_cuts": true,
    "resolve_boundary_ties": true,
    "discovery_trace_scale": "traced",
-   "max_request_memory_mb": 0
+   "max_request_memory_mb": 0,
+   "max_concurrent": {
+    "/pattern": 0,
+    "/resolve": 0,
+    "/traverse": 0
+   }
   }
  }
 }
