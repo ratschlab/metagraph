@@ -35,7 +35,7 @@ jobs:
       # annotation code they read through. The tests on the mini index skip here
       # (unit_tests_parallel runs each shard in a directory of its own, without mini_refseq/)
       # and run in mini-index-tests
-      unit_test_filter: '*Walker*:*LabelOracle*:*Resolve*:*Trie*:*SupportStep*:*Graphlet*:*Stage2Review*:*Attempt*:*ServerRequest*:*PathCache*:*Pattern*:*CoordToHeader*:*AlignmentFormatCoords*:*HeaderIndex*:*RowDiff*:*BRWT*:*Annotat*:*MultiGraph*:*MaskCheck*:*TraverseNotInGraph*'
+      unit_test_filter: '*Walker*:*LabelOracle*:*Resolve*:*Trie*:*SupportStep*:*Graphlet*:*Stage2Review*:*Attempt*:*ServerRequest*:*PathCache*:*Pattern*:*CoordToHeader*:*AlignmentFormatCoords*:*HeaderIndex*:*RowDiff*:*BRWT*:*Annotat*:*MultiGraph*:*MaskCheck*:*TraverseNotInGraph*:*ServerCapacity*'
       # the branch's integration modules, whole; their classes on the mini index skip here and
       # run in mini-index-tests
       integration_test_filters: '*(test_traverse.* *(test_pattern.* *(test_multigraph.* *(test_transform_mask.*'
