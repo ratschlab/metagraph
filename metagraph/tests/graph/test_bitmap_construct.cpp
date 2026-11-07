@@ -16,6 +16,7 @@
 #include "common/seq_tools/reverse_complement.hpp"
 #include "common/sorted_sets/sorted_set.hpp"
 #include "kmer/kmer_collector.hpp"
+#include "tests/source_path.hpp"
 
 
 namespace {
@@ -24,7 +25,7 @@ using namespace mtg;
 using namespace mtg::graph;
 using mtg::kmer::KmerExtractor2Bit;
 
-const std::string test_data_dir = "../tests/data";
+const std::string test_data_dir = source_path("tests/data");
 const std::string test_fasta = test_data_dir + "/test_construct.fa";
 const std::string test_dump_basename = test_dump_dir() + "/graph_dump_test";
 

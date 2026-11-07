@@ -26,6 +26,7 @@
 #include "annotation/representation/column_compressed/annotate_column_compressed.hpp"
 #include "common/utils/file_utils.hpp"
 #include "graph/annotated_dbg.hpp"
+#include "tests/source_path.hpp"
 
 
 namespace {
@@ -222,9 +223,9 @@ TEST(SearchCut, MediansOrderTheTies) {
 // sample's N (its request's top_labels) over SRR1001 and the narrated SRR0999 (12 k-mers,
 // median 1)
 TEST(SearchCut, Sample14IsTheEnginesCut) {
-    const std::string path = "../tests/data/multigraph_contract/14_search_counts_cut.json";
+    const std::string path = source_path("tests/data/multigraph_contract/14_search_counts_cut.json");
     std::ifstream in(path, std::ios::binary);
-    ASSERT_TRUE(in.good()) << path << " not found (run from the build directory)";
+    ASSERT_TRUE(in.good()) << path << " not found";
     Json::Value sample;
     Json::CharReaderBuilder builder;
     std::string errors;

@@ -30,6 +30,7 @@
 #include "annotation/representation/column_compressed/annotate_column_compressed.hpp"
 #include "annotation/representation/annotation_matrix/static_annotators_def.hpp"
 #include "common/seq_tools/reverse_complement.hpp"
+#include "tests/source_path.hpp"
 
 
 /*
@@ -47,8 +48,7 @@ namespace {
 using namespace mtg::cli;
 using namespace mtg::cli::mgt;
 
-// run from the build directory, like every test reading ../tests/data
-const char kVectors[] = "../api/python/tests/data/traverse/codec_vectors.tsv";
+const std::string kVectors = source_path("api/python/tests/data/traverse/codec_vectors.tsv");
 
 Json::Value parse_cell(const std::string &cell) {
     Json::CharReaderBuilder builder;
@@ -140,7 +140,7 @@ std::string redump(const std::string &tag, const Json::Value &input) {
 
 TEST(GraphletCodec, GoldenVectors) {
     std::ifstream in(kVectors, std::ios::binary);
-    ASSERT_TRUE(in.good()) << kVectors << " not found (run from the build directory): the "
+    ASSERT_TRUE(in.good()) << kVectors << " not found: the "
                               "golden vectors are the freeze gate of MGT v1";
     std::map<std::string, size_t> seen, expected_counts;
     size_t failures = 0;

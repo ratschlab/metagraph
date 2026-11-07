@@ -212,6 +212,11 @@ struct RequestSettings {
     size_t retention_count = 10'000;
     std::string server_instance;
     RequestEntry::Clocks clocks;
+    // the server's clock (Unix epoch ms) that every admission compares not_after_ms with
+    // (AttemptRegistry::now_ms, which the server sets here), read for the 404's server_time_ms;
+    // none: |clocks|.wall, else the system clock. The proof of the 404 (section 5) needs it to
+    // be the clock the admissions read: IdAdmission's registries share it
+    std::function<uint64_t()> now_ms;
 };
 
 /**
@@ -242,15 +247,21 @@ class RequestRegistry {
     // of the id
     void forget(const std::shared_ptr<RequestEntry> &entry);
     // GET /requests/{request_id}: (200, the entry) or (404, {error, request_id,
-    // server_instance}) for an id that is not held (not admitted yet, never admitted, or past
-    // retention: SPEC-multigraph-envelope.md section 5)
+    // server_instance, server_time_ms}) for an id that is not held (not admitted yet, never
+    // admitted, or past retention: SPEC-multigraph-envelope.md section 5). server_time_ms is
+    // read from settings().now_ms in the critical section of the lookup that found nothing, so
+    // that an admission after it, which reads that clock under this lock, reads a time at least
+    // as late: when it exceeds a request's not_after_ms, no request with the id and that
+    // not_after_ms is admitted later (the clock not stepped back)
     std::pair<int, Json::Value> state(const std::string &request_id) const;
     // the retention rule, stated by the 404 and the 409
     std::string retention_text() const;
     // the `error` of the 409 of a repeated |request_id|
     std::string repeated_text(const std::string &request_id) const;
-    // the 404 body of an unknown id
-    Json::Value unknown_json(const std::string &request_id) const;
+    // the 404 body of an unknown id, the server's clock read at |server_time_ms|
+    Json::Value unknown_json(const std::string &request_id, uint64_t server_time_ms) const;
+    // settings().now_ms, else settings().clocks.wall, else the system clock (Unix epoch ms)
+    uint64_t now_ms() const;
 
     // the requests held now (running and retained), for tests
     size_t size() const;
@@ -293,20 +304,41 @@ class IdAdmission {
 
     // RequestRegistry::start of |entry| (with a request_id); the id held by an attempt is
     // refused like a repeated one, its body the attempt as GET /requests/{id} answers it
-    // plus `error`. |admission| as start's, asked after that
-    std::optional<Json::Value> start_request(
-            const std::shared_ptr<RequestEntry> &entry,
-            const std::function<std::optional<Json::Value>()> &admission = nullptr);
+    // plus `error`; then a request whose |not_after_ms| has passed is refused expired
+    // (expired_request_json). That check reads the attempts' clock (AttemptRegistry::now_ms)
+    // inside the request registry's critical section, after its lookup of the id: GET
+    // /requests/{id}'s 404 reads the same clock under the same lock (RequestRegistry::state),
+    // which makes its server_time_ms a proof (SPEC-multigraph-envelope.md section 5). The clock
+    // must never be read for the check outside that critical section, e.g. before this call
+    std::optional<Json::Value> start_request(const std::shared_ptr<RequestEntry> &entry,
+                                             std::optional<uint64_t> not_after_ms = std::nullopt);
     // AttemptRegistry::start of |attempt|; the id held by a request is refused like a running
     // or retained attempt_id, its body the attempt-shaped request (request_as_attempt_json)
     std::optional<AttemptRegistry::StartRefusal> start_attempt(
             const std::shared_ptr<Attempt> &attempt);
+    // GET /requests/{id}: (200, the request registry's entry of a /resolve or /pattern
+    // request_id), else (200, a /traverse attempt_id's, traverse_request_json), else the request
+    // registry's 404, its server_time_ms read before the attempt registry is asked: an attempt
+    // admitted after the attempt registry's lookup reads the clock under that registry's lock,
+    // later; one admitted before it is found (or ran and was dropped). Reading the clock there
+    // instead would not do: a request admitted between the two lookups reads an earlier time.
+    // Without the admission's lock: it waits for no admission
+    std::pair<int, Json::Value> state(const std::string &id);
 
   private:
     std::mutex mutex_;
     RequestRegistry &requests_;
     AttemptRegistry &attempts_;
 };
+
+// The expired 409 of a /resolve or /pattern request (SPEC-multigraph-envelope.md section 4):
+// expired_json of its |not_after_ms| at the server's time |now_ms|, with its |request_id| when it
+// has one; none when it gives no not_after_ms or that has not passed (strict: now_ms >
+// not_after_ms)
+std::optional<Json::Value> expired_request_json(std::optional<uint64_t> not_after_ms,
+                                                uint64_t now_ms,
+                                                const std::string &server_instance,
+                                                const std::optional<std::string> &request_id);
 
 // The `attempt` of a /traverse 409 whose attempt_id is a request's request_id: the request's
 // entry |entry| (GET /requests/{id}) with what is read of an attempt there: attempt_id, and

@@ -6,6 +6,7 @@
 #include <vector>
 
 #include "seq_io/sequence_io.hpp"
+#include "tests/source_path.hpp"
 
 
 namespace {
@@ -13,7 +14,7 @@ namespace {
 using namespace mtg;
 using namespace mtg::seq_io;
 
-const std::string test_data_dir = "../tests/data";
+const std::string test_data_dir = source_path("tests/data");
 const std::string test_fasta = test_data_dir + "/transcripts_1000.fa";
 const std::string dump_filename_base = test_dump_dir() + "/dump.fasta";
 const std::vector<std::string> dump_filename_exts { ".gz", ".zst" };

@@ -28,6 +28,7 @@
 #include "graph/annotated_dbg.hpp"
 #include "graph/representation/succinct/dbg_succinct.hpp"
 #include "graph/traversal/label_oracle.hpp"
+#include "tests/source_path.hpp"
 
 
 // The predicate language of POST /pattern (src/cli/pattern_predicate.cpp;
@@ -464,10 +465,9 @@ TEST(PatternPredicate, NestingAtMost64Deep) {
 // (the suite's tests/test_manifest_lib.py, in ratschlab/metagraph-suite since 2026-10-21), so the two readings
 // cannot drift apart unseen
 TEST(PatternPredicate, TheSharedCorpusIsTheHostsVerdict) {
-    // run from the build directory, like every test reading ../tests/data
-    const char corpus[] = "../tests/data/pattern_predicate_forms.json";
+    const std::string corpus = source_path("tests/data/pattern_predicate_forms.json");
     std::ifstream in(corpus, std::ios::binary);
-    ASSERT_TRUE(in.good()) << corpus << " not found (run from the build directory)";
+    ASSERT_TRUE(in.good()) << corpus << " not found";
     const std::string text { std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>() };
     const Json::Value doc = mtg::cli::parse_strict_json<mtg::cli::InvalidPatternRequest>(text, "");
     const Json::Value &rows = doc["rows"];

@@ -1327,6 +1327,9 @@ int run_server(Config *config) {
     request_settings.retention_s = config->request_retention_s;
     request_settings.retention_count = config->request_retention;
     request_settings.server_instance = attempts.server_instance();
+    // the clock of every admission's not_after_ms check (both routes' registries), which the
+    // registry's 404 states as server_time_ms (section 5)
+    request_settings.now_ms = [&attempts]() { return attempts.now_ms(); };
     RequestRegistry requests(request_settings);
     logger->info("[Server] Requests by request_id: {}", requests.retention_text());
     // a request_id and an attempt_id are one namespace (GET /requests/{id} reads both)
@@ -1352,19 +1355,12 @@ int run_server(Config *config) {
      */
     auto admit = [&](const std::shared_ptr<RequestEntry> &entry, const RequestHandles &handles,
                      size_t request_id) {
-        auto expired = [&]() -> std::optional<Json::Value> {
-            AttemptIds ids;
-            ids.not_after_ms = handles.not_after_ms;
-            const uint64_t now = attempts.now_ms();
-            if (!not_after_passed(ids, now))
-                return std::nullopt;
-            Json::Value body = expired_json(ids, now, attempts.server_instance());
-            if (handles.request_id)
-                body["request_id"] = *handles.request_id;
-            return body;
-        };
-        std::optional<Json::Value> refused
-                = handles.request_id ? id_admission.start_request(entry, expired) : expired();
+        // with a request_id the not_after_ms check reads the clock inside the request
+        // registry's critical section (IdAdmission::start_request): never read it here for it
+        std::optional<Json::Value> refused = handles.request_id
+                ? id_admission.start_request(entry, handles.not_after_ms)
+                : expired_request_json(handles.not_after_ms, attempts.now_ms(),
+                                       attempts.server_instance(), std::nullopt);
         if (refused) {
             logger->info("[Server] Request {}: not started, {}", request_id,
                          refused->get("error", "").asString());
@@ -2339,7 +2335,8 @@ int run_server(Config *config) {
     // or /pattern request's request_id (its pairs' states and usage, its response), kept for
     // the retention period after it ended, then 404; for /traverse the attempt_id is the handle
     // and the attempt registry answers (attempt: the object of GET /traverse/attempt/{id}), one
-    // polling path for every route
+    // polling path for every route. The 404 states the server's clock read in the lookup
+    // (server_time_ms; IdAdmission::state)
     server.resource["^/requests/([^/]+)$"]["GET"] = [&](shared_ptr<HttpServer::Response> response,
                                                        shared_ptr<HttpServer::Request> request) {
         const std::string id = request->path_match[1].str();
@@ -2348,14 +2345,9 @@ int run_server(Config *config) {
                 throw InvalidRequest("request_id: expected 1 to 128 characters from "
                                      "[A-Za-z0-9._:-]");
             }
-            auto [status, body] = requests.state(id);
+            auto [status, body] = id_admission.state(id);
             if (status == 200)
                 return body;
-            Json::Value pair;
-            auto [attempt_status, attempt] = attempts.state(id, &pair);
-            if (attempt_status == 200 && attempt.get("state", "").asString() != "unknown") {
-                return traverse_request_json(attempt, pair, attempts.settings().retention_s);
-            }
             throw HttpError(404, std::move(body));
         }, /* compact */ true, &traversal_io);
     };

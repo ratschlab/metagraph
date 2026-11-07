@@ -3,6 +3,7 @@
 #include "seq_io/vcf_parser.hpp"
 
 #include <set>
+#include "tests/source_path.hpp"
 
 
 namespace {
@@ -10,7 +11,7 @@ namespace {
 using namespace mtg;
 using namespace mtg::seq_io;
 
-const std::string test_data_dir = "../tests/data/";
+const std::string test_data_dir = source_path("tests/data/");
 const std::string ref_file = test_data_dir + "test_vcfparse.fa";
 const std::string vcf_file1 = test_data_dir + "test_vcfparse_1.vcf";
 const std::string vcf_file1_bad = test_data_dir + "test_vcfparse_1.bad.vcf.gz";
