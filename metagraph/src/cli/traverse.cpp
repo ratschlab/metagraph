@@ -5199,8 +5199,9 @@ Json::Value process_traverse_request(const Json::Value &json,
         // poll that reads the clock and the client (the stop flag alone is read elsewhere)
         control.ms_left = [attempt]() { return attempt->ms_left(); };
         control.poll_now = [attempt]() { return attempt->poll(/* force */ true); };
-        // the walked seed's account, from which its output is estimated (the delivery reserve),
-        // with its record coordinates' share apart (opt-in; 0 without them): an occurrence's
+        // the walked seed's account (without the memory budget's cache allotments, which write
+        // no text), from which its output is estimated (the delivery reserve), with its record
+        // coordinates' share apart (opt-in; 0 without them): an occurrence's
         // account is 20-73 times its text (872 bytes for 12-44), the rest of the output's
         // 115-129, so the reserve prices that share at its own bound
         // (kCoordinateAccountPerTextByte)
@@ -5216,10 +5217,10 @@ Json::Value process_traverse_request(const Json::Value &json,
     const std::function<void()> text_check = attempt
         ? std::function<void()>([attempt]() { attempt->check_delivery(); })
         : std::function<void()>();
-    // |account|: the walk's final modelled account (0: no walk), whose ratio to the text the
-    // server measures for its next attempts' estimates; |coordinates|: its record coordinates'
-    // share, which the ratio leaves out with the exact text it wrote (coordinates_text_bytes,
-    // counted before the tree is freed)
+    // |account|: the walk's final modelled account without the budget's cache allotments (0:
+    // no walk; final_bytes), whose ratio to the text the server measures for its next attempts'
+    // estimates; |coordinates|: its record coordinates' share, which the ratio leaves out with
+    // the exact text it wrote (coordinates_text_bytes, counted before the tree is freed)
     auto append = [&](Json::Value &&rj, double built_seconds, uint64_t account = 0,
                       uint64_t coordinates = 0) {
         if (!texts) {
@@ -5481,9 +5482,9 @@ Json::Value process_traverse_request(const Json::Value &json,
             put_memory(&rj, without_allotments(r.account.memory_peak, r.account),
                        without_allotments(r.account.memory_final, r.account));
             const std::string outcome = rj["outcome"]["walks"].asString();
-            // the delivery reserve's sample: the walk's account at its end, as the walk's
-            // progress states it (the allotments included)
-            append(std::move(rj), seconds, r.account.memory_final, meter.memory_coordinates);
+            // the delivery reserve's sample: the walk's account at its end without the
+            // budget's cache allotments (final_bytes), as the walk's progress states it
+            append(std::move(rj), seconds, meter.memory_final, meter.memory_coordinates);
             delivered(outcome);
         } catch (const SeedDerivationError &e) {
             // The permitted set could not be derived from THIS seed (nothing carries it

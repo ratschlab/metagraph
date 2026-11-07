@@ -5074,9 +5074,15 @@ void Walker::run_level(ArmState &arm, uint64_t depth) {
     beam(arm, depth + 1);
     arm.frontier.swap(arm.next);
     // what the walk will deliver grows with its account: the caller keeps time back for it,
-    // the recorded coordinates' part told apart (their text per account byte is another)
-    if (control_ && control_->progress)
-        control_->progress(accounted(), coord_account_);
+    // the recorded coordinates' part told apart (their text per account byte is another).
+    // Without the budget's cache allotments, which write no text: the account the caller
+    // measures its account per text byte on (the meter's memory_final) is the same, so that
+    // a budget's allotments neither inflate the ratio a smaller seed measures (and with it
+    // understate a larger seed's text) nor add text to the estimate
+    if (control_ && control_->progress) {
+        const uint64_t account = accounted();
+        control_->progress(account > allotted_ ? account - allotted_ : 0, coord_account_);
+    }
 }
 
 std::optional<EndReason> Walker::process_item(ArmState &arm, Item &item,

@@ -344,12 +344,13 @@ class Attempt {
     // server, else the configured one for JSON or for a graphlet)
     void set_delivery_detail(const std::string &detail);
     const std::string& delivery_detail() const { return detail_; }
-    // the seed being walked holds |account| modelled bytes, |coordinates| of them its record
-    // coordinates' share (ResourceAccount::coordinates; 0 without output.coordinates), at
-    // every level's end
+    // the seed being walked holds |account| modelled bytes (without a memory budget's cache
+    // allotments, which write no text), |coordinates| of them its record coordinates' share
+    // (ResourceAccount::coordinates; 0 without output.coordinates), at every level's end
     void progress(uint64_t account, uint64_t coordinates = 0);
     // a seed's result was written as |text_bytes| of text, built in |build_seconds|, from a
-    // walk whose modelled account ended at |account| bytes (0: no walk, a failed seed), of
+    // walk whose modelled account ended at |account| bytes (0: no walk, a failed seed; as
+    // progress states it, without the budget's cache allotments: the seed's final_bytes), of
     // which |coordinate_account| is the coordinate share and |coordinate_text| the exact text
     // it wrote (coordinates_text_bytes): the ratio of the rest is measured without both, so
     // that a request with coordinates measures what the same walk without them would (their

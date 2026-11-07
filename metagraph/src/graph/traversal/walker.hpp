@@ -1282,9 +1282,10 @@ struct AttemptControl {
     std::function<double()> ms_left;
     std::function<ExternalStop()> poll_now;
     // the walk's modelled account (bytes, the memory model's, computed with or without a
-    // budget) at every level's end, and the part of it that is recorded coordinates (0 without
-    // them): what the caller estimates the seed's output from (the server's delivery reserve),
-    // whose text per account byte differs between the two parts
+    // budget) at every level's end, without a memory budget's cache allotments (they write no
+    // text; ResourceAccount::allotted), and the part of it that is recorded coordinates (0
+    // without them): what the caller estimates the seed's output from (the server's delivery
+    // reserve), whose text per account byte differs between the two parts
     std::function<void(uint64_t account, uint64_t coordinates)> progress;
 };
 
