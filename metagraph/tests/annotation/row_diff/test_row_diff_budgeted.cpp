@@ -848,6 +848,66 @@ TEST(BudgetedRowsAlone, PlainBrwtAndColumnMajor) {
     }
 }
 
+// A plain BRWT whose column groups are not ranges of columns (as transform_anno --greedy
+// builds them): its batched read returns a row's columns in the tree's order, not sorted, and
+// the budget-aware read of each row alone returns exactly that -- the same columns in the same
+// order, so a caller that keeps a row's first columns (the annotate recorder's
+// max_labels_per_node) or numbers them in row order keeps and numbers the same ones under a
+// budget as without one. The charges are those of any row read alone: the scratch and the copy
+// at the row's size.
+TEST(BudgetedRowsAlone, PlainBrwtKeepsTheOrderOfItsBatchedRead) {
+    std::mt19937 rng(45);
+    const uint64_t num_rows = 300;
+    const size_t num_columns = 12;
+    // the leaves in groups {1, 4, 7, 10}, {2, 5, 8, 11}, {0, 3, 6, 9} (in this order), then
+    // the three under the root
+    const BRWTBottomUpBuilder::Partitioner interleaved = [](const auto &columns) {
+        BRWTBottomUpBuilder::Partition groups(columns.size() <= 3 ? 1 : 3);
+        for (uint64_t j = 0; j < columns.size(); ++j) {
+            groups[j % groups.size()].push_back(j);
+        }
+        std::rotate(groups.begin(), groups.begin() + 1, groups.end());
+        return groups;
+    };
+    for (double density : { 0.3, 0.7, 1.0 }) {
+        std::vector<std::unique_ptr<bit_vector>> cols;
+        for (size_t j = 0; j < num_columns; ++j) {
+            cols.push_back(random_column(num_rows, density, rng));
+        }
+        BRWT brwt = BRWTBottomUpBuilder::build(std::move(cols), interleaved);
+        const auto reader = budgeted_rows(brwt);
+        ASSERT_TRUE(reader);
+        std::vector<Row> rows(num_rows);
+        std::iota(rows.begin(), rows.end(), 0);
+        std::shuffle(rows.begin(), rows.end(), rng);
+        const std::vector<SetBits> expected = brwt.get_rows(rows);
+        // the fixture is what it is for: rows the tree does not return in column order
+        size_t unsorted = 0;
+        for (const SetBits &row : expected) {
+            unsorted += !std::is_sorted(row.begin(), row.end());
+        }
+        ASSERT_GT(unsorted, num_rows / 4) << density;
+        DecodeBudget budget;
+        std::vector<SetBits> out;
+        std::vector<RowCost> costs;
+        std::vector<uint64_t> held;
+        ASSERT_EQ(DecodeStatus::OK, reader->decode_rows(rows, budget, &out, &costs, &held));
+        EXPECT_EQ(expected, out) << density;
+        for (size_t i = 0; i < rows.size(); ++i) {
+            EXPECT_EQ(small_vector_bytes(out[i].size(), sizeof(Column)), held[i]);
+            // read alone: the demand is what the read holds at its peak, exactly
+            DecodeBudget alone;
+            std::vector<SetBits> o;
+            std::vector<RowCost> c;
+            std::vector<uint64_t> h;
+            ASSERT_EQ(DecodeStatus::OK, reader->decode_rows({ rows[i] }, alone, &o, &c, &h));
+            EXPECT_EQ(expected[i], o[0]);
+            EXPECT_EQ(costs[i].demand, c[0].demand);
+            EXPECT_LE(alone.peak(), c[0].demand);
+        }
+    }
+}
+
 // Formats without the budget-aware path say so, charge nothing and touch nothing (a count
 // row-diff annotation on disk, row_diff_int_disk: not a deployed form)
 TEST(RowDiffBudgetedDecode, UnsupportedFormatsChargeNothing) {

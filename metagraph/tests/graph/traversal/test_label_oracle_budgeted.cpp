@@ -136,7 +136,9 @@ std::vector<LabelRef> refs(const LabelOracle &oracle, const std::vector<std::str
 
 // A plain BRWT annotation (the matrix of a relaxed .brwt.annodbg, no row-diff) of the columns
 // of the column annotation |column|, on its graph
-std::unique_ptr<AnnotatedDBG> brwt_of(const AnnotatedDBG &column) {
+std::unique_ptr<AnnotatedDBG> brwt_of(const AnnotatedDBG &column,
+                                      annot::matrix::BRWTBottomUpBuilder::Partitioner partitioner
+                                              = annot::matrix::BRWTBottomUpBuilder::get_basic_partitioner()) {
     const auto &matrix = dynamic_cast<const annot::matrix::ColumnMajor&>(
             column.get_annotator().get_matrix());
     std::vector<std::unique_ptr<bit_vector>> cols;
@@ -144,12 +146,26 @@ std::unique_ptr<AnnotatedDBG> brwt_of(const AnnotatedDBG &column) {
         cols.push_back(c->copy());
     }
     auto brwt = std::make_unique<annot::matrix::BRWT>(
-            annot::matrix::BRWTBottomUpBuilder::build(std::move(cols)));
+            annot::matrix::BRWTBottomUpBuilder::build(std::move(cols), std::move(partitioner)));
     auto annotator = std::make_unique<annot::MultiBRWTAnnotator>(
             std::move(brwt), column.get_annotator().get_label_encoder());
     auto graph = std::const_pointer_cast<DeBruijnGraph>(
             std::dynamic_pointer_cast<const DeBruijnGraph>(column.get_graph_ptr()));
     return std::make_unique<AnnotatedDBG>(graph, std::move(annotator));
+}
+
+// Column groups that are not ranges of columns, as transform_anno --greedy builds them: the
+// leaves in groups {1, 4, ...}, {2, 5, ...}, {0, 3, ...} (in this order), then one root. A
+// plain BRWT built so returns a row's columns in the tree's order, not sorted
+annot::matrix::BRWTBottomUpBuilder::Partitioner interleaved_partitioner() {
+    return [](const annot::matrix::BRWTBottomUpBuilder::VectorPtrs &columns) {
+        annot::matrix::BRWTBottomUpBuilder::Partition groups(columns.size() <= 3 ? 1 : 3);
+        for (uint64_t j = 0; j < columns.size(); ++j) {
+            groups[j % groups.size()].push_back(j);
+        }
+        std::rotate(groups.begin(), groups.begin() + 1, groups.end());
+        return groups;
+    };
 }
 
 // The budget-aware fetch and warm return the unbudgeted hits, and a key's costs are the same
@@ -284,6 +300,67 @@ TEST(LabelOracleBudgetedQuery, PlainAnnotationsReadEachRowAlone) {
         size_t refused = 0;
         EXPECT_FALSE(cold.fetch(keys.data(), keys.size(), none, &hits, &costs, &refused));
         EXPECT_EQ(0u, none.held());
+    }
+}
+
+// A plain BRWT whose column groups are not ranges of columns (a --greedy brwt): the annotate
+// recorder keeps a row's first max_labels_per_node columns in the order the row is read and
+// numbers new labels in that order, so the budget-aware read must return a row as the
+// unbudgeted read does, in the tree's order: the same lists, the same totals and the same
+// dictionary, label for label, under a budget as without one -- with every label of a row kept
+// and with fewer kept than the row has
+TEST(LabelOracleBudgetedQuery, PlainBrwtRecorderNamesTheLabelsOfItsUnbudgetedRead) {
+    Fixture fx(false);
+    auto column = test::build_anno_graph<DBGSuccinct, annot::ColumnCompressed<>>(
+            kK, fx.seqs, fx.labels, DeBruijnGraph::BASIC);
+    auto brwt = brwt_of(*column, interleaved_partitioner());
+    LabelOracle oracle(*brwt);
+    ASSERT_TRUE(oracle.decode_charged());
+    ASSERT_FALSE(oracle.row_diff());
+    // the fixture is what it is for: rows the tree does not return in column order
+    size_t unsorted = 0;
+    for (const auto &batch : fx.batches(oracle)) {
+        std::vector<annot::matrix::BinaryMatrix::Row> rows;
+        for (node_index k : batch) {
+            if (k != npos)
+                rows.push_back(AnnotatedDBG::graph_to_anno_index(k));
+        }
+        for (const auto &row : oracle.get_rows(rows)) {
+            unsorted += !std::is_sorted(row.begin(), row.end());
+        }
+    }
+    ASSERT_GT(unsorted, 50u);
+    auto name_bytes = [](std::string_view n) { return 100 + n.size(); };
+    for (size_t cap : { 64, 2 }) {
+        LabelRecorder plain_recorder(oracle, LabelKind::COLUMN, cap);
+        LabelRecorder recorder(oracle, LabelKind::COLUMN, cap);
+        recorder.set_max_cache_bytes(1 << 20);
+        size_t checked = 0;
+        for (const auto &batch : fx.batches(oracle)) {
+            const auto expected = plain_recorder.fetch(batch);
+            std::vector<LabelRecorder::NodeLabels> lists;
+            std::vector<KeyCost> costs;
+            lists.reserve(batch.size());
+            costs.reserve(batch.size());
+            DecodeBudget budget;
+            size_t refused = 0;
+            ASSERT_TRUE(recorder.fetch(batch.data(), batch.size(), budget, &lists, &costs,
+                                       &refused, name_bytes));
+            ASSERT_EQ(expected.size(), lists.size());
+            for (size_t i = 0; i < lists.size(); ++i) {
+                EXPECT_EQ(expected[i].labels, lists[i].labels) << cap << " " << i;
+                EXPECT_EQ(expected[i].total, lists[i].total) << cap << " " << i;
+                checked += expected[i].total > cap;
+            }
+        }
+        ASSERT_EQ(plain_recorder.labels().size(), recorder.labels().size()) << cap;
+        for (size_t l = 0; l < recorder.labels().size(); ++l) {
+            EXPECT_EQ(plain_recorder.labels()[l].name, recorder.labels()[l].name) << cap << " " << l;
+        }
+        // with the cap below the shared rows' width, rows were cut
+        if (cap == 2) {
+            EXPECT_GT(checked, 20u);
+        }
     }
 }
 

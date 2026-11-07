@@ -325,14 +325,19 @@ class RowDiff : public IRowDiff, public BinaryMatrix {
 
 // The stored rows of a binary row-diff matrix for the budget-aware decode path: the index
 // matrix's single-row read (a descent for BRWT, a scan of the columns for ColumnMajor, one
-// range for the row-major forms) into the scratch, sorted, then copied into the row (charged
-// at its exact size before the copy). A matrix read through a reader (HasRowReader: RowDisk)
-// opens one at the call's first read, charged before it is opened and held, like the scratch,
-// until the call ends.
+// range for the row-major forms) into the scratch, sorted (the row-diff decode merges sorted
+// rows), then copied into the row (charged at its exact size before the copy). A matrix read
+// without a row-diff (BudgetedMatrixRows) is not sorted: its row is returned in the order of
+// the single-row read, which is the order of the matrix's batched read (a BRWT's tree order,
+// not column order where its column groups are not ranges of columns, as --greedy builds
+// them), so that it is exactly what get_rows() returns. A matrix read through a reader
+// (HasRowReader: RowDisk) opens one at the call's first read, charged before it is opened and
+// held, like the scratch, until the call ends.
 template <class BaseMatrix>
 class BudgetedRowFetcher : public RowFetcher<BinaryMatrix::SetBitPositions> {
   public:
-    explicit BudgetedRowFetcher(const BaseMatrix &matrix) : matrix_(matrix) {}
+    explicit BudgetedRowFetcher(const BaseMatrix &matrix, bool sorted = true)
+          : matrix_(matrix), sorted_(sorted) {}
 
     bool fetch(BinaryMatrix::Row r, BinaryMatrix::SetBitPositions *row, uint64_t *bytes,
                DecodeBudget &budget) override {
@@ -340,7 +345,8 @@ class BudgetedRowFetcher : public RowFetcher<BinaryMatrix::SetBitPositions> {
         *bytes = 0;
         if (!read(r, budget))
             return false;
-        std::sort(scratch_.data.begin(), scratch_.data.end());
+        if (sorted_)
+            std::sort(scratch_.data.begin(), scratch_.data.end());
         const uint64_t b = small_vector_bytes(scratch_.data.size(), sizeof(BinaryMatrix::Column));
         if (!budget.charge(b))
             return false;
@@ -381,6 +387,7 @@ class BudgetedRowFetcher : public RowFetcher<BinaryMatrix::SetBitPositions> {
     }
 
     const BaseMatrix &matrix_;
+    const bool sorted_;
     ChargedBuffer<BinaryMatrix::Column> scratch_;
     std::unique_ptr<typename RowReaderOf<BaseMatrix>::type> reader_;
     uint64_t reader_charged_ = 0;
@@ -394,6 +401,8 @@ class BudgetedRowFetcher : public RowFetcher<BinaryMatrix::SetBitPositions> {
  * at entry); OK: |*costs| and |*held| as decode_rows states them. Each row is read alone by
  * the matrix's single-row read, so a row has no dependency rows and its demand is what reading
  * it alone holds: the outputs for one row, the scratch grown to its entries and its copy.
+ * The rows are exactly those of the matrix's get_rows(), their columns in the same order (a
+ * BRWT's tree order: not sorted where its column groups are not ranges of columns).
  * Single-threaded, as decode_rows.
  */
 class BudgetedRows {
@@ -423,7 +432,8 @@ class BudgetedMatrixRows : public BudgetedRows {
                              std::vector<BinaryMatrix::SetBitPositions> *out,
                              std::vector<RowCost> *costs,
                              std::vector<uint64_t> *held) const override {
-        BudgetedRowFetcher<Matrix> fetcher(matrix_);
+        // the single-row read's order, which is get_rows()'s (BudgetedRowFetcher)
+        BudgetedRowFetcher<Matrix> fetcher(matrix_, /* sorted */ false);
         return decode_rows_alone<BinaryMatrix::SetBitPositions>(rows, budget, fetcher, out,
                                                                 costs, held);
     }
