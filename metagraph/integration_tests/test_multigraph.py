@@ -1574,6 +1574,253 @@ class TestMultiGraphServer(TestingBase):
         finally:
             server.stop()
 
+    def test_resolve_and_pattern_caps_refuse_busy_and_register_nothing(self):
+        """E19 on a multi-graph server (SPEC-multigraph-envelope.md section 1.1, section 8;
+        SPEC-labeled-traversal-core.md §10.3, "Handler capacity"): -p 1, --http-threads 4,
+        --resolve-max-concurrent 1 and --pattern-max-concurrent 1. A /resolve of b_big's whole
+        record (seconds) holds the /resolve slot, the slow pattern on b_big the /pattern slot.
+        Meanwhile a second /pattern and a second /resolve, each with a request_id, are refused
+        at once: 503, Retry-After 1, {code: "busy", error}, unwrapped (no envelope, no
+        request_id), their ids not registered (GET /requests/{id} 404); GET /capabilities (its
+        multigraph block stating the caps), GET /traverse/capabilities (each probe the same
+        object), GET /pattern/capabilities and GET /requests/{id} of the running requests
+        answer within a second. Once each slot is free, the refused request sent again after
+        Retry-After runs, its request_id admitted."""
+        server = Server([self._cutoff_csv(), '--http-threads', '4', '--resolve-max-concurrent',
+                         '1', '--pattern-max-concurrent', '1', '--traverse-max-time-ms', '600000',
+                         '--pattern-max-contexts', '1000000'],
+                        os.path.join(self.tempdir.name, 'server_busy.log'), threads=1)
+        got = {}
+
+        def post(key, route, body):
+            try:
+                got[key] = server.post(route, body)
+            except requests.exceptions.RequestException as e:
+                got[key] = e
+
+        def running(request_id, deadline):
+            while True:
+                ret = server.get(f'requests/{request_id}')
+                if ret.status_code == 200 and ret.json()['state'] == 'running':
+                    return
+                self.assertLess(time.time(), deadline, (request_id, ret.text[:2000]))
+                time.sleep(0.02)
+        slow_resolve = dict(self._slow_resolve(100000000), graphs=['b_big'],
+                            request_id='it-busy-r1')
+        slow_pattern = dict(self.SLOW_PATTERN, time_budget_ms=60000, graphs=['b_big'],
+                            request_id='it-busy-p1')
+        second_resolve = dict(self._slow_resolve(1000), graphs=['a_kleb'],
+                              request_id='it-busy-r2')
+        second_pattern = dict(self.SLOW_PATTERN, graphs=['a_kleb'], request_id='it-busy-p2')
+        clients = [threading.Thread(target=post, args=('r1', 'resolve', slow_resolve)),
+                   threading.Thread(target=post, args=('p1', 'pattern', slow_pattern))]
+        took = {}
+
+        def timed(name, call, status):
+            started = time.time()
+            ret = call()
+            took[name] = time.time() - started
+            self.assertEqual(status, ret.status_code, (name, ret.text[:2000]))
+            return ret
+
+        def busy(ret, route):
+            self.assertEqual('1', ret.headers.get('Retry-After'))
+            self.assertEqual(['code', 'error', 'server_instance'], sorted(ret.json()))
+            self.assertEqual('busy', ret.json()['code'])
+            self.assertEqual(server.get('capabilities').json()['server_instance'],
+                             ret.json()['server_instance'])
+            self.assertIn(f'at most 1 {route} request(s) at once (--{route[1:]}-max-concurrent)',
+                          ret.json()['error'])
+        try:
+            clients[0].start()
+            running('it-busy-r1', time.time() + 60)
+            clients[1].start()
+            running('it-busy-p1', time.time() + 60)
+            # both slots held: the second of each route is refused, nothing of it registered
+            p2 = timed('POST /pattern (busy)', lambda: server.post('pattern', second_pattern),
+                       503)
+            busy(p2, '/pattern')
+            r2 = timed('POST /resolve (busy)', lambda: server.post('resolve', second_resolve),
+                       503)
+            busy(r2, '/resolve')
+            for request_id in ('it-busy-p2', 'it-busy-r2'):
+                self.assertEqual(404, server.get(f'requests/{request_id}').status_code)
+            caps = timed('GET /capabilities', lambda: server.get('capabilities'), 200).json()
+            stated = {'/pattern': 1, '/resolve': 1, '/traverse': 0}
+            self.assertEqual(stated, caps['multigraph']['max_concurrent'])
+            probes = timed('GET /traverse/capabilities',
+                           lambda: server.get('traverse/capabilities'), 200).json()
+            self.assertEqual([stated] * 3, [e['max_concurrent'] for e in probes['answers']])
+            timed('GET /pattern/capabilities', lambda: server.get('pattern/capabilities'), 200)
+            # the slow resolve (seconds) still holds its slot; the slow pattern (over a second)
+            # held its own when the second /pattern was refused
+            for request_id in ('it-busy-r1', 'it-busy-p1'):
+                entry = timed(f'GET /requests/{request_id}',
+                              lambda: server.get(f'requests/{request_id}'), 200).json()
+                if request_id == 'it-busy-r1':
+                    self.assertEqual('running', entry['state'], (request_id, took))
+            for name, seconds in took.items():
+                self.assertLess(seconds, 1.0, (name, took))
+            # each slot freed: the refused request, sent again after Retry-After, runs
+            for key, client, route, body, refused in ((
+                    'p1', clients[1], 'pattern', second_pattern, p2), (
+                    'r1', clients[0], 'resolve', second_resolve, r2)):
+                client.join(timeout=300)
+                self.assertEqual(200, got[key].status_code, got[key])
+                time.sleep(int(refused.headers['Retry-After']))
+                ret = server.post(route, body)
+                self.assertEqual(200, ret.status_code, ret.text[:2000])
+                self.assertEqual(body['request_id'], ret.json()['request_id'])
+                self.assertEqual('ended', self._wait_ended(server, body['request_id'])['state'])
+            text = server.text()
+            self.assertIn('Handler threads: 4 (--http-threads); requests run at once at most: '
+                          '/traverse 0, /resolve 1, /pattern 1', text)
+            self.assertIn(': busy, 1 of 1 running (--pattern-max-concurrent); 503', text)
+            self.assertIn(': busy, 1 of 1 running (--resolve-max-concurrent); 503', text)
+            print('\n[E19 multi-graph] beside full /resolve and /pattern caps (s): '
+                  + ', '.join(f'{k} {v:.3f}' for k, v in took.items()), flush=True)
+        finally:
+            server.stop()
+            for client in clients:
+                if client.ident is not None:
+                    client.join(timeout=60)
+
+    def test_single_graph_resolve_and_pattern_caps_refuse_busy(self):
+        """E19 on a single-graph server (the mini index, -i/-a): --http-threads 4,
+        --resolve-max-concurrent 1 and --pattern-max-concurrent 1. While a /resolve of a whole
+        record (seconds) and the slow pattern (over a second) hold the slots, a second /resolve and
+        a second /pattern, each with a request_id, are refused as on a multi-graph server: 503,
+        Retry-After 1, {code: "busy", error, server_instance}, their ids not registered."""
+        mini = (os.path.join(MINI_DIR, 'graph_k31.dbg'),
+                os.path.join(MINI_DIR, 'annotation.relaxed.relabeled.row_diff_brwt_coord.annodbg'))
+        if not all(os.path.exists(p) for p in mini):
+            if REQUIRE_GUARDS:
+                self.fail(f'$METAGRAPH_REQUIRE_GUARDS=1: the mini index is missing: {mini}')
+            self.skipTest(f'the mini index is not built: {mini}')
+        server = Server(['-i', mini[0], '-a', mini[1], '--http-threads', '4',
+                         '--resolve-max-concurrent', '1', '--pattern-max-concurrent', '1',
+                         '--traverse-max-time-ms', '600000', '--pattern-max-contexts', '1000000'],
+                        os.path.join(self.tempdir.name, 'server_busy_single.log'), threads=1)
+        got = {}
+
+        def post(key, route, body):
+            try:
+                got[key] = server.post(route, body)
+            except requests.exceptions.RequestException as e:
+                got[key] = e
+
+        def running(request_id):
+            deadline = time.time() + 60
+            while True:
+                ret = server.get(f'requests/{request_id}')
+                if ret.status_code == 200 and ret.json()['state'] == 'running':
+                    return
+                self.assertLess(time.time(), deadline, (request_id, ret.text[:2000]))
+                time.sleep(0.02)
+        clients = [threading.Thread(target=post, args=(
+                       'r1', 'resolve', dict(self._slow_resolve(100000000), request_id='it-sb-r1'))),
+                   threading.Thread(target=post, args=(
+                       'p1', 'pattern', dict(self.SLOW_PATTERN, time_budget_ms=60000,
+                                             request_id='it-sb-p1')))]
+        try:
+            instance = server.get('capabilities').json()['server_instance']
+            for client, request_id, route, body in (
+                    (clients[0], 'it-sb-r1', 'resolve',
+                     dict(self._slow_resolve(1000), request_id='it-sb-r2')),
+                    (clients[1], 'it-sb-p1', 'pattern',
+                     dict(self.SLOW_PATTERN, request_id='it-sb-p2'))):
+                client.start()
+                running(request_id)
+                ret = server.post(route, body)
+                self.assertEqual(503, ret.status_code, ret.text[:2000])
+                self.assertEqual('1', ret.headers.get('Retry-After'))
+                self.assertEqual({'code': 'busy', 'server_instance': instance},
+                                 {k: v for k, v in ret.json().items() if k != 'error'})
+                self.assertIn(f'(--{route}-max-concurrent)', ret.json()['error'])
+                self.assertEqual(404, server.get('requests/' + body['request_id']).status_code)
+            for client in clients:
+                client.join(timeout=300)
+            self.assertEqual([200, 200], [got['r1'].status_code, got['p1'].status_code], got)
+        finally:
+            server.stop()
+            for client in clients:
+                if client.ident is not None:
+                    client.join(timeout=60)
+
+    def test_two_long_searches_leave_the_light_routes_a_thread(self):
+        """E19, the plan's finding 10 (SPEC-labeled-traversal-core.md §10.3, "Handler
+        capacity"): -p sets the graphs' pool and, without --http-threads, the handler threads
+        too, and a /search handler waits for its graphs on that pool, so with -p 1 one long
+        search holds the one handler thread and a second waits behind it: a capabilities call
+        and a /resolve sent meanwhile wait until both are done. With --http-threads 4 (-p 1:
+        the same pool) the two searches still run one after the other on the pool, and
+        meanwhile GET /capabilities, GET /requests/{id} and a named /resolve answer within a
+        second. /search has no cap: both searches are answered."""
+        query = self.records['pseudo'][0][:3000000]
+        search = {'FASTA': '>q\n' + query, 'graphs': ['b_big'], 'top_labels': 5}
+        resolve = dict(self._slow_resolve(1000), graphs=['a_kleb'], request_id='it-search-r1')
+
+        def run(server, flags):
+            got = {}
+
+            def post(key, body):
+                try:
+                    got[key] = server.post('search', body)
+                except requests.exceptions.RequestException as e:
+                    got[key] = e
+            # how long one search takes here (a second distinct one: no cache shared)
+            started = time.time()
+            first = server.post('search', dict(search, FASTA='>w\n' + query[1:]))
+            alone = time.time() - started
+            self.assertEqual(200, first.status_code, first.text[:2000])
+            clients = [threading.Thread(target=post, args=(i, dict(search, FASTA=f'>q{i}\n'
+                                                                    + query[i + 2:])))
+                       for i in range(2)]
+            for c in clients:
+                c.start()
+            # both handlers are in: the first searching, the second waiting for the pool
+            time.sleep(min(0.3, alone / 4))
+            took = {}
+            for name, call in (('GET /capabilities', lambda: server.get('capabilities')),
+                               ('POST /resolve', lambda: server.post('resolve', resolve)),
+                               ('GET /requests/{request_id}',
+                                lambda: server.get('requests/' + resolve['request_id']))):
+                started = time.time()
+                ret = call()
+                took[name] = time.time() - started
+                self.assertEqual(200, ret.status_code, (flags, name, ret.text[:2000]))
+            busy = [c.is_alive() for c in clients]
+            for c in clients:
+                c.join(timeout=600)
+            for i in range(2):
+                self.assertEqual(200, got[i].status_code, got[i])
+            return alone, took, busy
+
+        log = os.path.join(self.tempdir.name, 'server_searches_{}.log')
+        server = Server([self._cutoff_csv(), '--cache-size', '0'], log.format('p1'), threads=1)
+        try:
+            alone, coupled, _ = run(server, '-p 1')
+        finally:
+            server.stop()
+        if alone < 1.0:
+            self.skipTest(f'one search takes {alone:.2f} s here: too fast to hold a thread')
+        # without --http-threads the capabilities call waited for both searches
+        self.assertGreater(coupled['GET /capabilities'], alone / 2, coupled)
+        resolve['request_id'] = 'it-search-r2'
+        server = Server([self._cutoff_csv(), '--cache-size', '0', '--http-threads', '4'],
+                        log.format('http4'), threads=1)
+        try:
+            alone, took, busy = run(server, '-p 1 --http-threads 4')
+        finally:
+            server.stop()
+        self.assertEqual([True, True], busy, (alone, took))
+        for name, seconds in took.items():
+            self.assertLess(seconds, 1.0, (name, took, alone))
+        print(f'\n[E19 searches] one search alone {alone:.2f} s; beside two: '
+              + ', '.join(f'{k} {v:.3f}' for k, v in took.items())
+              + '; with -p 1 alone: ' + ', '.join(f'{k} {v:.3f}' for k, v in coupled.items()),
+              flush=True)
+
     def test_not_after_ms_admits_resolve_and_pattern(self):
         """not_after_ms (the latest START, E20) on /resolve and /pattern: passed at the
         request's admission, 409 {error, state: expired, not_after_ms, server_time_ms} and nothing

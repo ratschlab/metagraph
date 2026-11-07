@@ -1072,11 +1072,13 @@ the chunked databases needs milestone 6, whose `graphs` selection keeps exactly 
 - admission by the queue, **shared with search and traversal** (the owner: "they use essentially the same
   resources: load an index and access it"): the service's per-database queues, `META_DB_CAPS` and its distributed
   semaphore count search, pattern and traversal calls against **one** cap per database server, and on the server
-  side the one request pool (`-p`; `--threads-each` is the threads within a request) serves `/search`,
-  `/pattern`, `/traverse` and `/resolve` alike — no per-route pool, no reservation. Every route, the GET
-  capabilities routes included, runs on those `-p` threads: with `-p` long calls in flight the probe waits up to
-  their budgets, so the cap stays below `-p` (`-p` ≥ cap + 1, as `SPEC-labeled-traversal-core.md` "Deployment"
-  requires for traversals), and a full pool is not a dead host. The engine needs nothing beyond "at most cap
+  side the one set of handler threads (`--http-threads`, `-p` when not given; `--threads-each` is the threads
+  within a request) serves `/search`, `/pattern`, `/traverse` and `/resolve` alike — no per-route pool, no
+  reservation. Every route, the GET capabilities routes included, runs on those threads: with as many long calls
+  in flight as threads the probe waits up to their budgets, so the cap stays below the threads (threads ≥ cap + 1,
+  as `SPEC-labeled-traversal-core.md` "Deployment" requires for traversals), and a full pool is not a dead host.
+  E19 adds optional per-route caps on the engine side (`--pattern-max-concurrent` and the others: above one 503
+  `busy`, SPEC §6), a backstop for clients outside this admission; `/search` has none. The engine needs nothing beyond "at most cap
   concurrent calls per database server across all routes"; a request's memory is bounded with `output.labels:
   all` by `max_memory_mb`, and on the label-free path by the caps (about `max_contexts` descriptors in `partial`
   and `all_or_count`, the DFS frontier in `count`, and in every mode on an even-k PRIMARY index up to

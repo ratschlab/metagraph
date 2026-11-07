@@ -78,6 +78,17 @@ class _Handler(http.server.BaseHTTPRequestHandler):
         body = json.loads(self.rfile.read(int(self.headers['Content-Length'])))
         self.server.seen.append(('POST', self.path, dict(self.headers), body))
         if self.path == '/api/resolve':
+            if body['sequence'] == 'BUSY':
+                # a route at its cap (E19): Retry-After, code busy, no usage
+                return self._send(503, {'code': 'busy',
+                                        'error': '/resolve: this server runs at most 1 /resolve '
+                                                 'request(s) at once (--resolve-max-concurrent) '
+                                                 'and runs that many now: this one was not run, '
+                                                 'its body not parsed and nothing of it '
+                                                 'registered; send it again after Retry-After '
+                                                 '(1 s)',
+                                        'server_instance': '7c1e0f3a9b24d6e8'},
+                                  {'Retry-After': '1'})
             if body['sequence'] == 'LATE':
                 # a /resolve past its own deadline (SPEC §4.5): no Retry-After, no usage
                 return self._send(503, {'error': 'resolve: the answer could not be built and '
@@ -288,6 +299,18 @@ class TestClient(unittest.TestCase):
         # the budget given through bounds alone is passed as it always was
         self.client.resolve('ACGTACGT', labels=['acc1'], bounds={'time_budget_ms': 400})
         self.assertEqual({'time_budget_ms': 400}, self.server.seen[0][3]['bounds'])
+
+    def test_busy_503_is_retried_as_a_loading_one(self):
+        """A route at its cap (E19): 503 with Retry-After 1 and code busy, no usage, nothing
+        registered -- the shape a client already retries for a loading index: ServerInitializing
+        with retry_after 1 and the body (its code and server_instance) kept."""
+        with self.assertRaises(ServerInitializing) as cm:
+            self.client.resolve('BUSY', labels=['acc1'])
+        e = cm.exception
+        self.assertEqual((503, 1), (e.status, e.retry_after))
+        self.assertEqual(('busy', '7c1e0f3a9b24d6e8'), (e.body['code'], e.body['server_instance']))
+        self.assertIsNone(e.usage)
+        self.assertIn('--resolve-max-concurrent', e.message)
 
     def test_resolve_deadline_503(self):
         """A /resolve whose answer could not be built within its budget: 503 with code

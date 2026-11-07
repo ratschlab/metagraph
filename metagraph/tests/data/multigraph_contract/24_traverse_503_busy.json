@@ -1,0 +1,44 @@
+{
+ "route": "POST /traverse",
+ "status": 503,
+ "note": "E19: a route at its cap. The server runs at most --traverse-max-concurrent /traverse requests at once (1 here, with --http-threads 4 and -p 2); a further one is refused when its handler starts, before its body is parsed: HTTP 503 with Retry-After: 1 and {code: \"busy\", error, server_instance}, unwrapped and without usage on a single-graph and a multi-graph server alike (the shape of the loading 503, which has no code; server_instance names this process, so that a ledger that pinned another one sees the restart at once). Nothing of it ran and nothing of it was registered: GET /traverse/attempt/{attempt_id} and GET /requests/{attempt_id} answered 404 after it, and the same request sent again after Retry-After, once the slot was free, ran (200). Like the loading 503 it is no ground of the release rule. /resolve and /pattern refuse alike at their caps (--resolve-max-concurrent, --pattern-max-concurrent); every /traverse capabilities probe and GET /capabilities' multigraph block state the caps (max_concurrent). A real run of the E19 binary: a graph list with bact_other (the integration fixture of samples 05 and 23) and a slow pair whose walk held the one slot; the request is sample 05's with an id of its own.",
+ "request": {
+  "seeds": [
+   {
+    "labels": [
+     "acc1"
+    ],
+    "sequence": "TATGTACTGATTGCTTAAAGGAATATCATCTACGCTGGGATAGATGTTCAACATCGCGCAAAAGTGATGTCGATCGCGCAGTTATGCCACGCCGCATTCG"
+   }
+  ],
+  "strategy": {
+   "bounds": {
+    "max_extension_bp": 100,
+    "max_memory_mb": 512,
+    "max_output_bp": 500000,
+    "max_work_units": 100000000,
+    "time_budget_ms": 70000
+   },
+   "branching": {
+    "max_label_branches": 2
+   },
+   "direction": "both",
+   "exhaustive": false,
+   "labels": {
+    "mode": "constrain"
+   },
+   "output": {
+    "detail": "full",
+    "timing": true
+   }
+  },
+  "graph": "bact_other",
+  "attempt_id": "svc-trv-91aa07-4",
+  "not_after_ms": 1794071276000
+ },
+ "body": {
+  "code": "busy",
+  "error": "/traverse: this server runs at most 1 /traverse request(s) at once (--traverse-max-concurrent) and runs that many now: this one was not run, its body not parsed and nothing of it registered; send it again after Retry-After (1 s)",
+  "server_instance": "7c1e0f3a9b24d6e8"
+ }
+}

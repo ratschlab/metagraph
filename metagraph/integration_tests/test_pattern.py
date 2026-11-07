@@ -4522,18 +4522,20 @@ class TestPatternRegression(TestingBase):
         # The probe gains discovery_trace_scale (a discovery under trace ranks by traced
         # k-mers, release 10's post-merge fix, SPEC-multigraph-envelope.md section 7) and
         # max_request_memory_mb (E5b: the request-wide memory bound of /traverse, 0 when off,
-        # SPEC-labeled-traversal-core.md §5), and against a base before the pattern search the
-        # gate block and the two blocks above
+        # SPEC-labeled-traversal-core.md §5) and max_concurrent (E19: the caps on the requests of
+        # each long route run at once, 0 when none, §10.3), and against a base before the pattern
+        # search the gate block and the two blocks above
         a = without_reworded(without_instance(self.base.get('traverse/capabilities').json()))
         b = without_reworded(without_instance(self.new.get('traverse/capabilities').json()))
         without_poll_stride(a)
         without_poll_stride(b)
         new_caps = self.new.get('capabilities').json()
-        gains = {'discovery_trace_scale', 'max_request_memory_mb'} | (
+        gains = {'discovery_trace_scale', 'max_request_memory_mb', 'max_concurrent'} | (
             set() if base_pattern else {'pattern', 'resolve', 'in_ram'})
         only_gains(a, b, gains, 'probe')
         self.assertEqual('traced', b['discovery_trace_scale'])
         self.assertEqual(0, b['max_request_memory_mb'])
+        self.assertEqual({'/pattern': 0, '/resolve': 0, '/traverse': 0}, b['max_concurrent'])
         self.assertEqual(gate_block(new_caps['pattern']), b['pattern'])
         self.assertEqual(new_caps['resolve'], b['resolve'])
         self.assertEqual(new_caps['in_ram'], b['in_ram'])

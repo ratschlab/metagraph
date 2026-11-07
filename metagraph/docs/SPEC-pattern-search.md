@@ -130,13 +130,15 @@ What this build serves (milestone 1, and increment 3 where marked), against the 
   own error body (SPEC-labeled-traversal-core.md §5). The answer is compact JSON, gzip or deflate when the request's `Accept-Encoding` asks
   for it (zlib level `--traverse-compression-level`, 1 by default, to keep compression short; the time to write
   and compress the answer is kept back from the work, §7.6). Error bodies are never compressed.
-- The route runs on the server's request pool (`-p`; `--threads-each` is not a pool: it sets the threads used
-  within one request and at load), shared with `/search`, `/align`, `/resolve` and `/traverse` (design §9).
-  Every route, `GET /capabilities` and `GET /traverse/capabilities` included, runs on these `-p` threads: with
-  `-p` long calls in flight, a further call — a capabilities probe too — waits up to their `time_budget_ms`. A
-  deployment therefore keeps its concurrent long calls below `-p` (`-p` ≥ cap + 1, as
-  `SPEC-labeled-traversal-core.md` "Deployment" requires for traversals), and a client does not take a full pool
-  for a dead host.
+- The route runs on the server's handler threads (`--http-threads`, `-p` when not given; `--threads-each` is
+  not a pool: it sets the threads used within one request and at load), shared with `/search`, `/align`,
+  `/resolve` and `/traverse` (design §9). Every route, `GET /capabilities` and `GET /traverse/capabilities`
+  included, runs on these threads: with as many long calls in flight as threads, a further call — a capabilities
+  probe too — waits up to their `time_budget_ms`. A deployment therefore keeps its concurrent long calls below the
+  handler threads (threads ≥ cap + 1, as `SPEC-labeled-traversal-core.md` "Deployment" requires for traversals),
+  and a client does not take a full pool for a dead host. `--pattern-max-concurrent` (E19; none by default) caps
+  the `/pattern` requests the server runs at once: a request above it is refused 503 `busy` (§6;
+  `SPEC-labeled-traversal-core.md` §10.3, "Handler capacity").
 - The server's content timeout is 900 s; the route's own deadline is `time_budget_ms` (§7.6), at most 600 s by
   default and at most 899,000 ms on `server_query` whatever the flag (the content timeout less 1 s for the
   transport: a larger `--pattern-max-time-ms` refuses to start). `time_budget_ms` is the backend's deadline for
@@ -357,7 +359,9 @@ server lowers them, so that a direct caller is not refused for a budget the host
 
 ## 5. Order of the checks
 
-A request is refused by the first check it fails, in this order:
+A request is refused by the first check it fails, in this order (with `--pattern-max-concurrent` set, a request
+of the route at its cap is refused 503 `busy`, §6, before all of them: after step 2's 503 on a single-graph
+server, before step 1 on a multi-graph one; its body is not parsed):
 
 1. multi-graph server: the order of §24.1 (the body, `graphs`, `in_ram`, then the request's fields -- steps 5 to 9,
    whose refusals are the request's -- then each pair from step 4 on, on its own: a pair's refusal, steps 4, 10, 11
@@ -400,8 +404,9 @@ A request is refused by the first check it fails, in this order:
 
 ## 6. Whole-request refusals
 
-The body is `{"error": <message>, "code": <code>}`, except the 503 during loading, which has no `code`, and a
-selection refusal of a multi-graph server, which may add `candidates` (below).
+The body is `{"error": <message>, "code": <code>}`, except the 503 during loading, which has no `code`, a
+selection refusal of a multi-graph server, which may add `candidates` (below), and the 503 `busy`, which adds
+`server_instance`.
 
 On a multi-graph server (§24.1) a refusal that one pair alone would be answered -- its graph's support (step 4 of
 §5), its annotation (steps 10 and 11), its 503 `deadline`, a failure while it is processed -- is carried inside the
@@ -432,6 +437,7 @@ answered; the refusals that no pair decides (the body, `graphs`, `in_ram`, the r
 | 400 | `annotation_unbudgeted` | increment 3: `output.labels: "all"` in a retrieval mode, and the annotation has no budget-aware decode (capabilities `annotation: "unbudgeted"`: a column, BRWT, row or other annotation without row-diff, or `row_diff_int_disk` / `row_diff_disk_coord`; only the row-diff family has one, since E14 every deployed row-diff form); increment 5b: a request with a predicate on such an annotation, in every mode (its selection reads rows); increment 5s: a request with `long_search: "supported_paths"`, in every mode (its search reads rows) | set `allow_unbudgeted_annotation: true` to read it without a memory bound on the reads (§14.4; a selection then reads single cells for at most 16 labels where the annotation has direct access, `selection.access: "columns"`), or ask for `labels: "none"` or mode `count` (without a predicate) |
 | 400 | `graph_unknown`, `selection_conflict`, `pair_not_found`, `pair_ambiguous` | a multi-graph server's selection (§24.1; SPEC-multigraph-envelope.md section 6, its codes): an unknown name in `graphs` or `pairs`, `graphs` beside `pairs`, a pair object naming none or several pairs of its name; the body adds `candidates` (`[{graph, graph_path, annotation_path}]`) where a choice exists | fix the selection: GET /capabilities lists the pairs |
 | 503 | `deadline` | the answer could not be written by `time_budget_ms` (§7.6): nothing partial is sent | narrow the request: fewer patterns, a smaller `max_contexts` or `max_steps`; a larger budget helps only when it lets the work end early. The operator can raise `--pattern-finalize-ms` or lower the delivery rates (§4.5) |
+| 503 | `busy` | E19: the server runs its most `/pattern` requests at once (`--pattern-max-concurrent`; `SPEC-multigraph-envelope.md` §1.1). Refused before the body is parsed, with `Retry-After: 1` and the server's `server_instance` in the body: nothing ran, its `request_id` is not registered | send it again after `Retry-After` (the same `request_id` is admitted) |
 | 503 | (none) | the single index is still loading (`Retry-After: 60`); every route answers so | retry later |
 
 An unexpected failure (a server bug) is answered as every route answers it: 400 `{"error": …}` without a
@@ -444,7 +450,7 @@ marked W = `$` edges valid and is now refused (`mask_invalid`).
 without one are the 503 while the index loads (`{"error": …}`, `Retry-After: 60`), the 400 of an unexpected
 failure and the 500 above. Any other status, or a body that is none of these and not a JSON answer of §8 (a
 proxy's page, a truncated body), is a failure of the backend: never read as an empty result. A client retries
-the loading 503 after `Retry-After`; it does not retry a 503 `deadline`, nor a `withheld` or stopped answer,
+the loading 503 and the 503 `busy` after `Retry-After`; it does not retry a 503 `deadline`, nor a `withheld` or stopped answer,
 with a larger budget on its own (the caller decides, §7.5); it passes an unknown `code` through verbatim (§1).
 
 ## 7. Semantics

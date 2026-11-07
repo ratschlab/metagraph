@@ -1581,8 +1581,10 @@ reserve = 1.25 × ( (text written so far + walked seed's estimated text) / compr
 
 ## 17.5 Deployment
 
-SPEC §10.3: `-p` above the number of concurrent traversals, so that the cancel, state and capabilities routes find
-an io thread; a reverse proxy forwards the cancel, state and both capabilities routes with their query strings,
+SPEC §10.3: the handler threads (`--http-threads`, `-p` when not given) above the number of concurrent long calls,
+so that the cancel, state and capabilities routes find a thread; with E19 the long routes can be capped
+(`--traverse-max-concurrent`, `--resolve-max-concurrent`, `--pattern-max-concurrent`: above a cap 503 `busy`, nothing
+registered), the caps set summing below the handler threads (SPEC §10.3, "Handler capacity"); a reverse proxy forwards the cancel, state and both capabilities routes with their query strings,
 closes its upstream connection when the client goes and keeps a read timeout of at least `hard_cap_ms` plus the
 transfer; the server's clock is synchronised within `clock_skew_allowance_ms`. A server memory maximum
 (`--traverse-max-memory-mb`) is the budget of every request without a smaller one (§11, §18.8). Before raising a

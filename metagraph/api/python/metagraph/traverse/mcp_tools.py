@@ -857,6 +857,14 @@ class GraphletTools:
         try:
             return call(*args)
         except ServerInitializing as e:
+            if isinstance(e.body, dict) and e.body.get('code') == 'busy':
+                # a route at its cap (E19): nothing ran or was registered; the same request
+                # runs once a slot is free
+                raise ToolError('backend_error', e.message or 'the server is busy',
+                                status=e.status, retry_after_s=e.retry_after,
+                                hint='the server runs its most requests of this route at once: '
+                                     'nothing ran; retry the same call after retry_after_s'
+                                ) from None
             raise ToolError('backend_error', e.message or 'the server is initialising',
                             status=e.status, retry_after_s=e.retry_after,
                             hint='the index is still loading: retry later') from None

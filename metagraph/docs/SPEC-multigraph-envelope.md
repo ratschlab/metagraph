@@ -8,7 +8,8 @@ this text wins and the sample is a bug.
 
 A server is in multi-graph mode when it is started with a graph list (csv); a name of the list may hold several
 (graph, annotation) PAIRS. A single-graph server answers every route as before this document, except the additive
-`/search` cut (section 3) and the new request fields (sections 4 and 5).
+`/search` cut (section 3), the new request fields (sections 4 and 5) and, with a cap set, the busy refusal (section
+1.1, E19).
 
 ## 1. The envelope (resolve, traverse, pattern, and the capabilities routes)
 
@@ -55,9 +56,26 @@ exactly as before, because the service's attempt ledger reads those statuses:
   `attempt_id` equal to a running or retained `request_id`, section 5, `attempt` then being that request's entry with
   `attempt_id` and `state` `running` or `finished`), and an expired `not_after_ms` (`{error, state: "expired", ...}`);
 - 503 with `usage` when the attempt reaches its bound;
-- 400 with `usage` for a managed request (without `usage` for an unmanaged one).
+- 400 with `usage` for a managed request (without `usage` for an unmanaged one);
+- 503 `busy` (E19, below), without `usage`.
 429 exists only on `POST /traverse/cancel` (an unknown id that could not be tombstoned); that route and
 `GET /traverse/attempt/{attempt_id}` are unchanged and never wrapped.
+
+**Busy (E19).** `/traverse`, `/resolve` and `/pattern` each take an optional cap on the requests the server runs at
+once (`--traverse-max-concurrent`, `--resolve-max-concurrent`, `--pattern-max-concurrent`; none by default;
+`SPEC-labeled-traversal-core.md` §10.3, "Handler capacity", states what a cap counts and the threads it keeps for
+the light routes). A request of a route at its cap is answered HTTP 503 with `Retry-After: 1` and the body
+`{"error": <message>, "code": "busy", "server_instance": <this process>}`: no `usage`, no envelope, on a
+single-graph server too. Its `server_instance` lets a ledger that sent `expect_server_instance` see a restarted
+process at once, as its 409 `instance_mismatch` would tell it, rather than once a slot is free. It is refused when
+its handler starts, after the 503 of a single index still loading and before its body is parsed: before every 400
+and 409 and before its `attempt_id` or `request_id` is registered (section 5), so nothing of it ran, nothing of it
+is held, and a re-send (the same id included) after `Retry-After` is admitted as a first copy would be. It says
+nothing about other copies of its id: like the loading 503 it is no ground of the release rule; a ledger re-sends,
+or releases on that rule's grounds. This is the shape a client already retries for a loading index (503,
+`Retry-After`, no `usage`), told apart by its `code`. 429 stays reserved for the cancel (a 429 releases nothing).
+During a shutdown a request the cap would refuse is not answered (its connection is closed, as for a client gone).
+`/search` has no cap.
 
 A `/traverse` request runs on exactly one pair (until the graph-less traverse of a later release): a name with
 several pairs, or several pairs, is refused with the candidates (section 6).
@@ -285,7 +303,13 @@ capabilities probe (each entry of its envelope) states too, beside `max_memory_m
 without reading a pair. A seed the bound leaves unstarted is a result of the pair's entry (a failed result with
 `resource_stop.scope: "request"`, phase `not_started`, its `unknown_labels` stated as every result of the pair
 states them); the envelope is the one-entry envelope of a named `/traverse` as with any other result.
-Its `graph_summary` states `headers_unique` (section 9). Clients switch on these, never on dates.
+Its `graph_summary` states `headers_unique` (section 9).
+From E19 the block also states `max_concurrent`: `{"/pattern": n, "/resolve": n, "/traverse": n}`, the caps on
+the requests of each route the server runs at once (`--pattern-max-concurrent`, `--resolve-max-concurrent`,
+`--traverse-max-concurrent`), integers, 0 for a route without one; above a cap the request is refused 503 `busy`
+(section 1.1). Every `/traverse` capabilities probe (each entry of its envelope, and a single-graph server's probe)
+states the same object beside its maxima.
+Clients switch on these, never on dates.
 
 ## 9. headers_unique (E22)
 

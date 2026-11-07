@@ -141,6 +141,11 @@
    "/resolve",
    "/pattern"
   ],
+  "max_concurrent": {
+   "/pattern": 0,
+   "/resolve": 0,
+   "/traverse": 0
+  },
   "max_request_memory_mb": 0,
   "not_after_ms": [
    "/traverse",

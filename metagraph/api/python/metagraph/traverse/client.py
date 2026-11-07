@@ -416,8 +416,9 @@ class TraverseClient:
                 # every time
                 self._forget_level()
             if status == 503:
-                # Two 503s mean opposite things to a ledger: a loading index (Retry-After, no
-                # usage: nothing registered) and an attempt stopped at its bound (usage, no
+                # Two 503s mean opposite things to a ledger: a loading index or a route at its
+                # cap (Retry-After, no usage: nothing registered; the latter with code "busy",
+                # E19) and an attempt stopped at its bound (usage, no
                 # Retry-After: registered and consumed -- a retry under its id is refused
                 # while the server holds the id, and runs again after). Told apart by the body,
                 # not by the status alone

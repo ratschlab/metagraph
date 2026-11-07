@@ -192,7 +192,15 @@ Json::Value composite_fp_json(std::vector<std::string> index_fps) {
     return Json::Value(sha256_hex(joined));
 }
 
-Json::Value multigraph_capabilities_json(uint64_t max_request_memory_mb) {
+Json::Value max_concurrent_json(const RouteCaps &caps) {
+    Json::Value m(Json::objectValue);
+    m["/pattern"] = Json::Value(static_cast<Json::UInt64>(caps.pattern));
+    m["/resolve"] = Json::Value(static_cast<Json::UInt64>(caps.resolve));
+    m["/traverse"] = Json::Value(static_cast<Json::UInt64>(caps.traverse));
+    return m;
+}
+
+Json::Value multigraph_capabilities_json(uint64_t max_request_memory_mb, const RouteCaps &caps) {
     auto strings = [](std::initializer_list<const char *> values) {
         Json::Value out(Json::arrayValue);
         for (const char *value : values) {
@@ -231,6 +239,9 @@ Json::Value multigraph_capabilities_json(uint64_t max_request_memory_mb) {
     // the request-wide memory bound of /traverse (0: off), as the /traverse capabilities probe
     // states it (the service's request of 2026-11-01: seen without reading a pair)
     m["max_request_memory_mb"] = Json::Value(static_cast<Json::UInt64>(max_request_memory_mb));
+    // the caps on the requests each route runs at once (E19; 0: none), as every /traverse
+    // capabilities probe states them
+    m["max_concurrent"] = max_concurrent_json(caps);
     return m;
 }
 

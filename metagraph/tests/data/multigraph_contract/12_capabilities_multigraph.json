@@ -1,7 +1,7 @@
 {
  "route": "GET /capabilities",
  "status": 200,
- "note": "Illustrative graph_summary.headers_unique (E22, section 9): recorded on three fixture pairs served as bact_other, bact_pseudomonadota and inv_insecta (one header, acc2, in a column of each of the first two: false, one example), its pair tags rewritten to sample 12's r237 paths; r237's real value is read from staging's GET /capabilities after the deploy. A header label acc2 answers each pair's own first occurrence. E3/E4/E9/E12/E20/E22 advertised: composite_fp (C3, with its rule) beside graph_summary; the multigraph block lists the envelope routes, the selectors per route, the routes that read not_after_ms, finish_by_ms and request_id, and the registry route. Clients switch on these, never by date.",
+ "note": "Illustrative graph_summary.headers_unique (E22, section 9): recorded on three fixture pairs served as bact_other, bact_pseudomonadota and inv_insecta (one header, acc2, in a column of each of the first two: false, one example), its pair tags rewritten to sample 12's r237 paths; r237's real value is read from staging's GET /capabilities after the deploy. A header label acc2 answers each pair's own first occurrence. E3/E4/E9/E12/E20/E22 advertised: composite_fp (C3, with its rule) beside graph_summary; the multigraph block lists the envelope routes, the selectors per route, the routes that read not_after_ms, finish_by_ms and request_id, and the registry route, max_request_memory_mb (E5b) and max_concurrent (E19: the caps on the requests of each long route run at once, 0 = none; above one 503 busy, sample 24). Clients switch on these, never by date.",
  "body": {
   "algorithm_version": "traverse-0.2",
   "attempts": {
@@ -649,7 +649,12 @@
    "search_cuts": true,
    "resolve_boundary_ties": true,
    "discovery_trace_scale": "traced",
-   "max_request_memory_mb": 0
+   "max_request_memory_mb": 0,
+   "max_concurrent": {
+    "/pattern": 0,
+    "/resolve": 0,
+    "/traverse": 0
+   }
   }
  }
 }

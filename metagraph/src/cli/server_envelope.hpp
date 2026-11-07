@@ -115,11 +115,20 @@ Json::Value composite_fp_json(std::vector<std::string> index_fps);
  * of each route (section 6), traverse_pairs_per_request, the routes that read not_after_ms,
  * finish_by_ms and request_id, the registry's route (requests_route), the flags
  * unknown_labels (section 2), search_cuts (section 3) and resolve_boundary_ties (section 7),
- * discovery_trace_scale, and |max_request_memory_mb| (the server's request-wide memory bound of
- * /traverse, --traverse-max-request-memory-mb; 0 = off), which every /traverse capabilities
- * probe states too: a graph-less probe sees it without reading a pair
+ * discovery_trace_scale, |max_request_memory_mb| (the server's request-wide memory bound of
+ * /traverse, --traverse-max-request-memory-mb; 0 = off) and |caps| (max_concurrent, E19), which
+ * every /traverse capabilities probe states too: a graph-less probe sees them without reading a
+ * pair
  */
-Json::Value multigraph_capabilities_json(uint64_t max_request_memory_mb);
+Json::Value multigraph_capabilities_json(uint64_t max_request_memory_mb, const RouteCaps &caps);
+
+/**
+ * max_concurrent (E19; SPEC-multigraph-envelope.md section 8): the caps on the requests of each
+ * route the server runs at once, {"/pattern": n, "/resolve": n, "/traverse": n}, integers, 0
+ * for a route without one; stated by GET /capabilities' multigraph block and every /traverse
+ * capabilities probe
+ */
+Json::Value max_concurrent_json(const RouteCaps &caps);
 
 } // namespace cli
 } // namespace mtg
