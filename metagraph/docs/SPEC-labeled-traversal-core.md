@@ -3713,8 +3713,8 @@ search's routes, `POST /pattern` and `GET /pattern/capabilities`, are `SPEC-patt
     registered. HTTP 503, `Retry-After: 1`, body `{"code": "busy", "error": …, "server_instance": …}` (this
     process, as every attempt answer names it: a ledger that pinned another instance learns of the restart
     without waiting for a slot), no `usage`, never wrapped in the envelope, on single-graph and multi-graph
-    servers alike (`SPEC-multigraph-envelope.md` §1.1). One log line per refusal (`[Server] <route> request <n>
-    from <address>: busy, <running> of <cap> running (<flag>); 503`). Nothing of it
+    servers alike (`SPEC-multigraph-envelope.md` §1.1). One log line per refusal at the handler's start
+    (`[Server] <route> request <n> from <address>: busy, <running> of <cap> running (<flag>); 503`). Nothing of it
     ran and nothing of it is held: a re-send, under the same id too, is admitted as a first copy would be. It says
     nothing about other copies of its id, so, like the loading 503, it is no ground of the release rule (above): a
     ledger re-sends after `Retry-After`, or releases on the rule's own grounds. 429 stays the cancel's alone (a 429
