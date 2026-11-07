@@ -628,6 +628,10 @@ int run_server(Config *config) {
 
     ThreadPool graphs_pool(get_num_threads(), 1000 /* max_num_tasks */);
     size_t num_server_threads = std::max(1u, get_num_threads());
+    // the HTTP server's handler threads, on which every route's handler runs (E19):
+    // --http-threads, else -p's value, as before E19; -p keeps sizing the graphs' pool (above)
+    // and the threads that load a graph list (num_server_threads)
+    const size_t http_threads = config->http_threads ? config->http_threads : num_server_threads;
     set_num_threads(std::max(1u, config->parallel_each));
     config->parallel_each = 1;  // query one batch at a time
     logger->info("[Server] Threads per graph: {}", get_num_threads());
@@ -891,6 +895,41 @@ int run_server(Config *config) {
     } else {
         logger->info("[Server] /search result cache disabled (--cache-size 0)");
     }
+
+    // The caps on the requests of /traverse, /resolve and /pattern whose handlers run at once
+    // (E19, SPEC-labeled-traversal-core.md §10.3, "Handler capacity"; 0: none). A request of a
+    // route at its cap is refused busy when its handler starts (take_slot), so that the other
+    // routes keep a handler thread while the long calls run: the caps set sum to less than the
+    // handler threads (Config refuses them otherwise)
+    const RouteCaps route_caps { config->traverse_max_concurrent, config->resolve_max_concurrent,
+                                 config->pattern_max_concurrent };
+    RouteSlots traverse_slots("/traverse", "--traverse-max-concurrent", route_caps.traverse);
+    RouteSlots resolve_slots("/resolve", "--resolve-max-concurrent", route_caps.resolve);
+    RouteSlots pattern_slots("/pattern", "--pattern-max-concurrent", route_caps.pattern);
+    if (config->http_threads || route_caps.traverse || route_caps.resolve || route_caps.pattern) {
+        logger->info("[Server] Handler threads: {} ({}); requests run at once at most: /traverse "
+                     "{}, /resolve {}, /pattern {} (0: no cap; above a cap a request is refused "
+                     "503 busy, Retry-After {} s); the graphs' pool: {} thread(s) (-p)",
+                     http_threads, config->http_threads ? "--http-threads" : "-p's value",
+                     route_caps.traverse, route_caps.resolve, route_caps.pattern,
+                     kBusyRetryAfterS, num_server_threads);
+    }
+    // A slot of |slots| for the request whose handler starts now, held until the handler
+    // returns (the caller keeps it in the handler's scope). At the route's cap the request is
+    // refused busy: 503 with Retry-After, nothing of it parsed or registered; while the server
+    // shuts down it is not answered at all (nothing new is served, class Shutdown), as for a
+    // client gone
+    auto take_slot = [&shutdown](RouteSlots &slots) {
+        RouteSlots::Slot slot = slots.try_acquire();
+        if (!slot) {
+            if (shutdown.stopping()) {
+                throw ClientGone("the server stops, and the route runs its most requests at "
+                                 "once: not run");
+            }
+            throw ServerBusy(slots.busy_message());
+        }
+        return slot;
+    };
 
     HttpServer server;
 
@@ -1576,14 +1615,18 @@ int run_server(Config *config) {
         control.on_written = [&](int status, std::optional<size_t> bytes) {
             record_response(tracked, status, bytes);
         };
+        // the route's slot (E19), from the handler's start to its return
+        RouteSlots::Slot slot;
         process_request(response, request, request_id, [&](const std::string &content) {
             return translated([&]() {
+                if (!config->fnames.size() && anno_graph.wait_for(0s) != std::future_status::ready)
+                    throw CurrentlyInitializingError();
+                // at the route's cap: refused busy before its body is read
+                slot = take_slot(pattern_slots);
                 if (config->fnames.size()) {
                     return multi_graph_pattern(content, request_id, request, gone, &delivery,
                                                &tracked);
                 }
-                if (anno_graph.wait_for(0s) != std::future_status::ready)
-                    throw CurrentlyInitializingError();
                 const AnnotatedDBG &index = *anno_graph.get();
                 const IndexIdentity identity = identity_of(index);
                 const Json::Value json = parse_pattern_body(content);
@@ -1845,9 +1888,13 @@ int run_server(Config *config) {
         writing.control.on_written = [&](int status, std::optional<size_t> bytes) {
             record_response(tracked, status, bytes);
         };
+        // the route's slot (E19), from the handler's start to its return
+        RouteSlots::Slot slot;
         process_request(response, request, request_id, [&](const std::string &content) {
             if (!config->fnames.size() && anno_graph.wait_for(0s) != std::future_status::ready)
                 throw CurrentlyInitializingError();
+            // at the route's cap: refused busy before its body is read
+            slot = take_slot(resolve_slots);
 
             Json::Value json = parse_traversal_body(content);
             const bool multi = !config->fnames.empty();
@@ -1958,6 +2005,9 @@ int run_server(Config *config) {
     server.resource["^/traverse$"]["POST"] = [&](shared_ptr<HttpServer::Response> response,
                                                  shared_ptr<HttpServer::Request> request) {
         const size_t request_id = num_requests++;
+        // the route's slot (E19), from the handler's start to its return: released after
+        // everything below, the attempt's response recorded
+        RouteSlots::Slot slot;
         // Every traversal is stopped when its client is gone: its walk polls the client's
         // connection, and nothing is written. A request with attempt_id is also an attempt of
         // the service's ledger: registered, cancellable by id, bounded in duration by the
@@ -2060,6 +2110,9 @@ int run_server(Config *config) {
         process_request(response, request, request_id, [&](const std::string &content) {
             if (!config->fnames.size() && anno_graph.wait_for(0s) != std::future_status::ready)
                 throw CurrentlyInitializingError();
+            // at the route's cap: refused busy before its body is read, so before its id could
+            // be registered (503 without usage)
+            slot = take_slot(traverse_slots);
 
             Json::Value json = parse_traversal_body(content);
             // a malformed id or not_after_ms is refused before anything is registered (400, no
@@ -2383,6 +2436,9 @@ int run_server(Config *config) {
         // "request"); its presence says that this server can leave seeds unstarted for it
         caps["max_request_memory_mb"]
             = static_cast<Json::UInt64>(config->traverse_max_request_memory_mb);
+        // the caps on the requests each long route runs at once (E19; 0: none), as GET
+        // /capabilities' multigraph block states them: above one a request is refused 503 busy
+        caps["max_concurrent"] = max_concurrent_json(route_caps);
         caps["work_check_interval"]
             = static_cast<Json::UInt64>(graph::traversal::kWorkCheckInterval);
         // what bounds.max_work_units counts and how far a work stop can exceed it: the rule is
@@ -2580,7 +2636,7 @@ int run_server(Config *config) {
                 c["composite_fp"] = composite_fp;
                 c["composite_rule"] = kCompositeRule;
                 c["multigraph"] = multigraph_capabilities_json(
-                        config->traverse_max_request_memory_mb);
+                        config->traverse_max_request_memory_mb, route_caps);
             }
             // the request registry (section 5) on every server: a single-graph /resolve or
             // /pattern with request_id registers too, and GET /requests/{attempt_id} reads a
@@ -2711,7 +2767,7 @@ int run_server(Config *config) {
         }
     };
 
-    std::thread server_thread = start_server(server, *config, num_server_threads,
+    std::thread server_thread = start_server(server, *config, http_threads,
                                              [&]() { shutdown.started(&server); });
     server_thread.join();
     // No HTTP worker is left: close the acceptor and the open connections (a response still

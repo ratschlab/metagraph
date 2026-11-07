@@ -174,6 +174,18 @@ class Config {
     // queryable (GET /requests/{request_id}) and their ids refused
     uint64_t request_retention_s = 3600;
     size_t request_retention = 10'000;
+    // Handler capacity (E19, SPEC-labeled-traversal-core.md §10.3): the HTTP server's handler
+    // threads, on which every route's handler runs (0: -p's value, as before E19; -p keeps
+    // sizing the graphs' pool and the loading threads), and the caps on the requests of
+    // /traverse, /resolve and /pattern whose handlers run at once (0: none), above which a
+    // request is refused 503 busy. The caps that are set must sum to less than the handler
+    // threads (refused at start-up otherwise), so that a thread is left for the other routes
+    uint64_t http_threads = 0;
+    uint64_t traverse_max_concurrent = 0;
+    uint64_t resolve_max_concurrent = 0;
+    uint64_t pattern_max_concurrent = 0;
+    // the accepted range of each of them, [0, it]
+    static constexpr uint64_t kMaxHttpThreads = 4096;
     // the accepted ranges of the retention settings (refused at start-up beyond them): a year,
     // ten million attempts
     static constexpr uint64_t kMaxAttemptRetentionS = 31'536'000;

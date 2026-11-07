@@ -5857,6 +5857,153 @@ class TestTraverseAttempts(TestingBase):
                     result = ret.json()['results'][0]
                     self.assertEqual('cancelled', result['resource_stop']['resource'], i)
 
+    # E19: how long a light route may take to answer while every /traverse slot is held (on an
+    # idle machine each answers in milliseconds; a walk holding a slot runs for seconds)
+    LIGHT_BOUND_S = 1.0
+
+    def test_saturation_flags_and_their_start_up_rule(self):
+        """E19 (SPEC-labeled-traversal-core.md §10.3, "Handler capacity"): without the flags a
+        server has -p handler threads and no cap, its probe stating max_concurrent 0 for every
+        route and its log no capacity line (as before E19); the caps that are set must sum to
+        less than the handler threads (--http-threads, else -p), else the server refuses to
+        start, naming the flags and the threads it needs."""
+        with self._Server(self) as server:
+            probe = requests.get(server.url + '/traverse/capabilities').json()
+            self.assertEqual({'/pattern': 0, '/resolve': 0, '/traverse': 0},
+                             probe['max_concurrent'])
+            self.assertTrue(all(type(v) is int for v in probe['max_concurrent'].values()))
+            self.assertIn('Maximum connections: 4', server.text())
+            self.assertNotIn('Handler threads:', server.text())
+        for flags, needed in ((['-p', '2', '--traverse-max-concurrent', '2'], 3),
+                              (['--http-threads', '3', '--traverse-max-concurrent', '1',
+                                '--resolve-max-concurrent', '1', '--pattern-max-concurrent', '1'],
+                               4)):
+            res = subprocess.run(shlex.split(METAGRAPH) + [
+                'server_query', '-i', self.graph, '-a', self.anno, '--port', str(_free_port()),
+                '--address', '127.0.0.1'] + flags, stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE, timeout=60)
+            self.assertNotEqual(0, res.returncode, flags)
+            self.assertIn(f'--http-threads must be at least {needed} (a thread left for the '
+                          'other routes)', res.stderr.decode(), flags)
+        with self._Server(self, '--http-threads', '8', '--traverse-max-concurrent', '3',
+                          '--resolve-max-concurrent', '2', '--pattern-max-concurrent', '2',
+                          threads=2) as server:
+            probe = requests.get(server.url + '/traverse/capabilities').json()
+            self.assertEqual({'/pattern': 2, '/resolve': 2, '/traverse': 3},
+                             probe['max_concurrent'])
+            self.assertIn('Maximum connections: 8', server.text())
+            self.assertIn('Handler threads: 8 (--http-threads); requests run at once at most: '
+                          '/traverse 3, /resolve 2, /pattern 2', server.text())
+
+    def test_saturation_the_light_routes_answer_beside_a_full_cap(self):
+        """E19, the saturation test (SPEC-labeled-traversal-core.md §10.3, "Handler capacity";
+        SPEC-multigraph-envelope.md section 1.1): a server with -p 2, --http-threads 4 and
+        --traverse-max-concurrent 2, two slow walks (three seeds each, seconds) holding both
+        /traverse slots. While they run, GET /capabilities, GET /traverse/capabilities, GET
+        /pattern/capabilities, GET /requests/{attempt_id}, GET /traverse/attempt/{attempt_id}
+        and POST /traverse/cancel each answer within LIGHT_BOUND_S, and a /resolve (no cap) is
+        answered; a third /traverse, with attempt_id, is refused at once: 503, Retry-After 1,
+        {code: "busy", error}, no usage, nothing registered (both state routes answer its id
+        404). Once a walk is cancelled and its slot free, the same request sent again after
+        Retry-After runs (200, its usage under that id). The walks still run when the light
+        routes have answered, so every answer was measured with the cap full."""
+        self._need_a_slow_walk()
+        with self._Server(self, '--http-threads', '4', '--traverse-max-concurrent', '2',
+                          threads=2) as server:
+            got = {}
+
+            def walk(i):
+                try:
+                    got[i] = server.post('traverse', self._request(3, attempt_id=f'sat-{i}'),
+                                         timeout=600)
+                except requests.exceptions.RequestException as e:
+                    got[i] = e
+            walkers = [threading.Thread(target=walk, args=(i,)) for i in range(2)]
+            for t in walkers:
+                t.start()
+            try:
+                # both registered and walking
+                deadline = time.time() + 60
+                while True:
+                    states = [server.state(f'sat-{i}', timeout=30) for i in range(2)]
+                    if all(s.status_code == 200 and s.json()['state'] == 'running'
+                           for s in states):
+                        break
+                    self.assertLess(time.time(), deadline, [s.text for s in states])
+                    time.sleep(0.02)
+                took = {}
+
+                def timed(name, call, status):
+                    started = time.time()
+                    ret = call()
+                    took[name] = time.time() - started
+                    self.assertEqual(status, ret.status_code, (name, ret.text[:2000]))
+                    return ret
+                url = server.url
+                timed('GET /capabilities', lambda: requests.get(url + '/capabilities',
+                                                                 timeout=30), 200)
+                probe = timed('GET /traverse/capabilities',
+                              lambda: requests.get(url + '/traverse/capabilities', timeout=30),
+                              200).json()
+                self.assertEqual({'/pattern': 0, '/resolve': 0, '/traverse': 2},
+                                 probe['max_concurrent'])
+                timed('GET /pattern/capabilities',
+                      lambda: requests.get(url + '/pattern/capabilities', timeout=30), 200)
+                request = timed('GET /requests/sat-0',
+                                lambda: requests.get(url + '/requests/sat-0', timeout=30),
+                                200).json()
+                self.assertEqual(('/traverse', 'running'), (request['route'], request['state']))
+                timed('GET /traverse/attempt/sat-1', lambda: server.state('sat-1', timeout=30),
+                      200)
+                cancel = timed('POST /traverse/cancel', lambda: server.post(
+                        'traverse/cancel', {'attempt_id': 'sat-unknown'}, timeout=30), 404).json()
+                self.assertTrue(cancel['tombstone'], cancel)
+                # a third /traverse: refused busy before anything of it is parsed
+                again = self._request(1, attempt_id='sat-2')
+                busy = timed('POST /traverse (busy)',
+                             lambda: server.post('traverse', again, timeout=30), 503)
+                self.assertEqual('1', busy.headers.get('Retry-After'))
+                self.assertNotIn('Content-Encoding', busy.headers)
+                self.assertEqual(['code', 'error'], sorted(busy.json()))
+                self.assertEqual('busy', busy.json()['code'])
+                self.assertIn('at most 2 /traverse request(s) at once (--traverse-max-concurrent)',
+                              busy.json()['error'])
+                # nothing of it registered
+                self.assertEqual(404, server.state('sat-2', timeout=30).status_code)
+                self.assertEqual(404, requests.get(url + '/requests/sat-2', timeout=30).status_code)
+                # /resolve has no cap here: answered beside the full /traverse cap
+                timed('POST /resolve', lambda: server.post(
+                        'resolve', {'sequence': self.seed, 'discover': {'max_labels': 2}},
+                        timeout=30), 200)
+                # the walks were running throughout
+                for i in range(2):
+                    self.assertEqual('running', server.state(f'sat-{i}', timeout=30)
+                                     .json()['state'], (i, took))
+                for name, seconds in took.items():
+                    self.assertLess(seconds, self.LIGHT_BOUND_S, (name, took))
+                # a slot freed: the same request, sent again after Retry-After, runs
+                self.assertEqual(200, server.post('traverse/cancel',
+                                                  {'attempt_id': 'sat-0'}).status_code)
+                walkers[0].join(timeout=120)
+                time.sleep(int(busy.headers['Retry-After']))
+                ret = server.post('traverse', again, timeout=300)
+                self.assertEqual(200, ret.status_code, ret.text[:2000])
+                self.assertEqual(('sat-2', 'completed'),
+                                 (ret.json()['usage']['attempt_id'], ret.json()['usage']['reason']))
+                self.assertEqual('finished', server.state('sat-2', timeout=30).json()['state'])
+            finally:
+                server.post('traverse/cancel', {'attempt_id': 'sat-1'}, timeout=30)
+                for t in walkers:
+                    t.join(timeout=120)
+            self.assertEqual(200, got[0].status_code)
+            self.assertEqual('cancelled', got[0].json()['usage']['reason'])
+            log = server.text()
+            self.assertIn('Handler threads: 4 (--http-threads); requests run at once at most: '
+                          '/traverse 2, /resolve 0, /pattern 0', log)
+            self.assertIn('refused busy: /traverse: this server runs at most 2', log)
+            print(f'\n[E19 saturation] light routes beside a full /traverse cap (s): '
+                  + ', '.join(f'{k} {v:.3f}' for k, v in took.items()), flush=True)
+
 
 class TestTraverseSeedPhase(TestingBase):
     """The deadline record covers the seed phase: a request naming 2,500 header labels that

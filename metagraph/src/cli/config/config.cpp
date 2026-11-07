@@ -536,6 +536,18 @@ Config::Config(int argc, char *argv[]) {
             bounded(argv[i], get_value(i), kMaxAttemptRetentionCount, &count);
             request_retention = count;
             i++;
+        } else if (!strcmp(argv[i], "--http-threads")) {
+            bounded(argv[i], get_value(i), kMaxHttpThreads, &http_threads);
+            i++;
+        } else if (!strcmp(argv[i], "--traverse-max-concurrent")) {
+            bounded(argv[i], get_value(i), kMaxHttpThreads, &traverse_max_concurrent);
+            i++;
+        } else if (!strcmp(argv[i], "--resolve-max-concurrent")) {
+            bounded(argv[i], get_value(i), kMaxHttpThreads, &resolve_max_concurrent);
+            i++;
+        } else if (!strcmp(argv[i], "--pattern-max-concurrent")) {
+            bounded(argv[i], get_value(i), kMaxHttpThreads, &pattern_max_concurrent);
+            i++;
         } else if (!strcmp(argv[i], "--traverse-attempt-tombstone-max-s")) {
             bounded(argv[i], get_value(i), kMaxAttemptRetentionS,
                     &traverse_attempt_tombstone_max_s);
@@ -1052,6 +1064,26 @@ Config::Config(int argc, char *argv[]) {
                      "seed's memory budget is then at most), got " << traverse_max_memory_mb
                   << std::endl;
         print_usage_and_exit = true;
+    }
+
+    // the caps on concurrent requests that are set sum to less than the handler threads (E19):
+    // else, with every capped route at its most, no thread would be left for the light routes
+    // (the capabilities, the request and attempt states, the cancel) or for the busy refusal,
+    // and a cap could never refuse a request that a thread would not hold first
+    if (identity == SERVER_QUERY) {
+        const uint64_t threads = http_threads ? http_threads : std::max(1u, get_num_threads());
+        const uint64_t capped = traverse_max_concurrent + resolve_max_concurrent
+                                    + pattern_max_concurrent;
+        if (capped && capped >= threads) {
+            std::cerr << "Error: --traverse-max-concurrent " << traverse_max_concurrent
+                      << ", --resolve-max-concurrent " << resolve_max_concurrent
+                      << " and --pattern-max-concurrent " << pattern_max_concurrent << " sum to "
+                      << capped << ", which needs more handler threads: --http-threads must be "
+                         "at least " << capped + 1 << " (a thread left for the other routes), got "
+                      << threads << (http_threads ? "" : " (-p's value: --http-threads not given)")
+                      << std::endl;
+            print_usage_and_exit = true;
+        }
     }
 
     if (identity == SERVER_QUERY
@@ -1984,6 +2016,10 @@ if (advanced) {
             // fprintf(stderr, "\t-d --distance [INT] \tmax allowed alignment distance [0]\n");
             fprintf(stderr, "\t-p --parallel [INT] \tmaximum number of parallel connections [1]\n");
             fprintf(stderr, "\t   --threads-each [INT] \tnumber of threads per graph [1]\n");
+            fprintf(stderr, "\t   --http-threads [INT] \tthe HTTP handler threads, on which every request runs (-p then sizes only the pool of a multi-graph request's graphs and the loading); in [0, 4096], 0 = -p's value [0]\n");
+            fprintf(stderr, "\t   --traverse-max-concurrent [INT] \tmost POST /traverse requests run at once, a further one refused 503 busy (Retry-After 1); in [0, 4096], 0 = no cap; the caps set must sum to less than the handler threads [0]\n");
+            fprintf(stderr, "\t   --resolve-max-concurrent [INT] \tthe same for POST /resolve [0]\n");
+            fprintf(stderr, "\t   --pattern-max-concurrent [INT] \tthe same for POST /pattern [0]\n");
             fprintf(stderr, "\t   --one-pass-brwt \tuse one-pass parallel BRWT traversal for queries [off]\n");
             fprintf(stderr, "\t   --cache-size [GB] \tmax size of the /search result cache, in GB (0 disables) [1]\n");
             fprintf(stderr, "\n\t   --num-top-labels [INT] \tmaximum number of top labels per query by default [10'000]\n");

@@ -210,8 +210,9 @@ class TraverseError(RuntimeError):
 
 
 class ServerInitializing(TraverseError):
-    """503 with Retry-After: the index is still loading (nothing was registered or run);
-    retry after |retry_after| seconds."""
+    """503 with Retry-After: the index is still loading, or (E19) the route runs its most
+    requests at once (body code "busy"; SPEC-multigraph-envelope.md section 1.1): nothing was
+    registered or run; retry after |retry_after| seconds."""
 
     def __init__(self, status, message, body=None, retry_after=None):
         super().__init__(status, message, body)

@@ -734,6 +734,17 @@ RequestAnswer answer_request(const std::string &content, const std::string &enco
         answer.status = 503;
         answer.header.emplace_back("Retry-After", "60"); // ask to come back in 60 seconds
         ret = json_str_with_error_msg("Server is currently initializing, please come back later.");
+    } catch (const ServerBusy &e) {
+        // a route at its cap (E19): the request was not parsed, nothing of it registered
+        logger->info("[Server] Request {}: refused busy: {}", request_id, e.what());
+        answer.status = 503;
+        answer.header.clear();
+        answer.header.emplace_back("Retry-After", std::to_string(kBusyRetryAfterS));
+        Json::Value body;
+        body["code"] = "busy";
+        body["error"] = e.what();
+        // uncompressed, as every error
+        ret = json_text(body, compact);
     } catch (const std::exception& e) {
         logger->warn("[Server] Error on request {}: {}", request_id, e.what());
         answer.status = 400;

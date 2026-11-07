@@ -82,6 +82,111 @@ class CurrentlyInitializingError : public std::runtime_error {
         : std::runtime_error("Server is currently initializing") {}
 };
 
+// ---------------------------------------------------------------- handler capacity (E19)
+
+// The Retry-After of the busy refusal, in seconds: a slot frees when one of the route's
+// requests ends, which the server cannot foresee, and a refusal costs it no more than reading
+// the request, so a client asks again soon (SPEC-labeled-traversal-core.md §10.3, "Handler
+// capacity")
+constexpr int kBusyRetryAfterS = 1;
+
+// A request of a route at its cap (RouteSlots): answered 503 with Retry-After
+// (kBusyRetryAfterS) and {"code": "busy", "error": its message}, unwrapped, before the request
+// is parsed or anything of it registered (answer_request)
+class ServerBusy : public std::runtime_error {
+  public:
+    using std::runtime_error::runtime_error;
+};
+
+// The caps on the requests of /traverse, /resolve and /pattern whose handlers run at once
+// (--traverse-max-concurrent, --resolve-max-concurrent, --pattern-max-concurrent; 0: none)
+struct RouteCaps {
+    uint64_t traverse = 0;
+    uint64_t resolve = 0;
+    uint64_t pattern = 0;
+};
+
+/**
+ * The cap of one route (E19): at most |max| of its requests whose handlers run at once (0: no
+ * cap). A handler takes a Slot when it starts (try_acquire) and holds it until it returns, the
+ * Slot's destructor giving it back; a handler that gets none (a false Slot) refuses its request
+ * busy. The requests are counted with or without a cap (running()).
+ */
+class RouteSlots {
+  public:
+    class Slot {
+      public:
+        Slot() = default;
+        Slot(Slot &&other) noexcept : owner_(other.owner_) { other.owner_ = nullptr; }
+        Slot& operator=(Slot &&other) noexcept {
+            if (this != &other) {
+                release();
+                owner_ = other.owner_;
+                other.owner_ = nullptr;
+            }
+            return *this;
+        }
+        Slot(const Slot&) = delete;
+        Slot& operator=(const Slot&) = delete;
+        ~Slot() { release(); }
+
+        // whether this is a slot (false: the route was at its cap)
+        explicit operator bool() const { return owner_ != nullptr; }
+
+      private:
+        friend class RouteSlots;
+        explicit Slot(RouteSlots *owner) : owner_(owner) {}
+        void release() {
+            if (owner_) {
+                owner_->release();
+                owner_ = nullptr;
+            }
+        }
+        RouteSlots *owner_ = nullptr;
+    };
+
+    // |route| names it in the refusal ("/traverse"), |flag| is its cap's flag
+    RouteSlots(std::string route, std::string flag, uint64_t max)
+          : route_(std::move(route)), flag_(std::move(flag)), max_(max) {}
+    RouteSlots(const RouteSlots&) = delete;
+    RouteSlots& operator=(const RouteSlots&) = delete;
+
+    // a slot for one request; none (false) when |max| run already
+    Slot try_acquire() {
+        std::lock_guard<std::mutex> lock(mutex_);
+        if (max_ && running_ >= max_)
+            return Slot();
+        ++running_;
+        return Slot(this);
+    }
+
+    uint64_t max() const { return max_; }
+    uint64_t running() const {
+        std::lock_guard<std::mutex> lock(mutex_);
+        return running_;
+    }
+
+    // the busy refusal's message: the route, its cap and what the client does
+    std::string busy_message() const {
+        return route_ + ": this server runs at most " + std::to_string(max_) + " " + route_
+                + " request(s) at once (" + flag_ + ") and runs that many now: this one was not "
+                "run, its body not parsed and nothing of it registered; send it again after "
+                "Retry-After (" + std::to_string(kBusyRetryAfterS) + " s)";
+    }
+
+  private:
+    void release() {
+        std::lock_guard<std::mutex> lock(mutex_);
+        --running_;
+    }
+
+    const std::string route_;
+    const std::string flag_;
+    const uint64_t max_;
+    mutable std::mutex mutex_;
+    uint64_t running_ = 0;
+};
+
 // What process_request does besides writing the result (null: nothing)
 struct ResponseControl {
     // called while the body is written (every 64 KiB of JSON text) and compressed (every
@@ -127,8 +232,9 @@ struct RequestAnswer {
  * under |control|->check), compressed when |encoding| is "gzip" or "deflate" (the request's
  * requested_encoding; "" none), then asks the check once more. Its failures are answered:
  * ClientGone with nothing (status 0); HttpError with its status and body (uncompressed, as
- * every error); CurrentlyInitializingError with 503 and Retry-After; any other exception with
- * 400 {"error": its message}, anything else with 500. Last, |control|->gone, when set: true
+ * every error); CurrentlyInitializingError with 503 and Retry-After; ServerBusy with 503,
+ * Retry-After (kBusyRetryAfterS) and {"code": "busy", "error": its message}; any other
+ * exception with 400 {"error": its message}, anything else with 500. Last, |control|->gone, when set: true
  * answers nothing (status 0) whatever was built. |request_id| names the request in the log.
  */
 RequestAnswer answer_request(const std::string &content, const std::string &encoding,
