@@ -1484,12 +1484,17 @@ TEST(Graphlet, ReaderRebuildsTheFullResult) {
     // not vacuous: every record kind and every end token the walker can produce today
     for (const char *kind : { "H", "S", "L", "O", "Q", "K", "A", "B", "V", "G", "P", "E", "T", "C", "R", "Z",
                               "R:Y",
-                              "E:s", "E:b", "E:h", "E:v", "R:Lw", "R:m", "R:D", "R:L", "R:X", "R:R",
+                              "E:s", "E:b", "E:v", "R:Lw", "R:m", "R:D", "R:L", "R:X", "R:R",
                               "R:Rm", "R:B", "R:Ls", "G.end:*", "G.entry:*",
                               "G.entry:delta", "G.entry:explicit", "G.partition:explicit",
                               "G.split:ambiguous", "G.first_base", "C:derived", "C:sequence" }) {
         EXPECT_GT(coverage.seen[kind], 0u) << kind << " never written";
     }
+#if ! _PROTEIN_GRAPH
+    // a hairpin is a step onto the other strand, which only the stranded modes have: a
+    // Protein build has one strand and never writes one
+    EXPECT_GT(coverage.seen["E:h"], 0u) << "E:h never written";
+#endif
 }
 
 
@@ -2077,9 +2082,15 @@ std::vector<BudgetCase> budget_cases() {
 #if ! _PROTEIN_GRAPH
     modes.push_back(DeBruijnGraph::CANONICAL);
     modes.push_back(DeBruijnGraph::PRIMARY);
+    const uint32_t graphs_per_mode = 2;
+#else
+    // A Protein build has no stranded modes (no reverse complement): it walks three times as
+    // many basic graphs in their place, so that the counts the tests require of these cases
+    // (that they are not vacuous) keep their meaning there. The first cases are the same.
+    const uint32_t graphs_per_mode = 6;
 #endif
     for (auto mode : modes) {
-        for (uint32_t s = 1; s <= 2; ++s) {
+        for (uint32_t s = 1; s <= graphs_per_mode; ++s) {
             std::vector<std::string> seqs, labels;
             for (uint32_t i = 0; i < 6; ++i) {
                 seqs.push_back("AAA" + random_seq(14, s * 11 + i));
@@ -4335,19 +4346,24 @@ namespace {
 // under the same strategies; and a trace case on a coordinate row-diff annotation
 std::vector<BudgetCase> rowdiff_budget_cases() {
     std::vector<BudgetCase> cases;
-    std::vector<DeBruijnGraph::Mode> modes { DeBruijnGraph::BASIC };
+    std::vector<std::pair<DeBruijnGraph::Mode, uint32_t>> graphs { { DeBruijnGraph::BASIC, 11 } };
 #if ! _PROTEIN_GRAPH
-    modes.push_back(DeBruijnGraph::PRIMARY);
+    graphs.emplace_back(DeBruijnGraph::PRIMARY, 11);
+#else
+    // a Protein build has no primary mode: a second basic graph takes its place, so that the
+    // counts the tests require of these cases keep their meaning there
+    graphs.emplace_back(DeBruijnGraph::BASIC, 41);
 #endif
-    for (auto mode : modes) {
+    for (const auto &[mode, first_seed] : graphs) {
         std::vector<std::string> seqs, labels;
         for (uint32_t i = 0; i < 6; ++i) {
-            seqs.push_back("AAA" + random_seq(14, 11 + i));
+            seqs.push_back("AAA" + random_seq(14, first_seed + i));
             labels.push_back(std::string(1, "CDECDF"[i]));
         }
         std::shared_ptr<graph::AnnotatedDBG> anno
             = test::build_anno_graph<DBGSuccinct, annot::RowDiffColumnAnnotator>(3, seqs, labels, mode);
-        const std::string where = "row-diff mode " + std::to_string(mode);
+        const std::string where = "row-diff mode " + std::to_string(mode)
+                                + (first_seed == 11 ? "" : " graph " + std::to_string(first_seed));
         LabelChangeCost constant;
         cases.push_back({ where + " merge", anno, seed_of("AAA", { "C", "D", "E" }),
                           strategy_of(R"({"bounds": {"max_extension_bp": 7}})") });

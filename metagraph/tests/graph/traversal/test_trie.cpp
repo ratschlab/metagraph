@@ -19,6 +19,7 @@
 #include "annotation/representation/column_compressed/annotate_column_compressed.hpp"
 #include "annotation/representation/annotation_matrix/static_annotators_def.hpp"
 #include "common/seq_tools/reverse_complement.hpp"
+#include "kmer/kmer_extractor.hpp"
 
 
 /*
@@ -1295,15 +1296,37 @@ struct DenseSweep {
     size_t capped = 0;         // omissions counted unexplained_capped, over all cells
 };
 
+// The graphs of the sweep, (mode, with reverse complements): every mode's. A Protein build has
+// no stranded modes; it adds basic graphs that hold each record's reverse complement as a
+// record of the same label as well, as dense as the canonical graphs they stand in for, so
+// that the sweep's counts keep their meaning there.
+std::vector<std::pair<DeBruijnGraph::Mode, bool>> dense_graph_kinds() {
+    std::vector<std::pair<DeBruijnGraph::Mode, bool>> kinds;
+    for (auto mode : all_modes()) {
+        kinds.emplace_back(mode, false);
+    }
+#if _PROTEIN_GRAPH
+    kinds.emplace_back(DeBruijnGraph::BASIC, true);
+#endif
+    return kinds;
+}
+
 DenseSweep dense_tuned_sweep(size_t max_branch_events) {
     DenseSweep out;
-    for (auto mode : all_modes()) {
+    for (const auto &kind : dense_graph_kinds()) {
+        const DeBruijnGraph::Mode mode = kind.first;
         for (bool skip : { false, true }) {
             for (uint32_t s = 1; s <= 6; ++s) {
                 std::vector<std::string> seqs, labels;
                 for (uint32_t i = 0; i < 5; ++i) {
                     seqs.push_back("AAA" + random_seq(12, s * 7 + i));
                     labels.push_back(std::string(1, "CDECD"[i]));
+                }
+                if (kind.second) {
+                    for (uint32_t i = 0; i < 5; ++i) {
+                        seqs.push_back(rc(seqs[i]));
+                        labels.push_back(labels[i]);
+                    }
                 }
                 auto anno = build_anno_graph<DBGSuccinct, annot::ColumnCompressed<>>(3, seqs, labels, mode);
                 Strategy full = exhaustive_at(LabelMode::CONSTRAIN, 8);
@@ -1344,7 +1367,8 @@ DenseSweep dense_tuned_sweep(size_t max_branch_events) {
                     const trie::SeedContext ctx { "AAA", mode != DeBruijnGraph::BASIC, st };
                     for (size_t side : { kLeft, kRight }) {
                         const ArmResult &ta = t.arms[side];
-                        const std::string what = "mode " + std::to_string(mode) + " skip "
+                        const std::string what = "mode " + std::to_string(mode)
+                            + (kind.second ? " with reverse complements" : "") + " skip "
                             + std::to_string(skip) + " random " + std::to_string(s) + " knob "
                             + std::to_string(knob) + " arm " + std::to_string(side);
                         if (all) {
@@ -1420,7 +1444,7 @@ TEST(Trie, CheckersAcceptGenuineTunedRunsOnDenseGraphs) {
         EXPECT_GT(sweep.causes_uncapped.count(cause) ? sweep.causes_uncapped.at(cause) : 0, 0u)
             << cause;
     }
-    EXPECT_EQ(all_modes().size() * 2 * 6 * 8 * 2, sweep.cells);
+    EXPECT_EQ(dense_graph_kinds().size() * 2 * 6 * 8 * 2, sweep.cells);
     // ... the default cap does cut evidence here, and omissions resting on the cut
     // events exist and are accepted only at or beyond the boundary (checked per cell)
     EXPECT_GT(sweep.cut_arms, 0u);
@@ -1925,14 +1949,21 @@ TEST(Trie, WalkRuleStatesWhatTheWalkerEnforces) {
     }
 #endif
     {
-        // (k+1) * 2 bits > 64: edges are identified by a hash, a collision blocks
+        // (k+1) * b bits > 64, b the bits of a character of the build's alphabet without '$'
+        // (2 on DNA: k 32; 5 on protein: k 12): edges are identified by a hash, a collision
+        // blocks
+        size_t bits = 1;
+        while ((size_t(1) << bits) < kmer::KmerExtractorBOSS::alphabet.size() - 1) {
+            ++bits;
+        }
+        const size_t packable_k = 64 / bits - 1;
         const std::string seq = random_seq(80, 9);
         auto anno = build_anno_graph<DBGSuccinct, annot::ColumnCompressed<>>(
-                32, { seq }, { "A" }, DeBruijnGraph::BASIC);
+                packable_k + 1, { seq }, { "A" }, DeBruijnGraph::BASIC);
         LabelOracle oracle(*anno);
         EXPECT_TRUE(has(walk_rule_statement(st, oracle), "128-bit FNV-1a hash"));
         auto packable = build_anno_graph<DBGSuccinct, annot::ColumnCompressed<>>(
-                31, { seq }, { "A" }, DeBruijnGraph::BASIC);
+                packable_k, { seq }, { "A" }, DeBruijnGraph::BASIC);
         LabelOracle packable_oracle(*packable);
         EXPECT_FALSE(has(walk_rule_statement(st, packable_oracle), "128-bit"));
     }
