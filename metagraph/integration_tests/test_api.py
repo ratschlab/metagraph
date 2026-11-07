@@ -184,7 +184,17 @@ class TestAPIRaw(TestAPIBase):
             '{"FASTA": ">query\\nAATAAAGGTGTGAGATAACCCCAGCGGTGCCAGGATCCGTGCA", "discovery_fraction": 0.1,')
 
         self.assertEqual(ret.status_code, 400)
-        self.assertIn("Invalid JSON:", ret.json()['error'])
+        self.assertIn("Bad json received:", ret.json()['error'])
+
+    def test_api_raw_incomplete_json_prefix(self):
+        """The 400 text of a body that is no JSON starts with 'Bad json received: ' on /search
+        and /align, byte for byte (SPEC-multigraph-envelope.md section 6 freezes it; a client
+        prefix-matches it as a refusal)."""
+        for route in ('search', 'align'):
+            ret = self.raw_post_request(route, '{"FASTA": ">query\\nAATAAAGG",')
+            self.assertEqual(ret.status_code, 400, route)
+            self.assertTrue(ret.json()['error'].startswith('Bad json received: '),
+                            (route, ret.json()))
 
     def test_api_raw_invalid_params(self):
         payload = json.dumps({
@@ -209,7 +219,7 @@ class TestAPIRaw(TestAPIBase):
         ret = self.raw_post_request('search', payload)
 
         self.assertEqual(ret.status_code, 400)
-        self.assertIn("Missing or null 'FASTA' field", ret.json()['error'])
+        self.assertIn("No input sequences received from client", ret.json()['error'])
 
     @parameterized.expand([
         ('negative', -1), ('minimum_int', -2147483648), ('zero', 0),

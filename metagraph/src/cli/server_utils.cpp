@@ -664,7 +664,7 @@ Json::Value parse_json_string(const std::string &msg) {
     std::string errors;
 
     if (!reader->parse(msg.data(), msg.data() + msg.size(), &json, &errors))
-        throw std::invalid_argument("Invalid JSON: " + errors);
+        throw std::invalid_argument("Bad json received: " + errors);
 
     return json;
 }
