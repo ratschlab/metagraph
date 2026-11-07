@@ -195,7 +195,7 @@ Json::Value process_align_request(const std::string &received_message,
     if (config.alignment_min_exact_match < 0.0
             || config.alignment_min_exact_match > 1.0) {
         throw std::invalid_argument(
-                "'min_exact_match' must be in [0, 1]. Received "
+                "Minimum exact match should be within [0, 1.0]. Instead got "
                 + std::to_string(config.alignment_min_exact_match));
     }
 

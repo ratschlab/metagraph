@@ -246,6 +246,16 @@ class TestAPIRaw(TestAPIBase):
 
         self.assertEqual(ret.status_code, 400)
 
+    def test_api_raw_invalid_min_exact_match(self):
+        """/search and /align refuse a min_exact_match outside [0, 1] with the same text, byte
+        for byte the text release 10 wrote (master's #712 rewording is not taken)."""
+        for route in ('search', 'align'):
+            ret = self.raw_post_request(route, json.dumps({'FASTA': '>query\nTCGA',
+                                                           'min_exact_match': 1.5}))
+            self.assertEqual(ret.status_code, 400, route)
+            self.assertEqual({'error': 'Minimum exact match should be within [0, 1.0]. '
+                                       'Instead got 1.500000'}, ret.json(), route)
+
     def test_api_raw_missing_top_labels(self):
         payload = json.dumps({
             "FASTA": "\n".join([">query",
