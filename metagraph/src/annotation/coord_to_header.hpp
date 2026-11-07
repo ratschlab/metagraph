@@ -167,8 +167,10 @@ class CoordToHeader {
      * as build_header_index), then merges the sorted arrays (a k-way merge over the objects'
      * hashes): equal hashes are compared on the headers, so a hash collision is never
      * reported as a repeat. A header repeated many times costs its count, not a list. Null
-     * entries hold no headers. Every object must hash with the same function
-     * (std::invalid_argument).
+     * entries hold no headers. |indexes| lists each object once: an object listed twice
+     * repeats every one of its headers (a caller with one object under several names, as a
+     * multi-graph server's pair under two names, passes it once). Every object must hash with
+     * the same function (std::invalid_argument).
      */
     static uint64_t find_repeated_headers(
             const std::vector<const CoordToHeader*> &indexes,
@@ -194,7 +196,8 @@ class CoordToHeader {
   private:
     struct HeaderIndex;
     // the reverse index, built now if not built yet: shared, so that a reader keeps the array
-    // it searches although load() or set_header_hash() drop it meanwhile
+    // it searches although set_header_hash() drops it meanwhile (load() is not thread-safe
+    // with readers: it replaces the headers the entries name, find_header)
     std::shared_ptr<const HeaderIndex> header_index(size_t num_threads = 0) const;
 
     std::vector<std::vector<std::string>> headers_;

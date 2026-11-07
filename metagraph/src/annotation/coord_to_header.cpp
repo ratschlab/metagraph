@@ -217,7 +217,8 @@ uint64_t CoordToHeader::find_repeated_headers(
         size_t max_listed,
         size_t num_threads) {
     using Entry = HeaderIndex::Entry;
-    // each object's array, held for the merge (load() cannot free it meanwhile)
+    // each object's array, held for the merge (set_header_hash() cannot free it meanwhile;
+    // load() is not thread-safe with readers)
     std::vector<std::shared_ptr<const HeaderIndex>> arrays(indexes.size());
     HeaderHash hash = nullptr;
     for (size_t i = 0; i < indexes.size(); ++i) {

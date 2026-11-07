@@ -274,8 +274,11 @@ Whether every sequence header of a server names one record, so that a header lab
 one sequence of one pair. Computed once at start-up from the pairs' header indexes (a merge of their sorted hash
 arrays; equal hashes are confirmed on the header text, so a hash collision is never counted).
 
-- Multi-graph server: `GET /capabilities` `graph_summary.headers_unique`, over every pair once (a pair listed under
-  several names is tagged with the first name in pair order). There is no top-level member.
+- Multi-graph server: `GET /capabilities` `graph_summary.headers_unique`, over every pair as listed, each once: a
+  (graph_path, annotation_path) as the graph list spells it, as `composite_fp` (section 8) and
+  `graph_summary.columns_disjoint` count pairs. A pair listed under several names counts once and is tagged with the
+  first name in pair order; two spellings of one pair's paths are two pairs, whose headers then all repeat. There is
+  no top-level member.
 - Single-graph server: `GET /capabilities` `headers_unique` at the top level, over its one pair, with null pair
   tags (as its `/search` cut); null while the index loads (`ready: false`).
 
@@ -289,7 +292,7 @@ graph_path, annotation_path, column}...]}...]}`:
 | `examples` | [object] | up to 10 repeated headers, the byte-smallest ones (independent of the hash) |
 | `examples[].header` | string | the header |
 | `examples[].occurrences` | int | its number of records over the pairs |
-| `examples[].pairs` | [object] | its first 10 occurrences in pair order, then column order, then record order: `{graph, graph_path, annotation_path, column}`, `column` the column's label (its file name for `--anno-filename`); a header twice in one column lists that column twice |
+| `examples[].pairs` | [object] | its first 10 occurrences in pair order, then column order, then record order: `{graph, graph_path, annotation_path, column}`, `column` the column's label, as given to annotate; a header twice in one column lists that column twice |
 
 A header that occurs more than once is answered by its first occurrence: within a pair, the first in column order
 (`find_header`); a fan-out over pairs answers each pair's own first occurrence. `value: false` tells a client that a

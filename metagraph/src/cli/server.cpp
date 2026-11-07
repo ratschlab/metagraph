@@ -524,9 +524,16 @@ static void build_header_index(const graph::AnnotatedDBG &index, size_t num_thre
         return;
     Timer timer;
     try {
-        const size_t headers = coord_to_header->build_header_index(num_threads);
-        logger->info("[Server] Sequence header index built: {} headers in {:.1f} s ({} MiB)",
-                     headers, timer.elapsed(), coord_to_header->header_index_bytes() >> 20);
+        const size_t distinct = coord_to_header->build_header_index(num_threads);
+        // its entries (one per record) and the distinct headers among them: fewer when a
+        // header names several records (headers_unique, E22)
+        uint64_t entries = 0;
+        for (uint64_t col = 0; col < coord_to_header->num_columns(); ++col) {
+            entries += coord_to_header->num_sequences(col);
+        }
+        logger->info("[Server] Sequence header index built: {} entries, {} distinct headers, "
+                     "in {:.1f} s ({} MiB)", entries, distinct, timer.elapsed(),
+                     coord_to_header->header_index_bytes() >> 20);
     } catch (const std::length_error &e) {
         logger->error("[Server] {}", e.what());
         std::exit(1);
