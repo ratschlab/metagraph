@@ -1060,9 +1060,10 @@ TEST(MultiGraphInRam, LoadSharesTheResidentRecordMapping) {
     EXPECT_EQ("acc1", discovered["labels"][0]["label"].asString());
 #if ! _PROTEIN_GRAPH
     // /pattern on its copy: the record labels of its paths as the resident's (a column
-    // annotation's reads are unbudgeted: allowed, as a request on such an index asks). The
-    // pattern search refuses a protein graph (PatternRoute.ProteinGraphIsRefused) until E16
-    // serves one: a Protein build checks the copy's mapping alone
+    // annotation's reads are unbudgeted: allowed, as a request on such an index asks).
+    // until E16 (pattern on protein graphs): the pattern search refuses a protein graph
+    // (PatternRoute.ProteinGraphIsRefused), so a Protein build checks the copy's mapping
+    // alone; E16 removes the guard
     const Json::Value pattern = parse_pattern_body(
             "{\"patterns\": [{\"dna\": \"" + acc1.substr(30, 40) + "\"}], "
             "\"long_search\": \"paths\", \"output\": {\"labels\": \"all\"}, "

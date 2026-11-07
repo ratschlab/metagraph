@@ -44,10 +44,11 @@ jobs:
       mini_refseq: fetch
 
   # The same suites on a Protein build (SPEC-labeled-traversal-core.md §6.12, T66): the unit
-  # tests a Protein build compiles (the stranded cases and the pattern search, which refuses a
-  # protein graph, are left out of it; the refusal is tested), test_traverse's fixtures as
-  # protein graphs and test_traverse_protein's protein graph of UniParc's shape. linux.yml's
-  # Python and mini-index jobs run on the DNA build only.
+  # tests a Protein build compiles (the stranded cases are left out of it, and so is the
+  # pattern search, which refuses a protein graph until E16 (pattern on protein graphs); the
+  # refusal is tested), test_traverse's fixtures as protein graphs and test_traverse_protein's
+  # protein graph of UniParc's shape. linux.yml's Python and mini-index jobs run on the DNA
+  # build only.
   Linux-Protein:
     if: *requested
     name: Linux (Protein, Release, g++-13)

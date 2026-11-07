@@ -53,9 +53,10 @@ header labels are acc1/acc2/acc3.
 
 In a Protein build the same fixtures are protein graphs over the residues A, C, G and T
 (one strand, every length in residues; SPEC §6.12), and every test runs but the few whose
-subject is DNA by nature: /pattern (refused on a protein graph, alphabet_unsupported), the
-graphlet documents a DNA build wrote, and the mini index. test_traverse_protein.py covers
-a protein graph over amino acids.
+subject is DNA by nature: /pattern (alphabet_unsupported on a protein graph,
+until E16 (pattern on protein graphs)), the graphlet documents a DNA build wrote, the mini
+index and the primary graphs of TestTraversePrimary (E13; a Protein build refuses the
+primary mode). test_traverse_protein.py covers a protein graph over amino acids.
 """
 
 K = 31
@@ -1883,7 +1884,8 @@ class TestTraverseAPI(TestTraverseBase):
                                                       {'dna': self.right1[5:35]}],
                                          'mode': 'partial'})
         if PROTEIN_MODE:
-            # pattern search is served on DNA graphs only (SPEC-pattern-search.md)
+            # until E16 (pattern on protein graphs): pattern search is served on DNA graphs
+            # only (SPEC-pattern-search.md); E16 flips this branch to the protein answer
             self.assertEqual((400, 'alphabet_unsupported'),
                              (pattern.status_code, pattern.json().get('code')), pattern.text)
         else:
@@ -1954,7 +1956,8 @@ class TestTraverseAPI(TestTraverseBase):
         pattern = self._post('pattern', {'patterns': [{'dna': self.element[10:40]}],
                                          'mode': 'partial'}).json()
         if PROTEIN_MODE:
-            # pattern search is served on DNA graphs only (SPEC-pattern-search.md)
+            # until E16 (pattern on protein graphs): pattern search is served on DNA graphs
+            # only (SPEC-pattern-search.md); E16 flips this branch to the protein answer
             self.assertEqual('alphabet_unsupported', pattern.get('code'), pattern)
         else:
             self.assertIsInstance(pattern['work']['memory_bytes'], int)
@@ -3960,8 +3963,9 @@ class TestTraverseMultiGraph(TestTraverseBase):
                                     out['answers'][4]['index_meta_fp'])
             else:
                 self.assertEqual(one, out['answers'][0])
-                # pattern search is served on DNA graphs only (SPEC-pattern-search.md): a
-                # protein graph's block says it is not available and why
+                # until E16 (pattern on protein graphs): pattern search is served on DNA graphs
+                # only (SPEC-pattern-search.md), a protein graph's block says it is not
+                # available and why; E16 flips both lines to the protein answer
                 self.assertEqual(('basic', K, not PROTEIN_MODE),
                                  (one['graph_mode'], one['k'], one['available']))
                 if PROTEIN_MODE:

@@ -222,8 +222,9 @@ TEST(TaskResources, ResolveStatesCpu) {
     }
 }
 
-// The pattern search refuses a protein graph (alphabet_unsupported,
-// PatternRoute.ProteinGraphIsRefused) until E16 serves one
+// until E16 (pattern on protein graphs): the pattern search refuses a protein graph
+// (alphabet_unsupported, PatternRoute.ProteinGraphIsRefused), so a Protein build compiles this
+// test out; E16 removes the guard
 #if ! _PROTEIN_GRAPH
 TEST(TaskResources, PatternStatesCpuPerRequestAndPerEntry) {
     Fixture f;

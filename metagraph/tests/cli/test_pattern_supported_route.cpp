@@ -50,9 +50,10 @@
 
 namespace {
 
-// The pattern search is served on DNA graphs only (SPEC-pattern-search.md: the route refuses a
-// protein graph, alphabet_unsupported, PatternRoute.ProteinGraphIsRefused), so a Protein build
-// runs none of this suite, as test_pattern_search.cpp
+// until E16 (pattern on protein graphs): the pattern search is served on DNA graphs only
+// (SPEC-pattern-search.md: the route refuses a protein graph, alphabet_unsupported,
+// PatternRoute.ProteinGraphIsRefused), so a Protein build runs none of this suite, as
+// test_pattern_search.cpp
 #if ! _PROTEIN_GRAPH
 
 using namespace mtg;

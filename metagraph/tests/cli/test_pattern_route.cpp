@@ -38,9 +38,10 @@ using namespace mtg;
 using namespace mtg::graph;
 using namespace mtg::cli;
 
-// The pattern search is served on DNA graphs only (SPEC-pattern-search.md: the route refuses a
-// protein graph, alphabet_unsupported, PatternRoute.ProteinGraphIsRefused below), so a Protein
-// build runs none of the DNA search's tests, as test_pattern_search.cpp
+// until E16 (pattern on protein graphs): the pattern search is served on DNA graphs only
+// (SPEC-pattern-search.md: the route refuses a protein graph, alphabet_unsupported,
+// PatternRoute.ProteinGraphIsRefused below), so a Protein build runs none of the DNA search's
+// tests, as test_pattern_search.cpp
 #if ! _PROTEIN_GRAPH
 
 using Clock = pattern::Deadline::Clock;
@@ -2354,10 +2355,10 @@ TEST(PatternRoute, TheCountersOfTheExtensionAndOfTheLabels) {
 #endif // ! _PROTEIN_GRAPH
 
 #if _PROTEIN_GRAPH
-// A protein graph is refused, whatever the request: the route (`/pattern` and `metagraph
-// pattern`) answers 400 alphabet_unsupported naming the graph's alphabet, and the capabilities
-// say it is not available and why. This is the state until E16 (pattern search on protein
-// graphs) lands: E16 replaces this test, and its guard, with the tests of the search it serves.
+// until E16 (pattern on protein graphs): a protein graph is refused, whatever the request: the
+// route (`/pattern` and `metagraph pattern`) answers 400 alphabet_unsupported naming the graph's
+// alphabet, and the capabilities say it is not available and why. E16 replaces this test, and
+// its guard, with the tests of the search it serves.
 TEST(PatternRoute, ProteinGraphIsRefused) {
     auto anno_graph = test::build_anno_graph<DBGSuccinct, annot::ColumnCompressed<>>(
             5, { "MKVLAAGIVGLLLAQSEWHT", "MKVLAAGPVGRWHEDNQ" }, { "p1", "p2" },
