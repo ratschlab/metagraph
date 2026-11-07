@@ -144,6 +144,55 @@ TEST(HeaderCounts, SelectsByTheReportedScore) {
               graph->get_top_labels("AAA", 1, 0, 0, false));
 }
 
+TEST(HeaderCounts, OneHeaderInTwoColumnsTiedAtTheCut) {
+    // the header "same" in two columns: in F0 (column 0) the record ACGT, every query k-mer
+    // once; in F1 (column 1) the record ACGTACGT, every query k-mer twice. The query ACGT
+    // (k-mers ACG, CGT) matches both records at both positions: the same k-mer score and the
+    // same header, so the tie at a top-1 cut is broken by (column, seq_id), and column 0's
+    // record is kept; with the counts the score is the coordinates matched (2 against 4) and
+    // column 1's record ranks first. Every expectation is written out by hand.
+    auto graph = coordinate_test_graph(3, {{"ACGT", "F0", "same"},
+                                            {"ACGTACGT", "F1", "same"}});
+    using Counts = std::vector<std::tuple<std::string, size_t, std::vector<size_t>>>;
+    using Pairs = std::vector<std::pair<std::string, size_t>>;
+    graph::SearchCut cut;
+
+    // top 1, without the counts: column 0's record (one coordinate per position)
+    EXPECT_EQ((Counts{{"same", 2, {1, 1}}}), graph->get_kmer_counts("ACGT", 1, 0, 0, &cut));
+    EXPECT_EQ(1u, cut.returned);
+    EXPECT_FALSE(cut.complete);
+    EXPECT_EQ(2u, cut.nth_score);
+    EXPECT_EQ(2u, cut.tied);
+    EXPECT_EQ(1u, cut.tied_returned);
+    EXPECT_EQ((Pairs{{"same", 2}}), graph->get_top_labels("ACGT", 1, 0, 0, false, &cut));
+    EXPECT_EQ(2u, cut.tied);
+    EXPECT_EQ(1u, cut.tied_returned);
+    auto coords = graph->get_kmer_coordinates("ACGT", 1, 0, 0, &cut);
+    ASSERT_EQ(1u, coords.size());
+    EXPECT_EQ("same", std::get<0>(coords[0]));
+    EXPECT_EQ(2u, std::get<1>(coords[0]));
+    // ACG at its record's position 0, CGT at 1; the record has two k-mers
+    EXPECT_EQ((std::vector<SmallVector<uint64_t>>{{0}, {1}}), std::get<2>(coords[0]));
+    EXPECT_EQ(2u, std::get<3>(coords[0]));
+    EXPECT_EQ(2u, cut.tied);
+    EXPECT_EQ(1u, cut.tied_returned);
+
+    // top 2: both records, column 0's first; nothing cut
+    EXPECT_EQ((Counts{{"same", 2, {1, 1}}, {"same", 2, {2, 2}}}),
+              graph->get_kmer_counts("ACGT", 2, 0, 0, &cut));
+    EXPECT_EQ(2u, cut.returned);
+    EXPECT_TRUE(cut.complete);
+
+    // with the counts: the coordinates matched rank, column 1's record first, no tie
+    EXPECT_EQ((Pairs{{"same", 4}}), graph->get_top_labels("ACGT", 1, 0, 0, true, &cut));
+    EXPECT_EQ(1u, cut.returned);
+    EXPECT_FALSE(cut.complete);
+    EXPECT_EQ(4u, cut.nth_score);
+    EXPECT_EQ(1u, cut.tied);
+    EXPECT_EQ(1u, cut.tied_returned);
+    EXPECT_EQ((Pairs{{"same", 4}, {"same", 2}}), graph->get_top_labels("ACGT", 2, 0, 0, true));
+}
+
 TEST(HeaderCounts, CountsQueryPositionsInsteadOfDistinctKmers) {
     auto graph = coordinate_test_graph(3, {{"AAAAAAAA", "F", "long"}, {"AAAA", "F", "short"}});
     const auto counts = graph->get_top_labels("AAAAA", 2, 1., 1.);
