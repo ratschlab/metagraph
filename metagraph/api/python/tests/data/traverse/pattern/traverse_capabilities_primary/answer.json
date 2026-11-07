@@ -124,6 +124,11 @@
   "constrain",
   "annotate"
  ],
+ "max_concurrent": {
+  "/pattern": 0,
+  "/resolve": 0,
+  "/traverse": 0
+ },
  "max_memory_mb": 0,
  "max_query_bp": 0,
  "max_request_memory_mb": 0,
