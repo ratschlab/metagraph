@@ -567,10 +567,15 @@ void check_batched_parity(graph::DeBruijnGraph::Mode graph_mode, CountsForm form
 
 TEST(construct_query_graph, batched_counts_search_answers_as_unbatched) {
     check_batched_parity<graph::DBGHashOrdered>(graph::DeBruijnGraph::BASIC, CountsForm::CSR);
+#if ! _PROTEIN_GRAPH
+    // a Protein build has no reverse complement, so no canonical graph
     check_batched_parity<graph::DBGHashOrdered>(graph::DeBruijnGraph::CANONICAL, CountsForm::CSR);
+#endif
     check_batched_parity<graph::DBGSuccinct>(graph::DeBruijnGraph::BASIC, CountsForm::CSR);
     check_batched_parity<graph::DBGHashOrdered>(graph::DeBruijnGraph::BASIC, CountsForm::INT_BRWT);
+#if ! _PROTEIN_GRAPH
     check_batched_parity<graph::DBGSuccinct>(graph::DeBruijnGraph::CANONICAL, CountsForm::INT_BRWT);
+#endif
 }
 
 // An int_brwt annotation's matrix that counts the integer values read from it
