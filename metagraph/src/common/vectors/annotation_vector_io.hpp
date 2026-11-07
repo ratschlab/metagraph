@@ -1,17 +1,18 @@
-#ifndef MTG_MAPPED_VECTOR_VIEW_HPP
-#define MTG_MAPPED_VECTOR_VIEW_HPP
+#ifndef MTG_ANNOTATION_VECTOR_IO_HPP
+#define MTG_ANNOTATION_VECTOR_IO_HPP
 #include <sdsl/packed_vector_view.hpp>
 #include <sdsl/shared_mapper.hpp>
 namespace mtg::detail {
-// MetaGraph's legacy file headers stay outside the format-independent SDSL view.
-template <uint8_t Width> class mapped_vector_view : public sdsl::packed_vector_view<Width> {
+// Read and write the existing MetaGraph annotation-vector format:
+// a 64-bit bit count, an optional width byte, then the packed payload.
+// SDSL provides the shared packed view and ownership conversion.
+template <uint8_t Width> class annotation_vector_io : public sdsl::packed_vector_view<Width> {
     using base = sdsl::packed_vector_view<Width>;
     using vector_type = sdsl::int_vector<Width>;
 
   public:
-    mapped_vector_view() = default;
-    explicit mapped_vector_view(vector_type value)
-        : base(value.is_mapped() ? vector_type(value) : std::move(value)) {}
+    annotation_vector_io() = default;
+    using base::base;
     const base &packed() const { return *this; }
     void load(std::istream &in) {
         base next;

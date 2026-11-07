@@ -1156,14 +1156,14 @@ TEST(BitmapVector, SharedMappedDenseUnionBoundaries) {
 
 
 TEST(BitmapVector, SharedOwnedViewDetachesOnlyWhenAliased) {
-    using mtg::detail::mapped_vector_view;
+    using mtg::detail::annotation_vector_io;
     sdsl::bit_vector source(65, 0);
     source[64] = 1;
     const auto *allocation = source.data();
-    mapped_vector_view<1> unique(std::move(source));
+    annotation_vector_io<1> unique(std::move(source));
     auto moved = std::move(unique).into_owned();
     EXPECT_EQ(allocation, moved.data());
-    mapped_vector_view<1> view(std::move(moved));
+    annotation_vector_io<1> view(std::move(moved));
     auto alias = view;
     auto detached = std::move(view).into_owned();
     EXPECT_NE(allocation, detached.data());
@@ -1175,7 +1175,7 @@ TEST(BitmapVector, SharedOwnedViewDetachesOnlyWhenAliased) {
 }
 
 TEST(BitmapVector, SharedViewSequentialLoadAndFailedLoad) {
-    using mtg::detail::mapped_vector_view;
+    using mtg::detail::annotation_vector_io;
     const auto filename = test_dump_basename + "_sequential_views";
     const auto bad_file = test_dump_basename + "_truncated_view";
     for (size_t offset = 0; offset < 8; ++offset) {
@@ -1188,7 +1188,7 @@ TEST(BitmapVector, SharedViewSequentialLoadAndFailedLoad) {
             b.serialize(out);
             out.put('!');
         }
-        mapped_vector_view<1> first, second;
+        annotation_vector_io<1> first, second;
         {
             sdsl::mmap_ifstream in(filename);
             in.seekg(offset);

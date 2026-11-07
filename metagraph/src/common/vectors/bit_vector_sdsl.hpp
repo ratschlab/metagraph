@@ -13,7 +13,7 @@
 #include "common/serialization.hpp"
 #include "vector_algorithm.hpp"
 #include "bit_vector.hpp"
-#include "mapped_vector_view.hpp"
+#include "annotation_vector_io.hpp"
 
 
 template <class bv_type, class rank_1_type, class select_1_type, class select_0_type>
@@ -89,7 +89,7 @@ class bit_vector_sdsl : public bit_vector {
 
   private:
     using storage_type = std::conditional_t<std::is_same_v<bv_type, sdsl::bit_vector>,
-        mtg::detail::mapped_vector_view<1>, bv_type>;
+        mtg::detail::annotation_vector_io<1>, bv_type>;
     const auto &packed() const {
         if constexpr(std::is_same_v<bv_type, sdsl::bit_vector>) return vector_.packed();
         else return vector_;
