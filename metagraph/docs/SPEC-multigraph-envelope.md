@@ -107,8 +107,8 @@ The answer keeps its upstream shape (a list of `{seq_description, results, ...}`
 
 - `not_after_ms` (integer, ms since the epoch) is the latest START time, as in SPEC-labeled-traversal-core
   section 5: `/traverse` as before; `/resolve` and `/pattern` read it too. A request whose `not_after_ms` has
-  passed when its handler starts is refused 409 `{error, state: "expired", not_after_ms, server_time_ms}` and nothing
-  runs. In a fan-out, a pair not started by then is `not_reached` with reason `not_after_ms`.
+  passed at its admission (section 5) is refused 409 `{error, state: "expired", not_after_ms, server_time_ms}` and
+  nothing runs. In a fan-out, a pair not started by then is `not_reached` with reason `not_after_ms`.
 - `finish_by_ms` (integer, ms since the epoch) is the completion deadline, on `/traverse`, `/resolve`, `/pattern`.
   Each route's deadline becomes the minimum of its own and `finish_by_ms - clock_skew_allowance_ms`. A `/resolve`
   without `bounds.time_budget_ms` gets the server maximum as its deadline. The in_ram memory wait is not entered
@@ -158,6 +158,11 @@ The answer keeps its upstream shape (a list of `{seq_description, results, ...}`
 - `/resolve` and `/pattern` take an optional `request_id`, the same token rule as `attempt_id`
   (`^[A-Za-z0-9._:-]{1,128}$`), checked by the strict parsers before anything is registered. `/traverse`'s
   `attempt_id` is its request handle; no second id.
+- A request's ADMISSION is the point where the server decides to run it: the check of a repeated id (the 409
+  below) and of an expired `not_after_ms` (section 4), made together, after which a request with an id is
+  registered under it. On `/resolve` and `/pattern` it comes after the request's own 400s (below), on `/traverse`
+  before its fields are parsed (its body read as JSON, its ids and `finish_by_ms` checked). A request without an
+  id is admitted at the same point, without an entry.
 - On `/resolve` and `/pattern` the request's own 400s (the body, the selection, the fields; on `/resolve` also what
   the request and k decide of its explicit seeds: a `kmer_interval` empty or out of range, a seed label that is not
   one of `labels`) come before the registry's 409 and the expired 409: a malformed request with an expired
@@ -183,7 +188,11 @@ The answer keeps its upstream shape (a list of `{seq_description, results, ...}`
   [{graph, graph_path, annotation_path, state: "queued" | "waiting_memory" | "loading" | "running" | "ended" |
   "never_started", outcome, usage}]}`; for `/traverse` also `attempt` (the object of
   `GET /traverse/attempt/{attempt_id}`). An entry is retained for a period and a count set by server flags, then
-  the id is unknown: 404 `{error, request_id, server_instance}`. An id that breaks the token rule is 400. `reason`
+  the id is unknown. `GET /requests/{id}` answers 404 `{error, request_id, server_instance}` for an id this server
+  instance does not hold, in three cases: NOT ADMITTED YET (the window between the request's receipt and its
+  admission), NEVER ADMITTED (refused by an HTTP-level 400, also one only the work finds, which frees the id when it
+  is answered, or by the expired 409; or never received here), or ENDED AND DROPPED (past its retention, by time or
+  by count). An id that breaks the token rule is 400. `reason`
   on `/resolve` and `/pattern`: `answered` (200 written), `client_gone` (nothing written), `deadline` (503),
   `error` (any other status but 400, which leaves no entry).
 - A client gone, or a connection lost, stops the work as before; the entry records the end (`reason:

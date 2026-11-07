@@ -448,8 +448,10 @@ std::string RequestRegistry::retention_text() const {
 
 Json::Value RequestRegistry::unknown_json(const std::string &request_id) const {
     Json::Value j;
-    j["error"] = "request_id '" + request_id + "' is not known on this server: never received, "
-                 "or no longer retained (" + retention_text() + ")";
+    // the three cases of SPEC-multigraph-envelope.md section 5
+    j["error"] = "request_id '" + request_id + "' is not known on this server: not admitted yet, "
+                 "never admitted (an HTTP-level 400 or the expired 409; or never received), or "
+                 "ended and no longer retained (" + retention_text() + ")";
     j["request_id"] = request_id;
     j["server_instance"] = shared_->settings.server_instance;
     return j;

@@ -1227,6 +1227,11 @@ TEST(ServerFanout, RetentionThen404) {
     EXPECT_EQ("r1", body["request_id"].asString());
     EXPECT_EQ("inst", body["server_instance"].asString());
     EXPECT_EQ(0u, body["error"].asString().find("request_id 'r1' is not known on this server"));
+    // the three cases of SPEC-multigraph-envelope.md section 5, as sample 20 names them
+    EXPECT_EQ("request_id 'r1' is not known on this server: not admitted yet, never admitted (an "
+              "HTTP-level 400 or the expired 409; or never received), or ended and no longer "
+              "retained (requests are kept 60 s after they finish, at most 2)",
+              body["error"].asString());
     EXPECT_EQ(200, registry.state("r2").first);
     // by period: 60 s after it ended
     *t += 58'999;

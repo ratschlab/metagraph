@@ -154,7 +154,7 @@ Json::Value expired_json(const AttemptIds &ids, uint64_t now_ms,
     assert(ids.not_after_ms);
     Json::Value j;
     j["error"] = fmt::format("not_after_ms {} ({}) has passed on this server's clock ({}, {}) "
-                             "when the request's handler started: it was not started",
+                             "at the request's admission: it was not started",
                              *ids.not_after_ms, iso_of_ms(*ids.not_after_ms), now_ms,
                              iso_of_ms(now_ms));
     // told apart from the other 409 (a duplicate id, which carries `attempt`) by its state

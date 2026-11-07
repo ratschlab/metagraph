@@ -242,7 +242,8 @@ class RequestRegistry {
     // of the id
     void forget(const std::shared_ptr<RequestEntry> &entry);
     // GET /requests/{request_id}: (200, the entry) or (404, {error, request_id,
-    // server_instance}) for an id that is not held (never received, or past retention)
+    // server_instance}) for an id that is not held (not admitted yet, never admitted, or past
+    // retention: SPEC-multigraph-envelope.md section 5)
     std::pair<int, Json::Value> state(const std::string &request_id) const;
     // the retention rule, stated by the 404 and the 409
     std::string retention_text() const;

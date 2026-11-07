@@ -1,9 +1,9 @@
 {
  "route": "GET /requests/svc-res-0000-9",
  "status": 404,
- "note": "E4: an id this server instance does not hold (never received, or past its retention): 404. The service treats it as unresolved (no re-ask) when server_instance is the one it dispatched to.",
+ "note": "E4: an id this server instance does not hold: 404, in three cases (SPEC section 5): not admitted yet (the window before its admission), never admitted (an HTTP-level 400 or the expired 409; or never received), or ended and dropped by time or count (past its retention). The service treats it as unresolved (no re-ask) when server_instance is the one it dispatched to.",
  "body": {
-  "error": "request_id 'svc-res-0000-9' is not known on this server: never received, or no longer retained (requests are kept 3600 s after they finish, at most 10000)",
+  "error": "request_id 'svc-res-0000-9' is not known on this server: not admitted yet, never admitted (an HTTP-level 400 or the expired 409; or never received), or ended and no longer retained (requests are kept 3600 s after they finish, at most 10000)",
   "request_id": "svc-res-0000-9",
   "server_instance": "7c1e0f3a9b24d6e8"
  }
