@@ -698,6 +698,7 @@ class TestAnnotateHeaderChecks(TestingBase):
         self.assertEqual(res.returncode, 0, res.stderr.decode('utf-8', 'replace'))
         self.assertTrue(os.path.exists(os.path.join(self.d, 'anno.seqs')))
 
+    @unittest.skipIf(PROTEIN_MODE, "--fwd-and-reverse: no reverse complement for Protein alphabets")
     def test_fwd_and_reverse_counts_a_records_reverse_complement_to_the_record(self):
         fasta = self._fasta([(b'a', self.SEQ_A), (b'b', self.SEQ_B)])
         graph = self._graph(fasta)
