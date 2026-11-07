@@ -40,7 +40,7 @@
   },
   "graph": "bact_other",
   "attempt_id": "svc-trv-91aa07-4",
-  "not_after_ms": 1794057295000
+  "not_after_ms": 1794070099000
  },
  "body": {
   "error": "seed 'CGGCGGGTTCGCTCGGTTCGAGAAATCCGTGC': No seed label supports every k-mer of the seed",
@@ -61,7 +61,7 @@
     "peak_admitted_bytes": 101316182,
     "soft_excess_bytes": 0
    },
-   "not_after_ms": 1794057295000,
+   "not_after_ms": 1794070099000,
    "observed_max_uninterruptible_ms": 1,
    "per_seed": [
     {
@@ -90,7 +90,7 @@
     }
    ],
    "reason": "error",
-   "received_at": "2026-11-07T13:13:55.997Z",
+   "received_at": "2026-11-07T16:47:19.959Z",
    "seeds": {
     "abandoned": 0,
     "finished": 2,
@@ -100,7 +100,7 @@
    "server_instance": "7c1e0f3a9b24d6e8",
    "stopped_at": null,
    "timing": {
-    "cpu_ms": 1.238292
+    "cpu_ms": 1.3165
    },
    "work": {
     "memory_bytes": 652886

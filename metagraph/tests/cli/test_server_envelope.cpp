@@ -280,7 +280,7 @@ TEST(ServerEnvelope, Sample05TraverseNamed) {
     EXPECT_EQ(s05["request"]["attempt_id"], built["request_id"]);
     EXPECT_EQ(text(body["usage"]), text(built["usage"]));
     EXPECT_FALSE(built["answers"][0].isMember("usage"));
-    EXPECT_EQ(1794057295000u, built["deadline"]["not_after_ms"].asUInt64());
+    EXPECT_EQ(1794070099000u, built["deadline"]["not_after_ms"].asUInt64());
     EXPECT_EQ(s05["request"]["not_after_ms"].asUInt64(), built["deadline"]["not_after_ms"].asUInt64());
     EXPECT_TRUE(built["deadline"]["finish_by_ms"].isNull());
     const Json::Value &seed = body["usage"]["per_seed"][0];

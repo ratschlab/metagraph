@@ -88,7 +88,10 @@ class TestDecodeStop(unittest.TestCase):
         self.assertEqual(1, len(soft))
         self.assertEqual((None, 'bounds.max_memory_mb', 1), (soft[0].arm, soft[0].knob, soft[0].limit))
         self.assertIn('charged before they are held', soft[0].effect)
-        self.assertIn("fetched rows until its heads are processed", soft[0].effect)
+        self.assertIn("keys and rows until its heads are done", soft[0].effect)
+        # and what it does not observe, with its bound (E5b: the seed phase's further name copies)
+        self.assertIn("not observed", soft[0].effect)
+        self.assertIn("at most 2 x max_seed_labels x the longest", soft[0].effect)
 
     def test_an_agent_sees_the_phase(self):
         with tempfile.TemporaryDirectory() as tmp:
