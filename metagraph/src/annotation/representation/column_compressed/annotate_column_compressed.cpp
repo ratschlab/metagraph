@@ -534,7 +534,7 @@ bool ColumnCompressed<Label>::merge_load(const std::vector<std::string> &filenam
                 if (col == bitmatrix_.size()) {
                     bitmatrix_.emplace_back(std::move(column));
                 } else {
-                    assert(bitmatrix_.at(col).get());
+                    assert(bitmatrix_.at(col).get() || cached_columns_.Cached(col));
                     decompress_bitmap(col) |= *column;
                 }
             } else {
