@@ -200,18 +200,20 @@ The answer keeps its upstream shape (a list of `{seq_description, results, ...}`
   that found no entry. An admission of an id reads that clock under a registry's lock, after its own lookup of the
   id: `/resolve` and `/pattern` under the request registry's, `/traverse` under the attempt registry's, which
   `GET /requests/{id}` asks after the request registry. An admission of the id after that lookup therefore reads
-  `server_time_ms` or a later time, and one before it is found (200) unless it ended and was dropped. Admission
-  refuses a time strictly greater than `not_after_ms` (section 4), so a 404 with `server_time_ms` > `not_after_ms`
-  (strictly) proves that no request with that id and that `not_after_ms` will be admitted on this
-  `server_instance` after the lookup: a copy that arrives later, or a re-send, is refused 409 expired. The proof
-  holds for a `request_id` of `/resolve` and `/pattern` and for an `attempt_id` of `/traverse` alike. It covers the
-  `server_instance` that answered: a 404 from another one (a restarted server) proves nothing about the instance
-  the request was sent to. It assumes that the server's wall clock does not step back between the lookup and a
-  later admission. It says nothing about earlier runs: an id that ran and was dropped, or that a 400 freed, also
-  answers 404. With `server_time_ms` <= `not_after_ms` the 404 proves nothing; the request may still be admitted.
-  The field's presence is the marker: it is absent in a 404 from an engine without this guarantee, and a client
-  then has no proof from that 404 (its own clock rule applies). The expired 409's `server_time_ms` (section 4,
-  since release 10) is unchanged: the clock that admission read.
+  `server_time_ms` or a later time, and one before it is found (200) unless it ended and was dropped, or a 400
+  freed it. Admission refuses a time strictly greater than `not_after_ms` (section 4), so a 404 with
+  `server_time_ms` > `not_after_ms` (strictly) proves that no request with that id and that `not_after_ms` will be
+  admitted on this `server_instance` after the lookup: a copy that arrives later, or a re-send, is not admitted. The
+  proof holds for a `request_id` of `/resolve` and `/pattern` and for an `attempt_id` of `/traverse` alike. It
+  covers the `server_instance` that answered: a 404 from another one (a restarted server) proves nothing about the
+  instance the request was sent to. It assumes that the server's wall clock does not step back below
+  `not_after_ms` between the lookup and a later admission: `server_time_ms − not_after_ms` is the backward clock
+  step the proof survives (a client may require it to exceed `clock_skew_allowance_ms`). It says nothing about
+  earlier runs: an id that ran and was dropped, or that a 400 freed, also answers 404. With `server_time_ms` <=
+  `not_after_ms` the 404 proves nothing; the request may still be admitted. The field's presence is the marker: it
+  is absent in a 404 from an engine without this guarantee, and a client then has no proof from that 404 (its own
+  clock rule applies). The expired 409's `server_time_ms` (section 4, since release 10) is unchanged: the clock
+  that admission read.
 - A client gone, or a connection lost, stops the work as before; the entry records the end (`reason:
   "client_gone"`, with usage). That holds for an error too: on `/resolve` and `/pattern` nothing is written to a
   client that left once the request has its entry, and the entry records `client_gone`; a delivered error stays
