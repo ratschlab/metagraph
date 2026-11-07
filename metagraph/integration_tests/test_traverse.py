@@ -5883,8 +5883,10 @@ class TestTraverseAttempts(TestingBase):
                 '--address', '127.0.0.1'] + flags, stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE, timeout=60)
             self.assertNotEqual(0, res.returncode, flags)
-            self.assertIn(f'--http-threads must be at least {needed} (a thread left for the '
-                          'other routes)', res.stderr.decode(), flags)
+            self.assertIn(f'--http-threads must be at least {needed}, got ', res.stderr.decode(),
+                          flags)
+            self.assertIn('and above the capped sum by the uncapped long calls that run at once',
+                          res.stderr.decode(), flags)
         with self._Server(self, '--http-threads', '8', '--traverse-max-concurrent', '3',
                           '--resolve-max-concurrent', '2', '--pattern-max-concurrent', '2',
                           threads=2) as server:
@@ -5903,10 +5905,13 @@ class TestTraverseAttempts(TestingBase):
         /pattern/capabilities, GET /requests/{attempt_id}, GET /traverse/attempt/{attempt_id}
         and POST /traverse/cancel each answer within LIGHT_BOUND_S, and a /resolve (no cap) is
         answered; a third /traverse, with attempt_id, is refused at once: 503, Retry-After 1,
-        {code: "busy", error}, no usage, nothing registered (both state routes answer its id
-        404). Once a walk is cancelled and its slot free, the same request sent again after
-        Retry-After runs (200, its usage under that id). The walks still run when the light
-        routes have answered, so every answer was measured with the cap full."""
+        {code: "busy", error, server_instance}, no usage, nothing registered (both state routes
+        answer its id 404), and so are a malformed body, an expired not_after_ms and the running
+        id (before their 400 and 409), one log line each. Once a walk is cancelled and its slot
+        free, the same request sent again after Retry-After runs (200, its usage under that id);
+        once both are free, a 400 and a 409 leave no slot taken: two walks then run at once. The
+        walks still run when the light routes have answered, so every answer was measured with
+        the cap full."""
         self._need_a_slow_walk()
         with self._Server(self, '--http-threads', '4', '--traverse-max-concurrent', '2',
                           threads=2) as server:
@@ -5964,13 +5969,33 @@ class TestTraverseAttempts(TestingBase):
                              lambda: server.post('traverse', again, timeout=30), 503)
                 self.assertEqual('1', busy.headers.get('Retry-After'))
                 self.assertNotIn('Content-Encoding', busy.headers)
-                self.assertEqual(['code', 'error'], sorted(busy.json()))
+                self.assertEqual(['code', 'error', 'server_instance'], sorted(busy.json()))
                 self.assertEqual('busy', busy.json()['code'])
+                # this process, as its attempts name it
+                self.assertEqual(probe['attempts']['server_instance'],
+                                 busy.json()['server_instance'])
                 self.assertIn('at most 2 /traverse request(s) at once (--traverse-max-concurrent)',
                               busy.json()['error'])
                 # nothing of it registered
                 self.assertEqual(404, server.state('sat-2', timeout=30).status_code)
                 self.assertEqual(404, requests.get(url + '/requests/sat-2', timeout=30).status_code)
+                # nor of the requests that would be refused otherwise: at the cap, a malformed
+                # body (400), an expired not_after_ms and the running id (409 each) are busy too
+                # -- the refusal comes before the body is parsed
+                expired = self._request(1, attempt_id='sat-expired',
+                                        not_after_ms=int(time.time() * 1000) - 60000)
+                for name, call in (
+                        ('malformed', lambda: requests.post(url + '/traverse', data='{"seeds": [',
+                                                            timeout=30)),
+                        ('expired', lambda: server.post('traverse', expired, timeout=30)),
+                        ('running id', lambda: server.post(
+                                'traverse', self._request(1, attempt_id='sat-0'), timeout=30))):
+                    ret = call()
+                    self.assertEqual(503, ret.status_code, (name, ret.text[:2000]))
+                    self.assertEqual(('busy', '1'), (ret.json()['code'],
+                                                     ret.headers.get('Retry-After')), name)
+                self.assertEqual(404, server.state('sat-expired', timeout=30).status_code)
+                self.assertEqual('running', server.state('sat-0', timeout=30).json()['state'])
                 # /resolve has no cap here: answered beside the full /traverse cap
                 timed('POST /resolve', lambda: server.post(
                         'resolve', {'sequence': self.seed, 'discover': {'max_labels': 2}},
@@ -5991,6 +6016,29 @@ class TestTraverseAttempts(TestingBase):
                 self.assertEqual(('sat-2', 'completed'),
                                  (ret.json()['usage']['attempt_id'], ret.json()['usage']['reason']))
                 self.assertEqual('finished', server.state('sat-2', timeout=30).json()['state'])
+                # both slots free: a 400 and a 409 hold none of them (the slot of a request
+                # refused after it was taken is given back) -- two valid walks then run at once
+                self.assertEqual(200, server.post('traverse/cancel',
+                                                  {'attempt_id': 'sat-1'}).status_code)
+                walkers[1].join(timeout=120)
+                ret = requests.post(url + '/traverse', data='{"seeds": [', timeout=30)
+                self.assertEqual(400, ret.status_code, ret.text[:2000])
+                ret = server.post('traverse', expired, timeout=30)
+                self.assertEqual(409, ret.status_code, ret.text[:2000])
+                self.assertEqual('expired', ret.json()['state'])
+                after = {}
+
+                def walk_after(i):
+                    after[i] = server.post('traverse', self._request(1, attempt_id=f'sat-{i}'),
+                                           timeout=300)
+                pair = [threading.Thread(target=walk_after, args=(i,)) for i in (4, 5)]
+                for t in pair:
+                    t.start()
+                for t in pair:
+                    t.join(timeout=300)
+                for i in (4, 5):
+                    self.assertEqual(200, after[i].status_code, after[i].text[:2000])
+                    self.assertEqual('completed', after[i].json()['usage']['reason'], i)
             finally:
                 server.post('traverse/cancel', {'attempt_id': 'sat-1'}, timeout=30)
                 for t in walkers:
@@ -6000,7 +6048,9 @@ class TestTraverseAttempts(TestingBase):
             log = server.text()
             self.assertIn('Handler threads: 4 (--http-threads); requests run at once at most: '
                           '/traverse 2, /resolve 0, /pattern 0', log)
-            self.assertIn('refused busy: /traverse: this server runs at most 2', log)
+            # one line per refusal
+            self.assertIn(': busy, 2 of 2 running (--traverse-max-concurrent); 503', log)
+            self.assertEqual(4, log.count(': busy, 2 of 2 running (--traverse-max-concurrent)'))
             print(f'\n[E19 saturation] light routes beside a full /traverse cap (s): '
                   + ', '.join(f'{k} {v:.3f}' for k, v in took.items()), flush=True)
 

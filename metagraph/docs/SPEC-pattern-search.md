@@ -404,8 +404,9 @@ server, before step 1 on a multi-graph one; its body is not parsed):
 
 ## 6. Whole-request refusals
 
-The body is `{"error": <message>, "code": <code>}`, except the 503 during loading, which has no `code`, and a
-selection refusal of a multi-graph server, which may add `candidates` (below).
+The body is `{"error": <message>, "code": <code>}`, except the 503 during loading, which has no `code`, a
+selection refusal of a multi-graph server, which may add `candidates` (below), and the 503 `busy`, which adds
+`server_instance`.
 
 On a multi-graph server (§24.1) a refusal that one pair alone would be answered -- its graph's support (step 4 of
 §5), its annotation (steps 10 and 11), its 503 `deadline`, a failure while it is processed -- is carried inside the
@@ -436,7 +437,7 @@ answered; the refusals that no pair decides (the body, `graphs`, `in_ram`, the r
 | 400 | `annotation_unbudgeted` | increment 3: `output.labels: "all"` in a retrieval mode, and the annotation has no budget-aware decode (capabilities `annotation: "unbudgeted"`: a column, BRWT, row or disk annotation; only the row-diff family has one); increment 5b: a request with a predicate on such an annotation, in every mode (its selection reads rows); increment 5s: a request with `long_search: "supported_paths"`, in every mode (its search reads rows) | set `allow_unbudgeted_annotation: true` to read it without a memory bound on the reads (§14.4; a selection then reads single cells for at most 16 labels where the annotation has direct access, `selection.access: "columns"`), or ask for `labels: "none"` or mode `count` (without a predicate) |
 | 400 | `graph_unknown`, `selection_conflict`, `pair_not_found`, `pair_ambiguous` | a multi-graph server's selection (§24.1; SPEC-multigraph-envelope.md section 6, its codes): an unknown name in `graphs` or `pairs`, `graphs` beside `pairs`, a pair object naming none or several pairs of its name; the body adds `candidates` (`[{graph, graph_path, annotation_path}]`) where a choice exists | fix the selection: GET /capabilities lists the pairs |
 | 503 | `deadline` | the answer could not be written by `time_budget_ms` (§7.6): nothing partial is sent | narrow the request: fewer patterns, a smaller `max_contexts` or `max_steps`; a larger budget helps only when it lets the work end early. The operator can raise `--pattern-finalize-ms` or lower the delivery rates (§4.5) |
-| 503 | `busy` | E19: the server runs its most `/pattern` requests at once (`--pattern-max-concurrent`; `SPEC-multigraph-envelope.md` §1.1). Refused before the body is parsed, with `Retry-After: 1`: nothing ran, its `request_id` is not registered | send it again after `Retry-After` (the same `request_id` is admitted) |
+| 503 | `busy` | E19: the server runs its most `/pattern` requests at once (`--pattern-max-concurrent`; `SPEC-multigraph-envelope.md` §1.1). Refused before the body is parsed, with `Retry-After: 1` and the server's `server_instance` in the body: nothing ran, its `request_id` is not registered | send it again after `Retry-After` (the same `request_id` is admitted) |
 | 503 | (none) | the single index is still loading (`Retry-After: 60`); every route answers so | retry later |
 
 An unexpected failure (a server bug) is answered as every route answers it: 400 `{"error": …}` without a

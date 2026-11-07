@@ -43,6 +43,10 @@ void process_request(std::shared_ptr<HttpServer::Response> &response,
                      const ResponseControl *control = nullptr,
                      std::function<void(const SimpleWeb::error_code &)> on_sent = nullptr);
 
+// Writes |answer| (a status other than 0) as process_request writes one, without its log lines:
+// the busy refusal of a handler that refuses its request before reading it (E19)
+void write_answer(std::shared_ptr<HttpServer::Response> &response, const RequestAnswer &answer);
+
 // Send an already serialized JSON body through the same compression and error handling.
 void process_serialized_request(std::shared_ptr<HttpServer::Response> &response,
                                 const std::shared_ptr<HttpServer::Request> &request,

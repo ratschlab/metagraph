@@ -65,7 +65,9 @@ exactly as before, because the service's attempt ledger reads those statuses:
 once (`--traverse-max-concurrent`, `--resolve-max-concurrent`, `--pattern-max-concurrent`; none by default;
 `SPEC-labeled-traversal-core.md` §10.3, "Handler capacity", states what a cap counts and the threads it keeps for
 the light routes). A request of a route at its cap is answered HTTP 503 with `Retry-After: 1` and the body
-`{"error": <message>, "code": "busy"}`: no `usage`, no envelope, on a single-graph server too. It is refused when
+`{"error": <message>, "code": "busy", "server_instance": <this process>}`: no `usage`, no envelope, on a
+single-graph server too. Its `server_instance` lets a ledger that sent `expect_server_instance` see a restarted
+process at once, as its 409 `instance_mismatch` would tell it, rather than once a slot is free. It is refused when
 its handler starts, after the 503 of a single index still loading and before its body is parsed: before every 400
 and 409 and before its `attempt_id` or `request_id` is registered (section 5), so nothing of it ran, nothing of it
 is held, and a re-send (the same id included) after `Retry-After` is admitted as a first copy would be. It says

@@ -91,11 +91,17 @@ class CurrentlyInitializingError : public std::runtime_error {
 constexpr int kBusyRetryAfterS = 1;
 
 // A request of a route at its cap (RouteSlots): answered 503 with Retry-After
-// (kBusyRetryAfterS) and {"code": "busy", "error": its message}, unwrapped, before the request
-// is parsed or anything of it registered (answer_request)
+// (kBusyRetryAfterS) and {"code": "busy", "error": its message, "server_instance": this
+// process's}, unwrapped, before the request is parsed or anything of it registered
+// (busy_answer; answer_request)
 class ServerBusy : public std::runtime_error {
   public:
-    using std::runtime_error::runtime_error;
+    ServerBusy(const std::string &message, std::string server_instance)
+          : std::runtime_error(message), server_instance_(std::move(server_instance)) {}
+    const std::string& server_instance() const { return server_instance_; }
+
+  private:
+    std::string server_instance_;
 };
 
 // The caps on the requests of /traverse, /resolve and /pattern whose handlers run at once
@@ -161,6 +167,8 @@ class RouteSlots {
     }
 
     uint64_t max() const { return max_; }
+    const std::string& route() const { return route_; }
+    const std::string& flag() const { return flag_; }
     uint64_t running() const {
         std::lock_guard<std::mutex> lock(mutex_);
         return running_;
@@ -237,6 +245,10 @@ struct RequestAnswer {
  * exception with 400 {"error": its message}, anything else with 500. Last, |control|->gone, when set: true
  * answers nothing (status 0) whatever was built. |request_id| names the request in the log.
  */
+// The answer of a busy refusal (E19): 503, Retry-After (kBusyRetryAfterS) and {"code": "busy",
+// "error", "server_instance"} (|compact| as json_text's), uncompressed as every error
+RequestAnswer busy_answer(const ServerBusy &busy, bool compact = true);
+
 RequestAnswer answer_request(const std::string &content, const std::string &encoding,
                              size_t request_id,
                              const std::function<Json::Value(const std::string &)> &process,

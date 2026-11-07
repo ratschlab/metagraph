@@ -3548,22 +3548,29 @@ search's routes, `POST /pattern` and `GET /pattern/capabilities`, are `SPEC-patt
   moment its request (header and body) has been read until its response is handed to the transport; a request
   that finds every thread busy waits unread, the light routes too (`GET /capabilities`, `GET
   /traverse/capabilities`, `GET /pattern/capabilities`, `GET /requests/{id}`, `GET /traverse/attempt/{attempt_id}`,
-  `POST /traverse/cancel`). Two kinds of flags keep a thread for them:
+  `POST /traverse/cancel` without `wait_ms`). Two kinds of flags keep a thread for them:
   - `--http-threads N`: the handler threads, in [0, 4096]. 0, the default, takes `-p`'s value, as every server
     had them before E19. `-p` keeps its other roles: the graphs' pool (the pooled pairs of a fan-out, `/search`'s
-    graphs) and the threads that load a graph list.
+    graphs) and the threads that load a graph list; with `--http-threads` given, those are all `-p` sizes.
   - `--traverse-max-concurrent`, `--resolve-max-concurrent`, `--pattern-max-concurrent`, each in [0, 4096] (0, the
     default: no cap): the most requests of the route whose handlers run at once. A request counts from its
     handler's start to its return: the wait for the memory of an `in_ram` load and the load, the work, the
     writing and the compression of its answer, and a request whose client left until its handler notices. A
     fan-out (`/resolve` or `/pattern` on two or more pairs) counts once: its pooled pairs run on the graphs' pool,
     and a pooled pair still working after its request was answered no longer counts. The caps that are set must
-    sum to less than the handler threads (else the server refuses to start, naming the flags), so that while every
-    capped route runs its most a thread is left for the light routes and for the refusal below.
+    sum to less than the handler threads (else the server refuses to start, naming the flags). That rule is
+    necessary, not sufficient: the uncapped long calls take handler threads too -- `/search`, `/align`, a route
+    whose cap is 0, and `POST /traverse/cancel` with `wait_ms` (up to 10,000 ms each) -- and when they and the
+    capped routes hold every thread, the light routes and the refusal below queue unread like any request. A thread
+    stays free for them only when the handler threads exceed the capped sum plus the concurrent uncapped long
+    calls (the search service's `/search` admission and its cancels with `wait_ms` among them).
   - A request of a route at its cap is refused when its handler starts: after the 503 of a single index still
     loading, before its body is parsed, so before every 400 and 409 and before its `attempt_id` or `request_id` is
-    registered. HTTP 503, `Retry-After: 1`, body `{"code": "busy", "error": …}`, no `usage`, never wrapped in the
-    envelope, on single-graph and multi-graph servers alike (`SPEC-multigraph-envelope.md` §1.1). Nothing of it
+    registered. HTTP 503, `Retry-After: 1`, body `{"code": "busy", "error": …, "server_instance": …}` (this
+    process, as every attempt answer names it: a ledger that pinned another instance learns of the restart
+    without waiting for a slot), no `usage`, never wrapped in the envelope, on single-graph and multi-graph
+    servers alike (`SPEC-multigraph-envelope.md` §1.1). One log line per refusal (`[Server] <route> request <n>
+    from <address>: busy, <running> of <cap> running (<flag>); 503`). Nothing of it
     ran and nothing of it is held: a re-send, under the same id too, is admitted as a first copy would be. It says
     nothing about other copies of its id, so, like the loading 503, it is no ground of the release rule (above): a
     ledger re-sends after `Retry-After`, or releases on the rule's own grounds. 429 stays the cancel's alone (a 429
@@ -3573,7 +3580,8 @@ search's routes, `POST /pattern` and `GET /pattern/capabilities`, are `SPEC-patt
     pattern and traversal calls against one cap per database server (`DESIGN-pattern-search.md` §9), and a new
     refusal on `/search` would change that service's route. The light routes answer within their own time
     (milliseconds) whenever the requests in flight leave a thread free: a deployment sets `--http-threads` above
-    its admission cap, and the engine's caps bound what a client outside that admission can take of the threads.
+    the engine's capped sum plus its admission cap (and the cancels with `wait_ms` it may have waiting), and the
+    engine's caps bound what a client outside that admission can take of the threads.
   - Stated by every `/traverse` capabilities probe beside its maxima and by GET /capabilities' `multigraph` block
     as `max_concurrent: {"/pattern": n, "/resolve": n, "/traverse": n}` (0 for no cap;
     `SPEC-multigraph-envelope.md` §8). Logged at start-up: `[Server] Maximum connections: N` (the handler
@@ -3582,9 +3590,12 @@ search's routes, `POST /pattern` and `GET /pattern/capabilities`, are `SPEC-patt
     every `/traverse` slot held by a slow walk, the light routes answer within a stated bound, a further
     `/traverse` is refused `busy` with nothing registered, and its re-send runs once a slot is free.
 - **Deployment** (`DESIGN-traverse-graphlet.md` §17.5):
-  - `--http-threads` (`-p` when not given) must exceed the concurrent long calls by one at least (the search
-    service's admission cap per server; the engine's caps where they are set: "Handler capacity" above), so that
-    the cancel, state and capabilities routes find a thread while long calls run.
+  - `--http-threads` (`-p` when not given) must exceed the concurrent long calls by one at least (the engine's
+    caps where they are set, plus the uncapped long calls: the search service's admission cap per server and its
+    cancels with `wait_ms`; "Handler capacity" above), so that the cancel, state and capabilities routes find a
+    thread while long calls run. `--http-threads` above `-p` lets more requests run at once than the graphs'
+    pool has threads: their fan-outs and searches share that pool, so more pairs end `not_reached` or `unfinished`
+    at their cutoff and searches take longer.
   - A reverse proxy in front of the server must forward `POST /traverse/cancel`, `GET /traverse/attempt/*`,
     `GET /capabilities` and `GET /traverse/capabilities` with their query strings (`?graph=…&graph_path=…`,
     percent-encoded), must close its upstream connection when its client goes (the server stops a traversal whose

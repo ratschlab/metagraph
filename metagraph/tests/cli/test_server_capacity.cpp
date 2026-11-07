@@ -162,13 +162,21 @@ TEST(ServerCapacity, BusyMessage) {
     EXPECT_EQ(1, kBusyRetryAfterS);
 }
 
-// answer_request answers a ServerBusy with 503, Retry-After and {code: "busy", error}: never
-// compressed (as every error), and not written to a client that is gone (a route's |gone|)
+// answer_request answers a ServerBusy with 503, Retry-After and {code: "busy", error,
+// server_instance} (busy_answer, which the handlers write themselves when they refuse at their
+// start): never compressed (as every error), and not written to a client that is gone (a route's
+// |gone|)
 TEST(ServerCapacity, BusyIsAnswered503WithRetryAfter) {
     const RouteSlots slots("/resolve", "--resolve-max-concurrent", 1);
     const auto busy = [&](const std::string &) -> Json::Value {
-        throw ServerBusy(slots.busy_message());
+        throw ServerBusy(slots.busy_message(), "7c1e0f3a9b24d6e8");
     };
+    const RequestAnswer direct = busy_answer(ServerBusy(slots.busy_message(), "7c1e0f3a9b24d6e8"));
+    EXPECT_EQ(503, direct.status);
+    EXPECT_EQ(R"({"code":"busy","error":")" + slots.busy_message()
+                      + R"(","server_instance":"7c1e0f3a9b24d6e8"})", direct.body);
+    ASSERT_EQ(1u, direct.header.size());
+    EXPECT_EQ(std::make_pair(std::string("Retry-After"), std::string("1")), direct.header[0]);
     for (const char *encoding : { "", "gzip", "deflate" }) {
         for (bool compact : { true, false }) {
             const RequestAnswer answer = answer_request("{}", encoding, 7, busy, compact,
@@ -178,16 +186,18 @@ TEST(ServerCapacity, BusyIsAnswered503WithRetryAfter) {
             EXPECT_EQ("Retry-After", answer.header[0].first);
             EXPECT_EQ("1", answer.header[0].second);
             const Json::Value body = parse(answer.body);
-            EXPECT_EQ(2u, body.size()) << answer.body;
+            EXPECT_EQ(3u, body.size()) << answer.body;
             EXPECT_EQ("busy", body["code"].asString());
             EXPECT_EQ(slots.busy_message(), body["error"].asString());
+            EXPECT_EQ("7c1e0f3a9b24d6e8", body["server_instance"].asString());
             EXPECT_FALSE(body.isMember("usage"));
             // the members in byte order, as every answer of the server; compact on the
             // traversal routes
             EXPECT_LT(answer.body.find("\"code\""), answer.body.find("\"error\""));
             if (compact) {
-                EXPECT_EQ(0u, answer.body.find("{\"code\":\"busy\",\"error\":"))
-                    << answer.body;
+                EXPECT_EQ(direct.body, answer.body);
+            } else {
+                EXPECT_EQ(parse(direct.body), body);
             }
         }
     }
@@ -245,15 +255,16 @@ TEST(ServerCapacity, Samples10And12StateTheCaps) {
     }
 }
 
-// Sample 24: the busy refusal of a /traverse at its cap, unwrapped: 503, {code, error} and
-// nothing else (no usage, no envelope members), its message the server's for the cap it ran
-// with; its request is a managed one (attempt_id, not_after_ms), which nothing registered
+// Sample 24: the busy refusal of a /traverse at its cap, unwrapped: 503, {code, error,
+// server_instance} and nothing else (no usage, no envelope members), its message the server's for
+// the cap it ran with; its request is a managed one (attempt_id, not_after_ms), which nothing
+// registered
 TEST(ServerCapacity, Sample24IsTheBusyRefusal) {
     const Json::Value s = sample("24_traverse_503_busy.json");
     EXPECT_EQ("POST /traverse", s["route"].asString());
     EXPECT_EQ(503, s["status"].asInt());
     const Json::Value &body = s["body"];
-    EXPECT_EQ(parse(R"(["code", "error"])"), Json::Value([&]() {
+    EXPECT_EQ(parse(R"(["code", "error", "server_instance"])"), Json::Value([&]() {
         Json::Value names(Json::arrayValue);
         for (const std::string &n : body.getMemberNames()) {
             names.append(n);
@@ -263,6 +274,9 @@ TEST(ServerCapacity, Sample24IsTheBusyRefusal) {
     EXPECT_EQ("busy", body["code"].asString());
     EXPECT_EQ(RouteSlots("/traverse", "--traverse-max-concurrent", 1).busy_message(),
               body["error"].asString());
+    // the sample's server, as every sample's (SERVER_INSTANCE of the generator)
+    EXPECT_EQ(sample("12_capabilities_multigraph.json")["body"]["server_instance"].asString(),
+              body["server_instance"].asString());
     EXPECT_TRUE(s["request"]["attempt_id"].isString());
     EXPECT_TRUE(s["request"]["not_after_ms"].isIntegral());
     // the note states the header a client reads
@@ -318,7 +332,8 @@ TEST(ServerCapacity, FlagsAndTheirRanges) {
 }
 
 // The caps that are set sum to less than the handler threads (--http-threads, else -p's
-// value), else the server refuses to start, naming the flags and the threads it needs
+// value), else the server refuses to start, naming the flags and the threads it needs, and that
+// the uncapped long calls need more (the rule is necessary, not sufficient)
 TEST(ServerCapacity, CapsMustLeaveAThread) {
     // one thread left: started
     EXPECT_EQ(3u, server_config({ "--http-threads", "4", "--traverse-max-concurrent", "3" })
@@ -334,16 +349,17 @@ TEST(ServerCapacity, CapsMustLeaveAThread) {
     EXPECT_DEATH(server_config({ "--http-threads", "4", "--traverse-max-concurrent", "4" }),
                  "--traverse-max-concurrent 4, --resolve-max-concurrent 0 and "
                  "--pattern-max-concurrent 0 sum to 4, which needs more handler threads: "
-                 "--http-threads must be at least 5 \\(a thread left for the other routes\\), "
-                 "got 4");
+                 "--http-threads must be at least 5, got 4; and above the capped sum by the "
+                 "uncapped long calls that run at once \\(/search, /align, a route without a "
+                 "cap, POST /traverse/cancel with wait_ms\\)");
     EXPECT_DEATH(server_config({ "--http-threads", "4", "--traverse-max-concurrent", "2",
                                  "--resolve-max-concurrent", "1",
                                  "--pattern-max-concurrent", "2" }),
                  "sum to 5, which needs more handler threads: --http-threads must be at least "
                  "6");
     EXPECT_DEATH(server_config({ "-p", "2", "--pattern-max-concurrent", "2" }),
-                 "--http-threads must be at least 3 \\(a thread left for the other routes\\), "
-                 "got 2 \\(-p's value: --http-threads not given\\)");
+                 "--http-threads must be at least 3, got 2 \\(-p's value: --http-threads not "
+                 "given\\)");
     // a single-thread server (the default -p 1) takes no cap
     EXPECT_DEATH(server_config({ "-p", "1", "--traverse-max-concurrent", "1" }),
                  "--http-threads must be at least 2");

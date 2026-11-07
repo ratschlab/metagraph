@@ -1069,7 +1069,9 @@ Config::Config(int argc, char *argv[]) {
     // the caps on concurrent requests that are set sum to less than the handler threads (E19):
     // else, with every capped route at its most, no thread would be left for the light routes
     // (the capabilities, the request and attempt states, the cancel) or for the busy refusal,
-    // and a cap could never refuse a request that a thread would not hold first
+    // and a cap could never refuse a request that a thread would not hold first. Necessary, not
+    // sufficient: the uncapped long calls (/search, /align, a route without a cap, a cancel with
+    // wait_ms) take threads too, which the operator adds (SPEC §10.3, "Handler capacity")
     if (identity == SERVER_QUERY) {
         const uint64_t threads = http_threads ? http_threads : std::max(1u, get_num_threads());
         const uint64_t capped = traverse_max_concurrent + resolve_max_concurrent
@@ -1079,9 +1081,11 @@ Config::Config(int argc, char *argv[]) {
                       << ", --resolve-max-concurrent " << resolve_max_concurrent
                       << " and --pattern-max-concurrent " << pattern_max_concurrent << " sum to "
                       << capped << ", which needs more handler threads: --http-threads must be "
-                         "at least " << capped + 1 << " (a thread left for the other routes), got "
-                      << threads << (http_threads ? "" : " (-p's value: --http-threads not given)")
-                      << std::endl;
+                         "at least " << capped + 1 << ", got " << threads
+                      << (http_threads ? "" : " (-p's value: --http-threads not given)")
+                      << "; and above the capped sum by the uncapped long calls that run at once "
+                         "(/search, /align, a route without a cap, POST /traverse/cancel with "
+                         "wait_ms), for the light routes to keep a thread" << std::endl;
             print_usage_and_exit = true;
         }
     }
@@ -2014,10 +2018,10 @@ if (advanced) {
 }
             // fprintf(stderr, "\t-o --outfile-base [STR] \tbasename of output file []\n");
             // fprintf(stderr, "\t-d --distance [INT] \tmax allowed alignment distance [0]\n");
-            fprintf(stderr, "\t-p --parallel [INT] \tmaximum number of parallel connections [1]\n");
+            fprintf(stderr, "\t-p --parallel [INT] \tmaximum number of parallel connections, and the threads of the graphs' pool (multi-graph fan-outs, /search's graphs) and of loading a graph list; with --http-threads given, only the latter two [1]\n");
             fprintf(stderr, "\t   --threads-each [INT] \tnumber of threads per graph [1]\n");
-            fprintf(stderr, "\t   --http-threads [INT] \tthe HTTP handler threads, on which every request runs (-p then sizes only the pool of a multi-graph request's graphs and the loading); in [0, 4096], 0 = -p's value [0]\n");
-            fprintf(stderr, "\t   --traverse-max-concurrent [INT] \tmost POST /traverse requests run at once, a further one refused 503 busy (Retry-After 1); in [0, 4096], 0 = no cap; the caps set must sum to less than the handler threads [0]\n");
+            fprintf(stderr, "\t   --http-threads [INT] \tthe HTTP handler threads, on which every request runs (-p then sizes only the graphs' pool and the loading); for the capabilities, state and cancel routes to answer beside long calls, above the caps' sum plus the uncapped long calls run at once (/search, /align, routes without a cap, cancels with wait_ms); in [0, 4096], 0 = -p's value [0]\n");
+            fprintf(stderr, "\t   --traverse-max-concurrent [INT] \tmost POST /traverse requests run at once, a further one refused 503 busy (Retry-After 1); in [0, 4096], 0 = no cap; the caps set must sum to less than the handler threads (necessary, not sufficient: see --http-threads) [0]\n");
             fprintf(stderr, "\t   --resolve-max-concurrent [INT] \tthe same for POST /resolve [0]\n");
             fprintf(stderr, "\t   --pattern-max-concurrent [INT] \tthe same for POST /pattern [0]\n");
             fprintf(stderr, "\t   --one-pass-brwt \tuse one-pass parallel BRWT traversal for queries [off]\n");

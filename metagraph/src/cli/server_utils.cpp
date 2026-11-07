@@ -681,6 +681,18 @@ std::string json_str_with_error_msg(const std::string &msg) {
     return Json::writeString(Json::StreamWriterBuilder(), root);
 }
 
+RequestAnswer busy_answer(const ServerBusy &busy, bool compact) {
+    RequestAnswer answer;
+    answer.status = 503;
+    answer.header.emplace_back("Retry-After", std::to_string(kBusyRetryAfterS));
+    Json::Value body;
+    body["code"] = "busy";
+    body["error"] = busy.what();
+    body["server_instance"] = busy.server_instance();
+    answer.body = json_text(body, compact);
+    return answer;
+}
+
 RequestAnswer answer_request(const std::string &content, const std::string &encoding,
                              size_t request_id,
                              const std::function<Json::Value(const std::string &)> &process,
@@ -735,16 +747,11 @@ RequestAnswer answer_request(const std::string &content, const std::string &enco
         answer.header.emplace_back("Retry-After", "60"); // ask to come back in 60 seconds
         ret = json_str_with_error_msg("Server is currently initializing, please come back later.");
     } catch (const ServerBusy &e) {
-        // a route at its cap (E19): the request was not parsed, nothing of it registered
-        logger->info("[Server] Request {}: refused busy: {}", request_id, e.what());
-        answer.status = 503;
-        answer.header.clear();
-        answer.header.emplace_back("Retry-After", std::to_string(kBusyRetryAfterS));
-        Json::Value body;
-        body["code"] = "busy";
-        body["error"] = e.what();
-        // uncompressed, as every error
-        ret = json_text(body, compact);
+        // a route at its cap (E19): the request was not parsed, nothing of it registered (the
+        // handlers refuse it before process_request; this is the case of a slot taken after the
+        // index finished loading)
+        logger->info("[Server] Request {}: busy; 503", request_id);
+        answer = busy_answer(e, compact);
     } catch (const std::exception& e) {
         logger->warn("[Server] Error on request {}: {}", request_id, e.what());
         answer.status = 400;
@@ -805,6 +812,15 @@ void process_request(std::shared_ptr<HttpServer::Response> &response,
     logger->info("[Server] Request {} processing time: {:.3f} sec, response size: {:.1f} KB, "
                  "finished in {:.3f} sec",
                  request_id, processing_time, (double)ret.size() / 1000, timer.elapsed());
+}
+
+void write_answer(std::shared_ptr<HttpServer::Response> &response, const RequestAnswer &answer) {
+    // as process_request writes an answer: the Content-Type first, then the answer's fields
+    SimpleWeb::CaseInsensitiveMultimap header({ { "Content-Type", "application/json" } });
+    for (const auto &field : answer.header) {
+        header.insert(field);
+    }
+    response->write(static_cast<SimpleWeb::StatusCode>(answer.status), answer.body, header);
 }
 
 void process_serialized_request(std::shared_ptr<HttpServer::Response> &response,

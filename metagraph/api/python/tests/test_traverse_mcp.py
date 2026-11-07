@@ -496,7 +496,15 @@ class TestReviewFindings(ToolsCase):
         from metagraph.traverse import ServerInitializing, TraverseError
         cases = [(TraverseError(400, 'bad strategy'), {'error': 'backend_error', 'status': 400}),
                  (ServerInitializing(503, 'loading', retry_after=30),
-                  {'error': 'backend_error', 'status': 503, 'retry_after_s': 30}),
+                  {'error': 'backend_error', 'status': 503, 'retry_after_s': 30,
+                   'hint': 'the index is still loading: retry later'}),
+                 # a route at its cap (E19): its own hint
+                 (ServerInitializing(503, 'busy', body={'code': 'busy', 'error': 'busy',
+                                                        'server_instance': 'x'},
+                                     retry_after=1),
+                  {'error': 'backend_error', 'status': 503, 'retry_after_s': 1,
+                   'hint': 'the server runs its most requests of this route at once: nothing '
+                           'ran; retry the same call after retry_after_s'}),
                  (ConnectionRefusedError(61, 'Connection refused'),
                   {'error': 'backend_unreachable'}),
                  (URLError('refused'), {'error': 'backend_unreachable'})]
