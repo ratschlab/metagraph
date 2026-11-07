@@ -2544,9 +2544,11 @@ Backend-specific, chosen once per request (`get_matrix()` is called once: it loc
 `access: auto` picks by this table; `direct`/`rows` may be forced (a 400 if unsupported — no silent fallback).
 `auto` picks the same with a request budget as without (E14): where a memory budget makes a plain `column` or
 `brwt` annotation's reads budget-aware (§6.8), its `direct` read reads the same cells, each key's into a scratch
-charged at one column per cell read (an upper bound of what they hold) and its hits charged at their size, a
-key repeated within a read not read again; so `access_path` and `direct_reads` (§8.3) do not depend on a budget
-that does not bind, and T23 holds under one.
+charged at one column per cell read (an upper bound of what they hold) and its hits charged at their size. So
+`access_path` does not depend on a budget, nor does `direct_reads` (§8.3) under one that does not bind, with one
+exception: the unbudgeted read reads a key once per fetch, the budget-aware read once per run of the fetch's
+uncached keys (a key repeated within a run is copied, not read again), so a key that repeats in one fetch on
+both sides of a cached key is read twice under a budget. T23 holds under one.
 Header labels always use `tuples`. Never `get_column`, never `AnnotationBuffer`. A per-seed cache
 `annotation key → interned hit set` bounded by `max_steps`. T1 asserts `direct = rd_direct = rows = tuples`
 agreement where several apply.
