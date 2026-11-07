@@ -6076,7 +6076,7 @@ def _rc(sequence):
     return sequence[::-1].translate(_RC)
 
 
-@unittest.skipIf(PROTEIN_MODE, "traversal fixtures are DNA")
+@unittest.skipIf(PROTEIN_MODE, "a Protein build refuses the primary mode")
 @unittest.skipUnless(_supports_traverse(), "`metagraph traverse` is not available in this build")
 class TestTraversePrimary(TestingBase):
     """Traversal on PRIMARY graphs (E13): the graph of every SRA-side deployed index (Logan
@@ -6184,8 +6184,13 @@ class TestTraversePrimary(TestingBase):
         # served the deployed way, memory-mapped: row_diff_brwt (the Logan chunks) and
         # row_diff_disk (metagut, metasub41) on a primary graph
         cls.servers = {}
-        for index in ('primary', 'primary_disk'):
-            cls.servers[index] = cls._start_server(*cls.indexes[index])
+        try:
+            for index in ('primary', 'primary_disk'):
+                cls.servers[index] = cls._start_server(*cls.indexes[index])
+        except BaseException:
+            # tearDownClass does not run when setUpClass fails: stop the servers already up
+            cls._stop_servers()
+            raise
         cls.url = cls.servers['primary'][0]
 
     @classmethod
@@ -6214,11 +6219,16 @@ class TestTraversePrimary(TestingBase):
         raise AssertionError(f'the server on {anno} did not start')
 
     @classmethod
-    def tearDownClass(cls):
+    def _stop_servers(cls):
         for _, process, log in cls.servers.values():
             process.kill()
             process.wait()
             log.close()
+        cls.servers = {}
+
+    @classmethod
+    def tearDownClass(cls):
+        cls._stop_servers()
         super().tearDownClass()
 
     @classmethod
@@ -6422,6 +6432,21 @@ class TestTraversePrimary(TestingBase):
             out, rc, _ = self._cli(index, trace, resolve=True)
             self.assertNotEqual(0, rc, index)
             self.assertIn(refusal, out['error'], index)
+
+    def test_walk_rule_states_the_edge_identity(self):
+        """walk_rule states the edge identity the walker uses (SPEC §6.6): canonical (k+1)-mers
+        on the primary and the canonical graph, forward ones on the basic graph, 2-bit packed
+        while a (k+1)-mer fits 64 bits (k <= 31) and the 128-bit FNV-1a hash exactly from
+        k = 32 on (the k41 subclass)."""
+        request = {'seeds': [{'sequence': self.E}], 'strategy': self._strategy()}
+        for index, compared in (('primary', 'edges are compared as canonical (k+1)-mers'),
+                                ('canonical', 'edges are compared as canonical (k+1)-mers'),
+                                ('basic', 'edges are compared as (k+1)-mers')):
+            rule = self._ok(index, request)['walk_rule']
+            self.assertIn(compared, rule, index)
+            self.assertEqual(self.k >= 32, '128-bit FNV-1a hash' in rule, (index, rule))
+        rule = requests.post(self.url + '/traverse', data=json.dumps(request)).json()['walk_rule']
+        self.assertEqual(self.k >= 32, '128-bit FNV-1a hash' in rule, rule)
 
     def test_resolve_presence_and_discovery(self):
         """/resolve reads a k-mer's labels on either strand: the profile of a query and of its
@@ -6639,11 +6664,17 @@ class TestTraversePrimary(TestingBase):
         # complement: the left arm at Y's first k-mer (preceded by P and by rc(S)), the right
         # one where it would step into the reverse complement of a seed k-mer (at the latest
         # rc(Y)'s first k-mer, the reverse complement of the seed's last k-mer in Y)
-        primary = self._oracle(meets[1], 'ir')
-        self.assertEqual([(self.Y[:60], ('ir',), (('branch', 1),))], primary['left'])
-        (right, _, right_end), = primary['right']
-        self.assertEqual((('rejoined_seed', 1),), right_end)
-        self.assertTrue((self.Q[40:] + _rc(self.Y)).startswith(right), right)
+        two_strand = self._oracle(meets[1], 'ir')
+        self.assertEqual([(self.Y[:60], ('ir',), (('branch', 1),))], two_strand['left'])
+        # the right arm reads Q[40:], then rejoins the seed at the first k-mer reaching i
+        # bases into rc(Y) whose reverse complement, Y[-i:] + rc(Q)[:k - i], is the seed's
+        # k-mer Y[-i:] + Q[:k - i] across Y's end: the first i with Q's last k - i bases the
+        # reverse complement of its first k - i, at the latest i = k (rc(Y)'s first k-mer,
+        # the reverse complement of Y's last, which the seed holds: Y[60:] is longer than k)
+        i = next(i for i in range(1, self.k + 1)
+                 if _rc(self.Q[len(self.Q) - (self.k - i):]) == self.Q[:self.k - i])
+        self.assertEqual([(self.Q[40:] + _rc(self.Y)[:i - 1], ('ir',),
+                           (('rejoined_seed', 1),))], two_strand['right'])
         self.assertEqual({'left': [(self.P + self.Y[:60], ('ir',), (('dead_end', 1),))],
                           'right': [(self.Q[40:] + _rc(self.Y) + self.S, ('ir',),
                                      (('dead_end', 1),))]},
@@ -6839,8 +6870,10 @@ class TestTraversePrimary(TestingBase):
 
 class TestTraversePrimaryK41(TestTraversePrimary):
     """The same at k = 41, metasub41's: a (k+1)-mer no longer fits 64 bits there, so the edge
-    identity of SPEC §6.6 (edge reuse, the strand-agnostic edge_reuse_rc) is a hash of the
-    canonical (k+1)-mer with a comparison of the whole string instead of its 2-bit packing."""
+    identity of SPEC §6.6 (edge reuse, the strand-agnostic edge_reuse_rc) is the 128-bit FNV-1a
+    hash of the canonical (k+1)-mer instead of its 2-bit packing; no string is kept, so two
+    (k+1)-mers colliding on the hash count as one edge (a conservative block, walker.cpp).
+    test_walk_rule_states_the_edge_identity pins which of the two each k states."""
     k = 41
 
 
