@@ -1195,14 +1195,19 @@ delivered, and state the limiting resource and the useful next action — the st
   `row_diff_flat`, `row_diff_sparse` and `row_diff_disk` decode charged; `row_diff_int_brwt` decodes its stored rows
   with their counts (the BRWT's row ranks and the count vectors), sums them along the path as `IntRowDiff` does, and
   returns the columns whose sum is not zero (presence only, stated in capabilities as `counts: "presence_only"`);
-  a plain BRWT or ColumnMajor (`brwt`, `column`) reads each row alone under the budget, no dependency rows, and only
-  under a memory budget (a work budget alone keeps the default read there, as agreed below).
+  a plain BRWT or ColumnMajor (`brwt`, `column`) reads each row alone under the budget, no dependency rows, its
+  columns in the default read's order (a BRWT's tree order, not column order under a `--greedy` partition, so that
+  an annotate node keeps and numbers the same labels), and only under a memory budget (a work budget alone keeps
+  the default read there, as agreed below); a query of at most 16 labels, which the default read reads cell by
+  cell, reads the same cells under the budget, each key's charged at one column per cell read and its hits at
+  their size (the agreed column-wise charged pairs, `LabelQuery::decode_cells`), so a budget changes neither the
+  access path nor `direct_reads`.
 - **Not covered:** the formats without row-diff other than BRWT and ColumnMajor (TupleCSC alone, the flat and
   sparse row formats, counts without row-diff), `row_diff_int_disk` and `row_diff_disk_coord` read through the
   default path, stated; `/resolve` has no memory budget; a level's rows and lists are not charged in the account.
   Agreed for when this is built: every format except the four legacy ones (rbfish,
-  rb_brwt, bin_rel_wt, row/EigenSpMat), which stay stated as uncovered; ColumnMajor read as column-wise charged pairs;
-  work-only budgets keep the default decode on formats without row-diff; each head's rows released once it is
+  rb_brwt, bin_rel_wt, row/EigenSpMat), which stay stated as uncovered; ColumnMajor read as column-wise charged
+  pairs (built in E14 for the queries `auto` reads cell by cell); work-only budgets keep the default decode on formats without row-diff; each head's rows released once it is
   processed; a head stop caused by a level's rows states the bytes, without the `more_selective_seed` action; the disk
   reader charged as a measured constant; a stopped `/resolve` returns exactly the resolve of a query prefix, an
   explicit `select.policy` that stops fails the request, and discovery under a budget keeps every met label's runs; no
