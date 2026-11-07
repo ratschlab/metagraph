@@ -928,7 +928,8 @@ struct ResourceStop {
     // that do not
     enum Cause {
         HEAD,           // a head's admission (traversal), or the seed's depth-0 state
-        READ_ROW,       // annotation_decode: an annotation row with its row-diff dependency rows
+        READ_ROW,       // annotation_decode: an annotation row (with its row-diff dependency
+                        // rows on a row-diff annotation: |dependency_rows|)
         LABEL_NAMES,    // traversal: the dictionary labels a level's rows would name first
         LEVEL_LISTS,    // traversal: the level's own lists left nothing to read its rows with
     };
@@ -949,6 +950,9 @@ struct ResourceStop {
     uint64_t labels = 0;
     uint64_t label_bytes = 0;
     uint64_t index = 0;              // SEED, DERIVATION: the seed k-mer of the refused row
+    // READ_ROW: the refused row was read with its row-diff dependency rows (a row-diff
+    // annotation); false: read alone without any (a plain column or brwt annotation, E14)
+    bool dependency_rows = true;
     // |demand| is the least the seed was seen to need (part of what it needs was not read
     // because the budget was already exceeded): its statements say "at least"
     bool lower_bound = false;
@@ -1010,9 +1014,12 @@ struct ResourceAccount {
     // (every dependency row and coordinate tuple charged before it is held, a read that does
     // not fit refused whole, each row's dependency rows charged as work); |row_diff_uncounted|
     // — a row-diff annotation without that path, whose dependency rows are neither charged
-    // nor counted. Both false without a budget.
+    // nor counted; |dependency_rows| — the budget-aware path on a row-diff annotation (a
+    // plain column or brwt annotation read budget-aware has no dependency rows to charge).
+    // All false without a budget.
     bool decode_charged = false;
     bool row_diff_uncounted = false;
+    bool dependency_rows = false;
     // the part of the modelled memory that is the coordinate output (Strategy::coordinates:
     // the fixed part, DeliveryCosts::coordinate_fixed, and the seed's and the runs' entries and
     // occurrences as charged at their creation); 0 without them. Their text per account byte

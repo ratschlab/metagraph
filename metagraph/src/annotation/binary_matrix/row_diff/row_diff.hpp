@@ -370,8 +370,10 @@ class BudgetedRowFetcher : public RowFetcher<BinaryMatrix::SetBitPositions> {
                 const uint64_t b = matrix_.reader_bytes();
                 if (!budget.charge(b))
                     return false;
-                reader_charged_ = b;
+                // held from here (a reader that cannot be opened throws: the call's budget is
+                // the caller's to drop then)
                 reader_ = matrix_.reader();
+                reader_charged_ = b;
             }
             return reader_->row_columns(r, &scratch_, budget);
         } else {

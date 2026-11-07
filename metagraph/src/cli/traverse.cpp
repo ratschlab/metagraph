@@ -849,6 +849,9 @@ static Json::Value arm_limitations(const ArmResult &arm, const Strategy &st,
                 : decode && stop->injected
                 ? "an injected refusal of an annotation read (a test hook, not the budget) stopped "
                   "the exploration there (resource_limit; see resource_stop)"
+                : decode && !stop->dependency_rows
+                ? "the request's memory budget did not admit decoding the next level's annotation "
+                  "rows, and the exploration stopped there (resource_limit; see resource_stop)"
                 : decode
                 ? "the request's memory budget did not admit decoding the next level's annotation "
                   "rows with their row-diff dependency rows, and the exploration stopped there "
@@ -1576,13 +1579,17 @@ static Json::Value resource_stop_json(const ResourceStop &q, const Strategy &st,
                       "labels.max_labels_per_node, detail graphlet or a label-constrained query "
                       "names fewer or cheaper labels";
         } else {
+            // (a plain column or brwt annotation's row is read alone, without dependency rows)
             message = "the memory budget (" + knob + ") stopped the walk at " + where
-                    + " while decoding annotation: a row of the next level read alone with its "
-                      "row-diff dependency rows needs more than the "
+                    + " while decoding annotation: a row of the next level read alone"
+                    + (q.dependency_rows ? " with its row-diff dependency rows" : "")
+                    + " needs more than the "
                     + std::to_string(q.left) + " bytes the walk had left beside "
                       "its account, the level's lists and the rows read before it ("
-                    + std::to_string(q.held) + " bytes); " + present + "; each dependency row and "
-                      "coordinate tuple is charged before it is held, every row a fetch returns is "
+                    + std::to_string(q.held) + " bytes); " + present + "; "
+                    + (q.dependency_rows ? "each dependency row and coordinate tuple"
+                                         : "each row's entries")
+                    + " is charged before it is held, every row a fetch returns is "
                       "admitted against its standalone demand, and a read that does not fit is "
                       "refused whole, so the stop does not depend on annotation.batch_kmers; "
                     + (st.label_mode == LabelMode::ANNOTATE
@@ -1640,9 +1647,10 @@ static Json::Value resource_stop_json(const ResourceStop &q, const Strategy &st,
             message += " (the most this seed charged between two comparisons: "
                      + std::to_string(account->largest_charge) + " units)";
         }
-        // with the budget-aware reads a row is charged with its row-diff dependency rows; a
-        // row-diff annotation without them says that they are not counted
-        const char *weights = account && account->decode_charged
+        // with the budget-aware reads on a row-diff annotation a row is charged with its
+        // row-diff dependency rows; a row-diff annotation without them says that they are not
+        // counted; a plain column or brwt annotation (read budget-aware or not) has none
+        const char *weights = account && account->decode_charged && account->dependency_rows
             ? "(8 per key and per dependency row, 1 per entry and coordinate; near the budget a "
               "call reads one key)"
             : account && account->row_diff_uncounted
@@ -4728,7 +4736,8 @@ static Json::Value budget_failed_seed_to_json(const Seed &seed, const SeedBudget
                                          ? "the seed's annotation rows to derive its labels (a "
                                            "window of up to 64 held at once)"
                                          : "the seed's annotation rows to validate its labels")
-                                 + " with their row-diff dependency rows, so no traversal was made "
+                                 + (q.dependency_rows ? " with their row-diff dependency rows" : "")
+                                 + ", so no traversal was made "
                                    "(observed: what admitting the refused row needed beside what "
                                    "was held, MiB rounded up"
                                  + (q.allotted ? " to the smallest budget that admits it with the "
@@ -5246,7 +5255,8 @@ Json::Value process_traverse_request(const Json::Value &json,
                                     account, coordinates, coordinate_text);
         }
     };
-    // a seed never started reads its annotation as one started would have
+    // how the request's seeds read the annotation (LabelOracle::reads_charged): what a seed's
+    // result states of it, a seed's that failed, was never started or is not in the graph too
     const bool decode_charged = oracle.reads_charged(req.strategy.max_memory_bytes,
                                                      req.strategy.max_work_units);
     // work.memory_bytes (SPEC §7.2.2), whether or not a budget is set: each result states its
@@ -5497,7 +5507,7 @@ Json::Value process_traverse_request(const Json::Value &json,
             // report it against the seed and keep the other seeds' traversals, instead of
             // discarding a 100-seed batch because seed 57 spans a recombination point.
             Json::Value failed = failed_seed_to_json(seed, e, req.strategy, clamped,
-                                                     oracle.decode_charged(), no_coordinates);
+                                                     decode_charged, no_coordinates);
             const std::string outcome = failed["outcome"]["walks"].asString();
             state_unknown_labels(&failed, seed);
             // the seed phase holds no modelled account (its rows are observed, not charged)
@@ -5541,8 +5551,7 @@ Json::Value process_traverse_request(const Json::Value &json,
             // a chunk of a multi-graph server that does not hold the seed: stated per seed, the
             // other seeds traversed
             Json::Value absent = not_in_graph_seed_to_json(seed, e, req.strategy,
-                                                           oracle.decode_charged(),
-                                                           no_coordinates);
+                                                           decode_charged, no_coordinates);
             state_unknown_labels(&absent, seed);
             walked("not_in_graph", "", true, std::nullopt, put_failed_memory(&absent, seed));
             append(std::move(absent), 0);
@@ -5554,7 +5563,7 @@ Json::Value process_traverse_request(const Json::Value &json,
             // the pair holds none of the seed's labels, which is its result; the other seeds
             // are traversed
             Json::Value absent = labels_not_in_graph_seed_to_json(seed, e, req.strategy,
-                                                                  oracle.decode_charged(),
+                                                                  decode_charged,
                                                                   no_coordinates);
             walked("labels_not_in_graph", "", true, std::nullopt,
                    put_failed_memory(&absent, seed));

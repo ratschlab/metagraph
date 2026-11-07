@@ -106,8 +106,10 @@ struct PathSupportEnv {
     uint64_t &units;
     const RetrievalLimits &limits;
     graph::pattern::GraphMode mode = graph::pattern::GraphMode::BASIC;
-    // LabelOracle::decode_charged(): the budget-aware reads; else the unbudgeted ones (the route
-    // requires allow_unbudgeted_annotation for them), their results charged after the fact
+    // the route's AnnotationDescription::budgeted (a row-diff annotation with
+    // LabelOracle::decode_charged(); a plain column or brwt annotation stays unbudgeted on this
+    // route): the budget-aware reads; else the unbudgeted ones (the route requires
+    // allow_unbudgeted_annotation for them), their results charged after the fact
     bool budgeted = false;
     // the request's answer volume (null: none): the text of the labels built for the answer
     AnswerVolume *volume = nullptr;

@@ -868,8 +868,8 @@ class Walker {
     uint64_t recorded_label_bytes(std::string_view name) const;
     // how a seed-phase or root read that |refusal| refused did not fit (none when a test hook
     // injected the refusal): what its row needed, more than what was left |beside| ...
-    static std::string refused_read_text(const FetchRefusal &refusal, bool injected,
-                                         const std::string &beside);
+    std::string refused_read_text(const FetchRefusal &refusal, bool injected,
+                                  const std::string &beside) const;
     // a level's annotation rows (in calls under a budget, observing what each holds),
     // charged as work to |arm| when a call returns them
     std::vector<LabelQuery::NodeHits> fetch_hits(ArmState &arm, const std::vector<node_index> &keys);
@@ -1846,6 +1846,7 @@ bool Walker::derive_seed_labels(const std::vector<node_index> &keys,
                 const bool injected = decode_denied_ && r.cause == FetchRefusal::DECODE;
                 ResourceStop detail;
                 detail.cause = ResourceStop::READ_ROW;
+                detail.dependency_rows = oracle_.row_diff();
                 detail.where = ResourceStop::DERIVATION;
                 detail.left = r.left;
                 detail.held = beside + r.held;
@@ -2449,6 +2450,7 @@ std::vector<LabelQuery::NodeHits> Walker::fetch_seed_hits(LabelQuery &query,
                 }
                 ResourceStop detail;
                 detail.cause = ResourceStop::READ_ROW;
+                detail.dependency_rows = oracle_.row_diff();
                 detail.where = ResourceStop::SEED;
                 detail.left = r.left;
                 detail.held = beside + r.held;
@@ -2541,6 +2543,7 @@ void Walker::fail_seed(ResourceStop::Resource resource, double used, double dema
     account.largest_charge = largest_charge_;
     account.decode_charged = decode_charged_;
     account.row_diff_uncounted = budgeted_ && !decode_charged_ && oracle_.row_diff();
+    account.dependency_rows = decode_charged_ && oracle_.row_diff();
     account.coordinates = coord_account_;
     account.allotted = allotted_;
     const size_t labels = annotate_ ? (recorder_ ? recorder_->labels().size() : 0)
@@ -2663,6 +2666,7 @@ void Walker::init_arm(ArmState &arm) {
                 const bool injected = decode_denied_ && r.cause == FetchRefusal::DECODE;
                 ResourceStop detail;
                 detail.cause = ResourceStop::READ_ROW;
+                detail.dependency_rows = oracle_.row_diff();
                 detail.where = ResourceStop::ROOT;
                 detail.left = r.left;
                 detail.held = accounted();
@@ -3954,6 +3958,7 @@ BudgetTrip Walker::read_trip(const FetchRefusal &r) {
         t.demand = static_cast<double>(held + r.demand + r.names_bytes);
     } else {
         d.cause = ResourceStop::READ_ROW;
+        d.dependency_rows = oracle_.row_diff();
         // Whether the refused row's exact demand is known depends on whether the lookahead
         // had already read it (DEMAND) or its read was refused (DECODE), and that depends on
         // annotation.batch_kmers. The stop must not (spec §6.8), so a level stop states only
@@ -3980,17 +3985,19 @@ void Walker::level_lists_trip() {
 }
 
 std::string Walker::refused_read_text(const FetchRefusal &r, bool injected,
-                                      const std::string &beside) {
+                                      const std::string &beside) const {
     if (injected)
         return "";
     // a demand is an upper bound, so a row refused by it is not said to need more: it is said
     // to be admitted against more
+    // (a plain column or brwt annotation's row has no dependency rows)
+    const std::string with = oracle_.row_diff() ? " with its row-diff dependency rows" : "";
     return std::string(": ")
         + (r.cause == FetchRefusal::DECODE
-            ? "the row, read alone with its row-diff dependency rows, needs more"
-            : "the row's standalone demand (what reading it alone with its row-diff dependency "
-              "rows holds at most, which every read is admitted against) is "
-              + std::to_string(r.demand) + " bytes, more")
+            ? "the row, read alone" + with + ", needs more"
+            : "the row's standalone demand (what reading it alone" + with + " holds at most, "
+              "which every read is admitted against) is " + std::to_string(r.demand)
+              + " bytes, more")
         + " than the " + std::to_string(r.left) + " bytes " + beside;
 }
 
@@ -6589,6 +6596,7 @@ SeedResult Walker::run() {
     account.largest_charge = largest_charge_;
     account.decode_charged = decode_charged_;
     account.row_diff_uncounted = budgeted_ && !decode_charged_ && oracle_.row_diff();
+    account.dependency_rows = decode_charged_ && oracle_.row_diff();
     account.coordinates = coord_account_;
     account.allotted = allotted_;
     result_.coordinates_recorded = record_coords_;

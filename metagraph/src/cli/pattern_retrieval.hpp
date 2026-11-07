@@ -17,7 +17,9 @@
  *     offset + 1, 1-based); without a .seqs the occurrence is (kmer_coord, offset), placed
  *     nowhere.
  *
- * Both steps read through LabelOracle::decode_charged() annotations with a DecodeBudget (the
+ * Both steps read a budgeted annotation (AnnotationDescription::budgeted: a row-diff
+ * annotation with LabelOracle::decode_charged(); a plain column or brwt annotation, which the
+ * traversal routes read budget-aware, stays unbudgeted here) with a DecodeBudget (the
  * account's remainder) and ReadPacing (the request's deadline); an unbudgeted backend is read
  * only when the request allows it (allow_unbudgeted_annotation), and the answer says so. They
  * read one row at a time, the time and the work checked before each row, every row whose read

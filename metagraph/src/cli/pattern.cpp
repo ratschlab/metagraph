@@ -1684,28 +1684,30 @@ Json::Value process_pattern_request(
                                      "annotation in every mode (the search reads the row of "
                                      "every k-mer it enters, to carry each branch's support), "
                                      "and this index's annotation has no budget-aware decode "
-                                     "(only the row-diff family has one): its reads would run "
-                                     "without a memory bound. Set allow_unbudgeted_annotation: "
-                                     "true to read it anyway, or ask with long_search \"paths\"");
+                                     "(on this route only a row-diff annotation has one): its "
+                                     "reads would run without a memory bound. Set "
+                                     "allow_unbudgeted_annotation: true to read it anyway, or "
+                                     "ask with long_search \"paths\"");
             }
             if (has_predicate) {
                 throw PatternRefusal(400, "annotation_unbudgeted",
                                      "pattern: a predicate reads the annotation in every mode "
                                      "(its selection reads the rows of the contexts it tests), "
                                      "and this index's annotation has no budget-aware decode "
-                                     "(only the row-diff family has one): its reads would run "
-                                     "without a memory bound. Set allow_unbudgeted_annotation: "
-                                     "true to read it anyway (selection.access then says how: "
-                                     "\"rows\", or \"columns\" for at most 16 labels), or ask "
-                                     "without the predicate");
+                                     "(on this route only a row-diff annotation has one): its "
+                                     "reads would run without a memory bound. Set "
+                                     "allow_unbudgeted_annotation: true to read it anyway "
+                                     "(selection.access then says how: \"rows\", or "
+                                     "\"columns\" for at most 16 labels), or ask without the "
+                                     "predicate");
             }
             throw PatternRefusal(400, "annotation_unbudgeted",
                                  "pattern: output.labels \"all\" reads the annotation, and this "
-                                 "index's annotation has no budget-aware decode (only the "
-                                 "row-diff family has one): its reads would run without a "
-                                 "memory bound. Set allow_unbudgeted_annotation: true to read "
-                                 "it anyway (the answer then says annotation: unbudgeted), or "
-                                 "ask for output.labels \"none\" or mode count");
+                                 "index's annotation has no budget-aware decode (on this "
+                                 "route only a row-diff annotation has one): its reads would "
+                                 "run without a memory bound. Set allow_unbudgeted_annotation: "
+                                 "true to read it anyway (the answer then says annotation: "
+                                 "unbudgeted), or ask for output.labels \"none\" or mode count");
         }
         // require_support "record_verified" (DESIGN §4.3) keeps the labels one record verifies,
         // which needs a BASIC index with coordinates and its record mapping; an index that
