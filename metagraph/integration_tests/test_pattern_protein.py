@@ -294,6 +294,44 @@ class TestPatternProtein(unittest.TestCase):
         a = self.pattern({'patterns': [{'protein': 'MKVLAAGIVGLLLAQSEWHT'}]})
         self.assertIn('paths_later_increment', a['patterns'][0]['notes'])
 
+    def test_supported_paths_and_a_predicate(self):
+        """long_search "supported_paths": the walks some record carries along their whole length
+        (label_intersection: this index has no coordinates), one strand; with a predicate the
+        selected ones, its strands evaluated and stated as "context"."""
+        texts = ('MKVLAAGIVGLLLAQSEWHT', 'RDNPQE[LI]KYSTAMKVW', 'DNPQE[LI]KYSTAMKVWEGHYPSTR')
+
+        def carriers(walk):
+            kmers = [walk[i:i + K] for i in range(len(walk) - K + 1)]
+            return sorted(set.intersection(*(set(labels_of(x)) for x in kmers)))
+
+        a = self.pattern({'patterns': [{'protein': t} for t in texts],
+                          'long_search': 'supported_paths', 'output': {'labels': 'all'},
+                          'allow_unbudgeted_annotation': True})
+        for text, entry in zip(texts, a['patterns']):
+            with self.subTest(text):
+                _, walks = oracle_paths(self.kmers, text)
+                supported = [w for w in walks if carriers(w)]
+                self.assertEqual(len(walks), entry['counts']['paths']['value'])
+                sp = entry['counts']['supported_paths']
+                self.assertEqual((len(supported), 'exact'), (sp['value'], sp['relation']))
+                self.assertEqual(['+'], list(sp['by_strand']))
+                self.assertEqual(supported, sorted(r['sequence'] for r in entry['results']))
+                for r in entry['results']:
+                    self.assertEqual('+', r['strand'])
+                    self.assertEqual(carriers(r['sequence']),
+                                     sorted(l['column'] for l in r['labels']))
+        a = self.pattern({'patterns': [{'protein': t} for t in texts],
+                          'long_search': 'supported_paths', 'predicate': {'any': ['p2']},
+                          'predicate_strands': 'either', 'allow_unbudgeted_annotation': True})
+        self.assertEqual('context', a['predicate']['strands'])
+        self.assertEqual('context', a['limits']['predicate_strands'])
+        for text, entry in zip(texts, a['patterns']):
+            with self.subTest(text, predicate='p2'):
+                _, walks = oracle_paths(self.kmers, text)
+                selected = [w for w in walks if 'p2' in carriers(w)]
+                self.assertEqual(len(selected), entry['counts']['selected']['value'])
+                self.assertEqual(selected, sorted(r['sequence'] for r in entry['results']))
+
     def test_label_predicate(self):
         # asked with "either": evaluated and stated as "context" (one strand)
         a = self.pattern({'patterns': [{'protein': 'DNPQE[LI]KYSTA'}, {'protein': W15}],

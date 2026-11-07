@@ -4987,7 +4987,7 @@ only: a DNA build's block has neither, its peptides are read in codons, §12.2);
 **Fixtures.** `api/python/tests/data/traverse/pattern_protein/` (README.md there): `capabilities` (GET
 /pattern/capabilities of a protein index) and `entry` (a request and its answer: the plan row's scenarios on that
 index), answered by `metagraph_Protein pattern` and pinned by `integration_tests/test_pattern_protein.py`
-(`TestPatternProteinFixtures`). They sit beside `pattern/`, whose fixtures the DNA build answers on the mini index
+(`TestPatternProtein.test_fixtures`). They sit beside `pattern/`, whose fixtures the DNA build answers on the mini index
 (`scripts/traversal/pattern_fixtures.py`).
 
 Tests: `PatternProtein.*` (`tests/graph/alignment/test_pattern_protein.cpp`: the parser against its own table, the

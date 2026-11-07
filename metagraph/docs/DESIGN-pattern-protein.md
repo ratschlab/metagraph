@@ -1,9 +1,11 @@
 # Design: pattern search on protein graphs (E16)
 
 Status (2026-11-07, branch gr/mg-e16-protein-pattern, lane C of the every-route engine work): the engine, the
-route and the capabilities are implemented behind `_PROTEIN_GRAPH`; the contract is SPEC-pattern-search.md §29;
-the tests and the CI job are listed in section 9 with what has run (see the lane's progress note). Not deployed. The owner's decision of
-2026-10-31: "patterns must work on UniParc too". The language is the minimum of the suite's plan row E16
+route and the capabilities are implemented behind `_PROTEIN_GRAPH`, the contract is SPEC-pattern-search.md §29, the
+tests of section 9 pass locally on both builds; the branch is not rebased onto E15 yet (section 10: the CI job comes
+with that rebase), not reviewed, not deployed.
+
+The owner's decision of 2026-10-31: "patterns must work on UniParc too". The language is the minimum of the suite's plan row E16
 (docs/PLAN-multigraph-implementation.md of metagraph-suite) and of the engine's note of 2026-10-31, section 6; this
 note settles only what those two leave to the implementation, and lists those choices in section 8.
 
@@ -119,8 +121,10 @@ build.
 Every change in `pattern_search.{hpp,cpp}` and `pattern.cpp` is either inside `#if _PROTEIN_GRAPH` or
 an identity in the DNA build: named constants that equal the old literals there (the 4 bases, their mask, the
 estimate's 4 strings per position), a helper that returns the old table entry. The proof is the DNA build's own:
-the DNA unit and integration pattern suites, the byte comparison of the old and new DNA binaries' answers on a
-request set (the pattern fixtures and the integration requests), and the contract samples regenerated unchanged.
+the DNA unit and integration pattern suites; `scripts/traversal/pattern_fixtures.py --check` with the new DNA binary
+(every frozen fixture body of `pattern/`, answered on the mini index, timings blanked);
+`TestPatternRegression` against the unmodified base binary; and the contract samples (the pattern samples 11, 12 and
+16 regenerate byte for byte from their recorded inputs; this branch changes no sample).
 
 ## 8. Choices this note makes (the engine note and the plan row leave them open)
 
@@ -145,9 +149,9 @@ request set (the pattern fixtures and the integration requests), and the contrac
 - Integration: `integration_tests/test_pattern_protein.py`, skipped in DNA mode: the plan row's scenarios on a
   small protein index built in the test at k = 15 (an exact peptide of at most 15 residues, one with X, one with B,
   Z or J, a bracket and a negated class, mismatches 1 to 3 on a 15-mer, an exact peptide longer than 15, a label
-  predicate, the refusals), through `metagraph pattern` and the server; and the fixtures
-  `api/python/tests/data/traverse/pattern_protein/` (a capabilities document and one answer), pinned byte for byte
-  apart from timings (`TestPatternProteinFixtures`).
+  predicate, the refusals), the supported paths with and without a predicate, through `metagraph pattern` and the
+  server; and the fixtures `api/python/tests/data/traverse/pattern_protein/` (a capabilities document and one
+  answer), pinned byte for byte apart from timings (`TestPatternProtein.test_fixtures`).
 - CI: one Protein build in CI, E15's job `Linux-Protein` of `.github/workflows/dev-branch.yml`: its unit filter
   already holds `*Pattern*` (PatternProtein, PatternProteinRoute, the predicate and mask suites a Protein build
   compiles); its integration filters gain `*(test_pattern_protein.*` (section 10). No job of its own.
