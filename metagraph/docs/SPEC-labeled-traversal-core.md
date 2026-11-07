@@ -437,7 +437,8 @@ deadline. `src/cli/traverse.cpp` `process_resolve_request`, `src/graph/traversal
   starts — after the stop between seeds
   (§6.8), which keeps precedence — the request compares H + B with R, where H is what the results of seeds 0 to
   i − 1 hold until the response is written (their `usage.per_seed[].final_bytes`, §7.3: walked, failed,
-  not-in-graph and refused results alike, the attempt's held account) and B the request's effective per-seed
+  not-in-graph and refused results alike, the attempt's held account — a walked result its own account,
+  without its memory budget's cache allotments, which end with its walk) and B the request's effective per-seed
   memory budget (`bounds.max_memory_mb` after the server's clamp; R requires the server's per-seed maximum in
   [1, R], §10.3, so every seed has one, at most R). If H + B > R (a tie at exactly R starts), seed i and every
   later seed are **not started**: each is failed in the shape of a seed the attempt never started (§6.8) — no
@@ -1071,7 +1072,8 @@ response is delivered whole (`outcome.delivery: inline`, §7.0; spooled / paged 
     × 1000)) + stop_ms`, T the exact bytes of the text of the seeds finished so far (the server writes each seed's result
     as compact text once it is built and assembles the response from those texts — byte for byte the text of
     the whole tree, which is freed seed by seed), E the text the seed being walked is estimated to write (its
-    modelled account, published at every level's end, / the account per text byte of the requested detail; from
+    modelled account without the memory budget's cache allotments, which write no text, published at every
+    level's end, / the account per text byte of the requested detail; from
     feature level 6 the account's record-coordinates share C apart: E = ⌈(A − C) / ratio⌉ +
     ⌈C / coordinate_account_per_text_byte⌉ with `coordinate_account_per_text_byte` 12, a bound — every byte of
     coordinate text, whatever its digits, costs at least 12 account bytes (each part's ratio at its widest text is
@@ -1083,7 +1085,12 @@ response is delivered whole (`outcome.delivery: inline`, §7.0; spooled / paged 
     §18.8, M2); a ratio is
     measured as (A − C) / (the text − the text the coordinates wrote, counted exactly from digits and
     punctuation), on a rest of at least 1 MiB, so that a request with coordinates measures what the same walk
-    without them would, and the server's measured ratios do not depend on whether one came first),
+    without them would, and the server's measured ratios do not depend on whether one came first; A is the
+    walk's account at its end without the allotments, its `final_bytes` (§7.3), the account E is estimated
+    from — *E5b's fix: with the allotments in both, a seed of 1 MiB of text under a budget of 1 GiB or more
+    measured a ratio of at least 128 and the estimate of a larger seed after it fell short by as much: on
+    servers at budgets of 64 MiB to 4 GiB with results growing to 97 MiB of text, up to 3.3 times too little
+    text, or 12 times too much the other way, against 0.92 to 1.07 times the text without them*),
     with the configured values `account_per_text_byte` (30 for the JSON details, 50 for a graphlet — *calibrated
     in the efficiency pass, feature level 4*: just below the smallest account/text ratios measured on real
     responses, 33.5 (UHGG `full`) to 1,344 (SRA `summary`; 37.2 the smallest SRA JSON ratio) and 58.4 and more for
@@ -2179,9 +2186,18 @@ attempt) nor a 400 for a malformed id:
   whether or not a budget is set: deterministic logical work, §6.8; a derivation found `too_wide` includes the
   window it decoded); `peak_admitted_bytes` — the modelled account's peak, which under `bounds.max_memory_mb` is
   at most the budget (an account past it was refused — the seed failed at depth 0 or the walk stopped — or is
-  held beyond it as the soft excess); `final_bytes` — what the seed's result holds until the response is
-  written: the account when its walk ended for a walked result, the failed result as priced (its fixed part
-  and its echo of `seed_id`, §5) for a failed, refused or never started one; `soft_excess_bytes` — what the
+  held beyond it as the soft excess; the cache allotments of a memory budget included, §7.2.2, held while the
+  seed is walked); `final_bytes` — what the seed's result holds until the response is written: for a walked
+  result the account when its walk ended **without the memory budget's cache allotments** (`memory_allotments`,
+  §7.2.2: the label cache's and the lookahead's), which end with the walk — the caches are the walk's own, freed
+  when its seed is done, and the row-diff path cache within the label cache's allotment is cleared then — so the
+  same with and without a budget that does not bind, and at most the result's `work.memory_bytes`; the failed
+  result as priced (its fixed part and its echo of `seed_id`, §5) for a failed, refused or never started one
+  *(E5b's fix, 2026-11-07: with the allotments, the request-wide bound, §5, which sums `final_bytes`, charged up
+  to 128 MiB for every seed already walked — at a per-seed maximum of 1 GiB and a bound of 8 GiB, 56 of 64
+  seeds of a few hundred KB started, all 64 without; measured on results of up to 97 MiB of text at budgets of
+  64 MiB to 4 GiB, a walked result's `final_bytes` was at least 6.1 times the text it holds until the
+  response is written)*; `soft_excess_bytes` — what the
   result's `memory_bound_soft` states, in bytes (the walk's observed excess, and for a failed or never started
   result its echo of `seed_id` beyond the budget), null without `bounds.max_memory_mb`; `refused_bytes` — the
   demand the memory budget refused when it stopped or failed the seed (bytes at that budget: a head, a read —

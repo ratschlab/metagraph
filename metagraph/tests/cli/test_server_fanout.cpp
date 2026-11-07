@@ -1803,6 +1803,47 @@ TEST(ServerFanout, Sample07IsTheAttemptsAnswerAtItsBound) {
     EXPECT_EQ(stated["seeds"]["started"].asUInt64(), usage["seeds"]["started"].asUInt64());
 }
 
+// Sample 08 is a managed request failed by one seed (400, unwrapped, with its usage; a real run,
+// an attempt of its own): the error names the request's failed seed as the engine names a seed
+// without seed_id (its first 32 bases), the usage states every seed of the request — the walked
+// one and the failed one — and its totals: the results held are the walked seed's final_bytes,
+// its own account without the 512 MiB budget's cache allotments (which its peak keeps), so the
+// held bound is that result beside the budget of the seed walked after it (E5b's fix; before, the
+// allotments counted as held: 101,302,654 bytes for the same walk, sample 05's)
+TEST(ServerFanout, Sample08IsTheRequestsFailedSeed) {
+    const Json::Value s08 = sample("08_traverse_400_unwrapped.json");
+    const Json::Value &request = s08["request"];
+    const Json::Value &body = s08["body"];
+    const Json::Value &u = body["usage"];
+    ASSERT_EQ(400, s08["status"].asInt());
+    EXPECT_EQ(std::vector<std::string>({ "error", "usage" }), body.getMemberNames());
+    ASSERT_EQ(2u, request["seeds"].size());
+    EXPECT_EQ("seed '" + request["seeds"][1]["sequence"].asString().substr(0, 32)
+                      + "': No seed label supports every k-mer of the seed",
+              body["error"].asString());
+    EXPECT_EQ("error", u["reason"].asString());
+    EXPECT_EQ(request["attempt_id"], u["attempt_id"]);
+    EXPECT_EQ(2u, u["bound"]["seeds"].asUInt64());
+    EXPECT_EQ(2u, u["seeds"]["requested"].asUInt64());
+    EXPECT_EQ(2u, u["seeds"]["finished"].asUInt64());
+    ASSERT_EQ(2u, u["per_seed"].size());
+    EXPECT_EQ("complete", u["per_seed"][0]["outcome"].asString());
+    EXPECT_EQ("failed", u["per_seed"][1]["outcome"].asString());
+    const uint64_t budget = request["strategy"]["bounds"]["max_memory_mb"].asUInt64() << 20;
+    const uint64_t final0 = u["per_seed"][0]["final_bytes"].asUInt64();
+    const uint64_t peak0 = u["per_seed"][0]["peak_admitted_bytes"].asUInt64();
+    EXPECT_GE(peak0, final0 + mtg::graph::traversal::memory_allotments(budget));
+    EXPECT_LE(final0, u["work"]["memory_bytes"].asUInt64());
+    EXPECT_EQ(peak0, u["memory"]["peak_admitted_bytes"].asUInt64());
+    // the failed seed was walked (its seed phase) beside seed 0's result, under its budget
+    EXPECT_EQ(final0 + budget, u["memory"]["held_bound_bytes"].asUInt64());
+    uint64_t work = 0;
+    for (const Json::Value &seed : u["per_seed"]) {
+        work += seed["work_units"].asUInt64();
+    }
+    EXPECT_EQ(work, u["work_units"].asUInt64());
+}
+
 // GET /requests/{attempt_id} of a /traverse attempt: the request object built from the
 // attempt's state (sample 21, the attempt of sample 05), under the attempts' retention the
 // samples state (sample 12): the sample is, member for member, what the server builds
@@ -1821,7 +1862,7 @@ TEST(ServerFanout, TraverseRequestFromTheAttempt) {
     EXPECT_EQ("/traverse", j["route"].asString());
     EXPECT_EQ("ended", j["state"].asString());
     EXPECT_EQ("completed", j["reason"].asString());
-    EXPECT_EQ("2026-11-07T08:52:34.095Z", j["retained_until"].asString());
+    EXPECT_EQ("2026-11-07T14:13:55.994Z", j["retained_until"].asString());
     EXPECT_EQ(s21["pairs"], j["pairs"]);
     EXPECT_EQ(s21["response"], j["response"]);
     // a running attempt on a single-graph server: null tags, no response yet
@@ -1871,11 +1912,13 @@ TEST(ServerFanout, EachRegistrySampleIsRetainedForItsRetention) {
 }
 
 // Samples that name one attempt describe one execution of it (release 10's one identity per
-// sample, across samples; the coordinator's Q3 of 2026-11-07): an attempt object (a 409's, GET
-// /requests') naming the attempt a /traverse envelope sample records states that envelope's
-// server, receipt, stop, bound, seeds, not_after_ms and reason, and its 200 (sample 21 described
-// the 2026-10-21 attempt under sample 05's id until then). An attempt of its own (sample 06's)
-// is not compared
+// sample, across samples; the coordinator's Q3 of 2026-11-07): an attempt answers once, so no two
+// responses with usage — /traverse envelopes (05, 23) and unwrapped answers (07's 503, 08's 400)
+// — name one attempt_id (sample 08 named sample 05's while it described a 2026-10-21 attempt
+// until E5b's fix, 2026-11-07); an attempt object (a 409's, GET /requests') naming the attempt a
+// response records states that response's server, receipt, stop, bound, seeds, not_after_ms and
+// reason, and its status (sample 21 described the 2026-10-21 attempt under sample 05's id until
+// then). An attempt of its own (sample 06's) is not compared
 TEST(ServerFanout, SamplesNamingOneAttemptDescribeOneExecution) {
     std::map<std::string, std::pair<std::string, Json::Value>> recorded;
     std::vector<std::pair<std::string, Json::Value>> attempts;
@@ -1883,33 +1926,46 @@ TEST(ServerFanout, SamplesNamingOneAttemptDescribeOneExecution) {
         if (file.path().extension() != ".json")
             continue;
         const std::string name = file.path().filename().string();
-        const Json::Value body = sample(name)["body"];
+        const Json::Value s = sample(name);
+        const Json::Value &body = s["body"];
         if (!body.isObject())
             continue;
-        if (body["route"].asString() == "/traverse" && body["request_id"].isString()
-                && body["usage"].isObject())
-            recorded[body["request_id"].asString()] = { name, body };
+        if (body["usage"].isObject() && body["usage"]["attempt_id"].isString()) {
+            const std::string id = body["usage"]["attempt_id"].asString();
+            if (body["request_id"].isString()) {
+                EXPECT_EQ(id, body["request_id"].asString()) << name;
+            }
+            if (s["request"].isObject()) {
+                EXPECT_EQ(id, s["request"]["attempt_id"].asString()) << name;
+            }
+            auto [it, inserted] = recorded.emplace(id, std::make_pair(name, s));
+            EXPECT_TRUE(inserted) << name << " and " << it->second.first << " both answer attempt "
+                                  << id;
+        }
         if (body["attempt"].isObject())
             attempts.emplace_back(name, body["attempt"]);
     }
-    ASSERT_LE(2u, recorded.size());   // 05, 23
+    ASSERT_LE(4u, recorded.size());   // 05, 07, 08, 23
     size_t matched = 0;
     for (const auto &[name, attempt] : attempts) {
         auto it = recorded.find(attempt["attempt_id"].asString());
         if (it == recorded.end())
             continue;
         const std::string where = name + " names the attempt of " + it->second.first;
-        const Json::Value &envelope = it->second.second;
-        const Json::Value &u = envelope["usage"];
-        EXPECT_EQ(envelope["server_instance"].asString(), attempt["server_instance"].asString())
-            << where;
+        const Json::Value &response = it->second.second;
+        const Json::Value &u = response["body"]["usage"];
+        EXPECT_EQ(u["server_instance"].asString(), attempt["server_instance"].asString()) << where;
+        if (response["body"]["server_instance"].isString()) {
+            EXPECT_EQ(response["body"]["server_instance"].asString(),
+                      attempt["server_instance"].asString()) << where;
+        }
         for (const char *key : { "received_at", "stopped_at", "reason" }) {
             EXPECT_EQ(u[key].asString(), attempt[key].asString()) << where << ": " << key;
         }
         EXPECT_EQ(u["bound_ms"].asInt64(), attempt["bound_ms"].asInt64()) << where;
         EXPECT_EQ(integer_of(u["not_after_ms"]), integer_of(attempt["not_after_ms"])) << where;
         EXPECT_EQ(compact(u["seeds"]), compact(attempt["seeds"])) << where;
-        EXPECT_EQ(200, attempt["response"]["status"].asInt()) << where;
+        EXPECT_EQ(response["status"].asInt(), attempt["response"]["status"].asInt()) << where;
         ++matched;
     }
     // 21 names the attempt 05 records

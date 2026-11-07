@@ -1,11 +1,11 @@
 {
  "route": "POST /traverse",
  "status": 200,
- "note": "E5b: the request-wide memory bound (--traverse-max-request-memory-mb 2, with --traverse-max-memory-mb 1). Before seed i >= 1 starts, the results of seeds 0 to i-1 (usage.per_seed final_bytes) and the seed's memory budget are compared with the bound: here seeds 0 and 1 hold 1943996 bytes, which with the third seed's 1 MiB budget pass 2 MiB, so the third is not started: a failed result in the shape of an attempt's unstarted seed with resource_stop scope \"request\", resource \"memory\", phase \"not_started\", actions [\"split_request\"], a walk_domain with knob max_request_memory_mb (limit the bound, observed what the results before it hold, MiB rounded up), memory_bound_soft and unknown_labels; usage.per_seed states it not_started, stopped_by \"request_memory\", and seeds.started does not count it. The response is 200, the one-entry envelope of a named /traverse. The answer is a real run of the release binary on the integration fixture (three records acc1-acc3) served as bact_other, tagged with that pair and identity: its labels, columns and sequences are the fixture's, so the request does not replay on the real pair.",
+ "note": "E5b: the request-wide memory bound (--traverse-max-request-memory-mb 2, with --traverse-max-memory-mb 1). Before seed i >= 1 starts, the results of seeds 0 to i-1 (usage.per_seed final_bytes: a walked result its account without the budget's cache allotments, which end with its walk) and the seed's memory budget are compared with the bound: here seeds 0 and 1 hold 1288636 bytes, which with the third seed's 1 MiB budget pass 2 MiB, so the third is not started: a failed result in the shape of an attempt's unstarted seed with resource_stop scope \"request\", resource \"memory\", phase \"not_started\", actions [\"split_request\"], a walk_domain with knob max_request_memory_mb (limit the bound, observed what the results before it hold, MiB rounded up), memory_bound_soft and unknown_labels; usage.per_seed states it not_started, stopped_by \"request_memory\", and seeds.started does not count it. The response is 200, the one-entry envelope of a named /traverse. The answer is a real run of the release binary on the integration fixture (three records acc1-acc3) served as bact_other, tagged with that pair and identity: its labels, columns and sequences are the fixture's, so the request does not replay on the real pair.",
  "request": {
   "graph": "bact_other",
   "attempt_id": "svc-trv-91aa07-2",
-  "not_after_ms": 1793584634000,
+  "not_after_ms": 1794060836000,
   "seeds": [
    {
     "seed_id": "s0",
@@ -44,10 +44,10 @@
   "request_id": "svc-trv-91aa07-2",
   "server_instance": "7c1e0f3a9b24d6e8",
   "deadline": {
-   "cutoff_at": "2026-11-02T00:58:49.471Z",
-   "effective_deadline_at": "2026-11-02T00:58:54.471Z",
+   "cutoff_at": "2026-11-07T13:15:31.350Z",
+   "effective_deadline_at": "2026-11-07T13:15:36.350Z",
    "finish_by_ms": null,
-   "not_after_ms": 1793584634000
+   "not_after_ms": 1794060836000
   },
   "usage": {
    "attempt_id": "svc-trv-91aa07-2",
@@ -60,18 +60,18 @@
     "walk_until_ms": 95000
    },
    "bound_ms": 100000,
-   "elapsed_ms": 10,
+   "elapsed_ms": 3,
    "memory": {
-    "held_bound_bytes": 2400560,
-    "peak_admitted_bytes": 2400560,
+    "held_bound_bytes": 1755948,
+    "peak_admitted_bytes": 1745200,
     "soft_excess_bytes": 0
    },
-   "not_after_ms": 1793584634000,
+   "not_after_ms": 1794060836000,
    "observed_max_uninterruptible_ms": 1,
    "per_seed": [
     {
-     "elapsed_ms": 8,
-     "final_bytes": 1035052,
+     "elapsed_ms": 2,
+     "final_bytes": 707372,
      "index": 0,
      "outcome": "partial",
      "peak_admitted_bytes": 1040468,
@@ -83,7 +83,7 @@
     },
     {
      "elapsed_ms": 1,
-     "final_bytes": 908944,
+     "final_bytes": 581264,
      "index": 1,
      "outcome": "complete",
      "peak_admitted_bytes": 911184,
@@ -107,7 +107,7 @@
     }
    ],
    "reason": "completed",
-   "received_at": "2026-11-02T00:57:14.471Z",
+   "received_at": "2026-11-07T13:13:56.350Z",
    "seeds": {
     "abandoned": 0,
     "finished": 2,
@@ -115,9 +115,9 @@
     "started": 2
    },
    "server_instance": "7c1e0f3a9b24d6e8",
-   "stopped_at": "2026-11-02T00:57:14.481Z",
+   "stopped_at": "2026-11-07T13:13:56.352Z",
    "timing": {
-    "cpu_ms": 5.780041
+    "cpu_ms": 2.162875
    },
    "work": {
     "memory_bytes": 1745200
@@ -546,20 +546,20 @@
        "validated_seed_id": "1353044a3eb27ba8"
       },
       "timing": {
-       "annotation_fetch_ms": 1.1707500000000002,
+       "annotation_fetch_ms": 0.628125,
        "cache_hits": 388,
        "coords_mapped": 990,
-       "cpu_ms": 3.966084,
+       "cpu_ms": 1.386,
        "deadline": {
         "longest_piece": {
-         "coordinates": 0,
-         "kind": "setup",
-         "ms": 0.9738749861717224,
-         "rows": 0
+         "coordinates": 162,
+         "kind": "read",
+         "ms": 0.25466692447662354,
+         "rows": 108
         },
         "stopped_by": "memory"
        },
-       "elapsed_ms": 6.226832985877991,
+       "elapsed_ms": 1.7543340921401978,
        "label_resolve_ms": 0.0,
        "path_cache": {
         "bytes_kept": 36752,
@@ -569,9 +569,9 @@
         "stored_rows_read": 740
        },
        "rows_fetched": 0,
-       "seed_fetch_ms": 0.543916,
-       "seed_phase_ms": 2.5550000071525574,
-       "serialize_ms": 0.578959,
+       "seed_fetch_ms": 0.060458000000000005,
+       "seed_phase_ms": 0.16504204273223877,
+       "serialize_ms": 0.140875,
        "tuple_rows_fetched": 570
       },
       "unknown_labels": [],
@@ -847,19 +847,19 @@
        "validated_seed_id": "0ba0302632c9db6a"
       },
       "timing": {
-       "annotation_fetch_ms": 0.1968320000000001,
+       "annotation_fetch_ms": 0.11937600000000013,
        "cache_hits": 138,
        "coords_mapped": 390,
-       "cpu_ms": 0.619292,
+       "cpu_ms": 0.376334,
        "deadline": {
         "longest_piece": {
          "coordinates": 160,
          "kind": "read",
-         "ms": 0.08791697025299072,
+         "ms": 0.050665974617004395,
          "rows": 55
         }
        },
-       "elapsed_ms": 0.5476250052452087,
+       "elapsed_ms": 0.34366607666015625,
        "label_resolve_ms": 0.0,
        "path_cache": {
         "bytes_kept": 11520,
@@ -869,9 +869,9 @@
         "stored_rows_read": 210
        },
        "rows_fetched": 0,
-       "seed_fetch_ms": 0.040000000000000105,
-       "seed_phase_ms": 0.09295797348022466,
-       "serialize_ms": 0.043542,
+       "seed_fetch_ms": 0.024834000000000047,
+       "seed_phase_ms": 0.05795800685882567,
+       "serialize_ms": 0.034458,
        "tuple_rows_fetched": 170
       },
       "unknown_labels": [],
@@ -880,7 +880,7 @@
       }
      },
      {
-      "error": "not started: the results already held (1943996 bytes) and this seed's memory budget (1048576 bytes) would pass the server's request memory bound (2 MiB); no budget of the seed ran out: send it in a new request",
+      "error": "not started: the results already held (1288636 bytes) and this seed's memory budget (1048576 bytes) would pass the server's request memory bound (2 MiB); no budget of the seed ran out: send it in a new request",
       "limitations": [
        {
         "effect": "the results of the seeds before the first one not started (observed: what they hold, MiB rounded up) and this seed's memory budget would pass the server's request memory bound (limit, MiB), so the seed was not started and no traversal was made; no budget of the seed ran out: send it in a new request",
@@ -908,7 +908,7 @@
         "split_request"
        ],
        "effective": 2,
-       "message": "the results of the seeds before the first one not started hold 1943996 bytes, which with this seed's memory budget (1048576 bytes) would pass the server's request memory bound (2 MiB): the seed is failed, nothing of it was read; no budget of the seed ran out: send it in a new request",
+       "message": "the results of the seeds before the first one not started hold 1288636 bytes, which with this seed's memory budget (1048576 bytes) would pass the server's request memory bound (2 MiB): the seed is failed, nothing of it was read; no budget of the seed ran out: send it in a new request",
        "phase": "not_started",
        "remaining": 0,
        "requested": 2,
@@ -989,9 +989,9 @@
      "support": "kmer"
     },
     "timing": {
-     "cpu_ms": 5.364792,
-     "elapsed_ms": 8.618458,
-     "serialize_ms": 0.622501
+     "cpu_ms": 2.079459,
+     "elapsed_ms": 2.7106660000000002,
+     "serialize_ms": 0.17533300000000002
     },
     "unknown_labels": [],
     "walk_rule": "every walk of at most complete_to_bp bases from the seed boundary is present when it uses no (k+1)-mer edge twice on its own path (edges are compared as (k+1)-mers), enters no seed node, and takes every step regardless of strand (a single-strand graph has no hairpins); after a reconvergence the merged walk is also barred from every edge used by any route merged into it (edge histories are united under on_reconverge: merge, so fewer walks are present than per path; on_reconverge: keep gives the per-path set); it is followed while some permitted label supports every node of it under the strategy's label rules",
@@ -1001,7 +1001,7 @@
    }
   ],
   "timing": {
-   "elapsed_ms": 10.165333
+   "elapsed_ms": 2.872541
   },
   "work": {
    "memory_bytes": 1745200

@@ -16,6 +16,7 @@
 #include "cli/server_checks.hpp"
 #include "cli/server_envelope.hpp"
 #include "cli/traverse.hpp"
+#include "graph/traversal/walker.hpp"
 
 
 // The multi-graph envelope's builders (server_envelope.hpp) against the reference samples of
@@ -267,7 +268,9 @@ TEST(ServerEnvelope, Sample03ResolveCutoff) {
 
 // Sample 05: a named-graph /traverse, one entry; request_id is the attempt_id and the
 // attempt's usage sits at the top level; a real run (2026-11-07): the deadline's not_after_ms is
-// the request's (its timeline: ServerFanout.EachSampleDeadlineTellsOneTimeline)
+// the request's (its timeline: ServerFanout.EachSampleDeadlineTellsOneTimeline). The seed's
+// final_bytes is what its result holds: its own account (at most the result's work.memory_bytes),
+// without the 512 MiB budget's cache allotments, which its peak keeps (E5b)
 TEST(ServerEnvelope, Sample05TraverseNamed) {
     const Json::Value s05 = sample("05_traverse_envelope_named.json");
     const Json::Value &body = s05["body"];
@@ -277,9 +280,17 @@ TEST(ServerEnvelope, Sample05TraverseNamed) {
     EXPECT_EQ(s05["request"]["attempt_id"], built["request_id"]);
     EXPECT_EQ(text(body["usage"]), text(built["usage"]));
     EXPECT_FALSE(built["answers"][0].isMember("usage"));
-    EXPECT_EQ(1794038014000u, built["deadline"]["not_after_ms"].asUInt64());
+    EXPECT_EQ(1794057295000u, built["deadline"]["not_after_ms"].asUInt64());
     EXPECT_EQ(s05["request"]["not_after_ms"].asUInt64(), built["deadline"]["not_after_ms"].asUInt64());
     EXPECT_TRUE(built["deadline"]["finish_by_ms"].isNull());
+    const Json::Value &seed = body["usage"]["per_seed"][0];
+    const uint64_t own = body["answers"][0]["results"][0]["work"]["memory_bytes"].asUInt64();
+    const uint64_t budget = s05["request"]["strategy"]["bounds"]["max_memory_mb"].asUInt64() << 20;
+    EXPECT_EQ(639358u, seed["final_bytes"].asUInt64());
+    EXPECT_LE(seed["final_bytes"].asUInt64(), own);
+    EXPECT_EQ(own + mtg::graph::traversal::memory_allotments(budget),
+              seed["peak_admitted_bytes"].asUInt64());
+    EXPECT_EQ(budget, body["usage"]["memory"]["held_bound_bytes"].asUInt64());
 }
 
 // Sample 23 (E5b): a named /traverse whose third seed the request-wide memory bound left
@@ -324,6 +335,15 @@ TEST(ServerEnvelope, Sample23TraverseRequestMemoryBound) {
     EXPECT_EQ("not_started", u["per_seed"][2]["outcome"].asString());
     EXPECT_EQ("request_memory", u["per_seed"][2]["stopped_by"].asString());
     EXPECT_EQ(unstarted["work"]["memory_bytes"], u["per_seed"][2]["final_bytes"]);
+    // each walked result holds its own account: the budget's cache allotments ended with its
+    // walk (its peak keeps them); E5b's run before the fix stated 1943996 bytes held here
+    EXPECT_EQ(1288636u, held);
+    for (Json::ArrayIndex i = 0; i < 2; ++i) {
+        const uint64_t own = entry["results"][i]["work"]["memory_bytes"].asUInt64();
+        EXPECT_LE(u["per_seed"][i]["final_bytes"].asUInt64(), own) << i;
+        EXPECT_EQ(own + mtg::graph::traversal::memory_allotments(budget),
+                  u["per_seed"][i]["peak_admitted_bytes"].asUInt64()) << i;
+    }
     EXPECT_EQ(2u, u["seeds"]["started"].asUInt64());
     EXPECT_EQ(3u, u["seeds"]["requested"].asUInt64());
     for (Json::ArrayIndex i = 0; i < 2; ++i) {

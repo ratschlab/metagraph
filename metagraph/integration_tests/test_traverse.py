@@ -2180,11 +2180,12 @@ class TestTraverseAPI(TestTraverseBase):
             plain = plain.json()
             final = [s['final_bytes'] for s in plain['usage']['per_seed']]
             self.assertEqual(3, plain['usage']['seeds']['started'])
-            # each result holds under 1 MiB here (the label caches' allotments of the 1 MiB
-            # budget and the delivery's fixed part): with the budget, the first fits 2 MiB, the
-            # first two do not
+            # each result holds 0.4 to 0.7 MiB here, mostly the delivery's fixed part (the 1 MiB
+            # budget's cache allotments, 320 KiB, end with each walk and are not held): with the
+            # budget, the first fits 2 MiB, the first two do not
             self.assertLessEqual(final[0] + mib, 2 * mib, final)
             self.assertGreater(final[0] + final[1] + mib, 2 * mib, final)
+            self.assertLess(max(final) + 320 * 1024, mib, final)
             ret = on.post('traverse', dict(request, attempt_id='on-1'))
             self.assertEqual(200, ret.status_code, ret.text[:500])
             out = ret.json()
@@ -2233,6 +2234,55 @@ class TestTraverseAPI(TestTraverseBase):
             self.assertNotEqual(0, res.returncode, flags)
             self.assertIn('--traverse-max-request-memory-mb 2 needs --traverse-max-memory-mb in '
                           '[1, 2]', res.stdout.decode(), flags)
+
+    def test_api_request_memory_bound_holds_the_results_own_bytes(self):
+        """E5's scale (E5b; SPEC §5 "Request budgets", §7.3 final_bytes): 64 tiny seeds under
+        a per-seed maximum of 1 GiB and a request bound of 8 GiB all start. Each walked result
+        holds its own account (final_bytes, a few hundred KB here), not the 1 GiB budget's cache
+        allotments (128 MiB: the label cache's and the lookahead's), which end with its walk;
+        counted per seed walked they left 8 of the 64 unstarted (56 started). final_bytes is the
+        same as without a budget; the seed's peak keeps the allotments, held while it is walked."""
+        mib = 1 << 20
+        allotted = 128 * mib    # memory_allotments(1 GiB): 64 MiB + 64 MiB
+        records = list(self.records.values())
+        seeds = []
+        for i in range(64):
+            r = records[i % 3]
+            off = (i * 37) % (len(r) - 80)
+            seeds.append({'seed_id': f'q{i}', 'sequence': r[off:off + 80]})
+        request = {'seeds': seeds, 'attempt_id': 'e5-1',
+                   'strategy': {'direction': 'both', 'bounds': {'max_extension_bp': BLOCK},
+                                'output': {'detail': 'summary', 'timing': False}}}
+        with TestTraverseAttempts._Server(self, '--traverse-max-seeds', '64',
+                                          '--traverse-max-memory-mb', '1024',
+                                          '--traverse-max-request-memory-mb', '8192') as bound, \
+                TestTraverseAttempts._Server(self, '--traverse-max-seeds', '64') as free:
+            ret = bound.post('traverse', request)
+            self.assertEqual(200, ret.status_code, ret.text[:500])
+            out = ret.json()
+            usage = out['usage']
+            self.assertEqual({'requested': 64, 'started': 64, 'finished': 64, 'abandoned': 0},
+                             usage['seeds'])
+            for r in out['results']:
+                self.assertNotIn('resource_stop', r, r.get('error'))
+            ret = free.post('traverse', dict(request, attempt_id='e5-free'))
+            self.assertEqual(200, ret.status_code, ret.text[:500])
+            plain = ret.json()
+            self.assertIsNone(plain['usage']['memory']['held_bound_bytes'])
+            final = [s['final_bytes'] for s in usage['per_seed']]
+            self.assertEqual([s['final_bytes'] for s in plain['usage']['per_seed']], final)
+            self.assertLess(max(final), mib, final)
+            # the results held before the last seed and its budget fit the bound with room
+            self.assertLessEqual(sum(final[:63]) + 1024 * mib, 8192 * mib)
+            for i, (s, r) in enumerate(zip(usage['per_seed'], out['results'])):
+                self.assertEqual(('complete', None), (s['outcome'], s['stopped_by']), i)
+                # the walk held the allotments beside its own account: its peak, not its result
+                self.assertEqual(r['work']['memory_bytes'] + allotted, s['peak_admitted_bytes'], i)
+                self.assertLessEqual(s['final_bytes'], r['work']['memory_bytes'], i)
+            # the request's: the results held at once, each seed's walk beside those before it
+            self.assertGreaterEqual(usage['memory']['peak_admitted_bytes'], sum(final))
+            self.assertLess(usage['memory']['peak_admitted_bytes'], sum(final) + allotted + mib)
+            self.assertEqual(sum(final[:63]) + 1024 * mib, usage['memory']['held_bound_bytes'])
 
     def test_api_resolve_deadline(self):
         """The /resolve deadline (SPEC §4.5): bounds.time_budget_ms on /resolve. The `resolve`
