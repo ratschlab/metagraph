@@ -1394,8 +1394,8 @@ class TestMultiGraphServer(TestingBase):
             server.stop()
 
     def test_not_after_ms_admits_resolve_and_pattern(self):
-        """not_after_ms (the latest START, E20) on /resolve and /pattern: passed when the
-        handler starts, 409 {error, state: expired, not_after_ms, server_time_ms} and nothing
+        """not_after_ms (the latest START, E20) on /resolve and /pattern: passed at the
+        request's admission, 409 {error, state: expired, not_after_ms, server_time_ms} and nothing
         runs (nothing registered under its request_id); not passed, the request runs (one
         that runs past it: test_an_admitted_request_runs_past_not_after_ms). A malformed
         request_id, not_after_ms or finish_by_ms is the request's 400."""

@@ -174,7 +174,7 @@ The answer keeps its upstream shape (a list of `{seq_description, results, ...}`
   of one pair is a refused entry (`refusal.http_status` 400) of a 200 envelope: the request was answered, its id
   is retained like any answered request's (`GET /requests/{id}` states it ended, that pair `refused`), and a
   corrected request takes a new id. A fan-out is never forgotten because one of its pairs gave 400; only a 400 of
-  the whole request frees the id. `/traverse` keeps checking expiry before it parses the body.
+  the whole request frees the id. `/traverse` keeps checking expiry before its fields are parsed.
 - A repeated `request_id` that is running, or retained after it finished, starts no work: 409, body = the registry
   entry (below) plus `error`.
 - `request_id` and `attempt_id` are one namespace, as `GET /requests/{id}` reads both: a `request_id` equal to a
