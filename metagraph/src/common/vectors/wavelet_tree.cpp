@@ -555,6 +555,6 @@ template wavelet_tree_dyn wavelet_tree::convert_to<wavelet_tree_dyn>();
 
 INSTANTIATE_WT(wavelet_tree_sdsl<sdsl::wt_huff<>>);
 
-INSTANTIATE_WT(wavelet_tree_sdsl<sdsl::wt_huff<sdsl::rrr_vector<63>>>);
+INSTANTIATE_WT(wavelet_tree_sdsl<sdsl::wt_huff<mtg::detail::rrr_storage<63>>>);
 
 INSTANTIATE_WT(partite_vector<bit_vector_stat>);

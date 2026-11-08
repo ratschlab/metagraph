@@ -18,10 +18,10 @@ Example commands:
     # List available objects in a bucket
     aws s3 --no-sign-request ls s3://metagraph/refseq/
 
-    # Download a specific file
-    aws s3 --no-sign-request cp s3://metagraph/refseq/file.dbg .
+    # Replace FILE.dbg with an object name returned by the listing
+    aws s3 --no-sign-request cp s3://metagraph/refseq/FILE.dbg .
 
-    # Sync an entire directory
+    # Download an entire index directory (check its size before starting)
     aws s3 --no-sign-request sync s3://metagraph/refseq/ ./local-refseq/
 
 The ``--no-sign-request`` flag indicates public access without AWS credentials.
@@ -39,14 +39,15 @@ MetaGraph Online
 and protein sequences across various public archives indexed with annotated de Bruijn graphs.
 
 **Web Interface Features:**
-    - Search up to 10 sequences per query (maximum length 50k)
-    - Support for both exact matching and sensitive alignment
+    - Exact k-mer search for DNA, RNA, and protein sequences
+    - Standard jobs: up to 10 sequences and 50,000 characters total
+    - Large jobs: up to 10 MB total, with no sequence-count limit
     - Access to various indexes (for current coverage see `Databases <https://metagraph.ethz.ch/indexes>`_)
         - Microbe, Fungi, Plants, Metazoa (including Human/Mouse)
         - Reference/assembled sets (RefSeq, UHGG, Tara Oceans)
         - Protein databases (UniParc)
     - Export results as CSV or JSON
-    - Shareable links with 48-hour expiration (6 months with locked searches)
+    - Shareable results: 48-hour expiration by default; locking guarantees retention for at least 6 months
 
 **API Access:**
 The production API endpoint is available at: ``https://metagraph.ethz.ch:8081/search``
@@ -57,11 +58,9 @@ For detailed API documentation and examples, see the `MetaGraph Online Help <htt
     and can also be used to query indexes hosted locally. To query indexes hosted publicly, refer to
     `MetaGraph Online Help <https://metagraph.ethz.ch/help#api-cli>`_.
 
-**Web Interface Limits:** Maximum 10 sequences per query, 50k bases, results expire after 48 hours (6 months with locked searches).
-
 **Performance Tips:**
     - Use exact matching for high identity matches (fast)
-    - Use alignment mode for divergent/noisy sequences (slower)
+    - For alignment of divergent or noisy sequences, download an index and use ``metagraph align`` locally
     - For larger jobs, use the API (rate limits apply for queued jobs) or download :ref:`download_indexes` and query locally
     - Split large inputs to avoid timeouts
 
