@@ -104,9 +104,10 @@ SUBSTANCE = {
         'take it with request_id only from f3b', 'exit status 1',
     ],
     'attempts.suppression': [
-        'tombstoned', 'held at least retention_s from the cancel',
+        'tombstoned', 'held at least min(retention_s, tombstone_hold_s) from the cancel',
         "until this server's clock reads not_after_ms + clock_skew_allowance_ms",
-        'at most tombstone_max_s from the cancel', 'never shorten it',
+        'at most min(tombstone_max_s, tombstone_hold_s) from the cancel', 'never shorten it',
+        'a burst of cancels holds the table at most 900 s',
         'while either clock says it is live', 'while it reads at most suppressed_until_ms',
         'covers_admission (true iff a not_after_ms was judged against',
         'covers_admission_reason (no_not_after_ms | beyond_tombstone_max)',

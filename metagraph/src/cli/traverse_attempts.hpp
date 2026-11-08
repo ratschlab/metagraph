@@ -140,6 +140,11 @@ struct AttemptSettings {
     // cancel or by a refused copy of the request, and a finished attempt's id from its finish
     // (s; never less than retention_s)
     uint64_t tombstone_max_s = 86'400;
+    // the longest a tombstone (the cancel of an id this server does not know) is held from its
+    // latest cancel or refused copy (s; H3, review 5 #14): at least min(retention_s, it), and to
+    // cover a not_after_ms (+ clock_skew_ms) within min(max(tombstone_max_s, retention_s), it).
+    // A held finished attempt is not bound by it. At least 1
+    uint64_t tombstone_hold_s = 900;
     // the client's connection is checked at most this often (ms)
     uint64_t client_check_ms = 100;
     // the clock (the walk-until, the client check's interval) is read at every
@@ -661,12 +666,14 @@ class AttemptRegistry {
     // not_after_ms, and the rules as references to the SPEC sections that state them
     Json::Value capabilities_json() const;
     // POST /traverse/cancel {attempt_id, wait_ms, not_after_ms}: (HTTP status, body). An
-    // unknown id is tombstoned (404, tombstone: true) for at least retention_s and, when the
-    // cancel names the request's not_after_ms, until not_after_ms + clock_skew_ms (at most
-    // max(tombstone_max_s, retention_s) from now); every tombstone answer states
-    // suppressed_until_ms and covers_admission. A repeated cancel never shortens the
-    // tombstone, extends it to its own not_after_ms, and keeps it at least retention_s from
-    // now. When retention_count tombstones are held already, or retention_s is 0, the id is
+    // unknown id is tombstoned (404, tombstone: true) for at least min(retention_s,
+    // tombstone_hold_s) and, when the cancel names the request's not_after_ms, until
+    // not_after_ms + clock_skew_ms (at most min(max(tombstone_max_s, retention_s),
+    // tombstone_hold_s) from now); every tombstone answer states suppressed_until_ms and
+    // covers_admission. A repeated cancel never shortens the tombstone, extends it to its own
+    // not_after_ms, and keeps it at least that floor from now (H3: tombstone_hold_s bounds what
+    // a cheap cancel of a made-up id holds). When retention_count tombstones are held already,
+    // or retention_s is 0, the id is
     // not tombstoned and the cancel is refused (429, tombstone: false, reason): nothing is
     // promised for it
     std::pair<int, Json::Value> cancel(const std::string &id, uint64_t wait_ms,
@@ -718,8 +725,12 @@ class AttemptRegistry {
                                 std::optional<uint64_t> against, bool fallback) const;
     // whether |a|'s hold is live now (either clock; under |mutex_|)
     bool hold_live_locked(const Attempt &a, Attempt::Clock::time_point t, uint64_t wall) const;
-    // the cap of a tombstone's hold (ms): max(tombstone_max_s, retention_s)
+    // the cap of a held finished attempt's hold (ms): max(tombstone_max_s, retention_s)
     uint64_t tombstone_cap_ms() const;
+    // the cap of a tombstone's hold (ms): min(tombstone_cap_ms(), tombstone_hold_s), and its
+    // floor: min(retention_s, tombstone_hold_s) (H3)
+    uint64_t tombstone_hold_cap_ms() const;
+    uint64_t tombstone_hold_floor_ms() const;
 
     AttemptSettings settings_;
     std::string instance_;

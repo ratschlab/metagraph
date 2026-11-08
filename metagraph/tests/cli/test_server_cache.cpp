@@ -3,7 +3,9 @@
 #include <cmath>
 #include <future>
 #include <locale>
+#include <stdexcept>
 #include <thread>
+#include <vector>
 
 #include "gtest/gtest.h"
 
@@ -119,13 +121,101 @@ TEST(ServerQueryCache, NeverEvictsEntryWithWaiters) {
         auto h_b = cache.acquire("b");
         h_b.set_result(response_of_kib(60));
     }
-    // The held entry survives pressure; waiterless entries are evicted.
+    // The held entry survives pressure; a waiterless entry is evicted for a result that
+    // fits beside the held one
     {
         auto h_c = cache.acquire("c");
-        h_c.set_result(response_of_kib(60));
+        EXPECT_TRUE(h_c.set_result(response_of_kib(30)));
     }
     EXPECT_TRUE(cache.contains("a"));
     EXPECT_FALSE(cache.contains("b"));
+    EXPECT_TRUE(cache.contains("c"));
+    EXPECT_LE(cache.size_bytes(), 104 * 1024u);
+}
+
+
+// H3 (review 5 #1; the suite's name within CI's unit filter): the budget bounds the pinned
+// entries too. A result that cannot fit
+// beside them is delivered to its waiters and not retained, and nothing is evicted for it
+// (before, it was retained above the budget, after evicting what it could)
+TEST(ServerCapacityCache, AResultThatCannotFitBesidePinnedOnesIsNotRetained) {
+    ServerQueryCache cache(/* max */ 104 * 1024);
+    auto h_a = cache.acquire("a");
+    ASSERT_TRUE(h_a.set_result(response_of_kib(60)));
+    {
+        auto h_b = cache.acquire("b");
+        ASSERT_TRUE(h_b.set_result(response_of_kib(30)));
+    }
+    auto h_c = cache.acquire("c");
+    auto waiter = cache.acquire("c");
+    ASSERT_FALSE(waiter.is_miss());
+    EXPECT_FALSE(h_c.set_result(response_of_kib(60)));
+    // shared with its waiter all the same
+    EXPECT_EQ(h_c.get(), waiter.get());
+    EXPECT_EQ(60 * 1024u, waiter.get()->size());
+    EXPECT_TRUE(cache.contains("a"));
+    EXPECT_TRUE(cache.contains("b"));
+    EXPECT_FALSE(cache.contains("c"));
+    EXPECT_LE(cache.size_bytes(), 104 * 1024u);
+    // once "a" is delivered it is evictable, and "c" fits after evicting it (the least
+    // recently used)
+    h_a = ServerQueryCache::Handle();
+    EXPECT_EQ(0u, cache.pinned_bytes());
+    {
+        auto again = cache.acquire("c");
+        ASSERT_TRUE(again.is_miss());
+        EXPECT_TRUE(again.set_result(response_of_kib(60)));
+    }
+    EXPECT_TRUE(cache.contains("c"));
+    EXPECT_FALSE(cache.contains("a"));
+    EXPECT_LE(cache.size_bytes(), 104 * 1024u);
+}
+
+
+// pinned_bytes follows the waiters: the producer pins its entry until its handle drops, a
+// hit pins it again, and the cache never holds more than its budget whatever is pinned
+TEST(ServerCapacityCache, PinnedBytesFollowTheWaiters) {
+    ServerQueryCache cache(/* max */ 256 * 1024);
+    auto producer = cache.acquire("p");
+    EXPECT_EQ(0u, cache.pinned_bytes());   // not charged before its result
+    ASSERT_TRUE(producer.set_result(response_of_kib(40)));
+    const size_t charged = cache.size_bytes();
+    EXPECT_GT(charged, 40 * 1024u);
+    EXPECT_EQ(charged, cache.pinned_bytes());
+    auto hit = cache.acquire("p");
+    EXPECT_EQ(charged, cache.pinned_bytes());   // pinned once, however many waiters
+    producer = ServerQueryCache::Handle();
+    EXPECT_EQ(charged, cache.pinned_bytes());
+    hit = ServerQueryCache::Handle();
+    EXPECT_EQ(0u, cache.pinned_bytes());
+    EXPECT_EQ(charged, cache.size_bytes());
+    // a hit on a delivered entry pins it again
+    {
+        auto again = cache.acquire("p");
+        ASSERT_FALSE(again.is_miss());
+        EXPECT_EQ(charged, cache.pinned_bytes());
+    }
+    EXPECT_EQ(0u, cache.pinned_bytes());
+    // a failed computation pins nothing
+    {
+        auto failing = cache.acquire("f");
+        failing.set_exception(std::make_exception_ptr(std::runtime_error("x")));
+    }
+    EXPECT_EQ(0u, cache.pinned_bytes());
+    // many pinned results: the cache stays within its budget, the late ones not retained
+    std::vector<ServerQueryCache::Handle> held;
+    size_t retained = 0;
+    for (int i = 0; i < 10; ++i) {
+        held.push_back(cache.acquire("k" + std::to_string(i)));
+        retained += held.back().set_result(response_of_kib(40));
+        EXPECT_LE(cache.size_bytes(), 256 * 1024u) << i;
+        EXPECT_LE(cache.pinned_bytes(), cache.size_bytes()) << i;
+    }
+    EXPECT_GE(retained, 4u);
+    EXPECT_LT(retained, 10u);
+    held.clear();
+    EXPECT_EQ(0u, cache.pinned_bytes());
+    EXPECT_LE(cache.size_bytes(), 256 * 1024u);
 }
 
 

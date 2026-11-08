@@ -54,6 +54,7 @@
   "server_instance": "6a23ab49a65ec8ad",
   "state": "GET /traverse/attempt/{attempt_id}",
   "suppression": "SPEC-labeled-traversal-core.md section 10.3, POST /traverse/cancel: the tombstone",
+  "tombstone_hold_s": 900,
   "tombstone_max_s": 86400
  },
  "budgets": [

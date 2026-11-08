@@ -209,7 +209,8 @@ Json::Value expect_server_instance_routes_json() {
 }
 
 Json::Value multigraph_capabilities_json(uint64_t max_request_memory_mb, const RouteCaps &caps,
-                                         const Json::Value &request_intake) {
+                                         const Json::Value &request_intake,
+                                         const Json::Value &column_labels) {
     auto strings = [](std::initializer_list<const char *> values) {
         Json::Value out(Json::arrayValue);
         for (const char *value : values) {
@@ -257,6 +258,7 @@ Json::Value multigraph_capabilities_json(uint64_t max_request_memory_mb, const R
     // what the server reads of a request (H1): the byte cap and its 413, the value count of the
     // strict-JSON routes and its 400, as a single-graph server states them at the top level
     m["request_intake"] = request_intake;
+    m["column_labels"] = column_labels;
     return m;
 }
 

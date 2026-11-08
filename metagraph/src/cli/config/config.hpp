@@ -160,6 +160,20 @@ class Config {
     // refused 400 too_many_json_values. Not /search's nor /align's. Stated by GET /capabilities
     // (request_intake.max_request_json_values). 2^18: 64 seeds of 4,000 explicit labels
     uint64_t max_request_json_values = 262'144;
+    // The most TCP connections the server holds open at once (0 = no cap, the default; H3,
+    // review 5 #1): at it the server stops accepting, and a further connection waits in the
+    // kernel's listen queue until one closes (a delay, never a refusal). Counted from its
+    // accept to its close, whatever it does (its header, its body, its handler, its answer, an
+    // idle keep-alive, the drain after a 413). Above the handler threads when set (refused at
+    // start-up otherwise). Stated by GET /capabilities (request_intake.max_connections)
+    uint64_t max_connections = 0;
+    static constexpr uint64_t kMaxConnections = 1'048'576;
+    // The most bytes of label text one GET /column_labels answer holds: the labels' JSON
+    // strings, quotes and escapes counted (0 = unlimited; H3, review 5 #4). The unpaged list
+    // above it is refused 400 column_labels_too_large; a page ends before it. Stated by GET
+    // /capabilities (column_labels.max_column_labels_bytes)
+    uint64_t max_column_labels_bytes = 16ull << 20;
+    static constexpr uint64_t kMaxColumnLabelsBytes = 1ull << 40;
     // The server's maxima of a request's budgets (bounds.max_memory_mb, bounds.max_work_units;
     // SPEC-labeled-traversal-core.md §10.3): 0 = off (a request's budgets as given, an omitted
     // one none). Set, a larger budget is lowered to it and an omitted one set to it, echoed as
@@ -183,6 +197,11 @@ class Config {
     // the request) names, plus the clock skew allowance (s; never less than retention_s, which
     // every tombstone is held at least): what bounds how long one cancel can keep an id refused
     uint64_t traverse_attempt_tombstone_max_s = 86'400;
+    // The longest a tombstone (the cancel of an id this server does not know) is held, from
+    // its latest cancel or refused copy (s, at least 1; H3, review 5 #14): it is held at least
+    // min(retention_s, it), and to cover the not_after_ms it names + the clock skew within
+    // min(max(tombstone_max_s, retention_s), it). A held finished attempt is not bound by it
+    uint64_t traverse_attempt_tombstone_hold_s = 900;
     // The request registry of /resolve and /pattern (requests with request_id,
     // SPEC-multigraph-envelope.md section 5): how long, and how many, ended requests stay
     // queryable (GET /requests/{request_id}) and their ids refused

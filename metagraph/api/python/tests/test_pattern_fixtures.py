@@ -3722,7 +3722,11 @@ class TestPatternFixtures(unittest.TestCase):
                 # shapes of both refusals (their bodies' members, sorted)
                 check.keys(intake, {'max_request_body_mb', 'body_too_large',
                                     'max_request_json_values', 'json_values_routes',
-                                    'too_many_json_values'}, path)
+                                    'too_many_json_values', 'max_connections'}, path)
+                # H3: the connection cap (null: none)
+                check.ok(intake['max_connections'] is None
+                         or (is_int(intake['max_connections']) and intake['max_connections'] >= 1),
+                         path + '.max_connections', 'an integer of at least 1, or null')
                 check.ok(intake['max_request_body_mb'] == doc['max_request_body_mb'],
                          path + '.max_request_body_mb', 'the top-level max_request_body_mb')
                 check.ok(intake['max_request_json_values'] is None
@@ -3740,6 +3744,23 @@ class TestPatternFixtures(unittest.TestCase):
                          == {'status': 400, 'code': 'too_many_json_values',
                              'members': ['code', 'error', 'max_request_json_values']},
                          path + '.too_many_json_values', 'the 400\'s shape')
+            def column_labels(c, path):
+                # H3 (SPEC-multigraph-envelope.md section 8): GET /column_labels' byte cap (null:
+                # unlimited), its paging parameters, its 400's shape and the list's length
+                check.keys(c, {'max_column_labels_bytes', 'paging', 'too_large', 'total'}, path)
+                check.ok(c['max_column_labels_bytes'] is None
+                         or (is_int(c['max_column_labels_bytes'])
+                             and c['max_column_labels_bytes'] >= 1),
+                         path + '.max_column_labels_bytes', 'an integer of at least 1, or null')
+                check.ok(c['paging'] == ['limit', 'offset'], path + '.paging',
+                         'the parameters of a page')
+                check.ok(c['too_large']
+                         == {'status': 400, 'code': 'column_labels_too_large',
+                             'members': ['code', 'error', 'max_column_labels_bytes', 'total']},
+                         path + '.too_large', 'the 400\'s shape')
+                check.ok(c['total'] is None or (is_int(c['total']) and c['total'] >= 0),
+                         path + '.total', 'an integer, or null while the index loads')
+
             def headers_unique(h, path):
                 # SPEC-multigraph-envelope.md section 9: true, false or null (a pair without
                 # its .seqs), the repeated headers counted, at most 10 examples of at most 10
@@ -3810,6 +3831,9 @@ class TestPatternFixtures(unittest.TestCase):
                 # what it reads of a request (H1), at the top level
                 check.ok('request_intake' in doc, 'request_intake', 'at the top level')
                 request_intake(doc['request_intake'], 'request_intake')
+                # and what GET /column_labels answers (H3), at the top level too
+                check.ok('column_labels' in doc, 'column_labels', 'at the top level')
+                column_labels(doc['column_labels'], 'column_labels')
                 return
             check.ok('headers_unique' not in doc, 'headers_unique',
                      'in graph_summary only on a multi-graph server')
@@ -3818,6 +3842,9 @@ class TestPatternFixtures(unittest.TestCase):
             check.ok('request_intake' not in doc, 'request_intake',
                      'in the multigraph block on a multi-graph server')
             request_intake(doc['multigraph']['request_intake'], 'multigraph.request_intake')
+            check.ok('column_labels' not in doc, 'column_labels',
+                     'in the multigraph block on a multi-graph server')
+            column_labels(doc['multigraph']['column_labels'], 'multigraph.column_labels')
             # SPEC §24.1: the threshold of the selection rule (a request without `graphs`
             # queries every name of a list of at most that many), the server flag, at least 1
             check.ok(is_int(doc['max_graphs_without_selection'])

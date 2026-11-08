@@ -723,8 +723,10 @@ class TestAPIClientMultiple(TestingBase):
 
         self.assertIn(self.graph_name, ret.keys())
         label_list = ret[self.graph_name]
-        # Should have labels from all graphs combined
-        self.assertEqual(len(label_list), 1300 * self.mult)
+        # Should have labels from all graphs combined: each distinct (graph, annotation) pair
+        # once (H3): G2 lists G1's pairs, twice, so only G1's 100 and G3's 1000 labels a copy
+        # (before H3 G2's pairs were listed again, twice: 1300 a copy)
+        self.assertEqual(len(label_list), 1100 * self.mult)
         # All labels should start with 'ENST' (from the test data)
         self.assertTrue(all(l.startswith('ENST') for l in label_list))
         # Check that the total number of deduplicated labels equals to 1000
