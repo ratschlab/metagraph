@@ -285,8 +285,15 @@ class RequestRegistry {
         RequestSettings settings;
         mutable std::mutex mutex;
         std::map<std::string, std::shared_ptr<RequestEntry>> entries;
-        // ended entries, oldest first: (when it ended, id)
-        std::deque<std::pair<SteadyClock::time_point, std::string>> ended;
+        // an ended entry: when it ended, its id, and the entry itself (weakly: the map holds
+        // it), so that its expiry finds it in O(1) and never drops a newer entry of the id
+        struct Ended {
+            SteadyClock::time_point at;
+            std::string id;
+            std::weak_ptr<const RequestEntry> entry;
+        };
+        // ended entries, oldest first
+        std::deque<Ended> ended;
         SteadyClock::time_point now() const;
         void expire_locked();
     };
