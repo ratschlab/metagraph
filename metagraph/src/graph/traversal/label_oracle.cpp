@@ -5,8 +5,6 @@
 
 #include "graph/annotated_dbg.hpp"
 #include "graph/representation/canonical_dbg.hpp"
-#include "graph/representation/succinct/dbg_succinct.hpp"
-#include "graph/graph_extensions/node_first_cache.hpp"
 #include "annotation/coord_to_header.hpp"
 #include "common/logger.hpp"
 #include "common/unix_tools.hpp"
@@ -31,9 +29,7 @@ LabelOracle::LabelOracle(const AnnotatedDBG &anno_graph,
     if (const auto *wrapper = dynamic_cast<const CanonicalDBG*>(&loaded)) {
         regime_ = Regime::PRIMARY;
         // a wrapper of our own: same node ids, own caches; the shared one is never mutated
-        local_canonical_ = std::make_shared<CanonicalDBG>(wrapper->get_graph_ptr());
-        if (const auto *dbg_succ = dynamic_cast<const DBGSuccinct*>(&wrapper->get_graph()))
-            local_canonical_->add_extension(std::make_shared<NodeFirstCache>(*dbg_succ));
+        local_canonical_ = CanonicalDBG::with_node_first_cache(wrapper->get_graph_ptr());
         graph_ = local_canonical_.get();
     } else {
         if (loaded.get_mode() == DeBruijnGraph::PRIMARY) {
