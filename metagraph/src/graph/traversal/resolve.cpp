@@ -121,6 +121,11 @@ void discover_labels(const LabelOracle &oracle,
     auto of = [&](Column c, uint64_t seq_id) -> LabelSupport& {
         auto [it, inserted] = index.try_emplace({ c, seq_id }, found->size());
         if (inserted) {
+            if (found->size() == kMaxDiscoveredLabels) {
+                throw std::invalid_argument("Discovery found more than "
+                        + std::to_string(kMaxDiscoveredLabels) + " distinct labels. "
+                        "Use a shorter query, or name the labels explicitly.");
+            }
             found->emplace_back();
             ids->emplace_back(c, seq_id);
         }
@@ -140,6 +145,8 @@ void discover_labels(const LabelOracle &oracle,
             const auto rows = oracle.get_row_tuples(anno_rows(batch));
             for (size_t j = 0; j < rows.size(); ++j) {
                 for (const auto &[c, coords] : rows[j]) {
+                    if (!oracle.has_header_records(c))
+                        continue;  // no records, so no header labels
                     for (uint64_t coord : coords) {
                         of(c, oracle.map_coord(c, coord).first).add(pos[begin + j]);
                     }

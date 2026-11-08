@@ -432,6 +432,8 @@ void Walker::derive_seed_labels(const std::vector<node_index> &keys,
                                                     })) {
                         continue;
                     }
+                    if (!oracle_.has_header_records(c))
+                        continue;  // no records, so no header labels
                     for (uint64_t coord : coords) {
                         cur.emplace_back(c, oracle_.map_coord(c, coord).first);
                     }

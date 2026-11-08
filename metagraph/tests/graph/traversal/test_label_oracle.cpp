@@ -8,6 +8,7 @@
 #include "tests/annotation/test_annotated_dbg_helpers.hpp"
 
 #include "graph/traversal/label_oracle.hpp"
+#include "graph/traversal/resolve.hpp"
 #include "graph/annotated_dbg.hpp"
 #include "graph/representation/canonical_dbg.hpp"
 #include "graph/representation/hash/dbg_sshash.hpp"
@@ -344,6 +345,23 @@ TYPED_TEST(LabelOracleCoordTest, HeaderLabels) {
     EXPECT_THROW(clash_oracle.resolve_label("G"), std::invalid_argument);
     EXPECT_THROW(clash_oracle.resolve_label("acc2"), std::invalid_argument);
     EXPECT_EQ(LabelKind::COLUMN, clash_oracle.resolve_label("F").kind);
+
+    // a column without sequence records has no header labels: header discovery skips it
+    std::vector<std::vector<std::string>> partial(2);
+    std::vector<std::vector<uint64_t>> partial_kmers(2);
+    partial[col_f] = { "acc1", "acc2" }; partial_kmers[col_f] = { n1, n2 };
+    annot::CoordToHeader partial_cth(std::move(partial), std::move(partial_kmers));
+    LabelOracle partial_oracle(*anno, &partial_cth);
+    EXPECT_TRUE(partial_oracle.has_header_records(col_f));
+    EXPECT_FALSE(partial_oracle.has_header_records(col_g));
+    ResolveOptions discover;
+    discover.discover = true;
+    discover.discover_kind = LabelKind::HEADER;
+    auto profile = resolve_support(partial_oracle, s3, discover);
+    ASSERT_FALSE(profile.labels.empty());
+    for (const auto &support : profile.labels) {
+        EXPECT_EQ(col_f, support.label.column);
+    }
 
     // header labels need a CoordToHeader
     LabelOracle no_headers(*anno);
