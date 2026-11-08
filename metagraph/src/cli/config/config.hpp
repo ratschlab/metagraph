@@ -144,6 +144,10 @@ class Config {
     // held, before discover.max_labels cut them. Per pair; the CLI applies neither
     uint64_t resolve_max_discover_labels = 1'000'000;
     uint64_t resolve_max_discover_memory_mb = 1024;
+    // The cap on a /resolve's explicit label lists (0 = none): the request's `labels` and each
+    // explicit seed's, checked before anything of the request is copied (a 400 naming the list),
+    // as /traverse's --traverse-max-explicit-labels. The CLI applies none
+    uint64_t resolve_max_explicit_labels = 10'000;
     // A multi-graph server: a POST /search or /pattern request without `graphs` queries every
     // name of the graph list when the list has at most this many names, else it is refused
     // (400). Stated by GET /capabilities (max_graphs_without_selection), so that a client can

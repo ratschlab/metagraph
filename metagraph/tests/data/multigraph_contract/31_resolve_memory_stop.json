@@ -152,8 +152,8 @@
     },
     "support": "kmer",
     "timing": {
-     "cpu_ms": 7.320583,
-     "elapsed_ms": 7.5770409999999995
+     "cpu_ms": 4.123125,
+     "elapsed_ms": 4.117333
     },
     "unknown_labels": [],
     "work": {
@@ -162,7 +162,7 @@
    }
   ],
   "timing": {
-   "elapsed_ms": 7.647709
+   "elapsed_ms": 4.158333
   },
   "work": {
    "memory_bytes": 1090690

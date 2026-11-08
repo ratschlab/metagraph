@@ -3553,6 +3553,43 @@ class TestResolveDiscoveryBounds(TestingBase):
                     self.assertEqual({'max_tracked_labels': labels, 'max_memory_mb': memory,
                                       'stop_reasons': ['time', 'memory'],
                                       'rule': 'SPEC-labeled-traversal-core.md section 4.6'}, d)
+                    # the cap on a request's explicit label lists (its default)
+                    self.assertEqual(10000, requests.get(url + route).json()['resolve'][
+                        'max_explicit_labels'])
+
+    def test_the_explicit_labels_cap(self):
+        """--resolve-max-explicit-labels (10,000 by default): a request's `labels` or an explicit
+        seed's longer than it is refused 400 naming the list, the cap and the flag, before the
+        request's other fields are read; at the cap the request goes on (here to the 400 of a
+        label the index does not hold); the CLI applies no cap"""
+        url = self.servers['default'][0]
+        names = [f'x{i}' for i in range(10001)]
+
+        def refusal(body):
+            ret = requests.post(url + '/resolve', data=json.dumps(body), timeout=600)
+            self.assertEqual(400, ret.status_code, ret.text[:500])
+            return ret.json()['error']
+
+        self.assertEqual('request.labels: at most 10000 labels (--resolve-max-explicit-labels)',
+                         refusal({'sequence': self.core, 'labels': names}))
+        # with an unknown field beside it: the count's words
+        self.assertEqual('request.labels: at most 10000 labels (--resolve-max-explicit-labels)',
+                         refusal({'sequence': self.core, 'labels': names, 'bogus': 1}))
+        self.assertNotIn('--resolve-max-explicit-labels',
+                         refusal({'sequence': self.core, 'labels': names[:10000]}))
+        seeds = [{'kmer_interval': [0, 10], 'labels': ['s00000']},
+                 {'kmer_interval': [0, 10], 'labels': names}]
+        self.assertEqual('request.select.seeds[1].labels: at most 10000 labels per seed '
+                         '(--resolve-max-explicit-labels)',
+                         refusal({'sequence': self.core, 'labels': ['s00000'],
+                                  'select': {'policy': 'explicit', 'seeds': seeds}}))
+        path = self.tempdir.name + '/request-labels.json'
+        with open(path, 'w') as f:
+            json.dump({'sequence': self.core, 'labels': names}, f)
+        res = subprocess.run(shlex.split(METAGRAPH) + ['traverse', '--resolve', '--json', '-i',
+                                                       self.graph, '-a', self.anno, path],
+                             stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        self.assertNotIn('--resolve-max-explicit-labels', res.stdout.decode())
 
     def test_the_default_bounds_change_nothing(self):
         """With the default bounds every record is tracked and the pass fits: the server's

@@ -522,7 +522,7 @@ TEST(ServerEnvelope, Sample12MultigraphBlock) {
     // the sample's server ran with the default bounds of a /resolve discovery (H2,
     // SPEC-labeled-traversal-core.md §4.6), which the block states as resolve_discovery, as
     // the `resolve` block's `discovery` states them
-    const ResolveDiscoveryBounds defaults { 1'000'000, 1024 };
+    const ResolveDiscoveryBounds defaults { 1'000'000, 1024, 10'000 };
     EXPECT_EQ(text(body["multigraph"]), text(multigraph_capabilities_json(0, {}, defaults)));
     EXPECT_EQ("{\"max_memory_mb\":1024,\"max_tracked_labels\":1000000}",
               text(body["multigraph"]["resolve_discovery"]));
@@ -530,6 +530,10 @@ TEST(ServerEnvelope, Sample12MultigraphBlock) {
               text(body["multigraph"]["resolve_discovery"]["max_tracked_labels"]));
     EXPECT_EQ(text(body["resolve"]["discovery"]["max_memory_mb"]),
               text(body["multigraph"]["resolve_discovery"]["max_memory_mb"]));
+    // the cap on a /resolve's explicit label lists (H2 addendum), as the resolve block states it
+    EXPECT_EQ("10000", text(body["multigraph"]["resolve_max_explicit_labels"]));
+    EXPECT_EQ(text(body["resolve"]["max_explicit_labels"]),
+              text(body["multigraph"]["resolve_max_explicit_labels"]));
     EXPECT_EQ(body["routes"]["requests"].asString(), std::string(kRequestsRoute));
     EXPECT_EQ(body["multigraph"]["requests_route"].asString(), std::string(kRequestsRoute));
     // the request-wide memory bound of /traverse (E5b): 0 when off, as the sample's server,
@@ -544,6 +548,7 @@ TEST(ServerEnvelope, Sample12MultigraphBlock) {
     EXPECT_EQ(text(multigraph_capabilities_json(0, {})), text(rest));
     EXPECT_EQ("{\"max_memory_mb\":0,\"max_tracked_labels\":0}",
               text(multigraph_capabilities_json(0, {})["resolve_discovery"]));
+    EXPECT_EQ("0", text(multigraph_capabilities_json(0, {})["resolve_max_explicit_labels"]));
 }
 
 // Sample 10: every /traverse capabilities probe states the request-wide memory bound beside

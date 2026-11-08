@@ -1790,7 +1790,7 @@ int run_server(Config *config) {
                 && config->traverse_max_time_ms < static_cast<double>(kServerMaxDeadlineMs)
             ? config->traverse_max_time_ms : static_cast<double>(kServerMaxDeadlineMs),
         kResolveFinalizeMs, config->resolve_max_discover_labels,
-        config->resolve_max_discover_memory_mb };
+        config->resolve_max_discover_memory_mb, config->resolve_max_explicit_labels };
 
     /**
      * POST /resolve on a multi-graph server (SPEC-multigraph-envelope.md section 1, E2): the
@@ -1820,7 +1820,7 @@ int run_server(Config *config) {
         // sections 4 and 5, read last, where they were unknown fields before release 10), the
         // query's length (the server's limit and bounds.max_query_bp), a budget not above the
         // reserve
-        const ResolveRequest req = parse_resolve_request(json);
+        const ResolveRequest req = parse_resolve_request(json, resolve_time.max_explicit_labels);
         check_resolve_fields(req, config->resolve_max_query_bp, resolve_time);
         const RequestHandles handles = read_request_handles(json);
         // the request budget: bounds.time_budget_ms (lowered to the server's cap), else the
@@ -2737,7 +2737,8 @@ int run_server(Config *config) {
                 c["multigraph"] = multigraph_capabilities_json(
                         config->traverse_max_request_memory_mb, route_caps,
                         { resolve_time.max_discover_labels,
-                          resolve_time.max_discover_memory_mb });
+                          resolve_time.max_discover_memory_mb,
+                          resolve_time.max_explicit_labels });
             }
             // the request registry (section 5) on every server: a single-graph /resolve or
             // /pattern with request_id registers too, and GET /requests/{attempt_id} reads a

@@ -232,7 +232,10 @@ struct ResolveRequest {
 // Strict parsing: unknown keys, wrong types and out-of-range values throw InvalidRequest
 // naming the offending field. Defaults are filled in.
 TraverseRequest parse_traverse_request(const Json::Value &json);
-ResolveRequest parse_resolve_request(const Json::Value &json);
+// |max_explicit_labels| (0: none): the cap on the request's `labels` and on each explicit
+// seed's `labels` (SPEC-labeled-traversal-core.md §4.1), checked first, on the parsed body
+// before anything of it is copied: a 400 naming the list, the cap and the flag
+ResolveRequest parse_resolve_request(const Json::Value &json, uint64_t max_explicit_labels = 0);
 
 // Normalized strategy echo (what was actually used), resubmittable verbatim:
 // output.detail and output.timing come from the request, not from the Strategy
@@ -463,11 +466,15 @@ constexpr double kResolveFinalizeMs = 250;
 // most labels it tracks (--resolve-max-discover-labels; graph::traversal::ResolveOptions::
 // discover_max_tracked) and the memory its pass holds, in MiB
 // (--resolve-max-discover-memory-mb; ResolveOptions::discover_max_memory)
+// And the cap on a request's explicit label lists (--resolve-max-explicit-labels; 0: none — the
+// CLI): the request's `labels` and each explicit seed's, checked before anything is copied
+// (parse_resolve_request)
 struct ResolveTimeLimits {
     double max_time_ms = 0;
     double finalize_ms = kResolveFinalizeMs;
     uint64_t max_discover_labels = 0;
     uint64_t max_discover_memory_mb = 0;
+    uint64_t max_explicit_labels = 0;
 };
 
 // A /resolve answer that could not be built and written within its bounds.time_budget_ms (the

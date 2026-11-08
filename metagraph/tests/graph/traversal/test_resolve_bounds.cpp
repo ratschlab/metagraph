@@ -1,6 +1,8 @@
 #include "gtest/gtest.h"
 
 #include <algorithm>
+#include <chrono>
+#include <functional>
 #include <filesystem>
 #include <fstream>
 #include <iterator>
@@ -700,8 +702,12 @@ TEST(ResolveBoundsRoute, TheCutAndTheMemoryStopAreStated) {
 // The capabilities' `discovery` member of the `resolve` block (§4.6, §10.3)
 TEST(ResolveBoundsRoute, CapabilitiesBlock) {
     const Json::Value c = cli::resolve_capabilities_json({ 30000, cli::kResolveFinalizeMs,
-                                                           1'000'000, 1024 });
-    EXPECT_EQ((std::vector<std::string>{ "discovery", "time_budget" }), c.getMemberNames());
+                                                           1'000'000, 1024, 10'000 });
+    EXPECT_EQ((std::vector<std::string>{ "discovery", "max_explicit_labels", "time_budget" }),
+              c.getMemberNames());
+    EXPECT_TRUE(c["max_explicit_labels"].isUInt64());
+    EXPECT_EQ(10000u, c["max_explicit_labels"].asUInt64());
+    EXPECT_EQ(0u, cli::resolve_capabilities_json({})["max_explicit_labels"].asUInt64());
     EXPECT_EQ("{\"max_memory_mb\":1024,\"max_tracked_labels\":1000000,\"rule\":"
               "\"SPEC-labeled-traversal-core.md section 4.6\",\"stop_reasons\":[\"time\","
               "\"memory\"]}", compact(c["discovery"]));
@@ -711,11 +717,181 @@ TEST(ResolveBoundsRoute, CapabilitiesBlock) {
               "\"memory\"]}", compact(cli::resolve_capabilities_json({})["discovery"]));
 }
 
-// The reference samples of the bounds (SPEC-labeled-traversal-core.md §4.6), real runs: 30 a cut by the label cap
+// ---- the cap on a request's explicit label lists (--resolve-max-explicit-labels, SPEC §4.1)
+
+std::string refusal_of(const Json::Value &request, uint64_t cap) {
+    try {
+        cli::parse_resolve_request(request, cap);
+    } catch (const cli::InvalidRequest &e) {
+        return e.what();
+    }
+    return "";
+}
+
+// The request's `labels` and each explicit seed's, checked before anything else of the request
+// (a list of N passes, N + 1 is refused, naming the list, the cap and the flag), `labels` first,
+// then the seeds in order; a list of another type is left to the parse; 0 is no cap
+TEST(ResolveBoundsRoute, TheExplicitLabelsCap) {
+    auto names = [](size_t n, const std::string &prefix) {
+        Json::Value list(Json::arrayValue);
+        for (size_t i = 0; i < n; ++i) {
+            list.append(prefix + std::to_string(i));
+        }
+        return list;
+    };
+    auto seed = [&](size_t n) {
+        Json::Value s;
+        s["kmer_interval"].append(0);
+        s["kmer_interval"].append(1);
+        s["labels"] = names(n, "s");
+        return s;
+    };
+    Json::Value request;
+    request["sequence"] = random_seq(100, 1);
+    request["labels"] = names(4, "l");
+    request["select"]["policy"] = "explicit";
+    request["select"]["seeds"].append(seed(4));
+    request["select"]["seeds"].append(seed(4));
+    EXPECT_EQ("", refusal_of(request, 4));
+    EXPECT_NO_THROW(cli::parse_resolve_request(request, 4));
+    request["labels"] = names(5, "l");
+    EXPECT_EQ("request.labels: at most 4 labels (--resolve-max-explicit-labels)",
+              refusal_of(request, 4));
+    EXPECT_EQ("", refusal_of(request, 5));
+    EXPECT_EQ("", refusal_of(request, 0));
+    request["labels"] = names(4, "l");
+    request["select"]["seeds"][1] = seed(5);
+    EXPECT_EQ("request.select.seeds[1].labels: at most 4 labels per seed "
+              "(--resolve-max-explicit-labels)", refusal_of(request, 4));
+    // `labels` first, then the seeds in order
+    request["select"]["seeds"][0] = seed(6);
+    EXPECT_EQ("request.select.seeds[0].labels: at most 4 labels per seed "
+              "(--resolve-max-explicit-labels)", refusal_of(request, 4));
+    request["labels"] = names(9, "l");
+    EXPECT_EQ("request.labels: at most 4 labels (--resolve-max-explicit-labels)",
+              refusal_of(request, 4));
+    // before every other fault of the request's fields
+    request["bogus"] = 1;
+    request.removeMember("sequence");
+    EXPECT_EQ("request.labels: at most 4 labels (--resolve-max-explicit-labels)",
+              refusal_of(request, 4));
+    // a list of another type is the parse's to refuse, in its words
+    Json::Value typed;
+    typed["sequence"] = random_seq(100, 1);
+    typed["labels"] = "l0";
+    EXPECT_EQ(refusal_of(typed, 0), refusal_of(typed, 1));
+    EXPECT_NE("", refusal_of(typed, 1));
+    // the route reads its cap from the limits: refused before the index is read
+    const Records r = make_records<DBGSuccinct, annot::ColumnCompressed<>>(4, 2, 808);
+    Json::Value over;
+    over["sequence"] = r.q;
+    over["labels"] = names(3, "C");
+    cli::ResolveTimeLimits limits;
+    limits.max_explicit_labels = 2;
+    try {
+        cli::process_resolve_request(over, *r.anno, "r1", 0, nullptr, nullptr, limits);
+        ADD_FAILURE() << "not refused";
+    } catch (const cli::InvalidRequest &e) {
+        EXPECT_EQ("request.labels: at most 2 labels (--resolve-max-explicit-labels)",
+                  std::string(e.what()));
+    }
+}
+
+// The explicit seeds' names are looked up by hash (review 5 #6, the H1 review's S3): a pair of a
+// multi-graph server, 100,000 names it does not hold beside one it holds, and an explicit seed
+// naming all of them, answered in well under a second each way -- the selection made from the
+// profile (select_seeds), and under a stop the check of what the prefix can tell
+// (explicit_selection_blocked) -- where a linear search per name took minutes; the names covering
+// nothing are listed in the request's order. And the single-graph check before the work
+// (check_explicit_seeds) over 100,000 listed names
+TEST(ResolveBoundsRoute, ExplicitSeedNamesAreLookedUpByHash) {
+    const std::string q = random_seq(200, 909);
+    auto anno = build_anno_graph<DBGSuccinct, annot::ColumnCompressed<>>(kK, { q }, { "held" });
+    const size_t n = 100'000;
+    Json::Value request;
+    request["sequence"] = q;
+    Json::Value seed;
+    seed["kmer_interval"].append(0);
+    seed["kmer_interval"].append(10);
+    for (size_t i = 0; i < n; ++i) {
+        const std::string name = "absent" + std::to_string(i);
+        request["labels"].append(name);
+        seed["labels"].append(name);
+    }
+    request["labels"].append("held");
+    seed["labels"].append("held");
+    request["select"]["policy"] = "explicit";
+    request["select"]["seeds"].append(seed);
+    auto timed = [](const std::function<Json::Value()> &f, double *seconds) {
+        const auto start = std::chrono::steady_clock::now();
+        Json::Value out = f();
+        *seconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count();
+        return out;
+    };
+    double seconds = 0;
+    const Json::Value out = timed([&]() {
+        return cli::process_resolve_request(request, *anno, "r1", 0, nullptr, nullptr, {},
+                                            nullptr, nullptr, /* drop */ true);
+    }, &seconds);
+    EXPECT_LT(seconds, 10.0) << "select_seeds over " << n << " names";
+    ASSERT_EQ(1u, out["selection"]["seeds"].size());
+    const Json::Value &picked = out["selection"]["seeds"][0];
+    EXPECT_EQ("[\"held\"]", compact(picked["labels"]));
+    ASSERT_EQ(n, picked["labels_not_covering"].size());
+    EXPECT_EQ("absent0", picked["labels_not_covering"][0].asString());
+    EXPECT_EQ("absent99999", picked["labels_not_covering"][static_cast<Json::ArrayIndex>(n - 1)].asString());
+    EXPECT_EQ(n, out["unknown_labels"].size());
+
+    // under a stop (the deadline passed before the first row): the prefix cannot tell the seed
+    Json::Value budgeted = request;
+    budgeted["bounds"]["time_budget_ms"] = 251;
+    auto base = std::chrono::steady_clock::now();
+    uint64_t reads = 0;
+    std::function<std::chrono::steady_clock::time_point()> clock = [&]() {
+        return base + std::chrono::milliseconds(reads++ ? 10 : 0);
+    };
+    const Json::Value stopped = timed([&]() {
+        return cli::process_resolve_request(budgeted, *anno, "r1", 0, nullptr, nullptr,
+                                            { 0, cli::kResolveFinalizeMs }, nullptr, clock,
+                                            /* drop */ true);
+    }, &seconds);
+    EXPECT_LT(seconds, 10.0) << "explicit_selection_blocked over " << n << " names";
+    ASSERT_TRUE(stopped["stop"].isObject()) << compact(stopped).substr(0, 300);
+    EXPECT_TRUE(stopped["selection"].isNull());
+
+    // the check before the work: the request lists every name a seed names
+    ResolveOptions options;
+    SelectionPolicy policy;
+    policy.policy = SelectionPolicy::EXPLICIT;
+    ExplicitSeed ex;
+    ex.kmers = { 0, 10 };
+    for (size_t i = 0; i < n; ++i) {
+        options.labels.push_back("l" + std::to_string(i));
+    }
+    ex.labels = options.labels;
+    std::reverse(ex.labels.begin(), ex.labels.end());
+    policy.explicit_seeds.push_back(ex);
+    LabelOracle oracle(*anno);
+    const auto start = std::chrono::steady_clock::now();
+    EXPECT_NO_THROW(check_explicit_seeds(oracle, q, options, policy));
+    EXPECT_LT(std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count(),
+              10.0) << "check_explicit_seeds over " << n << " names";
+    // a name the request does not list is still the one refused, the first in the seed
+    policy.explicit_seeds[0].labels.push_back("unlisted");
+    policy.explicit_seeds[0].labels.push_back("unlisted2");
+    try {
+        check_explicit_seeds(oracle, q, options, policy);
+        ADD_FAILURE() << "not refused";
+    } catch (const std::invalid_argument &e) {
+        EXPECT_EQ("Explicit seed label was not profiled: 'unlisted'", std::string(e.what()));
+    }
+}
+
+// The reference samples of the bounds (SPEC-labeled-traversal-core.md §4.1, §4.6), real runs: 30 a cut by the label cap
 // (labels_capped with the members the route writes, ranking_exact checkable from the entry alone), 31 a memory
 // stop without a deadline (the members of a time stop's block, reason memory and max_memory_mb, the entry the
 // resolve of its first resolved_kmers k-mers)
-TEST(ResolveBoundsRoute, Samples30And31) {
+TEST(ResolveBoundsRoute, Samples30To32) {
     auto sample = [](const std::string &name) {
         const std::string path = source_path("tests/data/multigraph_contract/" + name);
         std::ifstream in(path, std::ios::binary);
@@ -761,6 +937,13 @@ TEST(ResolveBoundsRoute, Samples30And31) {
     EXPECT_EQ(stop["resolved_kmers"].asUInt64(), entry["num_kmers"].asUInt64());
     EXPECT_EQ(stop["resolved_kmers"].asUInt64(), stop["remainder_from_bp"].asUInt64());
     EXPECT_FALSE(entry.isMember("limits"));
+
+    // 32: the explicit labels' cap, the route's own text for the sample's request and cap
+    const Json::Value s32 = sample("32_resolve_400_explicit_labels.json");
+    EXPECT_EQ(400, s32["status"].asInt());
+    EXPECT_EQ((std::vector<std::string>{ "error" }), s32["body"].getMemberNames());
+    EXPECT_EQ(s32["body"]["error"].asString(), refusal_of(s32["request"], 4));
+    EXPECT_EQ("", refusal_of(s32["request"], 5));
 }
 
 } // namespace

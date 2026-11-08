@@ -125,6 +125,9 @@ Json::Value composite_fp_json(std::vector<std::string> index_fps);
 struct ResolveDiscoveryBounds {
     uint64_t max_tracked_labels = 0;     // --resolve-max-discover-labels (0: none)
     uint64_t max_memory_mb = 0;          // --resolve-max-discover-memory-mb (0: none)
+    // and resolve_max_explicit_labels: the cap on a request's explicit label lists
+    // (--resolve-max-explicit-labels, 0: none), as the `resolve` block's max_explicit_labels
+    uint64_t max_explicit_labels = 0;
 };
 Json::Value multigraph_capabilities_json(uint64_t max_request_memory_mb, const RouteCaps &caps,
                                          const ResolveDiscoveryBounds &discovery = {});

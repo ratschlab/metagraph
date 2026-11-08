@@ -4490,8 +4490,9 @@ class TestPatternRegression(TestingBase):
             return caps
 
         def without_resolve_discovery(caps):
-            # the `resolve` block's `discovery` member (H2, train 3: the server's bounds of a
-            # /resolve discovery, SPEC-labeled-traversal-core.md §4.6), a gain over every base:
+            # the `resolve` block's `discovery` and `max_explicit_labels` members (H2, train 3:
+            # the server's bounds of a /resolve discovery, SPEC-labeled-traversal-core.md §4.6,
+            # and the cap on its explicit label lists, §4.1), gains over every base:
             # checked as stated here at the defaults, the rest of the block compared as before
             block = caps.get('resolve')
             if block is None:
@@ -4501,7 +4502,10 @@ class TestPatternRegression(TestingBase):
                                   'stop_reasons': ['time', 'memory'],
                                   'rule': 'SPEC-labeled-traversal-core.md section 4.6'},
                                  block.get('discovery'))
+                # and the cap on a request's explicit label lists (the H2 addendum)
+                self.assertEqual(10000, block.get('max_explicit_labels'))
             block.pop('discovery', None)
+            block.pop('max_explicit_labels', None)
             return caps
 
         def only_gains(base, new, allowed, what):

@@ -479,7 +479,37 @@ TraverseRequest parse_traverse_request(const Json::Value &json) {
     return req;
 }
 
-ResolveRequest parse_resolve_request(const Json::Value &json) {
+// The request's explicit label lists under the server's cap, before anything of |json| is copied
+// or looked up (as /traverse's counts): the request's `labels`, then each explicit seed's, in
+// order; a list of another type is left to the parse that follows, which refuses it in its words
+static void check_resolve_counts(const Json::Value &json, uint64_t max_explicit_labels) {
+    if (!max_explicit_labels)
+        return;
+    // (indexing a const Value that is no object or null would throw jsoncpp's LogicError)
+    auto member = [](const Json::Value &object, const char *key) -> const Json::Value& {
+        static const Json::Value kNone;
+        return object.isObject() ? object[key] : kNone;
+    };
+    const Json::Value &labels = member(json, "labels");
+    if (labels.isArray() && labels.size() > max_explicit_labels) {
+        throw InvalidRequest("request.labels: at most " + std::to_string(max_explicit_labels)
+                             + " labels (--resolve-max-explicit-labels)");
+    }
+    const Json::Value &seeds = member(member(json, "select"), "seeds");
+    if (!seeds.isArray())
+        return;
+    for (Json::ArrayIndex i = 0; i < seeds.size(); ++i) {
+        const Json::Value &seed_labels = member(seeds[i], "labels");
+        if (seed_labels.isArray() && seed_labels.size() > max_explicit_labels) {
+            throw InvalidRequest("request.select.seeds[" + std::to_string(i) + "].labels: at most "
+                                 + std::to_string(max_explicit_labels)
+                                 + " labels per seed (--resolve-max-explicit-labels)");
+        }
+    }
+}
+
+ResolveRequest parse_resolve_request(const Json::Value &json, uint64_t max_explicit_labels) {
+    check_resolve_counts(json, max_explicit_labels);
     ResolveRequest req;
     Strict s(json, "request");
     // see parse_traverse_request: routing fields and in_ram are handled by the server
@@ -5698,6 +5728,9 @@ Json::Value resolve_capabilities_json(const ResolveTimeLimits &limits) {
     Json::Value r;
     r["time_budget"] = std::move(t);
     r["discovery"] = resolve_discovery_json(limits);
+    // the cap on a request's explicit label lists (--resolve-max-explicit-labels; 0: none):
+    // the request's `labels` and each explicit seed's, a 400 above it
+    r["max_explicit_labels"] = uint_json(limits.max_explicit_labels);
     return r;
 }
 
@@ -5734,11 +5767,16 @@ static std::string explicit_selection_blocked(const SupportProfile &profile,
     // a label the pair does not hold (unknown_labels, a multi-graph server's pair,
     // SPEC-multigraph-envelope.md section 2) covers nothing of a seed, under a stop as without
     // one (select_seeds lists it in labels_not_covering): it is neither unprofiled nor
-    // undiscovered
-    auto absent = [&](const std::string &name) {
-        return std::find(profile.unknown_labels.begin(), profile.unknown_labels.end(), name)
-                != profile.unknown_labels.end();
-    };
+    // undiscovered. The names are looked up in one set of those and one of the profiled labels'
+    // (a linear search per name cost N^2 comparisons for seeds naming N labels, review 5 #6)
+    const std::unordered_set<std::string_view> unknown(profile.unknown_labels.begin(),
+                                                       profile.unknown_labels.end());
+    std::unordered_set<std::string_view> profiled_names;
+    profiled_names.reserve(profile.labels.size());
+    for (const LabelProfile &lp : profile.labels) {
+        profiled_names.insert(lp.label.name);
+    }
+    auto absent = [&](const std::string &name) { return unknown.count(name) > 0; };
     for (size_t i = 0; i < policy.explicit_seeds.size(); ++i) {
         const ExplicitSeed &ex = policy.explicit_seeds[i];
         if (ex.kmers.begin >= ex.kmers.end || ex.kmers.end > query_kmers)
@@ -5752,8 +5790,7 @@ static std::string explicit_selection_blocked(const SupportProfile &profile,
         if (discover)
             continue;
         for (const std::string &name : ex.labels) {
-            const bool profiled = std::any_of(profile.labels.begin(), profile.labels.end(),
-                [&](const LabelProfile &lp) { return lp.label.name == name; });
+            const bool profiled = profiled_names.count(name) > 0;
             if (!profiled && !absent(name))
                 throw InvalidRequest("Explicit seed label was not profiled: '" + name + "'");
         }
@@ -5766,8 +5803,7 @@ static std::string explicit_selection_blocked(const SupportProfile &profile,
                     + std::to_string(ex.kmers.end) + ") ends past the k-mers resolved";
         }
         for (const std::string &name : ex.labels) {
-            const bool profiled = std::any_of(profile.labels.begin(), profile.labels.end(),
-                [&](const LabelProfile &lp) { return lp.label.name == name; });
+            const bool profiled = profiled_names.count(name) > 0;
             if (!profiled && !absent(name)) {
                 return seed + (profile.stop ? " names a label the resolved prefix did not discover"
                                             : " names a label the capped discovery did not keep");
@@ -5851,7 +5887,8 @@ Json::Value process_resolve_request(
             && json["bounds"].isMember("time_budget_ms")) {
         start = now();
     }
-    ResolveRequest req = parse_resolve_request(json);
+    // the explicit label lists first, before anything of the body is copied
+    ResolveRequest req = parse_resolve_request(json, time.max_explicit_labels);
     req.options.drop_labels_not_in_graph = labels_not_in_graph_dropped;
     // the bounds of a discovery (§4.6; 0: none)
     req.options.discover_max_tracked = time.max_discover_labels;

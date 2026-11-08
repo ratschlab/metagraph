@@ -9,6 +9,8 @@
 #include <optional>
 #include <string_view>
 #include <tuple>
+#include <unordered_map>
+#include <unordered_set>
 
 #include <tsl/hopscotch_map.h>
 #include <tsl/hopscotch_set.h>
@@ -544,15 +546,18 @@ void check_explicit_seeds(const LabelOracle &oracle,
     // pair covers nothing rather than being refused: a seed's labels are then decided by the
     // work, and select_seeds checks them before any later seed
     const bool labels_after_work = options.discover || options.drop_labels_not_in_graph;
-    // a seed's label that is no label of the request (explicit labels are all profiled)
+    // a seed's label that is no label of the request (explicit labels are all profiled): the
+    // request's labels in one set, each seed's names looked up in it (a linear search per name
+    // made a request of N labels and seeds naming them cost N^2 comparisons, review 5 #6)
+    std::unordered_set<std::string_view> listed;
+    if (!labels_after_work && !seeds.empty())
+        listed.insert(options.labels.begin(), options.labels.end());
     auto unlisted = [&](const ExplicitSeed &ex) -> const std::string* {
         if (labels_after_work)
             return nullptr;
         for (const std::string &name : ex.labels) {
-            if (std::find(options.labels.begin(), options.labels.end(), name)
-                    == options.labels.end()) {
+            if (!listed.count(name))
                 return &name;
-            }
         }
         return nullptr;
     };
@@ -1668,6 +1673,17 @@ SeedSelection select_seeds(const SupportProfile &profile,
             break;
         }
         case SelectionPolicy::EXPLICIT: {
+            // The seeds' names looked up in one map of the profiled labels (a name's FIRST
+            // label, as a scan in profile order finds it) and one set of the labels the pair
+            // does not hold: a linear search per name made seeds naming N labels of a profile of
+            // N cost N^2 comparisons (review 5 #6)
+            std::unordered_map<std::string_view, size_t> profiled;
+            profiled.reserve(profile.labels.size());
+            for (size_t l = 0; l < profile.labels.size(); ++l) {
+                profiled.emplace(profile.labels[l].label.name, l);
+            }
+            const std::unordered_set<std::string_view> absent(profile.unknown_labels.begin(),
+                                                              profile.unknown_labels.end());
             for (const auto &ex : policy.explicit_seeds) {
                 if (ex.kmers.end > profile.num_kmers || ex.kmers.begin >= ex.kmers.end)
                     throw std::invalid_argument("Explicit seed interval out of range");
@@ -1681,20 +1697,18 @@ SeedSelection select_seeds(const SupportProfile &profile,
                 Picked p;
                 p.kmers = ex.kmers;
                 for (const auto &name : ex.labels) {
-                    auto it = std::find_if(profile.labels.begin(), profile.labels.end(),
-                                           [&](const LabelProfile &lp) { return lp.label.name == name; });
-                    if (it == profile.labels.end()) {
+                    const auto it = profiled.find(name);
+                    if (it == profiled.end()) {
                         // a label this pair does not hold (unknown_labels, a multi-graph
                         // server's) covers nothing of the seed here
-                        if (std::find(profile.unknown_labels.begin(), profile.unknown_labels.end(),
-                                      name) != profile.unknown_labels.end()) {
+                        if (absent.count(name)) {
                             p.labels_not_covering.push_back(name);
                             continue;
                         }
                         throw std::invalid_argument("Explicit seed label was not profiled: '" + name + "'");
                     }
-                    if (covers(*it, ex.kmers)) {
-                        p.labels.push_back(it - profile.labels.begin());
+                    if (covers(profile.labels[it->second], ex.kmers)) {
+                        p.labels.push_back(it->second);
                     } else {
                         p.labels_not_covering.push_back(name);
                     }

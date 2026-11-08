@@ -340,7 +340,10 @@ states them); the envelope is the one-entry envelope of a named `/traverse` as w
 Its `graph_summary` states `headers_unique` (section 9).
 From H2 (train 3) the block also states `resolve_discovery`: `{"max_tracked_labels": n, "max_memory_mb": n}`, the
 bounds of a `/resolve` discovery per pair (`--resolve-max-discover-labels`, `--resolve-max-discover-memory-mb`;
-integers, 0 for none; `SPEC-labeled-traversal-core.md` §4.6), as the `resolve` block's `discovery` states them.
+integers, 0 for none; `SPEC-labeled-traversal-core.md` §4.6), as the `resolve` block's `discovery` states them, and
+`resolve_max_explicit_labels` (an integer, 0 = unlimited): the cap on a `/resolve`'s explicit label lists
+(`--resolve-max-explicit-labels`, `SPEC-labeled-traversal-core.md` §4.1), as the `resolve` block's
+`max_explicit_labels`; above it the whole request is refused 400, before any pair.
 From E19 the block also states `max_concurrent`: `{"/pattern": n, "/resolve": n, "/traverse": n}`, the caps on
 the requests of each route the server runs at once (`--pattern-max-concurrent`, `--resolve-max-concurrent`,
 `--traverse-max-concurrent`), integers, 0 for a route without one; above a cap the request is refused 503 `busy`

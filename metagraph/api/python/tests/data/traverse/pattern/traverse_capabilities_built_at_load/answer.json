@@ -283,6 +283,7 @@
     "memory"
    ]
   },
+  "max_explicit_labels": 10000,
   "time_budget": {
    "accepted": true,
    "check_kmers": 4096,
