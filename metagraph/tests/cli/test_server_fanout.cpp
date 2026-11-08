@@ -1369,12 +1369,30 @@ TEST(ServerFanout, RetentionThen404) {
     EXPECT_NE(std::string::npos, forgetful.retention_text().find("not kept"));
 }
 
+// whether this build's speed is what a wall-clock bound may assume: optimized (NDEBUG), and no
+// sanitizer (GCC's __SANITIZE_*__, Clang's __has_feature)
+#if defined(__SANITIZE_ADDRESS__) || defined(__SANITIZE_THREAD__)
+#define H4_SANITIZED_BUILD 1
+#elif defined(__has_feature)
+#if __has_feature(address_sanitizer) || __has_feature(thread_sanitizer) \
+        || __has_feature(memory_sanitizer) || __has_feature(undefined_behavior_sanitizer)
+#define H4_SANITIZED_BUILD 1
+#endif
+#endif
+#if defined(NDEBUG) && !defined(H4_SANITIZED_BUILD)
+constexpr bool kTimesBounded = true;
+#else
+constexpr bool kTimesBounded = false;
+#endif
+
 // The retention at its defaults (3,600 s, at most 10,000): the count bound drops the oldest
 // first, an id that ran again after it was dropped is its newer entry, and a burst expires every
-// retained entry at once. Each expiry is one lookup of the record's own entry (GPT review 5,
-// finding 15: it scanned every later record for the id, 5 * 10^7 comparisons of the ids for a
-// burst of 10,000, under the lock of every admission and poll): the ids are long and differ at
-// their end only, so that the scan's comparisons, had it come back, would take seconds
+// retained entry at once. Each expiry is one map lookup of the record's own entry, O(log n)
+// comparisons of ids (GPT review 5, finding 15: it scanned every later record for the id,
+// 5 * 10^7 comparisons of the ids for a burst of 10,000, under the lock of every admission and
+// poll): the ids are long and differ at their end only, so that the scan's comparisons, had it
+// come back, would take seconds. Its times are bounded in an optimized build without a
+// sanitizer only (a Debug or sanitizer build is slower by a factor no bound states)
 TEST(ServerFanout, RetentionAtTheDefaultCount) {
     auto t = std::make_shared<std::atomic<int64_t>>(0);
     RequestSettings rs;
@@ -1437,9 +1455,12 @@ TEST(ServerFanout, RetentionAtTheDefaultCount) {
     *t += 1;
     EXPECT_EQ(404, registry.state(id(0)).first);
     EXPECT_EQ(0u, registry.size());
-    // one lookup per expiry: the scan took about 5 * 10^7 comparisons of 1,000-byte ids here
-    EXPECT_LT(burst_s, 1.0);
-    EXPECT_LT(fill_s, 10.0);
+    // one map lookup per expiry: the scan took about 5 * 10^7 comparisons of 1,000-byte ids
+    // here (seconds in a Release build); the bounds leave the lookups a factor of 20
+    if (kTimesBounded) {
+        EXPECT_LT(burst_s, 1.0);
+        EXPECT_LT(fill_s, 10.0);
+    }
     RecordProperty("fill_ms", std::to_string(fill_s * 1000));
     RecordProperty("burst_ms", std::to_string(burst_s * 1000));
 }

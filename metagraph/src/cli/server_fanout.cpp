@@ -449,8 +449,9 @@ void RequestRegistry::Shared::expire_locked() {
         const Ended record = std::move(ended.front());
         ended.pop_front();
         // the entry this record was made for, if the map still holds it: an id that ran again
-        // after it was dropped is a newer entry, held by its own record (one lookup, where a
-        // scan of every later record for the id took O(retained) under the lock)
+        // after it was dropped is a newer entry, held by its own record (one map lookup,
+        // O(log n) comparisons of ids, where a scan of every later record for the id took
+        // O(retained) under the lock)
         auto it = entries.find(record.id);
         if (it != entries.end() && it->second == record.entry.lock() && it->second->ended())
             entries.erase(it);
