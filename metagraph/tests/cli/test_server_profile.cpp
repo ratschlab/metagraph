@@ -322,6 +322,68 @@ TEST(MultiGraphProfile, ExactlyTheCapabilityFieldsEnterSupportFp) {
     EXPECT_EQ(0u, support_text(p).find("mgt-support 1\n"));
 }
 
+// Every member of the entry, and of its `traversal`, is either a field support_fp hashes or
+// one it leaves out on purpose (SPEC-multigraph-envelope.md section 8.1: the identity, the
+// size, support_fp itself). A member added later must go into one of the two lists: left out
+// of support_fields() unnoticed, it would merge two pairs of different capabilities under one
+// support_fp (a_member_added_later above shows that a member outside the list leaves the hash
+// alone). Both lists name members the entry has, so neither keeps a stale name.
+TEST(MultiGraphProfile, EveryMemberIsHashedOrExcluded) {
+    using namespace mtg::annot;
+    using namespace mtg::graph;
+    const std::set<std::string> excluded {
+        "graph", "graph_path", "annotation_path", "index_ns", "index_fp", "index_meta_fp",
+        "traversal.num_labels", "support_fp",
+    };
+    const std::set<std::string> hashed(support_fields().begin(), support_fields().end());
+    for (const std::string &name : excluded) {
+        EXPECT_FALSE(hashed.count(name)) << name << ": both hashed and excluded";
+    }
+    const auto seqs = random_sequences(3, 80, 31);
+    const auto labels = names("L", 3);
+    std::vector<std::unique_ptr<AnnotatedDBG>> indexes;
+    indexes.push_back(test::build_anno_graph<DBGSuccinct, RowDiffColumnAnnotator>(
+            21, seqs, labels, DeBruijnGraph::BASIC, true));
+    indexes.push_back(test::build_anno_graph<DBGSuccinct, ColumnCompressed<>>(21, seqs, labels));
+    indexes.push_back(test::build_anno_graph<DBGSuccinct, RowFlatAnnotator>(21, seqs, labels));
+    indexes.push_back(test::build_anno_graph<DBGHashOrdered, ColumnCompressed<>>(
+            21, seqs, labels));
+    for (const auto &index : indexes) {
+        // a multi-graph server's entry, and a single-graph server's pair_summary (tags null)
+        IndexIdentity id;
+        id.meta_fp = index_meta_fingerprint(LabelOracle(*index));
+        const Json::Value single = pair_summary_json(*index, id, Json::Value(), Json::Value(),
+                                                     Json::Value());
+        for (const Json::Value &p : { profile(*index), single }) {
+            ASSERT_TRUE(p.isObject());
+            ASSERT_TRUE(p["traversal"].isObject());
+            std::set<std::string> members;
+            for (const std::string &name : p.getMemberNames()) {
+                if (name == "traversal") {
+                    for (const std::string &member : p[name].getMemberNames()) {
+                        members.insert("traversal." + member);
+                    }
+                    continue;
+                }
+                // another object or array would need its members listed as traversal's are
+                EXPECT_FALSE(p[name].isObject() || p[name].isArray()) << name;
+                members.insert(name);
+            }
+            for (const std::string &name : members) {
+                EXPECT_TRUE(hashed.count(name) || excluded.count(name))
+                        << name << ": a member of the entry neither in support_fields() nor"
+                                   " excluded from support_fp";
+            }
+            for (const std::string &name : hashed) {
+                EXPECT_TRUE(members.count(name)) << name << ": hashed, not a member";
+            }
+            for (const std::string &name : excluded) {
+                EXPECT_TRUE(members.count(name)) << name << ": excluded, not a member";
+            }
+        }
+    }
+}
+
 // graph_representation: the loaded graph's --graph name
 TEST(MultiGraphProfile, GraphRepresentationIsTheGraphsType) {
     using namespace mtg::annot;
