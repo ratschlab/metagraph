@@ -112,10 +112,11 @@ struct ResolveOptions {
 constexpr uint64_t kDiscoverIndexEntryBytes = 112;
 constexpr uint64_t kDiscoverRunBytes = 32;
 constexpr uint64_t kDiscoverBreakBytes = 16;
-// the bytes charged per coordinate of a row a discovery accumulates beyond its labels: a
-// chain's coordinates (8 B at up to twice its size) and the scratch the coordinates are sorted
-// and mapped in (three buffers of 8 B a coordinate)
-constexpr uint64_t kDiscoverCoordBytes = 40;
+// the most a coordinate of a row adds to what a discovery holds beyond its labels, which the
+// check before a k-mer's accumulation counts: a chain's coordinates (8 B, a vector at most twice
+// its size) and the scratch the coordinates are sorted, chained and mapped in (three vectors of
+// 8 B a coordinate, each at most twice its size)
+constexpr uint64_t kDiscoverCoordBytes = 64;
 
 struct LabelProfile {
     LabelRef label;

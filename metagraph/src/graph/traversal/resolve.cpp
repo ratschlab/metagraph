@@ -900,11 +900,16 @@ SupportProfile resolve_support(LabelOracle &oracle,
         // only once the k-mer fits. |count| gives the row's labels not tracked and tracked,
         // read only where the bounds of |labels| alone do not decide
         auto admit_row = [&](size_t j, uint64_t labels, uint64_t coords, const auto &count) {
-            std::optional<std::pair<uint64_t, uint64_t>> counted;
+            // (a flag and a value rather than an optional, whose copy GCC 13 takes for
+            // maybe-uninitialized)
+            bool is_counted = false;
+            std::pair<uint64_t, uint64_t> counted { 0, 0 };
             auto counts = [&]() {
-                if (!counted)
+                if (!is_counted) {
                     counted = count();
-                return *counted;
+                    is_counted = true;
+                }
+                return counted;
             };
             bool cut_here = false;
             uint64_t fresh_max = 0;

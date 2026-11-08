@@ -2,6 +2,8 @@
 
 #include <algorithm>
 #include <filesystem>
+#include <fstream>
+#include <iterator>
 #include <limits>
 #include <map>
 #include <random>
@@ -11,6 +13,7 @@
 #include <vector>
 
 #include "tests/test_helpers.hpp"
+#include "tests/source_path.hpp"
 #include "tests/graph/all/test_dbg_helpers.hpp"
 #include "tests/annotation/test_annotated_dbg_helpers.hpp"
 
@@ -296,8 +299,9 @@ TYPED_TEST(ResolveBoundsTest, TheCapTracksTheLabelsFirstMetBeforeTheCut) {
                 const size_t kept = std::min(before, max_labels);
                 ASSERT_EQ(kept, got.labels.size()) << what;
                 EXPECT_EQ(before > max_labels, got.labels_truncated.has_value()) << what;
-                if (got.labels_truncated)
+                if (got.labels_truncated) {
                     EXPECT_EQ(before, got.labels_truncated->total) << what;
+                }
                 for (const LabelProfile &lp : got.labels) {
                     const LabelProfile &u = *uncut.at(lp.label.name);
                     EXPECT_LT(u.runs.front().begin, cut) << what << " " << lp.label.name;
@@ -307,8 +311,9 @@ TYPED_TEST(ResolveBoundsTest, TheCapTracksTheLabelsFirstMetBeforeTheCut) {
                 }
                 // every untracked label within the bound
                 for (const LabelProfile &lp : all.labels) {
-                    if (lp.runs.front().begin >= cut)
+                    if (lp.runs.front().begin >= cut) {
                         EXPECT_LE(lp.kmers_supported, bound) << what << " " << lp.label.name;
+                    }
                 }
                 // above the bound the kept labels are the uncut discovery's, in its order
                 std::vector<std::string> above, above_uncut;
@@ -704,6 +709,58 @@ TEST(ResolveBoundsRoute, CapabilitiesBlock) {
     EXPECT_EQ("{\"max_memory_mb\":0,\"max_tracked_labels\":0,\"rule\":"
               "\"SPEC-labeled-traversal-core.md section 4.6\",\"stop_reasons\":[\"time\","
               "\"memory\"]}", compact(cli::resolve_capabilities_json({})["discovery"]));
+}
+
+// The reference samples of the bounds (SPEC-labeled-traversal-core.md §4.6), real runs: 27 a cut by the label cap
+// (labels_capped with the members the route writes, ranking_exact checkable from the entry alone), 28 a memory
+// stop without a deadline (the members of a time stop's block, reason memory and max_memory_mb, the entry the
+// resolve of its first resolved_kmers k-mers)
+TEST(ResolveBoundsRoute, Samples27And28) {
+    auto sample = [](const std::string &name) {
+        const std::string path = source_path("tests/data/multigraph_contract/" + name);
+        std::ifstream in(path, std::ios::binary);
+        EXPECT_TRUE(in.good()) << path << " not found";
+        Json::Value doc;
+        std::string errors;
+        Json::CharReaderBuilder builder;
+        EXPECT_TRUE(Json::parseFromStream(builder, in, &doc, &errors)) << errors;
+        return doc;
+    };
+    const Json::Value s27 = sample("27_resolve_labels_capped.json");
+    EXPECT_EQ(200, s27["status"].asInt());
+    const uint64_t max_labels = s27["request"]["discover"]["max_labels"].asUInt64();
+    ASSERT_EQ(2u, s27["body"]["answers"].size());
+    for (const Json::Value &entry : s27["body"]["answers"]) {
+        const Json::Value &c = entry["labels_capped"];
+        EXPECT_EQ((std::vector<std::string>{ "cut_kmer", "max_tracked", "message", "met_at_least",
+                                             "new_at_cut", "ranking_exact", "remainder_from_bp",
+                                             "tracked", "untracked_max_kmers" }),
+                  c.getMemberNames());
+        const Json::Value &kept = entry["labels"];
+        EXPECT_EQ(kept.size() == max_labels
+                      && kept[kept.size() - 1]["kmers_supported"].asUInt64()
+                             > c["untracked_max_kmers"].asUInt64(),
+                  c["ranking_exact"].asBool());
+        EXPECT_TRUE(c["ranking_exact"].asBool());
+        EXPECT_EQ(c["cut_kmer"].asUInt64(), c["remainder_from_bp"].asUInt64());
+        EXPECT_EQ(c["tracked"].asUInt64() + c["new_at_cut"].asUInt64(),
+                  c["met_at_least"].asUInt64());
+        EXPECT_FALSE(entry.isMember("stop"));
+    }
+    const Json::Value s28 = sample("28_resolve_memory_stop.json");
+    EXPECT_EQ(200, s28["status"].asInt());
+    ASSERT_EQ(1u, s28["body"]["answers"].size());
+    const Json::Value &entry = s28["body"]["answers"][0];
+    const Json::Value &stop = entry["stop"];
+    EXPECT_EQ((std::vector<std::string>{ "max_memory_mb", "message", "phase", "query_bp", "query_kmers",
+                                         "reason", "remainder_from_bp", "resolved_bp",
+                                         "resolved_kmers" }),
+              stop.getMemberNames());
+    EXPECT_EQ("memory", stop["reason"].asString());
+    EXPECT_EQ("rows", stop["phase"].asString());
+    EXPECT_EQ(stop["resolved_kmers"].asUInt64(), entry["num_kmers"].asUInt64());
+    EXPECT_EQ(stop["resolved_kmers"].asUInt64(), stop["remainder_from_bp"].asUInt64());
+    EXPECT_FALSE(entry.isMember("limits"));
 }
 
 } // namespace

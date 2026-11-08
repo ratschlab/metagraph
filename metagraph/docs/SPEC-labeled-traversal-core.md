@@ -427,7 +427,9 @@ pass (24 B per tracked label) and the answer (at most min(`max_labels`, N) label
 max_memory_mb, stop_reasons: ["time", "memory"], rule}` (integers, 0 for none; `rule` a reference to this section);
 a multi-graph server's `multigraph` block states `resolve_discovery: {max_tracked_labels, max_memory_mb}`. No
 `feature_level` (every `/resolve` and `/traverse` answer states it). A client merging the discoveries of several
-pairs follows SPEC-multigraph-envelope.md §7.
+pairs follows SPEC-multigraph-envelope.md §7. Reference instances: the contract samples
+(`tests/data/multigraph_contract/`) `27_resolve_labels_capped.json` (a cut, `ranking_exact` true) and
+`28_resolve_memory_stop.json` (a memory stop without a deadline), real runs.
 
 ## 5. `traverse` request
 
