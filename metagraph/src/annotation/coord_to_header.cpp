@@ -191,21 +191,21 @@ bool CoordToHeader::load(const std::string &filename_base) {
                       utils::file_read_failure_detail(path));
         return false;
     }
-    {
-        // the index views the headers about to be replaced
-        std::lock_guard<std::mutex> lock(header_index_mutex_);
-        header_index_.reset();
-    }
-
     try {
+        // read into new vectors, so that a failed load leaves this object as it was
         uint64_t num_columns = load_number(*in);
-        headers_.resize(num_columns);
-        coord_offsets_.resize(num_columns);
+        std::vector<std::vector<std::string>> headers(num_columns);
+        std::vector<bit_vector_sd> coord_offsets(num_columns);
 
         for (uint64_t i = 0; i < num_columns; ++i) {
-            load_string_vector(*in, &headers_[i]);
-            coord_offsets_[i].load(*in);
+            load_string_vector(*in, &headers[i]);
+            coord_offsets[i].load(*in);
         }
+        // the index views the headers being replaced: drop it with them
+        std::lock_guard<std::mutex> lock(header_index_mutex_);
+        header_index_.reset();
+        headers_.swap(headers);
+        coord_offsets_.swap(coord_offsets);
         return true;
 
     } catch (const std::exception &e) {

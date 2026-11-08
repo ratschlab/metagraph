@@ -70,7 +70,9 @@ std::vector<node_index> LabelOracle::keys_of_sequence(std::string_view sequence)
         return keys;
     keys.reserve(sequence.size() - get_k() + 1);
     // map_to_nodes returns annotation keys in every regime: the node itself (BASIC),
-    // the primary node (CanonicalDBG), the canonical node (native CANONICAL graphs)
+    // the primary node (CanonicalDBG), the canonical node (native CANONICAL graphs).
+    // Every graph calls them in query order, although the base class promises that only
+    // for map_to_nodes_sequentially; RegimeAndKeyMapping checks it per k-mer.
     graph_->map_to_nodes(sequence, [&](node_index key) { keys.push_back(key); });
     counters_.keys_mapped += keys.size();
     return keys;
@@ -233,12 +235,10 @@ void LabelQuery::hits_from_tuples(const MultiIntMatrix::RowTuples &row, NodeHits
     hits->erase(std::unique(hits->begin(), hits->end()), hits->end());
 }
 
-void LabelQuery::fetch_uncached(const std::vector<node_index> &keys) {
+void LabelQuery::read_hits(const std::vector<node_index> &keys,
+                           tsl::hopscotch_map<node_index, NodeHits> *out) const {
     if (keys.empty())
         return;
-    if (cache_.size() + keys.size() > max_cache_size_)
-        cache_.clear();
-
     std::vector<Row> rows;
     rows.reserve(keys.size());
     for (node_index key : keys) {
@@ -247,12 +247,12 @@ void LabelQuery::fetch_uncached(const std::vector<node_index> &keys) {
     if (tuples_) {
         auto tuple_rows = oracle_.get_row_tuples(rows);
         for (size_t i = 0; i < keys.size(); ++i) {
-            hits_from_tuples(tuple_rows[i], &cache_[keys[i]]);
+            hits_from_tuples(tuple_rows[i], &(*out)[keys[i]]);
         }
     } else {
         auto set_rows = oracle_.get_rows(rows);
         for (size_t i = 0; i < keys.size(); ++i) {
-            hits_from_row(set_rows[i], &cache_[keys[i]]);
+            hits_from_row(set_rows[i], &(*out)[keys[i]]);
         }
     }
 }
@@ -272,9 +272,10 @@ std::vector<LabelQuery::NodeHits> LabelQuery::fetch(const std::vector<node_index
             missing.push_back(key);
         }
     }
-    // a clear in fetch_uncached may drop keys requested here: read them all again then
+    // when the new keys do not fit, clear the cache and read every key of this batch
     if (cache_.size() + missing.size() > max_cache_size_) {
         cache_hits = 0;
+        cache_.clear();
         missing.clear();
         requested.clear();
         for (node_index key : keys) {
@@ -283,12 +284,16 @@ std::vector<LabelQuery::NodeHits> LabelQuery::fetch(const std::vector<node_index
         }
     }
     counters.cache_hits += cache_hits;
-    fetch_uncached(missing);
+
+    // a batch larger than the cache is answered without caching it
+    tsl::hopscotch_map<node_index, NodeHits> uncached;
+    auto *found = missing.size() > max_cache_size_ ? &uncached : &cache_;
+    read_hits(missing, found);
 
     std::vector<NodeHits> result(keys.size());
     for (size_t i = 0; i < keys.size(); ++i) {
         if (keys[i] != npos)
-            result[i] = cache_.at(keys[i]);
+            result[i] = found->at(keys[i]);
     }
     return result;
 }
