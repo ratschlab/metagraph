@@ -27,8 +27,9 @@ exits with status 1), so that a misspelled field is never ignored.
 
 A label is either an annotation **column** (for example a taxid or a file) or, on an index with
 k-mer coordinates and a sequence header index (`annotate --index-header-coords`), one indexed
-**sequence** of a column, named by its FASTA **header** (for example an accession). A name is
-resolved as a column first, then as a header.
+**sequence** of a column, named by its FASTA **header** (for example an accession). A name that
+is both a column and a header, or the header of several sequences, is ambiguous: a request that
+names it is refused (HTTP 400). The server builds its header index when it starts.
 
 ## `/resolve`
 
