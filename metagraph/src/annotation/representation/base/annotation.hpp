@@ -20,8 +20,10 @@ namespace annot {
 template <typename Label = std::string>
 class LabelEncoder;
 
-// The hash of the label set in LabelEncoder. LE-v2.1 files store buckets made
-// with it, so it must give the same values on every platform and never change.
+// The hash of the label set in LabelEncoder. Only string labels are saved: LE-v2.1
+// files store buckets made with LabelHash<std::string>, so it must give the same
+// values on every platform and never change. Other label types are never saved and
+// keep std::hash.
 template <typename Label>
 struct LabelHash : std::hash<Label> {};
 

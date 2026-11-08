@@ -5,10 +5,12 @@ Unreleased
 ----------
 
 Annotations now store their label names with a fixed hash (XXH3), so they load
-the same way on every platform. Earlier files used the C++ standard library's
-hash, which differs between Linux and macOS builds. Label lookups then failed
-when an annotation was loaded on the other platform. This version reads
-earlier annotations on any platform. Annotations it writes cannot be loaded by
+the same way with every build. Earlier files used the C++ standard library's
+hash, which differs between standard libraries (for example, libstdc++ on Linux
+and libc++ on macOS). Label lookups then failed when an annotation was loaded by
+a build with another standard library. This version reads earlier annotations
+with any build and rebuilds their label index on load, which takes about
+0.1 seconds per million labels. Annotations it writes cannot be loaded by
 earlier versions.
 
 The HTTP ``/align`` endpoint now rejects invalid ``max_alternative_alignments``
