@@ -1206,7 +1206,9 @@ delivered, and state the limiting resource and the useful next action — the st
   SPEC §8.2).
 - **Not covered:** the formats without row-diff other than BRWT and ColumnMajor (TupleCSC alone, the flat and
   sparse row formats, counts without row-diff), `row_diff_int_disk` and `row_diff_disk_coord` read through the
-  default path, stated; `/resolve` has no memory budget; a level's rows and lists are not charged in the account.
+  default path, stated; `/resolve` has no request memory budget (a discovery reads charged under the server's
+  bound since GPT review 5's finding 3, SPEC §4.6; explicit labels read by the default path); a level's rows and
+  lists are not charged in the account.
   Agreed for when this is built: every format except the four legacy ones (rbfish,
   rb_brwt, bin_rel_wt, row/EigenSpMat), which stay stated as uncovered; ColumnMajor read as column-wise charged
   pairs (built in E14 for the queries `auto` reads cell by cell); work-only budgets keep the default decode on formats without row-diff; each head's rows released once it is

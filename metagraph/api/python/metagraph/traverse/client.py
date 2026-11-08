@@ -575,7 +575,13 @@ class TraverseClient:
         sequence's first resolved_kmers k-mers -- resolve sequence[remainder_from_bp:] for the
         rest. An answer that could not be built within the budget raises ResolveDeadline (503).
         A server without the field (no `resolve` block in its capabilities) refuses it: a
-        TraverseError 400 naming it. None (the default): no bounds.time_budget_ms is sent."""
+        TraverseError 400 naming it. None (the default): no bounds.time_budget_ms is sent.
+
+        A discovery is bounded by the server (SPEC §4.6; capabilities()['resolve']['discovery']):
+        its label cap's cut is stated as `labels_capped` (absent where it did not bind;
+        ranking_exact true exactly when the kept labels number discover.max_labels and the last
+        supports more than untracked_max_kmers), and its memory bound's stop as `stop` with
+        reason 'memory' (the same members as a time stop's, with or without time_budget_ms)."""
         req = {'sequence': sequence}
         if labels is not None:
             req['labels'] = list(labels)

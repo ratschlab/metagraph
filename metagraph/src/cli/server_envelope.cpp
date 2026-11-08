@@ -210,7 +210,8 @@ Json::Value expect_server_instance_routes_json() {
 
 Json::Value multigraph_capabilities_json(uint64_t max_request_memory_mb, const RouteCaps &caps,
                                          const Json::Value &request_intake,
-                                         const Json::Value &column_labels) {
+                                         const Json::Value &column_labels,
+                                         const ResolveDiscoveryBounds &discovery) {
     auto strings = [](std::initializer_list<const char *> values) {
         Json::Value out(Json::arrayValue);
         for (const char *value : values) {
@@ -259,6 +260,16 @@ Json::Value multigraph_capabilities_json(uint64_t max_request_memory_mb, const R
     // strict-JSON routes and its 400, as a single-graph server states them at the top level
     m["request_intake"] = request_intake;
     m["column_labels"] = column_labels;
+    // the bounds of a /resolve discovery, per pair (SPEC-labeled-traversal-core.md §4.6), as
+    // the `resolve` block's `discovery` states them: a graph-less client sees them too
+    Json::Value d(Json::objectValue);
+    d["max_tracked_labels"] = Json::Value(static_cast<Json::UInt64>(discovery.max_tracked_labels));
+    d["max_memory_mb"] = Json::Value(static_cast<Json::UInt64>(discovery.max_memory_mb));
+    m["resolve_discovery"] = std::move(d);
+    // the cap on a /resolve's explicit label lists (H2 addendum), as the `resolve` block's
+    // max_explicit_labels states it
+    m["resolve_max_explicit_labels"]
+            = Json::Value(static_cast<Json::UInt64>(discovery.max_explicit_labels));
     return m;
 }
 

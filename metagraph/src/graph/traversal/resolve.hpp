@@ -83,7 +83,40 @@ struct ResolveOptions {
     size_t batch_rows = kResolveBatchRows;
     uint64_t batch_bytes = kResolveBatchBytes;
     uint64_t kept_bytes = kResolveKeptBytes;
+
+    // The bounds of a discovery (SPEC-labeled-traversal-core.md §4.6; the server's
+    // --resolve-max-discover-labels and --resolve-max-discover-memory-mb, the CLI none). Not
+    // request fields.
+    // |discover_max_tracked|: the most labels the discovery tracks (0: no cap). A label is
+    // tracked from the first k-mer it is met at; the labels first met at a k-mer are admitted
+    // all or none: the first k-mer whose new labels would make more than this many is the cut
+    // k-mer, and no label first met there or later is tracked (SupportProfile::labels_capped)
+    size_t discover_max_tracked = 0;
+    // |discover_max_memory|: the bytes the discovery's pass may hold (0: no bound), charged
+    // before they are allocated — the rows by the budget-aware reads, the rows kept for
+    // repeats, the label index, the accumulators (kDiscover*Bytes) and the pass's arrays. The
+    // pass decodes a batch in halves, gives up the rows kept and reads the next row alone
+    // before it stops: only a k-mer whose row read alone, or whose accumulation, does not fit
+    // beside the accumulators of the k-mers before it ends the work there (ResolveStop::MEMORY:
+    // the resolve of the query's prefix before that k-mer)
+    uint64_t discover_max_memory = 0;
 };
+
+// What a discovery charges against ResolveOptions::discover_max_memory for its accumulators
+// (§4.6; the rows are charged by the decoder): per label tracked its accumulator and its id
+// (held in deques: no relocation), and of a header label its entry in the label index (a hash
+// table at most 90% full, which doubles: its entry, the empty buckets and the table before
+// the growth while it is moved); per run and per trace break twice the element (a vector at
+// most twice its size); per chain coordinate beyond those held inline its heap (charged as
+// the vector's capacity grows). A model of the heap, never a measurement
+constexpr uint64_t kDiscoverIndexEntryBytes = 112;
+constexpr uint64_t kDiscoverRunBytes = 32;
+constexpr uint64_t kDiscoverBreakBytes = 16;
+// the most a coordinate of a row adds to what a discovery holds beyond its labels, which the
+// check before a k-mer's accumulation counts: a chain's coordinates (8 B, a vector at most twice
+// its size) and the scratch the coordinates are sorted, chained and mapped in (three vectors of
+// 8 B a coordinate, each at most twice its size)
+constexpr uint64_t kDiscoverCoordBytes = 64;
 
 struct LabelProfile {
     LabelRef label;
@@ -114,6 +147,27 @@ struct LabelTruncation {
     size_t tied_kept = 0;
 };
 
+// A discovery's cut by ResolveOptions::discover_max_tracked (SPEC-labeled-traversal-core.md
+// §4.6): the labels tracked are exactly those first met at a k-mer before |cut_kmer|, each
+// counted over the whole query (its kmers_supported, runs and trace breaks are the uncut
+// discovery's); a label first met at |cut_kmer| or later was not tracked, and supports at most
+// |untracked_max_kmers| k-mers (the in-graph k-mers from |cut_kmer| on, of the prefix under a
+// stop). LabelTruncation describes the tracked labels
+struct LabelCap {
+    size_t max_tracked = 0;
+    size_t tracked = 0;
+    uint64_t cut_kmer = 0;
+    size_t new_at_cut = 0;                   // the labels first met at |cut_kmer|
+    uint64_t untracked_max_kmers = 0;
+    // the kept labels are the uncut discovery's top discover_max_labels: that many kept, the
+    // last one supporting more than |untracked_max_kmers|
+    bool ranking_exact = false;
+    size_t max_labels = 0;                   // ResolveOptions::discover_max_labels
+    size_t kept = 0;
+    uint64_t min_kept_kmers = 0;             // of the last kept label (0: none kept)
+    uint64_t met_at_least() const { return tracked + new_at_cut; }
+};
+
 // The k-mers between two checkpoints of the explicit labels' support pass: a hit list per
 // k-mer is a few to a few thousand hits, so a gone client (and a deadline) is seen within
 // milliseconds, and a check (a peek on its socket, a clock read) costs nothing beside that
@@ -132,6 +186,11 @@ struct ResolveStop {
     // priming) or before it; SUPPORT: the explicit labels' hits, k-mer by k-mer
     enum Phase { ROWS, SUPPORT };
     Phase phase = ROWS;
+    // TIME: the deadline (ResolveOptions::time_up); MEMORY: a discovery's memory bound
+    // (ResolveOptions::discover_max_memory, |max_memory| bytes; always in phase ROWS)
+    enum Reason { TIME, MEMORY };
+    Reason reason = TIME;
+    uint64_t max_memory = 0;
     uint64_t resolved_kmers = 0;
     uint64_t query_kmers = 0;
     // the runs of the WHOLE query's k-mers present in the graph (SupportProfile::graph_runs
@@ -153,9 +212,12 @@ struct SupportProfile {
     // (ResolveOptions::drop_labels_not_in_graph; empty otherwise)
     std::vector<std::string> unknown_labels;
     std::optional<LabelTruncation> labels_truncated;
+    // set when the discovery's label cap bound (ResolveOptions::discover_max_tracked)
+    std::optional<LabelCap> labels_capped;
     std::vector<SeedCandidate> candidates;   // ordered: longer, more labels, smaller begin
-    // set when the deadline ended the work: every field above is then exactly the resolve of
-    // the query's first num_kmers k-mers (a run ending there may continue past it)
+    // set when the deadline or a discovery's memory bound ended the work: every field above is
+    // then exactly the resolve of the query's first num_kmers k-mers (a run ending there may
+    // continue past it)
     std::optional<ResolveStop> stop;
     // The modelled memory of the work at its largest (bytes; work.memory_bytes, SPEC §4.4 and
     // §7.2.2): what the request's structures held at once — the query's k-mers and keys, the
