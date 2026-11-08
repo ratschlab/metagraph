@@ -39,13 +39,13 @@ struct HeaderOfRecordEqual {
 // header -> (column, seq_id) of its first occurrence in column order
 struct CoordToHeader::HeaderIndex {
     tsl::hopscotch_map<std::string_view, std::pair<Column, size_t>> map;
+    tsl::hopscotch_set<std::string_view> repeated;  // the headers of several records
 };
 
 CoordToHeader::CoordToHeader() {}
 CoordToHeader::~CoordToHeader() {}
 
-std::optional<std::pair<CoordToHeader::Column, size_t>>
-CoordToHeader::find_header(std::string_view header) const {
+const CoordToHeader::HeaderIndex& CoordToHeader::header_index() const {
     std::lock_guard<std::mutex> lock(header_index_mutex_);
     if (!header_index_) {
         auto index = std::make_unique<HeaderIndex>();
@@ -56,15 +56,32 @@ CoordToHeader::find_header(std::string_view header) const {
         index->map.reserve(total);
         for (Column col = 0; col < headers_.size(); ++col) {
             for (size_t s = 0; s < headers_[col].size(); ++s) {
-                index->map.try_emplace(std::string_view(headers_[col][s]), col, s);
+                const std::string_view header(headers_[col][s]);
+                if (!index->map.try_emplace(header, col, s).second)
+                    index->repeated.insert(header);
             }
         }
         header_index_ = std::move(index);
     }
-    auto it = header_index_->map.find(header);
-    if (it == header_index_->map.end())
+    // the index is immutable once built, so lookups run outside the lock
+    return *header_index_;
+}
+
+void CoordToHeader::index_headers() const {
+    header_index();
+}
+
+std::optional<std::pair<CoordToHeader::Column, size_t>>
+CoordToHeader::find_header(std::string_view header) const {
+    const HeaderIndex &index = header_index();
+    auto it = index.map.find(header);
+    if (it == index.map.end())
         return std::nullopt;
     return it->second;
+}
+
+bool CoordToHeader::is_repeated_header(std::string_view header) const {
+    return header_index().repeated.count(header);
 }
 
 void CoordToHeader::find_duplicate_headers(const std::vector<std::string> &headers,

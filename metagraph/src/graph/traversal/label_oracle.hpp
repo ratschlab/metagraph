@@ -81,8 +81,9 @@ class LabelOracle {
     std::pair<uint64_t, uint64_t> map_coord(Column column, uint64_t coord) const;
     // The first and last column coordinates of sequence |seq_id|. Requires a CoordToHeader.
     std::pair<uint64_t, uint64_t> sequence_coords(Column column, uint64_t seq_id) const;
-    // A column name first, then a header. Throws std::invalid_argument naming the label if
-    // neither exists.
+    // A column name or a header. Throws std::invalid_argument naming the label if neither
+    // exists, or if it is ambiguous: both a column and a header, or the header of several
+    // records.
     LabelRef resolve_label(const std::string &name) const;
 
     // Batched row access (rows = annotation key - 1). Updates the counters.
