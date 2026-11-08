@@ -766,8 +766,6 @@ std::optional<EndReason> Walker::cap_check(const ArmState &arm, size_t nf, size_
     };
     if (steps_total_ + nf > strategy_.max_steps)
         return over(steps_total_ + nf, EndReason::MAX_STEPS);
-    if (arm.result.output_bp + nf > strategy_.max_output_bp)
-        return over(arm.result.output_bp + nf, EndReason::MAX_OUTPUT);
     const size_t live_after = remaining + arm.next.size() + nf;
     if (nf >= 2 && arm.finished_leaves + live_after > strategy_.max_paths)
         return over(arm.finished_leaves + live_after, EndReason::MAX_PATHS);
@@ -911,7 +909,6 @@ std::optional<EndReason> Walker::process_item(ArmState &arm, Item &item,
 
     // ---- steps
     arm.result.steps += nf;
-    arm.result.output_bp += nf;
     steps_total_ += nf;
 
     if (nf == 1) {

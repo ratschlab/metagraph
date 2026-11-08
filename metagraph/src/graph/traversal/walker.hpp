@@ -66,7 +66,6 @@ struct Strategy {
     uint64_t max_steps = 1'000'000;
     size_t max_live_paths = 1000;
     size_t max_paths = 10'000;
-    uint64_t max_output_bp = 2'000'000;
 };
 
 struct Seed {
@@ -199,7 +198,6 @@ struct ArmResult {
     std::vector<PathResult> paths;
 
     uint64_t steps = 0;
-    uint64_t output_bp = 0;
 };
 
 // A seed label that does not carry every seed k-mer

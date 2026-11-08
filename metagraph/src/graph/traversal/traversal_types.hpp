@@ -59,7 +59,6 @@ enum class EndReason : uint8_t {
     MAX_STEPS,
     MAX_LIVE_PATHS,
     MAX_PATHS,
-    MAX_OUTPUT,
     MAX_SPLITS,       // a path reached its split limit: the walks past that fork are missing
     TIME_BUDGET,
 };

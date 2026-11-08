@@ -112,7 +112,6 @@ void check_invariants(const ArmResult &arm) {
         }
     }
     EXPECT_EQ(arm.steps, bases);
-    EXPECT_EQ(arm.output_bp, bases);
     for (const auto &path : arm.paths) {
         const Segment &leaf = arm.segments[path.leaf];
         EXPECT_TRUE(leaf.children.empty());
@@ -141,7 +140,7 @@ std::string serialize(const SeedResult &r) {
     }
     for (const ArmResult &a : r.arms) {
         os << "\nARM " << to_string(a.arm) << ' ' << a.requested << ' ' << a.status << ' '
-           << a.steps << ' ' << a.output_bp << ' ' << a.frontier_live_paths << ' '
+           << a.steps << ' ' << a.frontier_live_paths << ' '
            << a.complete_to_bp;
         if (a.cap_trigger)
             os << " cap " << to_string(a.cap_trigger->reason) << ' ' << a.cap_trigger->at_bp;
@@ -660,20 +659,6 @@ TYPED_TEST(WalkerTest, Caps) {
             ASSERT_EQ(1u, arm.paths.size());
             EXPECT_EQ(EndReason::MAX_STEPS, *arm.paths[0].path_reason);
             EXPECT_EQ(1u, count_ends(arm, EndReason::MAX_STEPS));
-        }
-
-        st = Strategy();
-        st.max_output_bp = 10;
-        res = run(*linear, seed, { "A" }, st);
-        for (size_t a : { kLeft, kRight }) {
-            const ArmResult &arm = res.arms[a];
-            check_invariants(arm);
-            EXPECT_EQ(ArmResult::TRUNCATED, arm.status);
-            EXPECT_EQ(10u, arm.output_bp);
-            ASSERT_TRUE(arm.cap_trigger.has_value());
-            EXPECT_EQ(EndReason::MAX_OUTPUT, arm.cap_trigger->reason);
-            EXPECT_EQ(10u, arm.cap_trigger->at_bp);
-            EXPECT_EQ(1u, count_ends(arm, EndReason::MAX_OUTPUT));
         }
 
         // the live-path and path caps stop one arm only
