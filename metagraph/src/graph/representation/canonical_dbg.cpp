@@ -43,6 +43,14 @@ CanonicalDBG::CanonicalDBG(std::shared_ptr<const DeBruijnGraph> graph, size_t ca
     }
 }
 
+std::shared_ptr<CanonicalDBG>
+CanonicalDBG::with_node_first_cache(std::shared_ptr<const DeBruijnGraph> graph) {
+    auto canonical = std::make_shared<CanonicalDBG>(std::move(graph));
+    if (const DBGSuccinct *dbg_succ = get_dbg_succ(canonical->get_graph()))
+        canonical->add_extension(std::make_shared<NodeFirstCache>(*dbg_succ));
+    return canonical;
+}
+
 NodeFirstCache& CanonicalDBG::get_cache() const {
     if (auto *cache = get_extension_threadsafe<NodeFirstCache>())
         return *cache;

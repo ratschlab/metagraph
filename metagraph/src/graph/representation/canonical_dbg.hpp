@@ -27,6 +27,12 @@ class CanonicalDBG : public DBGWrapper<DeBruijnGraph> {
     CanonicalDBG(const CanonicalDBG &canonical)
           : CanonicalDBG(canonical.graph_, canonical.cache_size_) {}
 
+    // A wrapper of the PRIMARY |graph| with caches of its own, including a NodeFirstCache
+    // when it is a DBGSuccinct, which speeds up backward traversal. Nothing shared with
+    // other wrappers of |graph| is changed.
+    static std::shared_ptr<CanonicalDBG>
+    with_node_first_cache(std::shared_ptr<const DeBruijnGraph> graph);
+
     /**
      * Added methods
      */

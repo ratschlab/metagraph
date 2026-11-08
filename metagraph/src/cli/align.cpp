@@ -416,8 +416,8 @@ int align_to_graph(Config *config) {
 
     auto wrap_graph = [&](auto graph) {
         if (graph->get_mode() == DeBruijnGraph::PRIMARY) {
-            graph = std::make_shared<CanonicalDBG>(graph);
             logger->trace("Primary graph wrapped into canonical");
+            return std::shared_ptr<DeBruijnGraph>(CanonicalDBG::with_node_first_cache(graph));
         }
 
         // If backwards traversal on DBGSuccinct will be needed, then add a cache
@@ -425,7 +425,7 @@ int align_to_graph(Config *config) {
         if (dbg_succ)
             graph->add_extension(std::make_shared<NodeFirstCache>(*dbg_succ));
 
-        return graph;
+        return std::shared_ptr<DeBruijnGraph>(graph);
     };
 
     // if using a small number of threads, use a shared cache for all threads
