@@ -17,7 +17,9 @@ together (a name spanning two graphs). What such a server serves, as /search doe
     present), whichever spelling named the graph;
   - `in_ram` on /pattern, /traverse and /resolve loads the pair into RAM for the request (a
     server on mmap, the pair within --mem-cap-gb), the budgets after the load, timing.load_ms;
-  - GET /capabilities: the per-pair summary (graph_summary) and columns_disjoint;
+  - GET /capabilities: the per-pair summary (graph_summary) and columns_disjoint, each pair's
+    capability profile (E17: index_meta_fp at start-up, alphabet, graph_representation,
+    annotation_form, decode_charged, traversal.counts and support_fp);
   - GET /pattern/capabilities?graph= and /traverse/capabilities?graph=: the pair's block, in
     the envelope of one entry (SPEC-multigraph-envelope.md section 1), and every pair's without
     ?graph=; a /traverse answers in the envelope of its one pair.
@@ -46,6 +48,7 @@ import requests
 
 from base import PROTEIN_MODE, TestingBase, METAGRAPH
 from test_pattern import gate_block
+from test_traverse_forms import CHARGED
 
 MINI_DIR = os.environ.get('METAGRAPH_MINI_REFSEQ', os.path.join(os.getcwd(), 'mini_refseq'))
 FASTA = os.path.join(MINI_DIR, 'fasta')
@@ -109,6 +112,39 @@ def revcomp(s):
 
 def pair_names(capabilities):
     return [p['graph'] for p in capabilities['graph_summary']['pairs']]
+
+
+SPEC_ENVELOPE = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'docs',
+                             'SPEC-multigraph-envelope.md')
+
+
+def support_rule():
+    """The version line and the fields of support_fp, as SPEC-multigraph-envelope.md section 8.1
+    states them (its fenced block: the version line, then "<name>=<value>" per field)"""
+    with open(SPEC_ENVELOPE) as f:
+        lines = f.read().split('\n')
+    start = next(i for i, line in enumerate(lines) if line.startswith('mgt-support '))
+    end = next(i for i in range(start, len(lines)) if lines[i].startswith('```'))
+    fields = [line[:-len('=<value>')] for line in lines[start + 1:end]]
+    assert all(line.endswith('=<value>') for line in lines[start + 1:end]), lines[start:end]
+    return lines[start], fields
+
+
+def support_fp(pair):
+    """support_fp recomputed from a graph_summary entry (or pair_summary) alone, by the rule of
+    SPEC-multigraph-envelope.md section 8.1: FNV-1a-64 over the version line and a line
+    "<name>=<compact JSON>" per field, as 16 lowercase hex digits"""
+    version, fields = support_rule()
+    text = version + '\n'
+    for name in fields:
+        value = pair
+        for part in name.split('.'):
+            value = value.get(part) if isinstance(value, dict) else None
+        text += f'{name}={json.dumps(value)}\n'
+    h = 14695981039346656037
+    for byte in text.encode():
+        h = ((h ^ byte) * 1099511628211) & 0xFFFFFFFFFFFFFFFF
+    return '%016x' % h
 
 
 def single(out, route=None):
@@ -339,7 +375,7 @@ class TestMultiGraphServer(TestingBase):
                 self.assertEqual((None, None), (p['index_ns'], p['index_fp']))
                 self.assertEqual({'regime': 'basic', 'num_labels': len(self.columns[chunk]),
                                   'has_coordinates': masked, 'has_coord_to_header': masked,
-                                  'supports_trace': masked}, p['traversal'])
+                                  'supports_trace': masked, 'counts': None}, p['traversal'])
                 # what the pair's own documents say
                 block = single(self.server.get(f'pattern/capabilities?graph={chunk}').json())
                 for key in ('k', 'graph_mode', 'available', 'mask', 'counting'):
@@ -348,6 +384,48 @@ class TestMultiGraphServer(TestingBase):
                 for key in ('regime', 'num_labels', 'has_coordinates', 'has_coord_to_header',
                             'supports_trace'):
                     self.assertEqual(probe[key], p['traversal'][key], key)
+
+    def test_capabilities_state_each_pairs_profile(self):
+        """Each pair's capability profile (SPEC-multigraph-envelope.md section 8.1): its
+        index_meta_fp computed at start-up (before any request read the pair: the probes below
+        come after) and its probe's, the alphabet its probe states, the succinct graph, the
+        annotation form, charged reads on both forms (row_diff_brwt_coord; plain column), no
+        counts, and support_fp recomputed from the entry: kleb and pseudo, two chunks of one
+        build (unmasked column annotations by file name), share it while their index_meta_fp
+        differ; ecoli (masked, coordinates, its .seqs) has another; enterics' entries are
+        ecoli's and kleb's"""
+        caps = self.server.get('capabilities').json()
+        self.assertNotIn('pair_summary', caps)
+        log = self.server.text()
+        self.assertRegex(log, r'index_meta_fp of the 3 pairs \(\d+ columns\) computed in '
+                              r'\d+\.\d+ s')
+        self.assertIn('2 capability profile(s) (support_fp)', log)
+        by_chunk = {}
+        for p in caps['graph_summary']['pairs']:
+            chunk = {v[0]: c for c, v in self.pairs.items()}[p['graph_path']]
+            with self.subTest(pair=(p['graph'], chunk)):
+                probe = single(self.server.get(f'traverse/capabilities?graph={chunk}').json())
+                self.assertEqual(probe['index_meta_fp'], p['index_meta_fp'])
+                self.assertRegex(p['index_meta_fp'], r'^[0-9a-f]{16}$')
+                self.assertEqual(probe['alphabet'], p['alphabet'])
+                self.assertEqual('succinct', p['graph_representation'])
+                self.assertEqual(dict((c[0], c[3]) for c in CHUNKS)[chunk], p['annotation_form'])
+                self.assertIs(True, p['decode_charged'])
+                self.assertIsNone(p['traversal']['counts'])
+                self.assertNotIn('counts', probe)
+                self.assertRegex(p['support_fp'], r'^[0-9a-f]{16}$')
+                self.assertEqual(support_fp(p), p['support_fp'])
+                if p['graph'] == chunk:
+                    by_chunk[chunk] = p
+        for p in caps['graph_summary']['pairs']:
+            if p['graph'] == 'enterics':
+                chunk = {v[0]: c for c, v in self.pairs.items()}[p['graph_path']]
+                self.assertEqual(by_chunk[chunk], dict(p, graph=chunk))
+        self.assertEqual(by_chunk['kleb']['support_fp'], by_chunk['pseudo']['support_fp'])
+        self.assertNotEqual(by_chunk['kleb']['index_meta_fp'], by_chunk['pseudo']['index_meta_fp'])
+        self.assertNotEqual(by_chunk['kleb']['traversal']['num_labels'],
+                            by_chunk['pseudo']['traversal']['num_labels'])
+        self.assertNotEqual(by_chunk['ecoli']['support_fp'], by_chunk['kleb']['support_fp'])
 
     def test_capabilities_probes_without_a_graph(self):
         """GET /traverse/capabilities and GET /pattern/capabilities without ?graph= answer the
@@ -3054,6 +3132,9 @@ class TestHeadersUnique(TestingBase):
                 self.assertIn('headers_unique', caps)
                 self.assertIsNone(caps['headers_unique'])
                 self.assertIsNone(caps['graph_summary'])
+                # and its pair's profile (E17), null until the index is loaded
+                self.assertIn('pair_summary', caps)
+                self.assertIsNone(caps['pair_summary'])
             finally:
                 process.kill()
                 process.wait()
@@ -3147,6 +3228,190 @@ class TestHeadersUnique(TestingBase):
                 else:
                     self.assertEqual((0, []), (certificate['collisions'],
                                                certificate['examples']))
+
+
+
+@unittest.skipIf(PROTEIN_MODE, "the fixture is DNA")
+class TestCapabilityProfile(TestingBase):
+    """The capability profile of each pair (E17, SPEC-multigraph-envelope.md section 8.1) on one
+    multi-graph server of every annotation form the integration tests build (test_query.py's),
+    each over a copy of one graph of three random records (k 31, basic, no mask), annotated by
+    file name, with its record mapping (.seqs) on the coordinate forms; and a second chunk
+    (other records) of the column form, as two chunks of one build. The annotation form is the
+    form built, decode_charged the oracle's (what a walk under a memory budget states:
+    memory_bound_soft says the reads are charged before they are held exactly where it is
+    true), counts on the count forms, and support_fp recomputed from each entry: one per form,
+    the two chunks' one. A single-graph server states the same profile as pair_summary."""
+
+    maxDiff = None
+
+    FORMS = ('column', 'column_coord', 'brwt_coord', 'row_diff_coord', 'row_diff_brwt_coord',
+             'row_diff_disk_coord', 'row', 'row_diff', 'row_sparse', 'row_diff_brwt',
+             'row_diff_disk', 'row_diff_flat', 'row_diff_sparse', 'rb_brwt', 'brwt', 'int_brwt',
+             'row_diff_int_brwt', 'row_diff_int_disk', 'rbfish', 'flat')
+    # the forms whose reads a traversal charges under a memory budget (E14; the unit test
+    # MultiGraphProfile.AnnotationFormAndDecodeChargedOnEveryForm covers every type)
+    CHARGED = {'column', 'brwt', 'row_diff', 'row_diff_coord', 'row_diff_brwt',
+               'row_diff_brwt_coord', 'row_diff_disk', 'row_diff_sparse', 'row_diff_flat',
+               'row_diff_int_brwt'}
+    COUNTS = {'int_brwt', 'row_diff_int_brwt', 'row_diff_int_disk'}
+
+    @classmethod
+    def write_records(cls, path, headers, seed):
+        rng = random.Random(seed)
+        with open(path, 'w') as f:
+            for h in headers:
+                f.write(f'>{h}\n{"".join(rng.choice("ACGT") for _ in range(400))}\n')
+
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        d = cls.tempdir.name
+        cls.fasta = os.path.join(d, 'records.fa')
+        cls.write_records(cls.fasta, ['r1', 'r2', 'r3'], 20261108)
+        cls._build_graph([cls.fasta], os.path.join(d, 'graph.dbg'), 31, 'succinct', mode='basic')
+        cls.pairs = {}
+        for form in cls.FORMS:
+            out = os.path.join(d, form)
+            os.makedirs(out)
+            graph = os.path.join(out, 'graph.dbg')
+            shutil.copyfile(os.path.join(d, 'graph.dbg'), graph)
+            cls._annotate_graph([cls.fasta], graph, os.path.join(out, 'anno'), form,
+                                anno_type='filename', num_threads=1)
+            if form.endswith('_coord'):
+                cls._run_command(f'{METAGRAPH} annotate -p 1 -i {graph} --anno-filename '
+                                 f'--index-header-coords -o {out}/anno {cls.fasta}',
+                                 'annotate --index-header-coords')
+            cls.pairs[form] = (graph, os.path.join(out, f'anno.{form}.annodbg'))
+            assert all(os.path.exists(p) for p in cls.pairs[form]), cls.pairs[form]
+        # a second chunk of the column build: other records, other columns
+        out = os.path.join(d, 'chunk2')
+        os.makedirs(out)
+        fasta2 = os.path.join(out, 'records2.fa')
+        cls.write_records(fasta2, ['s1', 's2'], 7)
+        fasta3 = os.path.join(out, 'records3.fa')
+        cls.write_records(fasta3, ['s3'], 8)
+        cls._build_graph([fasta2, fasta3], os.path.join(out, 'graph.dbg'), 31, 'succinct',
+                         mode='basic')
+        cls._annotate_graph([fasta2, fasta3], os.path.join(out, 'graph.dbg'),
+                            os.path.join(out, 'anno'), 'column', anno_type='filename',
+                            num_threads=1)
+        cls.pairs['chunk2'] = (os.path.join(out, 'graph.dbg'),
+                               os.path.join(out, 'anno.column.annodbg'))
+        cls.csv = os.path.join(d, 'forms.csv')
+        with open(cls.csv, 'w') as f:
+            for name, (graph, anno) in cls.pairs.items():
+                f.write(f'{name},{graph},{anno}\n')
+        cls.server = Server([cls.csv], os.path.join(d, 'server.log'))
+        cls.caps = cls.server.get('capabilities').json()
+        cls.entries = {p['graph']: p for p in cls.caps['graph_summary']['pairs']}
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.server.stop()
+        super().tearDownClass()
+
+    def test_every_pair_states_its_profile(self):
+        self.assertEqual(set(self.pairs), set(self.entries))
+        for form in self.FORMS + ('chunk2',):
+            p = self.entries[form]
+            built = 'column' if form == 'chunk2' else form
+            with self.subTest(form=form):
+                self.assertEqual(self.pairs[form], (p['graph_path'], p['annotation_path']))
+                self.assertEqual(built, p['annotation_form'])
+                self.assertEqual(built in self.CHARGED, p['decode_charged'])
+                self.assertEqual('succinct', p['graph_representation'])
+                self.assertEqual('presence_only' if built in self.COUNTS else None,
+                                 p['traversal']['counts'])
+                coordinates = built.endswith('_coord')
+                self.assertEqual((coordinates, coordinates, coordinates),
+                                 (p['traversal']['has_coordinates'],
+                                  p['traversal']['has_coord_to_header'],
+                                  p['traversal']['supports_trace']))
+                self.assertEqual(('basic', 31, True, 'absent', 'upper_bound'),
+                                 (p['traversal']['regime'], p['k'], p['available'], p['mask'],
+                                  p['counting']))
+                # what the pair's probe states
+                probe = single(self.server.get(f'traverse/capabilities?graph={form}').json())
+                self.assertEqual((probe['index_meta_fp'], probe['alphabet'], probe.get('counts')),
+                                 (p['index_meta_fp'], p['alphabet'], p['traversal']['counts']))
+                self.assertEqual(support_fp(p), p['support_fp'])
+        # one profile per form; the two chunks of the column build share theirs, their
+        # identity and size apart
+        fps = {form: self.entries[form]['support_fp'] for form in self.FORMS}
+        self.assertEqual(len(self.FORMS), len(set(fps.values())))
+        column, chunk2 = self.entries['column'], self.entries['chunk2']
+        self.assertEqual(column['support_fp'], chunk2['support_fp'])
+        self.assertNotEqual(column['index_meta_fp'], chunk2['index_meta_fp'])
+        self.assertEqual((1, 2), (column['traversal']['num_labels'],
+                                  chunk2['traversal']['num_labels']))
+        log = self.server.text()
+        self.assertRegex(log, r'index_meta_fp of the %d pairs \(%d columns\) computed in '
+                              r'\d+\.\d+ s' % (len(self.pairs), len(self.FORMS) + 2))
+        self.assertIn(f'{len(self.FORMS)} capability profile(s) (support_fp)', log)
+
+    def test_decode_charged_is_what_a_walk_under_a_memory_budget_does(self):
+        """A walk under a memory budget states memory_bound_soft: its reads charged before they
+        are held where the oracle charges them (SPEC-labeled-traversal-core.md §6.8), observed
+        after they are held elsewhere -- on every form, as decode_charged states it"""
+        seed = self.records()[0][100:160]
+        for form in self.FORMS:
+            with self.subTest(form=form):
+                ret = self.server.post('traverse', {
+                    'graph': form, 'seeds': [{'sequence': seed}],
+                    'strategy': {'labels': {'mode': 'annotate'},
+                                 'bounds': {'max_memory_mb': 64, 'max_extension_bp': 20},
+                                 'output': {'detail': 'summary', 'timing': False}}})
+                self.assertEqual(200, ret.status_code, ret.text[:2000])
+                (result,) = single(ret.json(), '/traverse')['results']
+                (soft,) = [l for l in result['limitations'] if l['kind'] == 'memory_bound_soft']
+                self.assertEqual(self.entries[form]['decode_charged'], CHARGED in soft['effect'],
+                                 soft['effect'])
+
+    def records(self):
+        return [seq for _, seq in named_records_of([self.fasta])]
+
+    def test_a_single_graph_server_states_its_pairs_profile(self):
+        """pair_summary: the graph_summary entry of the server's one pair, its tags null, the
+        same profile and support_fp (a count form and a coordinate form)"""
+        for form in ('row_diff_int_brwt', 'row_diff_brwt_coord'):
+            graph, anno = self.pairs[form]
+            server = Server(['-i', graph, '-a', anno],
+                            os.path.join(self.tempdir.name, f'single_{form}.log'))
+            try:
+                caps = server.get('capabilities').json()
+                log = server.text()
+            finally:
+                server.stop()
+            with self.subTest(form=form):
+                self.assertTrue(caps['ready'])
+                self.assertIsNone(caps['graph_summary'])
+                expected = dict(self.entries[form], graph=None, graph_path=None,
+                                annotation_path=None)
+                self.assertEqual(expected, caps['pair_summary'])
+                self.assertEqual(support_fp(caps['pair_summary']), caps['pair_summary']['support_fp'])
+                self.assertIn(f'Capability profile: succinct {form} annotation, support_fp '
+                              f'{expected["support_fp"]}, index_meta_fp '
+                              f'{expected["index_meta_fp"]}', log)
+
+    def test_the_reference_sample_states_the_profile_as_a_server_does(self):
+        """Sample 12 (tests/data/multigraph_contract) states each pair's profile in a server's
+        shape: the members of a live entry at every level, each support_fp recomputed from its
+        entry, and the value of a live pair of r237's profile (succinct, k 31, basic,
+        row_diff_brwt_coord with its .seqs, no mask): this server's row_diff_brwt_coord pair"""
+        path = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'tests', 'data',
+                            'multigraph_contract', '12_capabilities_multigraph.json')
+        with open(path) as f:
+            body = json.load(f)['body']
+        self.assertNotIn('pair_summary', body)
+        live = self.entries['row_diff_brwt_coord']
+        for pair in body['graph_summary']['pairs']:
+            with self.subTest(pair=pair['graph']):
+                self.assertEqual(sorted(live), list(pair))
+                self.assertEqual(sorted(live['traversal']), list(pair['traversal']))
+                self.assertEqual(support_fp(pair), pair['support_fp'])
+                self.assertEqual(live['support_fp'], pair['support_fp'])
+                self.assertRegex(pair['index_meta_fp'], r'^[0-9a-f]{16}$')
 
 
 if __name__ == '__main__':

@@ -103,6 +103,33 @@
  "max_graphs_without_selection": null,
  "max_request_body_mb": null,
  "mode": "single",
+ "pair_summary": {
+  "alphabet": "ACGT",
+  "annotation_form": "column",
+  "annotation_path": null,
+  "available": false,
+  "counting": null,
+  "decode_charged": true,
+  "graph": null,
+  "graph_mode": null,
+  "graph_path": null,
+  "graph_representation": "hash",
+  "index_fp": null,
+  "index_meta_fp": "9731bed20da2742d",
+  "index_ns": null,
+  "k": 31,
+  "mask": null,
+  "support_fp": "30cb7e4497b225fc",
+  "traversal": {
+   "counts": null,
+   "has_coord_to_header": false,
+   "has_coordinates": false,
+   "num_labels": 1,
+   "regime": "basic",
+   "supports_trace": false
+  },
+  "unavailable_reason": "representation_unsupported"
+ },
  "pattern": {
   "alphabet": null,
   "annotation": null,

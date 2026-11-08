@@ -45,6 +45,7 @@
 #include "server_selection.hpp"
 #include "server_envelope.hpp"
 #include "server_fanout.hpp"
+#include "server_profile.hpp"
 #include "cli/load/load_annotation.hpp"
 
 
@@ -564,12 +565,11 @@ static Json::Value headers_unique(const std::vector<HeaderPair> &pairs, size_t n
 /**
  * GET /capabilities' graph_summary of a multi-graph server, computed once at start-up, so that
  * a service learns every pair with one probe: per (name, pair), in ordered_pairs' order, the
- * pair (graph, graph_path, annotation_path), its identity (index_ns, index_fp), k, and what the
- * pattern search makes of it — graph_mode, available and unavailable_reason, mask and counting,
- * as its GET /pattern/capabilities?graph= block states them (the dummy fraction of a pair
- * without its mask, sampled at load, is its block's only) — and what a traversal reads
- * (regime, num_labels, has_coordinates, has_coord_to_header, supports_trace, as every
- * /traverse response states them); and whether the pairs' columns are disjoint
+ * pair's profile (pair_summary_json: its tags and identity, k, alphabet, representation,
+ * annotation form, decode_charged, what the pattern search makes of it — graph_mode, available
+ * and unavailable_reason, mask and counting, as its GET /pattern/capabilities?graph= block
+ * states them (the dummy fraction of a pair without its mask, sampled at load, is its block's
+ * only) — what a traversal reads, and support_fp); and whether the pairs' columns are disjoint
  * (column_overlap), which licenses summing a label's counts and occurrences over the pairs
  */
 static Json::Value multi_graph_summary(
@@ -580,44 +580,12 @@ static Json::Value multi_graph_summary(
     Json::Value summary;
     Json::Value pairs(Json::arrayValue);
     uint64_t masked = 0;
+    std::set<std::string> profiles;
     for (const auto &[name, pair] : ordered_pairs(indexes, sorted_names(indexes))) {
-        const AnnotatedDBG &index = *graphs_cache.at(pair);
-        const DeBruijnGraph &graph = index.get_graph();
-        const IndexIdentity &id = identities.at(pair);
-        Json::Value p;
-        p["graph"] = name;
-        p["graph_path"] = pair.first;
-        p["annotation_path"] = pair.second;
-        p["index_ns"] = string_or_null(id.name);
-        p["index_fp"] = string_or_null(id.fp);
-        p["k"] = uint_json(graph.get_k());
-        // the pattern search, as the pair's block states it (pattern_capabilities_json)
-        const graph::pattern::GraphSupport support = route_support(graph);
-        const bool recognised = support.supported || support.reason == "alphabet_unsupported"
-                                    || support.reason == "alphabet_untested"
-                                    || support.reason == "mask_invalid";
-        p["available"] = support.supported;
-        p["unavailable_reason"] = support.supported ? Json::Value()
-                                                    : Json::Value(support.reason);
-        p["graph_mode"] = recognised ? Json::Value(to_string(support.mode)) : Json::Value();
-        p["mask"] = !recognised ? Json::Value()
-                  : !support.mask_present ? Json::Value("absent")
-                  : mask_built_at_load(graph) ? Json::Value("built_at_load")
-                                              : Json::Value("file");
-        p["counting"] = !support.supported ? Json::Value()
-                      : support.mask_present ? Json::Value("exact")
-                                             : Json::Value("upper_bound");
-        masked += recognised && support.mask_present;
-        // what a traversal reads, as the capabilities of every /traverse response state it
-        const graph::traversal::LabelOracle oracle(index);
-        Json::Value t;
-        t["regime"] = to_string(oracle.regime());
-        t["num_labels"] = uint_json(oracle.num_columns());
-        t["has_coordinates"] = oracle.has_coordinates();
-        t["has_coord_to_header"] = oracle.coord_to_header() != nullptr;
-        t["supports_trace"] = oracle.has_coordinates()
-                && oracle.regime() == graph::traversal::Regime::BASIC;
-        p["traversal"] = std::move(t);
+        Json::Value p = pair_summary_json(*graphs_cache.at(pair), identities.at(pair),
+                                          name, pair.first, pair.second);
+        masked += p["mask"].isString() && p["mask"].asString() != "absent";
+        profiles.insert(p["support_fp"].asString());
         pairs.append(std::move(p));
     }
     // the columns of every pair (each pair once, whatever names list it)
@@ -641,8 +609,8 @@ static Json::Value multi_graph_summary(
     }
     logger->info("[Server] Pattern search: {} of the {} pairs with a dummy-edge mask (exact "
                  "counts); the others count upper bounds with estimates, their dummy fraction "
-                 "sampled at load. Summary computed in {:.3f} s", masked,
-                 summary["pairs"].size(), timer.elapsed());
+                 "sampled at load. {} capability profile(s) (support_fp). Summary computed in "
+                 "{:.3f} s", masked, summary["pairs"].size(), profiles.size(), timer.elapsed());
     return summary;
 }
 
@@ -695,8 +663,9 @@ int run_server(Config *config) {
     // §3.1). Single-index mode: --index-name and --index-manifest, checked against the
     // loaded files before the index is served; the meta fingerprint once the index is
     // loaded. Multi-index mode: per (graph, annotation) pair, the name and the manifest of the
-    // graph list's optional columns, checked before loading, and the meta fingerprint computed
-    // on first use (a pair without them states null).
+    // graph list's optional columns, checked before loading (a pair without them states null),
+    // and the meta fingerprint computed once the pairs are loaded, before the server listens
+    // (E17: GET /capabilities states it per pair).
     IndexIdentity single_identity;
     // the graph's derived data the loader reads (index_derived_files: its mask and Bloom
     // filter), named beside a checked manifest so that an operator sees what is loaded
@@ -713,8 +682,8 @@ int run_server(Config *config) {
         }
     };
     // per (graph, annotation) pair: its name and manifest digest from the graph list, its meta
-    // fingerprint computed on first use, from the resident index or a copy of it loaded for a
-    // request (`in_ram`: the same files, the same identity)
+    // fingerprint computed at start-up from the resident index (a copy of it loaded for a
+    // request, `in_ram`, has the same files, the same identity; computed here only if missing)
     std::mutex identities_mutex;
     std::map<GraphPair, IndexIdentity> pair_identities;
     std::map<const AnnotatedDBG*, GraphPair> resident_pairs;
@@ -744,6 +713,8 @@ int run_server(Config *config) {
     Json::Value composite_fp;
     // a single-graph server's headers_unique of GET /capabilities, set before its index is ready
     Json::Value single_headers_unique;
+    // and its pair's profile (pair_summary of GET /capabilities, E17), set then too
+    Json::Value single_pair_summary;
 
     if (config->infbase_annotators.size() == 1) {
         assert(config->fnames.empty());
@@ -780,6 +751,13 @@ int run_server(Config *config) {
                         anno_graph->get_coord_to_header(),
                         &anno_graph->get_annotator().get_label_encoder().get_labels() } },
                     get_num_threads() * num_server_threads);
+            // its profile, with null tags as its headers_unique
+            single_pair_summary = pair_summary_json(*anno_graph, single_identity, Json::Value(),
+                                                    Json::Value(), Json::Value());
+            logger->info("[Server] Capability profile: {} {} annotation, support_fp {}, "
+                         "index_meta_fp {}", single_pair_summary["graph_representation"].asString(),
+                         single_pair_summary["annotation_form"].asString(),
+                         single_pair_summary["support_fp"].asString(), single_identity.meta_fp);
             return anno_graph;
         });
     } else {
@@ -923,6 +901,27 @@ int run_server(Config *config) {
             id.name = name;
             id.fp = fp;
             resident_pairs[index.get()] = pair;
+        }
+        // and its meta fingerprint, computed here for every pair (one pass over its column
+        // names, the pairs in parallel), so that GET /capabilities states it per pair before
+        // any request has read the pair (E17)
+        {
+            Timer timer;
+            std::vector<std::string> meta_fps(graphs_cache.size());
+            std::vector<uint64_t> num_columns(graphs_cache.size());
+            #pragma omp parallel for num_threads(get_num_threads() * num_server_threads) schedule(dynamic)
+            for (size_t i = 0; i < graphs_cache.size(); ++i) {
+                const graph::traversal::LabelOracle oracle(*graphs_cache.nth(i).value());
+                meta_fps[i] = index_meta_fingerprint(oracle);
+                num_columns[i] = oracle.num_columns();
+            }
+            uint64_t columns = 0;
+            for (size_t i = 0; i < graphs_cache.size(); ++i) {
+                pair_identities[graphs_cache.nth(i).key()].meta_fp = meta_fps[i];
+                columns += num_columns[i];
+            }
+            logger->info("[Server] index_meta_fp of the {} pairs ({} columns) computed in "
+                         "{:.3f} s", graphs_cache.size(), columns, timer.elapsed());
         }
         graph_summary = multi_graph_summary(indexes, graphs_cache, pair_identities);
         // over each (graph, annotation) pair once, as loaded: a pair listed under several
@@ -2713,6 +2712,11 @@ int run_server(Config *config) {
             // server, here on a single-graph one (null while its index loads)
             if (!multi)
                 c["headers_unique"] = c["ready"].asBool() ? single_headers_unique : Json::Value();
+            // the capability profile of a single-graph server's pair (E17): a graph_summary
+            // entry with null tags, null while its index loads (each pair's is in graph_summary
+            // on a multi-graph server)
+            if (!multi)
+                c["pair_summary"] = c["ready"].asBool() ? single_pair_summary : Json::Value();
             // the threshold of /search's and /pattern's selection rule (a request without
             // `graphs`), so that a client sees it before a longer list refuses its requests
             c["max_graphs_without_selection"]

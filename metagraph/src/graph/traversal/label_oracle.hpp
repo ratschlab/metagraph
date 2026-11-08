@@ -358,7 +358,11 @@ class LabelOracle {
     // (timing) count the rows a read returns and the time of every read, a refused one's
     // included — also when the LabelQuery / LabelRecorder fetch that issued it is refused
     // afterwards: the decoding was done. The unbudgeted reads above are untouched by these.
-    bool decode_charged() const;
+    bool decode_charged() const { return decode_charged(*matrix_); }
+    // Whether an oracle over |matrix| has the budget-aware reads (decode_charged(), the one
+    // predicate): what GET /capabilities states per pair as decode_charged (E17,
+    // SPEC-multigraph-envelope.md section 8), from the matrix's type alone
+    static bool decode_charged(const annot::matrix::BinaryMatrix &matrix);
     // Whether a walk under these budgets reads its annotation budget-aware: under a memory
     // budget wherever the index has the reads (decode_charged()); under a work budget alone
     // only on a row-diff annotation, whose budget-aware reads charge a row's dependency rows

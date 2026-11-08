@@ -103,6 +103,33 @@
  "max_graphs_without_selection": null,
  "max_request_body_mb": null,
  "mode": "single",
+ "pair_summary": {
+  "alphabet": "$ACGT",
+  "annotation_form": "row_diff_brwt_coord",
+  "annotation_path": null,
+  "available": true,
+  "counting": "upper_bound",
+  "decode_charged": true,
+  "graph": null,
+  "graph_mode": "basic",
+  "graph_path": null,
+  "graph_representation": "succinct",
+  "index_fp": null,
+  "index_meta_fp": "7d99e33ed7315c3d",
+  "index_ns": "mini_refseq",
+  "k": 31,
+  "mask": "absent",
+  "support_fp": "0ad17482002fa6f5",
+  "traversal": {
+   "counts": null,
+   "has_coord_to_header": true,
+   "has_coordinates": true,
+   "num_labels": 9,
+   "regime": "basic",
+   "supports_trace": true
+  },
+  "unavailable_reason": null
+ },
  "pattern": {
   "alphabet": "$ACGT",
   "annotation": "budgeted",

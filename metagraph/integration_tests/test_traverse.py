@@ -2834,16 +2834,22 @@ class TestTraverseAPI(TestTraverseBase):
         # 'headers_unique': whether a header label names one record (E22; test_multigraph.py
         # checks it), true here: acc1, acc2, acc3; 'expect_server_instance': the routes that
         # take the field (F3b, SPEC-multigraph-envelope.md section 8; a single-graph server's
-        # top level, a multi-graph server's multigraph block)
+        # top level, a multi-graph server's multigraph block); 'pair_summary': the capability
+        # profile of the server's pair (E17, SPEC-multigraph-envelope.md section 8.1;
+        # test_multigraph.py's TestCapabilityProfile checks it)
         self.assertEqual({'algorithm_version', 'attempts', 'compression_level',
                           'content_encodings', 'deadline_check', 'expect_server_instance',
                           'feature_level', 'features', 'graph_summary', 'graphs',
                           'headers_unique', 'in_ram', 'max_graphs_without_selection',
-                          'max_request_body_mb', 'mode', 'pattern', 'ready', 'release',
-                          'resolve', 'routes', 'schema_version', 'server_instance'},
+                          'max_request_body_mb', 'mode', 'pair_summary', 'pattern', 'ready',
+                          'release', 'resolve', 'routes', 'schema_version', 'server_instance'},
                          set(c))
         self.assertEqual({'value': True, 'collisions': 0, 'examples': []}, c['headers_unique'])
         self.assertEqual(['/traverse', '/resolve', '/pattern'], c['expect_server_instance'])
+        profile = c['pair_summary']
+        self.assertEqual((None, None, None), (profile['graph'], profile['graph_path'],
+                                              profile['annotation_path']))
+        self.assertRegex(profile['support_fp'], r'^[0-9a-f]{16}$')
         self.assertEqual((6, 'single', None, None, None, None, True, 1),
                          (c['feature_level'], c['mode'], c['graphs'], c['graph_summary'],
                           c['max_graphs_without_selection'], c['max_request_body_mb'],
@@ -2920,6 +2926,10 @@ class TestTraverseAPI(TestTraverseBase):
         client = graphlet_lib.TraverseClient(self.host, self.port)
         self.assertEqual('single', client.server_capabilities()['mode'])
         self.assertEqual(probe['index_meta_fp'], client.capabilities()['index_meta_fp'])
+        # the pair's profile states what the probe states
+        self.assertEqual((probe['index_meta_fp'], probe['alphabet'], probe['k'], probe['regime']),
+                         (profile['index_meta_fp'], profile['alphabet'], profile['k'],
+                          profile['traversal']['regime']))
 
     def test_api_request_body_limit(self):
         """--max-request-body-mb N (SPEC-labeled-traversal-core.md §10.3; 0 = unlimited, the

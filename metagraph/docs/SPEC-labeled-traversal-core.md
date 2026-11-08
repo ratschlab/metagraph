@@ -3004,6 +3004,8 @@ search's routes, `POST /pattern` and `GET /pattern/capabilities`, are `SPEC-patt
     multi-graph mode; `SPEC-multigraph-envelope.md` §9), and `expect_server_instance` (F3b: the routes that take
     the field, `["/traverse", "/resolve", "/pattern"]`; at the top level in single-graph mode, beside
     `routes.requests`, and in the `multigraph` block in multi-graph mode; `SPEC-multigraph-envelope.md` §8).
+    Single-graph mode adds `pair_summary` (E17: its pair's capability profile, a `graph_summary` entry with null
+    tags, `null` while the index loads; `SPEC-multigraph-envelope.md` §8.1).
   - **`deadline_check`** (both capabilities routes, feature level 3): `chunk_target_ms` (integer,
     `--traverse-chunk-target-ms`, an integer in [0, 2⁵³ − 1]; 0: reads are not chunked), `max_uninterruptible_ms`
     (null: no bound on one row's decode exists before stage 3c, and it stays null after stage 3c-ii, whose
@@ -3299,8 +3301,9 @@ search's routes, `POST /pattern` and `GET /pattern/capabilities`, are `SPEC-patt
       `--verify`, whose hashing is the verification, the first two are refused before it and the binary's own
       failure is reported with the verdict's problems; `--inventory` runs no check and probes nothing.
     - `index_meta_fp`: FNV-1a-64 (16 hex) over k, regime, alphabet, the annotation's row count and its ordered
-      column names, and whether coordinates and a `CoordToHeader` exist — always present (computed per pair on
-      first use in multi-graph mode), and only a **negative** check: a mismatch proves two indexes different,
+      column names, and whether coordinates and a `CoordToHeader` exist — always present (computed per pair at
+      start-up in multi-graph mode, and stated per pair in `GET /capabilities`' `graph_summary`, E17), and only a
+      **negative** check: a mismatch proves two indexes different,
       equality proves nothing (an index whose columns swap their memberships keeps it).
     `--index-name` and `--index-manifest` describe one index (`-i`/`-a`) and are refused with a graph list. The CLI
     (`metagraph traverse`) takes the same two flags.
@@ -3383,9 +3386,11 @@ search's routes, `POST /pattern` and `GET /pattern/capabilities`, are `SPEC-patt
     states the pair's identity: `index_fp` and `index_meta_fp` are per (graph, annotation) pair.
   - **`GET /capabilities`** of a multi-graph server (the owner's decision of 2026-10-09): `graph_summary`, so that
     a service learns every pair with one probe — `{columns_disjoint, shared_columns, pairs: [{graph, graph_path,
-    annotation_path, index_ns, index_fp, k, graph_mode, available, unavailable_reason, mask, counting, traversal:
-    {regime, num_labels, has_coordinates, has_coord_to_header, supports_trace}}]}`, one entry per (name, pair),
-    the names in byte order, computed once at start-up (the schema is `SPEC-pattern-search.md` §24.4; about 470
+    annotation_path, index_ns, index_fp, index_meta_fp, k, alphabet, graph_representation, annotation_form,
+    decode_charged, graph_mode, available, unavailable_reason, mask, counting, traversal: {regime, num_labels,
+    has_coordinates, has_coord_to_header, supports_trace, counts}, support_fp}]}` (the capability profile and
+    `support_fp`, E17: `SPEC-multigraph-envelope.md` §8.1), one entry per (name, pair),
+    the names in byte order, computed once at start-up (the schema is `SPEC-pattern-search.md` §24.4; about 670
     bytes per entry, which makes the route's document large on a long graph list). `columns_disjoint`:
     no column name is a column of two distinct pairs — the chunks of an index partition its samples —, which
     licenses summing a label's counts and occurrences over the pairs; `shared_columns` counts the names that are

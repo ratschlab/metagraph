@@ -122,6 +122,33 @@
  "max_graphs_without_selection": null,
  "max_request_body_mb": null,
  "mode": "single",
+ "pair_summary": {
+  "alphabet": "$ACGT",
+  "annotation_form": "column_coord",
+  "annotation_path": null,
+  "available": true,
+  "counting": "exact",
+  "decode_charged": false,
+  "graph": null,
+  "graph_mode": "basic",
+  "graph_path": null,
+  "graph_representation": "succinct",
+  "index_fp": null,
+  "index_meta_fp": "e407b60fa1b65cea",
+  "index_ns": null,
+  "k": 31,
+  "mask": "file",
+  "support_fp": "cccbed9b50804c63",
+  "traversal": {
+   "counts": null,
+   "has_coord_to_header": true,
+   "has_coordinates": true,
+   "num_labels": 2,
+   "regime": "basic",
+   "supports_trace": true
+  },
+  "unavailable_reason": null
+ },
  "pattern": {
   "alphabet": "$ACGT",
   "annotation": "unbudgeted",

@@ -94,6 +94,7 @@ import glob
 import json
 import os
 import platform
+import re
 import shutil
 import socket
 import subprocess
@@ -611,6 +612,11 @@ def multi_capabilities(doc):
     pair = summary['pairs'][0]
     check((pair['available'], pair['mask'], pair['counting'], pair['graph_mode'], pair['k'])
           == (True, 'file', 'exact', 'basic', MINI_K), pair)
+    # its capability profile (E17): the mini's form, its reads charged, no counts
+    profile_fields(pair)
+    check((pair['graph_representation'], pair['annotation_form'], pair['decode_charged'],
+           pair['traversal']['counts']) == ('succinct', 'row_diff_brwt_coord', True, None), pair)
+    check('pair_summary' not in doc, sorted(doc))
     # the threshold of the selection rule: the default of --max-graphs-without-selection
     check(doc['max_graphs_without_selection'] == 10, doc['max_graphs_without_selection'])
     # the request-body limit: null, the fixture servers start without --max-request-body-mb
@@ -620,11 +626,26 @@ def multi_capabilities(doc):
 def single_graph_selection(doc):
     """GET /capabilities of a single-graph server: no graph list to select from, so
     graph_summary and max_graphs_without_selection are null; max_request_body_mb null too
-    (the fixture servers start without --max-request-body-mb)"""
+    (the fixture servers start without --max-request-body-mb); its pair's capability profile
+    at the top level, pair_summary, the pair tags null (E17, SPEC-multigraph-envelope.md section
+    8.1)"""
     check(doc['graph_summary'] is None and doc['max_graphs_without_selection'] is None
           and doc['max_request_body_mb'] is None,
           {k: doc[k] for k in ('graph_summary', 'max_graphs_without_selection',
                                'max_request_body_mb')})
+    profile = doc['pair_summary']
+    check(all(profile[t] is None for t in ('graph', 'graph_path', 'annotation_path')), profile)
+    profile_fields(profile)
+
+
+def profile_fields(pair):
+    """A pair's capability profile (E17): its fingerprints of 16 hex digits, the profile members
+    and traversal.counts"""
+    for fp in ('index_meta_fp', 'support_fp'):
+        check(re.fullmatch('[0-9a-f]{16}', pair[fp]) is not None, (fp, pair[fp]))
+    check(isinstance(pair['decode_charged'], bool) and 'counts' in pair['traversal']
+          and all(isinstance(pair[f], str)
+                  for f in ('alphabet', 'graph_representation', 'annotation_form')), pair)
 
 
 def headers_unique(value, multi=False, examples=()):
@@ -849,7 +870,8 @@ FIXTURES = [
         'features and routes, the block available (basic, mask file, counting exact, placement '
         'record); graph_summary and max_graphs_without_selection null (no graph list); '
         'headers_unique at the top level (SPEC-multigraph-envelope.md section 9): true, every '
-        'header of the .seqs names one record',
+        'header of the .seqs names one record; pair_summary at the top level (E17, section '
+        '8.1): the pair\'s capability profile, its tags null',
         expect_all(features(True), caps_block(True, mask='file', counting='exact'),
                    single_graph_selection, headers_unique(True))),
     get('capabilities_repeated_headers', 'repeated_headers', '/capabilities',
@@ -912,7 +934,9 @@ FIXTURES = [
         'a multi-graph server: the `pattern` feature, its routes per pair (?graph=), the block '
         'with the contract and the caps and no graph (available: a pair is served), '
         'graph_summary (each pair: available, mask, counting, k, graph_mode, index_fp, '
-        'traversal; columns_disjoint; headers_unique, SPEC-multigraph-envelope.md section 9) '
+        'traversal, and its capability profile, E17: index_meta_fp, alphabet, '
+        'graph_representation, annotation_form, decode_charged, traversal.counts, support_fp, '
+        'SPEC-multigraph-envelope.md section 8.1; columns_disjoint; headers_unique, section 9) '
         'and max_graphs_without_selection (the threshold of the selection rule: a request '
         'without `graphs` queries every name of a list of at most that many, the server flag, '
         '10 by default)',
