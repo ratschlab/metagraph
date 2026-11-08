@@ -2,9 +2,10 @@
 
 Status (2026-11-07, branch gr/mg-e16-protein-pattern, lane C of the every-route engine work, landing train 2): the
 engine, the route and the capabilities are implemented behind `_PROTEIN_GRAPH`, the contract is SPEC-pattern-search.md
-§29; reviewed (an independent review: its findings applied); rebased onto E15's head d5eef4044 with the landing steps
-of section 10 done (the CI job is E15's `Linux-Protein`). The verification on that base and the dev-branch.yml run
-are in the lane's progress note; the fixtures await the Linux run (section 10 item 9). Not deployed.
+§29; reviewed (an independent review: its findings applied, and verified); on train 1's head aabf9eb4a, E15 included,
+with the landing steps of section 10 done (the CI job is E15's `Linux-Protein`). The verification on that base and
+the dev-branch.yml run (42424914240, green) are in the lane's progress note; the Linux runs 42407551976 and
+42424914240 confirmed the fixtures (section 10 item 9). Not deployed.
 
 The owner's decision of 2026-10-31: "patterns must work on UniParc too". The language is the minimum of the suite's plan row E16
 (docs/PLAN-multigraph-implementation.md of metagraph-suite) and of the engine's note of 2026-10-31, section 6; this
@@ -194,3 +195,4 @@ protocol.file.allow=always submodule update --init --recursive`. There:
 9. The `pattern_protein/` fixtures were written on macOS; Linux is the reference platform. The first Linux-Protein CI
    run with `*(test_pattern_protein.*` confirms them (`test_fixtures`), or they are regenerated from it
    (`METAGRAPH_WRITE_PROTEIN_FIXTURES=1`); the bit values log2(22/s) are the only platform risk (the review's N4).
+   Done: `test_fixtures` passed in the Linux-Protein job of runs 42407551976 and 42424914240, so the fixtures stand.

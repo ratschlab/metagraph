@@ -220,6 +220,15 @@ TEST(PatternProteinRoute, RequestRefusals) {
             EXPECT_EQ("invalid_request", e.code()) << body;
         }
     }
+    // a pattern naming no kind: the message names the kind a protein graph reads (the review's S2)
+    try {
+        answer(*index, R"({"patterns": [{"id": "a"}]})");
+        ADD_FAILURE() << "answered a pattern without a kind";
+    } catch (const PatternRefusal &e) {
+        EXPECT_EQ(400, e.status());
+        EXPECT_NE(std::string::npos, std::string(e.what()).find("(a protein graph reads 'protein')"))
+                << e.what();
+    }
     for (const char *strands : { "both", "forward" }) {
         const Json::Value a = answer(*index, std::string(R"({"patterns": [{"protein": "DNPQE"}],
                                                              "strands": ")") + strands + "\"}");
@@ -255,6 +264,11 @@ TEST(PatternProteinRoute, SubstitutionsAreResidues) {
                                              "max_mismatches": 1})");
     EXPECT_EQ("mismatches_above_cap", l["patterns"][0]["error"]["code"].asString());
     EXPECT_EQ(0u, l["patterns"][0]["max_mismatches_cap"].asUInt64());
+    // its message counts residues, not bases (the review's S2)
+    const std::string message = l["patterns"][0]["error"]["message"].asString();
+    EXPECT_NE(std::string::npos, message.find("a pattern of 9 residues, longer than k")) << message;
+    EXPECT_NE(std::string::npos, message.find("windows of at most k residues")) << message;
+    EXPECT_EQ(std::string::npos, message.find("bases")) << message;
 }
 
 TEST(PatternProteinRoute, LabelsAndAPredicate) {

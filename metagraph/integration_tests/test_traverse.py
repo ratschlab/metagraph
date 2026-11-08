@@ -55,7 +55,8 @@ In a Protein build the same fixtures are protein graphs over the residues A, C, 
 (one strand, every length in residues; SPEC §6.12), and every test runs but the few whose
 subject is DNA by nature: the graphlet documents a DNA build wrote, the mini index and the
 primary graphs of TestTraversePrimary (E13; a Protein build refuses the primary mode). Its
-/pattern requests send the build's kind ('protein': SPEC-pattern-search.md §29). test_traverse_protein.py covers a protein graph over amino acids.
+/pattern requests send the build's kind ('protein': SPEC-pattern-search.md §29).
+test_traverse_protein.py covers a protein graph over amino acids.
 """
 
 K = 31
