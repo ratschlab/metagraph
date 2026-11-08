@@ -1,5 +1,11 @@
 #ifndef MTG_ANNOTATION_VECTOR_IO_HPP
 #define MTG_ANNOTATION_VECTOR_IO_HPP
+#include <cstdint>
+#include <cstring>
+#include <istream>
+#include <ostream>
+#include <span>
+#include <stdexcept>
 #include <sdsl/packed_vector_view.hpp>
 #include <sdsl/shared_mapper.hpp>
 namespace mtg::detail {
