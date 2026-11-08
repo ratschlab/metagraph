@@ -293,8 +293,10 @@ class PatternDelivery {
 // The request body as JSON: one RFC 8259 JSON text with unique member names and nothing after
 // it, nested at most 1,000 deep (parse_strict_json, the traversal routes' reader too); anything
 // else is refused as invalid_request (the traversal routes answer the same faults with their
-// code-less "Bad json received: " 400)
-Json::Value parse_pattern_body(const std::string &content);
+// code-less "Bad json received: " 400). |max_values| (--max-request-json-values on the server;
+// 0: none, the CLI): a body with more JSON values throws TooManyJsonValues before it is parsed,
+// which the server answers 400 too_many_json_values as on every strict-JSON route
+Json::Value parse_pattern_body(const std::string &content, uint64_t max_values = 0);
 
 /**
  * The checks of process_pattern_request that need no graph (SPEC §5 steps 5 to 9: the body

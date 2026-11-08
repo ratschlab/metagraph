@@ -17,6 +17,7 @@
 #include <optional>
 #include <set>
 #include <sstream>
+#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -48,6 +49,29 @@ inline std::optional<uint64_t> non_negative_integer(const Json::Value &v) {
 constexpr int kMaxBodyNesting = 1000;
 
 /**
+ * A body with more JSON values than the server reads (--max-request-json-values; GET
+ * /capabilities states it as request_intake.max_request_json_values): thrown by
+ * parse_strict_json before the text is parsed, so that jsoncpp never builds the tree of such a
+ * body (about 100 bytes and more per value, also for a body refused afterwards). Each route
+ * answers it alike (400 too_many_json_values, server_checks.hpp); the CLI, which sets no cap,
+ * never throws it.
+ */
+class TooManyJsonValues : public std::invalid_argument {
+  public:
+    explicit TooManyJsonValues(uint64_t max_values)
+          : std::invalid_argument("the request body holds more than "
+                                  + std::to_string(max_values)
+                                  + " JSON values (--max-request-json-values): it was not "
+                                    "parsed and nothing of it ran; send fewer values (split "
+                                    "the request)"),
+            max_values_(max_values) {}
+    uint64_t max_values() const { return max_values_; }
+
+  private:
+    uint64_t max_values_;
+};
+
+/**
  * A request body as one RFC 8259 JSON text whose member names are unique: no comment, no
  * trailing comma, nothing after the value, no duplicated member name (jsoncpp would keep the
  * last value without a word: an id or a budget given twice would be replaced silently), at most
@@ -56,23 +80,53 @@ constexpr int kMaxBodyNesting = 1000;
  * not an object, which each route refuses in its own order. The reader of /pattern, /resolve,
  * /traverse and /traverse/cancel and of the pattern and traverse CLIs; /search and /align keep
  * theirs (parse_json_string).
+ *
+ * |max_values| (0: unlimited): the most JSON values the text may hold — the root, each array
+ * element and each member's value (a member's name is none; an empty array or object holds
+ * none) —, counted in the scan below before anything is parsed: one more throws
+ * TooManyJsonValues at the value that passes it. Exact for every JSON text; a text that is
+ * not JSON may be refused by either check.
  */
 template <class Refusal>
-Json::Value parse_strict_json(std::string_view content, const std::string &prefix) {
+Json::Value parse_strict_json(std::string_view content, const std::string &prefix,
+                              uint64_t max_values = 0) {
     // jsoncpp skips a comment before an object's member name whatever allowComments says: a
-    // '/' outside a string is no JSON at all, so the text is refused before it is parsed
+    // '/' outside a string is no JSON at all, so the text is refused before it is parsed.
+    // The same scan counts the values: one per ',' outside a string (the next element or
+    // member) and one per '[' or '{' that does not close at once (its first), the root
+    // counted before
+    uint64_t values = 1;
+    auto count_value = [&]() {
+        if (++values > max_values && max_values)
+            throw TooManyJsonValues(max_values);
+    };
     bool in_string = false;
+    // an array or object was just opened: its first value is counted at the next character
+    // that is not whitespace, unless that character closes it
+    bool opened = false;
     for (size_t i = 0; i < content.size(); ++i) {
+        const char c = content[i];
         if (in_string) {
-            if (content[i] == '\\')
+            if (c == '\\')
                 ++i;
-            else if (content[i] == '"')
+            else if (c == '"')
                 in_string = false;
-        } else if (content[i] == '"') {
+            continue;
+        }
+        if (c == ' ' || c == '\t' || c == '\n' || c == '\r')
+            continue;
+        if (opened && c != ']' && c != '}')
+            count_value();
+        opened = false;
+        if (c == '"') {
             in_string = true;
-        } else if (content[i] == '/') {
+        } else if (c == '/') {
             throw Refusal()(prefix + "a comment (or a '/' outside a string) at byte "
                             + std::to_string(i));
+        } else if (c == '[' || c == '{') {
+            opened = true;
+        } else if (c == ',') {
+            count_value();
         }
     }
     Json::CharReaderBuilder builder;

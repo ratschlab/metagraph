@@ -1613,10 +1613,11 @@ PatternLimits pattern_limits(const Config &config) {
     return limits;
 }
 
-Json::Value parse_pattern_body(const std::string &content) {
+Json::Value parse_pattern_body(const std::string &content, uint64_t max_values) {
     // one RFC 8259 JSON text, its members' names unique (parse_strict_json, the reader of the
-    // traversal routes too), refused invalid_request
-    return parse_strict_json<InvalidPatternRequest>(content, "request: not JSON: ");
+    // traversal routes too), refused invalid_request; more than |max_values| values (0: no
+    // count) TooManyJsonValues, before it is parsed
+    return parse_strict_json<InvalidPatternRequest>(content, "request: not JSON: ", max_values);
 }
 
 double validate_pattern_request(const Json::Value &json, const PatternLimits &limits) {

@@ -516,22 +516,27 @@ TEST(ServerEnvelope, CompositeRule) {
     EXPECT_EQ(body["composite_fp"].asString(), composite_fp_json(listed_twice).asString());
 }
 
-// The multigraph block and routes.requests are sample 12's
+// The multigraph block and routes.requests are sample 12's (its server: --max-request-body-mb
+// 256, --max-request-json-values at its default)
 TEST(ServerEnvelope, Sample12MultigraphBlock) {
     const Json::Value body = sample("12_capabilities_multigraph.json")["body"];
-    EXPECT_EQ(text(body["multigraph"]), text(multigraph_capabilities_json(0, {})));
+    const Json::Value intake = request_intake_json(256, 262144);
+    EXPECT_EQ(text(body["multigraph"]), text(multigraph_capabilities_json(0, {}, intake)));
+    // request_intake (H1): the byte cap as the top-level member states it
+    EXPECT_EQ(text(body["max_request_body_mb"]),
+              text(body["multigraph"]["request_intake"]["max_request_body_mb"]));
     EXPECT_EQ(body["routes"]["requests"].asString(), std::string(kRequestsRoute));
     EXPECT_EQ(body["multigraph"]["requests_route"].asString(), std::string(kRequestsRoute));
     // the request-wide memory bound of /traverse (E5b): 0 when off, as the sample's server,
     // else the flag's value, an integer
     EXPECT_TRUE(body["multigraph"]["max_request_memory_mb"].isUInt64());
     EXPECT_EQ(0u, body["multigraph"]["max_request_memory_mb"].asUInt64());
-    const Json::Value set = multigraph_capabilities_json(8192, {});
+    const Json::Value set = multigraph_capabilities_json(8192, {}, intake);
     EXPECT_TRUE(set["max_request_memory_mb"].isIntegral());
     EXPECT_EQ("8192", text(set["max_request_memory_mb"]));
     Json::Value rest = set;
     rest["max_request_memory_mb"] = 0;
-    EXPECT_EQ(text(multigraph_capabilities_json(0, {})), text(rest));
+    EXPECT_EQ(text(multigraph_capabilities_json(0, {}, intake)), text(rest));
 }
 
 // Sample 10: every /traverse capabilities probe states the request-wide memory bound beside

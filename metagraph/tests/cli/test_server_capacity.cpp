@@ -239,9 +239,10 @@ TEST(ServerCapacity, MaxConcurrentJson) {
         EXPECT_TRUE(m[route].isUInt64()) << route;
     }
     // the multigraph block states the same object
-    EXPECT_EQ(text(m), text(multigraph_capabilities_json(0, caps)["max_concurrent"]));
+    EXPECT_EQ(text(m),
+              text(multigraph_capabilities_json(0, caps, Json::Value())["max_concurrent"]));
     EXPECT_EQ(text(max_concurrent_json({})),
-              text(multigraph_capabilities_json(0, {})["max_concurrent"]));
+              text(multigraph_capabilities_json(0, {}, Json::Value())["max_concurrent"]));
 }
 
 // Sample 12's multigraph block and every /traverse probe of sample 10 state max_concurrent of a
