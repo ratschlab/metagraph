@@ -412,6 +412,11 @@ void print_coord_to_header_stats(const std::string &fname) {
                 : "NA") << '\n';
         }
     }
+    // whether it states the label of each column (written since H4), which a load checks
+    // against the annotation's (SPEC-multigraph-envelope.md section 10)
+    std::cout << "column labels: "
+              << (coord_to_header.column_labels() ? "stated" : "none")
+              << '\n';
 
     std::cout << "========================================================" << std::endl;
 }

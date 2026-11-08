@@ -84,6 +84,18 @@ def free_port():
         return s.getsockname()[1]
 
 
+def strip_column_labels(seqs):
+    """|seqs| (a .seqs written since H4) rewritten as an earlier binary writes it: its columns
+    without the trailer of column labels (the marker "mtg-cols", then the labels), which an H4
+    load reads as a mapping that states none"""
+    with open(seqs, 'rb') as f:
+        data = f.read()
+    at = data.rfind(b'mtg-cols')
+    assert at > 0, seqs
+    with open(seqs, 'wb') as f:
+        f.write(data[:at])
+
+
 def named_records_of(paths):
     """The (header, sequence) of every record of the FASTA files, in their order"""
     out = []
@@ -3413,6 +3425,228 @@ class TestCapabilityProfile(TestingBase):
                 self.assertEqual(live['support_fp'], pair['support_fp'])
                 self.assertRegex(pair['index_meta_fp'], r'^[0-9a-f]{16}$')
 
+
+def run_to_exit(args, log_path, timeout=300):
+    """server_query |args| on a free port, run until it exits by itself: (exit status, log)"""
+    with open(log_path, 'wb') as log:
+        res = subprocess.run(shlex.split(METAGRAPH) + ['server_query'] + args
+                             + ['--port', str(free_port()), '--address', '127.0.0.1', '-p', '2'],
+                             stdout=log, stderr=subprocess.STDOUT, timeout=timeout)
+    with open(log_path) as f:
+        return res.returncode, f.read()
+
+
+@unittest.skipIf(PROTEIN_MODE, "the fixture is DNA")
+class TestRecordMappingAtLoad(TestingBase):
+    """A record mapping (.seqs) that is not its annotation's is refused when the index loads
+    (SPEC-multigraph-envelope.md section 10, H4), never by a request: another number of
+    columns; stated column labels (written by annotate --index-header-coords since H4) that are
+    not the annotation's, in its order; on column_coord, a column holding more coordinates than
+    the mapping states k-mers for it. The fixture: one graph of big.fa (two records of 300 bp)
+    and small.fa (one of 60 bp), annotated by file name on one thread (columns big.fa,
+    small.fa), as column_coord and row_diff_brwt_coord; each variant of the .seqs beside a copy
+    of the annotation. A .seqs without labels (as earlier binaries write it) is served; on the
+    row-diff form, where only the count is checked, even when its columns are swapped."""
+
+    maxDiff = None
+    REFUSAL = "does not belong to the annotation"
+
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        d = cls.d = cls.tempdir.name
+        rng = random.Random(20261108)
+        records = {'big.fa': [('b1', 300), ('b2', 300)], 'small.fa': [('s1', 60)]}
+        for fname, recs in records.items():
+            with open(os.path.join(d, fname), 'w') as f:
+                for header, length in recs:
+                    f.write(f'>{header}\n{"".join(rng.choice("ACGT") for _ in range(length))}\n')
+
+        def run(cmd):
+            res = subprocess.run(shlex.split(METAGRAPH) + cmd, cwd=d, stdout=subprocess.PIPE,
+                                 stderr=subprocess.STDOUT)
+            assert res.returncode == 0, (cmd, res.stdout.decode()[-3000:])
+
+        run(['build', '-p', '1', '--mode', 'basic', '--graph', 'succinct', '-k', '31',
+             '-o', 'graph', 'big.fa', 'small.fa'])
+        run(['annotate', '-p', '1', '--anno-filename', '-i', 'graph.dbg', '--anno-type', 'column',
+             '--coordinates', '-o', 'anno', 'big.fa', 'small.fa'])
+        run(['transform_anno', '-p', '1', '--anno-type', 'column_coord', '--coordinates',
+             '-o', 'anno', 'anno.column.annodbg'])
+        rd = ['transform_anno', '-p', '1', '--anno-type', 'row_diff', '--coordinates', '-o',
+              'anno', '-i', 'graph.dbg', 'anno.column.annodbg']
+        run(rd)
+        run(rd + ['--row-diff-stage', '1'])
+        run(rd + ['--row-diff-stage', '2'])
+        run(['transform_anno', '-p', '1', '--anno-type', 'row_diff_brwt_coord', '--greedy',
+             '-o', 'anno', '-i', 'graph.dbg', 'anno.column.annodbg'])
+        run(['relax_brwt', '-p', '1', '-o', 'anno', 'anno.row_diff_brwt_coord.annodbg'])
+        # the mappings: of the files in column order, in the other order, and of one file
+        for name, files in (('right', ['big.fa', 'small.fa']), ('swapped', ['small.fa', 'big.fa']),
+                            ('subset', ['big.fa'])):
+            run(['annotate', '-p', '1', '-i', 'graph.dbg', '--anno-filename',
+                 '--index-header-coords', '-o', name, *files])
+        cls.graph = os.path.join(d, 'graph.dbg')
+
+    def pair(self, form, mapping, labels=True):
+        """A copy of the |form| annotation beside a copy of the |mapping| .seqs (without its
+        labels unless |labels|): (graph, annotation)"""
+        out = os.path.join(self.d, f'{form}_{mapping}_{"labels" if labels else "old"}')
+        if not os.path.isdir(out):
+            os.makedirs(out)
+            shutil.copyfile(os.path.join(self.d, f'anno.{form}.annodbg'),
+                            os.path.join(out, f'anno.{form}.annodbg'))
+            shutil.copyfile(os.path.join(self.d, f'{mapping}.seqs'), os.path.join(out, 'anno.seqs'))
+            if not labels:
+                strip_column_labels(os.path.join(out, 'anno.seqs'))
+        return self.graph, os.path.join(out, f'anno.{form}.annodbg')
+
+    def test_the_mapping_states_the_files_as_passed(self):
+        # the columns, then the marker and the labels: the files' names as passed
+        with open(os.path.join(self.d, 'swapped.seqs'), 'rb') as f:
+            data = f.read()
+        at = data.rfind(b'mtg-cols')
+        self.assertGreater(at, 0)
+        self.assertIn(b'small.fa', data[at:])
+        self.assertLess(data[at:].index(b'small.fa'), data[at:].index(b'big.fa'))
+        # stats states whether a .seqs states its labels
+        stats = subprocess.run(shlex.split(METAGRAPH) + ['stats', os.path.join(self.d, 'right.seqs')],
+                               stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        self.assertEqual(0, stats.returncode, stats.stderr.decode())
+        self.assertIn('columns: 2', stats.stdout.decode())
+        self.assertIn('column labels: stated', stats.stdout.decode())
+        old = os.path.join(self.d, 'old.seqs')
+        shutil.copyfile(os.path.join(self.d, 'right.seqs'), old)
+        strip_column_labels(old)
+        stats = subprocess.run(shlex.split(METAGRAPH) + ['stats', old],
+                               stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        self.assertEqual(0, stats.returncode, stats.stderr.decode())
+        self.assertIn('column labels: none', stats.stdout.decode())
+
+    def test_a_mapping_of_the_annotation_is_served(self):
+        for form in ('column_coord', 'row_diff_brwt_coord'):
+            for labels in (True, False):
+                graph, anno = self.pair(form, 'right', labels)
+                server = Server(['-i', graph, '-a', anno],
+                                os.path.join(self.d, f'served_{form}_{labels}.log'))
+                try:
+                    caps = server.get('capabilities').json()
+                finally:
+                    server.stop()
+                with self.subTest(form=form, labels=labels):
+                    self.assertTrue(caps['ready'])
+
+    def test_another_mapping_is_refused_at_start_up(self):
+        cases = [
+            ('column_coord', 'subset', True, "it has 1 columns, the annotation 2 labels"),
+            ('row_diff_brwt_coord', 'subset', False, "it has 1 columns, the annotation 2 labels"),
+            ('column_coord', 'swapped', True,
+             "its column 0 is 'small.fa', the annotation's column 0 'big.fa' (the files were "
+             "passed in another order or under other names)"),
+            ('row_diff_brwt_coord', 'swapped', True,
+             "its column 0 is 'small.fa', the annotation's column 0 'big.fa'"),
+            # without labels, column_coord's coordinates do not fit the swapped k-mers: big.fa's
+            # 2 * (300 - 31 + 1) coordinates against small.fa's 60 - 31 + 1 k-mers
+            ('column_coord', 'swapped', False,
+             "column 0 ('big.fa') of the annotation holds 540 coordinates, more than the 30 "
+             "k-mers the mapping states for it (the files were passed in another order)"),
+        ]
+        for form, mapping, labels, reason in cases:
+            graph, anno = self.pair(form, mapping, labels)
+            seqs = anno[:-len(f'.{form}.annodbg')] + '.seqs'
+            line = (f"The record mapping '{seqs}' does not belong to the annotation '{anno}': "
+                    f"{reason}")
+            with self.subTest(form=form, mapping=mapping, labels=labels):
+                # a single-graph server: exits 1 before it is ready
+                status, log = run_to_exit(['-i', graph, '-a', anno],
+                                          os.path.join(self.d, f'single_{form}_{mapping}_{labels}.log'))
+                self.assertEqual(1, status, log)
+                self.assertIn(line, log)
+                self.assertNotIn('Annotated graph loaded', log)
+                # a multi-graph server, the pair beside a good one: exits 1 before it is ready
+                good = self.pair(form, 'right', True)
+                csv = os.path.join(self.d, f'list_{form}_{mapping}_{labels}.csv')
+                with open(csv, 'w') as f:
+                    f.write(f'good,{good[0]},{good[1]}\nbad,{graph},{anno}\n')
+                status, log = run_to_exit([csv], csv + '.log')
+                self.assertEqual(1, status, log)
+                self.assertIn(line, log)
+                self.assertNotIn('Ready to serve queries', log)
+                # the CLI, at its load
+                res = subprocess.run(shlex.split(METAGRAPH) + [
+                        'query', '--query-mode', 'coords', '-i', graph, '-a', anno,
+                        os.path.join(self.d, 'small.fa')],
+                        stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+                self.assertEqual(1, res.returncode, res.stderr.decode())
+                self.assertIn(line, res.stderr.decode())
+                # and none with --no-coord-mapping
+                res = subprocess.run(shlex.split(METAGRAPH) + [
+                        'query', '--query-mode', 'coords', '--no-coord-mapping', '-i', graph,
+                        '-a', anno, os.path.join(self.d, 'small.fa')],
+                        stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+                self.assertEqual(0, res.returncode, res.stderr.decode())
+
+    def test_annotate_with_the_annotation_checks_the_files(self):
+        # -a: each file is checked to be its column of the annotation (the column holds the
+        # coordinates of its first and last k-mers), and the annotation's labels are stated, so
+        # that files at another path pass the load's check; without -a they are refused there
+        def annotate(out, *args):
+            return subprocess.run(shlex.split(METAGRAPH) + [
+                    'annotate', '-p', '1', '-i', 'graph.dbg', '--anno-filename',
+                    '--index-header-coords', '-o', out, *args],
+                    cwd=self.d, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        absolute = [os.path.join(self.d, f) for f in ('big.fa', 'small.fa')]
+        for form in ('column_coord', 'row_diff_brwt_coord'):
+            anno = f'anno.{form}.annodbg'
+            with self.subTest(form=form):
+                res = annotate(f'checked_{form}', '-a', anno, *absolute)
+                self.assertEqual(0, res.returncode, res.stderr.decode())
+                with open(os.path.join(self.d, f'checked_{form}.seqs'), 'rb') as f:
+                    data = f.read()
+                trailer = data[data.rfind(b'mtg-cols'):]
+                self.assertIn(b'big.fa', trailer)
+                self.assertNotIn(self.d.encode(), trailer)
+                res = annotate(f'swapped_{form}', '-a', anno, 'small.fa', 'big.fa')
+                self.assertEqual(1, res.returncode)
+                self.assertIn(f"The file 'small.fa' is not column 0 ('big.fa') of the annotation "
+                              f"'{anno}': the column lacks the file's k-mer at coordinate",
+                              res.stderr.decode())
+                self.assertFalse(os.path.exists(os.path.join(self.d, f'swapped_{form}.seqs')))
+                res = annotate(f'subset_{form}', '-a', anno, 'big.fa')
+                self.assertEqual(1, res.returncode)
+                self.assertIn(f"The annotation '{anno}' has 2 columns, and 1 files were passed",
+                              res.stderr.decode())
+        # served: with -a's labels; without, the absolute names are refused at load
+        out = os.path.join(self.d, 'moved')
+        os.makedirs(out)
+        shutil.copyfile(os.path.join(self.d, 'anno.column_coord.annodbg'),
+                        os.path.join(out, 'anno.column_coord.annodbg'))
+        shutil.copyfile(os.path.join(self.d, 'checked_column_coord.seqs'),
+                        os.path.join(out, 'anno.seqs'))
+        server = Server(['-i', self.graph, '-a', os.path.join(out, 'anno.column_coord.annodbg')],
+                        os.path.join(self.d, 'moved.log'))
+        try:
+            self.assertTrue(server.get('capabilities').json()['ready'])
+        finally:
+            server.stop()
+        res = annotate(os.path.join(out, 'anno'), *absolute)
+        self.assertEqual(0, res.returncode, res.stderr.decode())
+        status, log = run_to_exit(['-i', self.graph, '-a',
+                                   os.path.join(out, 'anno.column_coord.annodbg')],
+                                  os.path.join(self.d, 'moved_refused.log'))
+        self.assertEqual(1, status, log)
+        self.assertIn(f"its column 0 is '{absolute[0]}', the annotation's column 0 'big.fa'", log)
+
+    def test_the_row_diff_form_checks_an_old_mapping_by_its_count_only(self):
+        # the documented limit: the row-diff forms state no coordinates per column, so an old
+        # .seqs of the right count but swapped columns is served
+        graph, anno = self.pair('row_diff_brwt_coord', 'swapped', False)
+        server = Server(['-i', graph, '-a', anno], os.path.join(self.d, 'rd_swapped.log'))
+        try:
+            caps = server.get('capabilities').json()
+        finally:
+            server.stop()
+        self.assertTrue(caps['ready'])
 
 if __name__ == '__main__':
     unittest.main()

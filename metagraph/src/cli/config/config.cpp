@@ -1783,6 +1783,9 @@ if (advanced) {
             fprintf(stderr, "\t                       \tpass files in annotation column order; headers must be non-empty UTF-8 and distinct within each file\n");
             fprintf(stderr, "\t                       \t(otherwise the build is refused, naming the file, the records and the bytes; with --fwd-and-reverse\n"
                             "\t                       \t a record's reverse complement counts to the same record)\n");
+            fprintf(stderr, "\t                       \tthe mapping states each file's name as its column's label, which a load checks;\n"
+                            "\t                       \twith -a ANNOTATION, each file is checked to be that column of ANNOTATION\n"
+                            "\t                       \tand ANNOTATION's labels are stated instead (renamed columns, moved files)\n");
             fprintf(stderr, "\t   --allow-unchecked-headers \tskip the checks of header names above, with a warning [off]\n");
             fprintf(stderr, "\n");
             fprintf(stderr, "\t-p --parallel [INT] \tuse multiple threads for computation [1]\n");

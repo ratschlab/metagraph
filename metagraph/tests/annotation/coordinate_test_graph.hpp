@@ -13,9 +13,11 @@ namespace mtg::test {
 struct CoordinateRecord { std::string sequence, column, header; };
 
 // Small real coordinate-matrix fixture, with adjacent records in each column.
+// |verified_order|: its record mapping states its column labels and was checked against the
+// annotation, as a load of a .seqs written since H4 (CoordToHeader::column_order_verified)
 inline std::unique_ptr<graph::AnnotatedDBG>
 coordinate_test_graph(size_t k, const std::vector<CoordinateRecord> &records,
-                      bool row_diff = false, bool brwt = false) {
+                      bool row_diff = false, bool brwt = false, bool verified_order = false) {
     using namespace annot::matrix;
     auto graph = std::make_shared<graph::DBGSuccinct>(k);
     annot::LabelEncoder<> encoder;
@@ -147,9 +149,15 @@ coordinate_test_graph(size_t k, const std::vector<CoordinateRecord> &records,
                 throw std::logic_error("Unexpected coordinate in row-diff fixture");
         }
     }
-    return std::make_unique<graph::AnnotatedDBG>(
-        graph, std::move(annotation), false,
-        std::make_unique<annot::CoordToHeader>(std::move(headers), std::move(counts)));
+    auto mapping = std::make_unique<annot::CoordToHeader>(std::move(headers), std::move(counts));
+    if (verified_order) {
+        const auto &labels = annotation->get_label_encoder().get_labels();
+        mapping->set_column_labels(std::vector<std::string>(labels));
+        if (!mapping->check_columns(labels).empty() || !mapping->column_order_verified())
+            throw std::logic_error("Coordinate fixture mapping not verified");
+    }
+    return std::make_unique<graph::AnnotatedDBG>(graph, std::move(annotation), false,
+                                                 std::move(mapping));
 }
 } // namespace mtg::test
 #endif

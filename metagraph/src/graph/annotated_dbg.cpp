@@ -3,6 +3,7 @@
 #include <cstdlib>
 #include <numeric>
 #include <span>
+#include <stdexcept>
 
 #include <tsl/hopscotch_set.h>
 #include <tsl/hopscotch_map.h>
@@ -53,7 +54,15 @@ AnnotatedDBG::AnnotatedDBG(std::shared_ptr<DeBruijnGraph> dbg,
                            std::shared_ptr<const annot::CoordToHeader> coord_to_header)
       : AnnotatedSequenceGraph(dbg, std::move(annotation), force_fast), dbg_(*dbg),
         coord_to_header_(std::move(coord_to_header)),
-        kmer_abundances_(holds_kmer_abundances(*annotator_)) {}
+        kmer_abundances_(holds_kmer_abundances(*annotator_)) {
+    // a mapping of another column count maps no coordinate right: refused here, so that no
+    // query has to (the loaders refuse it first, naming the files: check_record_mapping)
+    if (coord_to_header_ && coord_to_header_->num_columns() != annotator_->num_labels()) {
+        throw std::invalid_argument(fmt::format(
+                "A record mapping (.seqs) of {} columns for an annotation of {} labels",
+                coord_to_header_->num_columns(), annotator_->num_labels()));
+    }
+}
 
 bool AnnotatedDBG::holds_kmer_abundances(const Annotator &annotation) {
     const auto &matrix = annotation.get_matrix();
@@ -970,10 +979,11 @@ AnnotatedDBG::get_header_results(std::string_view sequence, size_t num_top_label
         logger->error("k-mer coordinates are not indexed in this annotator");
         exit(1);
     }
+    // the constructor refused a mapping of another column count: a request never exits here
     if (annotator_->num_labels() != coord_to_header_->num_columns()) {
-        logger->error("Incompatible number of columns in CoordToHeader and annotation matrix: "
-                      "{} != {}", coord_to_header_->num_columns(), annotator_->num_labels());
-        exit(1);
+        throw std::logic_error(fmt::format(
+                "Incompatible number of columns in CoordToHeader and annotation matrix: {} != {}",
+                coord_to_header_->num_columns(), annotator_->num_labels()));
     }
     auto tuples = matrix->get_row_tuples(rows);
     coord_to_header_->map_to_local_coords(&tuples);
@@ -1272,10 +1282,11 @@ AnnotatedDBG::get_kmer_coordinates(std::string_view sequence,
     auto rows_tuples = tuple_matrix->get_row_tuples(row_indices);
 
     if (coord_to_header_) {
+        // the constructor refused a mapping of another column count: a request never exits
         if (annotator_->num_labels() != coord_to_header_->num_columns()) {
-            logger->error("Incompatible number of columns in CoordToHeader and annotation matrix: "
-                          "{} != {}", coord_to_header_->num_columns(), annotator_->num_labels());
-            exit(1);
+            throw std::logic_error(fmt::format(
+                    "Incompatible number of columns in CoordToHeader and annotation matrix: "
+                    "{} != {}", coord_to_header_->num_columns(), annotator_->num_labels()));
         }
 
         coord_to_header_->map_to_local_coords(&rows_tuples);

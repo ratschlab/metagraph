@@ -16,6 +16,7 @@ class AnnotatedDBG;
 
 namespace annot {
 class CoordToHeader;
+template <typename LabelType> class MultiLabelAnnotation;
 } // namespace annot
 
 namespace cli {
@@ -30,6 +31,24 @@ initialize_annotated_dbg(std::shared_ptr<graph::DeBruijnGraph> graph,
                          size_t max_chunks_open = kDefaultMaxChunksOpen);
 
 std::unique_ptr<graph::AnnotatedDBG> initialize_annotated_dbg(const Config &config);
+
+/**
+ * Why |mapping| (a record mapping, .seqs, just loaded) is not the mapping of |annotation|, or ""
+ * when it is as far as the load can tell (SPEC-multigraph-envelope.md section 10):
+ *   - another number of columns than the annotation's labels;
+ *   - when the mapping states its column labels (written since H4), a column whose label is not
+ *     the annotation's (CoordToHeader::check_columns, which then drops them and records the
+ *     order as verified);
+ *   - on an annotation that states its coordinates per column without decoding them
+ *     (column_coord, brwt_coord), a column holding more coordinates than the k-mers the mapping
+ *     states for it: its coordinates are distinct values below that, so it is another file's.
+ *     The row-diff forms store differences along paths: there only the count (and the stated
+ *     labels) are checked.
+ * Every loader calls it on the mapping it loads and refuses the index on a reason: a server at
+ * start-up (exit 1 before it is ready), a CLI command at its load, a per-request load by throwing.
+ */
+std::string check_record_mapping(const annot::MultiLabelAnnotation<std::string> &annotation,
+                                 annot::CoordToHeader *mapping);
 
 /**
  * What the loading thread does for the pattern search to a graph it loads, before the graph is

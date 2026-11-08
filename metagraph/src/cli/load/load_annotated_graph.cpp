@@ -1,6 +1,8 @@
 #include "load_annotated_graph.hpp"
 
 #include <cassert>
+#include <cstdio>
+#include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <mutex>
@@ -13,6 +15,7 @@
 #include "annotation/binary_matrix/column_sparse/column_major.hpp"
 #include "annotation/binary_matrix/row_diff/row_diff.hpp"
 #include "annotation/binary_matrix/row_sparse/row_sparse.hpp"
+#include "annotation/int_matrix/rank_extended/tuple_csc_matrix.hpp"
 #include "annotation/representation/column_compressed/annotate_column_compressed.hpp"
 #include "annotation/coord_to_header.hpp"
 #include "graph/representation/canonical_dbg.hpp"
@@ -292,6 +295,42 @@ std::string coord_to_header_file(const annot::MultiLabelAnnotation<std::string> 
             + annot::CoordToHeader::kExtension;
 }
 
+} // namespace
+
+std::string check_record_mapping(const annot::MultiLabelAnnotation<std::string> &annotation,
+                                 annot::CoordToHeader *mapping) {
+    assert(mapping);
+    const auto &labels = annotation.get_label_encoder().get_labels();
+    if (std::string why = mapping->check_columns(labels); !why.empty())
+        return why;
+    // the coordinates of a column are distinct values below the k-mers of its files, so a
+    // column that holds more of them than the mapping states k-mers for it is another file's
+    // (or another build's): checked where the annotation states its coordinates per column
+    // without decoding them; the row-diff forms store differences along paths, and decoding
+    // every row would cost the annotation's size
+    auto bound = [&](const auto &tuples) -> std::string {
+        for (uint64_t j = 0; j < mapping->num_columns(); ++j) {
+            const uint64_t coordinates = tuples.num_column_attributes(j);
+            if (coordinates > mapping->num_kmers(j)) {
+                return fmt::format("column {} ('{}') of the annotation holds {} coordinates, "
+                                   "more than the {} k-mers the mapping states for it (the "
+                                   "files were passed in another order)", j, labels[j],
+                                   coordinates, mapping->num_kmers(j));
+            }
+        }
+        return "";
+    };
+    using namespace annot::matrix;
+    const BinaryMatrix &matrix = annotation.get_matrix();
+    if (const auto *tuples = dynamic_cast<const TupleCSCMatrix<ColumnMajor> *>(&matrix))
+        return bound(*tuples);
+    if (const auto *tuples = dynamic_cast<const TupleCSCMatrix<BRWT> *>(&matrix))
+        return bound(*tuples);
+    return "";
+}
+
+namespace {
+
 std::unique_ptr<annot::CoordToHeader>
 load_coord_to_header(const annot::MultiLabelAnnotation<std::string> &annotation,
                      const Config &config, LoadFailure on_failure) {
@@ -307,6 +346,31 @@ load_coord_to_header(const annot::MultiLabelAnnotation<std::string> &annotation,
                     throw std::runtime_error(load_failure("the record mapping", cth_fname));
                 }
                 exit(1);
+            }
+            // the mapping of this annotation, or none: refused here, before the index is built
+            // (a server before it is ready), never by a request that reads it
+            if (std::string why = check_record_mapping(annotation, coord_to_header.get());
+                    !why.empty()) {
+                const std::string message = fmt::format(
+                        "The record mapping '{}' does not belong to the annotation '{}': {}. "
+                        "Rebuild it against this annotation with every input file in column "
+                        "order (metagraph stats --print-col-names lists them): metagraph "
+                        "annotate --anno-filename --index-header-coords -i {} -a {} -o {} "
+                        "<files>; or load the annotation without it (--no-coord-mapping)",
+                        cth_fname, config.infbase_annotators.at(0), why, config.infbase,
+                        config.infbase_annotators.at(0),
+                        utils::remove_suffix(config.infbase_annotators.at(0),
+                                             annotation.file_extension()));
+                if (on_failure == LoadFailure::THROW)
+                    throw std::runtime_error(message);
+                logger->error("{}", message);
+                // ended at once, as the server's shutdown does: this runs in a loading thread
+                // while a single-graph server's listener runs, and exit() would destroy the
+                // process's statics under it (status -11 seen instead of 1); nothing is written
+                // yet that needs flushing but the log
+                logger->flush();
+                std::fflush(nullptr);
+                std::_Exit(1);
             }
             logger->trace("CoordToHeader mapping loaded successfully from {}. "
                           "All queries will be performed against individual sequences.",

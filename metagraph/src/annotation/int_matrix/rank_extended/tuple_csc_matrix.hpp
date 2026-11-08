@@ -43,6 +43,11 @@ class TupleCSCMatrix : public BinaryMatrix, public MultiIntMatrix, public GetEnt
                                           size_t num_threads = 1) const;
 
     uint64_t num_attributes() const;
+    // the attributes (coordinates) stored in column |j|, without decoding (the record
+    // mapping's load check, check_record_mapping)
+    uint64_t num_column_attributes(Column j) const {
+        return j < column_values_.size() ? column_values_[j].size() : 0;
+    }
 
     // return entries of the matrix -- where each entry is a set of integers
     std::vector<RowTuples> get_row_tuples(std::span<const Row> rows,

@@ -4299,8 +4299,11 @@ class TestTraverseMultiGraph(TestTraverseBase):
             if header:
                 with open(f'{d}/{side}/source.fa', 'w') as f:
                     f.write('>' + header + '\n' + seq + '\n')
+                # with -a: the file is checked to be the shared annotation's column, whose label
+                # (the shared source's path) the mapping states, as a load requires (H4)
                 self._run_ok(f'{METAGRAPH} annotate -p 1 -i graph.dbg --anno-filename '
-                             '--index-header-coords -o annotation source.fa', f'{d}/{side}')
+                             '--index-header-coords -a annotation.column_coord.annodbg '
+                             '-o annotation source.fa', f'{d}/{side}')
         return seq
 
     def _start_refused(self, csv):

@@ -448,3 +448,49 @@ pattern fixtures (`api/python/tests/data/traverse/pattern/`, `SPEC-pattern-searc
 (single-graph, `true`), `capabilities_repeated_headers` (single-graph, `false`: one header in both files of the pair,
 its occurrences with null pair tags), `capabilities_representation_unsupported` (`null`: the pair has no `.seqs`) and
 `capabilities_multi_graph` (`true`, in `graph_summary`).
+
+## 10. The record mapping at load (H4)
+
+A record mapping (`.seqs`) is the mapping of one annotation: per column, the headers of its records and their k-mer
+coordinate offsets, in the annotation's column order. Wherever one is loaded beside a coordinate annotation (a
+server's pairs at start-up, `query`, `align`, `traverse`, `pattern`; none with `--no-coord-mapping`), it is checked
+before the index is built:
+
+1. its number of columns must equal the annotation's labels;
+2. when it states its column labels, each must equal the annotation's label of that column (byte equality);
+3. on `column_coord` and `brwt_coord`, which state their coordinates per column without decoding, no column may hold
+   more coordinates than the k-mers the mapping states for it (the coordinates of a column are distinct values
+   below that, so more of them is another file's column). The row-diff forms (`row_diff_coord`,
+   `row_diff_brwt_coord`, `row_diff_disk_coord`) store differences along paths and have no such count: there a
+   `.seqs` without labels is checked by its count only.
+
+A failed check is a start-up failure, never a request's: `server_query` logs one error line and exits with status 1
+before it is ready (a single-graph server before `ready` turns true, a multi-graph server before `Ready to serve
+queries`), a CLI command exits 1 at its load, and a server's per-request load into RAM throws (its request fails). The
+line: `The record mapping '<anno-base>.seqs' does not belong to the annotation '<annotation>': <reason>. Rebuild it
+against this annotation with every input file in column order (metagraph stats --print-col-names lists them):
+metagraph annotate --anno-filename --index-header-coords -i <graph> -a <annotation> -o <anno-base> <files>; or load
+the annotation without it (--no-coord-mapping)`, the reason one of `it has <n> columns, the annotation <m> labels`, `its column <i>
+is '<label>', the annotation's column <i> '<label>' (the files were passed in another order or under other names)`
+and `column <i> ('<label>') of the annotation holds <c> coordinates, more than the <n> k-mers the mapping states for
+it (the files were passed in another order)`. An index is never built with a mapping of another column count, so no
+query checks it (before H4 a query exited the process on it).
+
+**The stated labels.** `annotate --index-header-coords` writes, after the columns, the number `0x6d74672d636f6c73`
+(the bytes `mtg-cols`, 8 bytes big-endian as every number of the file), then the column labels (their number, equal
+to the columns', then each label, as the file's string vectors are written): for its i-th input file the label
+`--anno-filename` gives that file, its name exactly as passed. The check passes when the files are passed under the
+names the annotation's columns carry, in that order; a file passed under another spelling of its path is refused.
+With `-a <annotation>` the command checks each file against that annotation instead: the file's column must hold the
+coordinates of the file's first and last k-mers (of its first sequence and of its last) at their nodes, else it
+exits 1 naming the file, the column and the coordinate, and writes nothing; it then states the annotation's labels.
+That is how a mapping is written for an annotation whose columns were renamed, or whose files have moved.
+Binaries before H4 read the columns and stop, so a `.seqs` with labels serves on them unchanged; an H4 binary reads a
+file that ends after its columns as one without labels, and fails the load of one with any other data after them.
+`metagraph stats <base>.seqs` states which it is (`column labels: stated` or `column labels: none`).
+
+**Certifying an existing `.seqs`.** The bytes before the labels are those an older binary writes for the same
+inputs. Rebuilding the mapping with an H4 binary from the files (with `-a`, the checked way, wherever they are now), and
+finding the old file to be a prefix of the new one (`cmp -n $(stat -c%s old.seqs) old.seqs new.seqs`, the new one
+longer), shows that the old file is the mapping of those files in that order; the new one then replaces it (its
+manifest and `index_fp` change).
