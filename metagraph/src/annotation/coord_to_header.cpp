@@ -1,5 +1,7 @@
 #include "annotation/coord_to_header.hpp"
 
+#include <algorithm>
+
 #include <tsl/hopscotch_map.h>
 #include <tsl/hopscotch_set.h>
 
@@ -121,9 +123,10 @@ void CoordToHeader::map_to_local_coords(std::vector<RowTuples> *rows) const {
     assert(rows);
     for (auto &row : *rows) {
         // a column without sequence records has no header labels
-        std::erase_if(row, [&](const auto &entry) {
-            return entry.first >= num_columns() || !num_sequences(entry.first);
-        });
+        row.erase(std::remove_if(row.begin(), row.end(), [&](const auto &entry) {
+                      return entry.first >= num_columns() || !num_sequences(entry.first);
+                  }),
+                  row.end());
         for (auto &[col, coords] : row) {
             const size_t n = num_sequences(col);
             for (uint64_t &coord : coords) {
