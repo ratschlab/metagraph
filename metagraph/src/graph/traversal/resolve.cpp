@@ -3,8 +3,10 @@
 #include <algorithm>
 #include <cctype>
 #include <map>
+#include <optional>
 
 #include <tsl/hopscotch_map.h>
+#include <tsl/hopscotch_set.h>
 
 #include "graph/annotated_dbg.hpp"
 #include "annotation/coord_to_header.hpp"
@@ -100,62 +102,6 @@ struct LabelSupport {
     }
 };
 
-std::vector<Row> anno_rows(const std::vector<node_index> &keys) {
-    std::vector<Row> rows;
-    rows.reserve(keys.size());
-    for (node_index key : keys) {
-        rows.push_back(AnnotatedDBG::graph_to_anno_index(key));
-    }
-    return rows;
-}
-
-// The labels of |options.discover_kind| present at the k-mers |pos| (keys |keys|), each with
-// its support, in the order first seen. Rows are decoded kResolveBatchRows at a time.
-void discover_labels(const LabelOracle &oracle,
-                     const std::vector<node_index> &keys,
-                     const std::vector<uint64_t> &pos,
-                     LabelKind kind,
-                     std::vector<std::pair<Column, uint64_t>> *ids,
-                     std::vector<LabelSupport> *found) {
-    std::map<std::pair<Column, uint64_t>, size_t> index;
-    auto of = [&](Column c, uint64_t seq_id) -> LabelSupport& {
-        auto [it, inserted] = index.try_emplace({ c, seq_id }, found->size());
-        if (inserted) {
-            if (found->size() == kMaxDiscoveredLabels) {
-                throw std::invalid_argument("Discovery found more than "
-                        + std::to_string(kMaxDiscoveredLabels) + " distinct labels. "
-                        "Use a shorter query, or name the labels explicitly.");
-            }
-            found->emplace_back();
-            ids->emplace_back(c, seq_id);
-        }
-        return (*found)[it->second];
-    };
-    for (size_t begin = 0; begin < keys.size(); begin += kResolveBatchRows) {
-        const size_t end = std::min(keys.size(), begin + kResolveBatchRows);
-        const std::vector<node_index> batch(keys.begin() + begin, keys.begin() + end);
-        if (kind == LabelKind::COLUMN) {
-            const auto rows = oracle.get_rows(anno_rows(batch));
-            for (size_t j = 0; j < rows.size(); ++j) {
-                for (Column c : rows[j]) {
-                    of(c, 0).add(pos[begin + j]);
-                }
-            }
-        } else {
-            const auto rows = oracle.get_row_tuples(anno_rows(batch));
-            for (size_t j = 0; j < rows.size(); ++j) {
-                for (const auto &[c, coords] : rows[j]) {
-                    if (!oracle.has_header_records(c))
-                        continue;  // no records, so no header labels
-                    for (uint64_t coord : coords) {
-                        of(c, oracle.map_coord(c, coord).first).add(pos[begin + j]);
-                    }
-                }
-            }
-        }
-    }
-}
-
 } // namespace
 
 SupportProfile resolve_support(const LabelOracle &oracle,
@@ -176,14 +122,6 @@ SupportProfile resolve_support(const LabelOracle &oracle,
     const std::vector<node_index> keys = oracle.keys_of_sequence(query);
     assert(keys.size() == profile.num_kmers);
 
-    std::vector<node_index> present_keys;
-    std::vector<uint64_t> present_pos;   // the k-mer index of each present key
-    for (uint64_t i = 0; i < keys.size(); ++i) {
-        if (keys[i] != npos) {
-            present_keys.push_back(keys[i]);
-            present_pos.push_back(i);
-        }
-    }
     profile.graph_runs = runs_of(profile.num_kmers, [&](uint64_t i) { return keys[i] != npos; });
 
     std::vector<LabelRef> refs;
@@ -194,7 +132,7 @@ SupportProfile resolve_support(const LabelOracle &oracle,
         }
         LabelQuery query_labels(oracle, refs);
         support.resize(refs.size());
-        // decode the rows kResolveBatchRows at a time, as discovery does
+        // decode the rows kResolveBatchRows at a time
         for (size_t begin = 0; begin < keys.size(); begin += kResolveBatchRows) {
             const size_t end = std::min(keys.size(), begin + kResolveBatchRows);
             const auto hits = query_labels.fetch(
@@ -208,41 +146,47 @@ SupportProfile resolve_support(const LabelOracle &oracle,
     } else {
         if (options.discover_kind == LabelKind::HEADER && !oracle.coord_to_header())
             throw std::invalid_argument("Header discovery requires a CoordToHeader index");
-        std::vector<std::pair<Column, uint64_t>> ids;
-        std::vector<LabelSupport> found;
-        discover_labels(oracle, present_keys, present_pos, options.discover_kind, &ids, &found);
-
-        // more k-mers first; ties by column id, then seq_id
-        std::vector<size_t> ranked(found.size());
-        for (size_t i = 0; i < ranked.size(); ++i) {
-            ranked[i] = i;
+        if (options.discover_kind == LabelKind::HEADER
+                && oracle.coord_to_header() != oracle.anno_graph().get_coord_to_header()) {
+            throw std::invalid_argument("Header discovery reads the annotation's own sequence "
+                                        "header index, not the oracle's override");
         }
-        std::sort(ranked.begin(), ranked.end(), [&](size_t a, size_t b) {
-            return found[a].kmers != found[b].kmers ? found[a].kmers > found[b].kmers
-                                                    : ids[a] < ids[b];
-        });
-        if (ranked.size() > options.discover_max_labels) {
+        // the ranking of /search with signatures, so that both report the same labels,
+        // counts and runs
+        const bool headers = options.discover_kind == LabelKind::HEADER;
+        AnnotatedDBG::TopLabelCut cut;
+        auto top = oracle.anno_graph().get_top_label_signatures(
+                query, options.discover_max_labels, 0.0, 0.0, &cut, headers);
+        if (cut.total > options.discover_max_labels) {
             LabelTruncation trunc;
-            trunc.total = ranked.size();
+            trunc.total = cut.total;
             trunc.kept = options.discover_max_labels;
-            trunc.min_kept_kmers = found[ranked[trunc.kept - 1]].kmers;
-            trunc.max_dropped_kmers = found[ranked[trunc.kept]].kmers;
-            for (size_t i = trunc.kept; i < ranked.size(); ++i) {
-                if (found[ranked[i]].kmers == present_keys.size())
-                    trunc.dropped_full_length++;
-            }
-            ranked.resize(trunc.kept);
+            trunc.min_kept_kmers = cut.min_kept;
+            trunc.max_dropped_kmers = cut.max_dropped;
+            trunc.dropped_full_length = cut.dropped_full;
             profile.labels_truncated = trunc;
         }
-        for (size_t at : ranked) {
-            LabelRef ref;
-            ref.kind = options.discover_kind;
-            ref.column = ids[at].first;
-            ref.seq_id = ids[at].second;
-            ref.name = ref.kind == LabelKind::COLUMN ? oracle.column_name(ref.column)
-                                                     : oracle.header_name(ref.column, ref.seq_id);
-            refs.push_back(std::move(ref));
-            support.push_back(std::move(found[at]));
+        tsl::hopscotch_set<std::string> named;  // a repeated header names its first record
+        for (const auto &[name, count, presence] : top) {
+            if (!named.insert(name).second)
+                continue;
+            std::optional<LabelRef> ref;
+            if (headers) {
+                ref = oracle.find_header(name);
+            } else if (auto column = oracle.find_column(name)) {
+                ref = LabelRef();
+                ref->kind = LabelKind::COLUMN;
+                ref->column = *column;
+                ref->name = name;
+            }
+            assert(ref);
+            LabelSupport found;
+            for (uint64_t i = 0; i < presence.size(); ++i) {
+                if (presence[i])
+                    found.add(i);
+            }
+            refs.push_back(std::move(*ref));
+            support.push_back(std::move(found));
         }
     }
 

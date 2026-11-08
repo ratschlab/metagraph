@@ -74,6 +74,9 @@ class CoordToHeader {
      * Unpacking: `seq_id   = packed % num_sequences[col]`
      *            `local_coord = packed / num_sequences[col]`
      *
+     * Entries of columns without sequence records are removed: they have no
+     * header labels.
+     *
      * For single-coord lookups prefer `map_single_coord`, which returns
      * the pair directly without packing.
      */
