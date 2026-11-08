@@ -567,10 +567,17 @@ the check at load::
                        -a annotation.row_diff_brwt_coord.annodbg -o annotation <files in column order>
 
 A ``.seqs`` written by an earlier version states no labels: its number of columns is checked, and its column order
-only by the coordinate check on ``column_coord`` and ``brwt_coord``. To certify such a file, build the mapping again
-with the current version (with ``-a``) and check that the old file is a prefix of the new one
-(``cmp -n $(stat -c%s old.seqs) old.seqs new.seqs``); then use the new one. Earlier versions read a ``.seqs`` with
-labels as before.
+only by the coordinate check on ``column_coord`` and ``brwt_coord``. A ``.seqs`` that was cut short is refused. To
+certify an earlier file, build the mapping again with the current version (with ``-a``) and check that the new file
+starts with the old file's bytes and that the labels' marker ``mtg-cols`` follows exactly where the old file ends
+(the commands work with GNU and macOS tools)::
+
+    n=$(wc -c < old.seqs)
+    head -c "$n" new.seqs | cmp -s - old.seqs \
+      && [ "$(tail -c +$((n + 1)) new.seqs | head -c 8)" = mtg-cols ] && echo certified
+
+Then use the new file. ``annotate -a`` loads the graph and the whole annotation; on a shared host, build one
+mapping at a time with ``--mmap``. Earlier versions read a ``.seqs`` with labels as before.
 
 All other flags (e.g., ``--separately`` and ``--disk-swap``) described above are also supported similarly as for binary annotations.
 

@@ -22,6 +22,7 @@ template <typename LabelType> class MultiLabelAnnotation;
 namespace cli {
 
 class Config;
+enum class LoadFailure;  // load_graph.hpp
 
 inline constexpr size_t kDefaultMaxChunksOpen = 2000;
 
@@ -31,6 +32,15 @@ initialize_annotated_dbg(std::shared_ptr<graph::DeBruijnGraph> graph,
                          size_t max_chunks_open = kDefaultMaxChunksOpen);
 
 std::unique_ptr<graph::AnnotatedDBG> initialize_annotated_dbg(const Config &config);
+
+// As the first overload, a file that cannot be loaded (the annotation, its record mapping, a
+// row_diff annotation's anchor and fork successor bitmap) or a record mapping refused
+// (check_record_mapping) handled as |on_failure| says: THROW, a std::runtime_error with the
+// load's message, for a caller that answers it (the Python bindings raise it); EXIT, logged and
+// the process ended
+std::unique_ptr<graph::AnnotatedDBG>
+initialize_annotated_dbg(std::shared_ptr<graph::DeBruijnGraph> graph, const Config &config,
+                         size_t max_chunks_open, LoadFailure on_failure);
 
 /**
  * Why |mapping| (a record mapping, .seqs, just loaded) is not the mapping of |annotation|, or ""

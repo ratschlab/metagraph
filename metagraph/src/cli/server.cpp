@@ -1147,7 +1147,20 @@ int run_server(Config *config) {
                                             Config config_copy = *config;
                                             config_copy.infbase = graph_fname;
                                             config_copy.infbase_annotators = { anno_fname };
-                                            index_loaded = initialize_annotated_dbg(config_copy);
+                                            // as /traverse, /resolve and /pattern load a pair
+                                            // into RAM: with the resident pair's mapping,
+                                            // checked at start-up (its .seqs is not read
+                                            // again), and a load that fails throws, so that
+                                            // it fails this request alone (the route's 400
+                                            // with the load's message), never the server
+                                            // (H4 review S2)
+                                            auto mapping = graphs_cache.at({ graph_fname, anno_fname })
+                                                                   ->share_coord_to_header();
+                                            config_copy.no_coord_mapping = !mapping;
+                                            PatternPreparation preparation;
+                                            preparation.progress = false;
+                                            index_loaded = initialize_annotated_dbg(
+                                                    config_copy, preparation, std::move(mapping));
                                             index = index_loaded.get();
                                         } else {
                                             index = graphs_cache.at({ graph_fname, anno_fname }).get();

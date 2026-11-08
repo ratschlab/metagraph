@@ -3492,6 +3492,14 @@ class TestRecordMappingAtLoad(TestingBase):
         run(['transform_anno', '-p', '1', '--anno-type', 'row_diff_brwt_coord', '--greedy',
              '-o', 'anno', '-i', 'graph.dbg', 'anno.column.annodbg'])
         run(['relax_brwt', '-p', '1', '-o', 'anno', 'anno.row_diff_brwt_coord.annodbg'])
+        # an annotation of three columns over the same graph (small.fa's record again, in
+        # third.fa), for an annotation replaced under a running server
+        with open(os.path.join(d, 'small.fa')) as f, open(os.path.join(d, 'third.fa'), 'w') as g:
+            g.write(f.read().replace('>s1', '>t1'))
+        run(['annotate', '-p', '1', '--anno-filename', '-i', 'graph.dbg', '--anno-type', 'column',
+             '--coordinates', '-o', 'three', 'big.fa', 'small.fa', 'third.fa'])
+        run(['transform_anno', '-p', '1', '--anno-type', 'column_coord', '--coordinates',
+             '-o', 'three', 'three.column.annodbg'])
         # the mappings: of the files in column order, in the other order, and of one file
         for name, files in (('right', ['big.fa', 'small.fa']), ('swapped', ['small.fa', 'big.fa']),
                             ('subset', ['big.fa'])):
@@ -3649,6 +3657,60 @@ class TestRecordMappingAtLoad(TestingBase):
                                   os.path.join(self.d, 'moved_refused.log'))
         self.assertEqual(1, status, log)
         self.assertIn(f"its column 0 is '{absolute[0]}', the annotation's column 0 'big.fa'", log)
+
+    def test_a_search_load_into_ram_never_exits_the_server(self):
+        # /search with in_ram on a --mmap server loads the pair with the resident pair's
+        # mapping, checked at start-up, as /traverse, /resolve and /pattern do: a .seqs
+        # replaced on disk is not read again. A load that fails (here the annotation replaced by
+        # one of three columns, which the resident's mapping of two is not, and the .seqs on
+        # disk of two columns refused) fails that request alone, the route's 400 with the load's
+        # message as error (as /traverse, /resolve and /pattern answer a load that fails), and
+        # the server runs on (H4 review S2: it exited)
+        out = os.path.join(self.d, 'live')
+        os.makedirs(out)
+        anno = os.path.join(out, 'anno.column_coord.annodbg')
+        seqs = os.path.join(out, 'anno.seqs')
+        shutil.copyfile(os.path.join(self.d, 'anno.column_coord.annodbg'), anno)
+        shutil.copyfile(os.path.join(self.d, 'right.seqs'), seqs)
+
+        def replace(source, target):
+            # a new file renamed over the old: the resident's mapped file keeps its inode
+            shutil.copyfile(source, target + '.new')
+            os.replace(target + '.new', target)
+
+        csv = os.path.join(self.d, 'live.csv')
+        with open(csv, 'w') as f:
+            f.write(f'live,{self.graph},{anno}\n')
+        with open(os.path.join(self.d, 'small.fa')) as f:
+            fasta = f.read()
+        query = {'FASTA': fasta, 'graphs': ['live'], 'discovery_fraction': 0.5}
+        server = Server([csv, '--mmap', '--mem-cap-gb', '1', '--cache-size', '0'],
+                        os.path.join(self.d, 'live.log'))
+        try:
+            resident = server.post('search', query)
+            self.assertEqual(200, resident.status_code, resident.text)
+            self.assertTrue(resident.json()[0]['results'], resident.text)
+            loaded = server.post('search', dict(query, in_ram=True))
+            self.assertEqual((200, resident.json()), (loaded.status_code, loaded.json()))
+            # the .seqs replaced (the files in another order): the resident's mapping serves
+            replace(os.path.join(self.d, 'swapped.seqs'), seqs)
+            loaded = server.post('search', dict(query, in_ram=True))
+            self.assertEqual((200, resident.json()), (loaded.status_code, loaded.json()))
+            # the annotation replaced: the request fails, the route's 400 with the load's message
+            replace(os.path.join(self.d, 'three.column_coord.annodbg'), anno)
+            failed = server.post('search', dict(query, in_ram=True))
+            self.assertEqual(400, failed.status_code, failed.text)
+            self.assertEqual(['error'], list(failed.json()))
+            self.assertTrue(failed.json()['error'].startswith(
+                    f"The record mapping '{seqs}' does not belong to the annotation '{anno}': "
+                    f"it has 2 columns, the annotation 3 labels. Rebuild it"), failed.text)
+            # the server runs on, its resident pair answering as before
+            self.assertIsNone(server.process.poll())
+            again = server.post('search', query)
+            self.assertEqual((200, resident.json()), (again.status_code, again.json()))
+        finally:
+            server.stop()
+        self.assertIn("The record mapping offered for " + anno, server.text())
 
     def test_the_row_diff_form_checks_an_old_mapping_by_its_count_only(self):
         # the documented limit: the row-diff forms state no coordinates per column, so an old

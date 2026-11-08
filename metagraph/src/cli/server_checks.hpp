@@ -558,8 +558,9 @@ struct HeaderPair {
 
 /**
  * GET /capabilities' `headers_unique` (SPEC-multigraph-envelope.md, "headers_unique (E22)"):
- * whether every sequence header of the server names one record, so that a header label
- * selects one sequence of one pair. |pairs| are the server's (graph, annotation) pairs, each
+ * whether every sequence header of the server names one record (a header label selects one
+ * sequence of one pair only when labels_disjoint_json holds too: this compares headers with
+ * headers, never with column names). |pairs| are the server's (graph, annotation) pairs, each
  * once (a single-graph server's one pair with null tags). A header repeated across pairs,
  * across the columns of a pair or within a column is a collision
  * (CoordToHeader::find_repeated_headers, which builds each pair's header index if not built

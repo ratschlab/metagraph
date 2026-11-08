@@ -555,18 +555,32 @@ bool CoordToHeader::load(const std::string &filename_base) {
         for (uint64_t i = 0; i < num_columns; ++i) {
             if (!load_string_vector(*in, &headers_[i]))
                 throw std::runtime_error(fmt::format("the headers of column {}", i));
-            coord_offsets_[i].load(*in);
+            // every column read whole: a file cut inside its last column would otherwise
+            // reach the test below in a failed state, where peek() answers EOF as at the end
+            // of a file written before the trailer
+            if (!coord_offsets_[i].load(*in) || in->fail())
+                throw std::runtime_error(fmt::format("the coordinate offsets of column {}", i));
+            // one set bit per record, the last coordinate of each
+            if (coord_offsets_[i].num_set_bits() != headers_[i].size()) {
+                throw std::runtime_error(fmt::format(
+                        "column {}: {} records, {} record ends in its coordinate offsets", i,
+                        headers_[i].size(), coord_offsets_[i].num_set_bits()));
+            }
         }
         // the trailer of column labels, if any (a file written before it ends here)
         if (in->peek() != std::char_traits<char>::eof()) {
             if (load_number(*in) != kColumnLabelsMarker)
                 throw std::runtime_error("unexpected data after the columns");
-            std::vector<std::string> labels;
-            if (!load_string_vector(*in, &labels))
-                throw std::runtime_error("the column labels");
-            if (labels.size() != num_columns) {
+            // the number of labels compared before anything is allocated for them
+            const uint64_t num_labels = load_number(*in);
+            if (num_labels != num_columns) {
                 throw std::runtime_error(fmt::format("{} column labels for {} columns",
-                                                         labels.size(), num_columns));
+                                                     num_labels, num_columns));
+            }
+            std::vector<std::string> labels(num_labels);
+            for (std::string &label : labels) {
+                if (!load_string(*in, &label))
+                    throw std::runtime_error("the column labels");
             }
             if (in->peek() != std::char_traits<char>::eof())
                 throw std::runtime_error("unexpected data after the column labels");

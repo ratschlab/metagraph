@@ -40,6 +40,17 @@ using mtg::common::logger;
 
 namespace {
 
+// Ends the process at a load that cannot go on (LoadFailure::EXIT), its log line written: at
+// once, as the server's shutdown does, since the loads run in loading threads beside a
+// single-graph server's listener or a multi-graph server's other loads, where exit() destroys
+// the process's statics under them (status -11 seen instead of 1, H4). Nothing is written
+// yet that needs flushing but the log and stdio.
+[[noreturn]] void exit_at_load() {
+    logger->flush();
+    std::fflush(nullptr);
+    std::_Exit(1);
+}
+
 // The graphs whose mask build_mask_at_load built. Weak references: a graph freed and another
 // allocated at its address must not pass for it (the unit tests load many graphs).
 std::mutex built_masks_mutex;
@@ -97,7 +108,7 @@ void build_mask_at_load(const std::shared_ptr<DeBruijnGraph> &graph, bool stdout
     } catch (const std::exception &e) {
         logger->error("--pattern-build-mask: the dummy-edge mask could not be built: {}",
                       e.what());
-        exit(1);
+        exit_at_load();
     }
     std::lock_guard<std::mutex> lock(built_masks_mutex);
     built_masks.emplace_back(dbg_succ);
@@ -345,7 +356,7 @@ load_coord_to_header(const annot::MultiLabelAnnotation<std::string> &annotation,
                 if (on_failure == LoadFailure::THROW) {
                     throw std::runtime_error(load_failure("the record mapping", cth_fname));
                 }
-                exit(1);
+                exit_at_load();
             }
             // the mapping of this annotation, or none: refused here, before the index is built
             // (a server before it is ready), never by a request that reads it
@@ -364,13 +375,7 @@ load_coord_to_header(const annot::MultiLabelAnnotation<std::string> &annotation,
                 if (on_failure == LoadFailure::THROW)
                     throw std::runtime_error(message);
                 logger->error("{}", message);
-                // ended at once, as the server's shutdown does: this runs in a loading thread
-                // while a single-graph server's listener runs, and exit() would destroy the
-                // process's statics under it (status -11 seen instead of 1); nothing is written
-                // yet that needs flushing but the log
-                logger->flush();
-                std::fflush(nullptr);
-                std::_Exit(1);
+                exit_at_load();
             }
             logger->trace("CoordToHeader mapping loaded successfully from {}. "
                           "All queries will be performed against individual sequences.",
@@ -384,11 +389,13 @@ load_coord_to_header(const annot::MultiLabelAnnotation<std::string> &annotation,
                          "sequence length needed to compute the fraction of the target covered "
                          "('kmers_in_target' for query, 'nt_length' for align) will be omitted. "
                          "To enable per-sequence reporting, run once against the final annotation "
-                         "with all input FASTA/FASTQ files in annotation column order:\n"
+                         "with all input FASTA/FASTQ files in annotation column order (-a checks "
+                         "each file against its column):\n"
                          "    metagraph annotate --anno-filename --index-header-coords "
-                         "-i {} -o {} <input_files>\n"
+                         "-i {} -a {} -o {} <input_files>\n"
                          "Pass '--no-coord-mapping' to suppress this warning.",
-                         cth_fname, config.infbase, anno_basename);
+                         cth_fname, config.infbase, config.infbase_annotators.at(0),
+                         anno_basename);
         }
     }
 
@@ -500,7 +507,7 @@ build_annotated_dbg(std::shared_future<std::shared_ptr<DeBruijnGraph>> graph_fut
                 throw std::runtime_error(annotation_load_failure(config.infbase_annotators,
                                                                  annotation->file_extension()));
             }
-            exit(1);
+            exit_at_load();
         }
 
         // The mapping another index of this annotation holds is shared (a column per label,
@@ -556,7 +563,7 @@ build_annotated_dbg(std::shared_future<std::shared_ptr<DeBruijnGraph>> graph_fut
                     fmt::join(config.infbase_annotators, "', '")));
         }
         logger->error("Graph and annotation are not compatible");
-        exit(1);
+        exit_at_load();
     }
     if (graph->get_mode() == DeBruijnGraph::PRIMARY) {
         graph = std::make_shared<CanonicalDBG>(graph);
@@ -578,6 +585,16 @@ std::unique_ptr<AnnotatedDBG> initialize_annotated_dbg(std::shared_ptr<DeBruijnG
 
 std::unique_ptr<AnnotatedDBG> initialize_annotated_dbg(const Config &config) {
     return build_annotated_dbg(async_load_critical_dbg(config), config, kDefaultMaxChunksOpen);
+}
+
+std::unique_ptr<AnnotatedDBG> initialize_annotated_dbg(std::shared_ptr<DeBruijnGraph> graph,
+                                                       const Config &config,
+                                                       size_t max_chunks_open,
+                                                       LoadFailure on_failure) {
+    std::promise<std::shared_ptr<DeBruijnGraph>> ready;
+    ready.set_value(std::move(graph));
+    return build_annotated_dbg(ready.get_future().share(), config, max_chunks_open, nullptr,
+                               on_failure);
 }
 
 std::unique_ptr<AnnotatedDBG>

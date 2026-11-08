@@ -348,6 +348,42 @@ TEST(CoordToHeader, LoadRefusesUnknownDataAfterTheColumns) {
     EXPECT_FALSE(cth.column_labels());
 }
 
+// A file cut anywhere is refused, also one written before the trailer and cut inside its last
+// column: its load must not end in a failed read that looks like the end of an old file (H4
+// review S1: cut 1, 9 or 40 bytes, it loaded as an old file and answered without the last
+// column's records, or aborted on a coordinate it could not place)
+TEST(CoordToHeader, LoadRefusesATruncatedFile) {
+    const std::string base = test_dump_dir() + "/cth_cut";
+    const std::string path = base + CoordToHeader::kExtension;
+    for (bool labelled : { false, true }) {
+        CoordToHeader cth = three_columns();
+        if (labelled)
+            cth.set_column_labels({ "x.fa", "y.fa", "z.fa" });
+        cth.serialize(base);
+        const std::string whole = file_bytes(path);
+        CoordToHeader loaded;
+        ASSERT_TRUE(loaded.load(base));
+        for (size_t cut : std::initializer_list<size_t> { 1, 8, 9, 40 }) {
+            ASSERT_LT(cut, whole.size());
+            {
+                std::ofstream out(path, std::ios::binary | std::ios::trunc);
+                out << whole.substr(0, whole.size() - cut);
+            }
+            EXPECT_FALSE(loaded.load(base)) << cut << (labelled ? " labelled" : " old");
+        }
+        // every shorter prefix of an old file too
+        if (!labelled) {
+            for (size_t size = 0; size < whole.size(); ++size) {
+                {
+                    std::ofstream out(path, std::ios::binary | std::ios::trunc);
+                    out << whole.substr(0, size);
+                }
+                EXPECT_FALSE(loaded.load(base)) << size << " of " << whole.size() << " bytes";
+            }
+        }
+    }
+}
+
 // The load's check of a record mapping against its annotation (cli::check_record_mapping): the
 // count, the stated labels, and the coordinates of a column against its k-mers where the
 // annotation states them per column (column_coord, brwt_coord); the row-diff form only by count

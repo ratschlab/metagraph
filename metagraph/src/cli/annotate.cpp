@@ -763,9 +763,10 @@ int annotate_graph(Config *config) {
                      "(`<seq>/N:...` in TSV; JSON `kmers_in_target` for query, "
                      "`nt_length` for align), build the CoordToHeader mapping "
                      "once against the final merged annotation with all input "
-                     "FASTAs:\n"
+                     "FASTAs in its column order (-a checks each file against its "
+                     "column):\n"
                      "    metagraph annotate --anno-filename --index-header-coords "
-                     "-i {} -o {} <input_fastas>",
+                     "-i {} -a <final_annotation> -o {} <input_fastas>",
                      !config->infbase.empty() ? config->infbase : "<graph>",
                      !config->outfbase.empty() ? config->outfbase
                                                : "<final_anno_basename>");
