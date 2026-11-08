@@ -1,6 +1,7 @@
 #include "gtest/gtest.h"
 
 #include <algorithm>
+#include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <map>
@@ -92,6 +93,12 @@ class MiniRefSeq : public ::testing::Test {
   protected:
     void SetUp() override {
         if (!index_available()) {
+            // CI fetches the index and sets METAGRAPH_REQUIRE_MINI_REFSEQ, so a missing index
+            // fails there instead of skipping every test
+            if (std::getenv("METAGRAPH_REQUIRE_MINI_REFSEQ")) {
+                FAIL() << "mini_refseq index not found in " << std::filesystem::current_path()
+                       << "/" << kIndexDir;
+            }
             GTEST_SKIP() << "mini_refseq index not found in " << std::filesystem::current_path()
                          << "/" << kIndexDir << " (fetch it with scripts/traversal/fetch_mini_refseq.sh)";
         }
