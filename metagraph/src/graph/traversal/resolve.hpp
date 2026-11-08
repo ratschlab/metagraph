@@ -80,10 +80,9 @@ SupportProfile resolve_support(const LabelOracle &oracle,
                                std::string_view query,
                                const ResolveOptions &options);
 
+// Seeds are picked by maximum support: repeatedly, the interval contained in the most label
+// runs, outside the intervals picked before
 struct SelectionPolicy {
-    enum Policy { LONGEST_FIRST, MAX_SUPPORT };
-
-    Policy policy = MAX_SUPPORT;
     size_t max_seeds = 10;
     uint64_t min_block_bp = 0;               // 0: at least k
     size_t max_labels_per_seed = 1000;
