@@ -3167,7 +3167,7 @@ class GraphletWriter {
             unrepresentable(std::string("empty ") + what);
         for (unsigned char c : t) {
             if (c < 0x21 || c > 0x7E)
-                unrepresentable(std::string(what) + " '" + std::string(t) + "' is not a token");
+                unrepresentable(std::string(what) + " '" + ::utils::clip_for_message(t) + "' is not a token");
         }
         out_ += t;
     }
@@ -5104,7 +5104,7 @@ Json::Value process_traverse_request(const Json::Value &json,
         attempt = local.get();
     }
     if (!req.release.empty() && !release.empty() && req.release != release)
-        throw InvalidRequest("request.release '" + req.release + "' does not match the loaded index release '"
+        throw InvalidRequest("request.release '" + ::utils::clip_for_message(req.release) + "' does not match the loaded index release '"
                              + release + "'");
     // a multi-graph server's pair answers for the labels it holds and states the others
     req.strategy.drop_labels_not_in_graph = limits.labels_not_in_graph_dropped;
@@ -5616,7 +5616,7 @@ Json::Value process_traverse_request(const Json::Value &json,
                 // the only graph of this server (or the CLI's): the whole request fails (400),
                 // as every malformed seed fails it
                 walked("failed", "");
-                throw InvalidRequest(std::string("seed '") + (seed.seed_id.empty() ? seed.sequence.substr(0, 32) : seed.seed_id)
+                throw InvalidRequest(std::string("seed '") + (seed.seed_id.empty() ? seed.sequence.substr(0, 32) : ::utils::clip_for_message(seed.seed_id))
                                      + "': " + e.what());
             }
             // a chunk of a multi-graph server that does not hold the seed: stated per seed, the
@@ -5645,7 +5645,7 @@ Json::Value process_traverse_request(const Json::Value &json,
         } catch (const std::invalid_argument &e) {
             // the whole request fails (400); what the seed consumed is still the attempt's
             walked("failed", "");
-            throw InvalidRequest(std::string("seed '") + (seed.seed_id.empty() ? seed.sequence.substr(0, 32) : seed.seed_id)
+            throw InvalidRequest(std::string("seed '") + (seed.seed_id.empty() ? seed.sequence.substr(0, 32) : ::utils::clip_for_message(seed.seed_id))
                                  + "': " + e.what());
         }
     }
@@ -5740,7 +5740,7 @@ static std::string explicit_selection_blocked(const SupportProfile &profile,
             const bool profiled = std::any_of(profile.labels.begin(), profile.labels.end(),
                 [&](const LabelProfile &lp) { return lp.label.name == name; });
             if (!profiled && !absent(name))
-                throw InvalidRequest("Explicit seed label was not profiled: '" + name + "'");
+                throw InvalidRequest("Explicit seed label was not profiled: '" + ::utils::clip_for_message(name) + "'");
         }
     }
     for (size_t i = 0; i < policy.explicit_seeds.size(); ++i) {

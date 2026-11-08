@@ -29,6 +29,7 @@
 #include "cli/json_helpers.hpp"
 #include "common/logger.hpp"
 #include "common/unix_tools.hpp"
+#include "common/utils/string_utils.hpp"
 #include "graph/alignment/pattern_search.hpp"
 #include "server_envelope.hpp"
 #include "server_utils.hpp"
@@ -336,44 +337,66 @@ namespace net = boost::asio;
 // whatever the client sends
 constexpr size_t kDiscardBufferBytes = 16 << 10;
 
-// Reads and discards from |connection| until the client closes it or the connection's timer
-// shuts it (both end the pending read with an error); then closes it (the last reference, held
-// by the pending read, frees it)
+// The drain of a refused body: its buffer, and how many more bytes it discards before it closes
+struct Drain {
+    std::vector<char> buffer;
+    uint64_t left;
+};
+
+// Reads and discards from |connection| until the client closes it, the connection's timer shuts
+// it (both end the pending read with an error) or |drain|'s bytes are spent; then closes it (the
+// last reference, held by the pending read, frees it)
 template <class Connection>
-void discard_until_closed(std::shared_ptr<Connection> connection,
-                          std::shared_ptr<std::vector<char>> buffer) {
+void discard_until_closed(std::shared_ptr<Connection> connection, std::shared_ptr<Drain> drain) {
     // the socket and the buffer's view taken before the handler is made: it takes both pointers
     // over, and the order in which a call's arguments are evaluated is unspecified (GCC makes
     // the handler first, which left a dereference of the moved-from buffer)
     auto *socket = connection->socket.get();
-    const auto view = net::buffer(*buffer);
+    const auto view = net::buffer(drain->buffer);
     socket->async_read_some(view,
-            [connection = std::move(connection), buffer = std::move(buffer)](
-                    const SimpleWeb::error_code &ec, size_t) mutable {
+            [connection = std::move(connection), drain = std::move(drain)](
+                    const SimpleWeb::error_code &ec, size_t bytes) mutable {
         auto lock = connection->handler_runner->continue_lock();
         if (!lock)
             return;
-        if (ec) {
+        if (ec || bytes >= drain->left) {
             connection->close();
             return;
         }
-        discard_until_closed(std::move(connection), std::move(buffer));
+        drain->left -= bytes;
+        discard_until_closed(std::move(connection), std::move(drain));
     });
+}
+
+// |text| a plain decimal number below 2^64 (what a Content-Length is): its value
+std::optional<uint64_t> decimal(const std::string &text) {
+    auto digit = [](unsigned char c) { return std::isdigit(c) != 0; };
+    if (text.empty() || text.size() > 20 || !std::all_of(text.begin(), text.end(), digit))
+        return std::nullopt;
+    try {
+        return std::stoull(text);
+    } catch (const std::exception &) {
+        return std::nullopt;
+    }
 }
 
 } // namespace
 
-void refuse_body_too_large(const std::shared_ptr<HttpServer::Request> &request,
+bool refuse_body_too_large(const std::shared_ptr<HttpServer::Request> &request,
                            uint64_t max_mb) {
     auto connection = request_connection(*request);
     if (!connection)
-        return;
+        return false;
     std::optional<uint64_t> length;
     if (auto it = request->header.find("Content-Length"); it != request->header.end()) {
-        // the library parsed it already (std::stoull) before it refused the request
-        try {
-            length = std::stoull(it->second);
-        } catch (const std::exception &) {}
+        // the library read it with std::stoull, which takes "-1" as 2^64 - 1 and "3145728junk"
+        // as 3145728: a Content-Length that is no plain decimal number is no byte count, and the
+        // request is dropped as the library drops one it cannot read at all ("abc", 2^64)
+        length = decimal(it->second);
+        if (!length) {
+            connection->close();
+            return false;
+        }
     }
     const std::string body = error_first_json_text(body_too_large_json(length, max_mb));
     auto text = std::make_shared<std::string>(
@@ -383,12 +406,16 @@ void refuse_body_too_large(const std::shared_ptr<HttpServer::Request> &request,
     // the whole of what follows (the answer and the drain) within the connection's own timer,
     // which shuts the connection when it ends (and so ends a pending read or write)
     connection->set_timeout(kBodyTooLargeDrainS);
+    // what the drain reads at most: the larger of kBodyTooLargeDrainBytes and the cap
+    auto drain = std::make_shared<Drain>(Drain {
+        std::vector<char>(kDiscardBufferBytes),
+        std::max<uint64_t>(kBodyTooLargeDrainBytes, max_mb << 20) });
     // (the socket and the text's view taken before the handler takes the connection over)
     auto *socket = connection->socket.get();
     const auto view = net::buffer(*text);
     net::async_write(*socket, view,
-            [connection = std::move(connection), text](const SimpleWeb::error_code &ec,
-                                                         size_t) mutable {
+            [connection = std::move(connection), text, drain = std::move(drain)](
+                    const SimpleWeb::error_code &ec, size_t) mutable {
         auto lock = connection->handler_runner->continue_lock();
         if (!lock)
             return;
@@ -401,9 +428,9 @@ void refuse_body_too_large(const std::shared_ptr<HttpServer::Request> &request,
         SimpleWeb::error_code ignored;
         connection->socket->lowest_layer().shutdown(net::ip::tcp::socket::shutdown_send,
                                                     ignored);
-        discard_until_closed(std::move(connection),
-                             std::make_shared<std::vector<char>>(kDiscardBufferBytes));
+        discard_until_closed(std::move(connection), std::move(drain));
     });
+    return true;
 }
 
 // Whether the TCP connection |fd| is past its established state, with data still waiting
@@ -1056,7 +1083,8 @@ std::vector<std::string> pattern_graph_names(const Json::Value &request,
             if (!seen.insert(value).second)
                 continue;
             if (!known_set.count(value)) {
-                throw std::invalid_argument("request.graphs: unknown graph '" + value
+                throw std::invalid_argument("request.graphs: unknown graph '"
+                                            + ::utils::clip_for_message(value)
                                             + "' (GET /capabilities lists the graphs)");
             }
             names.push_back(std::move(value));

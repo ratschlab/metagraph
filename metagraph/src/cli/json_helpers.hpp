@@ -26,6 +26,7 @@
 #include <json/json.h>
 
 #include "common/threads/thread_usage.hpp"
+#include "common/utils/string_utils.hpp"
 
 
 namespace mtg {
@@ -85,7 +86,9 @@ class TooManyJsonValues : public std::invalid_argument {
  * element and each member's value (a member's name is none; an empty array or object holds
  * none) —, counted in the scan below before anything is parsed: one more throws
  * TooManyJsonValues at the value that passes it. Exact for every JSON text; a text that is
- * not JSON may be refused by either check.
+ * not JSON may be refused by either check. The scan refuses at the first fault it meets: a
+ * comment, a raw control character inside a string (RFC 8259 asks it escaped), or the value
+ * past the count.
  */
 template <class Refusal>
 Json::Value parse_strict_json(std::string_view content, const std::string &prefix,
@@ -107,10 +110,19 @@ Json::Value parse_strict_json(std::string_view content, const std::string &prefi
     for (size_t i = 0; i < content.size(); ++i) {
         const char c = content[i];
         if (in_string) {
-            if (c == '\\')
+            if (c == '\\') {
                 ++i;
-            else if (c == '"')
+            } else if (c == '"') {
                 in_string = false;
+            } else if (static_cast<unsigned char>(c) < 0x20) {
+                // RFC 8259 §7: a control character inside a string is escaped. jsoncpp keeps a
+                // raw one, and an answer quoting the string writes it as \u00XX: 6 bytes for 1
+                static constexpr char kHex[] = "0123456789abcdef";
+                const std::string hex { kHex[(c >> 4) & 0xF], kHex[c & 0xF] };
+                throw Refusal()(prefix + "a control character (byte 0x" + hex
+                                + ") inside a string at byte " + std::to_string(i)
+                                + ": RFC 8259 requires it escaped (\\u00" + hex + ")");
+            }
             continue;
         }
         if (c == ' ' || c == '\t' || c == '\n' || c == '\r')
@@ -183,7 +195,7 @@ class StrictObject {
     void finish() const {
         for (const std::string &name : v_.getMemberNames()) {
             if (!seen_.count(name))
-                refuse(path_ + ": unknown field '" + name + "'");
+                refuse(path_ + ": unknown field '" + ::utils::clip_for_message(name) + "'");
         }
     }
 
