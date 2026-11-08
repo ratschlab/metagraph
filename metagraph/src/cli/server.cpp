@@ -1784,11 +1784,13 @@ int run_server(Config *config) {
     // transport can honour (with the flag 0, uncapped, or above it, a budget past the content
     // timeout would be accepted and the connection closed before any answer or 503); lowered
     // requests are stated in limits.clamped
+    // (and a discovery's bounds, SPEC-labeled-traversal-core.md §4.6)
     const ResolveTimeLimits resolve_time {
         config->traverse_max_time_ms > 0
                 && config->traverse_max_time_ms < static_cast<double>(kServerMaxDeadlineMs)
             ? config->traverse_max_time_ms : static_cast<double>(kServerMaxDeadlineMs),
-        kResolveFinalizeMs };
+        kResolveFinalizeMs, config->resolve_max_discover_labels,
+        config->resolve_max_discover_memory_mb };
 
     /**
      * POST /resolve on a multi-graph server (SPEC-multigraph-envelope.md section 1, E2): the
@@ -2733,7 +2735,9 @@ int run_server(Config *config) {
                 c["composite_fp"] = composite_fp;
                 c["composite_rule"] = kCompositeRule;
                 c["multigraph"] = multigraph_capabilities_json(
-                        config->traverse_max_request_memory_mb, route_caps);
+                        config->traverse_max_request_memory_mb, route_caps,
+                        { resolve_time.max_discover_labels,
+                          resolve_time.max_discover_memory_mb });
             }
             // the request registry (section 5) on every server: a single-graph /resolve or
             // /pattern with request_id registers too, and GET /requests/{attempt_id} reads a

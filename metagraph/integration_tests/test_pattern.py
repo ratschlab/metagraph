@@ -4489,6 +4489,21 @@ class TestPatternRegression(TestingBase):
             caps['attempts']['delivery_reserve']['account_per_text_byte'] = None
             return caps
 
+        def without_resolve_discovery(caps):
+            # the `resolve` block's `discovery` member (H2, train 3: the server's bounds of a
+            # /resolve discovery, SPEC-labeled-traversal-core.md §4.6), a gain over every base:
+            # checked as stated here at the defaults, the rest of the block compared as before
+            block = caps.get('resolve')
+            if block is None:
+                return caps
+            if caps is b:
+                self.assertEqual({'max_tracked_labels': 1000000, 'max_memory_mb': 1024,
+                                  'stop_reasons': ['time', 'memory'],
+                                  'rule': 'SPEC-labeled-traversal-core.md section 4.6'},
+                                 block.get('discovery'))
+            block.pop('discovery', None)
+            return caps
+
         def only_gains(base, new, allowed, what):
             # every member of |base| is in |new|, and what |new| adds is documented
             self.assertLessEqual(set(base), set(new), what)
@@ -4500,6 +4515,8 @@ class TestPatternRegression(TestingBase):
         without_poll_stride(b)
         without_reserve_defaults(a)
         without_reserve_defaults(b)
+        without_resolve_discovery(a)
+        without_resolve_discovery(b)
         # The documented gains, compared as sets: routes.requests (GET /requests/{request_id},
         # release 10, on every server); against a base before the pattern search also the
         # feature `pattern` with its routes and its blocks -- `pattern`, `resolve` (the block of
@@ -4555,7 +4572,9 @@ class TestPatternRegression(TestingBase):
         without_poll_stride(b)
         without_reserve_defaults(a)
         without_reserve_defaults(b)
-        new_caps = self.new.get('capabilities').json()
+        without_resolve_discovery(a)
+        without_resolve_discovery(b)
+        new_caps = without_resolve_discovery(self.new.get('capabilities').json())
         gains = {'discovery_trace_scale', 'max_request_memory_mb', 'max_concurrent'} | (
             set() if base_pattern else {'pattern', 'resolve', 'in_ram'})
         only_gains(a, b, gains, 'probe')

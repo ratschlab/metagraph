@@ -458,10 +458,16 @@ constexpr double kResolveFinalizeMs = 250;
 // The time limits of a /resolve: the cap of bounds.time_budget_ms (the server's
 // --traverse-max-time-ms, as /traverse's; 0: none — the CLI, which an operator runs) and the
 // finalisation reserve inside every budget. A request without the field has no deadline,
-// whatever the cap: it is answered without a time limit
+// whatever the cap: it is answered without a time limit.
+// And the bounds of a discovery (SPEC-labeled-traversal-core.md §4.6; 0: none — the CLI): the
+// most labels it tracks (--resolve-max-discover-labels; graph::traversal::ResolveOptions::
+// discover_max_tracked) and the memory its pass holds, in MiB
+// (--resolve-max-discover-memory-mb; ResolveOptions::discover_max_memory)
 struct ResolveTimeLimits {
     double max_time_ms = 0;
     double finalize_ms = kResolveFinalizeMs;
+    uint64_t max_discover_labels = 0;
+    uint64_t max_discover_memory_mb = 0;
 };
 
 // A /resolve answer that could not be built and written within its bounds.time_budget_ms (the
@@ -555,8 +561,13 @@ struct ResolveWriting {
 // The `resolve` block of both capabilities routes (GET /capabilities, GET
 // /traverse/capabilities): bounds.time_budget_ms accepted, its cap and the reserve, and the
 // rule (where the deadline is read, what a stop answers, what is not polled) as a reference to
-// the SPEC section that states it
+// the SPEC section that states it; and the bounds of a discovery (`discovery`: the label cap,
+// the memory bound, the stop reasons and the rule's reference, §4.6)
 Json::Value resolve_capabilities_json(const ResolveTimeLimits &limits);
+
+// The `discovery` member of the `resolve` block: {max_tracked_labels, max_memory_mb,
+// stop_reasons, rule}; the multigraph block states its two numbers
+Json::Value resolve_discovery_json(const ResolveTimeLimits &limits);
 
 // |client_gone|: polled between the phases of the request (the discovery read, the support
 // fetch, the selection); true abandons it (graph::traversal::AttemptAborted).

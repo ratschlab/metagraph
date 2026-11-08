@@ -119,9 +119,15 @@ Json::Value composite_fp_json(std::vector<std::string> index_fps);
  * discovery_trace_scale, |max_request_memory_mb| (the server's request-wide memory bound of
  * /traverse, --traverse-max-request-memory-mb; 0 = off) and |caps| (max_concurrent, E19), which
  * every /traverse capabilities probe states too: a graph-less probe sees them without reading a
- * pair
+ * pair; and |discovery| (resolve_discovery: the bounds of a /resolve discovery per pair, as the
+ * `resolve` block's `discovery` states them, SPEC-labeled-traversal-core.md §4.6)
  */
-Json::Value multigraph_capabilities_json(uint64_t max_request_memory_mb, const RouteCaps &caps);
+struct ResolveDiscoveryBounds {
+    uint64_t max_tracked_labels = 0;     // --resolve-max-discover-labels (0: none)
+    uint64_t max_memory_mb = 0;          // --resolve-max-discover-memory-mb (0: none)
+};
+Json::Value multigraph_capabilities_json(uint64_t max_request_memory_mb, const RouteCaps &caps,
+                                         const ResolveDiscoveryBounds &discovery = {});
 
 /**
  * max_concurrent (E19; SPEC-multigraph-envelope.md section 8): the caps on the requests of each

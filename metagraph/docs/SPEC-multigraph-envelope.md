@@ -313,6 +313,14 @@ the ranking, the cut and every count of `labels_truncated` (`min_kept_kmers`, `m
 answer, single-graph servers included) states `discovery_trace_scale: "traced"`; absent, a discovery under trace
 ranked by k-mers present (before release 10's post-merge fix).
 
+Each pair's discovery is bounded by the server per pair (`SPEC-labeled-traversal-core.md` §4.6: the labels it
+tracks, a cut stated as the entry's `labels_capped`, and the memory of its pass, a `stop` with reason `memory`), and
+a client merging the pairs' discoveries reads each entry's statements by this rule: **a pair entry with
+`labels_capped` and `ranking_exact: false` makes a ranking merged over pairs a lower bound at best, never exact; with
+`ranking_exact: true` that pair's top list is exact, and a label it did not track supports at most
+`untracked_max_kmers` k-mers in that pair. A pair entry whose `stop` has reason `memory` or `time` is the exact answer
+for its first `resolved_kmers` k-mers only; the rest of the sequence starts at `remainder_from_bp`.**
+
 ## 8. Capabilities (E3)
 
 `GET /capabilities` on a multi-graph server adds `composite_fp` (sha256 over the pairs' `index_fp` sorted as bytes,
@@ -330,6 +338,9 @@ without reading a pair. A seed the bound leaves unstarted is a result of the pai
 `resource_stop.scope: "request"`, phase `not_started`, its `unknown_labels` stated as every result of the pair
 states them); the envelope is the one-entry envelope of a named `/traverse` as with any other result.
 Its `graph_summary` states `headers_unique` (section 9).
+From H2 (train 3) the block also states `resolve_discovery`: `{"max_tracked_labels": n, "max_memory_mb": n}`, the
+bounds of a `/resolve` discovery per pair (`--resolve-max-discover-labels`, `--resolve-max-discover-memory-mb`;
+integers, 0 for none; `SPEC-labeled-traversal-core.md` §4.6), as the `resolve` block's `discovery` states them.
 From E19 the block also states `max_concurrent`: `{"/pattern": n, "/resolve": n, "/traverse": n}`, the caps on
 the requests of each route the server runs at once (`--pattern-max-concurrent`, `--resolve-max-concurrent`,
 `--traverse-max-concurrent`), integers, 0 for a route without one; above a cap the request is refused 503 `busy`

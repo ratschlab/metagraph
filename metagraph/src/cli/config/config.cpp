@@ -470,6 +470,13 @@ Config::Config(int argc, char *argv[]) {
         } else if (!strcmp(argv[i], "--resolve-max-query-bp")) {
             exact_ms(argv[i], get_value(i), &resolve_max_query_bp);
             i++;
+        } else if (!strcmp(argv[i], "--resolve-max-discover-labels")) {
+            exact_ms(argv[i], get_value(i), &resolve_max_discover_labels);
+            i++;
+        } else if (!strcmp(argv[i], "--resolve-max-discover-memory-mb")) {
+            // in MiB, at most 1 TiB (charged in bytes)
+            bounded(argv[i], get_value(i), 1048576, &resolve_max_discover_memory_mb);
+            i++;
         } else if (!strcmp(argv[i], "--max-graphs-without-selection")) {
             // at least 1: with 0 no request without `graphs` could be answered, and the
             // capabilities would state a threshold no list is within
@@ -2039,6 +2046,8 @@ if (advanced) {
             fprintf(stderr, "\t   --traverse-max-seed-bp [INT] \t\tcap on the length of a /traverse seed, 0 = unlimited [100000]\n");
             fprintf(stderr, "\t   --traverse-max-seed-labels [INT] \tcap on labels DERIVED from a seed, 0 = unlimited [10000]\n");
             fprintf(stderr, "\t   --resolve-max-query-bp [INT] \t\tcap on the /resolve query length, 0 = unlimited [0]\n");
+            fprintf(stderr, "\t   --resolve-max-discover-labels [INT] \tthe most labels a /resolve discovery tracks per pair: the labels first met at a k-mer that would pass it, and every later one, are not tracked (labels_capped states the cut); 0 = no cap [1000000]\n");
+            fprintf(stderr, "\t   --resolve-max-discover-memory-mb [INT] \tthe memory a /resolve discovery's pass holds per pair, in MiB, charged before it is allocated: the work stops before a k-mer whose row or accumulation does not fit (stop reason memory, the resolve of the prefix); in [0, 1048576], 0 = no bound [1024]\n");
             fprintf(stderr, "\t   --traverse-max-memory-mb [INT] \tmaximum of bounds.max_memory_mb per /traverse seed: a larger one is lowered to it, an omitted one set to it; 0 = off [0]\n");
             fprintf(stderr, "\t   --traverse-max-work-units [INT] \tmaximum of bounds.max_work_units per /traverse seed, likewise; 0 = off [0]\n");
             fprintf(stderr, "\t   --traverse-max-request-memory-mb [INT] \trequest-wide memory bound of a /traverse, in MiB: a seed after the first is not started (failed per seed, resource_stop scope request) when the results of the seeds before it and its memory budget would pass it; needs --traverse-max-memory-mb in [1, this]; in [0, 1048576], 0 = off [0]\n");

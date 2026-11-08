@@ -208,7 +208,8 @@ Json::Value expect_server_instance_routes_json() {
     return routes;
 }
 
-Json::Value multigraph_capabilities_json(uint64_t max_request_memory_mb, const RouteCaps &caps) {
+Json::Value multigraph_capabilities_json(uint64_t max_request_memory_mb, const RouteCaps &caps,
+                                         const ResolveDiscoveryBounds &discovery) {
     auto strings = [](std::initializer_list<const char *> values) {
         Json::Value out(Json::arrayValue);
         for (const char *value : values) {
@@ -253,6 +254,12 @@ Json::Value multigraph_capabilities_json(uint64_t max_request_memory_mb, const R
     // the caps on the requests each route runs at once (E19; 0: none), as every /traverse
     // capabilities probe states them
     m["max_concurrent"] = max_concurrent_json(caps);
+    // the bounds of a /resolve discovery, per pair (SPEC-labeled-traversal-core.md §4.6), as
+    // the `resolve` block's `discovery` states them: a graph-less client sees them too
+    Json::Value d(Json::objectValue);
+    d["max_tracked_labels"] = Json::Value(static_cast<Json::UInt64>(discovery.max_tracked_labels));
+    d["max_memory_mb"] = Json::Value(static_cast<Json::UInt64>(discovery.max_memory_mb));
+    m["resolve_discovery"] = std::move(d);
     return m;
 }
 
