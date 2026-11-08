@@ -136,6 +136,10 @@ class GraphClientJson:
         else:
             ret = requests.get(url=url, timeout=timeout)
 
+        return self._parse_response(ret)
+
+    @staticmethod
+    def _parse_response(ret: requests.Response) -> Any:
         try:
             json_obj = ret.json()
         except:
@@ -161,13 +165,12 @@ class GraphClientJson:
         return self._do_request("stats", {}, post_req=False, timeout=timeout)
 
     def ready(self) -> bool:
-        try:
-            self.stats()
-            return True
-        except RuntimeError as e:
-            if "503: Server is currently initializing" in str(e):
-                return False
-            raise e
+        ret = requests.get(url=f'{self.server}/stats')
+        # The server answers 503 Service Unavailable while it loads the index.
+        if ret.status_code == 503:
+            return False
+        self._parse_response(ret)
+        return True
 
 
 class GraphClient:
