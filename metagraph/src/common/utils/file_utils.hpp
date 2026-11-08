@@ -35,7 +35,7 @@ bool with_madvise();
 void set_madvise(bool set_bit);
 
 // `std::ifstream` that remembers the path it was opened from.
-// Mirrors `sdsl::mmap_ifstream` so loaders can recover the filename via cast.
+// Mirrors `sdsl::shared_mapper_ifstream` so loaders can recover the filename via cast.
 class named_ifstream : public std::ifstream {
   public:
     explicit named_ifstream(const std::string &filename,
@@ -51,18 +51,18 @@ std::unique_ptr<std::ifstream>
 open_ifstream(const std::string &filename, bool mmap_stream = with_mmap());
 
 // Returns the filename from a stream opened by `open_ifstream`
-// (i.e. `sdsl::mmap_ifstream` or `utils::named_ifstream`); throws otherwise.
+// (i.e. `sdsl::shared_mapper_ifstream` or `utils::named_ifstream`); throws otherwise.
 const std::string& get_filename(std::istream &f);
 
 // Hint MADV_RANDOM on `[start, start + length)` of the file mmapped by `f`.
 // `length < 0` (the default) means "to end of file". `start` is rounded
 // down to a page boundary (madvise requires page-aligned start).
-// No-op when `with_madvise()` is false or `f` is not an `sdsl::mmap_ifstream`.
+// No-op when `with_madvise()` is false or `f` is not an `sdsl::shared_mapper_ifstream`.
 void madvise_random_range(std::istream &f,
                           std::streamoff start = 0,
                           std::streamoff length = -1);
 
-// Open `filename` as an `sdsl::mmap_ifstream` seeked to `offset`, invoke
+// Open `filename` as an `sdsl::shared_mapper_ifstream` seeked to `offset`, invoke
 // `fn` so the caller can load from it, then (if `with_madvise()`) hint
 // MADV_RANDOM on the whole file mapping.
 void load_mmap_random(const std::string &filename, std::streamoff offset,

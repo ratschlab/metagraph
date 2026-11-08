@@ -5,7 +5,7 @@
 
 #include <sdsl/sd_vector.hpp>
 
-#include "annotation_vector_io.hpp"
+#include <sdsl/packed_vector_view.hpp>
 #include "sd_vector_builder_disk.hpp"
 #include "vector_algorithm.hpp"
 #include "bit_vector.hpp"
@@ -13,10 +13,10 @@
 
 
 namespace mtg::detail {
-using sd_storage = sdsl::sd_vector<annotation_vector_io<1>,
-    sdsl::select_support_mcl<1, 1, annotation_vector_io<1>, annotation_vector_io>,
-    sdsl::select_support_mcl<0, 1, annotation_vector_io<1>, annotation_vector_io>,
-    annotation_vector_io<0>>;
+using sd_storage = sdsl::sd_vector<sdsl::packed_vector_view<1>,
+    sdsl::select_support_mcl<1, 1, sdsl::packed_vector_view<1>, sdsl::packed_vector_view>,
+    sdsl::select_support_mcl<0, 1, sdsl::packed_vector_view<1>, sdsl::packed_vector_view>,
+    sdsl::packed_vector_view<0>>;
 }
 
 
