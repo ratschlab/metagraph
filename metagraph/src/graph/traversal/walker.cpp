@@ -841,12 +841,22 @@ std::optional<EndReason> Walker::process_item(ArmState &arm, Item &item,
             followed.push_back(&c);
         }
     }
+    // The split limit is a safety cap, not a label rule: the walks past this fork are not
+    // explored, so the arm is complete only up to here
+    bool split_capped = false;
     if (followed.size() >= 2 && item.splits + 1 > strategy_.max_splits_per_path) {
         for (Cand *c : followed) {
             c->followed = false;
             c->split_limited = true;
         }
         followed.clear();
+        split_capped = true;
+        if (!arm.result.cap_trigger) {
+            arm.result.cap_trigger = CapTrigger{ EndReason::MAX_SPLITS, at,
+                                                 static_cast<double>(item.splits + 1) };
+        }
+        arm.boundary = std::min(arm.boundary, at);
+        arm.result.status = ArmResult::TRUNCATED;
     }
     const size_t nf = followed.size();
 
@@ -875,7 +885,7 @@ std::optional<EndReason> Walker::process_item(ArmState &arm, Item &item,
         if (excluded.count(l)) {
             end_label(arm, item, src, EndReason::BRANCH, "");
         } else if (split_limited) {
-            end_label(arm, item, src, EndReason::BRANCH, "split_limit");
+            end_label(arm, item, src, EndReason::MAX_SPLITS, "");
         } else if (blocked) {
             end_label(arm, item, src, blocked == 3 ? EndReason::REACHED_SEED
                                      : blocked == 2 ? EndReason::EDGE_REUSE_RC
@@ -888,7 +898,8 @@ std::optional<EndReason> Walker::process_item(ArmState &arm, Item &item,
     }
 
     if (!nf) {
-        finish_path(arm, item, std::nullopt);
+        finish_path(arm, item, split_capped ? std::optional<EndReason>(EndReason::MAX_SPLITS)
+                                            : std::nullopt);
         return std::nullopt;
     }
 

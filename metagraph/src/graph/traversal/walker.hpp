@@ -132,8 +132,8 @@ struct LabelEnd {
     uint64_t at_bp = 0;
     LabelId label = 0;
     EndReason reason = EndReason::DEAD_END;
-    // why a BRANCH or DEAD_END: "split_limit" (the path's split allowance ran out) or
-    // "hairpin" (the label's only continuation was a skipped hairpin); otherwise empty
+    // why a DEAD_END: "hairpin" (the label's only continuation was a skipped hairpin);
+    // otherwise empty
     const char *text = "";
 };
 

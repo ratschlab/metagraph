@@ -60,6 +60,7 @@ enum class EndReason : uint8_t {
     MAX_LIVE_PATHS,
     MAX_PATHS,
     MAX_OUTPUT,
+    MAX_SPLITS,       // a path reached its split limit: the walks past that fork are missing
     TIME_BUDGET,
 };
 static constexpr size_t kNumEndReasons = static_cast<size_t>(EndReason::TIME_BUDGET) + 1;

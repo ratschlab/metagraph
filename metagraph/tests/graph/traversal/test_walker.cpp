@@ -729,7 +729,8 @@ TEST(Walker, HeadsAtTheRadiusAreCompleteWhenACapTrips) {
     EXPECT_EQ(1u, arm.cap_trigger->at_bp);
 }
 
-// the split allowance of a path: past it the labels end with BRANCH, "split_limit"
+// the split allowance of a path is a cap: the labels it cuts end with MAX_SPLITS, and the arm
+// is complete only up to the fork
 TYPED_TEST(WalkerTest, SplitLimit) {
     using Graph = typename TypeParam::first_type;
     using Annotation = typename TypeParam::second_type;
@@ -744,18 +745,26 @@ TYPED_TEST(WalkerTest, SplitLimit) {
         check_invariants(right);
         ASSERT_EQ(1u, right.paths.size()) << mode;
         EXPECT_EQ(0u, right.paths[0].length_bp);
-        EXPECT_EQ(2u, path_ends(right.paths[0], EndReason::BRANCH));
+        EXPECT_EQ(2u, path_ends(right.paths[0], EndReason::MAX_SPLITS));
+        ASSERT_TRUE(right.paths[0].path_reason.has_value());
+        EXPECT_EQ(EndReason::MAX_SPLITS, *right.paths[0].path_reason);
         EXPECT_TRUE(right.splits.empty());
         EXPECT_EQ(0u, right.steps);
+        EXPECT_EQ(ArmResult::TRUNCATED, right.status);
+        EXPECT_EQ(0u, right.complete_to_bp);
+        ASSERT_TRUE(right.cap_trigger);
+        EXPECT_EQ(EndReason::MAX_SPLITS, right.cap_trigger->reason);
+        EXPECT_EQ(0u, right.cap_trigger->at_bp);
         for (LabelId l : { 0u, 1u }) {
             const LabelEnd *e = label_end(right, l);
             ASSERT_NE(nullptr, e);
             EXPECT_EQ(0u, e->at_bp);
-            EXPECT_EQ(EndReason::BRANCH, e->reason);
-            EXPECT_STREQ("split_limit", e->text);
+            EXPECT_EQ(EndReason::MAX_SPLITS, e->reason);
         }
         st.max_splits_per_path = 1;
-        EXPECT_EQ(2u, run(*anno, X, { "A", "B" }, st).arms[kRight].paths.size());
+        auto one = run(*anno, X, { "A", "B" }, st);
+        EXPECT_EQ(2u, one.arms[kRight].paths.size());
+        EXPECT_EQ(ArmResult::COMPLETE, one.arms[kRight].status);
     }
 }
 
