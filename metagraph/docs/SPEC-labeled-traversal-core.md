@@ -339,7 +339,8 @@ A request that binds neither is answered byte for byte as before. Explicit label
 number is the request's, and their reads stay the default ones.
 
 **The label cap: the first-met rule.** A discovery tracks a label from the first k-mer it is met at, in k-mer
-order. Before it admits the labels first met at a k-mer it counts them; when tracking all of them would make more
+order. Before it admits the labels first met at a k-mer it counts them (a pass of lookups, read only where the bound of
+the labels the row's columns have left untracked does not decide); when tracking all of them would make more
 than N labels (N the flag), it admits none of them, and no label first met at that k-mer or later is tracked: that
 k-mer is the **cut k-mer**. So the labels tracked are exactly those first met at a k-mer before the cut k-mer, a set
 that depends only on the query and the index's content (not on column numbering, batches or the read path), and
@@ -386,8 +387,8 @@ allocated: the rows, by the budget-aware reads of the annotation (`LabelOracle::
 `DecodeBudget`, E14: every buffer of a decode, its row-diff path included, charged before it is allocated, a read
 that does not fit refused whole without side effects); the rows kept for a later occurrence of their k-mer, while
 kept; the next occurrence of every in-graph k-mer (8 B each) and the table that finds them (transient); the label
-index (4 B a column for column labels, 112 B a tracked record for header labels: a hash table at most 90% full,
-growth included); per tracked label 152 B (its accumulator and id, in deques that never relocate), per run 32 B,
+index (4 B a column for column labels; for header labels 8 B a column, the records it has tracked, and 112 B a
+tracked record: a hash table at most 90% full, growth included); per tracked label 152 B (its accumulator and id, in deques that never relocate), per run 32 B,
 per trace break 16 B, and the heap of the chains' coordinates and of the scratch as it grows. This is a model of the
 heap (size classes, vectors at most twice their size; one vector's growth in flight is not counted), never a
 measurement. A charge that does not fit is met, in this order, by decoding the batch in halves, by giving up the
@@ -422,6 +423,17 @@ the memory stop being the backstop for wide rows and run-heavy queries. Not char
 query's own arrays (about 41 B per k-mer: keys, presence, in-graph keys and positions, graph runs; the query's
 length is bounded by `--resolve-max-query-bp`, `bounds.max_query_bp` and the body cap), the ranking array after the
 pass (24 B per tracked label) and the answer (at most min(`max_labels`, N) labels with their runs).
+
+**Measured** (the physical footprint a request adds to an idle server, macOS `proc_pid_rusage` interval maximum,
+three fresh servers each, load 12-17; `e23/H2/mem/` of train 3): a header discovery of a 90 bp stretch that 600,000
+records hold from starts of their own (k-mers 0-39), a `row_diff_brwt_coord` index with its `.seqs`, 60 k-mers whose
+tuple rows hold up to 600,000 coordinates. The build before (6d97d6e8a): 372 MiB, every record tracked, 1.6-1.8 s.
+This build with the default bounds, which bind on nothing here: 309 MiB (the accumulators in deques), the same
+answer byte for byte, 1.7-1.8 s. With `--resolve-max-discover-labels 100000`: 215 MiB, 94,614 records tracked
+(the cut at k-mer 6, `ranking_exact` true), 1.0 s; the rows of the 60 k-mers then dominate. With
+`--resolve-max-discover-memory-mb 256`: 251-254 MiB, the whole answer (the batches decoded smaller, the kept rows
+given up), 2.1-2.2 s; with 64: 64-69 MiB, a memory stop at k-mer 11, 0.3 s. A footprint above the bound is what is
+not charged (the answer, the request's own structures) and the allocator's.
 
 **Capabilities** (§10.3): the `resolve` block of both GET routes states `discovery: {max_tracked_labels,
 max_memory_mb, stop_reasons: ["time", "memory"], rule}` (integers, 0 for none; `rule` a reference to this section);

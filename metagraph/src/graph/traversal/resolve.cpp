@@ -788,10 +788,13 @@ SupportProfile resolve_support(LabelOracle &oracle,
         // the scratch as it grows. Before a k-mer's labels are accumulated, the most they can
         // add is checked against what is left (admit_row), so a charge after it always fits
         const bool bounded = options.discover_max_memory != 0;
-        const uint64_t slot_bytes = by_column
-                ? annot::matrix::buffer_bytes(oracle.num_columns(), sizeof(uint32_t)) : 0;
+        // a header discovery also counts the records it tracks per column, so that a k-mer's
+        // new labels are bounded by those its columns have left (8 B a column)
+        const uint64_t slot_bytes = annot::matrix::buffer_bytes(oracle.num_columns(),
+                by_column ? sizeof(uint32_t) : sizeof(uint64_t));
         const bool index_fits = budget.charge(slot_bytes);
         std::vector<uint32_t> slot(by_column && index_fits ? oracle.num_columns() : 0, kNoSlot);
+        std::vector<uint64_t> tracked_in(!by_column && index_fits ? oracle.num_columns() : 0, 0);
         tsl::hopscotch_map<std::pair<Column, uint64_t>, uint64_t, LabelKeyHash> index;
         std::deque<LabelSupport> found;
         std::deque<std::pair<Column, uint64_t>> found_ids;
@@ -826,6 +829,7 @@ SupportProfile resolve_support(LabelOracle &oracle,
             if (inserted) {
                 found.emplace_back();
                 found_ids.emplace_back(c, seq_id);
+                tracked_in[c]++;
             }
             return &found[it->second];
         };
@@ -893,13 +897,15 @@ SupportProfile resolve_support(LabelOracle &oracle,
             }
             return std::make_pair(fresh, known);
         };
-        // Whether the k-mer of present index j, whose row has at most |labels| labels and
-        // |coords| coordinates, can be accumulated: false when the most it can add does not
-        // fit what |budget| has left (nothing done). The labels it would make tracked past the
-        // cap make it the cut k-mer (none of them admitted), decided here and taken effect
-        // only once the k-mer fits. |count| gives the row's labels not tracked and tracked,
-        // read only where the bounds of |labels| alone do not decide
-        auto admit_row = [&](size_t j, uint64_t labels, uint64_t coords, const auto &count) {
+        // Whether the k-mer of present index j, whose row has at most |labels| labels, at most
+        // |fresh_most| of them not tracked yet, and |coords| coordinates, can be accumulated:
+        // false when the most it can add does not fit what |budget| has left (nothing done).
+        // The labels it would make tracked past the cap make it the cut k-mer (none of them
+        // admitted), decided here and taken effect only once the k-mer fits. |count| gives the
+        // row's labels not tracked and tracked (a pass of lookups, and for header labels the
+        // coordinates' mapping), read only where the bounds alone do not decide
+        auto admit_row = [&](size_t j, uint64_t labels, uint64_t fresh_most, uint64_t coords,
+                             const auto &count) {
             // (a flag and a value rather than an optional, whose copy GCC 13 takes for
             // maybe-uninitialized)
             bool is_counted = false;
@@ -914,8 +920,8 @@ SupportProfile resolve_support(LabelOracle &oracle,
             bool cut_here = false;
             uint64_t fresh_max = 0;
             if (admitting) {
-                fresh_max = labels;
-                if (max_tracked && found.size() + labels > max_tracked) {
+                fresh_max = fresh_most;
+                if (max_tracked && found.size() + fresh_most > max_tracked) {
                     fresh_max = counts().first;
                     if (found.size() + fresh_max > max_tracked) {
                         cut_here = true;
@@ -959,7 +965,10 @@ SupportProfile resolve_support(LabelOracle &oracle,
         };
         const size_t used = !index_fits ? 0 : each_row(tuple_rows,
             [&](size_t j, const BinaryMatrix::SetBitPositions &row) {
-                if (!admit_row(j, row.size(), 0, [&]() { return count_bits(row); }))
+                // a column not tracked yet is one of those the index has left
+                const uint64_t fresh_most = std::min<uint64_t>(
+                        row.size(), oracle.num_columns() - found.size());
+                if (!admit_row(j, row.size(), fresh_most, 0, [&]() { return count_bits(row); }))
                     return false;
                 const size_t labels_before = found.size();
                 const uint64_t scratch_before = scratch_held();
@@ -971,16 +980,26 @@ SupportProfile resolve_support(LabelOracle &oracle,
                 return true;
             },
             [&](size_t j, const MultiIntMatrix::RowTuples &row) {
+                // a column label per column, a sequence label per coordinate at most, and of the
+                // labels not tracked yet at most those the index has left: per column (header
+                // labels: its records not tracked yet), or of all columns
                 uint64_t coords_in_row = 0;
-                for (const auto &entry : row) {
-                    coords_in_row += entry.second.size();
+                uint64_t fresh_most = 0;
+                for (const auto &[c, coords] : row) {
+                    coords_in_row += coords.size();
+                    if (!by_column) {
+                        fresh_most += std::min<uint64_t>(
+                                coords.size(),
+                                oracle.coord_to_header()->num_sequences(c) - tracked_in[c]);
+                    }
                 }
-                // a column label per column, a sequence label per coordinate at most (the
-                // scratch's growth counted from before the count, which may sort into it: it
-                // is within the coordinates' charge admit_row checks)
+                if (by_column)
+                    fresh_most = std::min<uint64_t>(row.size(), oracle.num_columns() - found.size());
+                // (the scratch's growth counted from before the count, which may sort into it:
+                // it is within the coordinates' charge admit_row checks)
                 const uint64_t scratch_before = scratch_held();
-                if (!admit_row(j, by_column ? row.size() : coords_in_row, coords_in_row,
-                               [&]() { return count_tuples(row); }))
+                if (!admit_row(j, by_column ? row.size() : coords_in_row, fresh_most,
+                               coords_in_row, [&]() { return count_tuples(row); }))
                     return false;
                 const size_t labels_before = found.size();
                 const uint64_t i = present_pos[j];
