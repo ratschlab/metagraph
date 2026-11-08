@@ -246,18 +246,20 @@ std::vector<LabelQuery::NodeHits> LabelQuery::fetch(const std::vector<node_index
     auto &counters = oracle_.counters();
     std::vector<node_index> missing;
     tsl::hopscotch_set<node_index> requested;
+    size_t cache_hits = 0;
     for (node_index key : keys) {
         if (key == npos)
             continue;
         counters.rows_requested++;
         if (cache_.count(key)) {
-            counters.cache_hits++;
+            cache_hits++;
         } else if (requested.insert(key).second) {
             missing.push_back(key);
         }
     }
     // a clear in fetch_uncached may drop keys requested here: read them all again then
     if (cache_.size() + missing.size() > max_cache_size_) {
+        cache_hits = 0;
         missing.clear();
         requested.clear();
         for (node_index key : keys) {
@@ -265,6 +267,7 @@ std::vector<LabelQuery::NodeHits> LabelQuery::fetch(const std::vector<node_index
                 missing.push_back(key);
         }
     }
+    counters.cache_hits += cache_hits;
     fetch_uncached(missing);
 
     std::vector<NodeHits> result(keys.size());

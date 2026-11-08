@@ -162,6 +162,8 @@ SupportProfile resolve_support(const LabelOracle &oracle,
         throw std::invalid_argument("Specify either an explicit label list or discovery, not both");
     if (query.size() < profile.k)
         throw std::invalid_argument("Query shorter than k");
+    if (options.discover && !options.discover_max_labels)
+        throw std::invalid_argument("Discovery needs discover_max_labels of at least 1");
 
     profile.num_kmers = query.size() - profile.k + 1;
     const std::vector<node_index> keys = oracle.keys_of_sequence(query);
@@ -184,11 +186,16 @@ SupportProfile resolve_support(const LabelOracle &oracle,
             refs.push_back(oracle.resolve_label(name));
         }
         LabelQuery query_labels(oracle, refs);
-        const auto hits = query_labels.fetch(keys);
         support.resize(refs.size());
-        for (uint64_t i = 0; i < hits.size(); ++i) {
-            for (LabelId l : hits[i]) {
-                support[l].add(i);
+        // decode the rows kResolveBatchRows at a time, as discovery does
+        for (size_t begin = 0; begin < keys.size(); begin += kResolveBatchRows) {
+            const size_t end = std::min(keys.size(), begin + kResolveBatchRows);
+            const auto hits = query_labels.fetch(
+                    std::vector<node_index>(keys.begin() + begin, keys.begin() + end));
+            for (size_t i = 0; i < hits.size(); ++i) {
+                for (LabelId l : hits[i]) {
+                    support[l].add(begin + i);
+                }
             }
         }
     } else {
@@ -322,6 +329,7 @@ std::vector<LabelId> covering_labels(const SupportProfile &profile, const KmerIn
 struct Picked {
     KmerInterval kmers;
     std::vector<LabelId> labels;
+    size_t rank;  // the order in which the policy picked it
 };
 
 // MAX_SUPPORT: repeatedly pick the interval of at least |min_kmers| k-mers contained in the
@@ -419,7 +427,7 @@ std::vector<Picked> pick_max_support(const SupportProfile &profile, uint64_t min
         }
         if (!best)
             break;
-        picked.push_back({ *best, covering_labels(profile, *best) });
+        picked.push_back({ *best, covering_labels(profile, *best), picked.size() });
         assert(picked.back().labels.size() == best_count);
         taken.push_back(*best);
         std::sort(taken.begin(), taken.end());
@@ -448,15 +456,17 @@ SeedSelection select_seeds(const SupportProfile &profile,
                 continue;
             selection.num_eligible++;
             if (picked.size() < policy.max_seeds)
-                picked.push_back({ cand.kmers, cand.labels });
+                picked.push_back({ cand.kmers, cand.labels, picked.size() });
         }
     } else {
         picked = pick_max_support(profile, min_kmers, policy.max_seeds);
         selection.num_eligible = picked.size();
     }
 
-    // merge overlapping picks onto their common interval
-    if (policy.merge_overlapping) {
+    // Merge overlapping picks onto their common interval, carried by the labels of both.
+    // Only LONGEST_FIRST picks can overlap: MAX_SUPPORT picks outside the earlier ones.
+    // A merged pick keeps the rank of its best member, and the picks stay in rank order.
+    if (policy.merge_overlapping && policy.policy == SelectionPolicy::LONGEST_FIRST) {
         std::sort(picked.begin(), picked.end(),
                   [](const Picked &a, const Picked &b) { return a.kmers < b.kmers; });
         std::vector<Picked> merged;
@@ -468,11 +478,14 @@ SeedSelection select_seeds(const SupportProfile &profile,
                 if (common.size() >= min_kmers) {
                     m.kmers = common;
                     m.labels = covering_labels(profile, common);
+                    m.rank = std::min(m.rank, p.rank);
                     continue;
                 }
             }
             merged.push_back(std::move(p));
         }
+        std::sort(merged.begin(), merged.end(),
+                  [](const Picked &a, const Picked &b) { return a.rank < b.rank; });
         picked.swap(merged);
     }
 
