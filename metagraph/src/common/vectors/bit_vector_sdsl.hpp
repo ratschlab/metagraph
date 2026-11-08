@@ -13,7 +13,7 @@
 #include "common/serialization.hpp"
 #include "vector_algorithm.hpp"
 #include "bit_vector.hpp"
-#include "annotation_vector_io.hpp"
+#include <sdsl/packed_vector_view.hpp>
 
 
 template <class bv_type, class rank_1_type, class select_1_type, class select_0_type>
@@ -365,9 +365,9 @@ struct bit_vector_sdsl<bv_type, rank_1_type, select_1_type, select_0_type>
 };
 
 template <class bv_type, class rank_1_type, class select_1_type, class select_0_type>
-template <uint32_t t_bs>
+template <uint32_t t_bs, template <uint8_t> class Storage>
 struct bit_vector_sdsl<bv_type, rank_1_type, select_1_type, select_0_type>
-::bv_traits<sdsl::bit_vector_il<t_bs>> {
+::bv_traits<sdsl::bit_vector_il<t_bs, Storage>> {
     static constexpr size_t MAX_ITER_BIT_VECTOR = 1000;
     static constexpr size_t SEQ_BITWISE_WORD_ACCESS_VS_SELECT_FACTOR = 1000;
 
@@ -410,7 +410,7 @@ struct bit_vector_sdsl<bv_type, rank_1_type, select_1_type, select_0_type>
 template <class bv_type, class rank_1_type, class select_1_type, class select_0_type>
 template <uint8_t t_width>
 struct bit_vector_sdsl<bv_type, rank_1_type, select_1_type, select_0_type>
-::bv_traits<mtg::detail::annotation_vector_io<t_width>> {
+::bv_traits<sdsl::packed_vector_view<t_width>> {
     static constexpr size_t MAX_ITER_BIT_VECTOR = 1000;
     static constexpr size_t SEQ_BITWISE_WORD_ACCESS_VS_SELECT_FACTOR = 1000;
 
@@ -420,21 +420,21 @@ struct bit_vector_sdsl<bv_type, rank_1_type, select_1_type, select_0_type>
 };
 
 template <class bv_type, class rank_1_type, class select_1_type, class select_0_type>
-template <uint8_t t_b, uint8_t t_pat_len, class Vector>
+template <uint8_t t_b, uint8_t t_pat_len, class Vector, template <uint8_t> class Storage>
 struct bit_vector_sdsl<bv_type, rank_1_type, select_1_type,
-                       select_0_type>::bv_traits<sdsl::rank_support_v5<t_b, t_pat_len, Vector>> {
+                       select_0_type>::bv_traits<sdsl::rank_support_v5<t_b, t_pat_len, Vector, Storage>> {
     static inline uint64_t predict_size(uint64_t size, uint64_t /*num_set_bits*/) {
-        return sizeof(sdsl::rank_support_v5<t_b, t_pat_len, Vector>) * 8 +
+        return sizeof(sdsl::rank_support_v5<t_b, t_pat_len, Vector, Storage>) * 8 +
                footprint_rank_support_v5(size);
     }
 };
 
 template <class bv_type, class rank_1_type, class select_1_type, class select_0_type>
-template <uint8_t t_b, uint8_t t_pat_len, class Vector>
+template <uint8_t t_b, uint8_t t_pat_len, class Vector, template <uint8_t> class Storage>
 struct bit_vector_sdsl<bv_type, rank_1_type, select_1_type,
-                       select_0_type>::bv_traits<sdsl::select_support_mcl<t_b, t_pat_len, Vector>> {
+                       select_0_type>::bv_traits<sdsl::select_support_mcl<t_b, t_pat_len, Vector, Storage>> {
     static inline uint64_t predict_size(uint64_t size, uint64_t num_set_bits) {
-        return sizeof(sdsl::select_support_mcl<t_b, t_pat_len, Vector>) * 8 +
+        return sizeof(sdsl::select_support_mcl<t_b, t_pat_len, Vector, Storage>) * 8 +
                footprint_select_support_mcl(size, num_set_bits);
     }
 };
@@ -448,15 +448,15 @@ using bit_vector_hyb
 
 template <uint32_t block_size = 512>
 using bit_vector_il
-    = bit_vector_sdsl<sdsl::bit_vector_il<block_size>,
-                      typename sdsl::bit_vector_il<block_size>::rank_1_type,
-                      typename sdsl::bit_vector_il<block_size>::select_1_type,
-                      typename sdsl::bit_vector_il<block_size>::select_0_type>;
+    = bit_vector_sdsl<sdsl::bit_vector_il<block_size, sdsl::packed_vector_view>,
+                      typename sdsl::bit_vector_il<block_size, sdsl::packed_vector_view>::rank_1_type,
+                      typename sdsl::bit_vector_il<block_size, sdsl::packed_vector_view>::select_1_type,
+                      typename sdsl::bit_vector_il<block_size, sdsl::packed_vector_view>::select_0_type>;
 
 namespace mtg::detail {
 template <uint32_t BlockSize = 63>
-using rrr_storage = sdsl::rrr_vector<BlockSize, annotation_vector_io<0>, 32,
-                                     annotation_vector_io>;
+using rrr_storage = sdsl::rrr_vector<BlockSize, sdsl::packed_vector_view<0>, 32,
+                                     sdsl::packed_vector_view>;
 }
 
 template <uint32_t block_size = 63>
@@ -467,9 +467,9 @@ using bit_vector_rrr
                       typename mtg::detail::rrr_storage<block_size>::select_0_type>;
 
 using bit_vector_stat =
-    bit_vector_sdsl<mtg::detail::annotation_vector_io<1>,
-                    sdsl::rank_support_v5<1, 1, sdsl::packed_vector_view<1>>,
-                    sdsl::select_support_mcl<1, 1, sdsl::packed_vector_view<1>>,
+    bit_vector_sdsl<sdsl::packed_vector_view<1>,
+                    sdsl::rank_support_v5<1, 1, sdsl::packed_vector_view<1>, sdsl::packed_vector_view>,
+                    sdsl::select_support_mcl<1, 1, sdsl::packed_vector_view<1>, sdsl::packed_vector_view>,
                     sdsl::select_support_scan<0, 1, sdsl::packed_vector_view<1>>>;
 
 #endif // __BIT_VECTOR_SDSL_HPP__

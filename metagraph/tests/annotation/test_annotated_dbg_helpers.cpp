@@ -138,7 +138,7 @@ std::unique_ptr<AnnotatedDBG> build_anno_graph(uint64_t k,
             }
             assert(diff_annotator->num_labels() == num_columns);
             std::vector<bit_vector_smart> delimiters;
-            std::vector<sdsl::int_vector<>> column_values;
+            std::vector<sdsl::packed_vector_view<0>> column_values;
 
             typedef ColumnCoordAnnotator::binary_matrix_type CoordDiff;
             auto coords_fname = utils::remove_suffix(files[0], ColumnCompressed<>::kExtension)

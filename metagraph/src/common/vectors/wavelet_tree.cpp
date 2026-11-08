@@ -44,7 +44,7 @@ WT wavelet_tree::convert_to() {
                 = dynamic_cast<wavelet_tree_sdsl_fast<typename WT::wt_type> *>(this)) {
             // fast_wt_sdsl -> wt_sdsl
             uint8_t logsigma = this->logsigma();
-            wt_fast->int_vector_ = sdsl::int_vector<>();
+            wt_fast->int_vector_ = {};
             return WT(logsigma, std::move(wt_fast->wwt_));
         }
     }
@@ -58,7 +58,8 @@ WT wavelet_tree::convert_to() {
 
     sdsl::int_vector<> vector;
     if (auto *wt = dynamic_cast<wavelet_tree_sdsl_augmented *>(this)) {
-        vector.swap(const_cast<sdsl::int_vector<>&>(wt->data()));
+        // Takes the allocation when this tree owns it alone, copies otherwise.
+        vector = std::move(const_cast<sdsl::packed_vector_view<0>&>(wt->data())).into_owned();
     } else {
         vector = to_vector();
     }
@@ -112,12 +113,10 @@ wavelet_tree_sdsl_fast<t_wt_sdsl>
 ::wavelet_tree_sdsl_fast(uint8_t logsigma, sdsl::int_vector<>&& vector) {
     assert(logsigma < 64);
 
-    if (vector.width() == logsigma) {
-        int_vector_ = std::move(vector);
-    } else {
-        int_vector_ = pack_vector(std::move(vector), logsigma);
-    }
-    wwt_ = t_wt_sdsl(int_vector_);
+    if (vector.width() != logsigma)
+        vector = pack_vector(std::move(vector), logsigma);
+    wwt_ = t_wt_sdsl(vector);
+    int_vector_ = sdsl::packed_vector_view<0>(std::move(vector));
 
     count_.resize(1 << logsigma);
     for (TAlphabet c = 0; c < count_.size(); ++c) {
@@ -214,7 +213,7 @@ uint64_t wavelet_tree_sdsl_fast<t_wt_sdsl>::prev(uint64_t i, TAlphabet c) const 
 
 template <class t_wt_sdsl>
 void wavelet_tree_sdsl_fast<t_wt_sdsl>::clear() {
-    int_vector_ = sdsl::int_vector<>(0, 0, int_vector_.width());
+    int_vector_ = sdsl::packed_vector_view<0>(sdsl::int_vector<>(0, 0, int_vector_.width()));
     wwt_ = t_wt_sdsl();
     count_.assign(count_.size(), 0);
 }
@@ -439,25 +438,23 @@ partite_vector<t_bv>::partite_vector(uint8_t logsigma,
                                      sdsl::int_vector<>&& vector) {
     assert(logsigma < 64);
 
-    if (vector.width() == logsigma) {
-        int_vector_ = std::move(vector);
-    } else {
-        int_vector_ = pack_vector(std::move(vector), logsigma);
-    }
+    if (vector.width() != logsigma)
+        vector = pack_vector(std::move(vector), logsigma);
 
     std::vector<sdsl::bit_vector> bitmaps(1 << logsigma);
 
-    for (size_t i = 0; i < int_vector_.size(); ++i) {
+    for (size_t i = 0; i < vector.size(); ++i) {
 
-        TAlphabet c = int_vector_[i];
+        TAlphabet c = vector[i];
 
         assert(c < static_cast<uint64_t>(bitmaps.size()));
 
         if (!bitmaps[c].size())
-            bitmaps[c] = sdsl::bit_vector(int_vector_.size(), 0);
+            bitmaps[c] = sdsl::bit_vector(vector.size(), 0);
 
         bitmaps[c][i] = 1;
     }
+    int_vector_ = sdsl::packed_vector_view<0>(std::move(vector));
 
     for (auto &bv : bitmaps) {
         bitmaps_.emplace_back(std::move(bv));
@@ -542,7 +539,7 @@ bool partite_vector<t_bv>::load(std::istream &in) {
 
 template <class t_bv>
 void partite_vector<t_bv>::clear() {
-    int_vector_.resize(0);
+    int_vector_ = sdsl::packed_vector_view<0>(sdsl::int_vector<>(0, 0, int_vector_.width()));
     bitmaps_.assign(bitmaps_.size(), t_bv());
 }
 
@@ -553,7 +550,7 @@ template wavelet_tree_dyn wavelet_tree::convert_to<wavelet_tree_dyn>();
     template class wt; \
     template wt wavelet_tree::convert_to<wt>(); \
 
-INSTANTIATE_WT(wavelet_tree_sdsl<sdsl::wt_huff<>>);
+INSTANTIATE_WT(wavelet_tree_sdsl<sdsl::wt_huff<sdsl::packed_vector_view<1>>>);
 
 INSTANTIATE_WT(wavelet_tree_sdsl<sdsl::wt_huff<mtg::detail::rrr_storage<63>>>);
 
