@@ -38,8 +38,6 @@ struct ResolveOptions {
     bool discover = false;
     size_t discover_max_labels = 1000;
     LabelKind discover_kind = LabelKind::COLUMN;
-    // the shortest support run (in k-mers) that becomes a seed candidate
-    uint64_t min_block_kmers = 1;
 };
 
 struct LabelProfile {
@@ -91,7 +89,6 @@ struct SelectionPolicy {
     size_t max_seeds = 10;
     uint64_t min_block_bp = 0;               // 0: at least k
     size_t max_labels_per_seed = 1000;
-    bool merge_overlapping = true;
 };
 
 // The labels supporting a selected seed beyond |max_labels_per_seed|: the kept ones are the

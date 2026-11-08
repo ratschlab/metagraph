@@ -258,8 +258,7 @@ SupportProfile resolve_support(const LabelOracle &oracle,
     std::map<KmerInterval, std::vector<LabelId>> groups;
     for (LabelId l = 0; l < profile.labels.size(); ++l) {
         for (const auto &run : profile.labels[l].runs) {
-            if (run.size() >= options.min_block_kmers)
-                groups[run].push_back(l);
+            groups[run].push_back(l);
         }
     }
     for (auto &[iv, labels] : groups) {
@@ -473,7 +472,7 @@ SeedSelection select_seeds(const SupportProfile &profile,
     // Merge overlapping picks onto their common interval, carried by the labels of both.
     // Only LONGEST_FIRST picks can overlap: MAX_SUPPORT picks outside the earlier ones.
     // A merged pick keeps the rank of its best member, and the picks stay in rank order.
-    if (policy.merge_overlapping && policy.policy == SelectionPolicy::LONGEST_FIRST) {
+    if (policy.policy == SelectionPolicy::LONGEST_FIRST) {
         std::sort(picked.begin(), picked.end(),
                   [](const Picked &a, const Picked &b) { return a.kmers < b.kmers; });
         std::vector<Picked> merged;
