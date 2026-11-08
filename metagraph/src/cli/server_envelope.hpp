@@ -119,11 +119,12 @@ Json::Value composite_fp_json(std::vector<std::string> index_fps);
  * discovery_trace_scale, |max_request_memory_mb| (the server's request-wide memory bound of
  * /traverse, --traverse-max-request-memory-mb; 0 = off) and |caps| (max_concurrent, E19), which
  * every /traverse capabilities probe states too: a graph-less probe sees them without reading a
- * pair; and |request_intake| (H1: request_intake_json, server_checks.hpp), which a single-graph
- * server states at the top level
+ * pair; |request_intake| (H1: request_intake_json, server_checks.hpp) and |column_labels| (H3:
+ * column_labels_capabilities_json), which a single-graph server states at the top level
  */
 Json::Value multigraph_capabilities_json(uint64_t max_request_memory_mb, const RouteCaps &caps,
-                                         const Json::Value &request_intake);
+                                         const Json::Value &request_intake,
+                                         const Json::Value &column_labels = Json::Value());
 
 /**
  * max_concurrent (E19; SPEC-multigraph-envelope.md section 8): the caps on the requests of each

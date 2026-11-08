@@ -16,6 +16,37 @@ namespace cli {
 
 using HttpServer = SimpleWeb::Server<SimpleWeb::HTTP>;
 
+/**
+ * The HTTP server with a cap on the connections it holds open (H3, review 5 #1;
+ * --max-connections, 0: no cap, the library's accept loop as it is). A connection counts from
+ * its accept to its close, whatever it does: its header, its body, its handler, its answer, an
+ * idle keep-alive, the drain after a 413. With N connections open the server stops accepting,
+ * and a further connection waits in the kernel's listen queue (its handshake completed by the
+ * kernel, its request unread) until one closes: the close resumes the accept loop. Nothing is
+ * written to a waiting connection: a delay, never a refusal. The pinned Simple-Web-Server's
+ * protected accept() is overridden (its own connection deleter counts the closes); no patch of
+ * the library, and the routes see its Request, Response and Connection types unchanged.
+ */
+class CappedHttpServer : public HttpServer {
+  public:
+    CappedHttpServer();
+    // the cap (0: none); set before start()
+    void set_max_connections(size_t max_connections);
+    size_t max_connections() const;
+    // the connections open now, the one awaiting an accept included (tests, diagnostics)
+    size_t open_connections() const;
+    // how many times the accept loop paused at the cap (tests, diagnostics)
+    size_t pauses() const;
+
+    struct CapState;
+
+  protected:
+    void accept() override;
+
+  private:
+    std::shared_ptr<CapState> cap_;
+};
+
 // HttpError, ClientGone, CurrentlyInitializingError, ResponseControl and answer_request, the
 // parts that need no HTTP library, are in server_checks.hpp
 

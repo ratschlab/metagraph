@@ -1004,13 +1004,22 @@ std::string AttemptRegistry::retention_text() const {
                        "names + {} ms, at most {} s, while fewer than {} tombstones and held "
                        "attempts are held (else the cancel is refused, 429)",
                        settings_.retention_s, settings_.retention_count, settings_.clock_skew_ms,
-                       tombstone_cap_ms() / 1000, settings_.retention_s,
-                       settings_.clock_skew_ms, tombstone_cap_ms() / 1000,
+                       tombstone_cap_ms() / 1000, tombstone_hold_floor_ms() / 1000,
+                       settings_.clock_skew_ms, tombstone_hold_cap_ms() / 1000,
                        settings_.retention_count);
 }
 
 uint64_t AttemptRegistry::tombstone_cap_ms() const {
     return std::max(settings_.tombstone_max_s, settings_.retention_s) * 1000;
+}
+
+uint64_t AttemptRegistry::tombstone_hold_cap_ms() const {
+    return std::min(tombstone_cap_ms(), std::max<uint64_t>(settings_.tombstone_hold_s, 1) * 1000);
+}
+
+uint64_t AttemptRegistry::tombstone_hold_floor_ms() const {
+    return std::min(settings_.retention_s, std::max<uint64_t>(settings_.tombstone_hold_s, 1))
+            * 1000;
 }
 
 void AttemptRegistry::note_uninterruptible(double ms) {
@@ -1131,14 +1140,19 @@ void AttemptRegistry::expire_locked() {
 void AttemptRegistry::hold_locked(Attempt &held, std::optional<uint64_t> not_after_ms,
                                   bool at_least_retention) {
     const uint64_t wall = now_ms();
-    uint64_t hold_ms = at_least_retention ? settings_.retention_s * 1000 : 0;
+    // a tombstone (an id this server never ran: a cheap cancel can make one) is held within
+    // tombstone_hold_s (H3); a finished attempt (it ran: its id must stay refused) within the
+    // tombstone cap
+    const bool tomb = held.tombstone();
+    const uint64_t cap_ms = tomb ? tombstone_hold_cap_ms() : tombstone_cap_ms();
+    uint64_t hold_ms = !at_least_retention ? 0
+                     : tomb ? tombstone_hold_floor_ms() : settings_.retention_s * 1000;
     if (not_after_ms) {
         held.tomb_not_after_ms_ = std::max(held.tomb_not_after_ms_.value_or(0), *not_after_ms);
         // covered once this server's clock passed not_after_ms + the skew a ledger adds (both
         // at most 2^53 - 1: no overflow)
         const uint64_t target = *not_after_ms + settings_.clock_skew_ms;
-        hold_ms = std::max(hold_ms, std::min(target > wall ? target - wall : 0,
-                                             tombstone_cap_ms()));
+        hold_ms = std::max(hold_ms, std::min(target > wall ? target - wall : 0, cap_ms));
     } else if (!at_least_retention) {
         return;   // a finished attempt's hold is that of a not_after_ms alone
     }
@@ -1256,8 +1270,10 @@ Json::Value AttemptRegistry::capabilities_json() const {
     att["server_instance"] = instance_;
     att["retention_s"] = uint_json(settings_.retention_s);
     att["retention_count"] = uint_json(settings_.retention_count);
-    // the cap of a tombstone's hold, as applied: max(tombstone_max_s, retention_s)
+    // the cap of a held finished attempt's hold, as applied: max(tombstone_max_s, retention_s)
     att["tombstone_max_s"] = uint_json(tombstone_cap_ms() / 1000);
+    // and of a tombstone's (H3), as applied: min(that, tombstone_hold_s)
+    att["tombstone_hold_s"] = uint_json(tombstone_hold_cap_ms() / 1000);
     // integers (ms), as usage.bound states them: a ledger compares them with its own
     att["allowance_ms"] = ceil_ms_json(settings_.allowance_ms);
     att["hard_cap_ms"] = ceil_ms_json(settings_.hard_cap_ms);

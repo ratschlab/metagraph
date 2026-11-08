@@ -184,18 +184,21 @@ TEST(ServerRequestIntake, RefusalBodiesWriteErrorFirst) {
 TEST(ServerRequestIntake, CapabilitiesStateTheIntake) {
     EXPECT_EQ(R"x({"body_too_large":{"code":"body_too_large","members":["code","error",)x"
               R"x("max_request_body_mb"],"status":413},"json_values_routes":["/pattern",)x"
-              R"x("/resolve","/traverse","/traverse/cancel"],"max_request_body_mb":256,)x"
+              R"x("/resolve","/traverse","/traverse/cancel"],"max_connections":null,)x"
+              R"x("max_request_body_mb":256,)x"
               R"x("max_request_json_values":262144,"too_many_json_values":{"code":)x"
               R"x("too_many_json_values","members":["code","error","max_request_json_values"],)x"
               R"x("status":400}})x",
-              text(request_intake_json(256, 262144)));
-    const Json::Value unlimited = request_intake_json(0, 0);
+              text(request_intake_json(256, 262144, 0)));
+    const Json::Value unlimited = request_intake_json(0, 0, 0);
     EXPECT_TRUE(unlimited["max_request_body_mb"].isNull());
     EXPECT_TRUE(unlimited["max_request_json_values"].isNull());
-    EXPECT_TRUE(request_intake_json(2, 1)["max_request_body_mb"].isUInt64());
-    EXPECT_TRUE(request_intake_json(2, 1)["max_request_json_values"].isUInt64());
+    EXPECT_TRUE(unlimited["max_connections"].isNull());
+    EXPECT_TRUE(request_intake_json(2, 1, 0)["max_request_body_mb"].isUInt64());
+    EXPECT_TRUE(request_intake_json(2, 1, 0)["max_request_json_values"].isUInt64());
+    EXPECT_TRUE(request_intake_json(2, 1, 3)["max_connections"].isUInt64());
     // the members each refusal states are exactly its body's
-    const Json::Value intake = request_intake_json(2, 1);
+    const Json::Value intake = request_intake_json(2, 1, 0);
     Json::Value members(Json::arrayValue);
     for (const std::string &m : body_too_large_json(1, 2).getMemberNames()) {
         members.append(m);

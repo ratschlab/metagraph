@@ -4415,8 +4415,9 @@ the other pairs.
   before, the HTTP library closed the connection without a status), from the `Content-Length` before the body
   is read; the server logs it at warning level (`SPEC-labeled-traversal-core.md` §10.3, the caps). A client that
   may send large bodies reads the limit here before it sends, or from `request_intake` (H1: the limit, the value
-  count of `--max-request-json-values` and the shapes of both refusals; at the top level on a single-graph
-  server, in the `multigraph` block on a multi-graph one, `SPEC-multigraph-envelope.md` section 8).
+  count of `--max-request-json-values` and the shapes of both refusals; H3: `max_connections`, the cap on the
+  connections held open; at the top level on a single-graph server, in the `multigraph` block on a multi-graph
+  one, `SPEC-multigraph-envelope.md` section 8).
 
 <!-- schema: capabilities_pair -->
 | field | type | meaning |

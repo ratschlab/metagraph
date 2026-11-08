@@ -121,6 +121,10 @@ Leave that process running. In another terminal or Python session, connect to it
     graph_client = GraphClient('127.0.0.1', 5555)
     labels = graph_client.column_labels()
 
+A server answers ``GET /column_labels`` whole up to ``--max-column-labels-bytes`` (16 MiB of
+labels by default); ``column_labels()`` reads a longer list page by page
+(``GET /column_labels?offset=&limit=``).
+
 Omit ``api_path`` when connecting directly to ``metagraph server_query``. For a server behind
 an HTTP proxy, set it to the index's path, as in the MetaSUB example below.
 

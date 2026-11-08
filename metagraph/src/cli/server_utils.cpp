@@ -6,6 +6,7 @@
 #include <filesystem>
 #include <limits>
 #include <map>
+#include <mutex>
 #include <optional>
 #include <ostream>
 #include <sstream>
@@ -22,6 +23,7 @@
 #endif
 #include <sys/socket.h>
 #include <zlib.h>
+#include <spdlog/fmt/fmt.h>
 #include <json/json.h>
 #include <server_http.hpp>
 
@@ -403,6 +405,172 @@ void refuse_body_too_large(const std::shared_ptr<HttpServer::Request> &request,
                                                     ignored);
         discard_until_closed(std::move(connection),
                              std::make_shared<std::vector<char>>(kDiscardBufferBytes));
+    });
+}
+
+// ---------------------------------------------------------------- the connection cap (H3)
+
+namespace {
+
+using IoContext = decltype(HttpServer::io_service)::element_type;
+
+// the shortest time between two warnings of the accept loop pausing at the cap
+constexpr auto kCapLogInterval = std::chrono::seconds(10);
+
+} // namespace
+
+struct CappedHttpServer::CapState {
+    std::mutex mutex;
+    size_t max = 0;
+    // the connections open, the one awaiting an accept included
+    size_t open = 0;
+    // the accept loop stopped at the cap: the next close resumes it
+    bool paused = false;
+    std::chrono::steady_clock::time_point paused_at;
+    size_t pauses = 0;
+    // the warnings are throttled: the pauses since the last one, and whether the current
+    // pause was warned of (its resume is then logged too)
+    std::chrono::steady_clock::time_point warned_at;
+    bool warned = false;
+    size_t pauses_unwarned = 0;
+    bool episode_warned = false;
+    // what a close needs to resume the loop: the server's io_context (weak: a close while it
+    // is destroyed posts nothing), its handler runner (stopped with the server: a resume
+    // posted before then does nothing) and the server itself
+    std::weak_ptr<IoContext> io;
+    std::shared_ptr<SimpleWeb::ScopeRunner> runner;
+    CappedHttpServer *server = nullptr;
+
+    // a connection closed: resume the accept loop if it stopped at the cap
+    void closed() {
+        std::shared_ptr<IoContext> context;
+        std::shared_ptr<SimpleWeb::ScopeRunner> run;
+        CappedHttpServer *to_resume = nullptr;
+        bool log_resume = false;
+        double waited_ms = 0;
+        {
+            std::lock_guard<std::mutex> lock(mutex);
+            --open;
+            if (!paused || open >= max)
+                return;
+            paused = false;
+            context = io.lock();
+            run = runner;
+            to_resume = server;
+            log_resume = episode_warned;
+            waited_ms = std::chrono::duration<double, std::milli>(
+                    std::chrono::steady_clock::now() - paused_at).count();
+        }
+        if (!context || !run || !to_resume)
+            return;
+        SimpleWeb::post(*context, [run, to_resume, log_resume, waited_ms]() {
+            auto lock = run->continue_lock();
+            if (!lock)
+                return;
+            if (log_resume) {
+                logger->info("[Server] Accepting connections again after {:.0f} ms at the "
+                             "connection cap", waited_ms);
+            }
+            to_resume->accept();
+        });
+    }
+};
+
+CappedHttpServer::CappedHttpServer() : cap_(std::make_shared<CapState>()) {}
+
+void CappedHttpServer::set_max_connections(size_t max_connections) {
+    std::lock_guard<std::mutex> lock(cap_->mutex);
+    cap_->max = max_connections;
+}
+
+size_t CappedHttpServer::max_connections() const {
+    std::lock_guard<std::mutex> lock(cap_->mutex);
+    return cap_->max;
+}
+
+size_t CappedHttpServer::open_connections() const {
+    std::lock_guard<std::mutex> lock(cap_->mutex);
+    return cap_->open;
+}
+
+size_t CappedHttpServer::pauses() const {
+    std::lock_guard<std::mutex> lock(cap_->mutex);
+    return cap_->pauses;
+}
+
+void CappedHttpServer::accept() {
+    // stopped (the acceptor closed): no accept, as the library's own loop ends at its
+    // operation_aborted
+    if (!acceptor || !acceptor->is_open())
+        return;
+    {
+        std::lock_guard<std::mutex> lock(cap_->mutex);
+        cap_->io = io_service;
+        cap_->runner = handler_runner;
+        cap_->server = this;
+        if (cap_->max && cap_->open >= cap_->max) {
+            // at the cap: nothing awaits an accept until a connection closes (CapState::
+            // closed); the kernel's listen queue holds the connections meanwhile
+            const auto now = std::chrono::steady_clock::now();
+            cap_->paused = true;
+            cap_->paused_at = now;
+            ++cap_->pauses;
+            cap_->episode_warned = !cap_->warned || now - cap_->warned_at >= kCapLogInterval;
+            if (cap_->episode_warned) {
+                logger->warn("[Server] {} connections open (--max-connections {}): new "
+                             "connections wait in the listen queue until one closes{}",
+                             cap_->open, cap_->max,
+                             cap_->pauses_unwarned
+                                 ? fmt::format(" ({} more pauses at the cap since the last "
+                                               "such line)", cap_->pauses_unwarned)
+                                 : std::string());
+                cap_->warned = true;
+                cap_->warned_at = now;
+                cap_->pauses_unwarned = 0;
+            } else {
+                ++cap_->pauses_unwarned;
+            }
+            return;
+        }
+        ++cap_->open;
+    }
+    // as the library's create_connection, with a deleter that also counts the close
+    auto connections = this->connections;
+    std::shared_ptr<CapState> cap = cap_;
+    std::shared_ptr<Connection> connection(
+            new Connection(handler_runner, *io_service),
+            [connections, cap](Connection *c) {
+                {
+                    SimpleWeb::LockGuard lock(connections->mutex);
+                    auto it = connections->set.find(c);
+                    if (it != connections->set.end())
+                        connections->set.erase(it);
+                }
+                delete c;
+                cap->closed();
+            });
+    {
+        SimpleWeb::LockGuard lock(connections->mutex);
+        connections->set.emplace(connection.get());
+    }
+    // as the library's Server<HTTP>::accept
+    acceptor->async_accept(*connection->socket,
+                           [this, connection](const SimpleWeb::error_code &ec) {
+        auto lock = connection->handler_runner->continue_lock();
+        if (!lock)
+            return;
+        // immediately accept the next one (unless the server stops), or stop at the cap
+        if (ec != SimpleWeb::error::operation_aborted)
+            this->accept();
+        auto session = std::make_shared<Session>(config.max_request_streambuf_size, connection);
+        if (!ec) {
+            net::ip::tcp::no_delay option(true);
+            SimpleWeb::error_code ignored;
+            session->connection->socket->set_option(option, ignored);
+            this->read(session);
+        } else if (this->on_error) {
+            this->on_error(session->request, ec);
+        }
     });
 }
 
@@ -1117,7 +1285,8 @@ std::string error_first_json_text(const Json::Value &body) {
     return text + "}";
 }
 
-Json::Value request_intake_json(uint64_t max_body_mb, uint64_t max_json_values) {
+Json::Value request_intake_json(uint64_t max_body_mb, uint64_t max_json_values,
+                                uint64_t max_connections) {
     auto refusal = [](int status, const char *code, const char *cap) {
         Json::Value r(Json::objectValue);
         r["status"] = status;
@@ -1141,7 +1310,175 @@ Json::Value request_intake_json(uint64_t max_body_mb, uint64_t max_json_values) 
     intake["json_values_routes"] = std::move(routes);
     intake["too_many_json_values"]
             = refusal(400, "too_many_json_values", "max_request_json_values");
+    // H3: the connections held open at once (a further one waits in the listen queue)
+    intake["max_connections"]
+            = max_connections ? Json::Value(Json::UInt64(max_connections)) : Json::Value();
     return intake;
+}
+
+// ---------------------------------------------------------------- GET /column_labels (H3)
+
+ColumnLabelList::ColumnLabelList(std::vector<const std::vector<std::string> *> parts)
+      : parts_(std::move(parts)) {
+    starts_.reserve(parts_.size());
+    for (const auto *part : parts_) {
+        starts_.push_back(total_);
+        total_ += part->size();
+    }
+}
+
+size_t append_json_string(std::string *out, const std::string &label) {
+    // what jsoncpp quotes as it is (isAnyCharRequiredQuoting): printable ASCII but `"` and `\`
+    bool plain = true;
+    for (char c : label) {
+        const auto u = static_cast<unsigned char>(c);
+        if (u < 0x20 || u >= 0x80 || c == '"' || c == '\\') {
+            plain = false;
+            break;
+        }
+    }
+    if (plain) {
+        out->push_back('"');
+        out->append(label);
+        out->push_back('"');
+        return label.size() + 2;
+    }
+    // else jsoncpp's own escaping, as json_text writes the label (default settings: no UTF-8
+    // emitted, every non-ASCII code point escaped)
+    const std::string quoted = Json::writeString(Json::StreamWriterBuilder(), Json::Value(label));
+    out->append(quoted);
+    return quoted.size();
+}
+
+std::optional<std::string> column_labels_text(const ColumnLabelList &list, uint64_t max_bytes) {
+    // json_text's styled array: "[", then each element on its own line after a tab, the
+    // elements separated by ",", then "\n]"; an empty array "[]"
+    std::string out = "[";
+    uint64_t bytes = 0;
+    bool over = false;
+    bool first = true;
+    list.visit_from(0, [&](const std::string &label) {
+        out.append(first ? "\n\t" : ",\n\t");
+        first = false;
+        bytes += append_json_string(&out, label);
+        over = max_bytes && bytes > max_bytes;
+        return !over;
+    });
+    if (over)
+        return std::nullopt;
+    out.append(list.total() ? "\n]" : "]");
+    return out;
+}
+
+namespace {
+
+// a parameter of GET /column_labels: decimal digits only, in [|min|, 2^53 - 1]
+uint64_t column_labels_integer(const std::string &key, const std::string &value, uint64_t min) {
+    constexpr uint64_t kMax = (uint64_t(1) << 53) - 1;
+    uint64_t v = 0;
+    bool ok = !value.empty() && value.size() <= 16;
+    for (char c : value) {
+        if (!ok || c < '0' || c > '9') {
+            ok = false;
+            break;
+        }
+        v = v * 10 + static_cast<uint64_t>(c - '0');
+    }
+    if (!ok || v < min || v > kMax) {
+        throw std::invalid_argument("Bad request: GET /column_labels: '" + key
+                                    + "' must be an integer in [" + std::to_string(min) + ", "
+                                    + std::to_string(kMax) + "], got '" + value + "'");
+    }
+    return v;
+}
+
+} // namespace
+
+ColumnLabelsPage column_labels_parameters(
+        const std::vector<std::pair<std::string, std::string>> &query) {
+    ColumnLabelsPage page;
+    bool offset_given = false;
+    bool limit_given = false;
+    for (const auto &[key, value] : query) {
+        bool *given = key == "offset" ? &offset_given : key == "limit" ? &limit_given : nullptr;
+        if (!given) {
+            throw std::invalid_argument("Bad request: unknown parameter '" + key
+                                        + "' of GET /column_labels (offset, limit)");
+        }
+        if (*given)
+            throw std::invalid_argument("Bad request: the parameter '" + key + "' is given twice");
+        *given = true;
+        if (key == "offset") {
+            page.offset = column_labels_integer(key, value, 0);
+        } else {
+            page.limit = column_labels_integer(key, value, 1);
+        }
+    }
+    page.paged = offset_given || limit_given;
+    return page;
+}
+
+std::string column_labels_page_text(const ColumnLabelList &list, const ColumnLabelsPage &page,
+                                    uint64_t max_bytes) {
+    // compact, the members in byte order, as json_text(compact) writes an object
+    std::string out = "{\"labels\":[";
+    uint64_t bytes = 0;
+    uint64_t count = 0;
+    list.visit_from(page.offset, [&](const std::string &label) {
+        if (page.limit && count >= *page.limit)
+            return false;
+        const size_t before = out.size();
+        if (count)
+            out.push_back(',');
+        const size_t n = append_json_string(&out, label);
+        // at least one label a page, so that paging moves on past a label longer than the cap
+        if (count && max_bytes && bytes + n > max_bytes) {
+            out.resize(before);
+            return false;
+        }
+        bytes += n;
+        ++count;
+        return true;
+    });
+    const uint64_t next = page.offset + count;
+    out.append("],\"next_offset\":");
+    out.append(count && next < list.total() ? std::to_string(next) : "null");
+    out.append(",\"offset\":" + std::to_string(page.offset));
+    out.append(",\"total\":" + std::to_string(list.total()) + "}");
+    return out;
+}
+
+Json::Value column_labels_too_large_json(uint64_t total, uint64_t max_bytes) {
+    Json::Value body(Json::objectValue);
+    body["code"] = "column_labels_too_large";
+    body["error"] = "the column labels (" + std::to_string(total) + " labels) take more than "
+                    + std::to_string(max_bytes) + " bytes of JSON strings, more than one answer "
+                    "holds (--max-column-labels-bytes): page through them with GET "
+                    "/column_labels?offset=0&limit=<n>, following next_offset";
+    body["max_column_labels_bytes"] = Json::UInt64(max_bytes);
+    body["total"] = Json::UInt64(total);
+    return body;
+}
+
+Json::Value column_labels_capabilities_json(uint64_t max_bytes, std::optional<uint64_t> total) {
+    Json::Value c(Json::objectValue);
+    c["max_column_labels_bytes"] = max_bytes ? Json::Value(Json::UInt64(max_bytes))
+                                             : Json::Value();
+    Json::Value paging(Json::arrayValue);
+    paging.append("limit");
+    paging.append("offset");
+    c["paging"] = std::move(paging);
+    Json::Value refusal(Json::objectValue);
+    refusal["status"] = 400;
+    refusal["code"] = "column_labels_too_large";
+    Json::Value members(Json::arrayValue);
+    for (const char *member : { "code", "error", "max_column_labels_bytes", "total" }) {
+        members.append(member);
+    }
+    refusal["members"] = std::move(members);
+    c["too_large"] = std::move(refusal);
+    c["total"] = total ? Json::Value(Json::UInt64(*total)) : Json::Value();
+    return c;
 }
 
 // The entries of /pattern's envelope are the shared envelope's (server_envelope.hpp), which
