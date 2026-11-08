@@ -192,7 +192,9 @@ template <class t_ifstream, uint64_t t>
 static void BM_bv_query_random_sd_vector_access_every_nth_bit_set(benchmark::State& state) {
     const uint64_t size = 1e12;
 
-    sdsl::sd_vector<> bv;
+    // A mapped stream keeps the payload in the file only with view storage.
+    std::conditional_t<std::is_same_v<t_ifstream, std::ifstream>,
+                       sdsl::sd_vector<>, mtg::detail::sd_storage> bv;
     {
         const std::string fname = "../tests/data/bit_vector_dump_test";
         sdsl::sd_vector_builder_disk<> builder(size, (size + t - 1) / t, fname);
@@ -219,11 +221,11 @@ BENCHMARK_TEMPLATE(BM_bv_query_random_sd_vector_access_every_nth_bit_set, std::i
 BENCHMARK_TEMPLATE(BM_bv_query_random_sd_vector_access_every_nth_bit_set, std::ifstream, 200) -> Unit(benchmark::kMicrosecond);
 BENCHMARK_TEMPLATE(BM_bv_query_random_sd_vector_access_every_nth_bit_set, std::ifstream, 100) -> Unit(benchmark::kMicrosecond);
 
-BENCHMARK_TEMPLATE(BM_bv_query_random_sd_vector_access_every_nth_bit_set, sdsl::mmap_ifstream, 10000) -> Unit(benchmark::kMicrosecond);
-BENCHMARK_TEMPLATE(BM_bv_query_random_sd_vector_access_every_nth_bit_set, sdsl::mmap_ifstream, 3000) -> Unit(benchmark::kMicrosecond);
-BENCHMARK_TEMPLATE(BM_bv_query_random_sd_vector_access_every_nth_bit_set, sdsl::mmap_ifstream, 1000) -> Unit(benchmark::kMicrosecond);
-BENCHMARK_TEMPLATE(BM_bv_query_random_sd_vector_access_every_nth_bit_set, sdsl::mmap_ifstream, 500) -> Unit(benchmark::kMicrosecond);
-BENCHMARK_TEMPLATE(BM_bv_query_random_sd_vector_access_every_nth_bit_set, sdsl::mmap_ifstream, 200) -> Unit(benchmark::kMicrosecond);
-BENCHMARK_TEMPLATE(BM_bv_query_random_sd_vector_access_every_nth_bit_set, sdsl::mmap_ifstream, 100) -> Unit(benchmark::kMicrosecond);
+BENCHMARK_TEMPLATE(BM_bv_query_random_sd_vector_access_every_nth_bit_set, sdsl::shared_mapper_ifstream, 10000) -> Unit(benchmark::kMicrosecond);
+BENCHMARK_TEMPLATE(BM_bv_query_random_sd_vector_access_every_nth_bit_set, sdsl::shared_mapper_ifstream, 3000) -> Unit(benchmark::kMicrosecond);
+BENCHMARK_TEMPLATE(BM_bv_query_random_sd_vector_access_every_nth_bit_set, sdsl::shared_mapper_ifstream, 1000) -> Unit(benchmark::kMicrosecond);
+BENCHMARK_TEMPLATE(BM_bv_query_random_sd_vector_access_every_nth_bit_set, sdsl::shared_mapper_ifstream, 500) -> Unit(benchmark::kMicrosecond);
+BENCHMARK_TEMPLATE(BM_bv_query_random_sd_vector_access_every_nth_bit_set, sdsl::shared_mapper_ifstream, 200) -> Unit(benchmark::kMicrosecond);
+BENCHMARK_TEMPLATE(BM_bv_query_random_sd_vector_access_every_nth_bit_set, sdsl::shared_mapper_ifstream, 100) -> Unit(benchmark::kMicrosecond);
 
 } // namespace
