@@ -562,6 +562,27 @@ static Json::Value headers_unique(const std::vector<HeaderPair> &pairs, size_t n
     return certificate;
 }
 
+// GET /capabilities' labels_disjoint (labels_disjoint_json) over |pairs|, logged with the time it
+// took (beside headers_unique's): the pairs' column names looked up in their header indexes
+static Json::Value labels_disjoint(const std::vector<HeaderPair> &pairs, size_t num_threads) {
+    Timer timer;
+    Json::Value certificate = labels_disjoint_json(pairs, num_threads);
+    const uint64_t collisions = certificate["collisions"].asUInt64();
+    if (certificate["value"].isNull()) {
+        logger->info("[Server] labels_disjoint: null, a pair has no .seqs ({} headers that are "
+                     "also column names among the pairs that have one), computed in {:.1f} s",
+                     collisions, timer.elapsed());
+    } else if (collisions) {
+        logger->warn("[Server] labels_disjoint: false, {} headers are also column names (one of "
+                     "them: '{}'); a label with such a name selects the column where one has it. "
+                     "Computed in {:.1f} s", collisions,
+                     certificate["examples"][0]["header"].asString(), timer.elapsed());
+    } else {
+        logger->info("[Server] labels_disjoint: true, computed in {:.1f} s", timer.elapsed());
+    }
+    return certificate;
+}
+
 /**
  * GET /capabilities' graph_summary of a multi-graph server, computed once at start-up, so that
  * a service learns every pair with one probe: per (name, pair), in ordered_pairs' order, the
@@ -614,12 +635,11 @@ static Json::Value multi_graph_summary(
     return summary;
 }
 
-// GET /capabilities' headers_unique of a multi-graph server: over its pairs, each once, tagged
+// The pairs of a multi-graph server's headers_unique and labels_disjoint: each once, tagged
 // with the first name that lists it in ordered_pairs' order
-static Json::Value multi_graph_headers_unique(
+static std::vector<HeaderPair> multi_graph_header_pairs(
         const GraphIndexes &indexes,
-        const VectorMap<GraphPair, std::unique_ptr<AnnotatedDBG>> &graphs_cache,
-        size_t num_threads) {
+        const VectorMap<GraphPair, std::unique_ptr<AnnotatedDBG>> &graphs_cache) {
     std::vector<HeaderPair> pairs;
     std::set<GraphPair> seen;
     for (const auto &[name, pair] : ordered_pairs(indexes, sorted_names(indexes))) {
@@ -629,7 +649,7 @@ static Json::Value multi_graph_headers_unique(
         pairs.push_back({ name, pair.first, pair.second, index.get_coord_to_header(),
                           &index.get_annotator().get_label_encoder().get_labels() });
     }
-    return headers_unique(pairs, num_threads);
+    return pairs;
 }
 
 int run_server(Config *config) {
@@ -711,8 +731,10 @@ int run_server(Config *config) {
     Json::Value graph_summary;
     // and the identity of the indexes it serves together (GET /capabilities' composite_fp)
     Json::Value composite_fp;
-    // a single-graph server's headers_unique of GET /capabilities, set before its index is ready
+    // a single-graph server's headers_unique and labels_disjoint of GET /capabilities, set before
+    // its index is ready
     Json::Value single_headers_unique;
+    Json::Value single_labels_disjoint;
     // and its pair's profile (pair_summary of GET /capabilities, E17), set then too
     Json::Value single_pair_summary;
 
@@ -746,11 +768,13 @@ int run_server(Config *config) {
             single_identity.meta_fp = index_meta_fingerprint(graph::traversal::LabelOracle(*anno_graph));
             build_header_index(*anno_graph, get_num_threads() * num_server_threads);
             // the one pair, with null tags as a single-graph server's /search cuts
-            single_headers_unique = headers_unique(
-                    { { Json::Value(), Json::Value(), Json::Value(),
-                        anno_graph->get_coord_to_header(),
-                        &anno_graph->get_annotator().get_label_encoder().get_labels() } },
-                    get_num_threads() * num_server_threads);
+            const std::vector<HeaderPair> header_pair { { Json::Value(), Json::Value(),
+                    Json::Value(), anno_graph->get_coord_to_header(),
+                    &anno_graph->get_annotator().get_label_encoder().get_labels() } };
+            single_headers_unique = headers_unique(header_pair,
+                                                   get_num_threads() * num_server_threads);
+            single_labels_disjoint = labels_disjoint(header_pair,
+                                                     get_num_threads() * num_server_threads);
             // its profile, with null tags as its headers_unique
             single_pair_summary = pair_summary_json(*anno_graph, single_identity, Json::Value(),
                                                     Json::Value(), Json::Value());
@@ -934,8 +958,12 @@ int run_server(Config *config) {
         logger->info("[Server] Composite fingerprint of the {} pairs: {}", graphs_cache.size(),
                      composite_fp.isNull() ? std::string("null (a pair has no manifest)")
                                            : composite_fp.asString());
-        graph_summary["headers_unique"] = multi_graph_headers_unique(
-                indexes, graphs_cache, get_num_threads() * num_server_threads);
+        const std::vector<HeaderPair> header_pairs
+                = multi_graph_header_pairs(indexes, graphs_cache);
+        graph_summary["headers_unique"]
+                = headers_unique(header_pairs, get_num_threads() * num_server_threads);
+        graph_summary["labels_disjoint"]
+                = labels_disjoint(header_pairs, get_num_threads() * num_server_threads);
         logger->info("[Server] All graphs were loaded ({}). Ready to serve queries.",
                      loaded_with_mmap ? "with mmap" : "into RAM");
         // Dynamic per-request loads (in_ram path) should always be in RAM.
@@ -2712,6 +2740,10 @@ int run_server(Config *config) {
             // server, here on a single-graph one (null while its index loads)
             if (!multi)
                 c["headers_unique"] = c["ready"].asBool() ? single_headers_unique : Json::Value();
+            // and whether no header is also a column name (H4: a header label selects one
+            // record only when both hold), placed as headers_unique
+            if (!multi)
+                c["labels_disjoint"] = c["ready"].asBool() ? single_labels_disjoint : Json::Value();
             // the capability profile of a single-graph server's pair (E17): a graph_summary
             // entry with null tags, null while its index loads (each pair's is in graph_summary
             // on a multi-graph server)

@@ -29,8 +29,8 @@ std::string annotation_form(const graph::AnnotatedDBG::Annotator &annotation);
 std::string graph_representation(const graph::DeBruijnGraph &graph);
 
 // The first line of the text support_fp hashes, the version of its rule: a field added to the
-// profile later changes it, and with it every support_fp
-constexpr const char kSupportVersion[] = "mgt-support 1";
+// profile later changes it, and with it every support_fp (2: seqs_order, H4)
+constexpr const char kSupportVersion[] = "mgt-support 2";
 
 // The capability fields support_fp covers, by their names in a pair entry (a member of
 // `traversal` as "traversal.<name>"), in byte order of the names: the order of the text
@@ -48,7 +48,9 @@ std::string support_fingerprint(const Json::Value &pair);
  * The profile of the pair |index| (SPEC-pattern-search.md §24.4, graph_summary_pair): its tags
  * (|graph|, |graph_path|, |annotation_path|: null on a single-graph server), its identity
  * (index_ns, index_fp, index_meta_fp from |identity|, whose meta fingerprint is set), k,
- * alphabet, graph_representation, annotation_form and decode_charged; what the pattern search
+ * alphabet, graph_representation, annotation_form and decode_charged; seqs_order, what its load
+ * verified of its record mapping's column order ("verified", "count_only", null without a
+ * .seqs; SPEC-multigraph-envelope.md section 9.1); what the pattern search
  * makes of it (graph_mode, available, unavailable_reason, mask, counting, as its
  * GET /pattern/capabilities block states them); what a traversal reads (`traversal`: regime,
  * num_labels, has_coordinates, has_coord_to_header, supports_trace, counts, as every

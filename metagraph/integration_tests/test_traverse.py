@@ -2836,15 +2836,19 @@ class TestTraverseAPI(TestTraverseBase):
         # take the field (F3b, SPEC-multigraph-envelope.md section 8; a single-graph server's
         # top level, a multi-graph server's multigraph block); 'pair_summary': the capability
         # profile of the server's pair (E17, SPEC-multigraph-envelope.md section 8.1;
-        # test_multigraph.py's TestCapabilityProfile checks it)
+        # test_multigraph.py's TestCapabilityProfile checks it); 'labels_disjoint': whether no
+        # header equals a column name (H4, section 9.1; test_multigraph.py's TestLabelsDisjoint
+        # checks it), true here: the headers acc1-acc3, the column the file's path
         self.assertEqual({'algorithm_version', 'attempts', 'compression_level',
                           'content_encodings', 'deadline_check', 'expect_server_instance',
                           'feature_level', 'features', 'graph_summary', 'graphs',
-                          'headers_unique', 'in_ram', 'max_graphs_without_selection',
-                          'max_request_body_mb', 'mode', 'pair_summary', 'pattern', 'ready',
-                          'release', 'resolve', 'routes', 'schema_version', 'server_instance'},
+                          'headers_unique', 'in_ram', 'labels_disjoint',
+                          'max_graphs_without_selection', 'max_request_body_mb', 'mode',
+                          'pair_summary', 'pattern', 'ready', 'release', 'resolve', 'routes',
+                          'schema_version', 'server_instance'},
                          set(c))
         self.assertEqual({'value': True, 'collisions': 0, 'examples': []}, c['headers_unique'])
+        self.assertEqual({'value': True, 'collisions': 0, 'examples': []}, c['labels_disjoint'])
         self.assertEqual(['/traverse', '/resolve', '/pattern'], c['expect_server_instance'])
         profile = c['pair_summary']
         self.assertEqual((None, None, None), (profile['graph'], profile['graph_path'],

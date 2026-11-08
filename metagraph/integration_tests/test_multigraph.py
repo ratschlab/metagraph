@@ -87,7 +87,7 @@ def free_port():
 def strip_column_labels(seqs):
     """|seqs| (a .seqs written since H4) rewritten as an earlier binary writes it: its columns
     without the trailer of column labels (the marker "mtg-cols", then the labels), which an H4
-    load reads as a mapping that states none"""
+    load reads as a mapping that states none (seqs_order "count_only")"""
     with open(seqs, 'rb') as f:
         data = f.read()
     at = data.rfind(b'mtg-cols')
@@ -3267,6 +3267,8 @@ class TestCapabilityProfile(TestingBase):
                'row_diff_brwt_coord', 'row_diff_disk', 'row_diff_sparse', 'row_diff_flat',
                'row_diff_int_brwt'}
     COUNTS = {'int_brwt', 'row_diff_int_brwt', 'row_diff_int_disk'}
+    # the forms whose .seqs is written as before H4 (no column labels), as r237's
+    COUNT_ONLY = {'row_diff_brwt_coord'}
 
     @classmethod
     def write_records(cls, path, headers, seed):
@@ -3294,6 +3296,10 @@ class TestCapabilityProfile(TestingBase):
                 cls._run_command(f'{METAGRAPH} annotate -p 1 -i {graph} --anno-filename '
                                  f'--index-header-coords -o {out}/anno {cls.fasta}',
                                  'annotate --index-header-coords')
+                # r237's profile: its .seqs written before H4, without column labels
+                # (seqs_order "count_only"); the other forms' state theirs ("verified")
+                if form in cls.COUNT_ONLY:
+                    strip_column_labels(os.path.join(out, 'anno.seqs'))
             cls.pairs[form] = (graph, os.path.join(out, f'anno.{form}.annodbg'))
             assert all(os.path.exists(p) for p in cls.pairs[form]), cls.pairs[form]
         # a second chunk of the column build: other records, other columns
@@ -3340,6 +3346,10 @@ class TestCapabilityProfile(TestingBase):
                                  (p['traversal']['has_coordinates'],
                                   p['traversal']['has_coord_to_header'],
                                   p['traversal']['supports_trace']))
+                # what the load verified of the .seqs's column order (H4, section 9.1)
+                self.assertEqual(None if not coordinates
+                                 else 'count_only' if form in self.COUNT_ONLY else 'verified',
+                                 p['seqs_order'])
                 self.assertEqual(('basic', 31, True, 'absent', 'upper_bound'),
                                  (p['traversal']['regime'], p['k'], p['available'], p['mask'],
                                   p['counting']))
@@ -3445,8 +3455,9 @@ class TestRecordMappingAtLoad(TestingBase):
     the mapping states k-mers for it. The fixture: one graph of big.fa (two records of 300 bp)
     and small.fa (one of 60 bp), annotated by file name on one thread (columns big.fa,
     small.fa), as column_coord and row_diff_brwt_coord; each variant of the .seqs beside a copy
-    of the annotation. A .seqs without labels (as earlier binaries write it) is served; on the
-    row-diff form, where only the count is checked, even when its columns are swapped."""
+    of the annotation. A .seqs without labels (as earlier binaries write it) is served with
+    seqs_order "count_only"; on the row-diff form, where only the count is checked, even when
+    its columns are swapped."""
 
     maxDiff = None
     REFUSAL = "does not belong to the annotation"
@@ -3525,7 +3536,7 @@ class TestRecordMappingAtLoad(TestingBase):
 
     def test_a_mapping_of_the_annotation_is_served(self):
         for form in ('column_coord', 'row_diff_brwt_coord'):
-            for labels in (True, False):
+            for labels, order in ((True, 'verified'), (False, 'count_only')):
                 graph, anno = self.pair(form, 'right', labels)
                 server = Server(['-i', graph, '-a', anno],
                                 os.path.join(self.d, f'served_{form}_{labels}.log'))
@@ -3535,6 +3546,7 @@ class TestRecordMappingAtLoad(TestingBase):
                     server.stop()
                 with self.subTest(form=form, labels=labels):
                     self.assertTrue(caps['ready'])
+                    self.assertEqual(order, caps['pair_summary']['seqs_order'])
 
     def test_another_mapping_is_refused_at_start_up(self):
         cases = [
@@ -3626,7 +3638,8 @@ class TestRecordMappingAtLoad(TestingBase):
         server = Server(['-i', self.graph, '-a', os.path.join(out, 'anno.column_coord.annodbg')],
                         os.path.join(self.d, 'moved.log'))
         try:
-            self.assertTrue(server.get('capabilities').json()['ready'])
+            self.assertEqual('verified',
+                             server.get('capabilities').json()['pair_summary']['seqs_order'])
         finally:
             server.stop()
         res = annotate(os.path.join(out, 'anno'), *absolute)
@@ -3639,14 +3652,113 @@ class TestRecordMappingAtLoad(TestingBase):
 
     def test_the_row_diff_form_checks_an_old_mapping_by_its_count_only(self):
         # the documented limit: the row-diff forms state no coordinates per column, so an old
-        # .seqs of the right count but swapped columns is served
+        # .seqs of the right count but swapped columns is served, its order stated unverified
         graph, anno = self.pair('row_diff_brwt_coord', 'swapped', False)
         server = Server(['-i', graph, '-a', anno], os.path.join(self.d, 'rd_swapped.log'))
         try:
             caps = server.get('capabilities').json()
         finally:
             server.stop()
-        self.assertTrue(caps['ready'])
+        self.assertEqual('count_only', caps['pair_summary']['seqs_order'])
+
+
+@unittest.skipIf(PROTEIN_MODE, "the fixture is DNA")
+class TestLabelsDisjoint(TestingBase):
+    """GET /capabilities' labels_disjoint (SPEC-multigraph-envelope.md section 9.1, H4): whether no
+    sequence header equals a column name of any pair, the second certificate a header label's
+    record selection needs beside headers_unique. Two pairs of small random records, annotated
+    by file name in their directories (a column's label is its file name), each with its .seqs
+    (stating its labels: seqs_order "verified"): left x1.fa [acc1, acc2], x2.fa [acc3]; right
+    y1.fa [acc4, x1.fa], y2.fa [y1.fa]: the header x1.fa is a column of left, the header y1.fa a
+    column of right itself; every header is distinct (headers_unique true)."""
+
+    maxDiff = None
+    PAIRS = {
+        'left': {'x1.fa': ['acc1', 'acc2'], 'x2.fa': ['acc3']},
+        'right': {'y1.fa': ['acc4', 'x1.fa'], 'y2.fa': ['y1.fa']},
+    }
+
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        rng = random.Random(20261108)
+        cls.pairs = {}
+        for name, files in cls.PAIRS.items():
+            d = os.path.join(cls.tempdir.name, name)
+            os.makedirs(d)
+            for fname, headers in files.items():
+                with open(os.path.join(d, fname), 'w') as f:
+                    for h in headers:
+                        f.write(f'>{h}\n{"".join(rng.choice("ACGT") for _ in range(80))}\n')
+            fastas = list(files)
+            for cmd in (['build', '-p', '1', '--mode', 'basic', '--graph', 'succinct', '-k', '31',
+                         '-o', 'graph', *fastas],
+                        ['annotate', '-p', '1', '--anno-filename', '-i', 'graph.dbg',
+                         '--anno-type', 'column', '--coordinates', '-o', 'anno', *fastas],
+                        ['transform_anno', '-p', '1', '--anno-type', 'column_coord',
+                         '--coordinates', '-o', 'anno', 'anno.column.annodbg'],
+                        ['annotate', '-p', '1', '-i', 'graph.dbg', '--anno-filename',
+                         '--index-header-coords', '-o', 'anno', *fastas]):
+                res = subprocess.run(shlex.split(METAGRAPH) + cmd, cwd=d,
+                                     stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+                assert res.returncode == 0, (cmd, res.stdout.decode()[-3000:])
+            cls.pairs[name] = (os.path.join(d, 'graph.dbg'),
+                               os.path.join(d, 'anno.column_coord.annodbg'))
+
+    def tags(self, name):
+        return {'graph': name, 'graph_path': self.pairs[name][0],
+                'annotation_path': self.pairs[name][1]}
+
+    def serve(self, names):
+        csv = os.path.join(self.tempdir.name, '_'.join(names) + '.csv')
+        with open(csv, 'w') as f:
+            for name in names:
+                f.write(f'{name},{self.pairs[name][0]},{self.pairs[name][1]}\n')
+        server = Server([csv], csv + '.log')
+        try:
+            caps = server.get('capabilities').json()
+        finally:
+            server.stop()
+        self.assertNotIn('labels_disjoint', caps)
+        return caps, server.text()
+
+    def test_a_header_equal_to_a_column_name_is_a_collision(self):
+        caps, log = self.serve(['left', 'right'])
+        summary = caps['graph_summary']
+        self.assertEqual({'value': True, 'collisions': 0, 'examples': []},
+                         summary['headers_unique'])
+        self.assertEqual({'value': False, 'collisions': 2, 'examples': [
+            {'header': 'x1.fa', 'records': [dict(self.tags('right'), column='y1.fa')],
+             'columns': [self.tags('left')]},
+            {'header': 'y1.fa', 'records': [dict(self.tags('right'), column='y2.fa')],
+             'columns': [self.tags('right')]},
+        ]}, summary['labels_disjoint'])
+        self.assertIn("labels_disjoint: false, 2 headers are also column names (one of them: "
+                      "'x1.fa'); a label with such a name selects the column where one has it",
+                      log)
+        self.assertEqual(['verified', 'verified'], [p['seqs_order'] for p in summary['pairs']])
+
+    def test_disjoint_names_are_certified(self):
+        caps, log = self.serve(['left'])
+        self.assertEqual({'value': True, 'collisions': 0, 'examples': []},
+                         caps['graph_summary']['labels_disjoint'])
+        self.assertIn('labels_disjoint: true, computed in', log)
+
+    def test_single_graph_server_states_it_at_the_top(self):
+        graph, anno = self.pairs['right']
+        server = Server(['-i', graph, '-a', anno], os.path.join(self.tempdir.name, 'single.log'))
+        try:
+            caps = server.get('capabilities').json()
+        finally:
+            server.stop()
+        untagged = {'graph': None, 'graph_path': None, 'annotation_path': None}
+        # right alone: its own column y1.fa shadows its record y1.fa
+        self.assertEqual({'value': False, 'collisions': 1, 'examples': [
+            {'header': 'y1.fa', 'records': [dict(untagged, column='y2.fa')],
+             'columns': [untagged]}]}, caps['labels_disjoint'])
+        self.assertTrue(caps['headers_unique']['value'])
+        self.assertEqual('verified', caps['pair_summary']['seqs_order'])
+
 
 if __name__ == '__main__':
     unittest.main()

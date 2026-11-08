@@ -11,6 +11,7 @@
 #include "graph/representation/hash/dbg_hash_string.hpp"
 #include "graph/representation/hash/dbg_sshash.hpp"
 #include "graph/representation/succinct/dbg_succinct.hpp"
+#include "annotation/coord_to_header.hpp"
 #include "graph/traversal/label_oracle.hpp"
 #include "graph/traversal/resolve.hpp"
 #include "cli/config/config.hpp"
@@ -52,7 +53,8 @@ std::string graph_representation(const graph::DeBruijnGraph &graph) {
 }
 
 const std::vector<std::string>& support_fields() {
-    // graph representation, regime, alphabet, k, annotation form, coordinates, .seqs, trace,
+    // graph representation, regime, alphabet, k, annotation form, coordinates, .seqs and what
+    // its load verified of its column order (seqs_order: what a header answer certifies), trace,
     // decode charged, counts and the pattern fields (graph_mode, available,
     // unavailable_reason, mask, counting); not the identity (graph, graph_path,
     // annotation_path, index_ns, index_fp, index_meta_fp) nor the size (traversal.num_labels)
@@ -66,6 +68,7 @@ const std::vector<std::string>& support_fields() {
         "graph_representation",
         "k",
         "mask",
+        "seqs_order",
         "traversal.counts",
         "traversal.has_coord_to_header",
         "traversal.has_coordinates",
@@ -134,6 +137,13 @@ Json::Value pair_summary_json(const graph::AnnotatedDBG &index, const IndexIdent
     p["alphabet"] = oracle.graph().alphabet();
     // whether the annotation reads are charged under a memory budget (the oracle's predicate)
     p["decode_charged"] = oracle.decode_charged();
+    // what the load verified of the record mapping's column order (check_record_mapping): its
+    // stated column labels matched ("verified"), or it states none and its column count alone
+    // was checked ("count_only"); null without a mapping
+    const annot::CoordToHeader *mapping = oracle.coord_to_header();
+    p["seqs_order"] = !mapping ? Json::Value()
+                    : mapping->column_order_verified() ? Json::Value("verified")
+                                                       : Json::Value("count_only");
     Json::Value t;
     t["regime"] = to_string(oracle.regime());
     t["num_labels"] = uint_json(oracle.num_columns());

@@ -3001,7 +3001,9 @@ search's routes, `POST /pattern` and `GET /pattern/capabilities`, are `SPEC-patt
     below, multi-graph mode), and in both modes `max_request_body_mb` (below, the caps: the largest request body
     the server reads, `null` when unlimited) and `headers_unique` (E22: whether every sequence header names one
     record; at the top level in single-graph mode, `null` while the index loads, and in `graph_summary` in
-    multi-graph mode; `SPEC-multigraph-envelope.md` §9), and `expect_server_instance` (F3b: the routes that take
+    multi-graph mode; `SPEC-multigraph-envelope.md` §9) and, placed alike, `labels_disjoint` (H4: whether no
+    sequence header equals a column name; a header label selects one record only when both are true;
+    `SPEC-multigraph-envelope.md` §9.1), and `expect_server_instance` (F3b: the routes that take
     the field, `["/traverse", "/resolve", "/pattern"]`; at the top level in single-graph mode, beside
     `routes.requests`, and in the `multigraph` block in multi-graph mode; `SPEC-multigraph-envelope.md` §8).
     Single-graph mode adds `pair_summary` (E17: its pair's capability profile, a `graph_summary` entry with null

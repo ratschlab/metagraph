@@ -1,0 +1,515 @@
+{
+ "route": "GET /capabilities",
+ "status": 200,
+ "note": "H4 (SPEC sections 9 and 9.1): labels_disjoint, whether no sequence header equals a column name of any pair. A label is resolved as a column name first, so a header equal to a column name selects that column where a pair has one, never the record: headers_unique (headers against headers) does not see it, and a header label selects one record of one pair only when both certificates are true. Here a multi-graph server of two pairs, left (columns x1.fa, x2.fa; records acc1, acc2, acc3) and right (columns y1.fa, y2.fa; records acc4 and x1.fa in y1.fa, y1.fa in y2.fa): headers_unique true (every header distinct), labels_disjoint false with 2 collisions: x1.fa, a record of right (its column y1.fa) and a column of left (labels [\"x1.fa\"] selects left's column and right's record), and y1.fa, a record and a column of right itself (the column shadows the record). Each example lists the pairs with a record of that header (the column of its first record) and the pairs with a column of that name, in pair order, at most 10 each; at most 10 examples, the byte-smallest. A single-graph server states it at the top level, with null pair tags; null where a pair has no .seqs (as headers_unique). Each pair states seqs_order \"verified\": its .seqs, written by annotate --index-header-coords since H4, states its column labels, which matched the annotation's at load (section 10). A real run: the body is the server's answer, its paths relative as the graph list spells them, its server named SERVER_INSTANCE as every sample's.",
+ "body": {
+  "algorithm_version": "traverse-0.2",
+  "attempts": {
+   "allowance_ms": 10000,
+   "bound": "SPEC-labeled-traversal-core.md section 6.8, the attempt's bound",
+   "cancel": "POST /traverse/cancel",
+   "cancel_fields": [
+    "attempt_id",
+    "wait_ms",
+    "not_after_ms"
+   ],
+   "client_check_ms": 100,
+   "clock_skew_allowance_ms": 2000,
+   "content_timeout_s": 900,
+   "delivery_reserve": {
+    "account_per_text_byte": {
+     "graphlet": 6.0,
+     "json": 6.0
+    },
+    "build_mbps": 10.0,
+    "calibration": "SPEC-labeled-traversal-core.md section 6.8, the delivery reserve: calibration",
+    "compress_mbps": 50.0,
+    "coordinate_account_per_text_byte": 12,
+    "margin": 1.25,
+    "measured_account_per_text_byte": {
+     "full": null,
+     "graphlet": null,
+     "summary": null,
+     "tree": null
+    },
+    "measured_build_mbps": null,
+    "measured_compress_mbps": null,
+    "measured_stop_ms": null,
+    "measured_text_bytes": 1048576,
+    "rate_window": 16,
+    "rule": "SPEC-labeled-traversal-core.md section 6.8, the delivery reserve",
+    "stop_ms": 1000
+   },
+   "fields": [
+    "attempt_id",
+    "budget_id",
+    "locus_id",
+    "not_after_ms",
+    "expect_server_instance"
+   ],
+   "hard_cap_ms": 899000,
+   "id_pattern": "^[A-Za-z0-9._:-]{1,128}$",
+   "instance": "SPEC-labeled-traversal-core.md section 5, expect_server_instance",
+   "not_after": "SPEC-labeled-traversal-core.md section 5, not_after_ms",
+   "release_rule": "SPEC-labeled-traversal-core.md section 10.3, the release rule",
+   "retention_count": 10000,
+   "retention_s": 3600,
+   "server_instance": "7c1e0f3a9b24d6e8",
+   "state": "GET /traverse/attempt/{attempt_id}",
+   "suppression": "SPEC-labeled-traversal-core.md section 10.3, POST /traverse/cancel: the tombstone",
+   "tombstone_max_s": 86400
+  },
+  "composite_fp": null,
+  "composite_rule": "sha256 over the pairs' index_fp sorted as bytes, joined by \"\\n\" without a trailing newline; null when any pair has no index_fp; each loaded (graph_path, annotation_path) pair counted once, whatever names list it",
+  "compression_level": 1,
+  "content_encodings": [
+   "gzip",
+   "deflate"
+  ],
+  "deadline_check": {
+   "chunk_target_ms": 50,
+   "max_uninterruptible_ms": null,
+   "observed_max_uninterruptible_ms": 0,
+   "observed_window_s": 3600,
+   "poll_stride": 8,
+   "rule": "SPEC-labeled-traversal-core.md section 6.8, chunked deadlines"
+  },
+  "feature_level": 6,
+  "features": [
+   "search",
+   "resolve",
+   "traverse",
+   "attempts",
+   "pattern"
+  ],
+  "graph_summary": {
+   "columns_disjoint": true,
+   "headers_unique": {
+    "collisions": 0,
+    "examples": [],
+    "value": true
+   },
+   "labels_disjoint": {
+    "collisions": 2,
+    "examples": [
+     {
+      "columns": [
+       {
+        "annotation_path": "left/anno.column_coord.annodbg",
+        "graph": "left",
+        "graph_path": "left/graph.dbg"
+       }
+      ],
+      "header": "x1.fa",
+      "records": [
+       {
+        "annotation_path": "right/anno.column_coord.annodbg",
+        "column": "y1.fa",
+        "graph": "right",
+        "graph_path": "right/graph.dbg"
+       }
+      ]
+     },
+     {
+      "columns": [
+       {
+        "annotation_path": "right/anno.column_coord.annodbg",
+        "graph": "right",
+        "graph_path": "right/graph.dbg"
+       }
+      ],
+      "header": "y1.fa",
+      "records": [
+       {
+        "annotation_path": "right/anno.column_coord.annodbg",
+        "column": "y2.fa",
+        "graph": "right",
+        "graph_path": "right/graph.dbg"
+       }
+      ]
+     }
+    ],
+    "value": false
+   },
+   "pairs": [
+    {
+     "alphabet": "$ACGT",
+     "annotation_form": "column_coord",
+     "annotation_path": "left/anno.column_coord.annodbg",
+     "available": true,
+     "counting": "upper_bound",
+     "decode_charged": false,
+     "graph": "left",
+     "graph_mode": "basic",
+     "graph_path": "left/graph.dbg",
+     "graph_representation": "succinct",
+     "index_fp": null,
+     "index_meta_fp": "a06ca11f03970eb9",
+     "index_ns": null,
+     "k": 31,
+     "mask": "absent",
+     "seqs_order": "verified",
+     "support_fp": "22f84b63a850cd81",
+     "traversal": {
+      "counts": null,
+      "has_coord_to_header": true,
+      "has_coordinates": true,
+      "num_labels": 2,
+      "regime": "basic",
+      "supports_trace": true
+     },
+     "unavailable_reason": null
+    },
+    {
+     "alphabet": "$ACGT",
+     "annotation_form": "column_coord",
+     "annotation_path": "right/anno.column_coord.annodbg",
+     "available": true,
+     "counting": "upper_bound",
+     "decode_charged": false,
+     "graph": "right",
+     "graph_mode": "basic",
+     "graph_path": "right/graph.dbg",
+     "graph_representation": "succinct",
+     "index_fp": null,
+     "index_meta_fp": "715b16dff75e45f1",
+     "index_ns": null,
+     "k": 31,
+     "mask": "absent",
+     "seqs_order": "verified",
+     "support_fp": "22f84b63a850cd81",
+     "traversal": {
+      "counts": null,
+      "has_coord_to_header": true,
+      "has_coordinates": true,
+      "num_labels": 2,
+      "regime": "basic",
+      "supports_trace": true
+     },
+     "unavailable_reason": null
+    }
+   ],
+   "shared_columns": 0
+  },
+  "graphs": [
+   "left",
+   "right"
+  ],
+  "in_ram": {
+   "budgets_start": "after_load",
+   "loads": false,
+   "mem_cap_gb": 0,
+   "routes": [
+    "pattern",
+    "resolve",
+    "search",
+    "traverse"
+   ]
+  },
+  "max_graphs_without_selection": 10,
+  "max_request_body_mb": null,
+  "mode": "multi",
+  "multigraph": {
+   "discovery_trace_scale": "traced",
+   "envelope_routes": [
+    "/resolve",
+    "/traverse",
+    "/pattern",
+    "/traverse/capabilities",
+    "/pattern/capabilities"
+   ],
+   "envelope_version": 1,
+   "expect_server_instance": [
+    "/traverse",
+    "/resolve",
+    "/pattern"
+   ],
+   "finish_by_ms": [
+    "/traverse",
+    "/resolve",
+    "/pattern"
+   ],
+   "max_concurrent": {
+    "/pattern": 0,
+    "/resolve": 0,
+    "/traverse": 0
+   },
+   "max_request_memory_mb": 0,
+   "not_after_ms": [
+    "/traverse",
+    "/resolve",
+    "/pattern"
+   ],
+   "request_id": [
+    "/resolve",
+    "/pattern"
+   ],
+   "requests_route": "GET /requests/{request_id}",
+   "resolve_boundary_ties": true,
+   "search_cuts": true,
+   "selectors": {
+    "/pattern": [
+     "graphs",
+     "pairs"
+    ],
+    "/pattern/capabilities": [
+     "graph",
+     "graph_path",
+     "annotation_path"
+    ],
+    "/resolve": [
+     "graphs",
+     "pairs"
+    ],
+    "/search": [
+     "graphs"
+    ],
+    "/traverse": [
+     "graph",
+     "graphs",
+     "pairs"
+    ],
+    "/traverse/capabilities": [
+     "graph",
+     "graph_path",
+     "annotation_path"
+    ]
+   },
+   "traverse_pairs_per_request": 1,
+   "unknown_labels": true
+  },
+  "pattern": {
+   "alphabet": null,
+   "annotation": null,
+   "available": true,
+   "caps": {
+    "max_anchors": 1000,
+    "max_annotation_work": 100000000,
+    "max_checked_entries": 50,
+    "max_contexts": 10000,
+    "max_labels": 1000,
+    "max_labels_per_anchor": 64,
+    "max_memory_mb": 256,
+    "max_occurrences_per_label": 16,
+    "max_paths": 1000,
+    "max_patterns": 16,
+    "max_predicate_contexts": 100000,
+    "max_predicate_labels": 10000,
+    "max_predicate_work": 100000000,
+    "max_steps": 100000000,
+    "min_information_bits": 24,
+    "row_cache_mb": 64,
+    "time_budget_ms": 600000
+   },
+   "caps_rule": "SPEC-pattern-search.md section 4.5",
+   "counting": null,
+   "default_genetic_code": 1,
+   "default_long_search": "anchors",
+   "default_max_anchors": 1000,
+   "default_max_labels": 1000,
+   "default_mode": "all_or_count",
+   "default_occurrences": true,
+   "default_projection": "none",
+   "default_scope": "any_offset",
+   "default_strands": "both",
+   "default_time_budget_ms": 60000,
+   "delivery_mbps": {
+    "build": 10,
+    "compress": 50
+   },
+   "dummy_fraction": null,
+   "finalize_reserve_ms": 250,
+   "genetic_codes": [
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    9,
+    10,
+    11,
+    12,
+    13,
+    14,
+    15,
+    16,
+    21,
+    22,
+    23,
+    24,
+    25,
+    26,
+    27,
+    28,
+    29,
+    30,
+    31,
+    32,
+    33
+   ],
+   "graph_cleaned": "unknown",
+   "graph_mode": null,
+   "in_ram": "accepted",
+   "k": null,
+   "kinds": [
+    "dna",
+    "iupac",
+    "protein"
+   ],
+   "kinds_later_increment": [],
+   "long_patterns": "anchors_counted",
+   "long_search": [
+    "anchors",
+    "paths",
+    "supported_paths"
+   ],
+   "mask": null,
+   "mismatches": {
+    "default": 0,
+    "edits": [
+     "substitution"
+    ],
+    "later_increment": [
+     "long_patterns",
+     "labels",
+     "predicate",
+     "supported_paths"
+    ],
+    "levels_rule": "SPEC-pattern-search.md section 21.4",
+    "max": {
+     "dna": 3,
+     "iupac": 3,
+     "protein": 3
+    },
+    "order": "mismatches_first",
+    "protein_substitutes": "sense_codons",
+    "unit": {
+     "dna": "base",
+     "iupac": "base",
+     "protein": "residue"
+    }
+   },
+   "modes": [
+    "count",
+    "all_or_count",
+    "partial"
+   ],
+   "pattern_contract_version": 1,
+   "placement": null,
+   "predicate": {
+    "access": null,
+    "operators": [
+     "any",
+     "all",
+     "none",
+     "at_least",
+     "and",
+     "or",
+     "not"
+    ],
+    "scopes": [
+     "context",
+     "motif"
+    ],
+    "strands": [
+     "either",
+     "context"
+    ]
+   },
+   "projections": [
+    "none",
+    "all",
+    "predicate_only"
+   ],
+   "projections_later_increment": [],
+   "protein_residues": [
+    "A",
+    "C",
+    "D",
+    "E",
+    "F",
+    "G",
+    "H",
+    "I",
+    "K",
+    "L",
+    "M",
+    "N",
+    "P",
+    "Q",
+    "R",
+    "S",
+    "T",
+    "V",
+    "W",
+    "Y",
+    "X",
+    "B",
+    "Z",
+    "J",
+    "*"
+   ],
+   "protein_rule": "SPEC-pattern-search.md section 12.2",
+   "records_shorter_than_k": "not_indexed",
+   "resident_only": false,
+   "scopes": null,
+   "scopes_by_graph_mode": {
+    "basic": [
+     "suffix",
+     "any_offset"
+    ],
+    "canonical": [
+     "suffix",
+     "any_offset"
+    ],
+    "primary": [
+     "any_offset"
+    ]
+   },
+   "strand_stated": null,
+   "strands": [
+    "both",
+    "forward",
+    "reverse"
+   ],
+   "support": null,
+   "unavailable_reason": null
+  },
+  "ready": true,
+  "release": "",
+  "resolve": {
+   "time_budget": {
+    "accepted": true,
+    "check_kmers": 4096,
+    "check_labels": 4096,
+    "default": null,
+    "finalize_reserve_configurable": false,
+    "finalize_reserve_ms": 250,
+    "knob": "bounds.time_budget_ms",
+    "max_time_ms": 30000,
+    "rule": "SPEC-labeled-traversal-core.md section 4.5",
+    "stop_phases": [
+     "rows",
+     "support"
+    ]
+   }
+  },
+  "routes": {
+   "attempt": "GET /traverse/attempt/{attempt_id}",
+   "cancel": "POST /traverse/cancel",
+   "capabilities": "GET /capabilities",
+   "column_labels": "GET /column_labels",
+   "pattern": "POST /pattern",
+   "pattern_capabilities": "GET /pattern/capabilities?graph={name}[&graph_path={path}]",
+   "requests": "GET /requests/{request_id}",
+   "resolve": "POST /resolve",
+   "search": "POST /search",
+   "stats": "GET /stats",
+   "traverse": "POST /traverse",
+   "traverse_capabilities": "GET /traverse/capabilities?graph={name}[&graph_path={path}]"
+  },
+  "schema_version": 1,
+  "server_instance": "7c1e0f3a9b24d6e8"
+ }
+}
