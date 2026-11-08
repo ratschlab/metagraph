@@ -421,7 +421,9 @@ void Walker::derive_seed_labels(const std::vector<node_index> &keys,
             cur.clear();
             if (kind == LabelKind::COLUMN) {
                 for (Column c : plain[r]) {
-                    cur.emplace_back(c, 0);
+                    // after the first k-mer, keep only the live columns
+                    if (!read || std::binary_search(live.begin(), live.end(), Key(c, 0)))
+                        cur.emplace_back(c, 0);
                 }
             } else {
                 for (const auto &[c, coords] : tuples[r]) {
@@ -435,7 +437,11 @@ void Walker::derive_seed_labels(const std::vector<node_index> &keys,
                     if (!oracle_.has_header_records(c))
                         continue;  // no records, so no header labels
                     for (uint64_t coord : coords) {
-                        cur.emplace_back(c, oracle_.map_coord(c, coord).first);
+                        Key key(c, oracle_.map_coord(c, coord).first);
+                        // after the first k-mer, keep only the live records, so that a
+                        // repetitive k-mer cannot grow |cur| past |live|
+                        if (!read || std::binary_search(live.begin(), live.end(), key))
+                            cur.push_back(key);
                     }
                 }
             }
