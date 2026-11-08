@@ -2402,9 +2402,10 @@ class TestTraverseAPI(TestTraverseBase):
         (SPEC-labeled-traversal-core.md §5): one RFC 8259 JSON text whose member names are
         unique. A duplicated member (jsoncpp would keep its last value without a word: an
         attempt_id, a time budget, a wait_ms replaced silently), a comment, a trailing comma,
-        text after the value and more than 1000 nested arrays and objects are 400
-        {"error": "Bad json received: ..."}, without a code, as a body that is no JSON at all;
-        the same body written strictly is answered."""
+        text after the value, more than 1000 nested arrays and objects and (H1) a raw control
+        character inside a string, which RFC 8259 asks escaped, are 400 {"error": "Bad json
+        received: ..."}, without a code, as a body that is no JSON at all; the same body
+        written strictly is answered (an escaped control character too)."""
         traverse = json.dumps({
             'seeds': [{'sequence': self.element}],
             'strategy': {'direction': 'right',
@@ -2417,9 +2418,15 @@ class TestTraverseAPI(TestTraverseBase):
         comment = "a comment (or a '/' outside a string) at byte %d"
         deep = ('Exceeded stackLimit in readValue(). (more than 1000 nested arrays and '
                 'objects)')
+        control = ('a control character (byte 0x%02x) inside a string at byte %d: RFC 8259 '
+                   'requires it escaped (\\u00%02x)')
 
         def common(t):
-            return [('// a comment\n' + t, comment % 0),
+            # (a raw byte inside the first string: after its opening quote, byte 2)
+            raw = t[:2] + '\x01' + t[2:]
+            return [(raw, control % (1, 2, 1)),
+                    (t[:2] + '\t' + t[2:], control % (9, 2, 9)),
+                    ('// a comment\n' + t, comment % 0),
                     ('{/* a comment */' + t[1:], comment % 1),
                     # a '/' in a string is text; outside one it is no JSON
                     (t[:-1] + ', "x": "a/b" / 2}', comment % (len(t) + 12)),
@@ -2453,6 +2460,9 @@ class TestTraverseAPI(TestTraverseBase):
         for route, (strict, status, refused) in cases.items():
             ret = requests.post(url + route, data=strict)
             self.assertEqual(status, ret.status_code, (route, ret.text[:500]))
+            # an escaped control character is read
+            self.assertNotIn('control character', requests.post(
+                url + route, data=strict[:-1] + ', "x\\u0001": 0}').text)
             for body, words in refused:
                 with self.subTest(route=route, body=body[:120]):
                     ret = requests.post(url + route, data=body)
@@ -3069,6 +3079,30 @@ class TestTraverseAPI(TestTraverseBase):
                 + [b'%x\r\n' % len(chunk) + chunk + b'\r\n'] * 40 + [b'0\r\n\r\n']))
             self.assertEqual(b'HTTP/1.1 413 Payload Too Large', status)
             self.assertEqual(self._body_too_large(None, 1), body)
+            # a Content-Length that is no plain decimal number is no byte count: closed without
+            # an answer (the library reads "-1" as 2^64 - 1 and "3145728junk" as 3145728), as
+            # one the library cannot read at all ("abc")
+            for value in (b'-1', b'3145728junk', b'abc'):
+                self.assertEqual(b'', self._exchange(port, [
+                    b'POST /traverse HTTP/1.1\r\nHost: x\r\nContent-Length: ' + value
+                    + b'\r\n\r\n']), value)
+            # the drain ends after the larger of 64 MiB and the cap (1 MiB here) past the 413:
+            # a client sending 256 MiB is cut long before it sent them, and before 30 s
+            sock = socket.create_connection((self.host, port))
+            sock.settimeout(20)
+            sock.sendall(b'POST /traverse HTTP/1.1\r\nHost: x\r\nContent-Length: %d\r\n\r\n'
+                         % (256 << 20))
+            sent, start, chunk = 0, time.monotonic(), b'x' * (1 << 20)
+            try:
+                while sent < (256 << 20):
+                    sock.sendall(chunk)
+                    sent += len(chunk)
+            except OSError:
+                pass
+            finally:
+                sock.close()
+            self.assertLess(sent, 128 << 20)
+            self.assertLess(time.monotonic() - start, 25)
             # a body right at the cap is read: its route answers it (here: the unknown field)
             at_cap = json.dumps(dict(request, padding='')).encode()
             at_cap = json.dumps(dict(request, padding='x' * ((1 << 20) - len(at_cap)))).encode()
@@ -3088,7 +3122,11 @@ class TestTraverseAPI(TestTraverseBase):
             text = f.read()
         self.assertIn('[Server] Maximum request body: 1 MiB', text)
         refused = [line for line in text.splitlines() if ' refused 413: its body (' in line]
-        self.assertEqual(7, len(refused), text[-3000:])
+        self.assertEqual(8, len(refused), text[-3000:])
+        # the two Content-Lengths that are no byte count, stated as dropped ("abc": the
+        # library's protocol error)
+        dropped = [line for line in text.splitlines() if ' dropped, no byte count: ' in line]
+        self.assertEqual(2, len(dropped), text[-3000:])
         for line in refused:
             self.assertIn('[warning]', line)
             self.assertIn('exceeds --max-request-body-mb 1 MiB', line)
@@ -3170,6 +3208,43 @@ class TestTraverseAPI(TestTraverseBase):
             self.assertNotEqual(0, out.returncode, value)
             self.assertIn("--max-request-json-values must be an integer in [0, 2^53 - 1], got "
                           "'%s'" % value, out.stderr + out.stdout, value)
+
+    def test_api_quoted_strings_are_clipped(self):
+        """An error text quotes a client's string whole up to 1 KiB, else its first 1,024 bytes,
+        "..." and its size (H1, review 5's S1: a 2 MiB name quoted in a 400, escaped again by the
+        answer, held 6 times the body), on every route: an unknown member name, a label the
+        index does not hold; a name of 1,024 bytes is quoted whole. /pattern answers a raw
+        control character in a string with its invalid_request ("request: not JSON: ")."""
+        url = f'http://{self.host}:{self.port}'
+        base = {'seeds': [{'sequence': self.element}],
+                'strategy': {'direction': 'right', 'bounds': {'max_extension_bp': 10},
+                             'output': {'detail': 'summary', 'timing': False}}}
+        resolve = {'sequence': self.element, 'labels': ['acc1']}
+        cancel = {'attempt_id': 'clip-cancel'}
+        clipped = 'k' * 1024 + '... (5000 bytes)'
+        for route, body, prefix in (('traverse', base, "request: unknown field '"),
+                                    ('resolve', resolve, "request: unknown field '"),
+                                    ('traverse/cancel', cancel, "request: unknown field '")):
+            ret = requests.post(f'{url}/{route}', data=json.dumps(dict(body, **{'k' * 5000: 1})))
+            self.assertEqual(400, ret.status_code, route)
+            self.assertEqual(prefix + clipped + "'", ret.json()['error'], route)
+            self.assertLess(len(ret.content), 2048, route)
+            ret = requests.post(f'{url}/{route}', data=json.dumps(dict(body, **{'k' * 1024: 1})))
+            self.assertEqual(prefix + 'k' * 1024 + "'", ret.json()['error'], route)
+        # a label the index does not hold
+        ret = requests.post(url + '/traverse', data=json.dumps(
+            dict(base, seeds=[{'sequence': self.element, 'labels': ['x' * 3000]}])))
+        self.assertEqual(400, ret.status_code)
+        self.assertIn("Label not found in the annotation: '" + 'x' * 1024 + "... (3000 bytes)'",
+                      ret.json()['error'])
+        self.assertLess(len(ret.content), 2048)
+        # /pattern: its invalid_request for the body's JSON fault
+        ret = requests.post(url + '/pattern', data='{"patterns": [{"id": "a\x02", "dna": "ACGT"}]}')
+        self.assertEqual(400, ret.status_code)
+        self.assertEqual('invalid_request', ret.json()['code'])
+        self.assertTrue(ret.json()['error'].startswith(
+            'request: not JSON: a control character (byte 0x02) inside a string at byte 23'),
+            ret.json()['error'])
 
     def test_api_traverse_count_caps(self):
         """/traverse's counts, checked before anything of the request is copied (H1; SPEC
@@ -3255,13 +3330,18 @@ class TestTraverseAPI(TestTraverseBase):
 
     def test_api_value_cap_memory(self):
         """A body at the value cap (262,144 values, the default) stays within the bound H1
-        states (SPEC-labeled-traversal-core.md §5): the server's peak memory above its idle
-        while it reads, parses and refuses it is at most 10 x its bytes + 256 bytes per value +
-        16 MiB. Measured as the peak resident set above the idle one on Linux (VmHWM, reset
+        states for /traverse (SPEC-labeled-traversal-core.md §5): the server's peak memory above
+        its idle while it reads, parses and refuses it is at most 8 x its bytes + 256 bytes per
+        value + 16 MiB. Measured as the peak resident set above the idle one on Linux (VmHWM, reset
         after a warm-up through clear_refs) and the peak physical footprint on macOS
-        (proc_pid_rusage); skipped elsewhere. Two shapes: zeros under an unknown member (the
-        reader's worst per value) and 64 seeds of one-character labels (the reader, the
-        request's copy and a seed's)."""
+        (proc_pid_rusage); skipped elsewhere. Two shapes at the value cap: zeros under an
+        unknown member (the reader's worst per value) and 64 seeds of one-character labels (the
+        reader, the request's copy and a seed's); and three of 8 MiB for the part per byte
+        (the H1 review's S1), where 8 x the body is 64 of the 80 MiB allowed (about 6 x is held),
+        so that a threefold regression of the bytes held per body byte fails: one label of 8 MiB the index does not
+        hold (its 400 quotes it, clipped), an unknown member name of 4 Mi two-byte UTF-8
+        characters (which an answer would escape to 6 bytes each, were it quoted whole), and
+        one of raw control bytes (refused by the pre-scan)."""
         if sys.platform.startswith('linux'):
             def idle(pid):
                 with open(f'/proc/{pid}/clear_refs', 'w') as f:
@@ -3302,14 +3382,24 @@ class TestTraverseAPI(TestTraverseBase):
         per_seed = (cap - 3) // 64 - 3          # a seed: its object, sequence, labels array
         lab1 = {'seeds': [{'sequence': self.element, 'labels': ['a'] * per_seed}] * 64,
                 'strategy': {}}
-        for name, body, words in (('zeros', zeros, "unknown field 'x'"),
-                                  ('lab1', lab1, 'Label not found')):
-            text = json.dumps(body, separators=(',', ':'))
+        big = 8 << 20
+        seed = {'sequence': self.element}
+        head = json.dumps({'seeds': [seed], 'strategy': {}}, separators=(',', ':'))[:-1]
+        shapes = [('zeros', json.dumps(zeros, separators=(',', ':')), "unknown field 'x'"),
+                  ('lab1', json.dumps(lab1, separators=(',', ':')), 'Label not found'),
+                  ('bigname', json.dumps({'seeds': [dict(seed, labels=['n' * big])],
+                                          'strategy': {}}, separators=(',', ':')),
+                   'Label not found'),
+                  ('bigkey_utf8', head + ',"' + '\u00e9' * (big // 2) + '":0}', 'unknown field'),
+                  ('bigkey_ctrl', head + ',"' + '\x01' * big + '":0}', 'a control character')]
+        for name, text, words in shapes:
+            text = text.encode()
             # (no string of these bodies holds a bracket or a comma)
-            values = (text.count(',') + text.count('[') + text.count('{') + 1
-                      - text.count('[]') - text.count('{}'))
+            values = (text.count(b',') + text.count(b'[') + text.count(b'{') + 1
+                      - text.count(b'[]') - text.count(b'{}'))
             self.assertLessEqual(values, cap, name)
-            self.assertGreater(values, cap - 300, name)
+            if len(text) < big:
+                self.assertGreater(values, cap - 300, name)
             proc, url, _ = self._flagged_server([], 'memory-' + name)
             try:
                 # a warm-up walk faults in what a first request touches
@@ -3322,11 +3412,13 @@ class TestTraverseAPI(TestTraverseBase):
                 ret = requests.post(url + '/traverse', data=text)
                 self.assertEqual(400, ret.status_code, ret.text[:300])
                 self.assertIn(words, ret.json()['error'], name)
+                # the answer quotes no more than about 1 KiB of the client's string
+                self.assertLess(len(ret.content), 4096, name)
                 above = peak(proc.pid) - before
             finally:
                 proc.kill()
                 proc.wait()
-            bound = 10 * len(text) + 256 * values + (16 << 20)
+            bound = 8 * len(text) + 256 * values + (16 << 20)
             print(f'value cap memory, {name}: {len(text)} bytes, {values} values, '
                   f'{above / 2**20:.1f} MiB above idle, bound {bound / 2**20:.1f} MiB',
                   file=sys.stderr)

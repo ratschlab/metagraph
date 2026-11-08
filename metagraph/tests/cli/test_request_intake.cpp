@@ -439,3 +439,72 @@ TEST(ServerRequestIntake, MakeCostIsLinear) {
     // generous for a loaded CI host: the quadratic scan took minutes
     EXPECT_LT(ms, 2000.0);
 }
+
+// RFC 8259 §7: a raw control character inside a string is the body's JSON fault, refused by the
+// pre-scan with the route's prefix (jsoncpp kept it, and an answer quoting it wrote it as
+// \u00XX, 6 bytes for 1); an escaped one, a raw byte from 0x20 up and UTF-8 are read as before
+TEST(ServerRequestIntake, ARawControlCharacterInAStringIsRefused) {
+    auto refusal = [](const std::string &text) {
+        return refusal_of([&] { parse_strict_json<RefuseRequest>(text, "Bad json received: "); });
+    };
+    EXPECT_EQ("Bad json received: a control character (byte 0x01) inside a string at byte 8: "
+              "RFC 8259 requires it escaped (\\u0001)",
+              refusal(std::string("{\"a\": \"x\x01y\"}")));
+    EXPECT_EQ("Bad json received: a control character (byte 0x09) inside a string at byte 2: "
+              "RFC 8259 requires it escaped (\\u0009)",
+              refusal(std::string("[\"\tx\"]")));
+    EXPECT_EQ("Bad json received: a control character (byte 0x1f) inside a string at byte 2: "
+              "RFC 8259 requires it escaped (\\u001f)",
+              refusal(std::string("{\"\x1f\": 0}")));
+    EXPECT_EQ("Bad json received: a control character (byte 0x00) inside a string at byte 2: "
+              "RFC 8259 requires it escaped (\\u0000)",
+              refusal(std::string("[\"\0\"]", 5)));
+    // whitespace outside strings, escapes, a byte from 0x20 up, UTF-8: read
+    EXPECT_EQ("x\x01y\n\t", parse("{\"a\": \"x\\u0001y\\n\\t\"}")["a"].asString());
+    EXPECT_EQ(" \x7f\xc3\xa9", parse("[\" \x7f\xc3\xa9\"]")[0].asString());
+    EXPECT_EQ(1, parse("{\n\t\"a\":\r\n 1}")["a"].asInt());
+    // the first fault the scan meets is refused: a comment before the byte, the byte before a
+    // comment, the value past the count before the byte
+    EXPECT_EQ("Bad json received: a comment (or a '/' outside a string) at byte 1",
+              refusal(std::string("[/\"\x01\"]")));
+    EXPECT_NE(std::string::npos, refusal(std::string("[\"\x01\", /]")).find("byte 0x01"));
+    EXPECT_FALSE(fits(std::string("[0, 0, \"\x01\"]"), 2));
+    // /pattern's prefix: its invalid_request
+    try {
+        parse_strict_json<RefuseRequest>(std::string("{\"a\": \"\x02\"}"), "request: not JSON: ");
+        FAIL();
+    } catch (const InvalidRequest &e) {
+        EXPECT_EQ(0u, std::string(e.what()).find("request: not JSON: a control character (byte "
+                                                 "0x02)"));
+    }
+}
+
+// An error text quotes a client's string whole up to 1 KiB, else its first 1 KiB (never inside
+// a UTF-8 sequence), "..." and its size
+TEST(ServerRequestIntake, QuotedClientStringsAreClipped) {
+    EXPECT_EQ("", ::utils::clip_for_message(""));
+    EXPECT_EQ(std::string(1024, 'n'), ::utils::clip_for_message(std::string(1024, 'n')));
+    EXPECT_EQ(std::string(1024, 'n') + "... (1025 bytes)",
+              ::utils::clip_for_message(std::string(1025, 'n')));
+    // a two-byte character across the cut is left out whole
+    std::string e;
+    for (size_t i = 0; i < 1000; ++i) {
+        e += "\xc3\xa9";
+    }
+    EXPECT_EQ("a" + e.substr(0, 1022) + "... (2001 bytes)", ::utils::clip_for_message("a" + e));
+    EXPECT_EQ("abc... (6 bytes)", ::utils::clip_for_message("abcdef", 3));
+    // a name that is no UTF-8 (continuation bytes only) is cut at most 3 bytes back: a clipped
+    // name keeps at least 1,021 bytes, so its text is longer than any name quoted whole
+    const std::string continuation(2000, '\x80');
+    EXPECT_EQ(continuation.substr(0, 1021) + "... (2000 bytes)",
+              ::utils::clip_for_message(continuation));
+    EXPECT_LT(1024u, ::utils::clip_for_message(std::string(1025, 'n')).size());
+    // the unknown field of a strict object
+    Json::Value v(Json::objectValue);
+    v[std::string(5000, 'k')] = 1;
+    EXPECT_EQ("request: unknown field '" + std::string(1024, 'k') + "... (5000 bytes)'",
+              refusal_of([&] {
+                  StrictObject<RefuseRequest> o(v, "request");
+                  o.finish();
+              }));
+}

@@ -142,7 +142,8 @@ void Parser::names(const Json::Value &list, const std::string &path, Predicate::
             last_list_.push_back(0);
             last_pos_.push_back(0);
         } else if (last_list_[id] == lists_) {
-            throw invalid(item_path(path, i) + ": '" + std::string(view) + "' listed twice in "
+            throw invalid(item_path(path, i) + ": '" + ::utils::clip_for_message(view)
+                          + "' listed twice in "
                           "one list (first at [" + std::to_string(last_pos_[id]) + "])");
         }
         last_list_[id] = lists_;
@@ -164,13 +165,16 @@ uint32_t Parser::node(const Json::Value &v, const std::string &path, unsigned de
         const std::string first = it.name();
         const std::string second = (++it).name();
         throw invalid(path + ": expected exactly one operator (" + kOperators + "), got "
-                      + std::to_string(v.size()) + " members ('" + first + "', '" + second
+                      + std::to_string(v.size()) + " members ('"
+                      + ::utils::clip_for_message(first) + "', '"
+                      + ::utils::clip_for_message(second)
                       + "'" + (v.size() > 2 ? ", ...)" : ")"));
     }
     const std::string key = v.begin().name();
     const std::optional<Op> op = op_of(key);
     if (!op) {
-        throw invalid(path + ": unknown operator '" + key + "' (expected one of "
+        throw invalid(path + ": unknown operator '" + ::utils::clip_for_message(key)
+                      + "' (expected one of "
                       + kOperators + ")");
     }
     const Json::Value &arg = *v.begin();

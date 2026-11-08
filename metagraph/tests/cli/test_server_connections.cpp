@@ -402,6 +402,13 @@ TEST(ServerRequestColumnLabels, Parameters) {
               refused({ { "offset", "1" }, { "offset", "2" } }));
     EXPECT_EQ("Bad request: GET /column_labels: 'limit' must be an integer in [1, "
               "9007199254740991], got '0'", refused({ { "limit", "0" } }));
+    // a client's key or value is quoted clipped past 1 KiB, as every error text quotes it (H1)
+    const std::string long_key(5000, 'k');
+    EXPECT_EQ("Bad request: unknown parameter '" + std::string(1024, 'k') + "... (5000 bytes)' of "
+              "GET /column_labels (offset, limit)", refused({ { long_key, "1" } }));
+    EXPECT_EQ("Bad request: GET /column_labels: 'limit' must be an integer in [1, "
+              "9007199254740991], got '" + std::string(1024, '9') + "... (3000 bytes)'",
+              refused({ { "limit", std::string(3000, '9') } }));
     for (const char *bad : { "", "-1", "+1", "1.0", "0x10", " 1", "9007199254740992",
                              "99999999999999999999" }) {
         EXPECT_EQ("Bad request: GET /column_labels: 'offset' must be an integer in [0, "

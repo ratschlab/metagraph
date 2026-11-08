@@ -411,8 +411,9 @@ std::thread start_server(HttpServer &server_startup, Config &config, size_t num_
     if (config.max_request_body_mb) {
         // the library's bound on a request's headers and body (size_t max by default): a
         // Content-Length above it, or a chunked body growing past it, is reported to on_error as
-        // message_size and the connection dropped — the 413 the library builds there is never
-        // sent (server_http.hpp, read_request_and_content)
+        // message_size, which answers 413 body_too_large (refuse_body_too_large; the library
+        // prepares a 413 of its own there but does not send it: server_http.hpp, read() and
+        // read_chunked_transfer_encoded()). A header block above it is closed without an answer
         server_startup.config.max_request_streambuf_size
                 = static_cast<size_t>(config.max_request_body_mb) << 20;
     }
@@ -2963,18 +2964,21 @@ int run_server(Config *config) {
                                const SimpleWeb::error_code &ec) {
         if (ec == SimpleWeb::make_error_code::make_error_code(SimpleWeb::errc::message_size)) {
             // a body over --max-request-body-mb, before it is read (a Content-Length above it)
-            // or at the chunk that passes it: the library builds a 413 it never sends and
-            // drops the request, so the 413 body_too_large is written here, on its connection
-            // (refuse_body_too_large: the connection closed after it, what the client still
-            // sends discarded meanwhile). Nothing of the request ran
+            // or at the chunk that passes it: the library prepares a 413 but does not send it
+            // and drops the request, so the 413 body_too_large is written here, on its
+            // connection (refuse_body_too_large: the connection closed after it, what the
+            // client still sends discarded meanwhile), or the connection is closed when the
+            // Content-Length is no byte count. Nothing of the request ran
             const auto it = request->header.find("Content-Length");
-            logger->warn("[Server] {} {} from {} refused 413: its body ({}) exceeds "
+            const std::string address = request->remote_endpoint().address().to_string();
+            const bool answered = refuse_body_too_large(request, config->max_request_body_mb);
+            logger->warn("[Server] {} {} from {} {}: its body ({}) exceeds "
                          "--max-request-body-mb {} MiB",
-                         request->method, request->path,
-                         request->remote_endpoint().address().to_string(),
-                         it != request->header.end() ? it->second + " bytes" : "chunked",
+                         request->method, ::utils::clip_for_message(request->path, 256),
+                         address, answered ? "refused 413" : "dropped, no byte count",
+                         it != request->header.end()
+                             ? ::utils::clip_for_message(it->second, 64) + " bytes" : "chunked",
                          config->max_request_body_mb);
-            refuse_body_too_large(request, config->max_request_body_mb);
             return;
         }
         // Handle errors here, ignoring a few trivial ones.
