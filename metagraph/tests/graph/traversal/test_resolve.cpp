@@ -148,6 +148,7 @@ TYPED_TEST(ResolveTest, ThreeStatesAndRuns) {
         }
 
         // max_labels_per_seed drops deterministically and reports the drop
+        pol.max_seeds = 1;
         pol.max_labels_per_seed = 1;
         sel = select_seeds(profile, q, pol, canonical);
         ASSERT_EQ(1u, sel.seeds.size());
