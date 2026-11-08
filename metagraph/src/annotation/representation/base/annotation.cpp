@@ -30,6 +30,8 @@ size_t LabelEncoder<Label>::encode(const Label &label) const {
 
 template<>
 void LabelEncoder<std::string>::serialize(std::ostream &outstream) const {
+    // TODO: the next format version should store only the labels. load() rebuilds
+    // the hash buckets from them, because std::hash differs between standard libraries.
     outstream.write("LE-v2.0", 7);
     Serializer serializer(outstream);
     data().serialize(serializer);
