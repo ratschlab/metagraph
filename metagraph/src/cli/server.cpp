@@ -238,6 +238,15 @@ int run_server(Config *config) {
             logger->info("[Server] Loading graph and annotation in parallel...");
             auto anno_graph = initialize_annotated_dbg(*config);
             logger->info("[Server] Annotated graph loaded. Current mem usage: {} MiB", get_curr_RSS() >> 20);
+            if (config->experimental_traverse) {
+                if (const auto *coord_to_header = anno_graph->get_coord_to_header()) {
+                    // header labels are looked up by name: index the names before serving
+                    Timer timer;
+                    coord_to_header->index_headers();
+                    logger->info("[Server] Indexed sequence headers in {:.1f} sec. Current mem usage: {} MiB",
+                                 timer.elapsed(), get_curr_RSS() >> 20);
+                }
+            }
             return anno_graph;
         });
     } else {
