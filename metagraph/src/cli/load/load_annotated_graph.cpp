@@ -58,9 +58,9 @@ load_coord_to_header(const annot::MultiLabelAnnotation<std::string> &annotation,
                          "sequence length needed to compute the fraction of the target covered "
                          "('kmers_in_target' for query, 'nt_length' for align) will be omitted. "
                          "To enable per-sequence reporting, run once against the final annotation "
-                         "with all input FASTAs:\n"
+                         "with all input FASTA/FASTQ files in annotation column order:\n"
                          "    metagraph annotate --anno-filename --index-header-coords "
-                         "-i {} -o {} <input_fastas>\n"
+                         "-i {} -o {} <input_files>\n"
                          "Pass '--no-coord-mapping' to suppress this warning.",
                          cth_fname, config.infbase, anno_basename);
         }

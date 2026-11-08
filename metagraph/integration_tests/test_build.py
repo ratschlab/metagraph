@@ -27,6 +27,16 @@ class TestBuild(TestingBase):
     def setUp(self):
         self.tempdir = TemporaryDirectory()
 
+    def test_default_k(self):
+        graph = os.path.join(self.tempdir.name, 'default')
+        fasta = os.path.join(TEST_DATA_DIR, 'genome.MT.fa')
+        subprocess.run(f'{METAGRAPH} build -o {graph} {fasta}', shell=True, check=True)
+        stats = self._get_stats(graph + '.dbg')
+        alphabet = os.path.basename(os.readlink(os.path.join(os.getcwd(), 'metagraph')))
+        expected = {'metagraph_DNA': '31', 'metagraph_DNA5': '21',
+                    'metagraph_DNA_CASE_SENSITIVE': '15', 'metagraph_Protein': '12'}
+        self.assertEqual(stats['k'], expected[alphabet])
+
     @parameterized.expand([repr for repr in BUILDS if not (repr == 'bitmap' and PROTEIN_MODE)])
     def test_simple_all_graphs(self, build):
         representation, tmp_dir = build_params[build]

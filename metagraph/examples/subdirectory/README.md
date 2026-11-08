@@ -4,6 +4,10 @@ Integrate MetaGraph using `add_subdirectory` for simple, direct access to the li
 
 ## Quick Start
 
+Install the [build dependencies](../../docs/source/installation.rst) and initialize
+the repository's submodules, then run these commands from
+`metagraph/examples/subdirectory`:
+
 ```bash
 mkdir build && cd build
 cmake ..

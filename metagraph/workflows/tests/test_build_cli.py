@@ -2,10 +2,12 @@ import os
 import subprocess
 import shutil
 import re
+import sys
 from itertools import product
 from pathlib import Path
 
 import pytest
+import yaml
 
 import metagraph_workflows
 from metagraph_workflows import cli, utils
@@ -144,6 +146,28 @@ def test_workflow_invocation_via_python(sample_list_path, output_dir):
         samples=sample_list_path,
         metagraph_cmd=metagraph_cmd,
     ) is None
+
+
+@pytest.mark.parametrize('explicit_k', [None, 7])
+def test_workflow_k_matches_selected_binary(sample_list_path, output_dir, explicit_k):
+    cmd = _resolve_metagraph_cmd() or shutil.which('metagraph')
+    if cmd is None:
+        pytest.skip('metagraph executable unavailable')
+    help_result = subprocess.run([cmd, 'build', '--help'], capture_output=True,
+                                 text=True, check=True)
+    default_k = int(re.search(r'--kmer-length[^\n]*\[(\d+)\]',
+                             help_result.stdout + help_result.stderr).group(1))
+    expected_k = default_k if explicit_k is None else explicit_k
+    args = ['build', sample_list_path, '--metagraph-cmd', cmd,
+            '--anno-type', 'brwt', '-p', 2, '--anno-threads-each', 1]
+    if explicit_k is not None:
+        args += ['-k', explicit_k]
+    proc = run_wrapper(args + [output_dir])
+    assert proc.returncode == 0, proc.stdout.decode()
+    config = yaml.safe_load((output_dir / 'config.yaml').read())
+    assert config['k'] == expected_k
+    stats = subprocess.check_output([cmd, 'stats', str(output_dir / 'graph.dbg')], text=True)
+    assert re.search(rf'^k: {expected_k}$', stats, re.MULTILINE)
 
 
 def test_workflow_invocation_additional_args(sample_list_path, output_dir):
@@ -309,6 +333,39 @@ def test_dryrun_prints_summary(sample_list_path, output_dir):
     out = proc.stdout.decode()
     assert "=== Workflow summary ===" in out
     assert "Mode: dry-run" in out
+
+
+@pytest.mark.parametrize('binary_available,explicit_k', [(False, None), (False, 7), (True, None)])
+def test_dryrun_default_lookup(sample_list_path, output_dir, tmp_path,
+                               binary_available, explicit_k):
+    executable = tmp_path / 'metagraph'
+    calls = tmp_path / 'calls.txt'
+    if binary_available:
+        executable.write_text(
+            f'#!{sys.executable}\n'
+            'import sys\nfrom pathlib import Path\n'
+            f'with Path({str(calls)!r}).open("a") as log:\n'
+            '    log.write(" ".join(sys.argv[1:]) + "\\n")\n'
+            'assert sys.argv[1:] == ["build", "--help"]\n'
+            'print("-k --kmer-length [INT] length [12]", file=sys.stderr)\n')
+        executable.chmod(0o755)
+    args = ['build', sample_list_path, '--dryrun', '--metagraph-cmd', str(executable), '-p', 2]
+    if explicit_k is not None:
+        args += ['-k', explicit_k]
+    proc = run_wrapper(args + [output_dir])
+    if not binary_available and explicit_k is None:
+        assert proc.returncode == 1
+        assert 'set -k explicitly' in proc.stdout.decode()
+        assert not (output_dir / 'config.yaml').exists()
+    else:
+        assert proc.returncode == 0, proc.stdout.decode()
+        config = yaml.safe_load((output_dir / 'config.yaml').read())
+        assert config['k'] == (explicit_k if explicit_k is not None else 12)
+        assert not (output_dir / 'graph.dbg').exists()
+    if binary_available:
+        assert calls.read_text() == 'build --help\n'
+    else:
+        assert not calls.exists()
 
 
 def test_missing_metagraph_executable_fails_fast(sample_list_path, output_dir):

@@ -658,8 +658,8 @@ slice_annotation(const AnnotatedDBG::Annotator &full_annotation,
     auto unique_rows = full_annotation.get_matrix().get_rows_dict(&row_indexes, num_threads);
 
     if (unique_rows.size() >= std::numeric_limits<uint32_t>::max()) {
-        throw std::runtime_error("There must be less than 2^32 rows in a batch."
-                                 " Reduce the query batch size.");
+        throw std::runtime_error("A query batch must contain fewer than 2^32 - 1 annotation rows."
+                                 " Reduce --batch-size.");
     }
 
     // insert one empty row for representing unmatched rows
@@ -1257,7 +1257,7 @@ size_t query_fasta(const std::string &file,
             && !dynamic_cast<const annot::matrix::MultiIntMatrix *>(
                     &anno_graph.get_annotator().get_matrix())) {
         logger->error("Annotation does not support k-mer coordinate queries. "
-                      "First transform this annotation to include coordinate data "
+                      "Use an annotation built with --coordinates and transformed to a coordinate representation "
                       "(e.g., {}, {}, {}, {}, {}).",
                       Config::annotype_to_string(Config::ColumnCoord),
                       Config::annotype_to_string(Config::BRWTCoord),
@@ -1271,7 +1271,7 @@ size_t query_fasta(const std::string &file,
             && !dynamic_cast<const annot::matrix::IntMatrix *>(
                     &anno_graph.get_annotator().get_matrix())) {
         logger->error("Annotation does not support k-mer count queries. "
-                      "First transform this annotation to include count data "
+                      "Use an annotation built with --count-kmers and transformed to a count representation "
                       "(e.g., {}, {}, {}).",
                       Config::annotype_to_string(Config::IntBRWT),
                       Config::annotype_to_string(Config::IntRowDiffDisk),

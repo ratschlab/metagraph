@@ -30,13 +30,6 @@
 namespace mtg {
 namespace graph {
 
-#if _PROTEIN_GRAPH
-static constexpr uint16_t bits_per_char = sshash::aa_uint_kmer_t<uint64_t>::bits_per_char;
-#else
-static constexpr uint16_t bits_per_char = sshash::dna_uint_kmer_t<uint64_t>::bits_per_char;
-#endif
-
-
 const std::string DBGSSHash::alphabet_ = kmer::KmerExtractor2Bit().alphabet;
 
 constexpr DeBruijnGraph::node_index sshash_to_graph_index(uint64_t idx) {
@@ -54,16 +47,14 @@ DBGSSHash::DBGSSHash(size_t k, Mode mode) : k_(k), num_nodes_(0), mode_(mode) {
     if (mode == PRIMARY)
         mode_ = CANONICAL;
 
-    size_t odd_k = (k_ | 1);
-
-    if (odd_k * bits_per_char <= 64) {
+    if (k_ <= kmer_t<KmerInt64>::max_k) {
         dict_.emplace<sshash::dictionary<kmer_t<KmerInt64>, sshash::decoded_offsets>>();
-    } else if (odd_k * bits_per_char <= 128) {
+    } else if (k_ <= kmer_t<KmerInt128>::max_k) {
         dict_.emplace<sshash::dictionary<kmer_t<KmerInt128>, sshash::decoded_offsets>>();
-    } else if (odd_k * bits_per_char <= 256) {
+    } else if (k_ <= kmer_t<KmerInt256>::max_k) {
         dict_.emplace<sshash::dictionary<kmer_t<KmerInt256>, sshash::decoded_offsets>>();
     } else {
-        common::logger->error("k too big: {} > {}", odd_k, 256 / bits_per_char);
+        common::logger->error("k too big: {} > {}", k_, kmer_t<KmerInt256>::max_k);
         throw std::length_error("k fail");
     }
 }
@@ -253,6 +244,9 @@ DBGSSHash::DBGSSHash(const std::string& input_filename,
     if (std::isfinite(ram_limit_GiB) && ram_limit_GiB > build_config.ram_limit_in_GiB)
         build_config.ram_limit_in_GiB = std::ceil(ram_limit_GiB);
     build_config.allow_reverse_complement_duplicates = mode == BASIC;
+    // BASIC graphs look up k-mers on the forward strand only. Strand-specific
+    // keys avoid scanning heavy buckets for them. Other modes keep the v6 format.
+    build_config.preserve_orientation = mode == BASIC;
 
     // put SSHash's temp files under --disk-swap (default: ./) and clean them up
     auto tmp_dir = utils::create_temp_dir(utils::get_swap_path(), "sshash");
