@@ -105,7 +105,6 @@ TYPED_TEST(ResolveTest, ThreeStatesAndRuns) {
         SelectionPolicy pol;
         pol.policy = SelectionPolicy::LONGEST_FIRST;
         pol.max_seeds = 2;
-        pol.merge_overlapping = false;
         auto sel = select_seeds(profile, q, pol, canonical);
         EXPECT_EQ(3u, sel.num_candidates);
         EXPECT_EQ(3u, sel.num_eligible);
@@ -140,17 +139,12 @@ TYPED_TEST(ResolveTest, ThreeStatesAndRuns) {
         EXPECT_EQ((KmerInterval{ 0, 70 }), sel.seeds[1].kmers);
         EXPECT_EQ((std::vector<std::string>{ "A" }), sel.seeds[1].labels);
 
-        // max_support picks never overlap, so merging leaves them and their order as they are
+        // max_support picks never overlap, so none is merged
         pol = SelectionPolicy();
         pol.max_seeds = 3;
-        pol.merge_overlapping = false;
-        auto unmerged = select_seeds(profile, q, pol, canonical);
-        pol.merge_overlapping = true;
         sel = select_seeds(profile, q, pol, canonical);
-        ASSERT_EQ(unmerged.seeds.size(), sel.seeds.size());
-        for (size_t i = 0; i < sel.seeds.size(); ++i) {
-            EXPECT_EQ(unmerged.seeds[i].kmers, sel.seeds[i].kmers) << i;
-            EXPECT_EQ(unmerged.seeds[i].labels, sel.seeds[i].labels) << i;
+        for (const auto &seed : sel.seeds) {
+            EXPECT_TRUE(seed.overlaps_with.empty());
         }
 
         // max_labels_per_seed drops deterministically and reports the drop
@@ -299,7 +293,6 @@ TEST(Resolve, MaxSupportClipsRunsBetweenRounds) {
     SelectionPolicy policy;
     policy.max_seeds = 2;
     policy.min_block_bp = kK;          // min_kmers == 1
-    policy.merge_overlapping = false;  // keep the rounds' intervals as chosen
     auto sel = select_seeds(profile, std::string(10 + kK - 1, 'A'), policy, false);
     ASSERT_EQ(2u, sel.seeds.size());
     EXPECT_EQ((KmerInterval{ 0, 5 }), sel.seeds[0].kmers);

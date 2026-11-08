@@ -483,7 +483,6 @@ ResolveRequest parse_resolve_request(const Json::Value &json) {
     }
     if (req.options.labels.empty() == !req.options.discover)
         throw InvalidRequest("request: specify exactly one of 'labels' or 'discover'");
-    req.options.min_block_kmers = s.uint("min_block_kmers", 1, 1);
     if (s.has("select")) {
         Strict p(s.raw("select"), "request.select");
         req.select = true;
@@ -493,7 +492,6 @@ ResolveRequest parse_resolve_request(const Json::Value &json) {
         req.policy.max_seeds = p.uint("max_seeds", 10, 1, 1000);
         req.policy.min_block_bp = p.uint("min_block_bp", 0);
         req.policy.max_labels_per_seed = p.uint("max_labels_per_seed", 1000, 1, kMaxSeedLabels);
-        req.policy.merge_overlapping = p.boolean("merge_overlapping", true);
         p.done();
     }
     s.done();
@@ -547,7 +545,6 @@ Json::Value profile_to_json(const SupportProfile &p, const SeedSelection *sel) {
         s["policy"]["max_seeds"] = uint_json(sel->policy.max_seeds);
         s["policy"]["min_block_bp"] = uint_json(sel->policy.min_block_bp);
         s["policy"]["max_labels_per_seed"] = uint_json(sel->policy.max_labels_per_seed);
-        s["policy"]["merge_overlapping"] = sel->policy.merge_overlapping;
         s["counts"]["candidates"] = uint_json(sel->num_candidates);
         s["counts"]["eligible"] = uint_json(sel->num_eligible);
         s["counts"]["selected"] = uint_json(sel->seeds.size());
