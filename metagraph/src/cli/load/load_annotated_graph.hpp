@@ -16,11 +16,13 @@ class AnnotatedDBG;
 
 namespace annot {
 class CoordToHeader;
+template <typename LabelType> class MultiLabelAnnotation;
 } // namespace annot
 
 namespace cli {
 
 class Config;
+enum class LoadFailure;  // load_graph.hpp
 
 inline constexpr size_t kDefaultMaxChunksOpen = 2000;
 
@@ -30,6 +32,33 @@ initialize_annotated_dbg(std::shared_ptr<graph::DeBruijnGraph> graph,
                          size_t max_chunks_open = kDefaultMaxChunksOpen);
 
 std::unique_ptr<graph::AnnotatedDBG> initialize_annotated_dbg(const Config &config);
+
+// As the first overload, a file that cannot be loaded (the annotation, its record mapping, a
+// row_diff annotation's anchor and fork successor bitmap) or a record mapping refused
+// (check_record_mapping) handled as |on_failure| says: THROW, a std::runtime_error with the
+// load's message, for a caller that answers it (the Python bindings raise it); EXIT, logged and
+// the process ended
+std::unique_ptr<graph::AnnotatedDBG>
+initialize_annotated_dbg(std::shared_ptr<graph::DeBruijnGraph> graph, const Config &config,
+                         size_t max_chunks_open, LoadFailure on_failure);
+
+/**
+ * Why |mapping| (a record mapping, .seqs, just loaded) is not the mapping of |annotation|, or ""
+ * when it is as far as the load can tell (SPEC-multigraph-envelope.md section 10):
+ *   - another number of columns than the annotation's labels;
+ *   - when the mapping states its column labels (written since H4), a column whose label is not
+ *     the annotation's (CoordToHeader::check_columns, which then drops them and records the
+ *     order as verified);
+ *   - on an annotation that states its coordinates per column without decoding them
+ *     (column_coord, brwt_coord), a column holding more coordinates than the k-mers the mapping
+ *     states for it: its coordinates are distinct values below that, so it is another file's.
+ *     The row-diff forms store differences along paths: there only the count (and the stated
+ *     labels) are checked.
+ * Every loader calls it on the mapping it loads and refuses the index on a reason: a server at
+ * start-up (exit 1 before it is ready), a CLI command at its load, a per-request load by throwing.
+ */
+std::string check_record_mapping(const annot::MultiLabelAnnotation<std::string> &annotation,
+                                 annot::CoordToHeader *mapping);
 
 /**
  * What the loading thread does for the pattern search to a graph it loads, before the graph is

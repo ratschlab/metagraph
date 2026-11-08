@@ -680,6 +680,31 @@ def headers_unique(value, multi=False, examples=()):
     return run
 
 
+def labels_disjoint(value, multi=False):
+    """GET /capabilities' labels_disjoint (H4, SPEC-multigraph-envelope.md section 9.1): whether
+    no sequence header equals a column name -- placed as headers_unique. |value| true where the
+    pairs have their .seqs and no header is a column's name (the fixtures' headers are
+    accessions or r<n>, their columns file paths), null where a pair has no .seqs"""
+    def run(doc):
+        if multi:
+            check('labels_disjoint' not in doc, sorted(doc))
+            member = doc['graph_summary']['labels_disjoint']
+        else:
+            member = doc['labels_disjoint']
+        check(member == {'value': value, 'collisions': 0, 'examples': []}, member)
+    return run
+
+
+def seqs_order(value, multi=False):
+    """Each pair's seqs_order (H4, SPEC-multigraph-envelope.md section 9.1): "count_only" on the
+    mini index (its .seqs written before H4, without column labels), "verified" on a .seqs this
+    build writes, null without one"""
+    def run(doc):
+        pairs = doc['graph_summary']['pairs'] if multi else [doc['pair_summary']]
+        check(all(p['seqs_order'] == value for p in pairs), [p['seqs_order'] for p in pairs])
+    return run
+
+
 def repeated_example(header, columns):
     """An example of headers_unique on a single-graph server: |header| once in each of
     |columns|, the pair tags null (as its /search cut's)"""
@@ -885,20 +910,26 @@ FIXTURES = [
         'features and routes, the block available (basic, mask file, counting exact, placement '
         'record); graph_summary and max_graphs_without_selection null (no graph list); '
         'headers_unique at the top level (SPEC-multigraph-envelope.md section 9): true, every '
-        'header of the .seqs names one record; pair_summary at the top level (E17, section '
-        '8.1): the pair\'s capability profile, its tags null',
+        'header of the .seqs names one record; labels_disjoint beside it (H4, section 9.1): '
+        'true, no header is a column\'s name; pair_summary at the top level (E17, section '
+        '8.1): the pair\'s capability profile, its tags null, its seqs_order count_only (the '
+        'mini index\'s .seqs states no column labels)',
         expect_all(features(True), caps_block(True, mask='file', counting='exact'),
-                   single_graph_selection, headers_unique(True))),
+                   single_graph_selection, headers_unique(True), labels_disjoint(True),
+                   seqs_order('count_only'))),
     get('capabilities_repeated_headers', 'repeated_headers', '/capabilities',
         'GET /capabilities of a single-graph server whose pair names one header twice (r9, in '
         'its files e1.fa and e2.fa): headers_unique at the top level false, one collision, its '
         'example listing both occurrences by column with null pair tags '
-        '(SPEC-multigraph-envelope.md section 9); the block available (basic, mask file, '
-        'counting exact)',
+        '(SPEC-multigraph-envelope.md section 9); labels_disjoint true (no header is a '
+        'column\'s name: the certificates are apart, section 9.1); seqs_order verified (its '
+        '.seqs, written by this build, states its column labels); the block available (basic, '
+        'mask file, counting exact)',
         expect_all(features(True), caps_block(True, mask='file', counting='exact'),
                    single_graph_selection,
                    headers_unique(False, examples=[repeated_example(REPEATED_HEADER,
-                                                                    ['e1.fa', 'e2.fa'])]))),
+                                                                    ['e1.fa', 'e2.fa'])]),
+                   labels_disjoint(True), seqs_order('verified'))),
     get('traverse_capabilities', 'masked', '/traverse/capabilities',
         'GET /traverse/capabilities (the document the service probe reads) on the same server: '
         'its `pattern` member the gate block (SPEC §23.2): the fields a client gates on, with '
@@ -925,7 +956,8 @@ FIXTURES = [
         'dummy_fraction sampled at load (value, 95% interval, samples, source sampled); it '
         'said available false, mask_required before',
         expect_all(features(True), caps_block(True, mask='absent', counting='upper_bound'),
-                   single_graph_selection, headers_unique(True))),
+                   single_graph_selection, headers_unique(True), labels_disjoint(True),
+                   seqs_order('count_only'))),
     get('traverse_capabilities_mask_absent', 'unmasked', '/traverse/capabilities',
         'the same unmasked server on the probe route (the gate block: counting upper_bound, '
         'the dummy_fraction in the full block only)',
@@ -938,7 +970,8 @@ FIXTURES = [
         'built_at_load (the mask built in memory at start-up), counting exact, otherwise as '
         'with the file',
         expect_all(features(True), caps_block(True, mask='built_at_load', counting='exact'),
-                   single_graph_selection, headers_unique(True))),
+                   single_graph_selection, headers_unique(True), labels_disjoint(True),
+                   seqs_order('count_only'))),
     get('traverse_capabilities_built_at_load', 'built_at_load', '/traverse/capabilities',
         'the same server on the probe route (the gate block)',
         gate_block(True, mask='built_at_load', counting='exact')),
@@ -951,11 +984,12 @@ FIXTURES = [
         'graph_summary (each pair: available, mask, counting, k, graph_mode, index_fp, '
         'traversal, and its capability profile, E17: index_meta_fp, alphabet, '
         'graph_representation, annotation_form, decode_charged, traversal.counts, support_fp, '
-        'SPEC-multigraph-envelope.md section 8.1; columns_disjoint; headers_unique, section 9) '
-        'and max_graphs_without_selection (the threshold of the selection rule: a request '
-        'without `graphs` queries every name of a list of at most that many, the server flag, '
-        '10 by default)',
-        expect_all(multi_capabilities, headers_unique(True, multi=True))),
+        'seqs_order, SPEC-multigraph-envelope.md section 8.1; columns_disjoint; headers_unique, '
+        'section 9; labels_disjoint, section 9.1) and max_graphs_without_selection (the '
+        'threshold of the selection rule: a request without `graphs` queries every name of a '
+        'list of at most that many, the server flag, 10 by default)',
+        expect_all(multi_capabilities, headers_unique(True, multi=True),
+                   labels_disjoint(True, multi=True), seqs_order('count_only', multi=True))),
     get('traverse_capabilities_multi_graph', 'multi',
         '/traverse/capabilities?graph=' + MULTI_GRAPH_NAME,
         'the multi-graph server probed for one pair: the envelope of one entry '
@@ -1014,9 +1048,11 @@ FIXTURES = [
     get('capabilities_representation_unsupported', 'hash', '/capabilities',
         'a graph the engine does not recognise (a hash graph): the feature and route listed, '
         'the block available false, unavailable_reason representation_unsupported, graph_mode '
-        'null and only k set; headers_unique null (the pair has no .seqs)',
+        'null and only k set; headers_unique and labels_disjoint null, seqs_order null (the '
+        'pair has no .seqs)',
         expect_all(features(True), caps_block(False, 'representation_unsupported'), only_k,
-                   single_graph_selection, headers_unique(None))),
+                   single_graph_selection, headers_unique(None), labels_disjoint(None),
+                   seqs_order(None))),
     get('traverse_capabilities_representation_unsupported', 'hash', '/traverse/capabilities',
         'the same hash-graph server on the probe route (the gate block)',
         expect_all(gate_block(False, 'representation_unsupported'), gate_only_k)),

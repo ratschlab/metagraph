@@ -1,5 +1,6 @@
 #include "annotate.hpp"
 
+#include <algorithm>
 #include <filesystem>
 
 #include <omp.h>
@@ -19,6 +20,7 @@
 #include "load/load_annotated_graph.hpp"
 #include "graph/annotated_dbg.hpp"
 #include "annotation/coord_to_header.hpp"
+#include "annotation/int_matrix/base/int_matrix.hpp"
 
 
 namespace mtg {
@@ -286,6 +288,44 @@ void check_header_labels(const std::vector<std::string> &files,
     }
 }
 
+// A stretch of a file's sequences, for the check of a record mapping against an annotation
+// (annotate --index-header-coords -a): |sequence| (at most kProbeLength characters) and the
+// coordinate of its first k-mer in the file's column
+struct CoordinateProbe {
+    std::string sequence;
+    uint64_t first = 0;
+};
+constexpr size_t kProbeLength = 1000;
+
+// Whether column |column| of |anno_graph|'s coordinate annotation (|matrix|) holds the coordinate
+// of the first and of the last k-mer of |probe| that the graph has, at their nodes (none such:
+// nothing to check): -1 when it does, else the coordinate it lacks
+int64_t check_probe(const graph::AnnotatedDBG &anno_graph,
+                    const annot::matrix::MultiIntMatrix &matrix, uint64_t column,
+                    const CoordinateProbe &probe) {
+    using Row = graph::AnnotatedDBG::row_index;
+    std::vector<std::pair<uint64_t, Row>> found;
+    uint64_t position = 0;
+    // as the coordinates were annotated and as queries map (canonical nodes on a canonical graph)
+    anno_graph.get_graph().map_to_nodes(probe.sequence, [&](auto node) {
+        if (node != graph::DeBruijnGraph::npos)
+            found.emplace_back(probe.first + position, graph::AnnotatedDBG::graph_to_anno_index(node));
+        ++position;
+    });
+    if (found.size() > 2)
+        found.erase(found.begin() + 1, found.end() - 1);
+    for (const auto &[coordinate, row] : found) {
+        const auto tuples = matrix.get_row_tuples(std::vector<Row> { row });
+        const bool held = std::any_of(tuples.at(0).begin(), tuples.at(0).end(), [&](const auto &t) {
+            return t.first == column && std::find(t.second.begin(), t.second.end(), coordinate)
+                                            != t.second.end();
+        });
+        if (!held)
+            return static_cast<int64_t>(coordinate);
+    }
+    return -1;
+}
+
 void annotate_data(std::shared_ptr<graph::DeBruijnGraph> graph,
                    const Config &config,
                    const std::vector<std::string> &files,
@@ -308,9 +348,15 @@ void annotate_data(std::shared_ptr<graph::DeBruijnGraph> graph,
         // Collect sequence headers and compute k-mer counts
         std::vector<std::vector<std::string>> headers(files.size());
         std::vector<std::vector<uint64_t>> num_kmers(files.size());
+        // with -a, the head of each file's first sequence and the tail of its last one, whose
+        // coordinates the annotation's column of the file must hold
+        const bool probe = !config.infbase_annotators.empty();
+        std::vector<CoordinateProbe> heads(files.size());
+        std::vector<CoordinateProbe> tails(files.size());
         #pragma omp parallel for num_threads(get_num_threads()) default(shared) schedule(dynamic)
         for (size_t i = 0; i < files.size(); ++i) {
             size_t last_record = 0;
+            uint64_t coordinate = 0;
             // the header of every record, those too short to have k-mers too: a record
             // without k-mers is not in the record mapping, but a repeat of its header is
             // refused all the same, so that a file is accepted or refused by its headers alone
@@ -360,6 +406,14 @@ void annotate_data(std::shared_ptr<graph::DeBruijnGraph> graph,
                         headers[i].push_back(labels[0]);
                         num_kmers[i].push_back(0);
                     }
+                    if (probe) {
+                        if (heads[i].sequence.empty())
+                            heads[i] = { sequence.substr(0, kProbeLength), coordinate };
+                        const size_t tail = std::min(sequence.size(), kProbeLength);
+                        tails[i] = { sequence.substr(sequence.size() - tail),
+                                     coordinate + (sequence.size() - tail) };
+                    }
+                    coordinate += sequence.size() - k + 1;
                     num_kmers[i].back() += sequence.size() - k + 1;
                     last_record = record;
                 }
@@ -382,7 +436,50 @@ void annotate_data(std::shared_ptr<graph::DeBruijnGraph> graph,
                 );
             }
         }
+        // each column's label, stated in the .seqs: a load compares them with the annotation's
+        // labels, so that files passed in another order are refused there. Without -a, the label
+        // --anno-filename gives the file the column was made from (its name as passed); with -a,
+        // the annotation's own, once each file is found to be its column: the column holds the
+        // coordinates of the file's first and last k-mers (a renamed column, or files at
+        // another path, then pass the load's check)
+        std::vector<std::string> column_labels(files.begin(), files.end());
+        if (probe) {
+            const std::string &anno_file = config.infbase_annotators.at(0);
+            const auto &annotation = anno_graph->get_annotator();
+            const auto *matrix
+                    = dynamic_cast<const annot::matrix::MultiIntMatrix *>(&annotation.get_matrix());
+            if (!matrix) {
+                logger->error("--index-header-coords with -a needs a coordinate annotation: '{}' "
+                              "has no k-mer coordinates", anno_file);
+                exit(1);
+            }
+            const auto &labels = annotation.get_label_encoder().get_labels();
+            if (labels.size() != files.size()) {
+                logger->error("The annotation '{}' has {} columns, and {} files were passed: pass "
+                              "every input file of the annotation in its column order (metagraph "
+                              "stats --print-col-names lists the columns)", anno_file,
+                              labels.size(), files.size());
+                exit(1);
+            }
+            for (size_t i = 0; i < files.size(); ++i) {
+                for (const CoordinateProbe *p : { &heads[i], &tails[i] }) {
+                    if (const int64_t lacking = check_probe(*anno_graph, *matrix, i, *p);
+                            lacking >= 0) {
+                        logger->error("The file '{}' is not column {} ('{}') of the annotation "
+                                      "'{}': the column lacks the file's k-mer at coordinate {}. "
+                                      "Pass the files in the annotation's column order (metagraph "
+                                      "stats --print-col-names lists the columns)", files[i], i,
+                                      labels[i], anno_file, lacking);
+                        exit(1);
+                    }
+                }
+            }
+            logger->trace("Each of the {} files is its column of the annotation '{}': its labels "
+                          "are stated in the record mapping", files.size(), anno_file);
+            column_labels = labels;
+        }
         annot::CoordToHeader headers_map(std::move(headers), std::move(num_kmers));
+        headers_map.set_column_labels(std::move(column_labels));
         auto fname = utils::make_suffix(annotator_filename, annot::CoordToHeader::kExtension);
         headers_map.serialize(fname);
         logger->trace("CoordToHeader mapping serialized to {}", fname);
@@ -605,7 +702,9 @@ int annotate_graph(Config *config) {
         }
         logger->trace("Parsing headers and computing coordinate offsets for {} files", files.size());
         logger->info("Note: It's essential that the files are passed in the order of the columns "
-                     "in the graph annotation (check with `metagraph stats --print-col-names ...`)");
+                     "in the graph annotation, under the names it labels them with (check with "
+                     "`metagraph stats --print-col-names ...`): the mapping states each file's "
+                     "name, and a load refuses a mapping whose names are not the annotation's");
         config->separately = false;
     }
 
@@ -664,9 +763,10 @@ int annotate_graph(Config *config) {
                      "(`<seq>/N:...` in TSV; JSON `kmers_in_target` for query, "
                      "`nt_length` for align), build the CoordToHeader mapping "
                      "once against the final merged annotation with all input "
-                     "FASTAs:\n"
+                     "FASTAs in its column order (-a checks each file against its "
+                     "column):\n"
                      "    metagraph annotate --anno-filename --index-header-coords "
-                     "-i {} -o {} <input_fastas>",
+                     "-i {} -a <final_annotation> -o {} <input_fastas>",
                      !config->infbase.empty() ? config->infbase : "<graph>",
                      !config->outfbase.empty() ? config->outfbase
                                                : "<final_anno_basename>");

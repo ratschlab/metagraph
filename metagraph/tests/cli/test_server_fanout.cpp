@@ -32,6 +32,7 @@
 #include "cli/traverse.hpp"
 #include "cli/traverse_attempts.hpp"
 #include "common/threads/threading.hpp"
+#include "common/unix_tools.hpp"
 #include "tests/source_path.hpp"
 
 
@@ -1366,6 +1367,102 @@ TEST(ServerFanout, RetentionThen404) {
     e->response(400, 20);
     EXPECT_EQ(404, forgetful.state("x").first);
     EXPECT_NE(std::string::npos, forgetful.retention_text().find("not kept"));
+}
+
+// whether this build's speed is what a wall-clock bound may assume: optimized (NDEBUG), and no
+// sanitizer (GCC's __SANITIZE_*__, Clang's __has_feature)
+#if defined(__SANITIZE_ADDRESS__) || defined(__SANITIZE_THREAD__)
+#define H4_SANITIZED_BUILD 1
+#elif defined(__has_feature)
+#if __has_feature(address_sanitizer) || __has_feature(thread_sanitizer) \
+        || __has_feature(memory_sanitizer) || __has_feature(undefined_behavior_sanitizer)
+#define H4_SANITIZED_BUILD 1
+#endif
+#endif
+#if defined(NDEBUG) && !defined(H4_SANITIZED_BUILD)
+constexpr bool kTimesBounded = true;
+#else
+constexpr bool kTimesBounded = false;
+#endif
+
+// The retention at its defaults (3,600 s, at most 10,000): the count bound drops the oldest
+// first, an id that ran again after it was dropped is its newer entry, and a burst expires every
+// retained entry at once. Each expiry is one map lookup of the record's own entry, O(log n)
+// comparisons of ids (GPT review 5, finding 15: it scanned every later record for the id,
+// 5 * 10^7 comparisons of the ids for a burst of 10,000, under the lock of every admission and
+// poll): the ids are long and differ at their end only, so that the scan's comparisons, had it
+// come back, would take seconds. Its times are bounded in an optimized build without a
+// sanitizer only (a Debug or sanitizer build is slower by a factor no bound states)
+TEST(ServerFanout, RetentionAtTheDefaultCount) {
+    auto t = std::make_shared<std::atomic<int64_t>>(0);
+    RequestSettings rs;
+    ASSERT_EQ(3600u, rs.retention_s);
+    ASSERT_EQ(10'000u, rs.retention_count);
+    rs.server_instance = "inst";
+    rs.clocks.steady = [t]() {
+        return std::chrono::steady_clock::time_point(std::chrono::milliseconds(t->load()));
+    };
+    RequestRegistry registry(rs);
+    const std::string prefix(1000, 'r');
+    auto id = [&](size_t i) { return prefix + std::to_string(i); };
+    auto start = [&](size_t i) {
+        auto e = std::make_shared<RequestEntry>(id(i), "/pattern", "inst",
+                                                std::chrono::system_clock::now(),
+                                                refs_of({ kPairs[0] }), rs.clocks);
+        EXPECT_FALSE(registry.start(e)) << i;
+        e->pair_running(0);
+        return e;
+    };
+    auto end = [&](const std::shared_ptr<RequestEntry> &e) {
+        e->pair_outcome(0, "answered");
+        e->pair_ended(0, 1, 0.5);
+        e->response(200, 10);
+        ASSERT_TRUE(e->ended());
+        *t += 1;
+    };
+    const size_t n = rs.retention_count;
+    Timer timer;
+    for (size_t i = 0; i < n; ++i) {
+        end(start(i));
+    }
+    EXPECT_EQ(n, registry.size());
+    EXPECT_EQ(200, registry.state(id(0)).first);
+    // by count: 2,000 more drop the 2,000 oldest, one each
+    for (size_t i = n; i < n + 2000; ++i) {
+        end(start(i));
+    }
+    EXPECT_EQ(n, registry.size());
+    EXPECT_EQ(404, registry.state(id(1999)).first);
+    EXPECT_EQ(200, registry.state(id(2000)).first);
+    EXPECT_EQ(200, registry.state(id(n + 1999)).first);
+    // id 0 runs again: its newer entry is held while it runs and once it ended, while the
+    // oldest retained one (2000) is dropped for it
+    auto again = start(0);
+    EXPECT_EQ(n + 1, registry.size());
+    end(again);
+    EXPECT_EQ(n, registry.size());
+    EXPECT_EQ(200, registry.state(id(0)).first);
+    EXPECT_EQ(404, registry.state(id(2000)).first);
+    const double fill_s = timer.elapsed();
+    // a burst: every record but the last expires at once (the newer id 0 ended last, 1 ms
+    // after the one before it)
+    *t += 3'600'000 - 2;
+    timer.reset();
+    EXPECT_EQ(1u, registry.size());
+    const double burst_s = timer.elapsed();
+    EXPECT_EQ(200, registry.state(id(0)).first);
+    EXPECT_EQ(404, registry.state(id(n + 1999)).first);
+    *t += 1;
+    EXPECT_EQ(404, registry.state(id(0)).first);
+    EXPECT_EQ(0u, registry.size());
+    // one map lookup per expiry: the scan took about 5 * 10^7 comparisons of 1,000-byte ids
+    // here (seconds in a Release build); the bounds leave the lookups a factor of 20
+    if (kTimesBounded) {
+        EXPECT_LT(burst_s, 1.0);
+        EXPECT_LT(fill_s, 10.0);
+    }
+    RecordProperty("fill_ms", std::to_string(fill_s * 1000));
+    RecordProperty("burst_ms", std::to_string(burst_s * 1000));
 }
 
 // A request refused 400 after its admission (only its work could find the fault) frees its id:

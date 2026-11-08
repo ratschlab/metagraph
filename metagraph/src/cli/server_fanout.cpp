@@ -443,21 +443,18 @@ void RequestRegistry::Shared::expire_locked() {
     const auto keep = std::chrono::seconds(settings.retention_s);
     auto expired = [&](const auto &queue) {
         return !queue.empty()
-            && (queue.size() > settings.retention_count || t - queue.front().first >= keep);
+            && (queue.size() > settings.retention_count || t - queue.front().at >= keep);
     };
     while (expired(ended)) {
-        const std::string id = ended.front().second;
+        const Ended record = std::move(ended.front());
         ended.pop_front();
-        auto it = entries.find(id);
-        // (an id that ran again after it was dropped is a newer entry, still held)
-        if (it != entries.end() && it->second->ended()) {
-            bool newer = false;
-            for (const auto &[_, later] : ended) {
-                newer |= later == id;
-            }
-            if (!newer)
-                entries.erase(it);
-        }
+        // the entry this record was made for, if the map still holds it: an id that ran again
+        // after it was dropped is a newer entry, held by its own record (one map lookup,
+        // O(log n) comparisons of ids, where a scan of every later record for the id took
+        // O(retained) under the lock)
+        auto it = entries.find(record.id);
+        if (it != entries.end() && it->second == record.entry.lock() && it->second->ended())
+            entries.erase(it);
     }
 }
 
@@ -524,12 +521,14 @@ std::optional<Json::Value> RequestRegistry::start(
     // the retention starts when the request ended (its response recorded, its workers ended);
     // the registry is held weakly, so that an entry kept by a late worker does not keep it
     std::weak_ptr<Shared> weak = shared_;
-    entry->set_on_ended([weak, id]() {
+    // the entry held weakly too: its own callback must not keep it
+    std::weak_ptr<const RequestEntry> self = entry;
+    entry->set_on_ended([weak, id, self]() {
         auto shared = weak.lock();
         if (!shared)
             return;
         std::lock_guard<std::mutex> lock(shared->mutex);
-        shared->ended.emplace_back(shared->now(), id);
+        shared->ended.push_back({ shared->now(), id, self });
         shared->expire_locked();
     });
     return std::nullopt;

@@ -400,14 +400,20 @@ SCHEMA = {
     'graph_summary': ['columns_disjoint', 'shared_columns', 'pairs',
                       # whether every sequence header names one record (E22,
                       # SPEC-multigraph-envelope.md section 9; its members: HEADERS_UNIQUE)
-                      'headers_unique'],
+                      'headers_unique',
+                      # whether no header equals a column name (H4, section 9.1; its
+                      # members: LABELS_DISJOINT)
+                      'labels_disjoint'],
     'graph_summary_pair': ['graph', 'graph_path', 'annotation_path', 'index_ns', 'index_fp', 'k',
                            'graph_mode', 'available', 'unavailable_reason', 'mask', 'counting',
                            'traversal',
                            # the pair's capability profile (E17, SPEC-multigraph-envelope.md
                            # section 8.1), also a single-graph server's pair_summary
                            'index_meta_fp', 'alphabet', 'graph_representation',
-                           'annotation_form', 'decode_charged', 'support_fp'],
+                           'annotation_form', 'decode_charged', 'support_fp',
+                           # what the load verified of the .seqs's column order (H4,
+                           # SPEC-multigraph-envelope.md section 9.1)
+                           'seqs_order'],
     'graph_summary_traversal': ['regime', 'num_labels', 'has_coordinates',
                                 'has_coord_to_header', 'supports_trace', 'counts'],
     # the block of GET /traverse/capabilities (SPEC §23): the gate fields and the route of the
@@ -606,6 +612,14 @@ def support_fp(pair):
     return '%016x' % h
 HEADERS_UNIQUE_EXAMPLE = ['header', 'occurrences', 'pairs']
 HEADERS_UNIQUE_OCCURRENCE = ['graph', 'graph_path', 'annotation_path', 'column']
+# GET /capabilities' labels_disjoint (H4, SPEC-multigraph-envelope.md section 9.1): the
+# certificate's members as headers_unique's, an example, a pair with the header's record (its
+# column) and a pair with a column of that name
+LABELS_DISJOINT = HEADERS_UNIQUE
+LABELS_DISJOINT_EXAMPLE = ['header', 'records', 'columns']
+LABELS_DISJOINT_RECORD = ['graph', 'graph_path', 'annotation_path', 'column']
+LABELS_DISJOINT_COLUMN = ['graph', 'graph_path', 'annotation_path']
+SEQS_ORDERS = ('verified', 'count_only', None)
 
 
 def spec_tables(text):
@@ -3794,6 +3808,40 @@ class TestPatternFixtures(unittest.TestCase):
                                      for t in ('graph', 'graph_path', 'annotation_path')),
                                  f'{ep}.pairs[{j}]', 'the pair tags, null on one graph')
 
+            def labels_disjoint(h, path):
+                # SPEC-multigraph-envelope.md section 9.1: true, false or null (a pair without
+                # its .seqs), the names that are a header and a column counted, at most 10
+                # examples, the byte-smallest names in byte order, each listing at most 10 pairs
+                # with the header's record and at most 10 with a column of the name; a
+                # single-graph server's pairs carry null tags
+                check.keys(h, LABELS_DISJOINT, path)
+                check.ok(h['value'] in (True, False, None), path + '.value')
+                check.ok(is_int(h['collisions']) and h['collisions'] >= 0,
+                         path + '.collisions')
+                check.ok(isinstance(h['examples'], list)
+                         and len(h['examples']) == min(h['collisions'], 10),
+                         path + '.examples', 'min(collisions, 10) examples')
+                check.ok(h['value'] is not True or h['collisions'] == 0, path,
+                         'true only without a clash')
+                check.ok(h['value'] is not False or h['collisions'] > 0, path,
+                         'false only with a clash')
+                names = [e.get('header') for e in h['examples']]
+                check.ok(all(isinstance(x, str) for x in names)
+                         and [x.encode() for x in names] == sorted(x.encode() for x in names),
+                         path + '.examples', 'the names in byte order')
+                for i, e in enumerate(h['examples']):
+                    ep = f'{path}.examples[{i}]'
+                    check.keys(e, LABELS_DISJOINT_EXAMPLE, ep)
+                    check.ok(1 <= len(e['records']) <= 10 and 1 <= len(e['columns']) <= 10,
+                             ep, 'a record and a column, at most 10 pairs each')
+                    for kind, members in (('records', LABELS_DISJOINT_RECORD),
+                                          ('columns', LABELS_DISJOINT_COLUMN)):
+                        for j, o in enumerate(e[kind]):
+                            check.keys(o, members, f'{ep}.{kind}[{j}]')
+                            check.ok(all((o[t] is None) is (not multi)
+                                         for t in ('graph', 'graph_path', 'annotation_path')),
+                                     f'{ep}.{kind}[{j}]', 'the pair tags, null on one graph')
+
             def profile(p, path):
                 # SPEC-multigraph-envelope.md section 8.1: a pair's profile, its tags null on a
                 # single-graph server, support_fp recomputed from the entry alone
@@ -3817,6 +3865,11 @@ class TestPatternFixtures(unittest.TestCase):
                          path + '.traversal.counts', 'presence_only on a count form, else null')
                 check.ok(p['support_fp'] == support_fp(p), path + '.support_fp',
                          'recomputed from the entry')
+                check.ok(p['seqs_order'] in SEQS_ORDERS
+                         and (p['seqs_order'] is None)
+                         is (not p['traversal']['has_coord_to_header']),
+                         path + '.seqs_order',
+                         '"verified" or "count_only" with a .seqs, null without')
 
             if not multi:
                 check.ok(doc['graph_summary'] is None, 'graph_summary', 'null on one graph')
@@ -3825,6 +3878,11 @@ class TestPatternFixtures(unittest.TestCase):
                 # a loaded single-graph server states it at the top level
                 check.ok('headers_unique' in doc, 'headers_unique', 'at the top level')
                 headers_unique(doc['headers_unique'], 'headers_unique')
+                check.ok('labels_disjoint' in doc, 'labels_disjoint', 'at the top level')
+                labels_disjoint(doc['labels_disjoint'], 'labels_disjoint')
+                check.ok((doc['labels_disjoint']['value'] is None)
+                         is (doc['headers_unique']['value'] is None), 'labels_disjoint',
+                         'null exactly where headers_unique is')
                 # and its pair's profile (E17)
                 check.ok('pair_summary' in doc, 'pair_summary', 'at the top level')
                 profile(doc['pair_summary'], 'pair_summary')
@@ -3836,6 +3894,8 @@ class TestPatternFixtures(unittest.TestCase):
                 column_labels(doc['column_labels'], 'column_labels')
                 return
             check.ok('headers_unique' not in doc, 'headers_unique',
+                     'in graph_summary only on a multi-graph server')
+            check.ok('labels_disjoint' not in doc, 'labels_disjoint',
                      'in graph_summary only on a multi-graph server')
             check.ok('pair_summary' not in doc, 'pair_summary',
                      'in graph_summary only on a multi-graph server')
@@ -3855,6 +3915,10 @@ class TestPatternFixtures(unittest.TestCase):
             summary = doc['graph_summary']
             check.keys(summary, SCHEMA['graph_summary'], 'graph_summary')
             headers_unique(summary['headers_unique'], 'graph_summary.headers_unique')
+            labels_disjoint(summary['labels_disjoint'], 'graph_summary.labels_disjoint')
+            check.ok((summary['labels_disjoint']['value'] is None)
+                     is (summary['headers_unique']['value'] is None),
+                     'graph_summary.labels_disjoint', 'null exactly where headers_unique is')
             check.ok(isinstance(summary['columns_disjoint'], bool)
                      and is_int(summary['shared_columns'])
                      and summary['columns_disjoint'] is (summary['shared_columns'] == 0),
@@ -4421,6 +4485,78 @@ class TestPatternFixtures(unittest.TestCase):
             (repeated, occurrence(i=1, annotation_path='/a.annodbg'), 'null on one graph'),
             (repeated, occurrence(drop='column'), 'fields'),
             (repeated, occurrence(column=None), r'\.column'),
+        ]
+        for name, mutate, says in cases:
+            with self.subTest(fixture=name, says=says):
+                run(name)
+                with self.assertRaisesRegex(AssertionError, says):
+                    run(name, mutate)
+
+    def test_labels_disjoint_refuses_what_h4_never_answers(self):
+        """SPEC-multigraph-envelope.md section 9.1: GET /capabilities' labels_disjoint, placed as
+        headers_unique, and each pair's seqs_order; each rule refuses a document that breaks it
+        -- the member missing at a single-graph server's top level or present at a multi-graph
+        server's, a value against its collisions or against headers_unique's null, an example
+        without a record or a column or with a pair tag on a single-graph server, and a
+        seqs_order outside its values or stated without a .seqs (support_fp recomputed, so that
+        the rule itself refuses)."""
+        def run(name, mutate=None):
+            doc = copy.deepcopy(self.bodies[name][1])
+            if mutate:
+                mutate(doc)
+            self.capabilities_document(Checker(Raising(), name), self.fixtures[name], doc)
+
+        def member(**fields):
+            def m(doc):
+                doc['labels_disjoint'].update(fields)
+            return m
+
+        untagged = {'graph': None, 'graph_path': None, 'annotation_path': None}
+
+        def clash(mutate_example=None):
+            # a single-graph server whose header e1.fa is its own column's name
+            def m(doc):
+                example = {'header': 'e1.fa', 'records': [dict(untagged, column='e2.fa')],
+                           'columns': [dict(untagged)]}
+                if mutate_example:
+                    mutate_example(example)
+                doc['labels_disjoint'] = {'value': False, 'collisions': 1,
+                                          'examples': [example]}
+            return m
+
+        def order(value):
+            def m(doc):
+                p = doc['pair_summary']
+                p['seqs_order'] = value
+                p['support_fp'] = support_fp(p)
+            return m
+
+        repeated = 'capabilities_repeated_headers'
+        # a clash is a document the rules accept
+        run(repeated, clash())
+        cases = [
+            ('capabilities', lambda d: d.pop('labels_disjoint'), 'at the top level'),
+            ('capabilities', member(value=False), 'false only with a clash'),
+            ('capabilities', member(value='true'), r'labels_disjoint\.value'),
+            ('capabilities', member(collisions=-1), r'labels_disjoint\.collisions'),
+            ('capabilities', lambda d: d['labels_disjoint'].pop('examples'), 'fields'),
+            ('capabilities_representation_unsupported', member(value=True),
+             'null exactly where headers_unique is'),
+            ('capabilities_multi_graph',
+             lambda d: d.update(labels_disjoint=d['graph_summary']['labels_disjoint']),
+             'in graph_summary only'),
+            ('capabilities_multi_graph', lambda d: d['graph_summary'].pop('labels_disjoint'),
+             'fields'),
+            (repeated, clash(lambda e: e.update(records=[])), 'a record and a column'),
+            (repeated, clash(lambda e: e.update(columns=[])), 'a record and a column'),
+            (repeated, clash(lambda e: e['records'][0].update(graph='x')), 'null on one graph'),
+            (repeated, clash(lambda e: e['columns'][0].update(column='e1.fa')), 'fields'),
+            (repeated, clash(lambda e: e.pop('records')), 'fields'),
+            (repeated, clash(lambda e: e.update(header=7)), 'byte order'),
+            ('capabilities', order('maybe'), r'pair_summary\.seqs_order'),
+            ('capabilities', order(None), r'pair_summary\.seqs_order'),
+            ('capabilities_representation_unsupported', order('verified'),
+             r'pair_summary\.seqs_order'),
         ]
         for name, mutate, says in cases:
             with self.subTest(fixture=name, says=says):
