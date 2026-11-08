@@ -1,6 +1,7 @@
 #include "walker.hpp"
 
 #include <algorithm>
+#include <cmath>
 #include <cctype>
 
 #include <tsl/hopscotch_map.h>
@@ -477,8 +478,11 @@ void Walker::derive_seed_labels(const std::vector<node_index> &keys,
     };
     if (kind == LabelKind::HEADER) {
         // A derived list must be resubmittable verbatim as an explicit one, and
-        // resolve_label refuses a header that also names a column or another record
-        for (const Key &key : live) {
+        // resolve_label refuses a header that also names a column or another record. Only
+        // the labels kept under max_seed_labels are returned, so only they are checked.
+        const size_t kept = std::min(live.size(), strategy_.max_seed_labels);
+        for (size_t i = 0; i < kept; ++i) {
+            const Key &key = live[i];
             const std::string &name = name_of(key);
             const bool column_too = oracle_.find_column(name).has_value();
             if (column_too || oracle_.coord_to_header()->is_repeated_header(name)) {
@@ -1069,8 +1073,10 @@ void Walker::run_level(ArmState &arm, uint64_t depth) {
 
 void Walker::finalize(ArmState &arm) {
     ArmResult &res = arm.result;
-    // every walk up to the first unexpanded head's depth is present
-    res.complete_to_bp = std::min(arm.boundary, strategy_.max_extension_bp);
+    // every walk up to the first unexpanded head's depth is present; an arm not requested
+    // has no walk
+    if (res.requested)
+        res.complete_to_bp = std::min(arm.boundary, strategy_.max_extension_bp);
     for (size_t s = 0; s < res.segments.size(); ++s) {
         Segment &seg = res.segments[s];
         seg.sequence = std::move(arm.walk_seq[s]);
@@ -1097,6 +1103,12 @@ void Walker::finalize(ArmState &arm) {
 SeedResult Walker::run() {
     if (!strategy_.max_seed_labels)
         throw std::invalid_argument("max_seed_labels must be positive");
+    if (!std::isfinite(strategy_.time_budget_ms))
+        throw std::invalid_argument("time_budget_ms must be finite");
+    if (!strategy_.max_steps || !strategy_.max_live_paths || !strategy_.max_paths
+            || !strategy_.max_extension_bp) {
+        throw std::invalid_argument("The step, path and extension caps must be positive");
+    }
 
     validate_seed();
     query_ = std::make_unique<LabelQuery>(oracle_, result_.label_dict);
