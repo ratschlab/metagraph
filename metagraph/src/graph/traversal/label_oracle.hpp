@@ -116,7 +116,8 @@ class LabelOracle {
  * Batched membership of a fixed set of permitted labels at annotation keys. Column
  * labels are read from whole rows; header labels (one sequence of a column) from tuple
  * rows, a coordinate counting for a label when it falls into that label's sequence.
- * Results are cached per key, up to |max_cache_size| keys, then the cache is cleared.
+ * Results are cached per key, up to |max_cache_size| keys, then the cache is cleared. A
+ * batch with more keys than that is answered without caching it.
  */
 class LabelQuery {
   public:
@@ -143,7 +144,8 @@ class LabelQuery {
         LabelId label;
     };
 
-    void fetch_uncached(const std::vector<node_index> &keys);
+    void read_hits(const std::vector<node_index> &keys,
+                   tsl::hopscotch_map<node_index, NodeHits> *out) const;
     void hits_from_row(const annot::matrix::BinaryMatrix::SetBitPositions &row,
                        NodeHits *hits) const;
     void hits_from_tuples(const annot::matrix::MultiIntMatrix::RowTuples &row,
