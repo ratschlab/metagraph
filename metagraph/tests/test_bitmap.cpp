@@ -1039,10 +1039,12 @@ TEST(BitmapVector, MoveMappedStorageBecomesWritable) {
         sdsl::mmap_ifstream in(filename, std::ios::binary);
         sdsl::bit_vector mapped;
         mapped.load(in);
+        ASSERT_TRUE(mapped.is_mapped());
         // Keep a separate view alive to check that edits do not reach the file.
         sdsl::mmap_ifstream check_in(filename, std::ios::binary);
         sdsl::bit_vector view;
         view.load(check_in);
+        ASSERT_TRUE(view.is_mapped());
         std::unique_ptr<bitmap_dyn> editable;
         if (adaptive)
             editable = std::make_unique<bitmap_adaptive>(std::move(mapped));
