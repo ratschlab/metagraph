@@ -4805,7 +4805,9 @@ TEST(WalkerSeedPhase, SetupPiecesCoverTheSeedPhase) {
             traverse_seed(*oracle, seed, Strategy(), LabelChangeCost::forbid());
             ADD_FAILURE() << "a duplicate seed label was accepted";
         } catch (const std::invalid_argument &e) {
-            EXPECT_EQ("Duplicate seed label '" + f.names[0] + "'", std::string(e.what()));
+            // (a name longer than 1 KiB is quoted clipped, H1)
+            EXPECT_EQ("Duplicate seed label '" + ::utils::clip_for_message(f.names[0]) + "'",
+                      std::string(e.what()));
         }
         EXPECT_EQ(n / 1000., oracle->counters().seed_phase_seconds);
         EXPECT_EQ("setup", std::string(oracle->pacer().longest.kind));
@@ -4836,14 +4838,16 @@ TEST(WalkerSeedPhase, DuplicateChecksRefuseAsBefore) {
         return std::string();
     };
     const auto &h = f.names;
-    EXPECT_EQ("Duplicate seed label '" + h[0] + "'", refusal({ h[0], h[1], h[0] }));
-    EXPECT_EQ("Duplicate seed label '" + h[1] + "'", refusal({ h[0], h[1], h[1], h[0] }));
+    // (the names are longer than 1 KiB: a message quotes them clipped, H1)
+    auto q = [](const std::string &name) { return ::utils::clip_for_message(name); };
+    EXPECT_EQ("Duplicate seed label '" + q(h[0]) + "'", refusal({ h[0], h[1], h[0] }));
+    EXPECT_EQ("Duplicate seed label '" + q(h[1]) + "'", refusal({ h[0], h[1], h[1], h[0] }));
     EXPECT_EQ("Label not found in the annotation: 'missing'",
               refusal({ h[0], "missing", h[0] }));
-    EXPECT_EQ("Duplicate seed label '" + h[0] + "'", refusal({ h[0], h[0], "missing" }));
-    EXPECT_EQ("Extra label '" + h[1] + "' duplicates a seed label",
+    EXPECT_EQ("Duplicate seed label '" + q(h[0]) + "'", refusal({ h[0], h[0], "missing" }));
+    EXPECT_EQ("Extra label '" + q(h[1]) + "' duplicates a seed label",
               refusal({ h[0], h[1] }, { h[1] }));
-    EXPECT_EQ("Extra label '" + h[2] + "' duplicates a seed label",
+    EXPECT_EQ("Extra label '" + q(h[2]) + "' duplicates a seed label",
               refusal({ h[0] }, { h[2], h[3], h[2] }));
     EXPECT_EQ("Label not found in the annotation: 'missing'",
               refusal({ h[0] }, { "missing", h[0] }));

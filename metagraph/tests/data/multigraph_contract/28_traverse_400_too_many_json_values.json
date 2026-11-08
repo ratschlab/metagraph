@@ -1,0 +1,113 @@
+{
+ "route": "POST /traverse",
+ "status": 400,
+ "note": "H1 (train 3; lane H1): the body of /traverse, /resolve, /pattern and /traverse/cancel holds at most --max-request-json-values JSON values (262,144 by default; 64 on the recording server so that the sample stays short): the root, each array element and each member's value, counted before the body is parsed. This request (sample 05's with an attempt_id and 70 explicit labels) holds more: 400 {error, code: \"too_many_json_values\", max_request_json_values}, written in this order, the same on the four routes, single-graph and multi-graph servers alike (never in an envelope). Nothing of it was parsed or registered: no usage, GET /traverse/attempt/svc-trv-h1-28 and GET /requests/svc-trv-h1-28 answered 404, and the id runs once the request is within the count. /search and /align have no count. A real run.",
+ "request": {
+  "graph": "bact_other",
+  "attempt_id": "svc-trv-h1-28",
+  "seeds": [
+   {
+    "labels": [
+     "acc1",
+     "label00",
+     "label01",
+     "label02",
+     "label03",
+     "label04",
+     "label05",
+     "label06",
+     "label07",
+     "label08",
+     "label09",
+     "label10",
+     "label11",
+     "label12",
+     "label13",
+     "label14",
+     "label15",
+     "label16",
+     "label17",
+     "label18",
+     "label19",
+     "label20",
+     "label21",
+     "label22",
+     "label23",
+     "label24",
+     "label25",
+     "label26",
+     "label27",
+     "label28",
+     "label29",
+     "label30",
+     "label31",
+     "label32",
+     "label33",
+     "label34",
+     "label35",
+     "label36",
+     "label37",
+     "label38",
+     "label39",
+     "label40",
+     "label41",
+     "label42",
+     "label43",
+     "label44",
+     "label45",
+     "label46",
+     "label47",
+     "label48",
+     "label49",
+     "label50",
+     "label51",
+     "label52",
+     "label53",
+     "label54",
+     "label55",
+     "label56",
+     "label57",
+     "label58",
+     "label59",
+     "label60",
+     "label61",
+     "label62",
+     "label63",
+     "label64",
+     "label65",
+     "label66",
+     "label67",
+     "label68"
+    ],
+    "sequence": "TATGTACTGATTGCTTAAAGGAATATCATCTACGCTGGGATAGATGTTCAACATCGCGCAAAAGTGATGTCGATCGCGCAGTTATGCCACGCCGCATTCG"
+   }
+  ],
+  "strategy": {
+   "bounds": {
+    "max_extension_bp": 100,
+    "max_memory_mb": 512,
+    "max_output_bp": 500000,
+    "max_work_units": 100000000,
+    "time_budget_ms": 70000
+   },
+   "branching": {
+    "max_label_branches": 2
+   },
+   "direction": "both",
+   "exhaustive": false,
+   "labels": {
+    "mode": "constrain"
+   },
+   "output": {
+    "detail": "full",
+    "timing": true
+   }
+  },
+  "not_after_ms": 1794137469123
+ },
+ "body": {
+  "error": "the request body holds more than 64 JSON values (--max-request-json-values): it was not parsed and nothing of it ran; send fewer values (split the request)",
+  "code": "too_many_json_values",
+  "max_request_json_values": 64
+ }
+}

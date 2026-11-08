@@ -17,6 +17,7 @@
 #include <optional>
 #include <set>
 #include <sstream>
+#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -25,6 +26,7 @@
 #include <json/json.h>
 
 #include "common/threads/thread_usage.hpp"
+#include "common/utils/string_utils.hpp"
 
 
 namespace mtg {
@@ -48,6 +50,60 @@ inline std::optional<uint64_t> non_negative_integer(const Json::Value &v) {
 constexpr int kMaxBodyNesting = 1000;
 
 /**
+ * A body with more JSON values than the server reads (--max-request-json-values; GET
+ * /capabilities states it as request_intake.max_request_json_values): thrown by
+ * parse_strict_json before the text is parsed, so that jsoncpp never builds the tree of such a
+ * body (about 100 bytes and more per value, also for a body refused afterwards). Each route
+ * answers it alike (400 too_many_json_values, server_checks.hpp); the CLI, which sets no cap,
+ * never throws it.
+ */
+class TooManyJsonValues : public std::invalid_argument {
+  public:
+    explicit TooManyJsonValues(uint64_t max_values)
+          : std::invalid_argument("the request body holds more than "
+                                  + std::to_string(max_values)
+                                  + " JSON values (--max-request-json-values): it was not "
+                                    "parsed and nothing of it ran; send fewer values (split "
+                                    "the request)"),
+            max_values_(max_values) {}
+    uint64_t max_values() const { return max_values_; }
+
+  private:
+    uint64_t max_values_;
+};
+
+/**
+ * jsoncpp's message of a text it refused, its quotes of the client's text clipped as every
+ * error text clips a client's string (clip_for_message: whole up to 1,024 bytes of its own,
+ * else its first 1,024 bytes and "... (N bytes)"). jsoncpp 1.9.3 quotes in two messages only:
+ * "Duplicate key: '<name>'" (the name decoded, its closing quote the message's last) and
+ * "'<token>' is not a number." (a raw number token, which holds no quote); it stops at the
+ * first fault, so a message holds one of them at most
+ */
+inline std::string clip_reader_quotes(std::string errors) {
+    auto clip = [&](size_t from, size_t to) {
+        if (to > from && to - from > ::utils::kMessageQuoteBytes) {
+            errors = errors.substr(0, from)
+                    + ::utils::clip_for_message(std::string_view(errors).substr(from, to - from))
+                    + errors.substr(to);
+        }
+    };
+    static const std::string kDuplicate = "Duplicate key: '";
+    if (const size_t at = errors.find(kDuplicate); at != std::string::npos) {
+        const size_t to = errors.rfind('\'');
+        if (to != std::string::npos)
+            clip(at + kDuplicate.size(), to);
+    }
+    static const std::string kNotNumber = "' is not a number.";
+    if (const size_t to = errors.rfind(kNotNumber); to != std::string::npos && to > 0) {
+        const size_t open = errors.rfind('\'', to - 1);
+        if (open != std::string::npos)
+            clip(open + 1, to);
+    }
+    return errors;
+}
+
+/**
  * A request body as one RFC 8259 JSON text whose member names are unique: no comment, no
  * trailing comma, nothing after the value, no duplicated member name (jsoncpp would keep the
  * last value without a word: an id or a budget given twice would be replaced silently), at most
@@ -56,23 +112,64 @@ constexpr int kMaxBodyNesting = 1000;
  * not an object, which each route refuses in its own order. The reader of /pattern, /resolve,
  * /traverse and /traverse/cancel and of the pattern and traverse CLIs; /search and /align keep
  * theirs (parse_json_string).
+ *
+ * |max_values| (0: unlimited): the most JSON values the text may hold — the root, each array
+ * element and each member's value (a member's name is none; an empty array or object holds
+ * none) —, counted in the scan below before anything is parsed: one more throws
+ * TooManyJsonValues at the value that passes it. Exact for every JSON text; a text that is
+ * not JSON may be refused by either check. The scan refuses at the first fault it meets: a
+ * comment, a raw control character inside a string (RFC 8259 asks it escaped), or the value
+ * past the count.
  */
 template <class Refusal>
-Json::Value parse_strict_json(std::string_view content, const std::string &prefix) {
+Json::Value parse_strict_json(std::string_view content, const std::string &prefix,
+                              uint64_t max_values = 0) {
     // jsoncpp skips a comment before an object's member name whatever allowComments says: a
-    // '/' outside a string is no JSON at all, so the text is refused before it is parsed
+    // '/' outside a string is no JSON at all, so the text is refused before it is parsed.
+    // The same scan counts the values: one per ',' outside a string (the next element or
+    // member) and one per '[' or '{' that does not close at once (its first), the root
+    // counted before
+    uint64_t values = 1;
+    auto count_value = [&]() {
+        if (++values > max_values && max_values)
+            throw TooManyJsonValues(max_values);
+    };
     bool in_string = false;
+    // an array or object was just opened: its first value is counted at the next character
+    // that is not whitespace, unless that character closes it
+    bool opened = false;
     for (size_t i = 0; i < content.size(); ++i) {
+        const char c = content[i];
         if (in_string) {
-            if (content[i] == '\\')
+            if (c == '\\') {
                 ++i;
-            else if (content[i] == '"')
+            } else if (c == '"') {
                 in_string = false;
-        } else if (content[i] == '"') {
+            } else if (static_cast<unsigned char>(c) < 0x20) {
+                // RFC 8259 §7: a control character inside a string is escaped. jsoncpp keeps a
+                // raw one, and an answer quoting the string writes it as \u00XX: 6 bytes for 1
+                static constexpr char kHex[] = "0123456789abcdef";
+                const std::string hex { kHex[(c >> 4) & 0xF], kHex[c & 0xF] };
+                throw Refusal()(prefix + "a control character (byte 0x" + hex
+                                + ") inside a string at byte " + std::to_string(i)
+                                + ": RFC 8259 requires it escaped (\\u00" + hex + ")");
+            }
+            continue;
+        }
+        if (c == ' ' || c == '\t' || c == '\n' || c == '\r')
+            continue;
+        if (opened && c != ']' && c != '}')
+            count_value();
+        opened = false;
+        if (c == '"') {
             in_string = true;
-        } else if (content[i] == '/') {
+        } else if (c == '/') {
             throw Refusal()(prefix + "a comment (or a '/' outside a string) at byte "
                             + std::to_string(i));
+        } else if (c == '[' || c == '{') {
+            opened = true;
+        } else if (c == ',') {
+            count_value();
         }
     }
     Json::CharReaderBuilder builder;
@@ -94,7 +191,7 @@ Json::Value parse_strict_json(std::string_view content, const std::string &prefi
                         + " nested arrays and objects)");
     }
     if (!parsed)
-        throw Refusal()(prefix + errors);
+        throw Refusal()(prefix + clip_reader_quotes(std::move(errors)));
     return json;
 }
 
@@ -129,7 +226,7 @@ class StrictObject {
     void finish() const {
         for (const std::string &name : v_.getMemberNames()) {
             if (!seen_.count(name))
-                refuse(path_ + ": unknown field '" + name + "'");
+                refuse(path_ + ": unknown field '" + ::utils::clip_for_message(name) + "'");
         }
     }
 

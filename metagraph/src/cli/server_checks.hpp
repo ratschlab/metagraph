@@ -33,12 +33,19 @@ class HttpError : public std::runtime_error {
     HttpError(int status, Json::Value body)
           : std::runtime_error(body.get("error", "").asString()), status_(status),
             body_(std::move(body)) {}
+    // |text|: the body as it is written, |body| serialized with an order of its own (the
+    // intake refusals' error_first_json_text); json_text(|body|) otherwise
+    HttpError(int status, Json::Value body, std::string text)
+          : HttpError(status, std::move(body)) { text_ = std::move(text); }
     int status() const { return status_; }
     const Json::Value& body() const { return body_; }
+    // the body's text when it has its own order, else empty
+    const std::string& text() const { return text_; }
 
   private:
     int status_;
     Json::Value body_;
+    std::string text_;
 };
 
 // The client of the request is gone: nothing is written, and the connection is closed
@@ -494,9 +501,60 @@ Json::Value max_graphs_without_selection_json(bool multi_graph, uint64_t thresho
 /**
  * GET /capabilities' `max_request_body_mb`: the largest request body the server reads, in MiB
  * (--max-request-body-mb); null when unlimited (the flag's 0, its default). A longer body is
- * dropped by the HTTP library: the connection is closed without a response.
+ * refused 413 body_too_large (body_too_large_json) before it is read.
  */
 Json::Value max_request_body_mb_json(uint64_t mb);
+
+/**
+ * A Content-Length field's value as a byte count (RFC 9110 §8.6): decimal digits, leading zeros
+ * allowed, below 2^64, the optional whitespace around it (SP, HTAB) trimmed; a comma-separated
+ * list of values that are all the same count (a field repeated by a proxy) is that count. None
+ * for anything else: no digits, a sign ("-1"), other characters ("3145728junk"), 2^64 and more,
+ * a list of differing values (refuse_body_too_large then closes the connection without an
+ * answer)
+ */
+std::optional<uint64_t> content_length_value(const std::string &text);
+
+// The routes whose body is read by parse_strict_json and counted against
+// --max-request-json-values (request_intake.json_values_routes), sorted
+constexpr const char *kJsonValuesRoutes[] = { "/pattern", "/resolve", "/traverse",
+                                              "/traverse/cancel" };
+
+/**
+ * The 413 of a request whose body is longer than --max-request-body-mb |max_mb| MiB, on every
+ * route: {"error", "code": "body_too_large", "max_request_body_mb"} (written in this order:
+ * error_first_json_text). |content_length|: its
+ * Content-Length (the 413 is answered from it before the body is read); none for a chunked
+ * body, refused at the chunk that passes the cap.
+ */
+Json::Value body_too_large_json(std::optional<uint64_t> content_length, uint64_t max_mb);
+
+/**
+ * The 400 of a body with more than --max-request-json-values |max_values| JSON values
+ * (TooManyJsonValues, json_helpers.hpp), on every route of kJsonValuesRoutes alike:
+ * {"error", "code": "too_many_json_values", "max_request_json_values"} (written in this order:
+ * error_first_json_text). Nothing of the request ran: it is refused before its body is parsed.
+ */
+Json::Value too_many_json_values_json(uint64_t max_values);
+
+/**
+ * |body|, an object with an `error` member, as compact JSON text with `error` first, then its
+ * other members in the order jsoncpp writes them (by name): the text of the intake refusals
+ * (body_too_large_json, too_many_json_values_json: error, code, then the cap), since a client
+ * of /search recognises a refusal by its leading member, and jsoncpp alone writes `code`
+ * before `error`.
+ */
+std::string error_first_json_text(const Json::Value &body);
+
+/**
+ * GET /capabilities' `request_intake` (SPEC-multigraph-envelope.md section 8): the byte cap
+ * (`max_request_body_mb`, null when unlimited, as the top-level member of that name) and its
+ * 413's shape (`body_too_large`: status, code, the body's members), the value count of the
+ * strict-JSON routes (`max_request_json_values`, null when unlimited; `json_values_routes`)
+ * and its 400's shape (`too_many_json_values`). In the multigraph block on a multi-graph
+ * server, at the top level on a single-graph one.
+ */
+Json::Value request_intake_json(uint64_t max_body_mb, uint64_t max_json_values);
 
 /**
  * The envelope POST /pattern answers on a multi-graph server (SPEC §24.1): one entry per

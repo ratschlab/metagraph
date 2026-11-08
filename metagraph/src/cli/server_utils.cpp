@@ -26,8 +26,10 @@
 #include <server_http.hpp>
 
 #include "annotation/coord_to_header.hpp"
+#include "cli/json_helpers.hpp"
 #include "common/logger.hpp"
 #include "common/unix_tools.hpp"
+#include "common/utils/string_utils.hpp"
 #include "graph/alignment/pattern_search.hpp"
 #include "server_envelope.hpp"
 #include "server_utils.hpp"
@@ -321,6 +323,102 @@ bool client_gone(const HttpServer::Request &request) {
     if (!connection)
         return true;
     return peer_closed(connection->socket->lowest_layer().native_handle());
+}
+
+namespace {
+
+#ifdef ASIO_STANDALONE
+namespace net = ::asio;
+#else
+namespace net = boost::asio;
+#endif
+
+// What the drain of a refused body reads at once (refuse_body_too_large): its whole buffer,
+// whatever the client sends
+constexpr size_t kDiscardBufferBytes = 16 << 10;
+
+// The drain of a refused body: its buffer, and how many more bytes it discards before it closes
+struct Drain {
+    std::vector<char> buffer;
+    uint64_t left;
+};
+
+// Reads and discards from |connection| until the client closes it, the connection's timer shuts
+// it (both end the pending read with an error) or |drain|'s bytes are spent; then closes it (the
+// last reference, held by the pending read, frees it)
+template <class Connection>
+void discard_until_closed(std::shared_ptr<Connection> connection, std::shared_ptr<Drain> drain) {
+    // the socket and the buffer's view taken before the handler is made: it takes both pointers
+    // over, and the order in which a call's arguments are evaluated is unspecified (GCC makes
+    // the handler first, which left a dereference of the moved-from buffer)
+    auto *socket = connection->socket.get();
+    const auto view = net::buffer(drain->buffer);
+    socket->async_read_some(view,
+            [connection = std::move(connection), drain = std::move(drain)](
+                    const SimpleWeb::error_code &ec, size_t bytes) mutable {
+        auto lock = connection->handler_runner->continue_lock();
+        if (!lock)
+            return;
+        if (ec || bytes >= drain->left) {
+            connection->close();
+            return;
+        }
+        drain->left -= bytes;
+        discard_until_closed(std::move(connection), std::move(drain));
+    });
+}
+
+} // namespace
+
+bool refuse_body_too_large(const std::shared_ptr<HttpServer::Request> &request,
+                           uint64_t max_mb) {
+    auto connection = request_connection(*request);
+    if (!connection)
+        return false;
+    std::optional<uint64_t> length;
+    if (auto it = request->header.find("Content-Length"); it != request->header.end()) {
+        // the library read it with std::stoull, which takes "-1" as 2^64 - 1 and "3145728junk"
+        // as 3145728: a Content-Length that is no byte count (content_length_value) is
+        // dropped as the library drops one it cannot read at all ("abc", 2^64)
+        length = content_length_value(it->second);
+        if (!length) {
+            connection->close();
+            return false;
+        }
+    }
+    const std::string body = error_first_json_text(body_too_large_json(length, max_mb));
+    auto text = std::make_shared<std::string>(
+            "HTTP/1.1 413 Payload Too Large\r\nContent-Type: application/json\r\n"
+            "Content-Length: " + std::to_string(body.size()) + "\r\nConnection: close\r\n\r\n"
+            + body);
+    // the whole of what follows (the answer and the drain) within the connection's own timer,
+    // which shuts the connection when it ends (and so ends a pending read or write)
+    connection->set_timeout(kBodyTooLargeDrainS);
+    // what the drain reads at most: the larger of kBodyTooLargeDrainBytes and the cap
+    auto drain = std::make_shared<Drain>(Drain {
+        std::vector<char>(kDiscardBufferBytes),
+        std::max<uint64_t>(kBodyTooLargeDrainBytes, max_mb << 20) });
+    // (the socket and the text's view taken before the handler takes the connection over)
+    auto *socket = connection->socket.get();
+    const auto view = net::buffer(*text);
+    net::async_write(*socket, view,
+            [connection = std::move(connection), text, drain = std::move(drain)](
+                    const SimpleWeb::error_code &ec, size_t) mutable {
+        auto lock = connection->handler_runner->continue_lock();
+        if (!lock)
+            return;
+        if (ec) {
+            connection->close();
+            return;
+        }
+        // the answer is complete (FIN after it); what the client still sends is read and
+        // dropped, so that its connection is not reset while it sends
+        SimpleWeb::error_code ignored;
+        connection->socket->lowest_layer().shutdown(net::ip::tcp::socket::shutdown_send,
+                                                    ignored);
+        discard_until_closed(std::move(connection), std::move(drain));
+    });
+    return true;
 }
 
 // Whether the TCP connection |fd| is past its established state, with data still waiting
@@ -741,7 +839,7 @@ RequestAnswer answer_request(const std::string &content, const std::string &enco
         answer.status = e.status();
         answer.header.clear();
         // the body as the route wrote it, uncompressed like every error
-        ret = json_text(e.body(), compact);
+        ret = e.text().empty() ? json_text(e.body(), compact) : e.text();
     } catch (const CurrentlyInitializingError& e) {
         logger->info("[Server] Got a request during initialization. Asked to come back later");
         answer.status = 503;
@@ -973,7 +1071,8 @@ std::vector<std::string> pattern_graph_names(const Json::Value &request,
             if (!seen.insert(value).second)
                 continue;
             if (!known_set.count(value)) {
-                throw std::invalid_argument("request.graphs: unknown graph '" + value
+                throw std::invalid_argument("request.graphs: unknown graph '"
+                                            + ::utils::clip_for_message(value)
                                             + "' (GET /capabilities lists the graphs)");
             }
             names.push_back(std::move(value));
@@ -998,6 +1097,100 @@ Json::Value max_graphs_without_selection_json(bool multi_graph, uint64_t thresho
 
 Json::Value max_request_body_mb_json(uint64_t mb) {
     return mb ? Json::Value(Json::UInt64(mb)) : Json::Value();
+}
+
+std::optional<uint64_t> content_length_value(const std::string &text) {
+    std::optional<uint64_t> count;
+    size_t from = 0;
+    while (true) {
+        size_t to = text.find(',', from);
+        if (to == std::string::npos)
+            to = text.size();
+        size_t a = from, b = to;
+        while (a < b && (text[a] == ' ' || text[a] == '\t'))
+            ++a;
+        while (b > a && (text[b - 1] == ' ' || text[b - 1] == '\t'))
+            --b;
+        // leading zeros are the same count; at most 20 digits remain below 2^64
+        while (a + 1 < b && text[a] == '0')
+            ++a;
+        if (a == b || b - a > 20 || !std::all_of(text.begin() + a, text.begin() + b,
+                                                 [](unsigned char c) { return std::isdigit(c); }))
+            return std::nullopt;
+        uint64_t value;
+        try {
+            value = std::stoull(text.substr(a, b - a));
+        } catch (const std::exception &) {
+            return std::nullopt;     // 2^64 and more
+        }
+        if (count && *count != value)
+            return std::nullopt;     // a list of differing counts
+        count = value;
+        if (to == text.size())
+            return count;
+        from = to + 1;
+    }
+}
+
+Json::Value body_too_large_json(std::optional<uint64_t> content_length, uint64_t max_mb) {
+    Json::Value body(Json::objectValue);
+    body["code"] = "body_too_large";
+    const std::string cap = std::to_string(max_mb) + " MiB (--max-request-body-mb)";
+    body["error"] = content_length
+        ? "the request body (" + std::to_string(*content_length) + " bytes) is larger than "
+          "this server reads, " + cap + ": it was not read and nothing of it ran"
+        : "the request body (chunked) grew past what this server reads, " + cap
+          + ": the rest was not read and nothing of it ran";
+    body["max_request_body_mb"] = Json::UInt64(max_mb);
+    return body;
+}
+
+Json::Value too_many_json_values_json(uint64_t max_values) {
+    Json::Value body(Json::objectValue);
+    body["code"] = "too_many_json_values";
+    body["error"] = TooManyJsonValues(max_values).what();
+    body["max_request_json_values"] = Json::UInt64(max_values);
+    return body;
+}
+
+std::string error_first_json_text(const Json::Value &body) {
+    Json::StreamWriterBuilder builder;
+    builder["indentation"] = "";
+    std::string text = "{\"error\":" + Json::writeString(builder, body["error"]);
+    for (const std::string &name : body.getMemberNames()) {
+        if (name != "error") {
+            text += "," + Json::writeString(builder, Json::Value(name)) + ":"
+                    + Json::writeString(builder, body[name]);
+        }
+    }
+    return text + "}";
+}
+
+Json::Value request_intake_json(uint64_t max_body_mb, uint64_t max_json_values) {
+    auto refusal = [](int status, const char *code, const char *cap) {
+        Json::Value r(Json::objectValue);
+        r["status"] = status;
+        r["code"] = code;
+        Json::Value members(Json::arrayValue);
+        for (const char *member : { "code", "error", cap }) {
+            members.append(member);
+        }
+        r["members"] = std::move(members);
+        return r;
+    };
+    Json::Value intake(Json::objectValue);
+    intake["max_request_body_mb"] = max_request_body_mb_json(max_body_mb);
+    intake["body_too_large"] = refusal(413, "body_too_large", "max_request_body_mb");
+    intake["max_request_json_values"]
+            = max_json_values ? Json::Value(Json::UInt64(max_json_values)) : Json::Value();
+    Json::Value routes(Json::arrayValue);
+    for (const char *route : kJsonValuesRoutes) {
+        routes.append(route);
+    }
+    intake["json_values_routes"] = std::move(routes);
+    intake["too_many_json_values"]
+            = refusal(400, "too_many_json_values", "max_request_json_values");
+    return intake;
 }
 
 // The entries of /pattern's envelope are the shared envelope's (server_envelope.hpp), which

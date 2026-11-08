@@ -411,8 +411,9 @@ std::thread start_server(HttpServer &server_startup, Config &config, size_t num_
     if (config.max_request_body_mb) {
         // the library's bound on a request's headers and body (size_t max by default): a
         // Content-Length above it, or a chunked body growing past it, is reported to on_error as
-        // message_size and the connection dropped — the 413 the library builds there is never
-        // sent (server_http.hpp, read_request_and_content)
+        // message_size, which answers 413 body_too_large (refuse_body_too_large; the library
+        // prepares a 413 of its own there but does not send it: server_http.hpp, read() and
+        // read_chunked_transfer_encoded()). A header block above it is closed without an answer
         server_startup.config.max_request_streambuf_size
                 = static_cast<size_t>(config.max_request_body_mb) << 20;
     }
@@ -486,12 +487,55 @@ class IndexLease {
     double load_ms_ = 0;
 };
 
+// A body with more JSON values than --max-request-json-values, as every strict-JSON route
+// refuses it (H1): 400 too_many_json_values, its members written in the order error, code, the
+// cap (error_first_json_text). Nothing of the request ran
+HttpError json_values_refusal(const TooManyJsonValues &e) {
+    Json::Value body = too_many_json_values_json(e.max_values());
+    std::string text = error_first_json_text(body);
+    return HttpError(400, std::move(body), std::move(text));
+}
+
 // The body of /resolve, /traverse or /traverse/cancel, read as /pattern reads its body
 // (parse_strict_json: one RFC 8259 JSON text, member names unique); a fault is 400
 // {"error": "Bad json received: ..."} without a code, as /search's reader answers a body that
-// is no JSON
-Json::Value parse_traversal_body(const std::string &content) {
-    return parse_strict_json<RefuseRequest>(content, "Bad json received: ");
+// is no JSON. Its values are counted against |max_values| (--max-request-json-values; 0:
+// none) before it is parsed: one more is json_values_refusal
+Json::Value parse_traversal_body(const std::string &content, uint64_t max_values) {
+    try {
+        return parse_strict_json<RefuseRequest>(content, "Bad json received: ", max_values);
+    } catch (const TooManyJsonValues &e) {
+        throw json_values_refusal(e);
+    }
+}
+
+// The body of /pattern (parse_pattern_body: its faults are PatternRefusal 400
+// invalid_request), its values counted as parse_traversal_body counts them
+Json::Value parse_pattern_route_body(const std::string &content, uint64_t max_values) {
+    try {
+        return parse_pattern_body(content, max_values);
+    } catch (const TooManyJsonValues &e) {
+        throw json_values_refusal(e);
+    }
+}
+
+// The caps of POST /traverse this server applies (Config::traverse_max_*, the H1 counts
+// included), without the fields of one request
+TraverseLimits traverse_limits(const Config &config) {
+    TraverseLimits limits;
+    limits.max_time_ms = config.traverse_max_time_ms;
+    limits.max_seeds = config.traverse_max_seeds;
+    limits.max_seed_bp = config.traverse_max_seed_bp;
+    limits.max_seed_labels = config.traverse_max_seed_labels;
+    limits.max_explicit_labels = config.traverse_max_explicit_labels;
+    limits.max_extra_labels = config.traverse_max_extra_labels;
+    limits.max_cost_entries = config.traverse_max_cost_entries;
+    limits.max_memory_mb = config.traverse_max_memory_mb;
+    limits.max_work_units = config.traverse_max_work_units;
+    limits.max_request_memory_mb = config.traverse_max_request_memory_mb;
+    limits.chunk_target_ms = static_cast<double>(config.traverse_chunk_target_ms);
+    limits.path_cache_bytes = config.traverse_path_cache_mb << 20;
+    return limits;
 }
 
 // The deadline block of a multi-graph server's /traverse envelope (SPEC-multigraph-envelope.md
@@ -1500,7 +1544,7 @@ int run_server(Config *config) {
         // the request's CPU time and page faults: this thread's own part (the parse, the
         // checks, the envelope, an inline pair) and each pooled pair's work on its thread
         const common::ThreadUsageMeter own_usage;
-        Json::Value json = parse_pattern_body(content);
+        Json::Value json = parse_pattern_route_body(content, config->max_request_json_values);
         if (!json.isObject())
             throw PatternRefusal(400, "invalid_request", "request: expected an object");
         // the checks in the release-9 order (the selection, in_ram, then the fields), so that
@@ -1711,7 +1755,8 @@ int run_server(Config *config) {
                 }
                 const AnnotatedDBG &index = *anno_graph.get();
                 const IndexIdentity identity = identity_of(index);
-                const Json::Value json = parse_pattern_body(content);
+                const Json::Value json = parse_pattern_route_body(
+                        content, config->max_request_json_values);
                 // the request's handles (sections 4 and 5): its not_after_ms admits it, its
                 // finish_by_ms caps its deadline, its request_id registers it — once its
                 // fields are valid, with or without a request_id: a request refused 400 holds
@@ -1983,7 +2028,7 @@ int run_server(Config *config) {
             if (!slot)
                 slot = take_slot(resolve_slots);
 
-            Json::Value json = parse_traversal_body(content);
+            Json::Value json = parse_traversal_body(content, config->max_request_json_values);
             const bool multi = !config->fnames.empty();
             if (multi) {
                 try {
@@ -2206,7 +2251,7 @@ int run_server(Config *config) {
             if (!slot)
                 slot = take_slot(traverse_slots);
 
-            Json::Value json = parse_traversal_body(content);
+            Json::Value json = parse_traversal_body(content, config->max_request_json_values);
             // a malformed id or not_after_ms is refused before anything is registered (400, no
             // usage)
             attempt->set_ids(attempt_ids(json));
@@ -2230,8 +2275,8 @@ int run_server(Config *config) {
                     traverse_graph_selection(json, false);
                     in_ram_field(json);
                 }
-                // its fields, finish_by_ms last
-                parse_traverse_request(json);
+                // its fields, finish_by_ms last (the counts first, before anything is copied)
+                parse_traverse_request(json, traverse_limits(*config));
                 throw;
             }
             if (attempt->managed()) {
@@ -2308,7 +2353,7 @@ int run_server(Config *config) {
                     const GraphPair &pair = selected->pair;
                     // a malformed request is refused before its index is loaded for it
                     if (in_ram.value_or(false) && loaded_with_mmap)
-                        parse_traverse_request(json);
+                        parse_traverse_request(json, traverse_limits(*config));
                     // GET /requests/{attempt_id} names the pair the attempt ran on, for as
                     // long as the attempt is answered
                     attempt->set_pair_ref(pair_ref_json(*selected));
@@ -2328,16 +2373,7 @@ int run_server(Config *config) {
                     identity = identity_of_pair(pair, lease->index());
                 }
                 const AnnotatedDBG &index = lease ? lease->index() : *anno_graph.get();
-                TraverseLimits limits;
-                limits.max_time_ms = config->traverse_max_time_ms;
-                limits.max_seeds = config->traverse_max_seeds;
-                limits.max_seed_bp = config->traverse_max_seed_bp;
-                limits.max_seed_labels = config->traverse_max_seed_labels;
-                limits.max_memory_mb = config->traverse_max_memory_mb;
-                limits.max_work_units = config->traverse_max_work_units;
-                limits.max_request_memory_mb = config->traverse_max_request_memory_mb;
-                limits.chunk_target_ms = static_cast<double>(config->traverse_chunk_target_ms);
-                limits.path_cache_bytes = config->traverse_path_cache_mb << 20;
+                TraverseLimits limits = traverse_limits(*config);
                 // a multi-graph server's graphs are the chunks of an index, which the fan-out
                 // of /search sends each seed to whether or not they hold it: a seed a chunk does
                 // not hold is its result, whichever spelling (`graph`, `graphs`) named the chunk
@@ -2389,7 +2425,8 @@ int run_server(Config *config) {
                                                         shared_ptr<HttpServer::Request> request) {
         const size_t request_id = num_requests++;
         process_request(response, request, request_id, [&](const std::string &content) {
-            const CancelRequest cancel = parse_cancel_request(parse_traversal_body(content));
+            const CancelRequest cancel = parse_cancel_request(
+                    parse_traversal_body(content, config->max_request_json_values));
             auto [status, body] = attempts.cancel(cancel.attempt_id, cancel.wait_ms,
                                                   cancel.not_after_ms);
             logger->info("[Server] Attempt {}: cancel requested (request {}): {} {}",
@@ -2506,6 +2543,12 @@ int run_server(Config *config) {
         caps["max_seeds"] = static_cast<Json::UInt64>(config->traverse_max_seeds);
         caps["max_seed_bp"] = static_cast<Json::UInt64>(config->traverse_max_seed_bp);
         caps["max_seed_labels"] = static_cast<Json::UInt64>(config->traverse_max_seed_labels);
+        // the counts refused before anything of a request is copied (H1; 0: none): one seed's
+        // explicit labels, strategy.labels.extra, a change_cost table's entries
+        caps["max_explicit_labels"]
+            = static_cast<Json::UInt64>(config->traverse_max_explicit_labels);
+        caps["max_extra_labels"] = static_cast<Json::UInt64>(config->traverse_max_extra_labels);
+        caps["max_cost_entries"] = static_cast<Json::UInt64>(config->traverse_max_cost_entries);
         caps["max_query_bp"] = static_cast<Json::UInt64>(config->resolve_max_query_bp);
         // the request budgets of DESIGN-traverse-graphlet.md §14 (bounds.max_memory_mb,
         // bounds.max_work_units) and W, the interval in charged work units at which the
@@ -2721,9 +2764,17 @@ int run_server(Config *config) {
             // `graphs`), so that a client sees it before a longer list refuses its requests
             c["max_graphs_without_selection"]
                     = max_graphs_without_selection_json(multi, config->max_graphs_without_selection);
-            // the largest request body the server reads (a longer one is dropped), so that a
-            // client can check it before a request is cut off without a response
+            // the largest request body the server reads (a longer one is refused 413
+            // body_too_large before it is read), so that a client can check it before it sends
             c["max_request_body_mb"] = max_request_body_mb_json(config->max_request_body_mb);
+            // what the server reads of a request (H1): that cap and its 413, the value count of
+            // the strict-JSON routes and its 400; in the multigraph block on a multi-graph
+            // server, here on a single-graph one (one reader for both, as
+            // expect_server_instance)
+            const Json::Value intake = request_intake_json(config->max_request_body_mb,
+                                                           config->max_request_json_values);
+            if (!multi)
+                c["request_intake"] = intake;
             c["release"] = config->index_release;
             if (multi) {
                 // the identity of the indexes served together (SPEC-multigraph-envelope.md
@@ -2733,7 +2784,7 @@ int run_server(Config *config) {
                 c["composite_fp"] = composite_fp;
                 c["composite_rule"] = kCompositeRule;
                 c["multigraph"] = multigraph_capabilities_json(
-                        config->traverse_max_request_memory_mb, route_caps);
+                        config->traverse_max_request_memory_mb, route_caps, intake);
             }
             // the request registry (section 5) on every server: a single-graph /resolve or
             // /pattern with request_id registers too, and GET /requests/{attempt_id} reads a
@@ -2849,15 +2900,32 @@ int run_server(Config *config) {
     server.on_error = [config](shared_ptr<HttpServer::Request> request,
                                const SimpleWeb::error_code &ec) {
         if (ec == SimpleWeb::make_error_code::make_error_code(SimpleWeb::errc::message_size)) {
-            // a body over --max-request-body-mb: the library closes the connection without a
-            // response (it builds a 413 it never sends), so this log line is the only trace
+            // a body over --max-request-body-mb, before it is read (a Content-Length above it)
+            // or at the chunk that passes it: the library prepares a 413 but does not send it
+            // and drops the request, so the 413 body_too_large is written here, on its
+            // connection (refuse_body_too_large: the connection closed after it, what the
+            // client still sends discarded meanwhile), or the connection is closed when the
+            // Content-Length is no byte count. Nothing of the request ran
             const auto it = request->header.find("Content-Length");
-            logger->warn("[Server] {} {} from {} dropped: its body ({}) exceeds "
-                         "--max-request-body-mb {} MiB; connection closed without a response",
-                         request->method, request->path,
-                         request->remote_endpoint().address().to_string(),
-                         it != request->header.end() ? it->second + " bytes" : "chunked",
-                         config->max_request_body_mb);
+            const std::string address = request->remote_endpoint().address().to_string();
+            const bool answered = refuse_body_too_large(request, config->max_request_body_mb);
+            const std::string length = it != request->header.end()
+                    ? ::utils::clip_for_message(it->second, 64) : std::string();
+            if (answered) {
+                // the count as the 413 states it (content_length_value: " 3145728 " is 3145728)
+                const auto count = it != request->header.end()
+                        ? content_length_value(it->second) : std::nullopt;
+                logger->warn("[Server] {} {} from {} refused 413: its body ({}) exceeds "
+                             "--max-request-body-mb {} MiB",
+                             request->method, ::utils::clip_for_message(request->path, 256),
+                             address, count ? std::to_string(*count) + " bytes" : "chunked",
+                             config->max_request_body_mb);
+            } else {
+                logger->warn("[Server] {} {} from {} dropped without an answer: its "
+                             "Content-Length '{}' is no byte count",
+                             request->method, ::utils::clip_for_message(request->path, 256),
+                             address, length);
+            }
             return;
         }
         // Handle errors here, ignoring a few trivial ones.

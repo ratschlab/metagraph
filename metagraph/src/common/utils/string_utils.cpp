@@ -46,6 +46,19 @@ std::string to_hex(std::string_view s) {
     return out;
 }
 
+std::string clip_for_message(std::string_view text, size_t max_bytes) {
+    if (text.size() <= max_bytes)
+        return std::string(text);
+    // never inside a UTF-8 sequence: back to its lead byte, at most 3 bytes back (a name that is
+    // no UTF-8 is cut where it falls), so that a clipped name keeps at least max_bytes - 3
+    size_t cut = max_bytes;
+    const size_t lowest = max_bytes > 3 ? max_bytes - 3 : 0;
+    while (cut > lowest && (static_cast<unsigned char>(text[cut]) & 0xC0) == 0x80) {
+        --cut;
+    }
+    return std::string(text.substr(0, cut)) + "... (" + std::to_string(text.size()) + " bytes)";
+}
+
 // Try to parse ka:f:[abundance] or km:f:[abundance] from header
 // https://github.com/IndexThePlanet/Logan/blob/main/Unitigs.md
 std::optional<uint64_t> parse_abundance(const std::string &comment) {
