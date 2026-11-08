@@ -33,7 +33,7 @@ class BinRelWT : public RowMajor, public GetEntrySupport {
     uint64_t num_relations() const override;
 
   private:
-    sdsl::wt_int<sdsl::rrr_vector<63>> wt_;
+    sdsl::wt_int<mtg::detail::rrr_storage<63>> wt_;
     bit_vector_rrr<> delimiters_;
     uint64_t num_columns_ = 0;
 };

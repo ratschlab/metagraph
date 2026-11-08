@@ -16,7 +16,7 @@
 #include <stdio.h>
 #endif
 
-#include <sdsl/memory_management.hpp>
+#include <sdsl/shared_mapper.hpp>
 
 #include "common/logger.hpp"
 
@@ -76,7 +76,7 @@ bool with_madvise() {
 std::unique_ptr<std::ifstream> open_ifstream(const std::string &filename, bool mmap_stream) {
     std::unique_ptr<std::ifstream> in;
     if (mmap_stream) {
-        in.reset(new sdsl::mmap_ifstream(filename, std::ios_base::binary));
+        in.reset(new sdsl::shared_mapper_ifstream(filename, std::ios_base::binary));
     } else {
         in.reset(new named_ifstream(filename, std::ios_base::binary));
     }
@@ -111,7 +111,7 @@ void madvise_random_range(std::istream &f, std::streamoff start, std::streamoff 
 
 void load_mmap_random(const std::string &filename, std::streamoff offset,
                       const std::function<void(std::istream &)> &fn) {
-    sdsl::mmap_ifstream in(filename);
+    sdsl::shared_mapper_ifstream in(filename);
     in.seekg(offset, std::ios_base::beg);
     fn(in);
     madvise_random_range(in, offset);
