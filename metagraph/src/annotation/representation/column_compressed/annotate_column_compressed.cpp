@@ -28,6 +28,9 @@ namespace {
 // Restore only sufficiently small, sparse columns into an editable position set.
 constexpr uint64_t kMaxSparseColumnOnes = 4000000;
 constexpr uint64_t kSparseColumnDensityDivisor = 128;
+// Unions up to this many ones (512 KiB per worker) are decoded into a buffer.
+// Larger unions are streamed to keep memory independent of column size.
+constexpr uint64_t kBufferedUnionOnes = 1 << 16;
 
 
 // Visit the union without materializing the two streams of set positions.
@@ -603,7 +606,20 @@ bool ColumnCompressed<Label>::merge_load(const std::vector<std::string> &filenam
                     const auto incoming_ones = column->num_set_bits();
                     // Preserve the density cutoff without imposing a position-buffer limit.
                     const uint64_t max_ones = num_rows_ / kSparseColumnDensityDivisor;
-                    if (existing_ones <= max_ones && incoming_ones <= max_ones - existing_ones) {
+                    if (existing_ones + incoming_ones <= std::min(max_ones, kBufferedUnionOnes)) {
+                        // Sequential decoding is cheaper than select1 for small columns.
+                        std::vector<uint64_t> positions;
+                        positions.reserve(existing_ones + incoming_ones);
+                        existing->call_ones([&](uint64_t j) { positions.push_back(j); });
+                        column->call_ones([&](uint64_t j) { positions.push_back(j); });
+                        std::inplace_merge(positions.begin(), positions.begin() + existing_ones,
+                                           positions.end());
+                        positions.erase(std::unique(positions.begin(), positions.end()),
+                                        positions.end());
+                        existing = std::make_unique<bit_vector_smart>(
+                            [&](const auto &emit) { for (uint64_t j : positions) emit(j); },
+                            num_rows_, positions.size());
+                    } else if (existing_ones <= max_ones && incoming_ones <= max_ones - existing_ones) {
                         uint64_t count = 0;
                         call_union(*existing, *column, [&](uint64_t) { ++count; });
                         existing = std::make_unique<bit_vector_smart>(
