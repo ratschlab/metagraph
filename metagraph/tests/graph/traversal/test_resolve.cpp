@@ -101,22 +101,23 @@ TYPED_TEST(ResolveTest, ThreeStatesAndRuns) {
 
         EXPECT_EQ("x70o25x15o80", encode_runs(A.runs, profile.num_kmers));
 
-        // longest_first
+        // several seeds: the shared [100,110) first, then the runs outside it
         SelectionPolicy pol;
-        pol.policy = SelectionPolicy::LONGEST_FIRST;
-        pol.max_seeds = 2;
+        pol.max_seeds = 3;
         auto sel = select_seeds(profile, q, pol, canonical);
         EXPECT_EQ(3u, sel.num_candidates);
-        EXPECT_EQ(3u, sel.num_eligible);
-        ASSERT_EQ(2u, sel.seeds.size());
-        EXPECT_EQ((KmerInterval{ 100, 190 }), sel.seeds[0].kmers);
-        EXPECT_EQ(q.substr(100), sel.seeds[0].sequence);
-        EXPECT_EQ((std::vector<std::string>{ "B" }), sel.seeds[0].labels);
-        EXPECT_EQ((KmerInterval{ 0, 70 }), sel.seeds[1].kmers);
-        EXPECT_EQ(q.substr(0, 80), sel.seeds[1].sequence);
-        EXPECT_TRUE(sel.seeds[0].overlaps_with.empty());
-        EXPECT_EQ(16u, sel.seeds[0].seed_id.size());
-        EXPECT_NE(sel.seeds[0].seed_id, sel.seeds[1].seed_id);
+        ASSERT_EQ(3u, sel.seeds.size());
+        EXPECT_EQ((KmerInterval{ 100, 110 }), sel.seeds[0].kmers);
+        for (size_t i = 0; i < sel.seeds.size(); ++i) {
+            const auto &seed = sel.seeds[i];
+            EXPECT_EQ(q.substr(seed.kmers.begin, seed.kmers.size() + kK - 1), seed.sequence);
+            EXPECT_EQ(16u, seed.seed_id.size());
+            // each pick is outside the earlier ones
+            EXPECT_TRUE(seed.overlaps_with.empty());
+            for (size_t j = 0; j < i; ++j) {
+                EXPECT_NE(sel.seeds[j].seed_id, seed.seed_id);
+            }
+        }
 
         // max_support with overlap: A and B both cover [100,110)
         pol = SelectionPolicy();
@@ -126,26 +127,6 @@ TYPED_TEST(ResolveTest, ThreeStatesAndRuns) {
         EXPECT_EQ((KmerInterval{ 100, 110 }), sel.seeds[0].kmers);
         EXPECT_EQ((std::vector<std::string>{ "A", "B" }), sel.seeds[0].labels);
         EXPECT_EQ(2u, sel.seeds[0].population.supporting_total);
-
-        // longest_first with merging: [95,110){A} and [100,190){B} merge onto
-        // [100,110){A,B}, which keeps the rank of [100,190) and so comes first
-        pol = SelectionPolicy();
-        pol.policy = SelectionPolicy::LONGEST_FIRST;
-        pol.max_seeds = 3;
-        sel = select_seeds(profile, q, pol, canonical);
-        ASSERT_EQ(2u, sel.seeds.size());
-        EXPECT_EQ((KmerInterval{ 100, 110 }), sel.seeds[0].kmers);
-        EXPECT_EQ((std::vector<std::string>{ "A", "B" }), sel.seeds[0].labels);
-        EXPECT_EQ((KmerInterval{ 0, 70 }), sel.seeds[1].kmers);
-        EXPECT_EQ((std::vector<std::string>{ "A" }), sel.seeds[1].labels);
-
-        // max_support picks never overlap, so none is merged
-        pol = SelectionPolicy();
-        pol.max_seeds = 3;
-        sel = select_seeds(profile, q, pol, canonical);
-        for (const auto &seed : sel.seeds) {
-            EXPECT_TRUE(seed.overlaps_with.empty());
-        }
 
         // max_labels_per_seed drops deterministically and reports the drop
         pol.max_seeds = 1;

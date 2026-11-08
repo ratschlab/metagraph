@@ -114,7 +114,8 @@ class TestTraverseCLI(TraverseFixture):
 
     def test_resolve(self):
         out = self._traverse({'sequence': self.X + self.P, 'discover': {},
-                              'select': {'policy': 'longest_first', 'max_seeds': 1}}, '--resolve')
+                              'select': {'min_block_bp': len(self.X + self.P), 'max_seeds': 1}},
+                             '--resolve')
         self.assertEqual(K, out['k'])
         names = {label['label']: label for label in out['labels']}
         self.assertEqual({'A', 'B'}, set(names))

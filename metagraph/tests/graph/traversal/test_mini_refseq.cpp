@@ -129,10 +129,11 @@ class MiniRefSeq : public ::testing::Test {
         return resolve_support(*oracle_, query, options);
     }
 
-    // the longest seed of the blaNDM query: the whole gene, carried by 19 accessions
+    // the whole blaNDM gene as a seed, carried by 19 accessions: max_support with the gene's
+    // length as the shortest seed
     FrozenSeed blandm_seed() const {
         SelectionPolicy policy;
-        policy.policy = SelectionPolicy::LONGEST_FIRST;
+        policy.min_block_bp = query_.size();
         policy.max_seeds = 1;
         auto selection = select_seeds(discover_headers(query_), query_, policy, false);
         EXPECT_FALSE(selection.seeds.empty());
@@ -275,7 +276,8 @@ TEST_F(MiniRefSeq, SelectFullLengthSeed) {
     EXPECT_EQ((KmerInterval{ 0, 231 }), by_support.seeds[0].kmers);
     EXPECT_EQ(25u, by_support.seeds[0].labels.size());
 
-    policy.policy = SelectionPolicy::LONGEST_FIRST;
+    // with the gene's length as the shortest seed, the whole gene: fewer carriers
+    policy.min_block_bp = query_.size();
     auto selection = select_seeds(profile, query_, policy, false);
     ASSERT_FALSE(selection.seeds.empty());
     const auto &seed = selection.seeds[0];
@@ -450,7 +452,7 @@ TEST_F(MiniRefSeq, ResolveThenTraverseRequests) {
     Json::Value resolve;
     resolve["sequence"] = query_;
     resolve["discover"]["kind"] = "header";
-    resolve["select"]["policy"] = "longest_first";
+    resolve["select"]["min_block_bp"] = static_cast<Json::UInt64>(query_.size());
     resolve["select"]["max_seeds"] = 1;
     const Json::Value profile = cli::process_resolve_request(resolve, *anno_graph_, limits);
     ASSERT_EQ(1u, profile["selection"]["seeds"].size());
