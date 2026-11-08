@@ -18,6 +18,7 @@ template <uint8_t Width> class annotation_vector_io : public sdsl::packed_vector
 
   public:
     annotation_vector_io() = default;
+    explicit annotation_vector_io(base value) : base(std::move(value)) {}
     using base::base;
     const base &packed() const { return *this; }
     void load(std::istream &in) {
@@ -45,7 +46,8 @@ template <uint8_t Width> class annotation_vector_io : public sdsl::packed_vector
             throw std::ios_base::failure("Cannot load packed vector view");
         static_cast<base &>(*this) = std::move(next);
     }
-    void serialize(std::ostream &out) const {
+    uint64_t serialize(std::ostream &out, sdsl::structure_tree_node * = nullptr,
+                       std::string = "") const {
         auto bits = this->bit_size();
         out.write(reinterpret_cast<const char *>(&bits), 8);
         if constexpr (Width == 0) {
@@ -55,6 +57,7 @@ template <uint8_t Width> class annotation_vector_io : public sdsl::packed_vector
         auto bytes = this->bytes();
         if (!bytes.empty())
             out.write(reinterpret_cast<const char *>(bytes.data()), bytes.size());
+        return 8 + (Width == 0) + bytes.size();
     }
 };
 } // namespace mtg::detail
