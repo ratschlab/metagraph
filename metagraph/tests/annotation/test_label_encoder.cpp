@@ -135,4 +135,66 @@ TEST(LabelEncoderBackwardCompatibility, LoadNewFormat) {
     ASSERT_EQ(std::vector<std::string>({"label1", "label2", "label3"}), encoder.get_labels());
 }
 
+// A string hash that differs from std::hash, standing in for another
+// toolchain's std::hash (e.g. libc++ vs libstdc++).
+struct OtherToolchainHash {
+    size_t operator()(const std::string &s) const {
+        return std::hash<std::string>()(s) * 0x9E3779B97F4A7C15ull + 0x632BE59BD9B4E019ull;
+    }
+};
+
+TEST(LabelEncoder, LoadBucketsWrittenWithAnotherHash) {
+    std::vector<std::string> labels;
+    for (size_t i = 0; i < 1000; ++i) {
+        labels.push_back("label" + std::to_string(i));
+    }
+    tsl::ordered_set<std::string, OtherToolchainHash, std::equal_to<std::string>,
+                     std::allocator<std::string>, std::vector<std::string>, uint64_t>
+            written(labels.begin(), labels.end());
+
+    std::stringstream stream;
+    stream.write("LE-v2.0", 7);
+    Serializer serializer(stream);
+    written.serialize(serializer);
+    // a second record after the first one must still be readable
+    LabelEncoder<std::string> second;
+    second.insert_and_encode("next");
+    second.serialize(stream);
+    stream.seekg(0);
+
+    LabelEncoder<std::string> encoder;
+    ASSERT_TRUE(encoder.load(stream));
+    ASSERT_EQ(labels, encoder.get_labels());
+    for (size_t i = 0; i < labels.size(); ++i) {
+        ASSERT_TRUE(encoder.label_exists(labels[i])) << labels[i];
+        ASSERT_EQ(i, encoder.encode(labels[i]));
+    }
+
+    ASSERT_TRUE(encoder.load(stream));
+    EXPECT_EQ(std::vector<std::string>({ "next" }), encoder.get_labels());
+}
+
+TEST(LabelEncoder, LabelHashIsFixed) {
+    // LE-v2.1 files store buckets made with this hash. These are XXH3_64bits values.
+    LabelHash<std::string> hash;
+    EXPECT_EQ(0x2d06800538d394c2ull, hash(""));
+    EXPECT_EQ(0xe6391e7a336a39eeull, hash("562"));
+    EXPECT_EQ(0xa8068554c36a8f5full, hash("SRR10000123"));
+}
+
+TEST(LabelEncoder, SerializeWritesCurrentVersion) {
+    LabelEncoder<std::string> encoder;
+    encoder.insert_and_encode("562");
+    encoder.insert_and_encode("SRR10000123");
+
+    std::stringstream stream;
+    encoder.serialize(stream);
+    EXPECT_EQ("LE-v2.1", stream.str().substr(0, 7));
+
+    LabelEncoder<std::string> loaded;
+    ASSERT_TRUE(loaded.load(stream));
+    EXPECT_EQ(encoder.get_labels(), loaded.get_labels());
+    EXPECT_EQ(1u, loaded.encode("SRR10000123"));
+}
+
 } // namespace

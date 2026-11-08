@@ -4,6 +4,13 @@ Release notes
 Unreleased
 ----------
 
+Annotations now store their label names with a fixed hash (XXH3), so they load
+the same way on every platform. Earlier files used the C++ standard library's
+hash, which differs between Linux and macOS builds. Label lookups then failed
+when an annotation was loaded on the other platform. This version reads
+earlier annotations on any platform. Annotations it writes cannot be loaded by
+earlier versions.
+
 The HTTP ``/align`` endpoint now rejects invalid ``max_alternative_alignments``
 values with status 400. Use a positive integer. Zero previously selected one
 alignment; negative values could become very large unsigned counts.
