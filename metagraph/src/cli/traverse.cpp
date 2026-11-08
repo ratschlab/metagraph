@@ -223,6 +223,11 @@ TraverseRequest parse_traverse_request(const Json::Value &json, const TraverseLi
                 throw InvalidRequest(ss.child("labels") + ": expected a non-empty array of "
                                      "labels; omit the field to derive the labels from the seed");
             }
+            if (seed.labels.size() > kMaxSeedLabels) {
+                throw InvalidRequest(ss.child("labels") + ": " + std::to_string(seed.labels.size())
+                                     + " labels, over the limit of "
+                                     + std::to_string(kMaxSeedLabels));
+            }
         }
         ss.done();
         req.seeds.push_back(std::move(seed));
@@ -260,7 +265,7 @@ TraverseRequest parse_traverse_request(const Json::Value &json, const TraverseLi
             Strict b(t.raw("bounds"), "request.strategy.bounds");
             st.max_extension_bp = b.uint("max_extension_bp", st.max_extension_bp, 1);
             // the server's bound clamps the request's
-            st.time_budget_ms = std::min(b.number("time_budget_ms", limits.max_time_ms, 0,
+            st.time_budget_ms = std::min(b.number("time_budget_ms", limits.max_time_ms, 1,
                                                   std::numeric_limits<double>::max()),
                                          limits.max_time_ms);
             b.done();
@@ -591,6 +596,10 @@ Json::Value process_traverse_request(const Json::Value &request,
                                      const TraverseLimits &limits) {
     const TraverseRequest req = parse_traverse_request(request, limits);
     const LabelOracle oracle(anno_graph);
+    // refuse a malformed seed before walking any seed
+    for (const Seed &seed : req.seeds) {
+        check_seed(oracle, seed);
+    }
     Json::Value out;
     out["schema_version"] = 1;
     out["strategy"] = strategy_to_json(req.strategy);

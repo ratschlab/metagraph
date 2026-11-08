@@ -66,7 +66,6 @@ struct Strategy {
     uint64_t max_steps = 1'000'000;
     size_t max_live_paths = 1000;
     size_t max_paths = 10'000;
-    uint64_t max_output_bp = 2'000'000;
 };
 
 struct Seed {
@@ -132,8 +131,8 @@ struct LabelEnd {
     uint64_t at_bp = 0;
     LabelId label = 0;
     EndReason reason = EndReason::DEAD_END;
-    // why a BRANCH or DEAD_END: "split_limit" (the path's split allowance ran out) or
-    // "hairpin" (the label's only continuation was a skipped hairpin); otherwise empty
+    // why a DEAD_END: "hairpin" (the label's only continuation was a skipped hairpin);
+    // otherwise empty
     const char *text = "";
 };
 
@@ -199,7 +198,6 @@ struct ArmResult {
     std::vector<PathResult> paths;
 
     uint64_t steps = 0;
-    uint64_t output_bp = 0;
 };
 
 // A seed label that does not carry every seed k-mer
@@ -238,6 +236,13 @@ struct SeedResult {
 SeedResult traverse_seed(const LabelOracle &oracle,
                          const Seed &seed,
                          const Strategy &strategy);
+
+/**
+ * The checks of |seed| that need no walk: its length, its characters and its named labels.
+ * Throws std::invalid_argument as traverse_seed would, so that a caller can refuse a request
+ * before walking any of its seeds.
+ */
+void check_seed(const LabelOracle &oracle, const Seed &seed);
 
 } // namespace traversal
 } // namespace graph

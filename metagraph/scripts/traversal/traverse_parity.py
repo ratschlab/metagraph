@@ -186,7 +186,8 @@ def run(metagraph, index, kind, request, prototype):
         command = [metagraph, 'traverse'] + (['--resolve'] if kind == 'resolve' else []) + [
             '--traverse-max-time-ms', str(TIME_BUDGET_MS),
             '-i', os.path.join(index, GRAPH), '-a', os.path.join(index, ANNOTATION), path]
-        res = subprocess.run(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        res = subprocess.run(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+                             timeout=600)
         if res.returncode:
             sys.exit(f'{" ".join(command)} failed:\n{res.stderr}')
         response = json.loads(res.stdout)

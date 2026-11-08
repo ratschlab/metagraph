@@ -137,7 +137,30 @@ void check_case(const Case &c, std::vector<DeBruijnGraph::Mode> modes = all_mode
             EXPECT_EQ(got, single) << where << " arm " << to_string(arm);
 
             // limit 0: a label's claim ends at its first fork (BRANCH) or as the reference
-            for (const auto &[key, reason] : walker_claims(walk(*anno, c, permitted, 0), arm)) {
+            const trie::RefClaims limited = walker_claims(walk(*anno, c, permitted, 0), arm);
+            std::map<std::string, size_t> ref_walks, branch_ends;
+            for (const auto &[key, reason] : expected) {
+                ref_walks[key.second]++;
+            }
+            for (const auto &[key, reason] : limited) {
+                branch_ends[key.second] += reason == EndReason::BRANCH;
+            }
+            for (const auto &[l, n] : ref_walks) {
+                // walks that part ways part at a fork the label is on: allowance 0 ends it there
+                if (n >= 2)
+                    EXPECT_GE(branch_ends[l], 1u) << where << ": " << l;
+            }
+            // every walk of the reference is covered by a limited claim on its prefix
+            for (const auto &[ref_key, ref_reason] : expected) {
+                const auto &[w, l] = ref_key;
+                bool covered = false;
+                for (const auto &[key, reason] : limited) {
+                    covered |= key.second == l && key.first.size() <= w.size()
+                                && w.compare(0, key.first.size(), key.first) == 0;
+                }
+                EXPECT_TRUE(covered) << where << ": " << l << " [" << w << "]";
+            }
+            for (const auto &[key, reason] : limited) {
                 const auto &[w, l] = key;
                 if (reason == EndReason::BRANCH) {
                     size_t continuing = 0;

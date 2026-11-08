@@ -276,6 +276,8 @@ jobs:
           key: test-data-mini-refseq-bea44d60
 
       - name: Unit tests on the mini index
+        env:
+          METAGRAPH_REQUIRE_MINI_REFSEQ: 1
         run: |
           cd metagraph/build
           chmod +x unit_tests

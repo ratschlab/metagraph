@@ -112,7 +112,6 @@ void check_invariants(const ArmResult &arm) {
         }
     }
     EXPECT_EQ(arm.steps, bases);
-    EXPECT_EQ(arm.output_bp, bases);
     for (const auto &path : arm.paths) {
         const Segment &leaf = arm.segments[path.leaf];
         EXPECT_TRUE(leaf.children.empty());
@@ -141,7 +140,7 @@ std::string serialize(const SeedResult &r) {
     }
     for (const ArmResult &a : r.arms) {
         os << "\nARM " << to_string(a.arm) << ' ' << a.requested << ' ' << a.status << ' '
-           << a.steps << ' ' << a.output_bp << ' ' << a.frontier_live_paths << ' '
+           << a.steps << ' ' << a.frontier_live_paths << ' '
            << a.complete_to_bp;
         if (a.cap_trigger)
             os << " cap " << to_string(a.cap_trigger->reason) << ' ' << a.cap_trigger->at_bp;
@@ -427,6 +426,28 @@ TYPED_TEST(WalkerTest, CycleJunction) {
     }
 }
 
+// an inverted repeat Y ... rc(Y): on a canonical or primary graph the walk re-enters Y's
+// edges in the opposite orientation and ends with EDGE_REUSE_RC; a basic graph has no such edge
+TYPED_TEST(WalkerTest, InvertedRepeatReusesEdgesInReverse) {
+    using Graph = typename TypeParam::first_type;
+    using Annotation = typename TypeParam::second_type;
+    auto b = clean_blocks({ 30, 25, 20, 30 }, 77);
+    const std::string &L = b[0], &Y = b[1], &B = b[2], &E = b[3];
+    const std::string S = L + Y + B + rc(Y) + E;
+    for (auto mode : all_modes()) {
+        auto anno = build_anno_graph<Graph, Annotation>(kK, { S }, { "A" }, mode);
+        auto res = run(*anno, L, { "A" }, strategy(Strategy::kUnlimited));
+        const ArmResult &right = res.arms[kRight];
+        check_invariants(right);
+        EXPECT_EQ(0u, count_ends(right, EndReason::EDGE_REUSE)) << mode;
+        if (mode == DeBruijnGraph::BASIC) {
+            EXPECT_EQ(0u, count_ends(right, EndReason::EDGE_REUSE_RC)) << mode;
+        } else {
+            EXPECT_GE(count_ends(right, EndReason::EDGE_REUSE_RC), 1u) << mode;
+        }
+    }
+}
+
 // a homopolymer self-loop: each loop step re-takes the loop edge
 TYPED_TEST(WalkerTest, SelfLoop) {
     using Graph = typename TypeParam::first_type;
@@ -640,20 +661,6 @@ TYPED_TEST(WalkerTest, Caps) {
             EXPECT_EQ(1u, count_ends(arm, EndReason::MAX_STEPS));
         }
 
-        st = Strategy();
-        st.max_output_bp = 10;
-        res = run(*linear, seed, { "A" }, st);
-        for (size_t a : { kLeft, kRight }) {
-            const ArmResult &arm = res.arms[a];
-            check_invariants(arm);
-            EXPECT_EQ(ArmResult::TRUNCATED, arm.status);
-            EXPECT_EQ(10u, arm.output_bp);
-            ASSERT_TRUE(arm.cap_trigger.has_value());
-            EXPECT_EQ(EndReason::MAX_OUTPUT, arm.cap_trigger->reason);
-            EXPECT_EQ(10u, arm.cap_trigger->at_bp);
-            EXPECT_EQ(1u, count_ends(arm, EndReason::MAX_OUTPUT));
-        }
-
         // the live-path and path caps stop one arm only
         st = Strategy();
         st.max_live_paths = 1;
@@ -729,7 +736,8 @@ TEST(Walker, HeadsAtTheRadiusAreCompleteWhenACapTrips) {
     EXPECT_EQ(1u, arm.cap_trigger->at_bp);
 }
 
-// the split allowance of a path: past it the labels end with BRANCH, "split_limit"
+// the split allowance of a path is a cap: the labels it cuts end with MAX_SPLITS, and the arm
+// is complete only up to the fork
 TYPED_TEST(WalkerTest, SplitLimit) {
     using Graph = typename TypeParam::first_type;
     using Annotation = typename TypeParam::second_type;
@@ -744,18 +752,26 @@ TYPED_TEST(WalkerTest, SplitLimit) {
         check_invariants(right);
         ASSERT_EQ(1u, right.paths.size()) << mode;
         EXPECT_EQ(0u, right.paths[0].length_bp);
-        EXPECT_EQ(2u, path_ends(right.paths[0], EndReason::BRANCH));
+        EXPECT_EQ(2u, path_ends(right.paths[0], EndReason::MAX_SPLITS));
+        ASSERT_TRUE(right.paths[0].path_reason.has_value());
+        EXPECT_EQ(EndReason::MAX_SPLITS, *right.paths[0].path_reason);
         EXPECT_TRUE(right.splits.empty());
         EXPECT_EQ(0u, right.steps);
+        EXPECT_EQ(ArmResult::TRUNCATED, right.status);
+        EXPECT_EQ(0u, right.complete_to_bp);
+        ASSERT_TRUE(right.cap_trigger);
+        EXPECT_EQ(EndReason::MAX_SPLITS, right.cap_trigger->reason);
+        EXPECT_EQ(0u, right.cap_trigger->at_bp);
         for (LabelId l : { 0u, 1u }) {
             const LabelEnd *e = label_end(right, l);
             ASSERT_NE(nullptr, e);
             EXPECT_EQ(0u, e->at_bp);
-            EXPECT_EQ(EndReason::BRANCH, e->reason);
-            EXPECT_STREQ("split_limit", e->text);
+            EXPECT_EQ(EndReason::MAX_SPLITS, e->reason);
         }
         st.max_splits_per_path = 1;
-        EXPECT_EQ(2u, run(*anno, X, { "A", "B" }, st).arms[kRight].paths.size());
+        auto one = run(*anno, X, { "A", "B" }, st);
+        EXPECT_EQ(2u, one.arms[kRight].paths.size());
+        EXPECT_EQ(ArmResult::COMPLETE, one.arms[kRight].status);
     }
 }
 

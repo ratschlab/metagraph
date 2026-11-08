@@ -432,9 +432,10 @@ Config::Config(int argc, char *argv[]) {
         } else if (!strcmp(argv[i], "--traverse-max-time-ms")) {
             traverse_max_time_ms = std::stod(get_value(i++));
         } else if (!strcmp(argv[i], "--traverse-max-seeds")) {
-            traverse_max_seeds = atoll(get_value(i++));
+            // a value below 1 becomes 0, which the check below refuses
+            traverse_max_seeds = std::max(0LL, atoll(get_value(i++)));
         } else if (!strcmp(argv[i], "--traverse-max-seed-bp")) {
-            traverse_max_seed_bp = atoll(get_value(i++));
+            traverse_max_seed_bp = std::max(0LL, atoll(get_value(i++)));
         } else if (!strcmp(argv[i], "--cache-size")) {
             std::string value = get_value(i++);
             size_t end = 0;
@@ -639,9 +640,9 @@ Config::Config(int argc, char *argv[]) {
     }
 
     if ((identity == TRAVERSE || identity == SERVER_QUERY)
-            && (traverse_max_time_ms < 0 || !traverse_max_seeds || !traverse_max_seed_bp)) {
-        std::cerr << "Error: --traverse-max-seeds and --traverse-max-seed-bp must be positive"
-                     " and --traverse-max-time-ms non-negative" << std::endl;
+            && (!(traverse_max_time_ms > 0) || !traverse_max_seeds || !traverse_max_seed_bp)) {
+        std::cerr << "Error: --traverse-max-time-ms, --traverse-max-seeds and"
+                     " --traverse-max-seed-bp must be positive" << std::endl;
         print_usage_and_exit = true;
     }
 
@@ -650,6 +651,12 @@ Config::Config(int argc, char *argv[]) {
                 || (fnames.size() && (infbase.size() || infbase_annotators.size()))
                 || (fnames.empty() && (infbase.empty() || infbase_annotators.size() != 1))))
         print_usage_and_exit = true;  // only one of fnames or (infbase & annotator) must be used
+
+    if (identity == SERVER_QUERY && experimental_traverse && fnames.size()) {
+        std::cerr << "Error: --experimental-traverse needs a single graph (-i) and annotation (-a),"
+                     " not a list of graphs" << std::endl;
+        print_usage_and_exit = true;
+    }
 
     if ((identity == TRANSFORM
             || identity == CLEAN
@@ -1506,7 +1513,7 @@ if (advanced) {
             fprintf(stderr, "\t   --no-coord-mapping \t\tquery without mapping coords to sequence headers even if the .seqs index exists [off]\n");
             fprintf(stderr, "\t   --mem-cap-gb [FLOAT] \tmemory in GB available for the server to load graphs for queries into RAM [0]\n");
             fprintf(stderr, "\n\t   --experimental-traverse \tserve /resolve, /traverse and /traverse/capabilities (single index only) [off]\n");
-            fprintf(stderr, "\t   --traverse-max-time-ms [FLOAT] \tthe most time a traversal request may take [30000]\n");
+            fprintf(stderr, "\t   --traverse-max-time-ms [FLOAT] \tthe most time one seed's walk may take [30000]\n");
             fprintf(stderr, "\t   --traverse-max-seeds [INT] \tthe most seeds a traversal request may hold [10]\n");
             fprintf(stderr, "\t   --traverse-max-seed-bp [INT] \tthe longest seed a traversal request may hold [10000]\n");
         } break;
@@ -1517,7 +1524,7 @@ if (advanced) {
 
             fprintf(stderr, "Available options for traverse:\n");
             fprintf(stderr, "\t   --resolve \t\tthe request is a /resolve request [off]\n");
-            fprintf(stderr, "\t   --traverse-max-time-ms [FLOAT] \tthe most time the request may take [30000]\n");
+            fprintf(stderr, "\t   --traverse-max-time-ms [FLOAT] \tthe most time one seed's walk may take [30000]\n");
             fprintf(stderr, "\t   --traverse-max-seeds [INT] \tthe most seeds the request may hold [10]\n");
             fprintf(stderr, "\t   --traverse-max-seed-bp [INT] \tthe longest seed the request may hold [10000]\n");
         } break;

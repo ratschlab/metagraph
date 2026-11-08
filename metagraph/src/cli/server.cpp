@@ -664,10 +664,7 @@ int run_server(Config *config) {
     // the traversal routes' bounds and their single index (the routes outlive this block)
     const TraverseLimits traverse_bounds = traverse_limits(*config);
     auto traverse_index = [&]() -> const AnnotatedDBG& {
-        if (config->fnames.size()) {
-            throw std::invalid_argument("Bad request: traversal requests are not supported "
-                                        "for servers with multiple graphs");
-        }
+        assert(config->fnames.empty());  // the config refuses the routes on a list of graphs
         if (anno_graph.wait_for(0s) != std::future_status::ready)
             throw CurrentlyInitializingError();
         return *anno_graph.get();
