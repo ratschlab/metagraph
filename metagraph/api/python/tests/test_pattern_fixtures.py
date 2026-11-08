@@ -403,9 +403,13 @@ SCHEMA = {
                       'headers_unique'],
     'graph_summary_pair': ['graph', 'graph_path', 'annotation_path', 'index_ns', 'index_fp', 'k',
                            'graph_mode', 'available', 'unavailable_reason', 'mask', 'counting',
-                           'traversal'],
+                           'traversal',
+                           # the pair's capability profile (E17, SPEC-multigraph-envelope.md
+                           # section 8.1), also a single-graph server's pair_summary
+                           'index_meta_fp', 'alphabet', 'graph_representation',
+                           'annotation_form', 'decode_charged', 'support_fp'],
     'graph_summary_traversal': ['regime', 'num_labels', 'has_coordinates',
-                                'has_coord_to_header', 'supports_trace'],
+                                'has_coord_to_header', 'supports_trace', 'counts'],
     # the block of GET /traverse/capabilities (SPEC §23): the gate fields and the route of the
     # full block
     'pattern_gate': None,
@@ -567,6 +571,39 @@ CUT_USAGE = ['state', 'started_at', 'elapsed_ms', 'cpu_ms', 'memory_bytes']
 # GET /capabilities' headers_unique, an example of a repeated header and one occurrence of it
 # (SPEC-multigraph-envelope.md section 9; not tables of SPEC-pattern-search.md)
 HEADERS_UNIQUE = ['value', 'collisions', 'examples']
+# the capability profile of a pair (E17, SPEC-multigraph-envelope.md section 8.1): the graph
+# types `--graph` names, the annotation types `--anno-type` names (those read as counts apart)
+GRAPH_REPRESENTATIONS = ('succinct', 'hash', 'hashstr', 'hashfast', 'sshash', 'bitmap')
+ANNOTATION_FORMS = ('column', 'row', 'brwt', 'bin_rel_wt', 'flat', 'rbfish', 'rb_brwt',
+                    'row_diff', 'row_diff_brwt', 'row_diff_flat', 'row_diff_sparse',
+                    'row_diff_disk', 'row_sparse', 'int_brwt', 'row_diff_int_brwt',
+                    'row_diff_int_disk', 'column_coord', 'brwt_coord', 'row_diff_coord',
+                    'row_diff_brwt_coord', 'row_diff_disk_coord')
+COUNT_FORMS = ('int_brwt', 'row_diff_int_brwt', 'row_diff_int_disk')
+SPEC_ENVELOPE = os.path.join(REPO, 'docs', 'SPEC-multigraph-envelope.md')
+
+
+def support_fp(pair):
+    """support_fp recomputed from a pair's entry alone by the rule of
+    SPEC-multigraph-envelope.md section 8.1 (its fenced block: the version line, then
+    "<name>=<value>" per field): FNV-1a-64 over those lines, each value the member's compact
+    JSON, as 16 lowercase hex digits"""
+    with open(SPEC_ENVELOPE, encoding='utf-8') as f:
+        lines = f.read().split('\n')
+    start = next(i for i, line in enumerate(lines) if line.startswith('mgt-support '))
+    end = next(i for i in range(start, len(lines)) if lines[i].startswith('```'))
+    text = lines[start] + '\n'
+    for line in lines[start + 1:end]:
+        assert line.endswith('=<value>'), line
+        name = line[:-len('=<value>')]
+        value = pair
+        for part in name.split('.'):
+            value = value.get(part) if isinstance(value, dict) else None
+        text += f'{name}={json.dumps(value)}\n'
+    h = 14695981039346656037
+    for byte in text.encode():
+        h = ((h ^ byte) * 1099511628211) & 0xFFFFFFFFFFFFFFFF
+    return '%016x' % h
 HEADERS_UNIQUE_EXAMPLE = ['header', 'occurrences', 'pairs']
 HEADERS_UNIQUE_OCCURRENCE = ['graph', 'graph_path', 'annotation_path', 'column']
 
@@ -3711,6 +3748,30 @@ class TestPatternFixtures(unittest.TestCase):
                                      for t in ('graph', 'graph_path', 'annotation_path')),
                                  f'{ep}.pairs[{j}]', 'the pair tags, null on one graph')
 
+            def profile(p, path):
+                # SPEC-multigraph-envelope.md section 8.1: a pair's profile, its tags null on a
+                # single-graph server, support_fp recomputed from the entry alone
+                check.keys(p, SCHEMA['graph_summary_pair'], path)
+                check.keys(p['traversal'], SCHEMA['graph_summary_traversal'], path + '.traversal')
+                check.ok(all((p[t] is None) is (not multi)
+                             for t in ('graph', 'graph_path', 'annotation_path')),
+                         path, 'the pair tags, null on one graph')
+                for fp in ('index_meta_fp', 'support_fp'):
+                    check.ok(isinstance(p[fp], str) and re.fullmatch('[0-9a-f]{16}', p[fp]),
+                             f'{path}.{fp}', '16 lowercase hex digits')
+                check.ok(isinstance(p['alphabet'], str) and p['alphabet'] != '',
+                         path + '.alphabet')
+                check.one_of(p['graph_representation'], GRAPH_REPRESENTATIONS,
+                             path + '.graph_representation')
+                check.one_of(p['annotation_form'], ANNOTATION_FORMS, path + '.annotation_form')
+                check.ok(isinstance(p['decode_charged'], bool), path + '.decode_charged')
+                check.ok(p['traversal']['counts'] == ('presence_only'
+                                                      if p['annotation_form'] in COUNT_FORMS
+                                                      else None),
+                         path + '.traversal.counts', 'presence_only on a count form, else null')
+                check.ok(p['support_fp'] == support_fp(p), path + '.support_fp',
+                         'recomputed from the entry')
+
             if not multi:
                 check.ok(doc['graph_summary'] is None, 'graph_summary', 'null on one graph')
                 check.ok(doc['max_graphs_without_selection'] is None,
@@ -3718,8 +3779,13 @@ class TestPatternFixtures(unittest.TestCase):
                 # a loaded single-graph server states it at the top level
                 check.ok('headers_unique' in doc, 'headers_unique', 'at the top level')
                 headers_unique(doc['headers_unique'], 'headers_unique')
+                # and its pair's profile (E17)
+                check.ok('pair_summary' in doc, 'pair_summary', 'at the top level')
+                profile(doc['pair_summary'], 'pair_summary')
                 return
             check.ok('headers_unique' not in doc, 'headers_unique',
+                     'in graph_summary only on a multi-graph server')
+            check.ok('pair_summary' not in doc, 'pair_summary',
                      'in graph_summary only on a multi-graph server')
             # SPEC §24.1: the threshold of the selection rule (a request without `graphs`
             # queries every name of a list of at most that many), the server flag, at least 1
@@ -3755,6 +3821,9 @@ class TestPatternFixtures(unittest.TestCase):
                          path + '.graph_mode')
             check.ok(b['available'] is any(p['available'] for p in summary['pairs']),
                      'pattern.available', 'whether a pair is served')
+            # each pair's capability profile (E17), its support_fp over the fields above
+            for i, p in enumerate(summary['pairs']):
+                profile(p, f'graph_summary.pairs[{i}]')
 
     def test_the_block_is_the_same_on_both_routes(self):
         """SPEC §23: on every fixture server the full block is the same on /capabilities and
@@ -4166,6 +4235,62 @@ class TestPatternFixtures(unittest.TestCase):
             ('pattern_capabilities_multi_graph', lambda d: d.update(graph='x'), 'the name'),
             ('pattern_capabilities_multi_graph_no_graph', lambda d: d.pop('graph'),
              'the pair named'),
+        ]
+        for name, mutate, says in cases:
+            with self.subTest(fixture=name, says=says):
+                run(name)
+                with self.assertRaisesRegex(AssertionError, says):
+                    run(name, mutate)
+
+    def test_pair_profile_refuses_what_e17_never_answers(self):
+        """SPEC-multigraph-envelope.md section 8.1: each pair's capability profile, in
+        graph_summary on a multi-graph server and as pair_summary at a single-graph server's top
+        level; each rule refuses a document that breaks it -- the member missing or misplaced, a
+        capability field changed under an unchanged support_fp, a fingerprint not 16 hex digits,
+        counts on a form without them, an unknown form or representation, and a pair tag on a
+        single-graph server."""
+        def run(name, mutate=None):
+            doc = copy.deepcopy(self.bodies[name][1])
+            if mutate:
+                mutate(doc)
+            self.capabilities_document(Checker(Raising(), name), self.fixtures[name], doc)
+
+        def single(**fields):
+            def m(doc):
+                doc['pair_summary'].update(fields)
+            return m
+
+        def multi(**fields):
+            def m(doc):
+                doc['graph_summary']['pairs'][0].update(fields)
+            return m
+
+        def traversal(**fields):
+            def m(doc):
+                doc['pair_summary']['traversal'].update(fields)
+            return m
+
+        cases = [
+            ('capabilities', lambda d: d.pop('pair_summary'), 'at the top level'),
+            ('capabilities', single(graph='x'), 'null on one graph'),
+            ('capabilities', single(decode_charged=False), 'recomputed from the entry'),
+            ('capabilities', single(annotation_form='row_diff_brwt'), 'recomputed from the entry'),
+            ('capabilities', single(support_fp='0' * 16), 'recomputed from the entry'),
+            ('capabilities', single(index_meta_fp='ABC'), '16 lowercase hex digits'),
+            ('capabilities', single(annotation_form='matrix'), r'pair_summary\.annotation_form'),
+            ('capabilities', single(graph_representation='dbg'),
+             r'pair_summary\.graph_representation'),
+            ('capabilities', single(decode_charged='true'), r'pair_summary\.decode_charged'),
+            ('capabilities', traversal(counts='presence_only'), 'presence_only on a count form'),
+            ('capabilities', lambda d: d['pair_summary'].pop('support_fp'), 'fields'),
+            ('capabilities_mask_absent', single(mask='file'), 'recomputed from the entry'),
+            ('capabilities_multi_graph', lambda d: d.update(
+                pair_summary=d['graph_summary']['pairs'][0]), 'in graph_summary only'),
+            ('capabilities_multi_graph', multi(graph_representation='hash'),
+             'recomputed from the entry'),
+            ('capabilities_multi_graph', multi(graph_path=None), 'null on one graph'),
+            ('capabilities_multi_graph', lambda d: d['graph_summary']['pairs'][0]['traversal']
+             .pop('counts'), 'fields'),
         ]
         for name, mutate, says in cases:
             with self.subTest(fixture=name, says=says):

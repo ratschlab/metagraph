@@ -4403,9 +4403,9 @@ the other pairs.
 
 So that a service learns a many-graph server with one probe, `GET /capabilities` of a multi-graph server states
 every pair, computed once at start-up (`null` on a single-graph server, whose graph `pattern` and
-`/traverse/capabilities` describe). It is the large part of that document there: about 470 bytes per entry, so
-8.8 KB for 7 pairs and about a megabyte for a list of two thousand chunks (a name over many chunks repeats each
-chunk's entry); a client caches it:
+`/traverse/capabilities` describe). It is the large part of that document there: about 670 bytes per entry (470
+before E17's capability profile added about 200), so about 10 KB for 7 pairs and about 1.3 megabytes for a list of
+two thousand chunks (a name over many chunks repeats each chunk's entry); a client caches it:
 
 <!-- schema: graph_summary -->
 | field | type | meaning |
@@ -4430,6 +4430,12 @@ chunk's entry); a client caches it:
 | `mask` | string \| null | as its block's |
 | `counting` | string \| null | as its block's (its `dummy_fraction`, sampled at load, is its block's only) |
 | `traversal` | object | `graph_summary_traversal`: what `/traverse` and `/resolve` read on it |
+| `index_meta_fp` | string | its meta fingerprint, computed at start-up (E17, SPEC-multigraph-envelope.md §8.1) |
+| `alphabet` | string | the graph's alphabet, as `/traverse` states it |
+| `graph_representation` | string | the graph's type as `--graph` names it (`succinct`, `hash`, `hashstr`, `hashfast`, `sshash`, `bitmap`) |
+| `annotation_form` | string | the annotation's type as `--anno-type` names it (e.g. `row_diff_brwt_coord`) |
+| `decode_charged` | boolean | a traversal under a memory budget charges its annotation reads before they are held |
+| `support_fp` | string | FNV-1a-64 (16 hex) over its capability fields, not its identity or size: SPEC-multigraph-envelope.md §8.1 states the fields and the text |
 
 <!-- schema: graph_summary_traversal -->
 | field | type | meaning |
@@ -4439,6 +4445,10 @@ chunk's entry); a client caches it:
 | `has_coordinates` | boolean | the annotation has k-mer coordinates |
 | `has_coord_to_header` | boolean | the record mapping (`.seqs`) is loaded |
 | `supports_trace` | boolean | `support: "trace"` and record coordinates are served (coordinates on a BASIC graph) |
+| `counts` | string \| null | `"presence_only"` on a count annotation (read as presence, SPEC-labeled-traversal-core.md §10.3), null otherwise |
+
+A single-graph server states its pair's entry at the top level of `GET /capabilities` as `pair_summary`, its
+`graph`, `graph_path` and `annotation_path` null, `null` while the index loads (SPEC-multigraph-envelope.md §8.1).
 
 ### 24.5 The mask check at load
 

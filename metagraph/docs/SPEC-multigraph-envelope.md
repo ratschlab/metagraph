@@ -311,6 +311,72 @@ the requests of each route the server runs at once (`--pattern-max-concurrent`, 
 states the same object beside its maxima.
 Clients switch on these, never on dates.
 
+### 8.1 The capability profile of a pair (E17)
+
+Each `graph_summary.pairs[]` entry (`SPEC-pattern-search.md` §24.4) states, besides the pair, its identity, k,
+the pattern fields and `traversal`, the pair's capability profile, computed once at start-up before the server
+listens:
+
+| Member | Type | Meaning |
+| --- | --- | --- |
+| `index_meta_fp` | string | the pair's meta fingerprint, the value its `/traverse` and `/resolve` capabilities state (`SPEC-labeled-traversal-core.md` §10.3): one pass over the pair's column names, the pairs in parallel, logged with its time (`index_meta_fp of the N pairs (C columns) computed in S s`). A negative check only, never identity: equal means "index shape unchanged", never "file unchanged" |
+| `alphabet` | string | the graph's alphabet as `/traverse` capabilities state it (a DNA build's succinct graph `$ACGT`, its hash graphs `ACGT`; a Protein build's succinct graph `$ABCDEFGHIJKLMNOPQRSTUVWYZX`) |
+| `graph_representation` | string | the graph's type as `--graph` names it: `succinct`, `hash` (an ordered hash graph, packed or not: one file extension), `hashstr`, `hashfast`, `sshash` or `bitmap`; of a PRIMARY graph (wrapped in `CanonicalDBG`) the wrapped graph's |
+| `annotation_form` | string | the annotation's type as `--anno-type` names it: the class the loader constructed from the file's extension, e.g. `row_diff_brwt_coord` (RefSeq r237, AllTheBacteria, UniParc), `row_diff_int_brwt` (Logan's `*_RNA` chunks), `row_diff_disk`, `column` |
+| `decode_charged` | bool | whether a traversal under a memory budget charges the pair's annotation reads before they are held (`SPEC-labeled-traversal-core.md` §6.8): the traversal oracle's own predicate on the matrix. True on the row-diff forms over an index matrix with a single-row read (`row_diff`, `row_diff_coord`, `row_diff_brwt`, `row_diff_brwt_coord`, `row_diff_disk`, `row_diff_sparse`, `row_diff_flat`, `row_diff_int_brwt`) and on plain `brwt` and `column`; false on `column_coord`, `brwt_coord`, `int_brwt`, `row_diff_int_disk`, `row_diff_disk_coord`, `flat`, `row_sparse`, `row`, `bin_rel_wt`, `rbfish` and `rb_brwt`. Plain `brwt` and `column` stay `annotation: "unbudgeted"` on `/pattern` (budgeted there is a row-diff form only): the two fields together state that nuance |
+| `traversal.counts` | string or null | `"presence_only"` on a count annotation (`row_diff_int_brwt`, `int_brwt`, `row_diff_int_disk`: walks read presence, `SPEC-labeled-traversal-core.md` §10.3), null on the others, so that a client without a graph sees it per pair |
+| `support_fp` | string | FNV-1a-64, 16 lowercase hex digits, over the pair's capability fields (below) |
+
+`support_fp` fingerprints what the routes can do on the pair, not its content. Two pairs with equal values agree
+on the graph representation, k, regime, alphabet, annotation form, coordinates, record mapping (`.seqs`), trace,
+charged reads, counts and the pattern fields (`graph_mode`, `available`, `unavailable_reason`, `mask`,
+`counting`), so that a service probes the routes once per distinct `support_fp` (the chunks of one Logan build
+share it) and keeps outcomes that depend on the data (a seed or a label absent from one pair) per request. The
+identity (`graph`, `graph_path`, `annotation_path`, `index_ns`, `index_fp`, `index_meta_fp`) and the size
+(`traversal.num_labels`) are left out; the pattern block's `dummy_fraction` (sampled from the graph's data) is not
+a member of the entry. The hashed text is a version line, then one line per field in this order (byte order of
+the names; a member of `traversal` named `traversal.<member>`), each line ending with `\n`:
+
+```
+mgt-support 1
+alphabet=<value>
+annotation_form=<value>
+available=<value>
+counting=<value>
+decode_charged=<value>
+graph_mode=<value>
+graph_representation=<value>
+k=<value>
+mask=<value>
+traversal.counts=<value>
+traversal.has_coord_to_header=<value>
+traversal.has_coordinates=<value>
+traversal.regime=<value>
+traversal.supports_trace=<value>
+unavailable_reason=<value>
+```
+
+`<value>` is the entry's member as compact JSON, as Python's `json.dumps` writes it: a string in double quotes
+with JSON's escapes (non-ASCII as `\uXXXX`; every value is ASCII today), `true` or `false`, `null`, an integer in
+decimal. A client recomputes `support_fp` from the entry alone: `'%016x' % fnv1a_64(text.encode())`, FNV-1a-64
+with offset basis 14695981039346656037 and prime 1099511628211 (as `index_meta_fp`). The first line is the rule's
+version: a capability field added to the profile later changes the version and the list, and with them every
+pair's `support_fp`, so that values of servers of different versions differ even for one profile, while equal
+values (up to FNV-1a-64 collisions) always mean one profile of one rule. A client compares `support_fp` within
+one server's document or between servers of one version, and never keeps it as the identity of an index.
+
+A single-graph server states its pair's profile at the top level of `GET /capabilities` as `pair_summary`: the
+same entry, with `graph`, `graph_path` and `annotation_path` null (as its `headers_unique` tags its pair) and
+`index_ns`, `index_fp` from `--index-name` and `--index-manifest`; null while the index loads (`ready: false`). A
+multi-graph server has no top-level `pair_summary`. The server logs the number of distinct profiles at start-up
+(multi-graph: `N capability profile(s) (support_fp)`; single-graph: `Capability profile: <representation>
+<form> annotation, support_fp <fp>, index_meta_fp <fp>`).
+
+Reference instance: sample 12, whose pairs' profile members are recorded on eleven fixture pairs of r237's
+profile (succinct, k 31, basic, `row_diff_brwt_coord` with its `.seqs`, no mask) served under r237's names, their
+tags rewritten to sample 12's paths: `support_fp` is r237's (a client recomputes it from each entry),
+`index_meta_fp` the fixture pairs' (r237's own are read from staging's `GET /capabilities` after the deploy).
+
 ## 9. headers_unique (E22)
 
 Whether every sequence header of a server names one record, so that a header label (a `.seqs` record name) selects

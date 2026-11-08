@@ -458,8 +458,12 @@ bool LabelOracle::get(Row row, Column column) const {
     return get_entry_->get(row, column);
 }
 
-bool LabelOracle::decode_charged() const {
-    return (rd_ && rd_->supports_budgeted_decode()) || plain_rows_;
+bool LabelOracle::decode_charged(const BinaryMatrix &matrix) {
+    // as the constructor sets rd_ and plain_rows_ from the matrix: a row-diff matrix whose
+    // index matrix has a single-row read, else a plain matrix budgeted_rows reads row by row
+    if (const auto *rd = dynamic_cast<const annot::matrix::IRowDiff*>(&matrix))
+        return rd->supports_budgeted_decode();
+    return static_cast<bool>(annot::matrix::budgeted_rows(matrix));
 }
 
 DecodeStatus LabelOracle::get_rows(const std::vector<Row> &rows, DecodeBudget &budget,
