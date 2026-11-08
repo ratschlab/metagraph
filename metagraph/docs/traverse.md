@@ -47,7 +47,7 @@ names it is refused (HTTP 400). The server builds its header index when it start
 |---|---|---|
 | `sequence` | the query, at most 1,000,000 bp | required |
 | `labels` | the labels to profile, at most 100,000 | exactly one of `labels` and `discover` |
-| `discover.max_labels` | keep the labels supporting the most k-mers; a discovery that sees more than 100,000 distinct labels is refused (HTTP 400) | 1000 |
+| `discover.max_labels` | keep the labels supporting the most k-mers, ranked as `/search` with `with_signature` ranks them | 1000 |
 | `discover.kind` | `column` or `header` | `column` |
 | `select` | also select seeds | none |
 | `select.policy` | `max_support`: the interval contained in the most labels' support runs, repeatedly, outside the intervals picked before; `longest_first`: the longest candidates | `max_support` |
