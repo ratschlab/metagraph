@@ -101,7 +101,7 @@ class TestRemapAnnotation(TestingBase):
         # The saved row map belongs to the first target and is rejected for another one.
         res = self._remap(anno, out, self.partial_target)
         self.assertNotEqual(res.returncode, 0)
-        self.assertIn('different version', res.stderr.decode() + res.stdout.decode())
+        self.assertIn('does not match', res.stderr.decode() + res.stdout.decode())
 
     def test_remap_rejects_different_kmers(self):
         prefix = f'{self.tempdir.name}/mismatch'

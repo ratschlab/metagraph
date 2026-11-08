@@ -8,6 +8,7 @@
 #include "annotation/binary_matrix/row_diff/row_diff.hpp"
 #include "annotation/representation/annotation_matrix/static_annotators_def.hpp"
 #include "common/logger.hpp"
+#include "common/threads/threading.hpp"
 #include "common/vectors/vector_algorithm.hpp"
 #include "graph/representation/succinct/dbg_succinct.hpp"
 
@@ -84,6 +85,31 @@ sdsl::int_vector<> map_rows_to_graph(const DeBruijnGraph &source,
     logger->trace("Matched {} of {} source rows to target rows",
                   num_mapped.load(), source.max_index());
     return row_map;
+}
+
+bool check_row_map(const DeBruijnGraph &source,
+                   const DeBruijnGraph &target,
+                   const sdsl::int_vector<> &row_map,
+                   uint64_t num_samples) {
+    if (row_map.size() != source.max_index())
+        return false;
+
+    uint64_t num_kept = 0;
+    uint64_t max_target_row = 0;
+    #pragma omp parallel for num_threads(get_num_threads()) reduction(+:num_kept) reduction(max:max_target_row)
+    for (uint64_t row = 0; row < row_map.size(); ++row) {
+        num_kept += row_map[row] != 0;
+        max_target_row = std::max<uint64_t>(max_target_row, row_map[row]);
+    }
+    if (num_kept != target.num_nodes() || max_target_row > target.max_index())
+        return false;
+
+    const uint64_t step = std::max<uint64_t>(1, row_map.size() / std::max<uint64_t>(1, num_samples));
+    for (uint64_t row = 0; row < row_map.size(); row += step) {
+        if (row_map[row] && target.kmer_to_node(source.get_node_sequence(row + 1)) != row_map[row])
+            return false;
+    }
+    return true;
 }
 
 std::unique_ptr<MultiLabelAnnotation<std::string>>

@@ -32,6 +32,16 @@ sdsl::int_vector<> map_rows_to_graph(const graph::DeBruijnGraph &source,
                                      size_t num_threads = 1);
 
 /**
+ * Check a saved row map against both graphs. Returns false if the row counts
+ * differ or if one of num_samples evenly spaced kept rows maps to another
+ * target row than its k-mer.
+ */
+bool check_row_map(const graph::DeBruijnGraph &source,
+                   const graph::DeBruijnGraph &target,
+                   const sdsl::int_vector<> &row_map,
+                   uint64_t num_samples = 10000);
+
+/**
  * Move the rows of a BRWT or RowDiff<BRWT> annotation built for `source` to a graph
  * with target_num_rows rows, using a row map from map_rows_to_graph. The BRWT
  * topology and column order are kept. For RowDiff, every kept row keeps its

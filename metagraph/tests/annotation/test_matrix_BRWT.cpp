@@ -213,11 +213,11 @@ TYPED_TEST(BinaryMatrixBRWTTest, RemapRowsRejectsInvalidMap) {
     sdsl::int_vector<> repeated(4, 0, 8);
     repeated[0] = 1;
     repeated[1] = 1;
-    EXPECT_THROW(matrix.remap_rows(repeated, 4), std::exception);
+    EXPECT_THROW(matrix.remap_rows(repeated, 4), std::runtime_error);
 
     sdsl::int_vector<> out_of_range(4, 0, 8);
     out_of_range[2] = 5;
-    EXPECT_THROW(matrix.remap_rows(out_of_range, 4), std::exception);
+    EXPECT_THROW(matrix.remap_rows(out_of_range, 4), std::runtime_error);
 }
 
 } // namespace

@@ -871,11 +871,12 @@ Pass the graph that the annotation was built for with ``--remap-graph`` and the 
 The result keeps the labels, the BRWT tree and the relations of every k-mer.
 Rows without a k-mer, such as the dummy nodes of a succinct graph, are dropped.
 The command stops with an error if the graphs differ in any k-mer.
+For ``row_diff_brwt``, it also stops if a row that is not an anchor would lose its successor.
 
 The command saves the matching of rows as ``moved.rowmap``.
-A repeated run with the same output name reuses this file and skips loading the new graph.
-Delete it after changing either graph.
-The command stops if the file size of the new graph changed since the row map was saved.
+A repeated run with the same output name reuses this file and skips matching the rows again.
+Before reusing it, the command checks a sample of rows against both graphs and stops if they no longer match.
+Delete the file after changing either graph.
 
 .. _query_index:
 

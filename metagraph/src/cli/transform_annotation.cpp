@@ -14,7 +14,6 @@
 #include "annotation/binary_matrix/multi_brwt/clustering.hpp"
 #include "annotation/annotation_converters.hpp"
 #include "annotation/annotation_remap.hpp"
-#include "common/serialization.hpp"
 #include "load/load_graph.hpp"
 #include "config/config.hpp"
 #include "load/load_annotation.hpp"
@@ -334,29 +333,19 @@ int transform_annotation(Config *config) {
         uint64_t target_num_rows;
 
         auto source = load_critical_dbg(config->remap_graph);
+        auto target = load_critical_dbg(config->infbase);
+        target_num_rows = target->max_index();
 
         if (std::filesystem::exists(row_map_fname)) {
             logger->trace("Loading row map from {}", row_map_fname);
             std::ifstream in(row_map_fname, std::ios::binary);
             row_map.load(in);
-            if (!in.good()) {
-                logger->error("Cannot load row map from {}", row_map_fname);
-                exit(1);
-            }
-            target_num_rows = load_number(in);
-            uint64_t target_file_size = load_number(in);
-            if (!in.good() || row_map.size() != source->max_index()) {
-                logger->error("Row map {} does not match graph {}. Delete it and run again",
-                              row_map_fname, config->remap_graph);
-                exit(1);
-            }
-            if (target_file_size != std::filesystem::file_size(config->infbase)) {
-                logger->error("Row map {} was made for a different version of graph {}."
-                              " Delete it and run again", row_map_fname, config->infbase);
+            if (!in.good() || !check_row_map(*source, *target, row_map)) {
+                logger->error("Row map {} does not match graphs {} and {}. Delete it and run again",
+                              row_map_fname, config->remap_graph, config->infbase);
                 exit(1);
             }
         } else {
-            auto target = load_critical_dbg(config->infbase);
             logger->trace("Matching rows of {} to {}...", config->remap_graph, config->infbase);
             try {
                 row_map = map_rows_to_graph(*source, *target, get_num_threads());
@@ -364,23 +353,19 @@ int transform_annotation(Config *config) {
                 logger->error("{}", e.what());
                 exit(1);
             }
-            target_num_rows = target->max_index();
-            target.reset();
 
             const std::string tmp_fname = row_map_fname + ".tmp";
-            {
-                std::ofstream out(tmp_fname, std::ios::binary);
-                row_map.serialize(out);
-                serialize_number(out, target_num_rows);
-                serialize_number(out, std::filesystem::file_size(config->infbase));
-                if (!out.good()) {
-                    logger->error("Cannot write row map to {}", tmp_fname);
-                    exit(1);
-                }
+            std::ofstream out(tmp_fname, std::ios::binary);
+            row_map.serialize(out);
+            out.close();
+            if (!out) {
+                logger->error("Cannot write row map to {}", tmp_fname);
+                exit(1);
             }
             std::filesystem::rename(tmp_fname, row_map_fname);
             logger->trace("Row map saved to {} in {} sec", row_map_fname, timer.elapsed());
         }
+        target.reset();
 
         auto annotation = initialize_annotation(files.at(0), *config);
         if (!annotation->load(files.at(0))) {
