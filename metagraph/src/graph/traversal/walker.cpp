@@ -247,25 +247,44 @@ class Walker {
 
 /******************************** seed phase ********************************/
 
-void Walker::validate_seed() {
-    const std::string &seq = seed_.sequence;
-    if (seq.size() < k_)
-        throw std::invalid_argument("Seed shorter than k");
+namespace {
 
-    seed_upper_ = seq;
+std::string seed_in_graph_case(const std::string &seq) {
+    std::string upper = seq;
 #if ! _DNA_CASE_SENSITIVE_GRAPH
-    for (char &c : seed_upper_) {
+    for (char &c : upper) {
         c = std::toupper(static_cast<unsigned char>(c));
     }
 #endif
-    const std::string &alphabet = graph_.alphabet();
-    for (size_t i = 0; i < seed_upper_.size(); ++i) {
-        char c = seed_upper_[i];
-        if (c == kSentinel || alphabet.find(c) == std::string::npos) {
+    return upper;
+}
+
+} // namespace
+
+void check_seed(const LabelOracle &oracle, const Seed &seed) {
+    const std::string &seq = seed.sequence;
+    if (seq.size() < oracle.get_k())
+        throw std::invalid_argument("Seed shorter than k");
+    const std::string upper = seed_in_graph_case(seq);
+    const std::string &alphabet = oracle.graph().alphabet();
+    for (size_t i = 0; i < upper.size(); ++i) {
+        if (upper[i] == kSentinel || alphabet.find(upper[i]) == std::string::npos) {
             throw std::invalid_argument("Invalid character '" + std::string(1, seq[i])
                                         + "' at position " + std::to_string(i) + " of the seed");
         }
     }
+    tsl::hopscotch_set<std::string_view> named;
+    for (const auto &name : seed.labels) {
+        if (!named.insert(name).second)
+            throw std::invalid_argument("Duplicate seed label '" + name + "'");
+        oracle.resolve_label(name);
+    }
+}
+
+void Walker::validate_seed() {
+    check_seed(oracle_, seed_);
+    const std::string &seq = seed_.sequence;
+    seed_upper_ = seed_in_graph_case(seq);
 
     nodes_ = map_to_nodes_sequentially(graph_, seed_upper_);
     assert(nodes_.size() == seq.size() - k_ + 1);
@@ -303,11 +322,8 @@ void Walker::validate_seed() {
         derive_seed_labels(keys, &refs);
         result_.label_dict = refs;
     } else {
-        tsl::hopscotch_set<std::string_view> named;
         for (const auto &name : seed_.labels) {
-            if (!named.insert(name).second)
-                throw std::invalid_argument("Duplicate seed label '" + name + "'");
-            refs.push_back(oracle_.resolve_label(name));
+            refs.push_back(oracle_.resolve_label(name));  // check_seed refused duplicates
         }
         // a label that does not carry every seed k-mer is dropped, with the runs it carries
         const auto hits = LabelQuery(oracle_, refs).fetch(keys);
