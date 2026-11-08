@@ -981,4 +981,76 @@ TYPED_TEST(BitVectorTest, operator_neq) {
     }
 }
 
+
+template <uint16_t BlockSize>
+void check_rrr_storage_roundtrip() {
+    using Owned = sdsl::rrr_vector<BlockSize>;
+    using View = sdsl::rrr_vector<BlockSize, detail::annotation_vector_io<0>, 32,
+                                  detail::annotation_vector_io>;
+    for (uint64_t size : {0, 1, 15, 63, 64, 65, 2048, 10003}) {
+        sdsl::bit_vector bits(size, 0);
+        for (uint64_t i = 0; i < size; ++i)
+            bits[i] = i % 101 < 43;
+        Owned owned(bits);
+        View constructed(bits);
+        std::ostringstream expected, actual;
+        owned.serialize(expected);
+        constructed.serialize(actual);
+        ASSERT_EQ(expected.str(), actual.str());
+        auto retained = constructed;
+        constructed = View();
+        typename View::rank_1_type retained_rank(&retained);
+        typename View::select_1_type retained_select(&retained);
+        uint64_t retained_ones = 0;
+        for (uint64_t i = 0; i < size; ++i) {
+            ASSERT_EQ(bits[i], retained[i]);
+            ASSERT_EQ(retained_ones, retained_rank(i));
+            if (bits[i]) {
+                ASSERT_EQ(i, retained_select(++retained_ones));
+            }
+        }
+        ASSERT_EQ(retained_ones, retained_rank(size));
+        for (unsigned offset = 0; offset < 8; ++offset) {
+            const auto filename = test_dump_basename + "_rrr_storage";
+            {
+                std::ofstream out(filename, std::ios::binary);
+                out << std::string(offset, 'x') << expected.str();
+            }
+            View loaded;
+            {
+                sdsl::shared_mapper_ifstream in(filename);
+                in.seekg(offset);
+                loaded.load(static_cast<std::istream &>(in));
+            }
+            auto alias = loaded;
+            View moved(std::move(loaded));
+            typename View::rank_1_type rank(&moved);
+            typename View::select_1_type select(&alias);
+            uint64_t ones = 0;
+            for (uint64_t i = 0; i < size; ++i) {
+                ASSERT_EQ(bits[i], moved[i]);
+                ASSERT_EQ(ones, rank(i));
+                if (bits[i]) {
+                    ASSERT_EQ(i, select(++ones));
+                }
+            }
+            ASSERT_EQ(ones, rank(size));
+            std::stringstream serialized;
+            moved.serialize(serialized);
+            ASSERT_EQ(expected.str(), serialized.str());
+            Owned restored;
+            restored.load(static_cast<std::istream &>(serialized));
+            ASSERT_EQ(owned, restored);
+        }
+    }
+}
+
+TEST(RRRStorage, MappedAndOwnedUseTheSameFormat) {
+    check_rrr_storage_roundtrip<3>();
+    check_rrr_storage_roundtrip<15>();
+    check_rrr_storage_roundtrip<63>();
+    check_rrr_storage_roundtrip<127>();
+    check_rrr_storage_roundtrip<255>();
+}
+
 } // namespace

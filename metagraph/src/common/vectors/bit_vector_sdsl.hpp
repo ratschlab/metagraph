@@ -22,8 +22,8 @@ class bit_vector_sdsl : public bit_vector {
 
     template <typename>
     struct is_rrr : std::false_type {};
-    template <uint16_t t_bs, class t_rac, uint16_t t_k>
-    struct is_rrr<sdsl::rrr_vector<t_bs, t_rac, t_k>> : std::true_type {};
+    template <uint16_t t_bs, class t_rac, uint16_t t_k, template <uint8_t> class Storage>
+    struct is_rrr<sdsl::rrr_vector<t_bs, t_rac, t_k, Storage>> : std::true_type {};
 
     template <typename>
     struct bv_traits;
@@ -383,9 +383,9 @@ struct bit_vector_sdsl<bv_type, rank_1_type, select_1_type, select_0_type>
 };
 
 template <class bv_type, class rank_1_type, class select_1_type, class select_0_type>
-template <uint16_t t_bs, class t_rac, uint16_t t_k>
+template <uint16_t t_bs, class t_rac, uint16_t t_k, template <uint8_t> class Storage>
 struct bit_vector_sdsl<bv_type, rank_1_type, select_1_type, select_0_type>
-::bv_traits<sdsl::rrr_vector<t_bs, t_rac, t_k>> {
+::bv_traits<sdsl::rrr_vector<t_bs, t_rac, t_k, Storage>> {
     static constexpr size_t MAX_ITER_BIT_VECTOR = 1;
     static constexpr size_t SEQ_BITWISE_WORD_ACCESS_VS_SELECT_FACTOR = 2;
 
@@ -454,12 +454,18 @@ using bit_vector_il
                       typename sdsl::bit_vector_il<block_size>::select_1_type,
                       typename sdsl::bit_vector_il<block_size>::select_0_type>;
 
+namespace mtg::detail {
+template <uint32_t BlockSize = 63>
+using rrr_storage = sdsl::rrr_vector<BlockSize, annotation_vector_io<0>, 32,
+                                     annotation_vector_io>;
+}
+
 template <uint32_t block_size = 63>
 using bit_vector_rrr
-    = bit_vector_sdsl<sdsl::rrr_vector<block_size>,
-                      typename sdsl::rrr_vector<block_size>::rank_1_type,
-                      typename sdsl::rrr_vector<block_size>::select_1_type,
-                      typename sdsl::rrr_vector<block_size>::select_0_type>;
+    = bit_vector_sdsl<mtg::detail::rrr_storage<block_size>,
+                      typename mtg::detail::rrr_storage<block_size>::rank_1_type,
+                      typename mtg::detail::rrr_storage<block_size>::select_1_type,
+                      typename mtg::detail::rrr_storage<block_size>::select_0_type>;
 
 using bit_vector_stat =
     bit_vector_sdsl<sdsl::bit_vector, sdsl::rank_support_v5<1, 1, sdsl::packed_vector_view<1>>,
