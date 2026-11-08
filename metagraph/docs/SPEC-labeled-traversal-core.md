@@ -469,9 +469,13 @@ deadline. `src/cli/traverse.cpp` `process_resolve_request`, `src/graph/traversal
   capped body (`--max-request-body-mb`), as the structures outside the account grow with it: jsoncpp's parsed
   request alone is about 12 to 28 times the body for an explicit list of labels of 6 to 1 characters (measured on
   macOS in the review of train 2; more on Linux), also for a body that is refused 400 afterwards, and each per-seed
-  copy of the list adds about 3 to 6 times. The cap that 256 MiB holds has not been measured; the estimate is a few
-  MiB, below 8 MiB. With a larger cap, or none (the default), a large body's structures are held beside R outside
-  every bound.
+  copy of the list adds about 3 to 6 times. The body-cap measurement (2026-11-08; the body read, parsed and copied,
+  refused or walked) found the memory no account counts at up to about 60 times the body: an explicit list of
+  1-character labels refused in the seed phase; the JSON reader alone up to 52 times; 6-character labels 25 to 28
+  times; long sequences 5 to 7 times. Under a cgroup limit of 256 MiB beside the idle charge, a 4.25 MiB body held
+  and a 4.5 MiB one was killed. A cap of 2 MiB holds that part to about 128 MiB, half the overhead. With a larger
+  cap, or none (the default), a large body's structures are held beside R outside every bound, about 60 times its
+  size.
   A seed the bound left unstarted is sent again in a new request (the action `split_request`).
 - **Attempt fields** (`DESIGN-traverse-graphlet.md` §14 and §14.1: the frozen wire contract's request fields;
   stage 4, backend half — the ledger itself lives in the search service): top-level `attempt_id`, `budget_id`
