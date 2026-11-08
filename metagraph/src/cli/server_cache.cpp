@@ -122,9 +122,10 @@ ServerQueryCache::Handle ServerQueryCache::acquire(const std::string &key) {
 
     auto it = map_.find(key);
     if (it != map_.end()) {
-        // Hit. Bump waiters, move to MRU.
+        // Hit. Bump waiters (an entry pinned again counts as pinned), move to MRU.
         auto &entry = it->second;
-        entry->waiters.fetch_add(1, std::memory_order_relaxed);
+        if (entry->waiters.fetch_add(1, std::memory_order_relaxed) == 0)
+            pinned_bytes_ += entry->size_bytes;
         touch_lru_locked(entry);
         // Sliding retention window: a hit on a PROTECTED entry is
         // direct evidence the upstream is still retrying, so we
@@ -148,16 +149,23 @@ ServerQueryCache::Handle ServerQueryCache::acquire(const std::string &key) {
 }
 
 void ServerQueryCache::release_waiter(const std::shared_ptr<Entry> &entry) {
+    if (max_size_bytes_ == 0) {
+        // a detached entry of the disabled cache: nothing is accounted
+        entry->waiters.fetch_sub(1, std::memory_order_acq_rel);
+        return;
+    }
+    // under the mutex, as every other change of the waiters, so that pinned_bytes_
+    // follows them
+    std::lock_guard<std::mutex> lock(mutex_);
     int prev = entry->waiters.fetch_sub(1, std::memory_order_acq_rel);
     if (prev > 1)
         return;  // Still has other waiters.
 
-    // Last waiter dropped: this entry — and possibly other entries that
-    // were skipped during a previous insert because they had waiters —
-    // are now evictable. Run the sweep so the cache settles back under
-    // budget without waiting for the next insert.
-    std::lock_guard<std::mutex> lock(mutex_);
-    evict_under_pressure_locked();
+    // Last waiter dropped: this entry is no longer pinned and is evictable. The
+    // budget holds already (on_result_ready retains only what fits beside the
+    // pinned entries), so nothing needs to be evicted now
+    if (entry->in_cache)
+        pinned_bytes_ -= entry->size_bytes;
 }
 
 bool ServerQueryCache::on_result_ready(const std::shared_ptr<Entry> &entry,
@@ -176,13 +184,18 @@ bool ServerQueryCache::on_result_ready(const std::shared_ptr<Entry> &entry,
     size_t charged_size = size + 2 * (entry->key.capacity() + 1)
                           + sizeof(Entry) + sizeof(decltype(map_)::value_type)
                           + sizeof(std::string) + 8 * sizeof(void *);
-    // An entry that cannot fit would evict useful results, then itself.
-    if (charged_size > max_size_bytes_) {
+    // Retained only when it fits beside the pinned entries, which no eviction can
+    // free (responses still being delivered): otherwise it would hold the cache above
+    // its budget, or evict useful results and then itself. Shared with its waiters
+    // either way (H3, review 5 #1)
+    if (charged_size > max_size_bytes_ || pinned_bytes_ > max_size_bytes_ - charged_size) {
         discard_locked(entry);
         return false;
     }
     entry->size_bytes = charged_size;
     total_size_bytes_ += entry->size_bytes;
+    // pinned by its producer (and any duplicate waiters) until delivered
+    pinned_bytes_ += entry->size_bytes;
     evict_under_pressure_locked();
     return true;
 }
@@ -196,6 +209,8 @@ void ServerQueryCache::discard_locked(const std::shared_ptr<Entry> &entry) {
     if (!entry->in_cache)
         return;
     total_size_bytes_ -= entry->size_bytes;
+    if (entry->waiters.load(std::memory_order_relaxed) > 0)
+        pinned_bytes_ -= entry->size_bytes;
     map_.erase(entry->key);
     lru_.erase(entry->lru_pos);
     entry->in_cache = false;
@@ -254,6 +269,11 @@ void ServerQueryCache::evict_under_pressure_locked() {
 size_t ServerQueryCache::size_bytes() const {
     std::lock_guard<std::mutex> lock(mutex_);
     return total_size_bytes_;
+}
+
+size_t ServerQueryCache::pinned_bytes() const {
+    std::lock_guard<std::mutex> lock(mutex_);
+    return pinned_bytes_;
 }
 
 size_t ServerQueryCache::entry_count() const {
