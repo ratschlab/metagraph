@@ -93,7 +93,7 @@ BOSS::BOSS(BOSSConstructor *builder) : BOSS::BOSS() {
 
 BOSS::~BOSS() = default;
 
-sdsl::sd_vector<> BOSS::build_suffix_ranges_sd(std::vector<edge_index>&& ranges,
+mtg::detail::sd_storage BOSS::build_suffix_ranges_sd(std::vector<edge_index>&& ranges,
                                                uint64_t num_edges) {
     assert(ranges.size());
     ranges[0] = std::max<uint64_t>(ranges[0], 1);
@@ -107,7 +107,7 @@ sdsl::sd_vector<> BOSS::build_suffix_ranges_sd(std::vector<edge_index>&& ranges,
     for (auto pos : ranges) {
         builder.set(pos);
     }
-    sdsl::sd_vector<> sd(builder);
+    mtg::detail::sd_storage sd(builder);
     logger->trace("Compressed node ranges to approx. {:.2f} MB",
                   footprint_sd_vector(sd.size(), ranges.size()) / 8e6);
     ranges = {};

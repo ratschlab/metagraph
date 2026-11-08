@@ -3,6 +3,7 @@ import logging
 import os
 import re
 import shlex
+import subprocess
 from pathlib import Path
 from typing import Union
 
@@ -11,6 +12,31 @@ from metagraph_workflows.workflow_configs import TMP_DIR, \
     RULE_CONFIGS_KEY, SEQS_FILE_LIST_PATH, SEQS_DIR_PATH
 
 logger = logging.getLogger("metagraph_workflow")
+
+
+def resolve_build_k(config):
+    """Resolve one k for every build stage, including KMC, and retain it in config."""
+    if config.get('k') is not None:
+        if isinstance(config['k'], bool) or not isinstance(config['k'], int) or config['k'] <= 0:
+            raise ValueError("k-mer length must be a positive integer.")
+        return
+
+    cmd = shlex.split(config['metagraph_cmd'])
+    error = ("Could not read the default k-mer length from the selected MetaGraph binary. "
+             "Check --metagraph-cmd, or set -k explicitly (k in a Snakemake config).")
+    if not cmd:
+        raise ValueError(error)
+    cmd[0] = os.path.expanduser(cmd[0])
+    try:
+        result = subprocess.run(cmd + ['build', '--help'], capture_output=True,
+                                text=True, check=True, timeout=10)
+    except (OSError, subprocess.SubprocessError) as exc:
+        raise ValueError(error) from exc
+    defaults = re.findall(r'^\s*-k\s+--kmer-length\b[^\n]*\[(\d+)\]\s*$',
+                          result.stdout + '\n' + result.stderr, re.MULTILINE)
+    if len(defaults) != 1 or int(defaults[0]) <= 0:
+        raise ValueError(error)
+    config['k'] = int(defaults[0])
 
 
 def get_seqs_file_list_path(wdir, config):

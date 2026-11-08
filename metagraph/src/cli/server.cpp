@@ -105,16 +105,13 @@ Json::Value process_align_request(const std::string &received_message,
 
     Config config(config_orig);
 
-    config.alignment_num_alternative_paths = json.get(
+    const auto &alignment_count = json.get(
         "max_alternative_alignments",
-        (uint64_t)config.alignment_num_alternative_paths).asInt();
-
-    if (!config.alignment_num_alternative_paths) {
-        // TODO: better throw an exception and send an error response to the client
-        logger->warn("[Server] Got invalid value of alignment_num_alternative_paths = {}."
-                     " The default value of 1 will be used instead...", config.alignment_num_alternative_paths);
-        config.alignment_num_alternative_paths = 1;
+        (uint64_t)config.alignment_num_alternative_paths);
+    if (!alignment_count.isInt() || alignment_count.asInt() <= 0) {
+        throw std::invalid_argument("'max_alternative_alignments' must be a positive integer.");
     }
+    config.alignment_num_alternative_paths = alignment_count.asInt();
 
     config.alignment_min_exact_match
             = json.get("min_exact_match",
@@ -123,7 +120,7 @@ Json::Value process_align_request(const std::string &received_message,
     if (config.alignment_min_exact_match < 0.0
             || config.alignment_min_exact_match > 1.0) {
         throw std::invalid_argument(
-                "Minimum exact match should be within [0, 1.0]. Instead got "
+                "'min_exact_match' must be in [0, 1]. Received "
                 + std::to_string(config.alignment_min_exact_match));
     }
 
@@ -192,7 +189,7 @@ std::vector<std::string> filter_graphs_from_list(
         for (const auto &item : content_json["graphs"]) {
             graphs_to_query.push_back(item.asString());
             if (!indexes.count(graphs_to_query.back()))
-                throw std::invalid_argument("Request with an uninitialized graph " + graphs_to_query.back());
+                throw std::invalid_argument("Unknown graph name in 'graphs': " + graphs_to_query.back());
         }
         // deduplicate
         std::sort(graphs_to_query.begin(), graphs_to_query.end());
@@ -200,8 +197,8 @@ std::vector<std::string> filter_graphs_from_list(
     } else {
         if (indexes.size() > max_names_without_filtering) {
             throw std::invalid_argument(
-                fmt::format("Bad request: requests without names (no \"graphs\" field) are "
-                            "only supported for small indexes (<={} names)",
+                fmt::format("Specify graph names in the 'graphs' array. Requests without a valid "
+                            "'graphs' array are only supported for indexes with at most {} names.",
                             max_names_without_filtering));
         }
         // query all graphs from list `config->fnames`
@@ -268,7 +265,7 @@ int run_server(Config *config) {
             std::getline(ss, name, ',');
             std::getline(ss, graph_path, ',');
             if (ss.eof()) {
-                logger->error("[Server] Invalid line in the csv file: `{}`", line);
+                logger->error("[Server] Invalid CSV row '{}'. Expected name,graph_path,annotation_path.", line);
                 std::exit(1);
             }
             std::getline(ss, annotation_path, ',');
@@ -372,7 +369,7 @@ int run_server(Config *config) {
                 bool load_in_ram = false;
                 if (config->fnames.empty()) {
                     if (content_json.isMember("graphs"))
-                        throw std::invalid_argument("Bad request: no support for filtering graphs on this server");
+                        throw std::invalid_argument("This server does not support graph filtering. Remove the 'graphs' field.");
                 } else {
                     graphs_to_query = filter_graphs_from_list(indexes, content_json, request_id);
                     load_in_ram = content_json.get("in_ram", false).asBool() && loaded_with_mmap;
@@ -562,8 +559,8 @@ int run_server(Config *config) {
                 throw CurrentlyInitializingError(); // the index is not loaded yet, so we can't process the request
 
             if (config->fnames.size()) {
-                throw std::invalid_argument("Bad request: alignment requests are not yet supported for "
-                                            "servers with multiple graphs");
+                throw std::invalid_argument("Alignment requests are not supported when the server uses a CSV graph list. "
+                                            "For /align, start a server with -i <GRAPH> -a <ANNOTATION>.");
             }
             return Json::writeString(Json::StreamWriterBuilder(),
                 process_align_request(content, anno_graph.get()->get_graph(), *config));

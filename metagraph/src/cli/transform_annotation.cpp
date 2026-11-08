@@ -186,8 +186,8 @@ auto parse_linkage_matrix(const std::string &filename){
 
             if (first == second || first >= merged || second >= merged) {
                 logger->error("Invalid format of the linkage matrix."
-                              " Indexes of parent clusters must be larger than"
-                              " indexes of the objects/clusters the include");
+                              " Child cluster indexes must be distinct, and the parent"
+                              " index must be larger than both child indexes.");
                 exit(1);
             }
 
@@ -369,8 +369,8 @@ int transform_annotation(Config *config) {
         while (instream.good() && !(instream >> old_name).eof()) {
             instream >> new_name;
             if (instream.fail() || instream.eof()) {
-                logger->error("Wrong format of the rules for renaming"
-                              " annotation columns passed in file '{}'",
+                logger->error("Invalid column-renaming rules in '{}'. "
+                              "Provide whitespace-separated pairs of old and new labels, ending with a newline.",
                               config->rename_instructions_file);
                 exit(1);
             }
@@ -429,7 +429,7 @@ int transform_annotation(Config *config) {
         uint64_t max_threshold = config->max_count;
         if (config->min_fraction > 0.0 || config->max_fraction < 1.0) {
             if (config->count_kmers) {
-                logger->error("--min-fraction and --max-fraction are ignored when --count-kmers is used. "
+                logger->error("--count-kmers requires --min-fraction 0 and --max-fraction 1. "
                               "Use --min-count and --max-count to filter by aggregated k-mer counts.");
                 exit(1);
             }
