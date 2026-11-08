@@ -58,9 +58,6 @@ struct Strategy {
     uint64_t max_extension_bp = 5000;
     double time_budget_ms = 30'000;
 
-    // output
-    bool sequences = true;
-
     // Safety caps. Not request fields: they keep a request within bounded memory.
     size_t max_splits_per_path = 64;
     uint64_t max_steps = 1'000'000;
