@@ -334,6 +334,17 @@ TYPED_TEST(LabelOracleCoordTest, HeaderLabels) {
     }
     EXPECT_GT(oracle.counters().tuple_rows_fetched, 0u);
 
+    // a name of both a column and a header, or the header of several records, is ambiguous
+    std::vector<std::vector<std::string>> clash(2);
+    std::vector<std::vector<uint64_t>> clash_kmers(2);
+    clash[col_f] = { "G", "acc2" }; clash_kmers[col_f] = { n1, n2 };
+    clash[col_g] = { "acc2" };      clash_kmers[col_g] = { n3 };
+    annot::CoordToHeader clash_cth(std::move(clash), std::move(clash_kmers));
+    LabelOracle clash_oracle(*anno, &clash_cth);
+    EXPECT_THROW(clash_oracle.resolve_label("G"), std::invalid_argument);
+    EXPECT_THROW(clash_oracle.resolve_label("acc2"), std::invalid_argument);
+    EXPECT_EQ(LabelKind::COLUMN, clash_oracle.resolve_label("F").kind);
+
     // header labels need a CoordToHeader
     LabelOracle no_headers(*anno);
     EXPECT_THROW(no_headers.resolve_label("acc1"), std::invalid_argument);
@@ -359,10 +370,14 @@ TEST(CoordToHeaderIndex, FindHeader) {
         EXPECT_FALSE(oracle.find_header("W"));
     }
 
-    // a header repeated in a second column resolves to its first column
+    // a header repeated in a second column resolves to its first column, and is marked
     annot::CoordToHeader two({ { "A", "B" }, { "B", "C" } }, { { 1, 1 }, { 1, 1 } });
+    two.index_headers();
     EXPECT_EQ(std::make_pair(Column(0), size_t(1)), *two.find_header("B"));
     EXPECT_EQ(std::make_pair(Column(1), size_t(1)), *two.find_header("C"));
+    EXPECT_TRUE(two.is_repeated_header("B"));
+    EXPECT_FALSE(two.is_repeated_header("C"));
+    EXPECT_FALSE(two.is_repeated_header("W"));
 
     // load() replaces the headers and the index with them
     const std::string base = test_dump_dir() + "/coord_to_header_index";
