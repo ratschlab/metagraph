@@ -1023,6 +1023,20 @@ void Walker::run_level(ArmState &arm, uint64_t depth) {
     std::sort(items.begin(), items.end(),
               [](const Item &a, const Item &b) { return a.path_id < b.path_id; });
 
+    // read the deadline before the level's fetch too, which can be long on a heavy
+    // annotation; it ends the heads as the check before each head below would
+    if (depth > 0 && time_exceeded()) {
+        for (size_t i = 0; i < items.size(); ++i) {
+            if (items[i].ext_bp < strategy_.max_extension_bp) {
+                cap_demand_ = elapsed_ms();
+                trip(arm, EndReason::TIME_BUDGET, items, i);
+                return;
+            }
+            censor_item(arm, items[i], EndReason::MAX_EXTENSION);
+        }
+        return;
+    }
+
     // the successors of every head below the extension length, and their labels in one fetch
     std::vector<std::vector<Succ>> succs(items.size());
     std::vector<node_index> keys;
