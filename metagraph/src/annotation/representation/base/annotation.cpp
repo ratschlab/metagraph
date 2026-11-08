@@ -1,7 +1,5 @@
 #include "annotation.hpp"
 
-#include <xxh3.h>
-
 #include "common/serialization.hpp"
 #include "common/logger.hpp"
 
@@ -10,12 +8,6 @@ namespace mtg {
 namespace annot {
 
 using mtg::common::logger;
-
-static_assert(sizeof(size_t) == sizeof(XXH64_hash_t));
-
-size_t LabelHash<std::string>::operator()(const std::string &label) const {
-    return XXH3_64bits(label.data(), label.size());
-}
 
 template <typename Label>
 size_t LabelEncoder<Label>::insert_and_encode(const Label &label) {
@@ -38,7 +30,7 @@ size_t LabelEncoder<Label>::encode(const Label &label) const {
 
 template<>
 void LabelEncoder<std::string>::serialize(std::ostream &outstream) const {
-    outstream.write("LE-v2.1", 7);
+    outstream.write("LE-v2.0", 7);
     Serializer serializer(outstream);
     data().serialize(serializer);
 }
@@ -60,18 +52,13 @@ bool LabelEncoder<std::string>::load(std::istream &instream) {
     try {
         auto pos = instream.tellg();
         std::string version(7, '\0');
-        if (instream.read(version.data(), 7)
-                && (version == "LE-v2.1" || version == "LE-v2.0")) {
+        if (instream.read(version.data(), 7) && version == "LE-v2.0") {
             Deserializer deserializer(instream);
-            // Read the whole record, including the stored buckets.
-            encode_label_ = LabelSet::deserialize(deserializer, true);
-            if (version == "LE-v2.0") {
-                // LE-v2.0 buckets were made with the writer's std::hash, which differs
-                // between standard libraries. Rebuild them with LabelHash.
-                auto labels = to_vector(std::move(encode_label_));
-                encode_label_ = LabelSet(std::make_move_iterator(labels.begin()),
-                                         std::make_move_iterator(labels.end()));
-            }
+            // Read the saved buckets to consume the entire record, then rebuild them:
+            // std::hash values can differ between the writer's and reader's toolchains.
+            auto labels = to_vector(VectorSet<std::string>::deserialize(deserializer, true));
+            encode_label_ = VectorSet<std::string>(std::make_move_iterator(labels.begin()),
+                                                   std::make_move_iterator(labels.end()));
             return instream.good();
         }
         // backward compatibility
@@ -90,8 +77,8 @@ bool LabelEncoder<std::string>::load(std::istream &instream) {
         std::vector<std::string> labels;
         if (!load_string_vector(instream, &labels))
             return false;
-        encode_label_ = LabelSet(std::make_move_iterator(labels.begin()),
-                                 std::make_move_iterator(labels.end()));
+        encode_label_ = VectorSet<std::string>(std::make_move_iterator(labels.begin()),
+                                               std::make_move_iterator(labels.end()));
         return instream.good();
     } catch (...) {
         return false;

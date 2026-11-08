@@ -20,18 +20,6 @@ namespace annot {
 template <typename Label = std::string>
 class LabelEncoder;
 
-// The hash of the label set in LabelEncoder. Only string labels are saved: LE-v2.1
-// files store buckets made with LabelHash<std::string>, so it must give the same
-// values on every platform and never change. Other label types are never saved and
-// keep std::hash.
-template <typename Label>
-struct LabelHash : std::hash<Label> {};
-
-template <>
-struct LabelHash<std::string> {
-    size_t operator()(const std::string &label) const;
-};
-
 
 // Graph annotation
 // An annotated graph is a graph with labeled nodes/edges.
@@ -147,12 +135,10 @@ class LabelEncoder {
     LabelEncoder<Label> make_static_copy() const;
 
   private:
-    using LabelSet = VectorSet<Label, LabelHash<Label>>;
+    const VectorSet<Label>& data() const { return remote_data_ ? *remote_data_ : encode_label_; }
 
-    const LabelSet& data() const { return remote_data_ ? *remote_data_ : encode_label_; }
-
-    LabelSet encode_label_;
-    const LabelSet *remote_data_ = nullptr;
+    VectorSet<Label> encode_label_;
+    const VectorSet<Label> *remote_data_ = nullptr;
 };
 
 } // namespace annot
