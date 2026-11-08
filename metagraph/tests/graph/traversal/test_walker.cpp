@@ -1005,9 +1005,9 @@ TEST(WalkerDerive, AmbiguousDerivedHeaderNamesAreRefused) {
     ASSERT_EQ(2u, by_column.label_dict.size());
     EXPECT_EQ("colA", by_column.label_dict[0].name);
     EXPECT_EQ("colB", by_column.label_dict[1].name);
+    // named explicitly, the header of two records is refused as ambiguous
     seed.labels = { "ACC1" };
-    auto one = traverse_seed(oracle, seed, Strategy());
-    EXPECT_EQ(1u, one.label_dict.size());
+    EXPECT_THROW(traverse_seed(oracle, seed, Strategy()), std::invalid_argument);
 }
 
 // a derived header that an explicit list would resolve to a column is refused
