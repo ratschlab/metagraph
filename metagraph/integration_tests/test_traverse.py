@@ -3246,7 +3246,7 @@ class TestTraverseAPI(TestTraverseBase):
     def test_api_value_cap_memory(self):
         """A body at the value cap (262,144 values, the default) stays within the bound H1
         states (SPEC-labeled-traversal-core.md §5): the server's peak memory above its idle
-        while it reads, parses and refuses it is at most 7 x its bytes + 256 bytes per value +
+        while it reads, parses and refuses it is at most 10 x its bytes + 256 bytes per value +
         16 MiB. Measured as the peak resident set above the idle one on Linux (VmHWM, reset
         after a warm-up through clear_refs) and the peak physical footprint on macOS
         (proc_pid_rusage); skipped elsewhere. Two shapes: zeros under an unknown member (the
@@ -3316,7 +3316,7 @@ class TestTraverseAPI(TestTraverseBase):
             finally:
                 proc.kill()
                 proc.wait()
-            bound = 7 * len(text) + 256 * values + (16 << 20)
+            bound = 10 * len(text) + 256 * values + (16 << 20)
             print(f'value cap memory, {name}: {len(text)} bytes, {values} values, '
                   f'{above / 2**20:.1f} MiB above idle, bound {bound / 2**20:.1f} MiB',
                   file=sys.stderr)

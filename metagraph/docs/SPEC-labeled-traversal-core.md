@@ -488,14 +488,18 @@ deadline. `src/cli/traverse.cpp` `process_resolve_request`, `src/graph/traversal
   its size. **The intake bound** *(H1, train 3)*: the value count (`--max-request-json-values` V, 262,144 by
   default) bounds the per-value part before the parse, and the counts of §10.3 (explicit labels, `extra`, table
   entries, seeds and seed lengths) are checked before anything of the body is copied. A strict-JSON body of
-  B bytes then holds outside every account at most **7 × B + 256 bytes × V + 16 MiB**: the transport's buffer
-  and the route's copy of the body (2B, all a body refused at the count holds), jsoncpp's tree (at most about
-  160 bytes per value, plus each string's bytes) and the copies of label names (the request's, a seed's
-  dictionary and its checks: up to 4B more for a body that is one huge name), the 16 MiB the allocator's and the
-  threads' fixed part. At B = 256 MiB that is at most about 1.9 GiB (a body of a few huge label names; a
-  value-heavy body of 256 MiB is refused at the count, holding 512 MiB), at B = 2 MiB at most 94 MiB; two
-  request slots double it. `/search` and `/align` read their body without a count (the owner's decision): their
-  parse holds about 51 times the body (zeros), bounded by `--max-request-body-mb` alone.
+  B bytes then holds outside every account at most **10 × B + 256 bytes × V + 16 MiB** (measured on the H1 binary,
+  2026-11-08, one request and two at once, single-graph and multi-graph: macOS peak footprint above the idle, and
+  Linux arm64 under a cgroup limit of the idle charge plus that bound, which every case held):
+  the transport's buffer and the route's copy of the body (2B: all a body refused at the count holds), jsoncpp's
+  tree (103 to 165 bytes per value measured, plus each string's bytes: a long string or sequence holds 4B in all)
+  and the copies of label names (the request's, a seed's dictionary and its checks: 4.4B for many names, 6B for one
+  huge name; 9B on a single-graph server, whose 400 "Label not found in the annotation" quotes the name), the
+  16 MiB the fixed part. At B = 256 MiB that is at most 2.6 GiB per request (measured at most 2,312 MiB; a
+  value-heavy body of 256 MiB is refused at the count holding 520 MiB), at B = 2 MiB at most 100 MiB (measured at
+  most 42 MiB); two requests at once hold about twice one, so two request slots double it. `/search` and `/align`
+  read their body without a count (the owner's decision): their parse holds about 51 times the body (zeros),
+  bounded by `--max-request-body-mb` alone.
   A seed the bound left unstarted is sent again in a new request (the action `split_request`).
 - **Attempt fields** (`DESIGN-traverse-graphlet.md` §14 and §14.1: the frozen wire contract's request fields;
   stage 4, backend half — the ledger itself lives in the search service): top-level `attempt_id`, `budget_id`
