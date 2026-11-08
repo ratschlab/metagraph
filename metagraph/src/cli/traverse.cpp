@@ -484,9 +484,8 @@ ResolveRequest parse_resolve_request(const Json::Value &json) {
     if (s.has("select")) {
         Strict p(s.raw("select"), "request.select");
         req.select = true;
-        req.policy.policy = p.enumeration<SelectionPolicy::Policy>("policy", SelectionPolicy::MAX_SUPPORT,
-            { { "max_support", SelectionPolicy::MAX_SUPPORT },
-              { "longest_first", SelectionPolicy::LONGEST_FIRST } });
+        // one policy in version 1; the field stays, as callers name it
+        p.enumeration<bool>("policy", true, { { "max_support", true } });
         req.policy.max_seeds = p.uint("max_seeds", 10, 1, 1000);
         req.policy.min_block_bp = p.uint("min_block_bp", 0);
         req.policy.max_labels_per_seed = p.uint("max_labels_per_seed", 1000, 1, kMaxSeedLabels);
@@ -538,8 +537,7 @@ Json::Value profile_to_json(const SupportProfile &p, const SeedSelection *sel) {
     j["candidates"] = std::move(cands);
     if (sel) {
         Json::Value &s = j["selection"];
-        s["policy"]["policy"] = sel->policy.policy == SelectionPolicy::LONGEST_FIRST
-                                ? "longest_first" : "max_support";
+        s["policy"]["policy"] = "max_support";
         s["policy"]["max_seeds"] = uint_json(sel->policy.max_seeds);
         s["policy"]["min_block_bp"] = uint_json(sel->policy.min_block_bp);
         s["policy"]["max_labels_per_seed"] = uint_json(sel->policy.max_labels_per_seed);
