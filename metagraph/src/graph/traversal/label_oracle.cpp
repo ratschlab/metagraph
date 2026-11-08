@@ -125,14 +125,24 @@ std::pair<uint64_t, uint64_t> LabelOracle::sequence_coords(Column column, uint64
 }
 
 LabelRef LabelOracle::resolve_label(const std::string &name) const {
-    if (auto column = find_column(name)) {
+    auto column = find_column(name);
+    auto header = find_header(name);
+    if (column && header) {
+        throw std::invalid_argument("Label '" + name + "' is ambiguous: it names both an "
+                                    "annotation column and a sequence header");
+    }
+    if (header && coord_to_header_->is_repeated_header(name)) {
+        throw std::invalid_argument("Label '" + name + "' is ambiguous: several sequence "
+                                    "records have this header");
+    }
+    if (column) {
         LabelRef ref;
         ref.kind = LabelKind::COLUMN;
         ref.column = *column;
         ref.name = name;
         return ref;
     }
-    if (auto header = find_header(name))
+    if (header)
         return *header;
     throw std::invalid_argument("Label not found in the annotation: '" + name + "'"
                                 + (coord_to_header_ ? "" : " (no sequence header index loaded)"));

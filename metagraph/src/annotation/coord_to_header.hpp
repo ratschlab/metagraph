@@ -91,10 +91,17 @@ class CoordToHeader {
     /**
      * The (column, seq_id) of a FASTA header: its first occurrence in column order (a
      * header is unique within a column, not within the index), or nothing. The reverse
-     * index is built on the first call and owned by this object, so it lives and dies with
-     * the headers it indexes. load() drops it. Thread-safe.
+     * index is built by index_headers() or on the first lookup, and owned by this object,
+     * so it lives and dies with the headers it indexes. load() drops it. Thread-safe,
+     * except against a concurrent load().
      */
     std::optional<std::pair<Column, size_t>> find_header(std::string_view header) const;
+
+    // Whether several records carry |header|, in one column or in several.
+    bool is_repeated_header(std::string_view header) const;
+
+    // Builds the reverse header index now, so that no lookup pays for it.
+    void index_headers() const;
 
     /**
      * The records of |headers| whose header repeats an earlier record's, in record order:
@@ -110,6 +117,7 @@ class CoordToHeader {
 
   private:
     struct HeaderIndex;
+    const HeaderIndex& header_index() const;
 
     std::vector<std::vector<std::string>> headers_;
     std::vector<bit_vector_sd> coord_offsets_;
