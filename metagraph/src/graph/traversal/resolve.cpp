@@ -6,7 +6,6 @@
 #include <optional>
 
 #include <tsl/hopscotch_map.h>
-#include <tsl/hopscotch_set.h>
 
 #include "graph/annotated_dbg.hpp"
 #include "annotation/coord_to_header.hpp"
@@ -166,9 +165,9 @@ SupportProfile resolve_support(const LabelOracle &oracle,
             trunc.dropped_full_length = cut.dropped_full;
             profile.labels_truncated = trunc;
         }
-        tsl::hopscotch_set<std::string> named;  // a repeated header names its first record
         for (const auto &[name, count, presence] : top) {
-            if (!named.insert(name).second)
+            // a header of several records is ambiguous, as when it is named explicitly
+            if (headers && oracle.coord_to_header()->is_repeated_header(name))
                 continue;
             std::optional<LabelRef> ref;
             if (headers) {
