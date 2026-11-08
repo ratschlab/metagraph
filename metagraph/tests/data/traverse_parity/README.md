@@ -13,3 +13,7 @@ sha256 `c8f71225fe3d34877687ad3fde25102d2ad41fb94a811f731ebcc50d4164e5a1`):
 The prototype was sent each request with the knobs v1 fixes stated explicitly
 (`to_prototype()`): `on_reconverge: keep`, `hairpins: skip`, `max_splits_per_path: 64`,
 `continuation_bp: 0`, `detail: full`.
+
+On 2026-11-08 the `selection.seeds` of the two `resolve_select_*` files were rewritten from
+the recorded data, without a new run: the seeds are sorted, and `overlaps_with` lists seed ids
+instead of positions. v1 keeps seeds in rank order where the prototype lists them by position.

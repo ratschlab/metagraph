@@ -163,13 +163,17 @@ def project_resolve(response):
     out['candidates'] = [[c['kmer_interval'], c['labels']] for c in response['candidates']]
     if 'selection' in response:
         sel = response['selection']
+        # The seeds as a set, with overlaps named by seed id: the prototype lists merged
+        # seeds by position, and v1 keeps them in rank order.
+        ids = [s['seed_id'] for s in sel['seeds']]
         out['selection'] = {
             'counts': sel['counts'],
-            'seeds': [[s['seed_id'], s['sequence'], s['kmer_interval'], s['labels'],
-                       s['label_population']['supporting_total'],
-                       s['label_population']['dropped_count'],
-                       s['label_population'].get('dropped_digest'), s['overlaps_with']]
-                      for s in sel['seeds']],
+            'seeds': sorted([s['seed_id'], s['sequence'], s['kmer_interval'], s['labels'],
+                             s['label_population']['supporting_total'],
+                             s['label_population']['dropped_count'],
+                             s['label_population'].get('dropped_digest'),
+                             sorted(ids[j] for j in s['overlaps_with'])]
+                            for s in sel['seeds']),
         }
     return out
 
