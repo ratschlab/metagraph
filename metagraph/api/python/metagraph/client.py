@@ -275,16 +275,18 @@ class GraphClient:
     def resolve(self, sequence: str,
                 labels: Union[None, List[str]] = None,
                 discover: Union[None, JsonDict] = None,
-                select: Union[None, JsonDict] = None) -> JsonDict:
+                select: Union[None, JsonDict] = None,
+                timeout=None) -> JsonDict:
         """
         Where the labels support the sequence (experimental; see GraphClientJson.resolve)
 
         :returns:   The support profile, with the selected seeds under 'selection'
         :rtype:     dict
         """
-        return self._json_client.resolve(sequence, labels, discover, select)
+        return self._json_client.resolve(sequence, labels, discover, select, timeout=timeout)
 
-    def traverse(self, seeds: List[JsonDict], strategy: Union[None, JsonDict] = None) -> JsonDict:
+    def traverse(self, seeds: List[JsonDict], strategy: Union[None, JsonDict] = None,
+                 timeout=None) -> JsonDict:
         """
         Extend seeds in the graph under the labels carrying them (experimental; see
         GraphClientJson.traverse)
@@ -292,7 +294,7 @@ class GraphClient:
         :returns:   The response, one entry of 'results' per seed
         :rtype:     dict
         """
-        return self._json_client.traverse(seeds, strategy)
+        return self._json_client.traverse(seeds, strategy, timeout=timeout)
 
     def column_labels(self) -> List[str]:
         return self._json_client.column_labels()

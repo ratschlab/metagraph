@@ -102,13 +102,13 @@ stands, with its `seed_id`. Seeds are listed in the order the policy picked them
 |---|---|---|
 | `seeds` | at most `--traverse-max-seeds` seeds, each at most `--traverse-max-seed-bp` long, every k-mer in the graph | required |
 | `seeds[].seed_id` | the caller's id, compared with the id the seed validates to | none |
-| `seeds[].labels` | the permitted labels; omitted: derived from the seed | derived |
+| `seeds[].labels` | the permitted labels, at most 100,000; omitted: derived from the seed | derived |
 | `direction` | `both`, `left` or `right` | `both` |
 | `labels.max_seed_labels` | the most labels a derived set keeps, in ascending (column, sequence) order (at most 100,000) | 1000 |
 | `labels.seed_label_kind` | what a derived label is: `column`, `header`, or `auto` (header on an index with a header index) | `auto` |
 | `branching.max_label_branches` | how many times a label may continue on more than one successor: an integer, or `"unlimited"` | 0 |
 | `bounds.max_extension_bp` | the extension length per arm | 5000 |
-| `bounds.time_budget_ms` | per seed, so a request may take up to its number of seeds times this; clamped to `--traverse-max-time-ms` | `--traverse-max-time-ms` |
+| `bounds.time_budget_ms` | per seed, at least 1, so a request may take up to its number of seeds times this; clamped to `--traverse-max-time-ms` | `--traverse-max-time-ms` |
 | `output.sequences` | include the segments' sequences | true |
 
 ### The walk
@@ -125,12 +125,12 @@ so far. A label leaves a path with a reason:
 |---|---|
 | `dead_end` | the node has no successor (`hairpin`: its only continuation was a hairpin) |
 | `label_lost` | successors exist, none carries the label |
-| `branch` | the label is on several successors and its branch allowance is spent (`split_limit`: the path's 64 splits are spent) |
+| `branch` | the label is on several successors and its branch allowance is spent |
 | `edge_reuse` | the label's continuation takes an edge this path took before |
 | `edge_reuse_rc` | ... in the opposite orientation (an inverted repeat) |
 | `rejoined_seed` | the continuation steps back into the seed (for example a circular record) |
 | `max_extension_bp` | the extension length was reached |
-| `time_budget`, `max_steps`, `max_live_paths`, `max_paths`, `max_output_bp` | a bound stopped the arm (see below) |
+| `time_budget`, `max_steps`, `max_live_paths`, `max_paths`, `max_splits_per_path` | a bound stopped the walk (see below) |
 
 Where the labels of a path continue on different successors, the path splits. Paths that
 meet again are kept apart, so each arm is a tree of segments.
@@ -140,10 +140,10 @@ The walk rule makes the walks finite on a graph with cycles: a path never takes 
 and never takes a self-reverse-complementary step.
 
 **Bounds.** Besides the extension length and the time budget, fixed caps bound a seed's work:
-1,000,000 steps, 1000 live paths and 10,000 paths per arm, and 2,000,000 output bases per arm.
-The time budget and the steps stop the whole seed; the other caps stop one arm. A cap trips
-between two heads of one level: `complete_to_bp` is the extension up to which every admissible
-walk is present.
+1,000,000 steps, 1000 live paths and 10,000 paths per arm, and 64 splits per path. The time
+budget and the steps stop the whole seed. The live paths and paths stop one arm. The split
+limit ends only the path that reached it. Any cap makes the arm `truncated`:
+`complete_to_bp` is the extension up to which every admissible walk is present.
 
 ### The response
 
