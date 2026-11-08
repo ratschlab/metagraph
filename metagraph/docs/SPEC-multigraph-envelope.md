@@ -361,7 +361,10 @@ listens:
 on the graph representation, k, regime, alphabet, annotation form, coordinates, record mapping (`.seqs`), trace,
 charged reads, counts and the pattern fields (`graph_mode`, `available`, `unavailable_reason`, `mask`,
 `counting`), so that a service probes the routes once per distinct `support_fp` (the chunks of one Logan build
-share it) and keeps outcomes that depend on the data (a seed or a label absent from one pair) per request. The
+share it) and keeps outcomes that depend on the data (a seed or a label absent from one pair) per request.
+`graph_representation` stays in `support_fp` although no answer of `/traverse`, `/resolve` or `/pattern` depends on
+it beyond what `alphabet` and `available` already state: pairs that run different code are probed apart (a wrong
+split costs one probe, a wrong merge carries one pair's outcome to another). The
 identity (`graph`, `graph_path`, `annotation_path`, `index_ns`, `index_fp`, `index_meta_fp`) and the size
 (`traversal.num_labels`) are left out; the pattern block's `dummy_fraction` (sampled from the graph's data) is not
 a member of the entry. The hashed text is a version line, then one line per field in this order (byte order of
