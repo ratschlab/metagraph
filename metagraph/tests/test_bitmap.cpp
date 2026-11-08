@@ -1044,6 +1044,9 @@ TEST(BitmapVector, MoveLoadedFromMappedStreamIsWritable) {
         sdsl::shared_mapper_ifstream check_in(filename, std::ios::binary);
         sdsl::packed_vector_view<1> view;
         view.load(check_in);
+        // The view refers to the mapping, after the 8-byte size header.
+        ASSERT_EQ(reinterpret_cast<const std::byte *>(check_in.mapper()->data()) + 8,
+                  view.bytes().data());
         std::unique_ptr<bitmap_dyn> editable;
         if (adaptive)
             editable = std::make_unique<bitmap_adaptive>(std::move(mapped));

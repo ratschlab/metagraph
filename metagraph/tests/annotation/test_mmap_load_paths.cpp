@@ -11,6 +11,7 @@
 #include <random>
 
 #include "annotation/binary_matrix/multi_brwt/brwt.hpp"
+#include "annotation/binary_matrix/row_sparse/row_sparse.hpp"
 #include "annotation/int_matrix/rank_extended/csc_matrix.hpp"
 #include "annotation/representation/annotation_matrix/static_annotators_def.hpp"
 #include "common/utils/file_utils.hpp"
@@ -34,6 +35,16 @@ void write_file(const std::string &filename, size_t prefix, Write write) {
     out << std::string(prefix, 'x');
     write(out);
 }
+
+// Sets the global mmap mode and restores it on scope exit, also after a failed assertion.
+class MmapMode {
+  public:
+    explicit MmapMode(bool mapped) : old_(utils::with_mmap()) { utils::set_mmap(mapped); }
+    ~MmapMode() { utils::set_mmap(old_); }
+
+  private:
+    bool old_;
+};
 
 // Load `T` from `filename` at byte `prefix`, mapped or not.
 template <class T, class Load>
@@ -131,11 +142,11 @@ TEST(MmapLoadNodeWeights, MappedLoadIsWritable) {
         weights[i] = i % 100;
     graph::NodeWeights(sdsl::int_vector<>(weights)).serialize(filename_base);
     for (bool mapped : {false, true}) {
-        const bool old_mode = utils::with_mmap();
-        utils::set_mmap(mapped);
         graph::NodeWeights loaded;
-        ASSERT_TRUE(loaded.load(filename_base));
-        utils::set_mmap(old_mode);
+        {
+            MmapMode mode(mapped);
+            ASSERT_TRUE(loaded.load(filename_base));
+        }
         for (size_t i = 0; i < weights.size(); ++i)
             ASSERT_EQ(weights[i], loaded[i]);
         loaded.get_data()[5] = 99;
@@ -144,6 +155,35 @@ TEST(MmapLoadNodeWeights, MappedLoadIsWritable) {
     graph::NodeWeights check;
     ASSERT_TRUE(check.load(filename_base));
     EXPECT_EQ(5u, check[5]);
+}
+
+
+TEST(MmapLoadRowSparse, MappedAndOwnedAgree) {
+    const auto filename = test_dump_basename + "_row_sparse";
+    std::mt19937_64 rng(4);
+    const uint64_t num_rows = 2000;
+    BitVectorPtrArray columns;
+    for (size_t j = 0; j < 9; ++j) {
+        sdsl::bit_vector bits(num_rows, 0);
+        for (uint64_t i = 0; i < num_rows; ++i)
+            bits[i] = rng() % (j + 2) == 0;
+        columns.emplace_back(new bit_vector_stat(std::move(bits)));
+    }
+    auto built = build_matrix_from_columns<annot::matrix::RowSparse>(columns, num_rows);
+    std::vector<uint64_t> rows(num_rows);
+    std::iota(rows.begin(), rows.end(), 0);
+    const auto expected = built.get_rows(rows);
+    for (size_t prefix : {0, 1, 5}) {
+        write_file(filename, prefix, [&](auto &out) { built.serialize(out); });
+        for (bool mapped : {false, true}) {
+            annot::matrix::RowSparse loaded;
+            load_file<annot::matrix::RowSparse>(filename, prefix, mapped, [&](auto &in) {
+                ASSERT_TRUE(loaded.load(in));
+            });
+            ASSERT_EQ(num_rows, loaded.num_rows());
+            EXPECT_EQ(expected, loaded.get_rows(rows));
+        }
+    }
 }
 
 
