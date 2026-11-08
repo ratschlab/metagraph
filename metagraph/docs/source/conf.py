@@ -79,7 +79,11 @@ pygments_style = 'sphinx'
 # import sphinx_bootstrap_theme
 html_theme = 'furo'
 # html_theme_path = sphinx_bootstrap_theme.get_html_theme_path()
-html_logo = 'images/mtg_icon.png'
+html_static_path = ['images']
+html_theme_options = {
+    'light_logo': 'metagraph_logo.svg',
+    'dark_logo': 'metagraph_logo_dark.svg',
+}
 templates_path = ['_templates']
 html_title = 'MetaGraph Docs'
 

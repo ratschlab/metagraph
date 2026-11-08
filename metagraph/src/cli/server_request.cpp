@@ -8,7 +8,7 @@ namespace cli {
 
 SearchRequest parse_search_request(const Json::Value &json, const Config &server_config) {
     if (json["FASTA"].isNull())
-        throw std::invalid_argument("No input sequences received from client");
+        throw std::invalid_argument("Missing or null 'FASTA' field. Provide input sequences in FASTA format.");
 
     SearchRequest request{json["FASTA"].asString(), server_config,
                           json.get("align", false).asBool()};
@@ -22,13 +22,13 @@ SearchRequest parse_search_request(const Json::Value &json, const Config &server
 
     if (config.discovery_fraction < 0.0 || config.discovery_fraction > 1.0) {
         throw std::invalid_argument(
-                "Discovery fraction should be within [0, 1.0]. Instead got "
+                "'discovery_fraction' must be in [0, 1]. Received "
                 + std::to_string(config.discovery_fraction));
     }
     if (config.alignment_min_exact_match < 0.0
             || config.alignment_min_exact_match > 1.0) {
         throw std::invalid_argument(
-                "Minimum exact match should be within [0, 1.0]. Instead got "
+                "'min_exact_match' must be in [0, 1]. Received "
                 + std::to_string(config.alignment_min_exact_match));
     }
 

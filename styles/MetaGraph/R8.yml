@@ -1,0 +1,9 @@
+extends: substitution
+message: Use '%s' instead of '%s'.
+level: error
+scope: text
+ignorecase: false
+nonword: true
+swap:
+  '(?<![\w-])(?:kmer|K-mer)(?![\w-])': k-mer
+  '(?<![\w-])(?:kmers|K-mers)(?![\w-])': k-mers

@@ -85,7 +85,7 @@ void call_masked_graphs(const AnnotatedDBG &anno_graph,
     // produces an empty output.
     if (!diff_json.isMember("groups") || !diff_json["groups"].isArray()
             || diff_json["groups"].empty()) {
-        logger->error("'{}' has no 'groups' array. Expected: "
+        logger->error("'{}' requires a non-empty 'groups' array. Expected: "
                       "{{\"groups\": [{{\"experiments\": [...]}}]}}. "
                       "See metagraph/tests/data/example_simple.diff.json.",
                       config->assembly_config_file);
@@ -115,7 +115,7 @@ void call_masked_graphs(const AnnotatedDBG &anno_graph,
         }
 
         if (!group["experiments"])
-            throw std::runtime_error("Missing experiments in group");
+            throw std::runtime_error("Assembly rule group is missing 'experiments'. Add an 'experiments' array to the group.");
 
         for (const Json::Value &experiment : group["experiments"]) {
             DifferentialAssemblyConfig diff_config = diff_assembly_config(

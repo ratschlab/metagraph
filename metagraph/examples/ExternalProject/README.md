@@ -4,6 +4,9 @@ Integrate MetaGraph using `ExternalProject_Add` for automatic download and isola
 
 ## Quick Start
 
+Install the [build dependencies](../../docs/source/installation.rst), then run these
+commands from `metagraph/examples/ExternalProject`:
+
 ```bash
 mkdir build && cd build
 cmake ..
@@ -58,15 +61,13 @@ target_link_libraries(your_app PRIVATE metagraph-cli metagraph-core
 add_dependencies(your_app metagraph-external)
 ```
 
-**⚠️ CRITICAL for ExternalProject_Add**: Always include `metagraph.hpp` as the **FIRST** header:
+Include `metagraph.hpp` before other MetaGraph or bundled dependency headers. It
+loads the compile-time configuration used to build the installed library:
 
 ```cpp
-// metagraph.hpp MUST be included FIRST when using ExternalProject_Add!
-// It provides compile-time configuration definitions (_DNA_GRAPH, _USE_FOLLY, etc.)
-// that affect how other MetaGraph headers are interpreted.
 #include "metagraph.hpp"
 #include "seq_io/sequence_io.hpp"
-// ... other MetaGraph headers and other external libraryes (e.g., sdsl)
+// ... other MetaGraph headers and bundled libraries (e.g., sdsl)
 ```
 
 See [`CMakeLists.txt`](CMakeLists.txt) for the complete configuration, including

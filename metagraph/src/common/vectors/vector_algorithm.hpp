@@ -567,15 +567,15 @@ next_bit(const t_int_vec &v, uint64_t idx, uint64_t max_steps) {
     assert(idx < v.bit_size());
 
     uint64_t pos  = idx >> 6;
-    uint64_t node = v.data()[pos];
+    uint64_t node = sdsl::detail::load_unaligned(v.data() + pos);
     node >>= (idx & 0x3F);
     if (node)
         return std::min(idx + sdsl::bits::lo(node), v.bit_size());
 
     uint64_t end = idx + std::min(max_steps, v.bit_size() - idx);
     for (++pos; (pos << 6) < end; ++pos) {
-        if (v.data()[pos])
-            return std::min((pos << 6) | sdsl::bits::lo(v.data()[pos]), v.bit_size());
+        if (uint64_t word = sdsl::detail::load_unaligned(v.data() + pos))
+            return std::min((pos << 6) | sdsl::bits::lo(word), v.bit_size());
     }
     return v.bit_size();
 }
@@ -588,7 +588,7 @@ prev_bit(const t_int_vec &v, uint64_t idx, uint64_t max_steps) {
     assert(idx < v.bit_size());
 
     int64_t pos  = idx >> 6;
-    uint64_t node = v.data()[pos];
+    uint64_t node = sdsl::detail::load_unaligned(v.data() + pos);
     node <<= 63 - (idx & 0x3F);
     if (node)
         return idx - (63 - sdsl::bits::hi(node));
@@ -597,8 +597,8 @@ prev_bit(const t_int_vec &v, uint64_t idx, uint64_t max_steps) {
     int64_t r_end_word = ((idx + 1 - std::min(idx + 1, max_steps)) >> 6) - 1;
     assert(r_end_word >= -1);
     for (--pos; pos > r_end_word; --pos) {
-        if (v.data()[pos])
-            return (pos << 6) | sdsl::bits::hi(v.data()[pos]);
+        if (uint64_t word = sdsl::detail::load_unaligned(v.data() + pos))
+            return (pos << 6) | sdsl::bits::hi(word);
     }
     return v.bit_size();
 }
