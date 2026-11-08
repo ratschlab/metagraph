@@ -87,8 +87,7 @@ class TestTraverseCLI(TraverseFixture):
     def test_derived_labels_direction_and_bounds(self):
         out = self._traverse({
             'seeds': [{'sequence': self.X}],
-            'strategy': {'direction': 'right', 'bounds': {'max_extension_bp': 10},
-                         'output': {'sequences': False}},
+            'strategy': {'direction': 'right', 'bounds': {'max_extension_bp': 10}},
         })
         result = out['results'][0]
         self.assertTrue(result['seed']['labels_from_seed'])

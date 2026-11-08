@@ -270,11 +270,6 @@ TraverseRequest parse_traverse_request(const Json::Value &json, const TraverseLi
                                          limits.max_time_ms);
             b.done();
         }
-        if (t.has("output")) {
-            Strict o(t.raw("output"), "request.strategy.output");
-            st.sequences = o.boolean("sequences", true);
-            o.done();
-        }
         t.done();
     }
     s.done();
@@ -292,7 +287,6 @@ Json::Value strategy_to_json(const Strategy &st) {
         ? Json::Value("unlimited") : uint_json(st.max_label_branches);
     j["bounds"]["max_extension_bp"] = uint_json(st.max_extension_bp);
     j["bounds"]["time_budget_ms"] = st.time_budget_ms;
-    j["output"]["sequences"] = st.sequences;
     return j;
 }
 
@@ -318,8 +312,7 @@ Json::Value arm_to_json(const ArmResult &arm, const Strategy &st) {
         sj["parents"] = std::move(parents);
         sj["from_bp"] = uint_json(s.from_bp);
         sj["length_bp"] = uint_json(s.length_bp);
-        if (st.sequences)
-            sj["sequence"] = s.sequence;
+        sj["sequence"] = s.sequence;
         sj["labels"] = labels_json(s.labels_start);
         sj["labels_at_end"] = labels_json(s.labels_end);
         Json::Value events(Json::arrayValue);
