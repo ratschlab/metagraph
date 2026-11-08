@@ -581,7 +581,7 @@ A client that needs record identity requires `"verified"` on every pair whose he
 certified (section 10).
 
 Reference instances: sample 12 (`graph_summary.labels_disjoint` true beside `headers_unique` false: the certificates
-are independent; each pair `seqs_order: "count_only"`, r237's), sample 27 (a real run: `labels_disjoint` false, a
+are independent; each pair `seqs_order: "count_only"`, r237's), sample 36 (a real run: `labels_disjoint` false, a
 header equal to a column of the other pair and one equal to a column of its own pair, `headers_unique` true; its
 pairs `"verified"`), and the pattern fixtures' `capabilities*` bodies (`labels_disjoint` beside `headers_unique` at
 the top level or in `graph_summary`; `pair_summary.seqs_order`).

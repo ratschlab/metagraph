@@ -1,0 +1,14 @@
+{
+ "route": "GET /column_labels?offset=1&limit=2",
+ "status": 200,
+ "note": "H3 (train 3; lane H3): a page of GET /column_labels, compact, its members in byte order: labels (from position offset, at most limit of them and at most as many as fit --max-column-labels-bytes, 16 MiB by default; at least one while offset < total), next_offset (offset + the labels returned, null at the end), offset and total. Without parameters the whole array as before, refused 400 column_labels_too_large above the cap (sample 34). On a multi-graph server the list holds each distinct (graph, annotation) pair once, at its first place in the answers' order (the names in byte order: bact_other's NZ_CP000001.1-3, then bact_pseudomonadota's NC_000913.3 and NC_002516.2), its labels in column order; before H3 the names came in the server's hash order and a pair listed twice twice. A real run on two pairs built from records with these accessions as headers.",
+ "body": {
+  "labels": [
+   "NZ_CP000002.1",
+   "NZ_CP000003.1"
+  ],
+  "next_offset": 3,
+  "offset": 1,
+  "total": 5
+ }
+}
