@@ -335,10 +335,11 @@ TYPED_TEST(ResolveCoordTest, HeaderLabelsAndDiscovery) {
     std::string acc1 = L + R + M + R;
     std::string acc2 = R;
     uint64_t n1 = acc1.size() - kK + 1, n2 = acc2.size() - kK + 1;
-    auto anno = build_anno_graph<Graph, Annotation>(kK, { acc1, acc2 }, { "F", "F" },
-                                                    DeBruijnGraph::BASIC, true, { 0, n1 });
-    annot::CoordToHeader cth({ { "acc1", "acc2" } }, { { n1, n2 } });
-    LabelOracle oracle(*anno, &cth);
+    auto anno = with_coord_to_header(
+            build_anno_graph<Graph, Annotation>(kK, { acc1, acc2 }, { "F", "F" },
+                                                DeBruijnGraph::BASIC, true, { 0, n1 }),
+            { { "acc1", "acc2" } }, { { n1, n2 } });
+    LabelOracle oracle(*anno);
 
     std::string q = R + M + R;
     ResolveOptions opts;

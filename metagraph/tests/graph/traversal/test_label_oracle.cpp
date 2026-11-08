@@ -350,8 +350,11 @@ TYPED_TEST(LabelOracleCoordTest, HeaderLabels) {
     std::vector<std::vector<std::string>> partial(2);
     std::vector<std::vector<uint64_t>> partial_kmers(2);
     partial[col_f] = { "acc1", "acc2" }; partial_kmers[col_f] = { n1, n2 };
-    annot::CoordToHeader partial_cth(std::move(partial), std::move(partial_kmers));
-    LabelOracle partial_oracle(*anno, &partial_cth);
+    auto partial_anno = with_coord_to_header(
+            build_anno_graph<Graph, Annotation>(kTestK, seqs, labels, DeBruijnGraph::BASIC,
+                                                true, { 0, n1, 0 }),
+            std::move(partial), std::move(partial_kmers));
+    LabelOracle partial_oracle(*partial_anno);
     EXPECT_TRUE(partial_oracle.has_header_records(col_f));
     EXPECT_FALSE(partial_oracle.has_header_records(col_g));
     ResolveOptions discover;
