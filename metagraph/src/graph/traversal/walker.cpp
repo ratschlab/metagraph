@@ -1244,7 +1244,9 @@ void Walker::validate_seed() {
             const std::vector<std::string> &unknown = result_.unknown_labels;
             std::string names;
             for (size_t i = 0; i < std::min(kNamed, unknown.size()); ++i) {
-                names += (i ? ", " : "") + echoed(unknown[i], "seed label");
+                // (a client's name: clipped as every error text clips one, also without a budget)
+                names += (i ? ", " : "")
+                         + ::utils::clip_for_message(echoed(unknown[i], "seed label"));
             }
             if (unknown.size() > kNamed)
                 names += " and " + std::to_string(unknown.size() - kNamed) + " more";
@@ -1497,13 +1499,10 @@ std::string Walker::echoed(const std::string &name, const std::string &where) co
     // result is not admitted, and nothing in the request bounds such a name, so echoing it
     // whole would let one failed result exceed the budget (a header of 180,000 control
     // characters, written twice, is 2.16 MB under 1 MiB). Without a budget, or when short, it
-    // is echoed whole, unless longer than an error text quotes (clip_for_message: a client's
-    // name of megabytes, written into the 400 and the log).
+    // is echoed whole.
     constexpr size_t kEchoBytes = 256;
-    if (name.size() <= kEchoBytes)
+    if (!strategy_.max_memory_bytes || name.size() <= kEchoBytes)
         return name;
-    if (!strategy_.max_memory_bytes)
-        return ::utils::clip_for_message(name);
     size_t cut = kEchoBytes;
     while (cut > 0 && (static_cast<unsigned char>(name[cut]) & 0xC0) == 0x80) {
         --cut;     // never inside a UTF-8 sequence
