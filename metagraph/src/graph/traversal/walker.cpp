@@ -1073,11 +1073,9 @@ void Walker::finalize(ArmState &arm) {
     res.complete_to_bp = std::min(arm.boundary, strategy_.max_extension_bp);
     for (size_t s = 0; s < res.segments.size(); ++s) {
         Segment &seg = res.segments[s];
-        if (strategy_.sequences) {
-            seg.sequence = std::move(arm.walk_seq[s]);
-            if (arm.arm == Arm::LEFT)
-                std::reverse(seg.sequence.begin(), seg.sequence.end());
-        }
+        seg.sequence = std::move(arm.walk_seq[s]);
+        if (arm.arm == Arm::LEFT)
+            std::reverse(seg.sequence.begin(), seg.sequence.end());
         std::stable_sort(seg.label_ends.begin(), seg.label_ends.end(),
                          [](const LabelEnd &a, const LabelEnd &b) { return a.at_bp < b.at_bp; });
     }
