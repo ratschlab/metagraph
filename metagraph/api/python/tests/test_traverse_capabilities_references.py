@@ -100,7 +100,8 @@ SUBSTANCE = {
         'compared as given', 'checked first, ahead of a duplicate id and of not_after_ms',
         'a delayed copy of a cancelled or of a finished request would otherwise run there',
         'without attempt_id it is a 400 naming the field',
-        'nor does a server below feature level 5', 'exit status 1',
+        'a server below feature level 5 does not accept it',
+        'take it with request_id only from f3b', 'exit status 1',
     ],
     'attempts.suppression': [
         'tombstoned', 'held at least retention_s from the cancel',
