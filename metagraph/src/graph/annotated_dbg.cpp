@@ -841,7 +841,9 @@ AnnotatedDBG::get_top_label_signatures(std::string_view sequence,
 
     size_t num_kmers = sequence.size() - dbg_.get_k() + 1;
 
-    if (discovery_fraction == 1.) {
+    // the shortcut ranks with get_top_labels, which reports no cut and ranks headers when
+    // a CoordToHeader mapping is loaded
+    if (discovery_fraction == 1. && !cut && (header_labels || !coord_to_header_)) {
         auto label_counts = get_top_labels(sequence, num_top_labels, discovery_fraction, presence_fraction);
         std::vector<std::tuple<Label, size_t, sdsl::bit_vector>> presence_vectors;
         presence_vectors.reserve(label_counts.size());
