@@ -93,8 +93,9 @@ TEST(ServerRequestIntake, JsonValuesAreCountedExactly) {
              { "{\"seeds\": [{\"sequence\": \"ACGT\", \"labels\": [\"a\", \"b\"]}], "
                "\"strategy\": {}}", 8 } }) {
         EXPECT_TRUE(fits(body, values)) << body;
-        EXPECT_FALSE(fits(body, values - 1)) << body;
+        // (a cap of 0 is none: a body of one value is within every cap)
         if (values > 1) {
+            EXPECT_FALSE(fits(body, values - 1)) << body;
             EXPECT_FALSE(fits(body, 1)) << body;
         }
         // 0: no count

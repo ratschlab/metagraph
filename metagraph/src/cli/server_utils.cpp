@@ -342,8 +342,12 @@ constexpr size_t kDiscardBufferBytes = 16 << 10;
 template <class Connection>
 void discard_until_closed(std::shared_ptr<Connection> connection,
                           std::shared_ptr<std::vector<char>> buffer) {
+    // the socket and the buffer's view taken before the handler is made: it takes both pointers
+    // over, and the order in which a call's arguments are evaluated is unspecified (GCC makes
+    // the handler first, which left a dereference of the moved-from buffer)
     auto *socket = connection->socket.get();
-    socket->async_read_some(net::buffer(*buffer),
+    const auto view = net::buffer(*buffer);
+    socket->async_read_some(view,
             [connection = std::move(connection), buffer = std::move(buffer)](
                     const SimpleWeb::error_code &ec, size_t) mutable {
         auto lock = connection->handler_runner->continue_lock();
@@ -379,8 +383,10 @@ void refuse_body_too_large(const std::shared_ptr<HttpServer::Request> &request,
     // the whole of what follows (the answer and the drain) within the connection's own timer,
     // which shuts the connection when it ends (and so ends a pending read or write)
     connection->set_timeout(kBodyTooLargeDrainS);
+    // (the socket and the text's view taken before the handler takes the connection over)
     auto *socket = connection->socket.get();
-    net::async_write(*socket, net::buffer(*text),
+    const auto view = net::buffer(*text);
+    net::async_write(*socket, view,
             [connection = std::move(connection), text](const SimpleWeb::error_code &ec,
                                                          size_t) mutable {
         auto lock = connection->handler_runner->continue_lock();
