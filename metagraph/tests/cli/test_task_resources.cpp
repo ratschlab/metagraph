@@ -222,18 +222,17 @@ TEST(TaskResources, ResolveStatesCpu) {
     }
 }
 
-// until E16 (pattern on protein graphs): the pattern search refuses a protein graph
-// (alphabet_unsupported, PatternRoute.ProteinGraphIsRefused), so a Protein build compiles this
-// test out; E16 removes the guard
-#if ! _PROTEIN_GRAPH
 TEST(TaskResources, PatternStatesCpuPerRequestAndPerEntry) {
     Fixture f;
     PatternLimits caps;
     caps.min_information_bits = 4;
     for (const std::string mode : { "count", "partial", "all_or_count" }) {
-        Json::Value request = parse(R"({"patterns": [{"dna": "ACGTAC"}, {"dna": "GGATCC"}]})");
+        // (a Protein build reads the same letters as residues, SPEC-pattern-search.md §29)
+        const std::string kind = mtg::graph::pattern::kResidueGraph ? "protein" : "dna";
+        Json::Value request = parse("{\"patterns\": [{\"" + kind + "\": \"ACGTAC\"}, {\""
+                                    + kind + "\": \"GGATCC\"}]}");
         request["patterns"].append(Json::Value(Json::objectValue));
-        request["patterns"][2]["dna"] = f.core.substr(10, kK + 5);
+        request["patterns"][2][kind] = f.core.substr(10, kK + 5);
         request["mode"] = mode;
         if (mode != "count") {
             request["output"]["labels"] = "all";
@@ -242,14 +241,16 @@ TEST(TaskResources, PatternStatesCpuPerRequestAndPerEntry) {
         const Json::Value out = process_pattern_request(request, *f.anno, caps, "rel");
         expect_figures(out["timing"], mode + ": top level");
         ASSERT_EQ(3u, out["patterns"].size());
+        size_t answered = 0;
         for (const Json::Value &entry : out["patterns"]) {
             if (entry.isMember("error"))
                 continue;
+            ++answered;
             expect_figures(entry["timing"], mode + ": an entry");
         }
+        EXPECT_LT(0u, answered) << mode;
     }
 }
-#endif // ! _PROTEIN_GRAPH
 
 } // namespace
 

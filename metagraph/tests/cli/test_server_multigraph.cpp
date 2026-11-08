@@ -417,8 +417,14 @@ TEST(MultiGraphEnvelope, RequestLevelChecksNeedNoGraph) {
     EXPECT_EQ("400 invalid_request", refusal("[]"));
     EXPECT_EQ("400 later_increment",
               refusal(R"({"patterns": [{"dna": "ACGT"}], "budget_split": "even"})"));
+#if _PROTEIN_GRAPH
+    // a protein graph reads residues: no genetic code applies (SPEC-pattern-search.md §29)
+    EXPECT_EQ("400 invalid_request",
+              refusal(R"({"patterns": [{"protein": "MKV"}], "genetic_code": 7})"));
+#else
     EXPECT_EQ("400 genetic_code_unknown",
               refusal(R"({"patterns": [{"protein": "MKV"}], "genetic_code": 7})"));
+#endif
     // the selection is the server's: the handler takes `graphs` off before asking
     EXPECT_EQ("400 invalid_request", refusal(R"({"patterns": [{"dna": "ACGT"}], "graphs": ["a"]})"));
 }
@@ -1220,14 +1226,12 @@ TEST(MultiGraphInRam, LoadSharesTheResidentRecordMapping) {
     const Json::Value discovered = process_resolve_request(discover, *copy, "");
     ASSERT_EQ(1u, discovered["labels"].size()) << discovered;
     EXPECT_EQ("acc1", discovered["labels"][0]["label"].asString());
-#if ! _PROTEIN_GRAPH
     // /pattern on its copy: the record labels of its paths as the resident's (a column
-    // annotation's reads are unbudgeted: allowed, as a request on such an index asks).
-    // until E16 (pattern on protein graphs): the pattern search refuses a protein graph
-    // (PatternRoute.ProteinGraphIsRefused), so a Protein build checks the copy's mapping
-    // alone; E16 removes the guard
+    // annotation's reads are unbudgeted: allowed, as a request on such an index asks). A
+    // Protein build reads the same letters as residues (SPEC-pattern-search.md §29)
+    const std::string kind = graph::pattern::kResidueGraph ? "protein" : "dna";
     const Json::Value pattern = parse_pattern_body(
-            "{\"patterns\": [{\"dna\": \"" + acc1.substr(30, 40) + "\"}], "
+            "{\"patterns\": [{\"" + kind + "\": \"" + acc1.substr(30, 40) + "\"}], "
             "\"long_search\": \"paths\", \"output\": {\"labels\": \"all\"}, "
             "\"allow_unbudgeted_annotation\": true}");
     PatternLimits caps;
@@ -1238,7 +1242,6 @@ TEST(MultiGraphInRam, LoadSharesTheResidentRecordMapping) {
     ASSERT_EQ(1u, on_resident["patterns"][0]["results"].size()) << on_resident;
     EXPECT_EQ("record_verified",
               on_resident["patterns"][0]["results"][0]["support"].asString()) << on_resident;
-#endif // ! _PROTEIN_GRAPH
     // one index, the resident's, for all of it
     EXPECT_EQ(1u, resident->get_coord_to_header()->num_header_index_builds());
 

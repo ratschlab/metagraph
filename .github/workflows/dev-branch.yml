@@ -45,11 +45,11 @@ jobs:
       mini_refseq: fetch
 
   # The same suites on a Protein build (SPEC-labeled-traversal-core.md §6.12, T66): the unit
-  # tests a Protein build compiles (the stranded cases are left out of it, and so is the
-  # pattern search, which refuses a protein graph until E16 (pattern on protein graphs); the
-  # refusal is tested), test_traverse's fixtures as protein graphs and test_traverse_protein's
-  # protein graph of UniParc's shape. linux.yml's Python and mini-index jobs run on the DNA
-  # build only.
+  # tests a Protein build compiles (the stranded cases and the DNA pattern suites are left out
+  # of it; the protein pattern suites, PatternProtein and PatternProteinRoute, are in),
+  # test_traverse's fixtures as protein graphs, test_traverse_protein's protein graph of
+  # UniParc's shape and test_pattern_protein's pattern search on protein graphs (E16,
+  # SPEC-pattern-search.md §29). linux.yml's Python and mini-index jobs run on the DNA build only.
   Linux-Protein:
     if: *requested
     name: Linux (Protein, Release, g++-13)
@@ -63,7 +63,7 @@ jobs:
       build_static: 'OFF'
       with_avx: 'ON'
       unit_test_filter: '*Walker*:*LabelOracle*:*Resolve*:*Trie*:*SupportStep*:*Graphlet*:*Stage2Review*:*Attempt*:*ServerRequest*:*PathCache*:*Pattern*:*CoordToHeader*:*AlignmentFormatCoords*:*HeaderIndex*:*RowDiff*:*BRWT*:*Annotat*:*MultiGraph*:*MaskCheck*:*TraverseNotInGraph*'
-      integration_test_filters: '*(test_traverse.* *(test_traverse_protein.*'
+      integration_test_filters: '*(test_traverse.* *(test_traverse_protein.* *(test_pattern_protein.*'
       examples: false
 
   # The generated test data against their generators, without a build: the MGT v1 codec

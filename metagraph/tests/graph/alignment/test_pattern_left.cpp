@@ -26,6 +26,11 @@
 
 namespace {
 
+// the codon automaton's arms and the nucleotide kinds: a Protein build reads a protein pattern in
+// residues, with no codon automaton and no nucleotide kind (DESIGN-pattern-protein.md;
+// test_pattern_protein.cpp)
+#if ! _PROTEIN_GRAPH
+
 using namespace mtg::graph::pattern;
 using namespace mtg::test::segments;
 
@@ -257,5 +262,7 @@ TEST(PatternLeft, ModelWithoutLeftArmThrows) {
     EXPECT_THROW(model.bases_left(0, 1), std::logic_error);
     EXPECT_THROW(model.prev(0, 1, 'A'), std::logic_error);
 }
+
+#endif // ! _PROTEIN_GRAPH
 
 } // namespace

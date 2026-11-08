@@ -53,10 +53,10 @@ header labels are acc1/acc2/acc3.
 
 In a Protein build the same fixtures are protein graphs over the residues A, C, G and T
 (one strand, every length in residues; SPEC §6.12), and every test runs but the few whose
-subject is DNA by nature: /pattern (alphabet_unsupported on a protein graph,
-until E16 (pattern on protein graphs)), the graphlet documents a DNA build wrote, the mini
-index and the primary graphs of TestTraversePrimary (E13; a Protein build refuses the
-primary mode). test_traverse_protein.py covers a protein graph over amino acids.
+subject is DNA by nature: the graphlet documents a DNA build wrote, the mini index and the
+primary graphs of TestTraversePrimary (E13; a Protein build refuses the primary mode). Its
+/pattern requests send the build's kind ('protein': SPEC-pattern-search.md §29).
+test_traverse_protein.py covers a protein graph over amino acids.
 """
 
 K = 31
@@ -1880,20 +1880,17 @@ class TestTraverseAPI(TestTraverseBase):
         self.assertEqual(200, resolve.status_code, resolve.text)
         self._thread_figures(resolve.json()['timing'], 'resolve')
 
-        pattern = self._post('pattern', {'patterns': [{'dna': self.element[10:40]},
-                                                      {'dna': self.right1[5:35]}],
+        # (a Protein build reads the same letters as residues: SPEC-pattern-search.md §29)
+        kind = 'protein' if PROTEIN_MODE else 'dna'
+        pattern = self._post('pattern', {'patterns': [{kind: self.element[10:40]},
+                                                      {kind: self.right1[5:35]}],
                                          'mode': 'partial'})
-        if PROTEIN_MODE:
-            # until E16 (pattern on protein graphs): pattern search is served on DNA graphs
-            # only (SPEC-pattern-search.md); E16 flips this branch to the protein answer
-            self.assertEqual((400, 'alphabet_unsupported'),
-                             (pattern.status_code, pattern.json().get('code')), pattern.text)
-        else:
-            self.assertEqual(200, pattern.status_code, pattern.text)
-            pattern = pattern.json()
-            self._thread_figures(pattern['timing'], 'pattern')
-            for e in pattern['patterns']:
-                self._thread_figures(e['timing'], 'pattern entry')
+        self.assertEqual(200, pattern.status_code, pattern.text)
+        pattern = pattern.json()
+        self._thread_figures(pattern['timing'], 'pattern')
+        for e in pattern['patterns']:
+            self.assertNotIn('error', e)
+            self._thread_figures(e['timing'], 'pattern entry')
 
         # an attempt: the response's usage, and the state's after the response was written
         ret = self._post('traverse', {'attempt_id': 'resources-1', 'seeds': seeds,
@@ -1953,16 +1950,13 @@ class TestTraverseAPI(TestTraverseBase):
         self.assertGreater(first['work']['memory_bytes'], 260)
         self.assertEqual(first['work'], self._post('resolve', resolve).json()['work'])
 
-        pattern = self._post('pattern', {'patterns': [{'dna': self.element[10:40]}],
+        kind = 'protein' if PROTEIN_MODE else 'dna'
+        pattern = self._post('pattern', {'patterns': [{kind: self.element[10:40]}],
                                          'mode': 'partial'}).json()
-        if PROTEIN_MODE:
-            # until E16 (pattern on protein graphs): pattern search is served on DNA graphs
-            # only (SPEC-pattern-search.md); E16 flips this branch to the protein answer
-            self.assertEqual('alphabet_unsupported', pattern.get('code'), pattern)
-        else:
-            self.assertIsInstance(pattern['work']['memory_bytes'], int)
-            for e in pattern['patterns']:
-                self.assertLessEqual(e['work']['memory_bytes'], pattern['work']['memory_bytes'])
+        self.assertIsInstance(pattern['work']['memory_bytes'], int)
+        for e in pattern['patterns']:
+            self.assertNotIn('error', e)
+            self.assertLessEqual(e['work']['memory_bytes'], pattern['work']['memory_bytes'])
 
         ret = self._post('traverse', {'attempt_id': 'memory-api-1', 'seeds': seeds,
                                       'strategy': {'bounds': {'max_extension_bp': BLOCK},
@@ -4060,13 +4054,13 @@ class TestTraverseMultiGraph(TestTraverseBase):
                                     out['answers'][4]['index_meta_fp'])
             else:
                 self.assertEqual(one, out['answers'][0])
-                # until E16 (pattern on protein graphs): pattern search is served on DNA graphs
-                # only (SPEC-pattern-search.md), a protein graph's block says it is not
-                # available and why; E16 flips both lines to the protein answer
-                self.assertEqual(('basic', K, not PROTEIN_MODE),
-                                 (one['graph_mode'], one['k'], one['available']))
-                if PROTEIN_MODE:
-                    self.assertEqual('alphabet_unsupported', one['unavailable_reason'])
+                # served on a protein graph too (SPEC-pattern-search.md §29): its block states
+                # the protein kind alone
+                self.assertEqual(('basic', K, True, None),
+                                 (one['graph_mode'], one['k'], one['available'],
+                                  one['unavailable_reason']))
+                self.assertEqual(['protein'] if PROTEIN_MODE else ['dna', 'iupac', 'protein'],
+                                 one['kinds'])
         server = self._Server(self, self.csv, flags=('--max-graphs-without-selection', '2'))
         try:
             self.assertTrue(server.ready, server.text()[-2000:])

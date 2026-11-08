@@ -1,0 +1,45 @@
+{
+ "long_search": "paths",
+ "patterns": [
+  {
+   "id": "exact_11",
+   "protein": "DNPQELKYSTA"
+  },
+  {
+   "id": "exact_15",
+   "protein": "EGHYPSTRLLKDNAQ"
+  },
+  {
+   "id": "x",
+   "protein": "DNPQEXKYSTA"
+  },
+  {
+   "id": "bzj",
+   "protein": "DBPQEJKYSTA"
+  },
+  {
+   "id": "class",
+   "protein": "DNPQE[LI]KYSTA"
+  },
+  {
+   "id": "negated",
+   "protein": "DNPQE[^P]KYS[^W]A"
+  },
+  {
+   "id": "long",
+   "protein": "MKVLAAGIVGLLLAQSEWHT"
+  },
+  {
+   "id": "long_class",
+   "protein": "RDNPQE[LI]KYSTAMKVW"
+  },
+  {
+   "dna": "ACGTACGTAC",
+   "id": "dna_kind"
+  },
+  {
+   "id": "stop",
+   "protein": "DNPQELKY*"
+  }
+ ]
+}

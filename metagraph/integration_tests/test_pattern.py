@@ -719,7 +719,7 @@ class PatternChecks:
         self.assertEqual('full', entry['determinism'])
 
 
-@unittest.skipIf(PROTEIN_MODE, "pattern search is DNA only")
+@unittest.skipIf(PROTEIN_MODE, "DNA patterns on DNA graphs (a Protein build: test_pattern_protein.py)")
 @unittest.skipUnless(_supports_pattern(), "`metagraph pattern` is not available in this build")
 @guard(os.path.isfile(os.path.join(MINI_DIR, MINI_GRAPH))
        and os.path.isdir(os.path.join(MINI_DIR, 'fasta')),
@@ -3294,7 +3294,7 @@ class TestPatternMini(PatternChecks, unittest.TestCase):
         self.assertNotIn(NOTE_ESTIMATE, e['notes'])
         self.assertEqual(e0['work']['steps'] + width * (self.k - 1), e['work']['steps'])
 
-@unittest.skipIf(PROTEIN_MODE, "pattern search is DNA only")
+@unittest.skipIf(PROTEIN_MODE, "DNA patterns on DNA graphs (a Protein build: test_pattern_protein.py)")
 @unittest.skipUnless(_supports_pattern(), "`metagraph pattern` is not available in this build")
 class TestPatternSynthetic(PatternChecks, TestingBase):
     """Random records at k = 15, served as BASIC, CANONICAL and PRIMARY graphs, with the
@@ -3972,7 +3972,7 @@ class TestPatternSynthetic(PatternChecks, TestingBase):
             self.assertEqual(a['work'], b['work'])
 
 
-@unittest.skipIf(PROTEIN_MODE, "pattern search is DNA only")
+@unittest.skipIf(PROTEIN_MODE, "DNA patterns on DNA graphs (a Protein build: test_pattern_protein.py)")
 @unittest.skipUnless(_supports_pattern(), "`metagraph pattern` is not available in this build")
 class TestPatternLabelNames(PatternChecks, TestingBase):
     """A label whose name is not valid UTF-8 is never written into an answer (SPEC §8.9,
@@ -4071,7 +4071,7 @@ class TestPatternLabelNames(PatternChecks, TestingBase):
         self.assertNotIn(b'\xff', ret.content)
 
 
-@unittest.skipIf(PROTEIN_MODE, "pattern search is DNA only")
+@unittest.skipIf(PROTEIN_MODE, "DNA patterns on DNA graphs (a Protein build: test_pattern_protein.py)")
 @unittest.skipUnless(_supports_pattern(), "`metagraph pattern` is not available in this build")
 class TestPatternLongLabelName(PatternChecks, TestingBase):
     """The output charges count the listed names' bytes (SPEC §14.4, §20.9; the review of
@@ -4244,7 +4244,7 @@ FIXTURES_MINI_FP = 'bea44d604ffe08d60b348b630b4a35bd0ae0b428615727345ba191228c7e
 WORK_OF_THE_ANCHORS = ('annotation_units', 'predicate_units')
 
 
-@unittest.skipIf(PROTEIN_MODE, "pattern search is DNA only")
+@unittest.skipIf(PROTEIN_MODE, "DNA patterns on DNA graphs (a Protein build: test_pattern_protein.py)")
 @unittest.skipUnless(_supports_pattern(), "`metagraph pattern` is not available in this build")
 @guard(os.path.isfile(os.path.join(MINI_DIR, MINI_GRAPH)) and os.path.isfile(FIXTURES_SCRIPT),
        "the mini index (scripts/traversal/build_mini_refseq.sh) or the fixture script is not "

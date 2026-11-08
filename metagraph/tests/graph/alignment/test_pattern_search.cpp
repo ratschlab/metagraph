@@ -63,8 +63,9 @@
 namespace {
 
 // the nucleotide builds the engine serves ($ACGT and $ACGTN); the case-sensitive DNA build
-// ($ACGTNacgt) is refused by the engine (alphabet_unsupported) and Protein has no pattern
-// search, so neither runs this suite
+// ($ACGTNacgt) is refused by the engine (alphabet_unsupported), and a Protein build searches
+// residues (DESIGN-pattern-protein.md; its suite is test_pattern_protein.cpp), so neither runs
+// this suite
 #if _DNA_GRAPH || _DNA5_GRAPH
 
 using namespace mtg;

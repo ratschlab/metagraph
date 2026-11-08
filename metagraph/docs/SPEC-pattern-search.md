@@ -174,7 +174,7 @@ What this build serves (milestone 1, and increment 3 where marked), against the 
 | `patterns` | list of pattern objects (§4.2) | required | 1 to `caps.max_patterns` (16) entries; more is 400 `invalid_request`, never cut |
 | `mode` | `"count"` \| `"all_or_count"` \| `"partial"` | `"all_or_count"` | §7.5 |
 | `scope` | `"suffix"` \| `"any_offset"` | `"any_offset"` | a pattern longer than k is searched as `long` whatever is named (§7.7) |
-| `strands` | `"both"` \| `"forward"` \| `"reverse"` | `"both"` | `forward` searches P, `reverse` rc(P); a palindrome is searched once whatever is named (§7.3) |
+| `strands` | `"both"` \| `"forward"` \| `"reverse"` | `"both"` | `forward` searches P, `reverse` rc(P); a palindrome is searched once whatever is named (§7.3) (Protein build: §29) |
 | `stop_at_threshold` | boolean | `false` | stop a pattern's discovery once its running lower bound passes its threshold (§7.5; on a graph without its mask its running upper bound, §7.4); checked in discovery only, so a pattern can still end `exact` above its threshold with no stop |
 | `max_contexts` | integer ≥ 0 | `caps.max_contexts` (10,000) | per pattern; above the cap: lowered and listed in `limits.clamped` |
 | `max_anchors` | integer ≥ 0 | `default_max_anchors` (1,000; `caps.max_anchors` unless the host lowers the default, §4.5) | per pattern, L > k: the `stop_at_threshold` threshold; above `caps.max_anchors`: lowered like `max_contexts` |
@@ -190,11 +190,11 @@ What this build serves (milestone 1, and increment 3 where marked), against the 
 | `long_search` | `"anchors"` \| `"paths"` \| `"supported_paths"` | `"anchors"` | increment 4 (§12.1): `"paths"` extends every pattern longer than k into its paths; increment 5s (§20): `"supported_paths"` into the walks some label supports along their whole length, reading the annotation in every mode; `"anchors"` answers byte for byte as the field's absence (§7.7). A pattern of at most k bases is answered alike under all three. Any other value, `null` included, is 400 `invalid_request` |
 | `max_paths` | integer ≥ 0 | `caps.max_paths` (1,000) | increment 4: per pattern, the paths an `all_or_count` answer releases at most (and partial's cut, and `stop_at_threshold`'s threshold in the extension, §12.1); under `"supported_paths"` the supported paths (with a predicate the selected ones, §20.9); lowered like `max_contexts`. Accepted with any request; it acts only with `long_search: "paths"` or `"supported_paths"` |
 | `require_support` | `"label_intersection"` \| `"record_verified"` | `"label_intersection"` | increment 4: the labels of paths listed: every label carrying the path with its support, or only those one record verifies (§12.1). An annotation field (§4.1, last bullet). `"record_verified"` with `output.occurrences: false` is 400 `invalid_request` (not under `"supported_paths"`, whose search verifies by the chains it carries, §20.2); on an index that cannot verify, 400 `support_unavailable` (§6) |
-| `genetic_code` | integer | `1` (`default_genetic_code`) | increment 5 (§12.2): the NCBI translation table the request's peptides are read in, one of the capabilities' `genetic_codes` (1–6, 9–16, 21–33); another integer is 400 `genetic_code_unknown`, a value that is not an integer 400 `invalid_request`. Accepted with any request; it acts on protein patterns only |
+| `genetic_code` | integer | `1` (`default_genetic_code`) | increment 5 (§12.2): the NCBI translation table the request's peptides are read in, one of the capabilities' `genetic_codes` (1–6, 9–16, 21–33); another integer is 400 `genetic_code_unknown`, a value that is not an integer 400 `invalid_request`. Accepted with any request; it acts on protein patterns only (Protein build: §29) |
 | `predicate` | object (§19.3) | absent | increment 5b: the condition on the annotation columns a graph context (a supported path of a pattern longer than k, §20.9) must satisfy to be selected (counted in `counts.selected`, returned); applies to every pattern of the request (§19). Its form is refused with 400 `invalid_request`, more names than `caps.max_predicate_labels` with 400 `predicate_too_large`; with `long_search: "paths"` 400 `invalid_request` |
 | `max_predicate_contexts` | integer ≥ 0 | `caps.max_predicate_contexts` (100,000) | increment 5b, per pattern: the compute admission of the selection, the raw contexts it may test (§19.6); lowered like `max_contexts`. Accepted with any request; it acts only with a predicate |
 | `max_predicate_work` | integer ≥ 1 | `caps.max_predicate_work` (10⁸) | increment 5b, per **request**: the work of the selection (its row reads, reverse-complement lookups and decisions) in the oracle's units (§19.9), a budget of its own beside `max_annotation_work`; lowered like `max_contexts`. Accepted with any request; it acts only with a predicate |
-| `predicate_strands` | `"either"` \| `"context"` | `"either"` | increment 5b (§19.5): on a BASIC graph, `"either"`: a label is present for a context when it annotates the context's k-mer or its reverse complement (the one or the other, never a mix: a single k-mer); `"context"`: the context's own k-mer only. On CANONICAL and PRIMARY graphs one row serves both: evaluated as `"either"` whatever is asked. Accepted with any request; it acts only with a predicate |
+| `predicate_strands` | `"either"` \| `"context"` | `"either"` | increment 5b (§19.5): on a BASIC graph, `"either"`: a label is present for a context when it annotates the context's k-mer or its reverse complement (the one or the other, never a mix: a single k-mer); `"context"`: the context's own k-mer only. On CANONICAL and PRIMARY graphs one row serves both: evaluated as `"either"` whatever is asked. Accepted with any request; it acts only with a predicate (Protein build: §29) |
 | `supported_paths_level` | `"best"` \| `"label_intersection"` | `"best"` | increment 5s (§20.1): the support level the supported-path search prunes on; `"best"` is `record_verified` where the index can verify, else `label_intersection`. With `require_support: "record_verified"` under `"supported_paths"`, `"label_intersection"` is 400 `invalid_request`. Accepted with any request; it acts only with `long_search: "supported_paths"` |
 | `predicate_scope` | `"context"` \| `"motif"` | `"context"` | §25: `"motif"` also asks the predicate once of each pattern of at most k bases as a whole, on the union of its contexts' labels (the entry's `motif`); `"context"` is §19's answer. `"motif"` needs a predicate (else 400 `invalid_request`); `"context"` is accepted with any request and acts only with a predicate |
 | `max_mismatches` | integer | `0` | increment 5m-3 (§21.2): the most substitutions an instance may hold, 0 to 3 (the contract's maximum); another integer, a fraction, `null` or another type is 400 `invalid_request`. Each pattern is checked against the cap applied to it (its kind's `mismatches.max` of the capabilities; 0 for a pattern longer than k, §21.16): above it the pattern is answered in its slot with `mismatches_above_cap` (§21.8), never lowered. Above 0 with `output.labels` `"all"` or `"predicate_only"`, a predicate or `long_search: "supported_paths"`: 400 `later_increment` (§21.16). `0` is the field's absence |
@@ -239,7 +239,7 @@ What this build serves (milestone 1, and increment 3 where marked), against the 
 | `id` | string | optional; echoed in the pattern's entry (`null` when absent). Another type is 400 `invalid_request` |
 | `dna` | string over A, C, G, T (any case) | exactly one of `dna`, `iupac`, `protein` |
 | `iupac` | string over the 15 IUPAC codes A C G T R Y S W K M B D H V N (any case) | exactly one of `dna`, `iupac`, `protein` |
-| `protein` | string over the 20 amino acids A C D E F G H I K L M N P Q R S T V W Y, the ambiguity codes X B Z J and the stop `*` (any case; the capabilities' `protein_residues`) | increment 5 (§12.2): a peptide, read in the request's `genetic_code`; exactly one of `dna`, `iupac`, `protein`. `*` since the owner's decision #19 of 2026-10-08: a stop codon of the genetic code at that position |
+| `protein` | string over the 20 amino acids A C D E F G H I K L M N P Q R S T V W Y, the ambiguity codes X B Z J and the stop `*` (any case; the capabilities' `protein_residues`) | increment 5 (§12.2): a peptide, read in the request's `genetic_code`; exactly one of `dna`, `iupac`, `protein`. `*` since the owner's decision #19 of 2026-10-08: a stop codon of the genetic code at that position (Protein build: §29) |
 
 - None or more than one of `dna`, `iupac`, `protein`, or a value that is not a string, is 400 `invalid_request`.
 - A string with another character (U, `-`, `.`, whitespace; an IUPAC code in a `dna` pattern; U, O or a digit
@@ -426,14 +426,14 @@ answered; the refusals that no pair decides (the body, `graphs`, `in_ram`, the r
 | 400 | `later_increment` | a field of §4.4 (`budget_split`); §21.16: `max_mismatches` above 0 with `output.labels` `"all"` or `"predicate_only"`, a predicate or `long_search: "supported_paths"` (the capabilities' `mismatches.later_increment`) | wait for the increment the capabilities will announce |
 | 400 | `predicate_too_large` | increment 5b: the predicate's lists name more than `caps.max_predicate_labels` names (10,000 by default; a name in two lists counted twice); the message names the count and the cap (§19.3) | send at most `caps.max_predicate_labels` names; split the cohort |
 | 400 | `support_unavailable` | increment 4: `require_support: "record_verified"` with `long_search: "paths"` and `output.labels: "all"` in a retrieval mode (increment 5s: with `long_search: "supported_paths"` in every mode), on an index that cannot verify a path in one record: not BASIC, no coordinates, or no record mapping (no `.seqs`, or `--no-coord-mapping`); capabilities `support` is then not `record_verified`. The message names the index's best support and placement | ask without `require_support`: each label of a path then states its support (`label_intersection` there) |
-| 400 | `genetic_code_unknown` | increment 5: `genetic_code` is an integer that is not an NCBI translation table id (1–6, 9–16, 21–33; 7 and 8 were merged into 4 and 1, 17–20 are unassigned); the message names the ids | send one of the capabilities' `genetic_codes`, or omit it (1, the standard code) |
+| 400 | `genetic_code_unknown` | increment 5: `genetic_code` is an integer that is not an NCBI translation table id (1–6, 9–16, 21–33; 7 and 8 were merged into 4 and 1, 17–20 are unassigned); the message names the ids | send one of the capabilities' `genetic_codes`, or omit it (1, the standard code) (Protein build: §29) |
 | 400 | `resident_only` | **retired** (§24): `in_ram` is accepted as `/search` accepts it; builds before multi-graph servers answered refused it, any value | a client of version 1 keeps handling it (an older host): drop `in_ram` |
 | 400 | `mask_required` | **retired** (the owner's decision #16 of 2026-10-08): no build since answers it. A graph loaded without its dummy-edge mask (`.edgemask`) is answered, its counts `exact` where provable and otherwise `bounds` with an `estimate` (`counting: "upper_bound"`, §7.4); builds of version 1 before the decision refused such a graph with this code | a client of version 1 keeps handling it (an older host): its operator creates the mask (`metagraph transform --mask-dummy` once, then a restart; or `--pattern-build-mask`), or updates the build |
 | 400 | `mask_invalid` | the graph's `.edgemask` marks valid a dummy edge whose last symbol (W) is `$`, as `metagraph extend` of earlier builds wrote it on a masked graph, or a stale mask left beside a rebuilt graph; counts on such a graph could be overstated, `exact` included (the owner's decision of 2026-10-07). Checked when the graph is loaded, on a sample of its W = `$` edges (§24; the start-up log names what was found; the full check is made where a mask is written, `transform --mask-dummy`); a mask built at load (`--pattern-build-mask`) is not checked. A graph without a mask is not checked and not refused (§7.4) | the host's operator masks the graph again (`metagraph transform --mask-dummy --force`), then restarts the server; the capabilities say `available: false`, `unavailable_reason: "mask_invalid"` meanwhile |
 | 400 | `representation_unsupported` | not a succinct graph (nor a PRIMARY one wrapped in `CanonicalDBG`), or k < 2 | none: this host has no pattern search |
 | 400 | `primary_unwrapped` | a PRIMARY graph not wrapped in `CanonicalDBG` (the server always wraps; CLI or embedding misuse) | none |
 | 400 | `alphabet_untested` | the graph's alphabet is `$ACGTN` (a DNA5 build): no DNA5 build has passed the pattern tests yet (the owner's decision of 2026-10-07; §8.2), with its mask or without | none on this build; a later build that passes them serves it |
-| 400 | `alphabet_unsupported` | the graph's alphabet is neither `$ACGT` nor `$ACGTN` | none |
+| 400 | `alphabet_unsupported` | the graph's alphabet is neither `$ACGT` nor `$ACGTN` | none (Protein build: §29) |
 | 400 | `annotation_unbudgeted` | increment 3: `output.labels: "all"` in a retrieval mode, and the annotation has no budget-aware decode (capabilities `annotation: "unbudgeted"`: a column, BRWT, row or other annotation without row-diff, or `row_diff_int_disk` / `row_diff_disk_coord`; only the row-diff family has one, since E14 every deployed row-diff form); increment 5b: a request with a predicate on such an annotation, in every mode (its selection reads rows); increment 5s: a request with `long_search: "supported_paths"`, in every mode (its search reads rows) | set `allow_unbudgeted_annotation: true` to read it without a memory bound on the reads (§14.4; a selection then reads single cells for at most 16 labels where the annotation has direct access, `selection.access: "columns"`), or ask for `labels: "none"` or mode `count` (without a predicate) |
 | 400 | `graph_unknown`, `selection_conflict`, `pair_not_found`, `pair_ambiguous` | a multi-graph server's selection (§24.1; SPEC-multigraph-envelope.md section 6, its codes): an unknown name in `graphs` or `pairs`, `graphs` beside `pairs`, a pair object naming none or several pairs of its name; the body adds `candidates` (`[{graph, graph_path, annotation_path}]`) where a choice exists | fix the selection: GET /capabilities lists the pairs |
 | 503 | `deadline` | the answer could not be written by `time_budget_ms` (§7.6): nothing partial is sent | narrow the request: fewer patterns, a smaller `max_contexts` or `max_steps`; a larger budget helps only when it lets the work end early. The operator can raise `--pattern-finalize-ms` or lower the delivery rates (§4.5) |
@@ -934,7 +934,7 @@ releases anchors (a path search cut before any extension, by `stop_at_threshold`
 | `release` | string | the server's `--index-release` (`""` when not set) |
 | `k` | integer | the graph's k |
 | `graph_mode` | `"basic"` \| `"canonical"` \| `"primary"` | §7.3 |
-| `alphabet` | `"$ACGT"` \| `"$ACGTN"` | the BOSS alphabet, sentinel first. This build answers `$ACGT` only: a `$ACGTN` (DNA5) graph is refused with `alphabet_untested` (§6; the owner's decision of 2026-10-07) until a DNA5 build passes the pattern tests. No DNA5 server or CLI has been built or run, and CI builds DNA and Protein only (the engine's unit suites, DNA5 branches included, passed once on a DNA5 build of the engine and its tests, by hand, 2026-10-07; not in CI). Known, for that later build: on a DNA5 wrapped PRIMARY graph with odd k, a stored k-mer equal to its reverse complement (N at its centre between complementary flanks, e.g. `ACNGT` at k = 5) is counted and released twice |
+| `alphabet` | `"$ACGT"` \| `"$ACGTN"` | the BOSS alphabet, sentinel first. This build answers `$ACGT` only: a `$ACGTN` (DNA5) graph is refused with `alphabet_untested` (§6; the owner's decision of 2026-10-07) until a DNA5 build passes the pattern tests. No DNA5 server or CLI has been built or run, and CI builds DNA and Protein only (the engine's unit suites, DNA5 branches included, passed once on a DNA5 build of the engine and its tests, by hand, 2026-10-07; not in CI). Known, for that later build: on a DNA5 wrapped PRIMARY graph with odd k, a stored k-mer equal to its reverse complement (N at its centre between complementary flanks, e.g. `ACNGT` at k = 5) is counted and released twice (Protein build: §29) |
 | `strand_stated` | boolean | `true` on BASIC: contexts carry `strand`, counts `by_strand` |
 | `counting` | `"upper_bound"` | the owner's decision #16, **answers on a graph loaded without its dummy-edge mask only** (an answer on a masked graph has neither this field nor the next: its counting is `exact`, as the capabilities say): counts are `exact` where provable and otherwise `bounds` with an `estimate` (§7.4) |
 | `dummy_fraction` | object (`dummy_fraction` below) | likewise: f, the dummy fraction the estimates rest on; the capabilities' `dummy_fraction` |
@@ -973,7 +973,7 @@ releases anchors (a path search cut before any extension, by `stop_at_threshold`
 | `max_predicate_contexts` | integer | increment 5b, answers with a predicate only: effective (§4.1). With a predicate the annotation limits above (`max_labels_per_anchor` … `allow_unbudgeted_annotation`) are echoed in every mode: the selection uses the account |
 | `max_predicate_work` | integer | likewise: effective |
 | `max_predicate_labels` | integer | likewise: the server's (`caps.max_predicate_labels`) |
-| `predicate_strands` | string | likewise: as requested, default applied (`predicate.strands` states what was evaluated) |
+| `predicate_strands` | string | likewise: as requested, default applied (`predicate.strands` states what was evaluated) (Protein build: §29) |
 | `predicate_scope` | `"context"` \| `"motif"` | §25, answers with a predicate whose request named it only: as requested |
 | `max_mismatches` | integer | increment 5m-3 (§21.8), answers to `max_mismatches` above 0 only: as requested (never lowered) |
 | `clamped` | list of objects | one per request value lowered to its cap, in the order of §7.9; `[]` when none |
@@ -1174,7 +1174,7 @@ and the labels count of the paths (with `labels: "all"`) has:
 | `labels_total` | integer \| null | likewise: the labels the row carries (its true total, also when truncated); `null` when it was not read |
 | `labels` | list \| null | likewise: the context's labels (§14.5); `null` unless the row was read and held. With `"predicate_only"` (increment 5b) the predicate's labels on its own row |
 | `selection_labels` | list of strings | increment 5b, a selected context of a predicate request whose projection reads labels (`"predicate_only"`, `"all"`): the predicate's labels in the set it was evaluated on (its row's, and with `"either"` on a BASIC graph its reverse complement's), in the label order of the returned results: why it was selected; the normal form holds on them (§19.10) |
-| `selection_strands` | list of strings | increment 5b, beside `selection_labels` (one per label, the same order): the orientation whose row carries the label (the owner's answer to P11). On a BASIC graph `"context"` (the row of the context's k-mer x, as `kmer` spells it), `"reverse_complement"` (the row of rc(x) only: `"either"`), `"both"` (both rows; a palindromic x, which is its own reverse complement, under `"either"`); `"either"` on CANONICAL and PRIMARY graphs (one row serves x and rc(x): no strand is known) (§19.10) |
+| `selection_strands` | list of strings | increment 5b, beside `selection_labels` (one per label, the same order): the orientation whose row carries the label (the owner's answer to P11). On a BASIC graph `"context"` (the row of the context's k-mer x, as `kmer` spells it), `"reverse_complement"` (the row of rc(x) only: `"either"`), `"both"` (both rows; a palindromic x, which is its own reverse complement, under `"either"`); `"either"` on CANONICAL and PRIMARY graphs (one row serves x and rc(x): no strand is known) (§19.10) (Protein build: §29) |
 | `mismatches` | integer | increment 5m-3 (§21.8), with `max_mismatches` > 0: the level of its instance, the substitutions it holds against the oriented pattern of its orientation |
 | `substitutions` | list of `substitution` (§21.8; `residue_substitution` for a `protein` pattern) | likewise: one per substituted position (residue), ascending, in the coordinates of the submitted pattern P; `[]` at level 0 |
 
@@ -1196,7 +1196,7 @@ It costs no step.
 
 | `code` | when | the slot carries |
 |---|---|---|
-| `bad_alphabet` | a character outside the kind's alphabet, or an empty pattern (the message names the first offending 0-based position); for `protein`, a character that is not in `protein_residues` (the stop `*` is one, §12.2; the message, kept as `4596bb3b` wrote it, lists the 20 amino acids and X B Z J and does not name `*`) | `id`, `kind`, `error` |
+| `bad_alphabet` | a character outside the kind's alphabet, or an empty pattern (the message names the first offending 0-based position); for `protein`, a character that is not in `protein_residues` (the stop `*` is one, §12.2; the message, kept as `4596bb3b` wrote it, lists the 20 amino acids and X B Z J and does not name `*`) | `id`, `kind`, `error` (Protein build: §29) |
 | `information_below_floor` | below the floor for its scope (§7.8); with `max_mismatches` > 0 on `mismatch_information_bits` (§21.5) | `id`, `kind`, `pattern`, `length`, `information_bits`, `anchor_information_bits`, `min_anchor_information_bits`, `error`; a peptide also `residues`, `genetic_code`; with `max_mismatches` > 0 also `max_mismatches`, `mismatch_information_bits`, `min_anchor_mismatch_information_bits` and `max_mismatches_within_floor` (§21.8) |
 | `scope_unsupported` | `scope: "suffix"` on a wrapped PRIMARY graph, L ≤ k (§7.2) | as above (with `max_mismatches` > 0 the three fields of §21.8, not `max_mismatches_within_floor`) |
 | `mismatches_above_cap` | increment 5m-3 (§21.8): `max_mismatches` above the cap applied to the pattern: its kind's (`/pattern/capabilities` `mismatches.max`), or 0 for a pattern longer than k, whose search with substitutions is a later increment (§21.16). Checked before the floor, before anything is charged | `id`, `kind`, `pattern`, `length`, `information_bits`, `anchor_information_bits`, `min_anchor_information_bits`, `max_mismatches`, `mismatch_information_bits`, `min_anchor_mismatch_information_bits`, `max_mismatches_cap`, `error`; a peptide also `residues`, `genetic_code` |
@@ -1308,19 +1308,19 @@ It costs no step.
 | `default_projection` | string | `"none"` | an omitted `output.labels`; frozen for version 1 (§1) |
 | `projections_later_increment` | list | `[]` | refused with `later_increment` today (`["predicate_only"]` before increment 5b, `["all", "predicate_only"]` before increment 3) |
 | `default_occurrences` | boolean | `true` | increment 3: an omitted `output.occurrences` with `labels: "all"` |
-| `kinds` | list | `["dna", "iupac", "protein"]` | pattern kinds served (`protein` since increment 5; `["dna", "iupac"]` before) |
+| `kinds` | list | `["dna", "iupac", "protein"]` | pattern kinds served (`protein` since increment 5; `["dna", "iupac"]` before) (Protein build: §29) |
 | `kinds_later_increment` | list | `[]` | (`["protein"]` before increment 5) |
-| `protein_residues` | list of one-letter strings | the 20 amino acids then `X`, `B`, `Z`, `J`, `*` | increment 5: the residues a `protein` pattern may hold (§12.2); the stop `*` since the owner's decision #19 of 2026-10-08 (it was not among them before) |
-| `genetic_codes` | list of integers | `[1, 2, 3, 4, 5, 6, 9, 10, …, 16, 21, …, 33]` | increment 5: the NCBI translation table ids `genetic_code` accepts (gc.prt version 4.6) |
-| `default_genetic_code` | integer | `1` | increment 5: an omitted `genetic_code` (the standard code) |
-| `protein_rule` | string | `"SPEC-pattern-search.md section 12.2"` | increment 5: a reference to the rule of how a peptide is read (§12.2: the ambiguity codes, the stop `*`, the codon automaton, the length in bases, the slot error, the context stops of tables 27, 28 and 31 and the note `no_stop_codon`); since the owner's decision P9 (§18) a reference, the rule in prose before. Printable ASCII; for people, not parsed |
+| `protein_residues` | list of one-letter strings | the 20 amino acids then `X`, `B`, `Z`, `J`, `*` | increment 5: the residues a `protein` pattern may hold (§12.2); the stop `*` since the owner's decision #19 of 2026-10-08 (it was not among them before) (Protein build: §29) |
+| `genetic_codes` | list of integers | `[1, 2, 3, 4, 5, 6, 9, 10, …, 16, 21, …, 33]` | increment 5: the NCBI translation table ids `genetic_code` accepts (gc.prt version 4.6) (Protein build: §29) |
+| `default_genetic_code` | integer | `1` | increment 5: an omitted `genetic_code` (the standard code) (Protein build: §29) |
+| `protein_rule` | string | `"SPEC-pattern-search.md section 12.2"` | increment 5: a reference to the rule of how a peptide is read (§12.2: the ambiguity codes, the stop `*`, the codon automaton, the length in bases, the slot error, the context stops of tables 27, 28 and 31 and the note `no_stop_codon`); since the owner's decision P9 (§18) a reference, the rule in prose before. Printable ASCII; for people, not parsed (Protein build: §29) |
 | `default_scope` | string | `"any_offset"` | |
-| `scopes_by_graph_mode` | object | `basic`, `canonical`: `["suffix", "any_offset"]`; `primary`: `["any_offset"]` | the rule |
+| `scopes_by_graph_mode` | object | `basic`, `canonical`: `["suffix", "any_offset"]`; `primary`: `["any_offset"]` | the rule (Protein build: §29) |
 | `scopes` | list \| null | | this graph's requestable scopes |
 | `long_patterns` | string | `"anchors_counted"` | what L > k gets without the option (§7.7); stays `"anchors_counted"` now that paths are served, since they are opt-in (`long_search`, §12.1) |
 | `long_search` | list | `["anchors", "paths", "supported_paths"]` | increment 4: the `long_search` values served; gate the paths on `"paths"` in it, the supported paths (increment 5s, §20) on `"supported_paths"` |
 | `default_long_search` | string | `"anchors"` | increment 4: an omitted `long_search`; the paths are never switched on by a default |
-| `strands` | list | `["both", "forward", "reverse"]` | |
+| `strands` | list | `["both", "forward", "reverse"]` | (Protein build: §29) |
 | `default_strands` | string | `"both"` | |
 | `graph_cleaned` | string | `"unknown"` | whether graph cleaning may have pruned k-mers (design §3); not known in version 1 |
 | `records_shorter_than_k` | string | `"not_indexed"` | such records have no k-mer |
@@ -1337,7 +1337,7 @@ It costs no step.
 | `mismatches` | object (`capabilities_mismatches`, §21.12) | | increment 5m-3 (§21.12): the caps per kind, the default, the unit per kind, what substitutes a residue, the edits served, the answer order, the rule of the levels and what is not served with substitutions yet. In the full block only (§23); a host without it refuses `max_mismatches` (400 `invalid_request`, an unknown field) |
 | `graph_mode` | string \| null | | `basic`, `canonical`, `primary` |
 | `k` | integer \| null | | |
-| `alphabet` | string \| null | | `$ACGT` or `$ACGTN` (`$ACGTN`: `available: false`, `alphabet_untested`, §8.2) |
+| `alphabet` | string \| null | | `$ACGT` or `$ACGTN` (`$ACGTN`: `available: false`, `alphabet_untested`, §8.2) (Protein build: §29) |
 | `strand_stated` | boolean \| null | | `true` on BASIC |
 | `mask` | string \| null | | `file`: the `.edgemask` loaded beside the graph (below; one that marks a W = `$` edge valid: `available: false`, `mask_invalid`); `built_at_load`: built in memory at start-up (`--pattern-build-mask`, milestone 1b); `absent`: no mask, the graph served with `counting: "upper_bound"` (the owner's decision #16; before it, `mask_required`; a `$ACGTN` graph says `alphabet_untested`, §6) |
 | `counting` | `"exact"` \| `"upper_bound"` \| null | | the owner's decision #16 of 2026-10-08: how this graph counts. `exact` with a mask (`file`, `built_at_load`): every count of a completed discovery `exact`; `upper_bound` without one (`absent`): counts `exact` where provable, otherwise `bounds` with an `estimate`, lists exact (§7.4); `null` while loading or when the graph is not served (`available` not `true`). An extensible enumeration (§1). The answers on such a graph state it in `index.counting` |
@@ -1345,6 +1345,9 @@ It costs no step.
 | `placement` | string \| null | | the placement `output.labels: "all"` gives on this index (`record`, `global`, `none`, `none_canonical`, §14.3; before increment 3: what a later increment could give) |
 | `support` | string \| null | | the best per-label support of a path on this index (`record_verified`, `label_intersection`; served since increment 4, §12.1: `require_support: "record_verified"` needs `record_verified` here); a context of L ≤ k has `kmer` |
 | `annotation` | string \| null | | `budgeted` (row-diff with budgeted decode) or `unbudgeted`: the reads of `output.labels: "all"` (§14.4; `unbudgeted` needs `allow_unbudgeted_annotation`); `count` and `none` never read it |
+
+A Protein build's block has two members more, `protein_reading` and `protein_classes`, and states the other members as
+§29 lists them; a DNA build's block has neither.
 
 The graph fields (`graph_mode` to `annotation`) are `null` while the index loads; when the graph is not
 recognised (`representation_unsupported`, `primary_unwrapped`) only `k` is set; `placement`, `support` and
@@ -3144,7 +3147,7 @@ cut `all_or_count` list are released with it.
 | `vacuous` | boolean \| null | the normal form holds on a context carrying none of its labels (§19.4) |
 | `scope` | `"shard_context"` | §19.5: per context, per index; not motif-level |
 | `motif_scope` | `"shard_motif"` | §25, with `predicate_scope: "motif"` only: each pattern's motif claim is per pattern, on this index |
-| `strands` | `"either"` \| `"context"` | what was evaluated (§19.5): `"either"` on CANONICAL and PRIMARY graphs whatever was asked (`limits.predicate_strands` echoes the request) |
+| `strands` | `"either"` \| `"context"` | what was evaluated (§19.5): `"either"` on CANONICAL and PRIMARY graphs whatever was asked (`limits.predicate_strands` echoes the request); `"context"` on a protein graph whatever was asked, echoed so in `limits.predicate_strands` too (Protein build: §29) |
 
 **Entry.** Every answered entry of a predicate request gains `counts.tested`, `counts.selected` (§19.7),
 `absence_filter: "predicate"` (§19.11), `rows_refused` (in every mode; the pass's first), `work.predicate_rows`,
@@ -3963,10 +3966,10 @@ The full block (§10.2) gains the object below, on every route that serves the f
 <!-- schema: capabilities_mismatches -->
 | field | type | meaning |
 |---|---|---|
-| `max` | object kind → integer | the most substitutions served per kind on this server: `dna`, `iupac` (3 by default, `--pattern-max-mismatches`), `protein` (`--pattern-max-mismatches-protein`, by default the former, at most it; staging: 1). 0 for a kind: not served |
+| `max` | object kind → integer | the most substitutions served per kind on this server: `dna`, `iupac` (3 by default, `--pattern-max-mismatches`), `protein` (`--pattern-max-mismatches-protein`, by default the former, at most it; staging: 1). 0 for a kind: not served (Protein build: the `protein` key only, §29) |
 | `default` | integer | `0`: an omitted `max_mismatches` |
-| `unit` | object kind → string | `"base"` for `dna` and `iupac`, `"residue"` for `protein` |
-| `protein_substitutes` | string | `"sense_codons"` (an extensible enumeration, §1): what substitutes a residue, §21.3 (the owner's decision M1 of 2026-10-11) |
+| `unit` | object kind → string | `"base"` for `dna` and `iupac`, `"residue"` for `protein` (Protein build: the `protein` key only, §29) |
+| `protein_substitutes` | string | `"sense_codons"` (an extensible enumeration, §1): what substitutes a residue, §21.3 (the owner's decision M1 of 2026-10-11) (Protein build: `"residues"`, §29) |
 | `edits` | list | `["substitution"]`: indels are not served |
 | `order` | string | `"mismatches_first"`: §21.7's answer order |
 | `levels_rule` | string | `"SPEC-pattern-search.md section 21.4"`: a reference to the rule of the passes (a stop in the work of level t leaves the levels below it complete). Printable ASCII; for people, not parsed |
@@ -4948,3 +4951,61 @@ no other stored body changes. Tests:
 `WindowedMaximumBucketsAndLateNotes`, `ObservedMaximumUnderConcurrentNotes`, `ObservedWindowFlagIsValidated`;
 integration `TestTraverseAttempts.test_observed_window_is_validated_and_stated` (a 5 s window: the piece of one
 `/traverse` stated on both routes, gone 2.2 s later; the flag's refusals).
+
+## 29. Protein graphs (the Protein build, E16)
+
+The owner's decision of 2026-10-31 ("patterns must work on UniParc too"); the design is
+`DESIGN-pattern-protein.md`. A server or CLI of the Protein build (`metagraph_Protein`, `_PROTEIN_GRAPH`) serves
+`/pattern` on graphs of its alphabet `$ABCDEFGHIJKLMNOPQRSTUVWYZX` (BASIC, one strand; UniParc at k = 15). Everything
+not stated here is as on a DNA graph. The DNA builds' answers and documents do not change.
+
+**The pattern.** `patterns[i].protein`, read one residue per position (no codon automaton, §12.2 does not apply):
+the 22 residues read as themselves (A C D E F G H I K L M N P Q R S T V W Y, U, O) as literals; `X` any of the 22
+(U and O included: UniParc stores selenocysteine and pyrrolysine, and "any residue" covers them; the coordinator's
+decision of 2026-11-07),
+`B` D or N, `Z` E or Q, `J` I or L; a class `[...]` (the union of its letters, each one of these 26 read as above)
+and a negated class `[^...]` (the 22 less that union). Any case; `pattern` is the text in upper case, brackets kept.
+L, `length` and `residues` count positions (a class is one); every offset and length of the answer is in residues.
+A stored ambiguity letter (B, J, Z, X in a record) is matched by no position and substitutes none; the free flanks
+of `any_offset` admit it.
+
+**Refused.** In the pattern's slot with `bad_alphabet`: the `dna` and `iupac` kinds, `*`, any other character,
+an empty text, an empty class or negation (`[]`, `[^]`, `[^X]`), an unclosed or nested class, a `]` without its
+`[`, a `^` not right after `[` (the message names the character and its 0-based place in the text). As the
+request's 400 `invalid_request`: `genetic_code` named with any value, `strands: "reverse"`.
+
+**One strand.** `strands` `"both"` (the default) and `"forward"` search the one strand: the entry's `strands` is
+`["+"]`, `by_strand` has the key `+` alone, `palindromic` is false. `predicate_strands` is accepted with both values
+and evaluated as `"context"` (no reverse complement whose row `"either"` could read); every answer with a predicate
+states the effective value: `predicate.strands` and `limits.predicate_strands` are `"context"`, and each selected
+context's `selection_strands` lists `"context"` per label.
+
+**Mismatches** (§21) for L <= k, 0 to 3, the cap `mismatches.max.protein` (`--pattern-max-mismatches-protein`): a
+substitution is one of the 22 residues outside the position's set (none at X). `substitutions` use the schema
+`substitution`: `position`, `expected` (the position as written: a letter or a class such as `[ST]`), `found`; no
+`codon`. A pattern longer than k is answered in its slot with `mismatches_above_cap` (cap 0).
+
+**Bits.** A position of s residues carries log2(22 / s) bits; within m substitutions the ball over the 22 residues
+(§21.5). The floor (§7.8) gates as on DNA; `low_complexity_pattern` is not computed (sdust is a nucleotide measure).
+
+**The entry.** `kind` `"protein"`, `length` = `residues` = L, `genetic_code` null (the key kept).
+
+**Capabilities** (`GET /pattern/capabilities`, `GET /capabilities`' `pattern`; the gate block projects its keys as
+§23.2 lists them): `alphabet` (per graph) `$ABCDEFGHIJKLMNOPQRSTUVWYZX`; `kinds` `["protein"]`; `protein_residues`
+the 22 then X B Z J; `protein_reading` `"residues"` and `protein_classes` `["[...]", "[^...]"]` (the Protein build's
+only: a DNA build's block has neither, its peptides are read in codons, §12.2); `genetic_codes` `[]` and
+`default_genetic_code` null; `protein_rule` `"SPEC-pattern-search.md section 29"`; `strands` `["both", "forward"]`;
+`scopes_by_graph_mode` `basic` only; `mismatches.max` and `mismatches.unit` the `protein` key only,
+`mismatches.protein_substitutes` `"residues"`.
+
+**Fixtures.** `api/python/tests/data/traverse/pattern_protein/` (README.md there): `capabilities` (GET
+/pattern/capabilities of a protein index) and `entry` (a request and its answer: the plan row's scenarios on that
+index), answered by `metagraph_Protein pattern` and pinned by `integration_tests/test_pattern_protein.py`
+(`TestPatternProtein.test_fixtures`). They sit beside `pattern/`, whose fixtures the DNA build answers on the mini index
+(`scripts/traversal/pattern_fixtures.py`).
+
+Tests: `PatternProtein.*` (`tests/graph/alignment/test_pattern_protein.cpp`: the parser against its own table, the
+bits, one strand, contexts and their levels against a brute-force oracle with and without the mask, long patterns'
+anchors and paths), `PatternProteinRoute.*` (`tests/cli/test_pattern_protein_route.cpp`), and
+`integration_tests/test_pattern_protein.py`, all in the Protein build (CI: the development workflow's Protein job,
+`Linux-Protein`, whose filters name them).
