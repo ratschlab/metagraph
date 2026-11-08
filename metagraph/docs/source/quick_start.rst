@@ -858,6 +858,25 @@ that is, all leaves (original labels) directly connected to the root of the BRWT
 
 For further examples on real data, see `<https://github.com/ratschlab/counting_dbg/blob/master/scripts.md#index-with-k-mer-counts>`_.
 
+Move an annotation to another graph with the same k-mers
+""""""""""""""""""""""""""""""""""""""""""""""""""""""""
+A ``brwt`` or ``row_diff_brwt`` annotation can be moved to another graph with the same k-mers, such as an SSHash graph built from the unitigs of a succinct graph.
+This avoids annotating the new graph again from the input sequences.
+Both graphs must be in ``basic`` mode.
+Pass the graph that the annotation was built for with ``--remap-graph`` and the new graph with ``-i``::
+
+    metagraph transform_anno -v -p 36 --remap-graph graph.dbg -i graph.sshashdbg \
+                             -o moved annotation.row_diff_brwt.annodbg
+
+The result keeps the labels, the BRWT tree and the relations of every k-mer.
+Rows without a k-mer, such as the dummy nodes of a succinct graph, are dropped.
+The command stops with an error if the graphs differ in any k-mer.
+
+The command saves the matching of rows as ``moved.rowmap``.
+A repeated run with the same output name reuses this file and skips loading the new graph.
+Delete it after changing either graph.
+The command stops if the file size of the new graph changed since the row map was saved.
+
 .. _query_index:
 
 Query index

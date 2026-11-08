@@ -160,4 +160,64 @@ TYPED_TEST(BinaryMatrixBRWTTest, RowViewsAcrossChunkBoundaries) {
     }
 }
 
+TYPED_TEST(BinaryMatrixBRWTTest, RemapRows) {
+    constexpr size_t num_rows = 131;
+    constexpr size_t num_new_rows = 150;
+    constexpr size_t num_columns = 24;
+    BitVectorPtrArray columns;
+    for (size_t col = 0; col < num_columns; ++col) {
+        sdsl::bit_vector bits(num_rows, false);
+        for (size_t row = 0; row < num_rows; ++row) {
+            bits[row] = row % 13 && (row + col * 7) % 11 < 5;
+        }
+        columns.emplace_back(new bit_vector_stat(std::move(bits)));
+    }
+    auto matrix = build_matrix_from_columns<TypeParam>(std::move(columns));
+
+    // Move row r to row (r * 17) % num_new_rows and drop every tenth row.
+    // Entries hold the new row + 1, and 0 drops the row.
+    sdsl::int_vector<> new_row(num_rows, 0, 64);
+    for (size_t row = 0; row < num_rows; ++row) {
+        if (row % 10)
+            new_row[row] = row * 17 % num_new_rows + 1;
+    }
+
+    for (size_t num_threads : { 1, 4 }) {
+        auto remapped = matrix.remap_rows(new_row, num_new_rows, num_threads);
+        ASSERT_EQ(num_new_rows, remapped->num_rows());
+        ASSERT_EQ(num_columns, remapped->num_columns());
+
+        std::vector<BinaryMatrix::SetBitPositions> expected(num_new_rows);
+        for (size_t row = 0; row < num_rows; ++row) {
+            if (new_row[row])
+                expected[new_row[row] - 1] = matrix.get_rows(std::vector<BinaryMatrix::Row>{ row })[0];
+        }
+        uint64_t num_relations = 0;
+        for (size_t row = 0; row < num_new_rows; ++row) {
+            auto actual = remapped->get_rows(std::vector<BinaryMatrix::Row>{ row })[0];
+            std::sort(actual.begin(), actual.end());
+            std::sort(expected[row].begin(), expected[row].end());
+            EXPECT_EQ(expected[row], actual) << "row " << row << ", threads " << num_threads;
+            num_relations += expected[row].size();
+        }
+        EXPECT_EQ(num_relations, remapped->num_relations());
+    }
+}
+
+TYPED_TEST(BinaryMatrixBRWTTest, RemapRowsRejectsInvalidMap) {
+    BitVectorPtrArray columns;
+    columns.emplace_back(new bit_vector_stat({ 1, 0, 1, 1 }));
+    columns.emplace_back(new bit_vector_stat({ 0, 1, 1, 0 }));
+    auto matrix = build_matrix_from_columns<TypeParam>(std::move(columns));
+
+    sdsl::int_vector<> repeated(4, 0, 8);
+    repeated[0] = 1;
+    repeated[1] = 1;
+    EXPECT_THROW(matrix.remap_rows(repeated, 4), std::exception);
+
+    sdsl::int_vector<> out_of_range(4, 0, 8);
+    out_of_range[2] = 5;
+    EXPECT_THROW(matrix.remap_rows(out_of_range, 4), std::exception);
+}
+
 } // namespace

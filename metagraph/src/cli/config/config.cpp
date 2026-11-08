@@ -354,6 +354,8 @@ Config::Config(int argc, char *argv[]) {
             graph_type = string_to_graphtype(get_value(i++));
         } else if (!strcmp(argv[i], "--rename-cols")) {
             rename_instructions_file = std::string(get_value(i++));
+        } else if (!strcmp(argv[i], "--remap-graph")) {
+            remap_graph = std::string(get_value(i++));
         } else if (!strcmp(argv[i], "-a") || !strcmp(argv[i], "--annotator")) {
             infbase_annotators.emplace_back(get_value(i++));
         } else if (!strcmp(argv[i], "-i") || !strcmp(argv[i], "--infile-base")) {
@@ -648,7 +650,13 @@ Config::Config(int argc, char *argv[]) {
                     && outfbase.empty())
         print_usage_and_exit = true;
 
-    if (identity == TRANSFORM_ANNOTATION) {
+    if (identity == TRANSFORM_ANNOTATION && remap_graph.size()) {
+        if (infbase.empty() || fnames.size() != 1) {
+            std::cerr << "--remap-graph needs one annotation and the target graph"
+                         " passed with '-i <GRAPH>'" << std::endl;
+            print_usage_and_exit = true;
+        }
+    } else if (identity == TRANSFORM_ANNOTATION) {
         const bool to_row_diff = anno_type == RowDiff
                                     || anno_type == RowDiffBRWT
                                     || anno_type == RowDiffDisk
@@ -1330,6 +1338,10 @@ if (advanced) {
             fprintf(stderr, "\t                       \t          L_2 L_2_renamed\n");
             fprintf(stderr, "\t                       \t          L_2 L_2_renamed\n");
             fprintf(stderr, "\t                       \t          ... ...........'\n");
+            fprintf(stderr, "\t   --remap-graph [STR] \tmove the rows of a brwt or row_diff_brwt annotation built for this graph\n");
+            fprintf(stderr, "\t                       \tto the graph given with -i, matching nodes by k-mer. Both graphs must be\n");
+            fprintf(stderr, "\t                       \tin basic mode and have the same k-mers. The row map is saved as\n");
+            fprintf(stderr, "\t                       \t<OUT>.rowmap and reused if present []\n");
             fprintf(stderr, "\t   --anno-type [STR] \ttarget annotation format [column]\n");
             fprintf(stderr, "%s\n", annotation_list);
             fprintf(stderr, "\t   --arity \t\tarity in the brwt tree [2]\n");
