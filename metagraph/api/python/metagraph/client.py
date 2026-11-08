@@ -152,14 +152,13 @@ class GraphClientJson:
                 labels: Union[None, List[str]] = None,
                 discover: Union[None, JsonDict] = None,
                 select: Union[None, JsonDict] = None,
-                min_block_kmers: int = 1,
                 timeout=None) -> JsonDict:
         """
         Where the labels support the sequence, and optionally the seeds selected from it
         (experimental; a server started with --experimental-traverse, see traverse.md).
         Give exactly one of `labels` and `discover` (e.g. {'kind': 'header'}).
         """
-        payload = {'sequence': sequence, 'min_block_kmers': min_block_kmers}
+        payload = {'sequence': sequence}
         if labels is not None:
             payload['labels'] = labels
         if discover is not None:
@@ -276,15 +275,14 @@ class GraphClient:
     def resolve(self, sequence: str,
                 labels: Union[None, List[str]] = None,
                 discover: Union[None, JsonDict] = None,
-                select: Union[None, JsonDict] = None,
-                min_block_kmers: int = 1) -> JsonDict:
+                select: Union[None, JsonDict] = None) -> JsonDict:
         """
         Where the labels support the sequence (experimental; see GraphClientJson.resolve)
 
         :returns:   The support profile, with the selected seeds under 'selection'
         :rtype:     dict
         """
-        return self._json_client.resolve(sequence, labels, discover, select, min_block_kmers)
+        return self._json_client.resolve(sequence, labels, discover, select)
 
     def traverse(self, seeds: List[JsonDict], strategy: Union[None, JsonDict] = None) -> JsonDict:
         """

@@ -38,9 +38,8 @@ names it is refused (HTTP 400). The server builds its header index when it start
   "sequence": "ATGGAATTGCCC...",
   "labels": ["NZ_CM008882.1", "562"],
   "discover": {"max_labels": 1000, "kind": "column"},
-  "min_block_kmers": 1,
   "select": {"policy": "max_support", "max_seeds": 10, "min_block_bp": 0,
-             "max_labels_per_seed": 1000, "merge_overlapping": true}
+             "max_labels_per_seed": 1000}
 }
 ```
 
@@ -50,12 +49,10 @@ names it is refused (HTTP 400). The server builds its header index when it start
 | `labels` | the labels to profile, at most 100,000 | exactly one of `labels` and `discover` |
 | `discover.max_labels` | keep the labels supporting the most k-mers; a discovery that sees more than 100,000 distinct labels is refused (HTTP 400) | 1000 |
 | `discover.kind` | `column` or `header` | `column` |
-| `min_block_kmers` | the shortest support run that becomes a seed candidate | 1 |
 | `select` | also select seeds | none |
 | `select.policy` | `max_support`: the interval contained in the most labels' support runs, repeatedly, outside the intervals picked before; `longest_first`: the longest candidates | `max_support` |
 | `select.max_seeds`, `select.min_block_bp` | at most that many seeds (at most 1000), each at least that long (at least k) | 10, 0 |
 | `select.max_labels_per_seed` | the labels kept per seed, by the FNV-1a hash of their names; the others are counted with a digest | 1000 |
-| `select.merge_overlapping` | merge overlapping `longest_first` picks onto their common interval, carried by the labels of both (`max_support` picks never overlap) | true |
 
 The response:
 
@@ -81,7 +78,7 @@ Intervals are half-open k-mer intervals `[begin, end)`, except `bp_interval`, wh
 bases. `graph_runs` are the runs of the query's k-mers present in the graph; a label's `runs`
 are the maximal runs of k-mers it carries. With discovery, `labels_truncated` states how many
 labels there were and where the cut fell. A selected seed is valid `/traverse` input as it
-stands, with its `seed_id`. Seeds are listed in the order the policy picked them, best first.
+stands, with its `seed_id`. Seeds are listed in the order the policy picked them, best first. Overlapping `longest_first` picks are merged onto their common interval, carried by the labels of both; `max_support` picks never overlap.
 
 ## `/traverse`
 
