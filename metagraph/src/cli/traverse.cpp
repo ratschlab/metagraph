@@ -596,6 +596,10 @@ Json::Value process_traverse_request(const Json::Value &request,
                                      const TraverseLimits &limits) {
     const TraverseRequest req = parse_traverse_request(request, limits);
     const LabelOracle oracle(anno_graph);
+    // refuse a malformed seed before walking any seed
+    for (const Seed &seed : req.seeds) {
+        check_seed(oracle, seed);
+    }
     Json::Value out;
     out["schema_version"] = 1;
     out["strategy"] = strategy_to_json(req.strategy);
