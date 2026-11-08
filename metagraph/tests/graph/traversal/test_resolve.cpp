@@ -128,6 +128,31 @@ TYPED_TEST(ResolveTest, ThreeStatesAndRuns) {
         EXPECT_EQ((std::vector<std::string>{ "A", "B" }), sel.seeds[0].labels);
         EXPECT_EQ(2u, sel.seeds[0].population.supporting_total);
 
+        // longest_first with merging: [95,110){A} and [100,190){B} merge onto
+        // [100,110){A,B}, which keeps the rank of [100,190) and so comes first
+        pol = SelectionPolicy();
+        pol.policy = SelectionPolicy::LONGEST_FIRST;
+        pol.max_seeds = 3;
+        sel = select_seeds(profile, q, pol, canonical);
+        ASSERT_EQ(2u, sel.seeds.size());
+        EXPECT_EQ((KmerInterval{ 100, 110 }), sel.seeds[0].kmers);
+        EXPECT_EQ((std::vector<std::string>{ "A", "B" }), sel.seeds[0].labels);
+        EXPECT_EQ((KmerInterval{ 0, 70 }), sel.seeds[1].kmers);
+        EXPECT_EQ((std::vector<std::string>{ "A" }), sel.seeds[1].labels);
+
+        // max_support picks never overlap, so merging leaves them and their order as they are
+        pol = SelectionPolicy();
+        pol.max_seeds = 3;
+        pol.merge_overlapping = false;
+        auto unmerged = select_seeds(profile, q, pol, canonical);
+        pol.merge_overlapping = true;
+        sel = select_seeds(profile, q, pol, canonical);
+        ASSERT_EQ(unmerged.seeds.size(), sel.seeds.size());
+        for (size_t i = 0; i < sel.seeds.size(); ++i) {
+            EXPECT_EQ(unmerged.seeds[i].kmers, sel.seeds[i].kmers) << i;
+            EXPECT_EQ(unmerged.seeds[i].labels, sel.seeds[i].labels) << i;
+        }
+
         // max_labels_per_seed drops deterministically and reports the drop
         pol.max_labels_per_seed = 1;
         sel = select_seeds(profile, q, pol, canonical);
