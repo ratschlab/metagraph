@@ -652,6 +652,12 @@ Config::Config(int argc, char *argv[]) {
                 || (fnames.empty() && (infbase.empty() || infbase_annotators.size() != 1))))
         print_usage_and_exit = true;  // only one of fnames or (infbase & annotator) must be used
 
+    if (identity == SERVER_QUERY && experimental_traverse && fnames.size()) {
+        std::cerr << "Error: --experimental-traverse needs a single graph (-i) and annotation (-a),"
+                     " not a list of graphs" << std::endl;
+        print_usage_and_exit = true;
+    }
+
     if ((identity == TRANSFORM
             || identity == CLEAN
             || identity == ASSEMBLE
