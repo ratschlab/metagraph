@@ -244,6 +244,9 @@ DBGSSHash::DBGSSHash(const std::string& input_filename,
     if (std::isfinite(ram_limit_GiB) && ram_limit_GiB > build_config.ram_limit_in_GiB)
         build_config.ram_limit_in_GiB = std::ceil(ram_limit_GiB);
     build_config.allow_reverse_complement_duplicates = mode == BASIC;
+    // BASIC graphs look up k-mers on the forward strand only. Strand-specific
+    // keys avoid scanning heavy buckets for them. Other modes keep the v6 format.
+    build_config.preserve_orientation = mode == BASIC;
 
     // put SSHash's temp files under --disk-swap (default: ./) and clean them up
     auto tmp_dir = utils::create_temp_dir(utils::get_swap_path(), "sshash");
