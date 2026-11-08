@@ -28,17 +28,22 @@ class bit_vector_sdsl : public bit_vector {
     template <typename>
     struct bv_traits;
 
+    // Plain bit vectors are read word by word.
+    // Compressed ones go through rank and select instead.
+    static constexpr bool is_packed_bits
+        = std::is_base_of_v<sdsl::packed_vector_view<1>, bv_type>;
+
   public:
     explicit bit_vector_sdsl(uint64_t size = 0, bool value = false)
       : bit_vector_sdsl(sdsl::bit_vector(size, value)) {}
     explicit bit_vector_sdsl(const sdsl::bit_vector &vector)
-      : vector_(vector), rk1_(&packed()), slct1_(&packed()), slct0_(&packed()),
-        num_set_bits_(rk1_(packed().size())) {}
+      : vector_(vector), rk1_(&vector_), slct1_(&vector_), slct0_(&vector_),
+        num_set_bits_(rk1_(vector_.size())) {}
     explicit bit_vector_sdsl(const bit_vector_sdsl &other) { *this = other; }
 
     bit_vector_sdsl(sdsl::bit_vector&& vector)
-      : vector_(std::move(vector)), rk1_(&packed()), slct1_(&packed()), slct0_(&packed()),
-        num_set_bits_(rk1_(packed().size())) {}
+      : vector_(std::move(vector)), rk1_(&vector_), slct1_(&vector_), slct0_(&vector_),
+        num_set_bits_(rk1_(vector_.size())) {}
     bit_vector_sdsl(bit_vector_sdsl&& other) { *this = std::move(other); }
     bit_vector_sdsl(std::initializer_list<bool> init)
       : bit_vector_sdsl(sdsl::bit_vector(init.begin(), init.end())) {}
@@ -65,7 +70,7 @@ class bit_vector_sdsl : public bit_vector {
     inline bool load(std::istream &in) override;
     inline void serialize(std::ostream &out) const override;
 
-    inline uint64_t size() const override { return packed().size(); }
+    inline uint64_t size() const override { return vector_.size(); }
     inline uint64_t num_set_bits() const override { return num_set_bits_; }
 
     inline void call_ones_in_range(uint64_t begin, uint64_t end,
@@ -75,7 +80,7 @@ class bit_vector_sdsl : public bit_vector {
 
     inline sdsl::bit_vector to_vector() const override;
 
-    inline const auto &data() const { return packed(); }
+    inline const bv_type& data() const { return vector_; }
 
     /**
      * Predict space taken by the vector with given its parameters in bits.
@@ -88,17 +93,11 @@ class bit_vector_sdsl : public bit_vector {
     }
 
   private:
-    using storage_type = std::conditional_t<std::is_same_v<bv_type, sdsl::bit_vector>,
-        mtg::detail::annotation_vector_io<1>, bv_type>;
-    const auto &packed() const {
-        if constexpr(std::is_same_v<bv_type, sdsl::bit_vector>) return vector_.packed();
-        else return vector_;
-    }
     sdsl::bit_vector take_owned() {
-        if constexpr(std::is_same_v<bv_type, sdsl::bit_vector>) return std::move(vector_).into_owned();
+        if constexpr(is_packed_bits) return std::move(vector_).into_owned();
         else return to_vector();
     }
-    storage_type vector_;
+    bv_type vector_;
     rank_1_type rk1_;
     select_1_type slct1_;
     select_0_type slct0_;
@@ -112,11 +111,11 @@ bit_vector_sdsl<bv_type, rank_1_type, select_1_type, select_0_type>
 ::operator=(const bit_vector_sdsl &other) {
     vector_ = other.vector_;
     rk1_ = other.rk1_;
-    rk1_.set_vector(&packed());
+    rk1_.set_vector(&vector_);
     slct1_ = other.slct1_;
-    slct1_.set_vector(&packed());
+    slct1_.set_vector(&vector_);
     slct0_ = other.slct0_;
-    slct0_.set_vector(&packed());
+    slct0_.set_vector(&vector_);
     num_set_bits_ = other.num_set_bits_;
     return *this;
 }
@@ -127,11 +126,11 @@ bit_vector_sdsl<bv_type, rank_1_type, select_1_type, select_0_type>
 ::operator=(bit_vector_sdsl&& other) noexcept {
     vector_ = std::move(other.vector_);
     rk1_ = std::move(other.rk1_);
-    rk1_.set_vector(&packed());
+    rk1_.set_vector(&vector_);
     slct1_ = std::move(other.slct1_);
-    slct1_.set_vector(&packed());
+    slct1_.set_vector(&vector_);
     slct0_ = std::move(other.slct0_);
-    slct0_.set_vector(&packed());
+    slct0_.set_vector(&vector_);
     num_set_bits_ = other.num_set_bits_;
     return *this;
 }
@@ -169,7 +168,7 @@ bit_vector_sdsl<bv_type, rank_1_type, select_1_type, select_0_type>
     if constexpr(is_rrr<bv_type>{}) {
         // TODO: implement inverse_select for sdsl::rrr_vector<15>
         if constexpr(bv_type::block_size != 15) {
-            std::pair<bool, uint64_t> pair = packed().inverse_select(id);
+            std::pair<bool, uint64_t> pair = vector_.inverse_select(id);
             pair.second += pair.first;
             return pair;
         }
@@ -185,7 +184,7 @@ bit_vector_sdsl<bv_type, rank_1_type, select_1_type, select_0_type>
     if constexpr(is_rrr<bv_type>{}) {
         // TODO: implement conditional_rank for sdsl::rrr_vector<15>
         if constexpr(bv_type::block_size != 15) {
-            return packed().conditional_rank(id);
+            return vector_.conditional_rank(id);
         }
     }
     return bit_vector::conditional_rank1(id);
@@ -197,12 +196,12 @@ bit_vector_sdsl<bv_type, rank_1_type, select_1_type, select_0_type>
 ::next1(uint64_t id) const {
     assert(id < size());
 
-    if constexpr(std::is_same_v<bv_type, sdsl::bit_vector>) {
-        auto next = next_bit(packed(), id, bv_traits<bv_type>::MAX_ITER_BIT_VECTOR);
-        if (next < packed().size())
+    if constexpr(is_packed_bits) {
+        auto next = next_bit(vector_, id, bv_traits<bv_type>::MAX_ITER_BIT_VECTOR);
+        if (next < vector_.size())
             return next;
 
-        if (packed().size() - id <= bv_traits<bv_type>::MAX_ITER_BIT_VECTOR)
+        if (vector_.size() - id <= bv_traits<bv_type>::MAX_ITER_BIT_VECTOR)
             return size();
 
         uint64_t rk = rank1(id) + 1;
@@ -218,8 +217,8 @@ bit_vector_sdsl<bv_type, rank_1_type, select_1_type, select_0_type>
 ::prev1(uint64_t id) const {
     assert(id < size());
 
-    if constexpr(std::is_same_v<bv_type, sdsl::bit_vector>) {
-        auto prev = prev_bit(packed(), id, bv_traits<bv_type>::MAX_ITER_BIT_VECTOR);
+    if constexpr(is_packed_bits) {
+        auto prev = prev_bit(vector_, id, bv_traits<bv_type>::MAX_ITER_BIT_VECTOR);
         if (prev <= id)
             return prev;
 
@@ -258,13 +257,13 @@ bit_vector_sdsl<bv_type, rank_1_type, select_1_type, select_0_type>
 
     try {
         vector_.load(in);
-        if constexpr(std::is_same_v<bv_type, sdsl::bit_vector>) {
+        if constexpr(is_packed_bits) {
             load_number(in);
         }
-        rk1_.load(in, &packed());
-        slct1_.load(in, &packed());
-        slct0_.load(in, &packed());
-        num_set_bits_ = rk1_(packed().size());
+        rk1_.load(in, &vector_);
+        slct1_.load(in, &vector_);
+        slct0_.load(in, &vector_);
+        num_set_bits_ = rk1_(vector_.size());
         return in.good();
 
     } catch (const std::bad_alloc &exception) {
@@ -281,7 +280,7 @@ void
 bit_vector_sdsl<bv_type, rank_1_type, select_1_type, select_0_type>
 ::serialize(std::ostream &out) const {
     vector_.serialize(out);
-    if constexpr(std::is_same_v<bv_type, sdsl::bit_vector>) {
+    if constexpr(is_packed_bits) {
         serialize_number(out, num_set_bits_);
     }
     rk1_.serialize(out);
@@ -296,7 +295,7 @@ template <class bv_type, class rank_1_type, class select_1_type, class select_0_
 sdsl::bit_vector
 bit_vector_sdsl<bv_type, rank_1_type, select_1_type, select_0_type>
 ::to_vector() const {
-    if constexpr(std::is_same_v<bv_type, sdsl::bit_vector>) {
+    if constexpr(is_packed_bits) {
         return vector_.to_owned();
     } else {
         return bit_vector::to_vector_adaptive(
@@ -313,8 +312,8 @@ bit_vector_sdsl<bv_type, rank_1_type, select_1_type, select_0_type>
     assert(begin <= end);
     assert(end <= size());
 
-    if constexpr(std::is_same_v<bv_type, sdsl::bit_vector>) {
-        ::call_ones(packed(), begin, end, callback);
+    if constexpr(is_packed_bits) {
+        ::call_ones(vector_, begin, end, callback);
     } else {
         bit_vector::call_ones_adaptive(begin, end, callback,
             bv_traits<bv_type>::SEQ_BITWISE_WORD_ACCESS_VS_SELECT_FACTOR
@@ -329,8 +328,8 @@ bit_vector_sdsl<bv_type, rank_1_type, select_1_type, select_0_type>
     assert(other);
     assert(other->size() == size());
 
-    if constexpr(std::is_same_v<bv_type, sdsl::bit_vector>) {
-        auto words = packed().data();
+    if constexpr(is_packed_bits) {
+        auto words = vector_.data();
         const uint64_t num_words = (size() + 63) / 64;
         for (uint64_t i = 0; i < num_words; ++i)
             other->data()[i] |= words[i];
@@ -411,7 +410,7 @@ struct bit_vector_sdsl<bv_type, rank_1_type, select_1_type, select_0_type>
 template <class bv_type, class rank_1_type, class select_1_type, class select_0_type>
 template <uint8_t t_width>
 struct bit_vector_sdsl<bv_type, rank_1_type, select_1_type, select_0_type>
-::bv_traits<sdsl::int_vector<t_width>> {
+::bv_traits<mtg::detail::annotation_vector_io<t_width>> {
     static constexpr size_t MAX_ITER_BIT_VECTOR = 1000;
     static constexpr size_t SEQ_BITWISE_WORD_ACCESS_VS_SELECT_FACTOR = 1000;
 
@@ -468,7 +467,8 @@ using bit_vector_rrr
                       typename mtg::detail::rrr_storage<block_size>::select_0_type>;
 
 using bit_vector_stat =
-    bit_vector_sdsl<sdsl::bit_vector, sdsl::rank_support_v5<1, 1, sdsl::packed_vector_view<1>>,
+    bit_vector_sdsl<mtg::detail::annotation_vector_io<1>,
+                    sdsl::rank_support_v5<1, 1, sdsl::packed_vector_view<1>>,
                     sdsl::select_support_mcl<1, 1, sdsl::packed_vector_view<1>>,
                     sdsl::select_support_scan<0, 1, sdsl::packed_vector_view<1>>>;
 
