@@ -38,11 +38,21 @@ struct HeaderOfRecordEqual {
 
 } // namespace
 
-// header -> (column, seq_id) of its first occurrence in column order
+// The records in column order get global ids. The index keeps the ids sorted by the hash of
+// their header, then by id: 8 bytes per record. A lookup binary-searches the hash and compares
+// the headers of the records that share it.
 struct CoordToHeader::HeaderIndex {
-    tsl::hopscotch_map<std::string_view, std::pair<Column, size_t>> map;
-    tsl::hopscotch_set<std::string_view> repeated;  // the headers of several records
+    std::vector<uint64_t> offsets;  // the global id of each column's first record, and the total
+    std::vector<uint64_t> by_hash;  // global record ids, by (header hash, id)
 };
+
+namespace {
+
+uint64_t header_hash(std::string_view header) {
+    return std::hash<std::string_view>()(header);
+}
+
+} // namespace
 
 CoordToHeader::CoordToHeader() {}
 CoordToHeader::~CoordToHeader() {}
@@ -51,17 +61,21 @@ const CoordToHeader::HeaderIndex& CoordToHeader::header_index() const {
     std::lock_guard<std::mutex> lock(header_index_mutex_);
     if (!header_index_) {
         auto index = std::make_unique<HeaderIndex>();
-        size_t total = 0;
-        for (const auto &column : headers_) {
-            total += column.size();
+        index->offsets.assign(headers_.size() + 1, 0);
+        for (Column col = 0; col < headers_.size(); ++col) {
+            index->offsets[col + 1] = index->offsets[col] + headers_[col].size();
         }
-        index->map.reserve(total);
+        std::vector<std::pair<uint64_t, uint64_t>> hashed;
+        hashed.reserve(index->offsets.back());
         for (Column col = 0; col < headers_.size(); ++col) {
             for (size_t s = 0; s < headers_[col].size(); ++s) {
-                const std::string_view header(headers_[col][s]);
-                if (!index->map.try_emplace(header, col, s).second)
-                    index->repeated.insert(header);
+                hashed.emplace_back(header_hash(headers_[col][s]), index->offsets[col] + s);
             }
+        }
+        std::sort(hashed.begin(), hashed.end());
+        index->by_hash.reserve(hashed.size());
+        for (const auto &[hash, id] : hashed) {
+            index->by_hash.push_back(id);
         }
         header_index_ = std::move(index);
     }
@@ -73,17 +87,42 @@ void CoordToHeader::index_headers() const {
     header_index();
 }
 
+// The records holding |header|, at most |limit| of them, in column order
+std::vector<std::pair<CoordToHeader::Column, size_t>>
+CoordToHeader::records_of(std::string_view header, size_t limit) const {
+    const HeaderIndex &index = header_index();
+    auto record = [&](uint64_t id) {
+        const Column col = std::upper_bound(index.offsets.begin(), index.offsets.end(), id)
+                            - index.offsets.begin() - 1;
+        return std::make_pair(col, static_cast<size_t>(id - index.offsets[col]));
+    };
+    auto name = [&](uint64_t id) -> std::string_view {
+        const auto [col, s] = record(id);
+        return headers_[col][s];
+    };
+    const uint64_t hash = header_hash(header);
+    auto it = std::partition_point(index.by_hash.begin(), index.by_hash.end(),
+                                   [&](uint64_t id) { return header_hash(name(id)) < hash; });
+    std::vector<std::pair<Column, size_t>> records;
+    for (; it != index.by_hash.end() && records.size() < limit
+            && header_hash(name(*it)) == hash; ++it) {
+        if (name(*it) == header)
+            records.push_back(record(*it));
+    }
+    return records;
+}
+
 std::optional<std::pair<CoordToHeader::Column, size_t>>
 CoordToHeader::find_header(std::string_view header) const {
-    const HeaderIndex &index = header_index();
-    auto it = index.map.find(header);
-    if (it == index.map.end())
+    // ids of equal hash are in id order, which is column order
+    const auto records = records_of(header, 1);
+    if (records.empty())
         return std::nullopt;
-    return it->second;
+    return records.front();
 }
 
 bool CoordToHeader::is_repeated_header(std::string_view header) const {
-    return header_index().repeated.count(header);
+    return records_of(header, 2).size() == 2;
 }
 
 void CoordToHeader::find_duplicate_headers(const std::vector<std::string> &headers,
