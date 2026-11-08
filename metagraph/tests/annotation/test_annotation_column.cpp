@@ -6,6 +6,7 @@
 #include "annotation/representation/column_compressed/annotate_column_compressed.hpp"
 #include "annotation/representation/row_compressed/annotate_row_compressed.hpp"
 #include "common/threads/threading.hpp"
+#include "common/utils/file_utils.hpp"
 
 
 namespace {
@@ -294,6 +295,49 @@ TEST(ColumnCompressed, MergeEmptyAndTruncatedFiles) {
                               std::filesystem::copy_options::overwrite_existing);
     std::filesystem::resize_file(truncated, std::filesystem::file_size(truncated) - 1);
     EXPECT_FALSE(restored.merge_load({ path, truncated }));
+}
+
+TEST(ColumnCompressed, MergeMappedDenseColumns) {
+    const uint64_t rows = 1024;
+    const auto first_file = test_dump_basename + "_mapped_first";
+    const auto second_file = test_dump_basename + "_mapped_second";
+    annot::ColumnCompressed<> first(rows), second(rows);
+    std::vector<uint64_t> even, odd;
+    for (uint64_t i = 0; i < rows; ++i)
+        (i % 2 ? odd : even).push_back(i);
+    first.add_labels(even, { "shared" });
+    second.add_labels(odd, { "shared" });
+    first.serialize(first_file);
+    second.serialize(second_file);
+
+    const auto read_bytes = [](const std::string &path) {
+        std::ifstream in(path, std::ios::binary);
+        return std::string(std::istreambuf_iterator<char>(in), {});
+    };
+    const auto first_bytes = read_bytes(first_file + first.file_extension());
+    const auto second_bytes = read_bytes(second_file + second.file_extension());
+    struct MmapSetting {
+        bool previous = utils::with_mmap();
+        MmapSetting() { utils::set_mmap(true); }
+        ~MmapSetting() { utils::set_mmap(previous); }
+    } mmap_setting;
+    annot::ColumnCompressed<> merged;
+    ASSERT_TRUE(merged.merge_load({ first_file, second_file, first_file }));
+    EXPECT_EQ(rows, merged.get_column("shared").num_set_bits());
+    for (uint64_t i = 0; i < rows; ++i)
+        EXPECT_TRUE(merged.get_column("shared")[i]);
+    const auto output = test_dump_basename + "_mapped_merged";
+    merged.serialize(output);
+    annot::ColumnCompressed<> restored;
+    ASSERT_TRUE(restored.load(output));
+    EXPECT_EQ(merged.get_column("shared"), restored.get_column("shared"));
+    // Updating the merged bitmap must leave each mapped input unchanged.
+    ASSERT_TRUE(restored.load(first_file));
+    EXPECT_EQ(rows / 2, restored.get_column("shared").num_set_bits());
+    for (uint64_t i = 0; i < rows; ++i)
+        EXPECT_EQ(i % 2 == 0, restored.get_column("shared")[i]);
+    EXPECT_EQ(first_bytes, read_bytes(first_file + first.file_extension()));
+    EXPECT_EQ(second_bytes, read_bytes(second_file + second.file_extension()));
 }
 
 } // namespace
