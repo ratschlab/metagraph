@@ -421,7 +421,9 @@ void Walker::derive_seed_labels(const std::vector<node_index> &keys,
             cur.clear();
             if (kind == LabelKind::COLUMN) {
                 for (Column c : plain[r]) {
-                    cur.emplace_back(c, 0);
+                    // after the first k-mer, keep only the live columns
+                    if (!read || std::binary_search(live.begin(), live.end(), Key(c, 0)))
+                        cur.emplace_back(c, 0);
                 }
             } else {
                 for (const auto &[c, coords] : tuples[r]) {
@@ -435,7 +437,11 @@ void Walker::derive_seed_labels(const std::vector<node_index> &keys,
                     if (!oracle_.has_header_records(c))
                         continue;  // no records, so no header labels
                     for (uint64_t coord : coords) {
-                        cur.emplace_back(c, oracle_.map_coord(c, coord).first);
+                        Key key(c, oracle_.map_coord(c, coord).first);
+                        // after the first k-mer, keep only the live records, so that a
+                        // repetitive k-mer cannot grow |cur| past |live|
+                        if (!read || std::binary_search(live.begin(), live.end(), key))
+                            cur.push_back(key);
                     }
                 }
             }
@@ -760,8 +766,6 @@ std::optional<EndReason> Walker::cap_check(const ArmState &arm, size_t nf, size_
     };
     if (steps_total_ + nf > strategy_.max_steps)
         return over(steps_total_ + nf, EndReason::MAX_STEPS);
-    if (arm.result.output_bp + nf > strategy_.max_output_bp)
-        return over(arm.result.output_bp + nf, EndReason::MAX_OUTPUT);
     const size_t live_after = remaining + arm.next.size() + nf;
     if (nf >= 2 && arm.finished_leaves + live_after > strategy_.max_paths)
         return over(arm.finished_leaves + live_after, EndReason::MAX_PATHS);
@@ -841,12 +845,22 @@ std::optional<EndReason> Walker::process_item(ArmState &arm, Item &item,
             followed.push_back(&c);
         }
     }
+    // The split limit is a safety cap, not a label rule: the walks past this fork are not
+    // explored, so the arm is complete only up to here
+    bool split_capped = false;
     if (followed.size() >= 2 && item.splits + 1 > strategy_.max_splits_per_path) {
         for (Cand *c : followed) {
             c->followed = false;
             c->split_limited = true;
         }
         followed.clear();
+        split_capped = true;
+        if (!arm.result.cap_trigger) {
+            arm.result.cap_trigger = CapTrigger{ EndReason::MAX_SPLITS, at,
+                                                 static_cast<double>(item.splits + 1) };
+        }
+        arm.boundary = std::min(arm.boundary, at);
+        arm.result.status = ArmResult::TRUNCATED;
     }
     const size_t nf = followed.size();
 
@@ -875,7 +889,7 @@ std::optional<EndReason> Walker::process_item(ArmState &arm, Item &item,
         if (excluded.count(l)) {
             end_label(arm, item, src, EndReason::BRANCH, "");
         } else if (split_limited) {
-            end_label(arm, item, src, EndReason::BRANCH, "split_limit");
+            end_label(arm, item, src, EndReason::MAX_SPLITS, "");
         } else if (blocked) {
             end_label(arm, item, src, blocked == 3 ? EndReason::REACHED_SEED
                                      : blocked == 2 ? EndReason::EDGE_REUSE_RC
@@ -888,13 +902,13 @@ std::optional<EndReason> Walker::process_item(ArmState &arm, Item &item,
     }
 
     if (!nf) {
-        finish_path(arm, item, std::nullopt);
+        finish_path(arm, item, split_capped ? std::optional<EndReason>(EndReason::MAX_SPLITS)
+                                            : std::nullopt);
         return std::nullopt;
     }
 
     // ---- steps
     arm.result.steps += nf;
-    arm.result.output_bp += nf;
     steps_total_ += nf;
 
     if (nf == 1) {
@@ -1005,6 +1019,20 @@ void Walker::run_level(ArmState &arm, uint64_t depth) {
     items.swap(arm.frontier);
     std::sort(items.begin(), items.end(),
               [](const Item &a, const Item &b) { return a.path_id < b.path_id; });
+
+    // read the deadline before the level's fetch too, which can be long on a heavy
+    // annotation; it ends the heads as the check before each head below would
+    if (depth > 0 && time_exceeded()) {
+        for (size_t i = 0; i < items.size(); ++i) {
+            if (items[i].ext_bp < strategy_.max_extension_bp) {
+                cap_demand_ = elapsed_ms();
+                trip(arm, EndReason::TIME_BUDGET, items, i);
+                return;
+            }
+            censor_item(arm, items[i], EndReason::MAX_EXTENSION);
+        }
+        return;
+    }
 
     // the successors of every head below the extension length, and their labels in one fetch
     std::vector<std::vector<Succ>> succs(items.size());
