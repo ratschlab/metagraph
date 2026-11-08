@@ -476,19 +476,17 @@ void Walker::derive_seed_labels(const std::vector<node_index> &keys,
                                          : oracle_.header_name(key.first, key.second);
     };
     if (kind == LabelKind::HEADER) {
-        // A derived list must be resubmittable verbatim as an explicit one, which resolves a
-        // name to a column first, then to the first column holding the header
+        // A derived list must be resubmittable verbatim as an explicit one, and
+        // resolve_label refuses a header that also names a column or another record
         for (const Key &key : live) {
             const std::string &name = name_of(key);
-            const LabelRef back = oracle_.resolve_label(name);   // the header exists: no throw
-            if (back.kind != LabelKind::HEADER || back.column != key.first
-                    || back.seq_id != key.second) {
+            const bool column_too = oracle_.find_column(name).has_value();
+            if (column_too || oracle_.coord_to_header()->is_repeated_header(name)) {
                 throw SeedDerivationError(SeedDerivationError::AMBIGUOUS_HEADER,
                         "The labels derived from the seed are not resubmittable: the sequence "
                         "header '" + name + "' "
-                        + (back.kind == LabelKind::COLUMN
-                            ? "is also the name of an annotation column"
-                            : "also occurs in another annotation column")
+                        + (column_too ? "is also the name of an annotation column"
+                                      : "is also the header of another sequence record")
                         + ". Set seed_label_kind to \"column\" or name the labels explicitly.",
                         0, 0, name);
             }
