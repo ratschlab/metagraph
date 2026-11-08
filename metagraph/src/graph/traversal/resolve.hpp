@@ -29,6 +29,8 @@ struct KmerInterval {
 
 // The rows a discovery decodes at once
 constexpr size_t kResolveBatchRows = 4096;
+// The most distinct labels a discovery may see before it keeps the best |discover_max_labels|
+constexpr size_t kMaxDiscoveredLabels = 100'000;
 
 struct ResolveOptions {
     // exactly one of |labels| (explicit) or |discover| must be set

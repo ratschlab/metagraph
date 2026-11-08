@@ -77,6 +77,9 @@ class LabelOracle {
     // The first (column, sequence) holding a FASTA header (CoordToHeader::find_header)
     std::optional<LabelRef> find_header(const std::string &name) const;
     const std::string& header_name(Column column, uint64_t seq_id) const;
+    // Whether |column| has sequence records, and so header labels (false without a
+    // CoordToHeader).
+    bool has_header_records(Column column) const;
     // (seq_id, local coordinate) of a column coordinate. Requires a CoordToHeader.
     std::pair<uint64_t, uint64_t> map_coord(Column column, uint64_t coord) const;
     // The first and last column coordinates of sequence |seq_id|. Requires a CoordToHeader.

@@ -111,6 +111,11 @@ const std::string& LabelOracle::header_name(Column column, uint64_t seq_id) cons
     return coord_to_header_->get_headers(column).at(seq_id);
 }
 
+bool LabelOracle::has_header_records(Column column) const {
+    return coord_to_header_ && column < coord_to_header_->num_columns()
+            && coord_to_header_->num_sequences(column);
+}
+
 std::pair<uint64_t, uint64_t> LabelOracle::map_coord(Column column, uint64_t coord) const {
     assert(coord_to_header_);
     counters_.coords_mapped++;
