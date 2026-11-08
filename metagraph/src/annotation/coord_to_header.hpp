@@ -121,6 +121,8 @@ class CoordToHeader {
   private:
     struct HeaderIndex;
     const HeaderIndex& header_index() const;
+    std::vector<std::pair<Column, size_t>> records_of(std::string_view header,
+                                                       size_t limit) const;
 
     std::vector<std::vector<std::string>> headers_;
     std::vector<bit_vector_sd> coord_offsets_;
