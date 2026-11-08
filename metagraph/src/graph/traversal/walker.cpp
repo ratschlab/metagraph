@@ -247,8 +247,6 @@ class Walker {
 
 /******************************** seed phase ********************************/
 
-namespace {
-
 std::string seed_in_graph_case(const std::string &seq) {
     std::string upper = seq;
 #if ! _DNA_CASE_SENSITIVE_GRAPH
@@ -257,28 +255,6 @@ std::string seed_in_graph_case(const std::string &seq) {
     }
 #endif
     return upper;
-}
-
-} // namespace
-
-void check_seed(const LabelOracle &oracle, const Seed &seed) {
-    const std::string &seq = seed.sequence;
-    if (seq.size() < oracle.get_k())
-        throw std::invalid_argument("Seed shorter than k");
-    const std::string upper = seed_in_graph_case(seq);
-    const std::string &alphabet = oracle.graph().alphabet();
-    for (size_t i = 0; i < upper.size(); ++i) {
-        if (upper[i] == kSentinel || alphabet.find(upper[i]) == std::string::npos) {
-            throw std::invalid_argument("Invalid character '" + std::string(1, seq[i])
-                                        + "' at position " + std::to_string(i) + " of the seed");
-        }
-    }
-    tsl::hopscotch_set<std::string_view> named;
-    for (const auto &name : seed.labels) {
-        if (!named.insert(name).second)
-            throw std::invalid_argument("Duplicate seed label '" + name + "'");
-        oracle.resolve_label(name);
-    }
 }
 
 void Walker::validate_seed() {
@@ -1166,6 +1142,26 @@ SeedResult Walker::run() {
 
 } // namespace
 
+
+void check_seed(const LabelOracle &oracle, const Seed &seed) {
+    const std::string &seq = seed.sequence;
+    if (seq.size() < oracle.get_k())
+        throw std::invalid_argument("Seed shorter than k");
+    const std::string upper = seed_in_graph_case(seq);
+    const std::string &alphabet = oracle.graph().alphabet();
+    for (size_t i = 0; i < upper.size(); ++i) {
+        if (upper[i] == kSentinel || alphabet.find(upper[i]) == std::string::npos) {
+            throw std::invalid_argument("Invalid character '" + std::string(1, seq[i])
+                                        + "' at position " + std::to_string(i) + " of the seed");
+        }
+    }
+    tsl::hopscotch_set<std::string_view> named;
+    for (const auto &name : seed.labels) {
+        if (!named.insert(name).second)
+            throw std::invalid_argument("Duplicate seed label '" + name + "'");
+        oracle.resolve_label(name);
+    }
+}
 
 SeedResult traverse_seed(const LabelOracle &oracle, const Seed &seed, const Strategy &strategy) {
     return Walker(oracle, seed, strategy).run();
