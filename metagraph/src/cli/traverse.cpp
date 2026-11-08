@@ -2225,7 +2225,8 @@ static Json::Value labels_capped_json(const SupportProfile &p) {
     c["remainder_from_bp"] = uint_json(cap.cut_kmer);
     const std::string u = std::to_string(cap.untracked_max_kmers);
     std::string m = "--resolve-max-discover-labels " + std::to_string(cap.max_tracked) + ": the "
-        + std::to_string(cap.new_at_cut) + " labels first met at k-mer "
+        + std::to_string(cap.new_at_cut) + (cap.new_at_cut == 1 ? " label" : " labels")
+        + " first met at k-mer "
         + std::to_string(cap.cut_kmer) + " would have made "
         + std::to_string(cap.met_at_least()) + " tracked labels; none of them, nor any label "
         + "first met after it, was tracked. ";

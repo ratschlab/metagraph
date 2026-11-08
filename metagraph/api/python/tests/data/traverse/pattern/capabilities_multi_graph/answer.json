@@ -170,6 +170,10 @@
   ],
   "requests_route": "GET /requests/{request_id}",
   "resolve_boundary_ties": true,
+  "resolve_discovery": {
+   "max_memory_mb": 1024,
+   "max_tracked_labels": 1000000
+  },
   "search_cuts": true,
   "selectors": {
    "/pattern": [
@@ -403,6 +407,15 @@
  "ready": true,
  "release": "fixtures-mini_refseq",
  "resolve": {
+  "discovery": {
+   "max_memory_mb": 1024,
+   "max_tracked_labels": 1000000,
+   "rule": "SPEC-labeled-traversal-core.md section 4.6",
+   "stop_reasons": [
+    "time",
+    "memory"
+   ]
+  },
   "time_budget": {
    "accepted": true,
    "check_kmers": 4096,

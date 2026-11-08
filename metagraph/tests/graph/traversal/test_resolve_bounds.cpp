@@ -711,11 +711,11 @@ TEST(ResolveBoundsRoute, CapabilitiesBlock) {
               "\"memory\"]}", compact(cli::resolve_capabilities_json({})["discovery"]));
 }
 
-// The reference samples of the bounds (SPEC-labeled-traversal-core.md §4.6), real runs: 27 a cut by the label cap
-// (labels_capped with the members the route writes, ranking_exact checkable from the entry alone), 28 a memory
+// The reference samples of the bounds (SPEC-labeled-traversal-core.md §4.6), real runs: 30 a cut by the label cap
+// (labels_capped with the members the route writes, ranking_exact checkable from the entry alone), 31 a memory
 // stop without a deadline (the members of a time stop's block, reason memory and max_memory_mb, the entry the
 // resolve of its first resolved_kmers k-mers)
-TEST(ResolveBoundsRoute, Samples27And28) {
+TEST(ResolveBoundsRoute, Samples30And31) {
     auto sample = [](const std::string &name) {
         const std::string path = source_path("tests/data/multigraph_contract/" + name);
         std::ifstream in(path, std::ios::binary);
@@ -726,11 +726,11 @@ TEST(ResolveBoundsRoute, Samples27And28) {
         EXPECT_TRUE(Json::parseFromStream(builder, in, &doc, &errors)) << errors;
         return doc;
     };
-    const Json::Value s27 = sample("27_resolve_labels_capped.json");
-    EXPECT_EQ(200, s27["status"].asInt());
-    const uint64_t max_labels = s27["request"]["discover"]["max_labels"].asUInt64();
-    ASSERT_EQ(2u, s27["body"]["answers"].size());
-    for (const Json::Value &entry : s27["body"]["answers"]) {
+    const Json::Value s30 = sample("30_resolve_labels_capped.json");
+    EXPECT_EQ(200, s30["status"].asInt());
+    const uint64_t max_labels = s30["request"]["discover"]["max_labels"].asUInt64();
+    ASSERT_EQ(2u, s30["body"]["answers"].size());
+    for (const Json::Value &entry : s30["body"]["answers"]) {
         const Json::Value &c = entry["labels_capped"];
         EXPECT_EQ((std::vector<std::string>{ "cut_kmer", "max_tracked", "message", "met_at_least",
                                              "new_at_cut", "ranking_exact", "remainder_from_bp",
@@ -747,10 +747,10 @@ TEST(ResolveBoundsRoute, Samples27And28) {
                   c["met_at_least"].asUInt64());
         EXPECT_FALSE(entry.isMember("stop"));
     }
-    const Json::Value s28 = sample("28_resolve_memory_stop.json");
-    EXPECT_EQ(200, s28["status"].asInt());
-    ASSERT_EQ(1u, s28["body"]["answers"].size());
-    const Json::Value &entry = s28["body"]["answers"][0];
+    const Json::Value s31 = sample("31_resolve_memory_stop.json");
+    EXPECT_EQ(200, s31["status"].asInt());
+    ASSERT_EQ(1u, s31["body"]["answers"].size());
+    const Json::Value &entry = s31["body"]["answers"][0];
     const Json::Value &stop = entry["stop"];
     EXPECT_EQ((std::vector<std::string>{ "max_memory_mb", "message", "phase", "query_bp", "query_kmers",
                                          "reason", "remainder_from_bp", "resolved_bp",

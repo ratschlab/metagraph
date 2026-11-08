@@ -353,6 +353,15 @@
  "ready": true,
  "release": "fixtures-mini_refseq",
  "resolve": {
+  "discovery": {
+   "max_memory_mb": 1024,
+   "max_tracked_labels": 1000000,
+   "rule": "SPEC-labeled-traversal-core.md section 4.6",
+   "stop_reasons": [
+    "time",
+    "memory"
+   ]
+  },
   "time_budget": {
    "accepted": true,
    "check_kmers": 4096,
