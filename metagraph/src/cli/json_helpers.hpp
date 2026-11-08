@@ -73,6 +73,37 @@ class TooManyJsonValues : public std::invalid_argument {
 };
 
 /**
+ * jsoncpp's message of a text it refused, its quotes of the client's text clipped as every
+ * error text clips a client's string (clip_for_message: whole up to 1,024 bytes of its own,
+ * else its first 1,024 bytes and "... (N bytes)"). jsoncpp 1.9.3 quotes in two messages only:
+ * "Duplicate key: '<name>'" (the name decoded, its closing quote the message's last) and
+ * "'<token>' is not a number." (a raw number token, which holds no quote); it stops at the
+ * first fault, so a message holds one of them at most
+ */
+inline std::string clip_reader_quotes(std::string errors) {
+    auto clip = [&](size_t from, size_t to) {
+        if (to > from && to - from > ::utils::kMessageQuoteBytes) {
+            errors = errors.substr(0, from)
+                    + ::utils::clip_for_message(std::string_view(errors).substr(from, to - from))
+                    + errors.substr(to);
+        }
+    };
+    static const std::string kDuplicate = "Duplicate key: '";
+    if (const size_t at = errors.find(kDuplicate); at != std::string::npos) {
+        const size_t to = errors.rfind('\'');
+        if (to != std::string::npos)
+            clip(at + kDuplicate.size(), to);
+    }
+    static const std::string kNotNumber = "' is not a number.";
+    if (const size_t to = errors.rfind(kNotNumber); to != std::string::npos && to > 0) {
+        const size_t open = errors.rfind('\'', to - 1);
+        if (open != std::string::npos)
+            clip(open + 1, to);
+    }
+    return errors;
+}
+
+/**
  * A request body as one RFC 8259 JSON text whose member names are unique: no comment, no
  * trailing comma, nothing after the value, no duplicated member name (jsoncpp would keep the
  * last value without a word: an id or a budget given twice would be replaced silently), at most
@@ -160,7 +191,7 @@ Json::Value parse_strict_json(std::string_view content, const std::string &prefi
                         + " nested arrays and objects)");
     }
     if (!parsed)
-        throw Refusal()(prefix + errors);
+        throw Refusal()(prefix + clip_reader_quotes(std::move(errors)));
     return json;
 }
 
