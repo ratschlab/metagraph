@@ -237,6 +237,13 @@ SeedResult traverse_seed(const LabelOracle &oracle,
                          const Seed &seed,
                          const Strategy &strategy);
 
+/**
+ * The checks of |seed| that need no walk: its length, its characters and its named labels.
+ * Throws std::invalid_argument as traverse_seed would, so that a caller can refuse a request
+ * before walking any of its seeds.
+ */
+void check_seed(const LabelOracle &oracle, const Seed &seed);
+
 } // namespace traversal
 } // namespace graph
 } // namespace mtg
