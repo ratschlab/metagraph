@@ -4,8 +4,8 @@
 
 From a plain clone, run `git submodule update --init -- tools/writing-rules`.
 Before changing documentation or user-facing text, read
-[`tools/writing-rules/PRINCIPLES.md`](https://github.com/ratschlab/writing-rules/blob/5fe98632f7399e0dd1006cc20ff38f90c9bd823e/PRINCIPLES.md). The accompanying
-[`tools/writing-rules/SOURCES.md`](https://github.com/ratschlab/writing-rules/blob/5fe98632f7399e0dd1006cc20ff38f90c9bd823e/SOURCES.md) explains the basis and limitations of the guidance. The submodule pins the guide and checker together.
+[`tools/writing-rules/PRINCIPLES.md`](https://github.com/ratschlab/writing-rules/blob/fe9defad9a3552bce895c3720243adc61178d6ce/PRINCIPLES.md). The accompanying
+[`tools/writing-rules/SOURCES.md`](https://github.com/ratschlab/writing-rules/blob/fe9defad9a3552bce895c3720243adc61178d6ce/SOURCES.md) explains the basis and limitations of the guidance. The submodule pins the guide and checker together.
 
 Write for the reader's task. Preserve facts, uncertainty and necessary technical
 detail. Check defaults, flags, file names and guarantees against their owning
@@ -24,7 +24,7 @@ evidence concisely; report material review findings without a mandatory verdict
 phrase or a fixed word count.
 
 Before drafting an issue, PR description, review or commit message, read the relevant
-section of [`tools/writing-rules/ENGINEERING.md`](https://github.com/ratschlab/writing-rules/blob/5fe98632f7399e0dd1006cc20ff38f90c9bd823e/ENGINEERING.md).
+section of [`tools/writing-rules/ENGINEERING.md`](https://github.com/ratschlab/writing-rules/blob/fe9defad9a3552bce895c3720243adc61178d6ce/ENGINEERING.md).
 Its guidance also covers replies to users and release/migration notes.
 Before submission, check the receiving project's contribution guidelines,
 templates and required disclosures.
@@ -34,3 +34,11 @@ It blocks increases in terminology errors and malformed exceptions. Sentence
 length, passive voice and vague-error phrases are review prompts. Parser
 recovery warnings identify coverage that needs inspection. A passing check does
 not establish factual correctness or complete extraction coverage.
+
+## Adding features
+
+Before adding a feature, option, flag, endpoint or API field, or reviewing a
+change that adds one, read
+[`tools/writing-rules/STEWARDSHIP.md`](https://github.com/ratschlab/writing-rules/blob/fe9defad9a3552bce895c3720243adc61178d6ce/STEWARDSHIP.md).
+Name who needs it, what happens without it and the smallest version that serves
+the need. Record the decision in the PR.
