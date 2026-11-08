@@ -1526,6 +1526,15 @@ beside the valid one answered with its name; in mode `count` both are answered; 
 selects its own column only (the A context tested and not selected). `traverse_capabilities_utf8_labels` is that
 server's probe document (every fixture server's is measured against the probe's budget, §23).
 
+E22 (`headers_unique`, `SPEC-multigraph-envelope.md` §9) adds `capabilities_repeated_headers`, on the server
+`repeated_headers`: a BASIC graph at k = 31 with `--mask-dummy` of two files, `e1.fa` with the records `r8` and
+`r9` and `e2.fa` with `r9`, each record 80 bases of the mini's `1296536.fa` at its own offset, and a
+`column_coord` annotation by file name with its `.seqs`, built on one thread so that its columns come in the
+files' order, as the `.seqs` lists them (as the integration fixture's pair `e` of `TestHeadersUnique`). The
+header `r9` names a record in both columns, so `GET /capabilities` states `headers_unique` false at the top level
+with one collision, its example listing both occurrences by column with null pair tags; the block is available
+as on the masked server (`basic`, mask `file`, counting `exact`).
+
 Situations without a stored body: `withheld: annotation_budget` for a refused row (in `all_or_count`); `by_label:
 null` in `partial` (the mini's label names are too short to exhaust the account there; a real answer of a tiny
 long-label index in `data/traverse/pattern_validator/by_label_null_partial` checks that the validator accepts it);

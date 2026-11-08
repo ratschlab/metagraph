@@ -2838,15 +2838,18 @@ class TestTraverseAPI(TestTraverseBase):
         # the largest request body the server reads (--max-request-body-mb), null here
         # (unlimited; test_api_request_body_limit starts a server with one)
         # 'headers_unique': whether a header label names one record (E22; test_multigraph.py
-        # checks it), true here: acc1, acc2, acc3
+        # checks it), true here: acc1, acc2, acc3; 'expect_server_instance': the routes that
+        # take the field (F3b, SPEC-multigraph-envelope.md section 8; a single-graph server's
+        # top level, a multi-graph server's multigraph block)
         self.assertEqual({'algorithm_version', 'attempts', 'compression_level',
-                          'content_encodings', 'deadline_check', 'feature_level', 'features',
-                          'graph_summary', 'graphs', 'headers_unique', 'in_ram',
-                          'max_graphs_without_selection', 'max_request_body_mb', 'mode',
-                          'pattern', 'ready', 'release', 'resolve', 'routes', 'schema_version',
-                          'server_instance'},
+                          'content_encodings', 'deadline_check', 'expect_server_instance',
+                          'feature_level', 'features', 'graph_summary', 'graphs',
+                          'headers_unique', 'in_ram', 'max_graphs_without_selection',
+                          'max_request_body_mb', 'mode', 'pattern', 'ready', 'release',
+                          'resolve', 'routes', 'schema_version', 'server_instance'},
                          set(c))
         self.assertEqual({'value': True, 'collisions': 0, 'examples': []}, c['headers_unique'])
+        self.assertEqual(['/traverse', '/resolve', '/pattern'], c['expect_server_instance'])
         self.assertEqual((6, 'single', None, None, None, None, True, 1),
                          (c['feature_level'], c['mode'], c['graphs'], c['graph_summary'],
                           c['max_graphs_without_selection'], c['max_request_body_mb'],
@@ -3215,7 +3218,10 @@ class TestTraverseResolveRegression(TestTraverseBase):
     base binary's answers byte for byte (with a base binary before them). So are a
     discovery cut's tied_at_boundary and tied_kept (release 10). A not_after_ms, which
     /resolve reads since release 10 and a base binary refuses as an unknown field, is not
-    in the panel: test_not_after_ms_is_read_since_release_10 checks it on its own."""
+    in the panel: test_not_after_ms_is_read_since_release_10 checks it on its own. The /traverse
+    answers' memory_bound_soft effect is the one text that differs by design: the final_bytes fix
+    (E5b follow-up, train 1, reworded in train 2) states what the account leaves out, checked as
+    this build's statement and compared by its place (_soft_effects)."""
 
     @classmethod
     def setUpClass(cls):
@@ -3304,6 +3310,24 @@ class TestTraverseResolveRegression(TestTraverseBase):
         text = text.replace('"discovery_trace_scale":"traced",', '')
         return re.sub(r'"elapsed_ms":[-+0-9.eE]+', '"elapsed_ms":0', text)
 
+    @staticmethod
+    def _soft_effects(text):
+        """|text| with every memory_bound_soft effect -- a limitation's in JSON, a graphlet's K
+        record -- replaced by one token, and the effects replaced, in their order: the statement
+        the final_bytes fix reworded (SPEC-labeled-traversal-core.md, the memory_bound_soft row),
+        compared by its place and its count, the rest of the answer byte for byte"""
+        found = []
+
+        def token(m):
+            found.append(m.group(2))
+            return m.group(1) + '<memory_bound_soft effect>' + m.group(3)
+        # compact JSON with sorted keys: a limitation's effect comes right before its kind
+        text = re.sub(r'("effect":")((?:[^"\\]|\\.)*)(","kind":"memory_bound_soft")', token, text)
+        # a graphlet's K record (MGT), its effect the rest of the line ("\\n" in the JSON string)
+        text = re.sub(r'(K \* memory_bound_soft bounds\.max_memory_mb (?:\S+ ){4})([^\\]*)(\\n)',
+                      token, text)
+        return text, found
+
     def _traverse_requests(self):
         e = self.element
         seeds = [{'sequence': e}, {'sequence': self.left1[10:70], 'seed_id': 'left'},
@@ -3341,7 +3365,25 @@ class TestTraverseResolveRegression(TestTraverseBase):
                     # (what is removed is there: the request's and every seed's)
                     self.assertEqual(1 + len(ret.json()['results']),
                                      ret.text.count('"work":{"memory_bytes":'))
-                answers.append((ret.status_code, self._untimed(ret.text)))
+                text, effects = self._soft_effects(ret.text)
+                if effects and '"graphlet_bytes":' in text:
+                    # a graphlet's byte count follows its K record's effect: checked against
+                    # its own text, then compared by its place
+                    for result in ret.json().get('results', []):
+                        if 'graphlet' in result:
+                            self.assertEqual(len(result['graphlet'].encode('utf-8')),
+                                             result['graphlet_bytes'])
+                    text = re.sub(r'"graphlet_bytes":\d+', '"graphlet_bytes":0', text)
+                if name == 'new':
+                    # this build's statement (the budget-aware reads of the fixture's row-diff
+                    # annotation), wherever a memory budget is set
+                    self.assertEqual('max_memory_mb' in request['strategy'].get('bounds', {})
+                                     and ret.status_code == 200,
+                                     bool(effects), json.dumps(request)[:300])
+                    for effect in effects:
+                        self.assertIn('charged before they are held', effect)
+                        self.assertIn("at most twice the seed's labels x the longest", effect)
+                answers.append((ret.status_code, self._untimed(text)))
             self.assertEqual(answers[0], answers[1], json.dumps(request)[:300])
             compared += 1
         self.assertEqual(36, compared)

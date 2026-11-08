@@ -1408,20 +1408,17 @@ int run_server(Config *config) {
 
     /**
      * The admission of a /resolve or /pattern request (sections 4 and 5), before anything of it
-     * runs: a request_id that is running or retained here, on any route, is refused (409, its
-     * entry and an error: no second worker), then one whose not_after_ms has passed (409
-     * expired, as /traverse refuses it); otherwise |entry| is registered under its request_id (a request
-     * without one is not registered). A malformed field was refused before (400), so that
-     * nothing a client must correct holds its id
+     * runs (IdAdmission::admit): one meant for another server_instance is refused (409
+     * instance_mismatch, F3b), then a request_id that is running or retained here, on any
+     * route (409, its entry and an error: no second worker), then one whose not_after_ms has
+     * passed (409 expired, as /traverse refuses it); otherwise |entry| is registered under its
+     * request_id (a request without one is not registered). A malformed field was refused
+     * before (400), so that nothing a client must correct holds its id. On a multi-graph
+     * server it is the request's: no pair starts before it
      */
     auto admit = [&](const std::shared_ptr<RequestEntry> &entry, const RequestHandles &handles,
                      size_t request_id) {
-        // with a request_id the not_after_ms check reads the clock inside the request
-        // registry's critical section (IdAdmission::start_request): never read it here for it
-        std::optional<Json::Value> refused = handles.request_id
-                ? id_admission.start_request(entry, handles.not_after_ms)
-                : expired_request_json(handles.not_after_ms, attempts.now_ms(),
-                                       attempts.server_instance(), std::nullopt);
+        std::optional<Json::Value> refused = id_admission.admit(entry, handles);
         if (refused) {
             logger->info("[Server] Request {}: not started, {}", request_id,
                          refused->get("error", "").asString());
@@ -2738,6 +2735,10 @@ int run_server(Config *config) {
             // /pattern with request_id registers too, and GET /requests/{attempt_id} reads a
             // /traverse attempt
             routes["requests"] = kRequestsRoute;
+            // the routes that take expect_server_instance (section 5, F3b): in the multigraph
+            // block on a multi-graph server, here on a single-graph one (one reader for both)
+            if (!multi)
+                c["expect_server_instance"] = expect_server_instance_routes_json();
             c["routes"] = std::move(routes);
             c["schema_version"] = 1;
             c["server_instance"] = attempts.server_instance();

@@ -465,7 +465,17 @@ deadline. `src/cli/traverse.cpp` `process_resolve_request`, `src/graph/traversal
   lists as not observed (§7.3). *E5b's verification sweep* (2026-11-07; per-seed budgets of 64 MiB to 4 GiB under
   R = 8 GiB, 1 to 64 seeds, results of up to 97 MiB of text, request bodies of a few KB) found a server's peak
   physical footprint above its idle at most 2.6 GiB, and on Linux under a cgroup limit of R + 256 MiB + the idle
-  charge no case killed: R plus a fixed overhead of 256 MiB holds a request whose body is capped.
+  charge no case killed: R plus a fixed overhead of 256 MiB held every request of the sweep. The overhead assumes a
+  capped body (`--max-request-body-mb`), as the structures outside the account grow with it: jsoncpp's parsed
+  request alone is about 12 to 28 times the body for an explicit list of labels of 6 to 1 characters (measured on
+  macOS in the review of train 2; more on Linux), also for a body that is refused 400 afterwards, and each per-seed
+  copy of the list adds about 3 to 6 times. The body-cap measurement (2026-11-08; the body read, parsed and copied,
+  refused or walked) found the memory no account counts at up to about 60 times the body: an explicit list of
+  1-character labels refused in the seed phase; the JSON reader alone up to 52 times; 6-character labels 25 to 28
+  times; long sequences 5 to 7 times. Under a cgroup limit of 256 MiB beside the idle charge, a 4.25 MiB body held
+  and a 4.5 MiB one was killed. A cap of 2 MiB holds that part to about 128 MiB, half the overhead. With a larger
+  cap, or none (the default), a large body's structures are held beside R outside every bound, about 60 times its
+  size.
   A seed the bound left unstarted is sent again in a new request (the action `split_request`).
 - **Attempt fields** (`DESIGN-traverse-graphlet.md` §14 and §14.1: the frozen wire contract's request fields;
   stage 4, backend half — the ledger itself lives in the search service): top-level `attempt_id`, `budget_id`
@@ -509,12 +519,13 @@ deadline. `src/cli/traverse.cpp` `process_resolve_request`, `src/graph/traversal
   request's `not_after_ms`; a held or tombstoned id's refusal extends that hold, §10.3), the expiry
   last — so an `expired` 409 always means that no attempt with that id existed on that
   `server_instance` when the request was judged, and no copy can start there later while its clock
-  does not step back below `not_after_ms` (a release ground, §10.3). The capabilities' `not_after`
+  does not step back to `not_after_ms` or earlier (a release ground, §10.3). The capabilities' `not_after`
   text states this order *(review of 2026-10-06, C24)*. A fraction, a sign, a string or a value above
   2⁵³ − 1 is a 400 naming the field, without `usage`. It is echoed as `usage.not_after_ms` and in the
   attempt's state, only when given. The CLI applies the same check (the 409 body on stdout, exit
-  status 1). `/resolve` does not accept it (400, unknown field).
-- **`expect_server_instance`** *(review of pass 5; with `attempt_id` only)*: the `server_instance` (§10.3) the
+  status 1). `/resolve` and `/pattern` read it too, since release 10 (`SPEC-multigraph-envelope.md` §4).
+- **`expect_server_instance`** *(review of pass 5; with `attempt_id` only; `/resolve` and `/pattern` take it
+  with `request_id` since F3b, `SPEC-multigraph-envelope.md` §5)*: the `server_instance` (§10.3) the
   request is meant for, a string matching the ids' pattern `^[A-Za-z0-9._:-]{1,128}$` (as every
   `server_instance` does), compared as given. Any other value — null, a non-string, `""`, more than 128
   characters, another character — is a 400 naming the field, without `usage`: nothing runs and nothing is
@@ -529,8 +540,8 @@ deadline. `src/cli/traverse.cpp` `process_resolve_request`, `src/graph/traversal
   attempts with this field *(the finished state: review of levels 4–5, finding 6)*. Without
   `attempt_id` it is a 400 naming the field. The CLI, whose instance is its own and random, refuses any
   well-formed value (the 409 body on stdout, exit status 1; a malformed one gets the 400's error output, exit
-  status 1). `/resolve` does not accept it (400, unknown field), nor does a server below feature level 5 (400,
-  unknown field).
+  status 1). A server below feature level 5 does not accept it (400, unknown field); `/resolve` and `/pattern` take
+  it with `request_id` only from F3b, where `GET /capabilities` lists them under `expect_server_instance`.
 - `direction`: `both | left | right`. `support`: `kmer | trace` (`trace` rejected unless coordinates are indexed
   and the regime is basic).
 - **`seeds[].labels` is optional.** Omitting it is the default and realizes the design note's
@@ -1492,8 +1503,9 @@ response is delivered whole (`outcome.delivery: inline`, §7.0; spooled / paged 
   format `memory_bound_soft` names what is still held uncharged beside the admitted account — a
   level's keys and fetched rows until its heads are processed, the seed phase's intersection, hits and
   coordinate copies, a failed seed's depth-0 dictionary, a failed result's echo of `seed_id`, and, not observed,
-  an index-wide header lookup, two further copies of the seed's label names (at most 2 × `max_seed_labels` × the
-  longest name, whatever the budget: E5b's sweep measured up to 121 MiB beyond the account and the observed
+  an index-wide header lookup, two further copies of the seed's label names (at most twice the seed's labels × the
+  longest name, whatever the budget: derived sets up to `max_seed_labels`, explicit lists up to the request body;
+  E5b's sweep measured up to 121 MiB beyond the account and the observed
   excess for 4,096 labels of 12,000-character names under 64 MiB) and the label dictionary's first table — and
   each seed of a request has budgets
   of its own (§5), so a request of n seeds holds up to n budgets.
@@ -1753,7 +1765,7 @@ is rejected instead (§5).
 | `trace_record_boundaries` | seed | `support: trace` with column labels | `labels.seed_label_kind` (`limit: "column"`) | column labels in the dictionary |
 | `seed_labels` | seed | the derived permitted set was cut (`labels_dropped > 0`); on a failed result, carriers were cut before the trace check (`no_trace_carrier`) | `labels.max_seed_labels`, with `server_limit` when the server clamped it | `labels_supporting_total` |
 | `server_clamp` | seed | an entry of `strategy.clamped` bound this seed: a lowered derived-set cap that cut its set, a lowered time budget that tripped, a budget raised from zero (the walk ran under it), or a memory or work budget at the server's maximum (§10, R16) that stopped its walk or failed the seed | the clamped field | the requested value (`limit` is the effective one) |
-| `memory_bound_soft` | seed | `bounds.max_memory_mb` is set: something is always held beyond the admitted account. **(i) On an annotation whose reads are budget-aware** (§6.8; `ResourceAccount::decode_charged`) the reads are charged inside the decoder, and the statement names only what is still uncharged: a level's key and successor lists and its fetched rows until its heads are processed, the seed phase's intersection and hits, the dictionary a failed seed's depth-0 state built, a failed result's echo of `seed_id` (named in the effect, review of the stage-2 recheck, design answer 5), an index-wide header lookup that the first request needing it builds (not observed: charging it would make a result depend on the server's history), the seed phase's two further copies of the seed's label names — its resolved label references and the names it keeps for the result, beside the dictionary's two copies, which are observed — (not observed; bounded by 2 × `max_seed_labels` × the longest name and not by the budget, independent of the seed count and released when the seed ends: *E5b's sweep, 2026-11-07*, measured up to 121 MiB beyond the account and the observed excess for a seed deriving 4,096 labels of 12,000-character names under a 64 MiB budget, about 229 MiB at 10,000 such names; charging them is on the engine's backlog), and the label dictionary's first table (about 1.5 KB per request) with the transient copy while its list grows (not observed). **(ii) Other formats**: the budget is enforced on the modelled state and output, but the annotation rows the seed phase and each level decode (with an annotate dictionary's growth and a cache beyond its allotment), and a failed result's echo of `seed_id`, are held before they can be charged. Neither is a hard request-wide memory bound (§6.8). In no outcome class | `bounds.max_memory_mb` | the largest excess over the budget seen of what was held beyond the admitted account, MiB rounded up (0: none), observed wherever it is held and before any check after it can stop the walk, so a stop inside a fetch still states what the fetch held; the admitted account itself never exceeds the budget. Observed once a level's key and successor lists are built, after every call of a level's fetch (with the call's raw rows in (ii)) and at a refused read (with the rows read before it), at **every head admission** (the account the head needs with the level's lists and fetched rows beside it), after the roots' rows and the lookahead's warming, and over the seed phase's rows and intersection (after each sub-batch is read and again once it is consumed; each fetch call of the label validation before its charge, which can fail the seed; under `trace` the validation's peak — the hits, every label's live coordinate set and both arms' boundary coordinates — before anything can fail the seed, review of the stage-2 recheck, P2). In (ii) the decoder's own transient buffers are not counted (the materialised rows are). Also on a seed a budget failed — what its depth-0 state built before the admission refused it (the dictionary's labels with their names in every copy, the caches) is observed first — on a seed whose derivation failed (what the derivation's rows held), and on every failed or refused seed what its result's echo of the request's `seed_id` holds beyond the budget (§5) |
+| `memory_bound_soft` | seed | `bounds.max_memory_mb` is set: something is always held beyond the admitted account. **(i) On an annotation whose reads are budget-aware** (§6.8; `ResourceAccount::decode_charged`) the reads are charged inside the decoder, and the statement names only what is still uncharged: a level's key and successor lists and its fetched rows until its heads are processed, the seed phase's intersection and hits, the dictionary a failed seed's depth-0 state built, a failed result's echo of `seed_id` (named in the effect, review of the stage-2 recheck, design answer 5), an index-wide header lookup that the first request needing it builds (not observed: charging it would make a result depend on the server's history), the seed phase's two further copies of the seed's label names — its resolved label references and the names it keeps for the result, beside the dictionary's two copies, which are observed — (not observed; bounded by twice the seed's labels × the longest name — derived sets up to `max_seed_labels`, explicit lists up to the request body — and not by the budget, independent of the seed count and released when the seed ends: *E5b's sweep, 2026-11-07*, measured up to 121 MiB beyond the account and the observed excess for a seed deriving 4,096 labels of 12,000-character names under a 64 MiB budget, about 229 MiB at 10,000 such names; charging them is on the engine's backlog), and the label dictionary's first table (about 1.5 KB per request) with the transient copy while its list grows (not observed). **(ii) Other formats**: the budget is enforced on the modelled state and output, but the annotation rows the seed phase and each level decode (with an annotate dictionary's growth and a cache beyond its allotment), and a failed result's echo of `seed_id`, are held before they can be charged. Neither is a hard request-wide memory bound (§6.8). In no outcome class | `bounds.max_memory_mb` | the largest excess over the budget seen of what was held beyond the admitted account, MiB rounded up (0: none), observed wherever it is held and before any check after it can stop the walk, so a stop inside a fetch still states what the fetch held; the admitted account itself never exceeds the budget. Observed once a level's key and successor lists are built, after every call of a level's fetch (with the call's raw rows in (ii)) and at a refused read (with the rows read before it), at **every head admission** (the account the head needs with the level's lists and fetched rows beside it), after the roots' rows and the lookahead's warming, and over the seed phase's rows and intersection (after each sub-batch is read and again once it is consumed; each fetch call of the label validation before its charge, which can fail the seed; under `trace` the validation's peak — the hits, every label's live coordinate set and both arms' boundary coordinates — before anything can fail the seed, review of the stage-2 recheck, P2). In (ii) the decoder's own transient buffers are not counted (the materialised rows are). Also on a seed a budget failed — what its depth-0 state built before the admission refused it (the dictionary's labels with their names in every copy, the caches) is observed first — on a seed whose derivation failed (what the derivation's rows held), and on every failed or refused seed what its result's echo of the request's `seed_id` holds beyond the budget (§5) |
 | `coordinates` | seed | `output.coordinates` is true and an occurrence list — a seed label's or a run's — was cut at the cap to its first occurrences by start (each cut list states `occurrences_total`; the block `complete: false`). In no outcome class (decision C2) | `output.max_coordinate_occurrences` | the largest true count of a cut list; the extra field `lists_cut` counts the lists cut |
 | `derivation` | failed seed; a walked seed whose set was derived from part of it (D3) | the permitted set could not be derived (`outcome.walks: failed`); `cause` names why, `server_limit` is added when the server clamped the knob; also a seed refused for a label name that is not UTF-8 (`unrepresentable_label_name`, §6.1 step 4, either mode). **D3** *(the owner's decision, feature level 6)*: a derived seed whose time budget runs out after 1 ≤ j < n of its k-mers is delivered as a walked result, without `error`, when nothing else would fail it — the set of the labels carrying the j k-mers read (a superset of the whole seed's carriers; `labels_from_seed`, `labels_supporting_total` its size), every requested arm truncated at `complete_to_bp` 0 (`cap_trigger` `time_budget`), this limitation first with `cause: time_budget` and `observed` = j, no `num_kmers` field, `outcome.walks: partial` and `label_evidence: qualified`; j = 0, or a superset that would fail the seed in any other way, fails as before | per `cause`: `no_carrier` → `seeds[].sequence`; `no_trace_carrier` → `support` (`limit: "trace"`); `too_wide` → `seeds[].sequence`; `time_budget` → `bounds.time_budget_ms`; `ambiguous_header` → `labels.seed_label_kind` (`limit: "header"`); `over_seed_label_cap` (`exhaustive`) → `labels.max_seed_labels`; `unrepresentable_label_name` → the knob that avoids recording the label: `labels.mode` (`limit: "annotate"`) in annotate mode, `labels.seed_label_kind` (`limit: "header"`) for a derived header label, `labels.extra` (`limit`: its labels) for an extra one, else `seeds[].labels` (`limit`: the labels named or derived) | `no_carrier`: the seed k-mers read when no candidate was left (`limit`: the seed's k-mers); `no_trace_carrier`: the labels carrying every k-mer by presence; `too_wide`: annotation entries of the narrowest of the first 64 k-mers (`limit`: 64 · `max_seed_labels`, at least 65 536); `time_budget`: **two units** — on a failed seed the elapsed ms (a number), on a walked seed (D3) j, the k-mers read (an integer; n is the seed's `num_kmers`, and the effect says "after j of n k-mers"): one `kind`, `cause` and `knob`, told apart by the result's shape (walked: `arms`, no `error`), which the owner kept rather than change the wire within level 6 *(review of 2026-10-06, X1; in an MGT `K` record j is written `i:j`, an elapsed time `f:`)*; `ambiguous_header`: the header (under `bounds.max_memory_mb` one longer than 256 bytes as a bounded prefix with its length, column and sequence id, §5); `over_seed_label_cap`: the carriers; `unrepresentable_label_name`: the names that are not UTF-8 (the effect names the first by column and sequence id, never its bytes) |
 
@@ -2300,8 +2312,9 @@ attempt) nor a 400 for a malformed id:
   at least all results' `final_bytes` together; `memory.soft_excess_bytes` is the largest per-seed excess (each
   seed's over its own budget), null without a memory budget; `memory.held_bound_bytes` — an upper bound of what
   the walks and the results held at once, **as observed** (what `memory_bound_soft` lists as not observed is not
-  in it — the largest part the seed phase's further copies of the seed's label names, up to 2 ×
-  `max_seed_labels` × the longest name whatever the budget: E5b's sweep found a server's peak footprint 121 MiB
+  in it — the largest part the seed phase's further copies of the seed's label names, up to twice the seed's
+  labels × the longest name whatever the budget (derived sets up to `max_seed_labels`, explicit lists up to the
+  request body): E5b's sweep found a server's peak footprint 121 MiB
   above `held_bound_bytes` for seeds of 4,096 labels of 12,000-character names under 64 MiB, the same with 1
   and 64 seeds), under `bounds.max_memory_mb` only: max over walked seeds i of (the `final_bytes` before i + the budget
   + i's soft excess), and at least all results together; null without a memory budget. Under the request-wide
@@ -2986,7 +2999,9 @@ search's routes, `POST /pattern` and `GET /pattern/capabilities`, are `SPEC-patt
     below, multi-graph mode), and in both modes `max_request_body_mb` (below, the caps: the largest request body
     the server reads, `null` when unlimited) and `headers_unique` (E22: whether every sequence header names one
     record; at the top level in single-graph mode, `null` while the index loads, and in `graph_summary` in
-    multi-graph mode; `SPEC-multigraph-envelope.md` §9).
+    multi-graph mode; `SPEC-multigraph-envelope.md` §9), and `expect_server_instance` (F3b: the routes that take
+    the field, `["/traverse", "/resolve", "/pattern"]`; at the top level in single-graph mode, beside
+    `routes.requests`, and in the `multigraph` block in multi-graph mode; `SPEC-multigraph-envelope.md` §8).
   - **`deadline_check`** (both capabilities routes, feature level 3): `chunk_target_ms` (integer,
     `--traverse-chunk-target-ms`, an integer in [0, 2⁵³ − 1]; 0: reads are not chunked), `max_uninterruptible_ms`
     (null: no bound on one row's decode exists before stage 3c, and it stays null after stage 3c-ii, whose
@@ -3609,9 +3624,10 @@ search's routes, `POST /pattern` and `GET /pattern/capabilities`, are `SPEC-patt
     the id's registration (running, retained, held, tombstoned) before the expiry, under one lock (§5), so no copy
     of the request was running or registered on that `server_instance` when it was judged, and none can start
     there later. It **settles nothing**: an earlier copy may have run, finished and left retention, and its usage
-    is then unknown. It assumes that this server's clock does not step back below `not_after_ms` (the 409 states
-    `server_time_ms`; `server_time_ms − not_after_ms` is the step it survives, and once that exceeds
-    `clock_skew_allowance_ms` the step is the one assumed below) and, for an attempt sent without
+    is then unknown. It assumes that this server's clock does not step back to `not_after_ms` or earlier (the 409
+    states `server_time_ms`; it survives a backward step SMALLER than `server_time_ms − not_after_ms`, a step of
+    exactly that admitting a copy at `not_after_ms`, and once that difference exceeds `clock_skew_allowance_ms`
+    the step is the one assumed below) and, for an attempt sent without
     `expect_server_instance`, that no copy of the request reaches another server at the same address while it
     could still be admitted there *(LRG-R2: the search service releases on it; the rule's list omitted it)*.
     **The clock release** takes the attempt as stopped once the ledger's clock passes `not_after_ms +
@@ -3708,8 +3724,8 @@ search's routes, `POST /pattern` and `GET /pattern/capabilities`, are `SPEC-patt
     registered. HTTP 503, `Retry-After: 1`, body `{"code": "busy", "error": …, "server_instance": …}` (this
     process, as every attempt answer names it: a ledger that pinned another instance learns of the restart
     without waiting for a slot), no `usage`, never wrapped in the envelope, on single-graph and multi-graph
-    servers alike (`SPEC-multigraph-envelope.md` §1.1). One log line per refusal (`[Server] <route> request <n>
-    from <address>: busy, <running> of <cap> running (<flag>); 503`). Nothing of it
+    servers alike (`SPEC-multigraph-envelope.md` §1.1). One log line per refusal at the handler's start
+    (`[Server] <route> request <n> from <address>: busy, <running> of <cap> running (<flag>); 503`). Nothing of it
     ran and nothing of it is held: a re-send, under the same id too, is admitted as a first copy would be. It says
     nothing about other copies of its id, so, like the loading 503, it is no ground of the release rule (above): a
     ledger re-sends after `Retry-After`, or releases on the rule's own grounds. 429 stays the cancel's alone (a 429
@@ -3755,11 +3771,15 @@ search's routes, `POST /pattern` and `GET /pattern/capabilities`, are `SPEC-patt
     them (its `index_fp` changes once; after that, adding a mask leaves it unchanged).
   - **The sequence header index** (header name → `(column, seq_id)`) is built while the index loads, before the
     server answers traversal requests, and logged with its size and time (`[Server] Sequence header index built:
-    N headers in S s`; 4.6 s for 33 M synthetic headers on the M5 Max): built by the first request naming a header
+    N entries, M distinct headers, in S s (B MiB)`: an entry per record, M the distinct headers among them, fewer
+    when a header names several records, `headers_unique`, `SPEC-multigraph-envelope.md` §9; E11's sorted array
+    builds 20 M synthetic headers in 0.59 s on four threads, the hash table before it 33 M in 4.6 s on the M5
+    Max): built by the first request naming a header
     instead, it cost that request seconds inside its time budget and outside every read timer (R10: staging,
-    refseq33m, a first header-named walk ran 9,947 ms on a 1,000 ms budget, 689 ms of it reading). It holds a
-    hash entry per header (on refseq33m, 33 M headers, on the order of 1-2 GB), which a server that serves header
-    labels would have built anyway. The CLI builds it once before its requests. A copy of a pair loaded into RAM
+    refseq33m, a first header-named walk ran 9,947 ms on a 1,000 ms budget, 689 ms of it reading). It holds 16
+    bytes per header (the header's 64-bit hash, its column and its record; on refseq33m, 33 M headers, about
+    0.53 GB; the hash table before E11 took about 40 bytes per header, on the order of 1-2 GB there), which a
+    server that serves header labels would have built anyway. The CLI builds it once before its requests. A copy of a pair loaded into RAM
     for one request (`in_ram`, multi-graph mode) shares the resident pair's mapping and so its index: the load
     neither reads the `.seqs` nor builds (the log holds the one start-up line per pair with a mapping, none per
     request).

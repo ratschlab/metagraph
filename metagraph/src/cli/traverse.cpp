@@ -487,11 +487,13 @@ ResolveRequest parse_resolve_request(const Json::Value &json) {
     s.strings("graphs");
     s.boolean("in_ram", false);
     // the request's handles (SPEC-multigraph-envelope.md sections 4 and 5: request_id,
-    // not_after_ms, finish_by_ms): the server reads them before the request runs, by the same
-    // rule (read_request_handles); declared here so that strict parsing accepts them, and
-    // checked at the end (where, unknown before release 10, they were refused) so that the
-    // CLI refuses what the server refuses and a request with another fault keeps its words
-    for (const char *field : { "request_id", "not_after_ms", "finish_by_ms" }) {
+    // expect_server_instance, not_after_ms, finish_by_ms): the server reads them before the
+    // request runs, by the same rule (read_request_handles); declared here so that strict
+    // parsing accepts them, and checked at the end (where, unknown before release 10, they
+    // were refused) so that the CLI refuses what the server refuses and a request with another
+    // fault keeps its words
+    for (const char *field : { "request_id", "expect_server_instance", "not_after_ms",
+                               "finish_by_ms" }) {
         s.has(field);
     }
     req.sequence = s.str("sequence", "");
@@ -1684,12 +1686,16 @@ static Json::Value memory_bound_soft(const Strategy &st, const ResourceAccount &
                       uint_json((account.soft_overshoot + (1 << 20) - 1) >> 20),
                       account.decode_charged
                       // (at most 640 bytes, kEffect: every limitation's effect is priced at
-                      // that width.) Not observed beside the header lookup and the dictionary's
-                      // first table: the seed phase's two further copies of its label names (its
-                      // resolved references and the names kept for the result; the dictionary's
-                      // two are observed), bounded by max_seed_labels x the longest name twice,
-                      // not by the budget (E5b's sweep: 121 MiB beyond the account and the
-                      // observed excess for 4,096 names of 12,000 B under 64 MiB)
+                      // that width; 634 here.) Not observed beside the header lookup and the
+                      // dictionary's first table: the seed phase's two further copies of its
+                      // label names (its resolved references and the names kept for the result;
+                      // the dictionary's two are observed), bounded by twice the seed's labels x
+                      // the longest name, not by the budget: a derived set has at most
+                      // max_seed_labels labels, an explicit list as many as the request body
+                      // holds (E5b's sweep: 121 MiB beyond the account and the observed excess for
+                      // 4,096 names of 12,000 B under 64 MiB). The seed's cost dictionary below
+                      // (dict) copies an explicit list once more, outside the account like the
+                      // parsed request: bounded by the request body (SPEC §5)
                       ? "the memory budget is enforced on the walker's modelled state, this "
                         "response's output and the annotation reads (rows and coordinates are "
                         "charged before they are held; a read not fitting is refused whole); "
@@ -1697,8 +1703,8 @@ static Json::Value memory_bound_soft(const Strategy &st, const ResourceAccount &
                         "keys and rows until its heads are done, the seed phase's intersection, "
                         "hits, dictionary, a failed result's echo of seed_id (observed: the "
                         "largest excess, MiB, rounded up) and, not observed, an index-wide header "
-                        "lookup, two more copies of the seed's label names (at most 2 x "
-                        "max_seed_labels x the longest) and the dictionary's first table and "
+                        "lookup, two more copies of the label names (at most twice the seed's "
+                        "labels x the longest) and the dictionary's first table and "
                         "growth copy (1.5 KB)"
                       : "the memory budget is enforced on the walker's modelled state and on "
                         "this response's output, admitted per head; the annotation rows the "
@@ -4401,13 +4407,6 @@ static uint64_t failed_result_bytes(const Strategy &st, const Seed &seed) {
         + (d.name ? d.name(seed.seed_id, DeliveryCosts::Name::SEED_ID) : 0);
 }
 
-// The walk's modelled account without a memory budget's fixed cache allotments (|bytes| is the
-// account's peak or final; ResourceAccount::allotted): the same with and without a budget that
-// does not bind, as work.memory_bytes states it (SPEC §7.2.2)
-static uint64_t without_allotments(uint64_t bytes, const ResourceAccount &account) {
-    return bytes > account.allotted ? bytes - account.allotted : 0;
-}
-
 // memory_bound_soft's observed excess (bytes) for a seed failed or refused without an
 // admitted result. Such a result is not admitted, and it echoes the request's seed_id,
 // which only the request's size bounds: a seed_id that the depth-0 admission refused still
@@ -4997,10 +4996,15 @@ static Json::Value labels_not_in_graph_seed_to_json(const Seed &seed,
 
 // A request with attempt_id outside the server (the CLI, a test): its usage is stated as the
 // server states it, with the bound computed but not enforced (no lease to protect)
-static const std::string& local_instance() {
+const std::string& local_instance() {
     static const std::string instance = AttemptRegistry(AttemptSettings()).server_instance();
     return instance;
 }
+
+// A request the CLI refuses at its admission, as a server refuses it there (the 409's body)
+struct NotAdmitted {
+    Json::Value body;
+};
 
 static std::unique_ptr<Attempt> local_attempt(const AttemptIds &ids) {
     AttemptSettings settings;
@@ -5475,8 +5479,10 @@ Json::Value process_traverse_request(const Json::Value &json,
                        true, r.resource_stop ? refused_of(*r.resource_stop) : std::nullopt,
                        names);
                 const std::string outcome = refused["outcome"]["walks"].asString();
-                // the walk's peak; its result is the refusal
-                put_memory(&refused, without_allotments(r.account.memory_peak, r.account),
+                // the walk's peak without a memory budget's fixed cache allotments (the same with
+                // and without a budget that does not bind, as work.memory_bytes states it, SPEC
+                // §7.2.2); its result is the refusal
+                put_memory(&refused, without_allotments(r.account.memory_peak, r.account.allotted),
                            failed_result_bytes(req.strategy, seed) + names);
                 append(std::move(refused), 0);
                 delivered(outcome);
@@ -5503,8 +5509,8 @@ Json::Value process_traverse_request(const Json::Value &json,
                 put_thread_usage(&rj["timing"], seed_usage.elapsed());
             }
             // after the graphlet's text: JSON beside its body, never in it
-            put_memory(&rj, without_allotments(r.account.memory_peak, r.account),
-                       without_allotments(r.account.memory_final, r.account));
+            put_memory(&rj, without_allotments(r.account.memory_peak, r.account.allotted),
+                       without_allotments(r.account.memory_final, r.account.allotted));
             const std::string outcome = rj["outcome"]["walks"].asString();
             // the delivery reserve's sample: the walk's account at its end without the
             // budget's cache allotments (final_bytes), as the walk's progress states it
@@ -5538,7 +5544,8 @@ Json::Value process_traverse_request(const Json::Value &json,
             state_unknown_labels(&failed, seed);
             // what the account held when the budget failed the seed, and what its result holds
             const uint64_t names = put_failed_memory(
-                    &failed, seed, without_allotments(e.account().memory_peak, e.account()));
+                    &failed, seed, without_allotments(e.account().memory_peak,
+                                                      e.account().allotted));
             walked("failed", resource_name(e.stop().resource), true, refused_of(e.stop()),
                    names);
             append(std::move(failed), 0);
@@ -6058,6 +6065,18 @@ int traverse_graph(Config *config) {
                 if (!ids.attempt_id.empty())
                     attempt = local_attempt(ids);
             }
+            // a /resolve meant for another server_instance is not started, as the server
+            // refuses it at its admission (409 instance_mismatch, after the request's own 400s,
+            // F3b): this process's instance is its own, random, so any one named is another's
+            // (only for a request that names one: every other is answered as before)
+            std::function<void()> admit_locally;
+            if (json.isObject() && json.isMember("expect_server_instance")) {
+                admit_locally = [&json]() {
+                    const RequestHandles handles = read_request_handles(json);
+                    if (instance_mismatch(handles, local_instance()))
+                        throw NotAdmitted { instance_mismatch_json(handles, local_instance()) };
+                };
+            }
             // operator-run: no caps; the reads are chunked under a deadline as on the server
             TraverseLimits limits;
             limits.chunk_target_ms = static_cast<double>(config->traverse_chunk_target_ms);
@@ -6067,7 +6086,7 @@ int traverse_graph(Config *config) {
             ResolveDelivery delivery;
             Json::Value out = config->traverse_resolve
                 ? process_resolve_request(json, *anno_graph, config->index_release, 0, &identity,
-                                          nullptr, {}, &delivery)
+                                          nullptr, {}, &delivery, nullptr, false, admit_locally)
                 : process_traverse_request(json, *anno_graph, config->index_release, limits,
                                            &identity, attempt.get());
             const std::string text = Json::writeString(builder, out);
@@ -6076,6 +6095,10 @@ int traverse_graph(Config *config) {
         } catch (const ResolveDeadline &e) {
             logger->error("Request in {} not answered: {}", file, e.what());
             std::cout << Json::writeString(builder, resolve_deadline_body(e)) << std::endl;
+            status = 1;
+        } catch (const NotAdmitted &e) {
+            logger->error("Request in {} not started: {}", file, e.body["error"].asString());
+            std::cout << Json::writeString(builder, e.body) << std::endl;
             status = 1;
         } catch (const InvalidRequest &e) {
             logger->error("Invalid request in {}: {}", file, e.what());

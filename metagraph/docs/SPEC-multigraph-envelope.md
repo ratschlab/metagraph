@@ -106,6 +106,13 @@ The answer keeps its upstream shape (a list of `{seq_description, results, ...}`
   - on COUNTS annotations also `nth_median` and `tied_same_median` (the labels with the N-th score and median).
     The median is read only where the N-th score is shared: a cut with `tied` 1 states `nth_median` null (and
     `tied_same_median` 1).
+- `kmers_in_target` (since MetaGraph master #634, 2026-05-17; single-graph and multi-graph servers alike): on the
+  rows of a coordinate query (`query_coords`: the rows that carry `kmer_coords`) of a pair that has a `.seqs`
+  (CoordToHeader) record mapping, a non-negative integer, the target record's k-mer count (its length − k + 1,
+  `CoordToHeader::num_kmers_in_sequence`), so that `kmer_count / kmers_in_target` is the fraction of the target
+  the query's k-mers cover. It is omitted where the label is a whole column (a pair without a `.seqs`, or a
+  server started with `--no-coord-mapping`: its `kmer_coords` are positions in the column), and never stated on
+  signature or counts rows. Sample 25: one pair with a `.seqs` and one without, on one multi-graph server.
 - The order before every engine-local cut (C5): score descending; then, on counts annotations only, the median
   abundance descending; then label ascending (byte order). The median is the LOWER median of the label's
   abundances over the query's k-mer positions where the label is present (abundance at least 1, zeros excluded),
@@ -176,14 +183,26 @@ The answer keeps its upstream shape (a list of `{seq_description, results, ...}`
 - `/resolve` and `/pattern` take an optional `request_id`, the same token rule as `attempt_id`
   (`^[A-Za-z0-9._:-]{1,128}$`), checked by the strict parsers before anything is registered. `/traverse`'s
   `attempt_id` is its request handle; no second id.
-- A request's ADMISSION is the point where the server decides to run it: the check of a repeated id (the 409
-  below) and of an expired `not_after_ms` (section 4), made together, after which a request with an id is
+- `/resolve` and `/pattern` take an optional `expect_server_instance`, as `/traverse` does
+  (SPEC-labeled-traversal-core §5): the `server_instance` the request is meant for, a string matching the ids'
+  pattern `^[A-Za-z0-9._:-]{1,128}$`, compared as given, **with `request_id` only**. Anything else (null, a
+  non-string, `""`, more than 128 characters, another character), or the field without `request_id`, is a 400
+  naming the field, one of the request's own 400s (before every 409). A server whose own `server_instance` is
+  another refuses the request at its admission, before anything is registered: **409** `{error, state: "instance_mismatch",
+  expect_server_instance, server_instance, request_id, not_after_ms?}`. Nothing runs and nothing is registered:
+  `GET /requests/{id}` on that server answers 404 (never admitted). It is the first of the admission refusals:
+  `instance_mismatch`, then the repeated id, then `expired` (section 4), the order `/traverse` has. On a
+  multi-graph server it is request-level: no pair starts and no envelope is written. The CLI, whose instance is
+  its own and random, refuses any value it is given (the 409 body on stdout, exit status 1), as for `/traverse`.
+- A request's ADMISSION is the point where the server decides to run it: the check of `expect_server_instance`
+  (`instance_mismatch`, above), of a repeated id (the 409 below) and of an expired `not_after_ms` (section 4),
+  made together in that order, after which a request with an id is
   registered under it. On `/resolve` and `/pattern` it comes after the request's own 400s (below), on `/traverse`
   before its fields are parsed (its body read as JSON, its ids and `finish_by_ms` checked). A request without an
   id is admitted at the same point, without an entry.
 - On `/resolve` and `/pattern` the request's own 400s (the body, the selection, the fields; on `/resolve` also what
   the request and k decide of its explicit seeds: a `kmer_interval` empty or out of range, a seed label that is not
-  one of `labels`) come before the registry's 409 and the expired 409: a malformed request with an expired
+  one of `labels`) come before every admission 409 (`instance_mismatch`, the repeated id, `expired`): a malformed request with an expired
   `not_after_ms` gets 400. The seeds are checked in their order, the work's, which checks a seed's labels before
   the next seed: under a discovery the seeds after the first that names labels are checked by the work. An
   HTTP-level 400 never holds a `request_id`: one that only the work can find (a seed not fully present in the graph,
@@ -209,7 +228,7 @@ The answer keeps its upstream shape (a list of `{seq_description, results, ...}`
   the id is unknown. `GET /requests/{id}` answers 404 `{error, request_id, server_instance, server_time_ms}` for an
   id this server instance does not hold, in three cases: NOT ADMITTED YET (the window between the request's receipt
   and its admission), NEVER ADMITTED (refused by an HTTP-level 400, also one only the work finds, which frees the id
-  when it is answered, or by the expired 409; or never received here), or ENDED AND DROPPED (past its retention, by
+  when it is answered, or by the expired 409 or the instance_mismatch 409; or never received here), or ENDED AND DROPPED (past its retention, by
   time or by count). An id that breaks the token rule is 400. `reason`
   on `/resolve` and `/pattern`: `answered` (200 written), `client_gone` (nothing written), `deadline` (503),
   `error` (any other status but 400, which leaves no entry).
@@ -224,9 +243,14 @@ The answer keeps its upstream shape (a list of `{seq_description, results, ...}`
   admitted on this `server_instance` after the lookup: a copy that arrives later, or a re-send, is not admitted. The
   proof holds for a `request_id` of `/resolve` and `/pattern` and for an `attempt_id` of `/traverse` alike. It
   covers the `server_instance` that answered: a 404 from another one (a restarted server) proves nothing about the
-  instance the request was sent to. It assumes that the server's wall clock does not step back below
-  `not_after_ms` between the lookup and a later admission: `server_time_ms − not_after_ms` is the backward clock
-  step the proof survives (a client may require it to exceed `clock_skew_allowance_ms`). It says nothing about
+  instance the request was sent to. A request sent with `expect_server_instance` X runs on X only: every other
+  instance refuses it (`instance_mismatch`) whatever its time. A 404 from X with `server_time_ms` > `not_after_ms`
+  therefore proves that no copy of that request is admitted anywhere after the lookup: X refuses it `expired`,
+  every other instance on its instance. A 404 from another instance proves that this instance holds none and runs
+  none; whether X still runs one is for the client to know (after a restart at the same address, X is gone). It assumes that the server's wall clock does not step back to `not_after_ms`
+  or earlier between the lookup and a later admission: the proof survives a backward clock step SMALLER than
+  `server_time_ms − not_after_ms` (a step of exactly that brings the clock to `not_after_ms`, which admission
+  accepts; a client may require the difference to exceed `clock_skew_allowance_ms`). It says nothing about
   earlier runs: an id that ran and was dropped, or that a 400 freed, also answers 404. With `server_time_ms` <=
   `not_after_ms` the 404 proves nothing; the request may still be admitted. The field's presence is the marker: it
   is absent in a 404 from an engine without this guarantee, and a client then has no proof from that 404 (its own
@@ -295,7 +319,9 @@ ranked by k-mers present (before release 10's post-merge fix).
 joined by `\n`, no trailing newline; null when any pair has none; each loaded (graph_path, annotation_path) pair
 counted once, so a pair listed under two names counts once), `composite_rule` (that sentence), and a
 `multigraph` block advertising `envelope_version`, the envelope routes, the selectors per route,
-`traverse_pairs_per_request`, the routes reading `not_after_ms`, `finish_by_ms` and `request_id`, the registry route,
+`traverse_pairs_per_request`, the routes reading `not_after_ms`, `finish_by_ms` and `request_id`,
+`expect_server_instance` (F3b: `["/traverse", "/resolve", "/pattern"]`, the routes that take the field, section 5),
+the registry route,
 `unknown_labels`, `search_cuts`, `resolve_boundary_ties`, `discovery_trace_scale` (`"traced"`, section 7) and
 `max_request_memory_mb` (E5b: the request-wide memory bound of `/traverse`, `--traverse-max-request-memory-mb`, an
 integer in MiB, 0 when off; `SPEC-labeled-traversal-core.md` §5, request budgets), which every `/traverse`
@@ -309,6 +335,10 @@ the requests of each route the server runs at once (`--pattern-max-concurrent`, 
 `--traverse-max-concurrent`), integers, 0 for a route without one; above a cap the request is refused 503 `busy`
 (section 1.1). Every `/traverse` capabilities probe (each entry of its envelope, and a single-graph server's probe)
 states the same object beside its maxima.
+A single-graph server, which states its request registry as `routes.requests`, states `expect_server_instance`
+(the same list) at the top level of `GET /capabilities`, beside `routes.requests` (the pattern of `headers_unique`:
+one reader serves both modes). An engine without the key refuses the field 400 (unknown field), so clients send it
+only where the key lists the route.
 Clients switch on these, never on dates.
 
 ## 9. headers_unique (E22)

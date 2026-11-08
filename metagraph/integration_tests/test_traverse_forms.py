@@ -757,19 +757,28 @@ class AgainstTheBase:
         statement of a count annotation (SPEC §10.3), and on a form whose reads E14 made
         budget-aware under these budgets, memory_bound_soft (its text says the reads are
         charged; what it observed held beyond the account) and, on a row-diff form, the work
-        units with the rows' dependency rows (SPEC §6.8)"""
+        units with the rows' dependency rows (SPEC §6.8). And on every form read budget-aware
+        under a memory budget, the controls included (their reads were budget-aware before
+        E14), memory_bound_soft's effect text: the final_bytes fix (E5b follow-up, train 1;
+        its name-copy bound reworded in train 2) restated what the account leaves out, so the
+        effect is this build's statement and differs from a base before the fix"""
         if path == '.capabilities.counts':
             return form.endswith('int_brwt')
         memory = 'max_memory_mb' in bounds
         work = 'max_work_units' in bounds
         newly = form not in ('row_diff_brwt', 'row_diff_brwt_coord')
         row_diff = form.startswith('row_diff')
+        m = re.match(r'\.results\[0\]\.limitations\[(\d+)\]\.', path)
+        soft = m and answer['results'][0]['limitations'][int(m.group(1))]['kind'] \
+            == 'memory_bound_soft'
+        if soft and memory and path.endswith('.effect'):
+            effect = answer['results'][0]['limitations'][int(m.group(1))]['effect']
+            if CHARGED in effect and "at most twice the seed's labels x the longest" in effect:
+                return True
         charged = newly and (memory or (work and row_diff))
         if not charged:
             return False
-        m = re.match(r'\.results\[0\]\.limitations\[(\d+)\]\.', path)
-        if m and answer['results'][0]['limitations'][int(m.group(1))]['kind'] \
-                == 'memory_bound_soft':
+        if soft:
             return memory
         if re.match(r'\.results\[0\]\.arms\.\w+\.counters\.work_units$', path):
             return row_diff
@@ -813,9 +822,12 @@ class TestTraverseRowDiffFormsAsTheBase(RowDiffFixture, AgainstTheBase, FormsBas
                         seen |= {(form, json.dumps(bounds, sort_keys=True),
                                   re.sub(r'\[\d+\]', '[]', p)) for p in paths}
         self.report(seen)
-        # the controls answer as before under every budget
+        # the controls answer as before under every budget, apart from memory_bound_soft's
+        # effect under a memory budget (the final_bytes fix's statement, by_design)
         self.assertEqual(set(), {p for p in seen
-                                 if p[0] in ('row_diff_brwt', 'row_diff_brwt_coord')})
+                                 if p[0] in ('row_diff_brwt', 'row_diff_brwt_coord')
+                                 and not (p[2] == '.results[].limitations[].effect'
+                                          and 'max_memory_mb' in p[1])})
 
     def test_resolve_as_the_base(self):
         for form in self.FORMS:

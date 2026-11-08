@@ -113,7 +113,8 @@ Json::Value composite_fp_json(std::vector<std::string> index_fps);
  * release's multi-graph routes do, for clients to switch on (never on dates):
  * envelope_version, the routes that answer in the envelope (envelope_routes), the selectors
  * of each route (section 6), traverse_pairs_per_request, the routes that read not_after_ms,
- * finish_by_ms and request_id, the registry's route (requests_route), the flags
+ * finish_by_ms, request_id and expect_server_instance, the registry's route (requests_route),
+ * the flags
  * unknown_labels (section 2), search_cuts (section 3) and resolve_boundary_ties (section 7),
  * discovery_trace_scale, |max_request_memory_mb| (the server's request-wide memory bound of
  * /traverse, --traverse-max-request-memory-mb; 0 = off) and |caps| (max_concurrent, E19), which
@@ -129,6 +130,15 @@ Json::Value multigraph_capabilities_json(uint64_t max_request_memory_mb, const R
  * capabilities probe
  */
 Json::Value max_concurrent_json(const RouteCaps &caps);
+
+/**
+ * expect_server_instance (SPEC-multigraph-envelope.md sections 5 and 8; F3b): the routes that
+ * take the field, ["/traverse", "/resolve", "/pattern"] (/resolve and /pattern with request_id
+ * only); stated by GET /capabilities' multigraph block, and by a single-graph server at the top
+ * level of GET /capabilities, beside routes.requests. An engine without the key refuses the
+ * field on /resolve and /pattern (400, an unknown field)
+ */
+Json::Value expect_server_instance_routes_json();
 
 } // namespace cli
 } // namespace mtg

@@ -297,8 +297,8 @@ one sent, or one that names none, releases nothing:
   ``not_after_ms``, and its ``server_instance`` when it was pinned): the server checks the
   id against what it holds before the expiry, so no copy of the attempt was registered
   there when it was judged, and none can start there later while the server's clock does
-  not step back below ``not_after_ms`` (its check is strict). The 409's
-  ``server_time_ms - not_after_ms`` is the step that survives: where it is within
+  not step back to ``not_after_ms`` or earlier (its check is strict). It survives a backward
+  step smaller than the 409's ``server_time_ms - not_after_ms``: where that is within
   ``clock_skew_allowance_ms`` (the step every release assumes the clock may take), or
   cannot be judged (no ``server_time_ms``, no allowance given), the release states
   ``server_clock_step_back``. It settles nothing: an earlier copy may have run, finished

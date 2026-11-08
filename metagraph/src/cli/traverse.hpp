@@ -603,6 +603,11 @@ void check_resolve_fields(const ResolveRequest &req, uint64_t max_query_bp,
 // CLI entry point: `metagraph traverse [--resolve] -i GRAPH -a ANNOTATION request.json ...`
 int traverse_graph(Config *config);
 
+// The server_instance of a process that answers requests outside a server (the CLI, tests):
+// its own, random, so that an expect_server_instance given to it names another process's and
+// is refused (409 instance_mismatch) on /traverse, /resolve and /pattern alike
+const std::string& local_instance();
+
 } // namespace cli
 } // namespace mtg
 

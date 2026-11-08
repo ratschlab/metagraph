@@ -395,7 +395,7 @@ class ReleaseVerdict:
     |assumptions|: what a release rests on beyond what the server holds (empty: nothing) --
     for `finished` and `expired`, that no copy of the request runs after the release (see
     release_verdict() for the tokens; for `expired` also `server_clock_step_back`: that the
-    server's clock does not step back below not_after_ms), for `clock`,
+    server's clock does not step back to not_after_ms or earlier), for `clock`,
     `uninterruptible_overrun`: that the attempt's run past its bound (up to its next
     delivery check) has ended. The release is the rule's
     either way; a ledger that must not see a request run twice, or must not overlap two
@@ -555,8 +555,9 @@ def release_verdict(answer, sent, *, now_ms=None, clock_skew_allowance_ms=None,
       * on an expired 409 (AttemptExpired, code `expired`): the server checks the id
         against what it holds before not_after_ms, so no copy of the attempt was registered
         there when it was judged, and every later copy is refused there while its clock
-        does not step back below not_after_ms (the server's own condition: its check is
-        strict). The 409's server_time_ms - not_after_ms is the step that survives; the
+        does not step back to not_after_ms or earlier (the server's own condition: its check
+        is strict). It survives a backward step smaller than the 409's server_time_ms -
+        not_after_ms (a step of exactly that admits a copy at not_after_ms); the
         release states `server_clock_step_back` when that margin is within
         clock_skew_allowance_ms (the step every release assumes the server's clock may
         take), or cannot be judged (no server_time_ms, no skew given);
@@ -787,19 +788,22 @@ def _expired(answer, sent, skew=None):
     tokens, notes = [], []
     # Later copies are refused only while the server's clock reads later than not_after_ms
     # (its check is strict and adds no allowance): the release_rule assumes the clock does
-    # not step back below it, and the 409's server_time_ms - not_after_ms is the step it
-    # survives. The step back every release assumes is at most clock_skew_allowance_ms, so
-    # only a margin above that is covered; a margin within it (a request that arrived just
+    # not step back to it or earlier, and it survives a backward step smaller than the 409's
+    # server_time_ms - not_after_ms (a step of exactly that admits a copy at not_after_ms).
+    # The step back every release assumes is at most clock_skew_allowance_ms, so only a
+    # margin above that is covered; a margin within it (a request that arrived just
     # late), or one that cannot be judged, is an assumption of this release of its own
     margin = None if answer.server_time_ms is None else \
         answer.server_time_ms - sent.not_after_ms
     if margin is None or skew is None or margin <= skew:
         tokens.append('server_clock_step_back')
-        notes.append("this server's clock does not step back below not_after_ms, where a later "
-                     'copy would be admitted again; %s' % (
-                         'the 409 states no server_time_ms, so the step it survives is unknown'
+        notes.append("this server's clock does not step back to not_after_ms or earlier, where "
+                     'a later copy would be admitted again; %s' % (
+                         'the 409 states no server_time_ms, so the steps it survives are '
+                         'unknown'
                          if margin is None else
-                         'server_time_ms - not_after_ms (%d ms) is the step it survives, %s'
+                         'it survives a backward step smaller than server_time_ms - '
+                         'not_after_ms (%d ms), %s'
                          % (margin, 'and no clock_skew_allowance_ms was given to compare it '
                             'with' if skew is None else 'within the clock_skew_allowance_ms '
                             '(%d ms) the server\'s clock may step back' % skew)))

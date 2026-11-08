@@ -19,6 +19,7 @@
 #include "cli/server_envelope.hpp"
 #include "common/threads/threading.hpp"
 #include "common/utils/file_utils.hpp"
+#include "tests/source_path.hpp"
 
 
 // Handler capacity (E19, SPEC-labeled-traversal-core.md §10.3, "Handler capacity";
@@ -49,10 +50,11 @@ std::string text(const Json::Value &value) {
 
 // A reference sample, {route, status, note, request?, body}
 Json::Value sample(const std::string &name) {
-    // run from the build directory, like every test reading ../tests/data
-    const std::string path = "../tests/data/multigraph_contract/" + name;
+    // by its absolute path in the source tree: read from whatever directory the test runs in (a
+    // shard directory of unit_tests_parallel too)
+    const std::string path = source_path("tests/data/multigraph_contract/" + name);
     std::ifstream in(path, std::ios::binary);
-    EXPECT_TRUE(in.good()) << path << " not found (run from the build directory)";
+    EXPECT_TRUE(in.good()) << path << " not found";
     const std::string body { std::istreambuf_iterator<char>(in),
                              std::istreambuf_iterator<char>() };
     return parse(body);

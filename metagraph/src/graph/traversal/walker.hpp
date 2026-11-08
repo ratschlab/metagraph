@@ -973,6 +973,13 @@ struct ResourceStop {
 // a sixteenth, at most 64 MiB, for the lookahead
 uint64_t memory_allotments(uint64_t budget);
 
+// |bytes| of an account (its peak, its final, a need measured at a budget) that includes the
+// caches' allotments |allotted|, without them, 0 when they are all of it: what a seed holds
+// whatever its budget's allotments, the same with and without a budget that does not bind
+// (a walked seed's final_bytes, the account per text byte the delivery reserve measures, the
+// work.memory_bytes of a result, memory_budget_holding's own need)
+uint64_t without_allotments(uint64_t bytes, uint64_t allotted);
+
 /**
  * The smallest bounds.max_memory_mb, in bytes (a whole number of MiB), whose admitted account
  * holds |need| bytes measured at a budget whose caches' allotments were |allotted| bytes: the
