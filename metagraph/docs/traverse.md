@@ -92,8 +92,7 @@ stands, with its `seed_id`. Seeds are listed in the order the policy picked them
     "direction": "both",
     "labels": {"max_seed_labels": 1000, "seed_label_kind": "auto"},
     "branching": {"max_label_branches": 0},
-    "bounds": {"max_extension_bp": 5000, "time_budget_ms": 30000},
-    "output": {"sequences": true}
+    "bounds": {"max_extension_bp": 5000, "time_budget_ms": 30000}
   }
 }
 ```
@@ -109,7 +108,6 @@ stands, with its `seed_id`. Seeds are listed in the order the policy picked them
 | `branching.max_label_branches` | how many times a label may continue on more than one successor: an integer, or `"unlimited"` | 0 |
 | `bounds.max_extension_bp` | the extension length per arm | 5000 |
 | `bounds.time_budget_ms` | per seed, at least 1, so a request may take up to its number of seeds times this; clamped to `--traverse-max-time-ms` | `--traverse-max-time-ms` |
-| `output.sequences` | include the segments' sequences | true |
 
 ### The walk
 
