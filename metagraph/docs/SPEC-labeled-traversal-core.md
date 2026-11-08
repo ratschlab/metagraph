@@ -3552,6 +3552,10 @@ search's routes, `POST /pattern` and `GET /pattern/capabilities`, are `SPEC-patt
     answers HTTP 200 in that envelope too (section 1.1 there: the attempt's `usage` at its top level); its other
     statuses are unchanged. In single-graph mode `graph` and `graph_path` are a 400, any other parameter is
     ignored, as before.
+- A `/resolve` discovery's bounds (§4.6): `--resolve-max-discover-labels` (1 000 000) and
+  `--resolve-max-discover-memory-mb` (1024, an integer in [0, 1 048 576] MiB), `0` none for each; stated by both
+  capabilities routes in the `resolve` block's `discovery` (and a multi-graph server's `multigraph` block); the CLI
+  applies neither.
 - Caps: `--traverse-max-time-ms` (default 30 000; also the cap of `/resolve`'s `bounds.time_budget_ms`, which
   it lowers, never sets, and which is never above 899 000 ms on the server, §4.5), `--traverse-max-seeds` (64),
   `--traverse-max-seed-bp` (100 000), `--traverse-max-seed-labels` (10 000) and `--resolve-max-query-bp` (0 = unlimited). `0` means
