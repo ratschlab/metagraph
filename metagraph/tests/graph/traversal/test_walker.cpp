@@ -427,6 +427,28 @@ TYPED_TEST(WalkerTest, CycleJunction) {
     }
 }
 
+// an inverted repeat Y ... rc(Y): on a canonical or primary graph the walk re-enters Y's
+// edges in the opposite orientation and ends with EDGE_REUSE_RC; a basic graph has no such edge
+TYPED_TEST(WalkerTest, InvertedRepeatReusesEdgesInReverse) {
+    using Graph = typename TypeParam::first_type;
+    using Annotation = typename TypeParam::second_type;
+    auto b = clean_blocks({ 30, 25, 20, 30 }, 77);
+    const std::string &L = b[0], &Y = b[1], &B = b[2], &E = b[3];
+    const std::string S = L + Y + B + rc(Y) + E;
+    for (auto mode : all_modes()) {
+        auto anno = build_anno_graph<Graph, Annotation>(kK, { S }, { "A" }, mode);
+        auto res = run(*anno, L, { "A" }, strategy(Strategy::kUnlimited));
+        const ArmResult &right = res.arms[kRight];
+        check_invariants(right);
+        EXPECT_EQ(0u, count_ends(right, EndReason::EDGE_REUSE)) << mode;
+        if (mode == DeBruijnGraph::BASIC) {
+            EXPECT_EQ(0u, count_ends(right, EndReason::EDGE_REUSE_RC)) << mode;
+        } else {
+            EXPECT_GE(count_ends(right, EndReason::EDGE_REUSE_RC), 1u) << mode;
+        }
+    }
+}
+
 // a homopolymer self-loop: each loop step re-takes the loop edge
 TYPED_TEST(WalkerTest, SelfLoop) {
     using Graph = typename TypeParam::first_type;
