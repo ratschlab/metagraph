@@ -1,6 +1,7 @@
 #ifndef __COORD_TO_HEADER_HPP__
 #define __COORD_TO_HEADER_HPP__
 
+#include <functional>
 #include <string>
 #include <vector>
 
@@ -76,6 +77,16 @@ class CoordToHeader {
     uint64_t num_kmers(Column column) const { return coord_offsets_[column].size(); }
     // FASTA headers of the sequences in a column, indexed by seq_id.
     const std::vector<std::string>& get_headers(Column column) const { return headers_[column]; }
+
+    /**
+     * The records of |headers| whose header repeats an earlier record's, in record order:
+     * |callback|(first, repeat) with the 0-based indices of the first occurrence and of the
+     * repeat, once per repeat, until the callback returns false. One pass with a hash set over
+     * the record indices (no header is copied), so a column of 33M headers is checked in O(n).
+     * `annotate --index-header-coords` refuses a column whose headers are not distinct.
+     */
+    static void find_duplicate_headers(const std::vector<std::string> &headers,
+                                       const std::function<bool(size_t, size_t)> &callback);
 
     static constexpr auto kExtension = ".seqs";
 

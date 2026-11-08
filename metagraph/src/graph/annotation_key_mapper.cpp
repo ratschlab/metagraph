@@ -5,12 +5,14 @@
 #include <stdexcept>
 
 #include "representation/canonical_dbg.hpp"
+#include "representation/hash/dbg_sshash.hpp"
 
 namespace mtg::graph {
 
 AnnotationKeyMapper::AnnotationKeyMapper(const DeBruijnGraph &graph)
       : graph_(graph), mode_(graph.get_mode()),
-        canonical_(dynamic_cast<const CanonicalDBG*>(&graph)) {
+        canonical_(dynamic_cast<const CanonicalDBG*>(&graph)),
+        sshash_(dynamic_cast<const DBGSSHash*>(&graph)) {
     if (mode_ == DeBruijnGraph::PRIMARY)
         throw std::invalid_argument("Wrap PRIMARY graphs in CanonicalDBG before mapping annotations");
 }
@@ -18,6 +20,8 @@ AnnotationKeyMapper::AnnotationKeyMapper(const DeBruijnGraph &graph)
 auto AnnotationKeyMapper::canonical_key(node_index node, std::string_view kmer) const -> node_index {
     if (canonical_)
         return canonical_->get_base_node(node);
+    if (sshash_)
+        return sshash_->get_base_node(node);
     assert(kmer.size() == graph_.get_k());
     node_index result = DeBruijnGraph::npos;
     graph_.map_to_nodes(kmer, [&](node_index key) { result = key; });

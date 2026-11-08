@@ -4,6 +4,7 @@
 #include "common/seq_tools/reverse_complement.hpp"
 #include "graph/annotation_key_mapper.hpp"
 #include "graph/representation/canonical_dbg.hpp"
+#include "graph/representation/hash/dbg_sshash.hpp"
 
 
 namespace {
@@ -66,6 +67,17 @@ TEST(AnnotationKeyMapper, CanonicalGraphMapsBothStrandsToOneKey) {
     auto graph = build_graph_batch<DBGSuccinct>(5, { kSequence }, DeBruijnGraph::CANONICAL);
     ASSERT_TRUE(AnnotationKeyMapper(*graph).needs_sequence());
     check_reverse_complement_keys(*graph);
+}
+
+TEST(AnnotationKeyMapper, CanonicalSSHashKeysAreStoredNodes) {
+    auto graph = build_graph_batch<DBGSSHash>(5, { kSequence }, DeBruijnGraph::CANONICAL);
+    AnnotationKeyMapper mapper(*graph);
+    ASSERT_FALSE(mapper.needs_sequence());
+    check_reverse_complement_keys(*graph);
+
+    // Without spelling, the keys must match the nodes found by mapping each k-mer
+    auto path = map_to_nodes_sequentially(*graph, kSequence);
+    EXPECT_EQ(map_to_nodes(*graph, kSequence), mapper.keys(path));
 }
 
 TEST(AnnotationKeyMapper, WrappedPrimaryGraphMapsBothStrandsToOneKey) {

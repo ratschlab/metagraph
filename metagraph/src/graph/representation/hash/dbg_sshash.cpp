@@ -22,18 +22,13 @@
 #include "common/algorithms.hpp"
 #include "common/threads/threading.hpp"
 #include "common/utils/file_utils.hpp"
+#include "common/unix_tools.hpp"
 #include "kmer/kmer_extractor.hpp"
+#include "seq_io/sequence_io.hpp"
 
 
 namespace mtg {
 namespace graph {
-
-#if _PROTEIN_GRAPH
-static constexpr uint16_t bits_per_char = sshash::aa_uint_kmer_t<uint64_t>::bits_per_char;
-#else
-static constexpr uint16_t bits_per_char = sshash::dna_uint_kmer_t<uint64_t>::bits_per_char;
-#endif
-
 
 const std::string DBGSSHash::alphabet_ = kmer::KmerExtractor2Bit().alphabet;
 
@@ -52,16 +47,14 @@ DBGSSHash::DBGSSHash(size_t k, Mode mode) : k_(k), num_nodes_(0), mode_(mode) {
     if (mode == PRIMARY)
         mode_ = CANONICAL;
 
-    size_t odd_k = (k_ | 1);
-
-    if (odd_k * bits_per_char <= 64) {
+    if (k_ <= kmer_t<KmerInt64>::max_k) {
         dict_.emplace<sshash::dictionary<kmer_t<KmerInt64>, sshash::decoded_offsets>>();
-    } else if (odd_k * bits_per_char <= 128) {
+    } else if (k_ <= kmer_t<KmerInt128>::max_k) {
         dict_.emplace<sshash::dictionary<kmer_t<KmerInt128>, sshash::decoded_offsets>>();
-    } else if (odd_k * bits_per_char <= 256) {
+    } else if (k_ <= kmer_t<KmerInt256>::max_k) {
         dict_.emplace<sshash::dictionary<kmer_t<KmerInt256>, sshash::decoded_offsets>>();
     } else {
-        common::logger->error("k too big: {} > {}", odd_k, 256 / bits_per_char);
+        common::logger->error("k too big: {} > {}", k_, kmer_t<KmerInt256>::max_k);
         throw std::length_error("k fail");
     }
 }
@@ -175,6 +168,29 @@ generate_succ_pred(const DBGSSHash& graph, uint64_t num_nodes) {
                            has_duplicates.load());
 }
 
+// Total length of the sequences in a FASTA file, read like SSHash reads it:
+// gzipped if the name ends with .gz, plain otherwise
+static uint64_t count_input_chars(const std::string& input_filename) {
+    using namespace seq_io;
+
+    std::ifstream file(input_filename, std::ios::binary);
+    if (!file)
+        throw std::runtime_error("Cannot read SSHash input " + input_filename);
+
+    boost::iostreams::filtering_istream in;
+    if (std::string_view(input_filename).ends_with(".gz"))
+        in.push(boost::iostreams::gzip_decompressor(), 1 << 20);
+    in.push(file, 1 << 20);
+
+    std::unique_ptr<kseq_t, decltype(&kseq_destroy)> read_stream(
+            kseq_init(compFile::open_read(in)), kseq_destroy);
+    uint64_t num_chars = 0;
+    while (kseq_read(read_stream.get()) >= 0) {
+        num_chars += read_stream->seq.l;
+    }
+    return num_chars;
+}
+
 DBGSSHash::DBGSSHash(const std::string& input_filename,
                      size_t k,
                      Mode mode,
@@ -190,9 +206,18 @@ DBGSSHash::DBGSSHash(const std::string& input_filename,
     sshash::build_configuration build_config;
     build_config.k = k;
 
+    // the minimizer length depends on the input size, so count it if not given
+    bool num_chars_counted = !num_chars;
+    if (num_chars_counted) {
+        Timer timer;
+        num_chars = count_input_chars(input_filename);
+        common::logger->trace("Counted {} characters in {} in {} sec",
+                              num_chars, input_filename, timer.elapsed());
+    }
+
     // use a value of m recommended here:
     // https://twitter.com/giulio_pibiri/status/1803417277213114501
-    // otherwise, use the next odd value greater than or equal to floor(k / 2)
+    // for an empty input, use the next odd value greater than or equal to floor(k / 2)
     build_config.m
             = std::min({ (num_chars > 0
                                   ? uint64_t(ceil(log(static_cast<double>(num_chars))
@@ -207,6 +232,9 @@ DBGSSHash::DBGSSHash(const std::string& input_filename,
                                  dict_),
                          uint64_t(k - 2) })
             | 1;
+    common::logger->info("SSHash minimizer length m = {} for {} input characters ({})",
+                         build_config.m, num_chars,
+                         num_chars_counted ? "counted" : "given");
 
     build_config.verbose = common::get_verbose();
     build_config.num_threads = get_num_threads();
@@ -369,6 +397,14 @@ DBGSSHash::node_index DBGSSHash::reverse_complement(node_index node) const {
     std::string rc_str_kmer(str_kmer);
     ::reverse_complement(rc_str_kmer.begin(), rc_str_kmer.end());
     return str_kmer != rc_str_kmer ? node + dict_size() : node;
+}
+
+DBGSSHash::node_index DBGSSHash::get_base_node(node_index node) const {
+    if (node == npos)
+        return npos;
+
+    assert(in_graph(node));
+    return node > dict_size() ? node - dict_size() : node;
 }
 
 uint64_t DBGSSHash::num_nodes() const {

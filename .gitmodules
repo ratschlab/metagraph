@@ -74,3 +74,6 @@
 [submodule "metagraph/external-libraries/fmt"]
 	path = metagraph/external-libraries/fmt
 	url = https://github.com/fmtlib/fmt.git
+[submodule "tools/writing-rules"]
+	path = tools/writing-rules
+	url = https://github.com/ratschlab/writing-rules.git

@@ -33,6 +33,8 @@ class DBGSSHash : public DeBruijnGraph {
                                 sshash::dictionary<kmer_t<KmerInt256>, sshash::decoded_offsets>>;
 
     explicit DBGSSHash(size_t k, Mode mode = BASIC);
+    // |num_chars| is the number of input characters the minimizer length is chosen
+    // from; 0 counts them in the input.
     // |ram_limit_gb| (in GB) is SSHash's construction budget, never below its default
     DBGSSHash(const std::string& input_filename,
               size_t k,
@@ -121,6 +123,8 @@ class DBGSSHash : public DeBruijnGraph {
     const dict_t& data() const { return dict_; }
 
     node_index reverse_complement(node_index node) const;
+    // The stored node of a k-mer or of its reverse complement
+    node_index get_base_node(node_index node) const;
 
     void adjacent_outgoing_nodes(node_index node,
                                  const std::function<void(node_index)>& callback) const override;

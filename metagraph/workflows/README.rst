@@ -2,7 +2,7 @@
 metagraph_workflows
 ===================
 
-This package provides workflows for the `metagraph framework
-<https://metagraph.ethz.ch>`_
+This package provides workflows for the `MetaGraph framework
+<https://metagraph.ethz.ch>`_.
 
-See the `corresponding section <https://metagraph.ethz.ch/static/docs/workflows.html>`_ in the metagraph documentation.
+See the `workflow documentation <https://metagraph.ethz.ch/static/docs/workflows.html>`_ for installation and usage.

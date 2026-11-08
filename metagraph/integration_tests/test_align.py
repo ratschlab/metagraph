@@ -758,9 +758,9 @@ class TestAlignCoordToHeader(TestingBase):
 
         self.assertEqual(rows[0][0], 'q_concat')
         self.assertEqual(rows[0][6], '8S16=')
-        # Range 8 nt in seq1 (local 5-12) + 8 nt in seq2 (local 1-8).
-        # seq1 -> 12 nt, seq2 -> 12 nt.
-        self.assertEqual(rows[0][8], 'seq1/12:5-12;seq2/12:1-8')
+        # seq1 k-mers 4-7 and all of seq2's k-mers: the shared four bases
+        # count in both records.
+        self.assertEqual(rows[0][8], 'seq1/12:5-12;seq2/12:1-12')
 
     @parameterized.expand(COORD_ANNO_TYPES)
     def test_align_json_labels_array(self, anno_repr):
@@ -896,11 +896,11 @@ class TestAlignCoordToHeader(TestingBase):
         self.assertEqual(records[0]['annotation']['cigar'], '8S16=')
         by_sample = {entry['sample']: entry for entry in records[0]['annotation']['labels']}
         self.assertEqual(set(by_sample), {'seq1', 'seq2'})
-        # 8 nt in seq1 (local 5-12) + 8 nt in seq2 (local 1-8).
+        # Both records include the shared four bases in their covered range.
         self.assertEqual(by_sample['seq1']['nt_length'], 12)
         self.assertEqual(by_sample['seq1']['nt_coords'], '5-12')
         self.assertEqual(by_sample['seq2']['nt_length'], 12)
-        self.assertEqual(by_sample['seq2']['nt_coords'], '1-8')
+        self.assertEqual(by_sample['seq2']['nt_coords'], '1-12')
 
     @parameterized.expand(COORD_ANNO_TYPES)
     def test_align_missing_seqs_warning(self, anno_repr):

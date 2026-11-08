@@ -80,6 +80,28 @@ TEST(Utils, call_rows) {
     ASSERT_EQ(7u, i);
 }
 
+TEST(Utils, ValidUtf8) {
+    const std::vector<std::pair<std::string, bool>> cases = {
+        { "abc", true },
+        { "caf\xC3\xA9", true },
+        { "\xF0\x9F\x98\x80" "z", true },
+        { "bad\xEF\xBF\xBD", true },          // U+FFFD itself is valid
+        { "", true },
+        { "\xC0" "abc", false },                 // C0: never a lead byte
+        { "\xE9" "ab", false },                  // Latin-1: a lead without its tail
+        { "\xED\xA0\x80", false },              // a surrogate
+        { "\xE0\x80\x80", false },              // overlong
+        { "\xF4\x90\x80\x80", false },          // beyond U+10FFFF
+        { "\xF0\x9F\x98", false },              // truncated
+        { "\xE2\x82" "x", false },
+        { "bad\xFF", false },
+        { "\x80\x80", false },
+    };
+    for (const auto &[raw, valid] : cases) {
+        EXPECT_EQ(valid, utils::valid_utf8(raw)) << raw;
+    }
+}
+
 TEST(Utils, TempFileInitialize) {
     utils::TempFile tmp;
 }
@@ -208,6 +230,7 @@ TEST(get_filetype, VCF) {
     EXPECT_EQ("VCF", file_format("file.vcf"));
     EXPECT_EQ("VCF", file_format("file.VCF.gz"));
     EXPECT_EQ("VCF", file_format("file.vcf.gz"));
+    EXPECT_EQ("VCF", file_format("file.vcf.zst"));
 }
 
 TEST(get_filetype, FASTA) {
@@ -215,6 +238,7 @@ TEST(get_filetype, FASTA) {
     EXPECT_EQ("FASTA", file_format("file.fasta"));
     EXPECT_EQ("FASTA", file_format("file.FASTA.gz"));
     EXPECT_EQ("FASTA", file_format("file.fasta.gz"));
+    EXPECT_EQ("FASTA", file_format("file.fasta.zst"));
 }
 
 TEST(get_filetype, FASTQ) {
@@ -223,6 +247,7 @@ TEST(get_filetype, FASTQ) {
     EXPECT_EQ("FASTQ", file_format("file.fastq"));
     EXPECT_EQ("FASTQ", file_format("file.fq.gz"));
     EXPECT_EQ("FASTQ", file_format("file.FQ.gz"));
+    EXPECT_EQ("FASTQ", file_format("file.fq.zst"));
 }
 
 TEST(get_filetype, IncorrectFiletype) {
@@ -231,6 +256,7 @@ TEST(get_filetype, IncorrectFiletype) {
     EXPECT_EQ("", file_format("bz2"));
     EXPECT_EQ("", file_format("file.gz"));
     EXPECT_EQ("", file_format("fasta.gz"));
+    EXPECT_EQ("", file_format("file.zst"));
 }
 
 bool colexicographically_greater(const std::string &s1, const std::string &s2) {

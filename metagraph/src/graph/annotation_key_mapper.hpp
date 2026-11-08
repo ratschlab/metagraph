@@ -9,6 +9,7 @@
 namespace mtg::graph {
 
 class CanonicalDBG;
+class DBGSSHash;
 
 // Map oriented graph nodes to the node IDs whose rows carry their annotation.
 // IDs remain one-based here; AnnotatedDBG::graph_to_anno_index converts to rows.
@@ -18,7 +19,7 @@ class AnnotationKeyMapper {
     explicit AnnotationKeyMapper(const DeBruijnGraph &graph);
 
     bool needs_sequence() const {
-        return mode_ == DeBruijnGraph::CANONICAL && !canonical_;
+        return mode_ == DeBruijnGraph::CANONICAL && !canonical_ && !sshash_;
     }
     // For a nonzero node, supply its k-mer spelling when needs_sequence() is true.
     node_index key(node_index node, std::string_view kmer = {}) const {
@@ -36,6 +37,7 @@ class AnnotationKeyMapper {
     const DeBruijnGraph &graph_;
     DeBruijnGraph::Mode mode_;
     const CanonicalDBG *canonical_;
+    const DBGSSHash *sshash_;
 };
 
 } // namespace mtg::graph

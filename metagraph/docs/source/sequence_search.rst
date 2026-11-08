@@ -5,9 +5,9 @@ Sequence search
 
 .. attention:: This page is in development
 
-MetaGraph allows for query sequences to be searched against the graph alone, returning
-the closest path in the graph, or against the annotated graph, returning a set of associated
-labels. These are referred to as the *align* and *query* regimes, respectively.
+Use ``metagraph align`` to find matching graph paths and report their alignments.
+Use ``metagraph query`` to find labels associated with matching k-mers, or add
+``--align`` to query labels after aligning the sequence. See :ref:`query_index` for label queries.
 
 Align sequences to the graph
 -----------------------------
@@ -15,14 +15,13 @@ Align sequences to the graph
 Sequence alignment features can be accessed via :code:`metagraph align`.
 By default, a sequence of graph paths is output which form a disjoint cover of the
 query sequence. Depending on the desired level of sensitivity, alignment options range
-from simply finding exact k-mer matches to performing an alignment to finding a
-best-scoring path in the graph.
+from exact k-mer matching to finding an approximate best-scoring path in the graph.
 
 Exact k-mer matching
 ^^^^^^^^^^^^^^^^^^^^
 Also referred to as pseudo-alignment, this feature is accessed via the additional :code:`--map` flag.
 This mode extracts the sequence of k-mers from a query sequence and reports the indices
-of the corresponding nodes in the graph. An example command may be::
+of the corresponding nodes in the graph. For example::
 
     metagraph align --map -i MYGRAPH.dbg MYREADS.fa
 
@@ -38,7 +37,7 @@ flags are available.
 
 Sequence-to-graph alignment
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^
-If the :code:`--map` flag is not used, this enables sequence-to-graph alignment, approximately finding the best-matching path in the graph to the query sequence. Alongside this path, this mode also returns an alignment score and a CIGAR string describing the edits needed to transform the spelling of the graph path to the query sequence. An example command may be::
+If the :code:`--map` flag is not used, this enables sequence-to-graph alignment, approximately finding the best-matching path in the graph to the query sequence. Alongside this path, this mode also returns an alignment score and a CIGAR string describing the edits needed to transform the spelling of the graph path to the query sequence. For example::
 
     metagraph align -i MYGRAPH.dbg MYREADS.fa
 
@@ -47,7 +46,7 @@ The output of the query is in TSV format, with one line per query sequence, wher
 1. Query name
 2. Query sequence
 3. Strand
-4. Reference sequence (the spelling of the matched path
+4. Reference sequence (the spelling of the matched path)
 5. Alignment score
 6. Number of exact matches
 7. CIGAR string-like alignment summary
