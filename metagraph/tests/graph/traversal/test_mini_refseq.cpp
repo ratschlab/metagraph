@@ -65,7 +65,7 @@ std::vector<std::pair<std::string, std::string>> read_records(const std::string 
     std::sort(files.begin(), files.end());
     std::vector<std::pair<std::string, std::string>> records;
     for (const auto &path : files) {
-        seq_io::read_fasta_file_critical(path, [&](kseq_t *read) {
+        seq_io::read_fasta_file_critical(path, [&](seq_io::kseq_t *read) {
             records.emplace_back(read->name.s, read->seq.s);
         });
     }
@@ -74,7 +74,7 @@ std::vector<std::pair<std::string, std::string>> read_records(const std::string 
 
 std::string read_query() {
     std::string seq;
-    seq_io::read_fasta_file_critical(kQueryFasta, [&](kseq_t *read) { seq += read->seq.s; });
+    seq_io::read_fasta_file_critical(kQueryFasta, [&](seq_io::kseq_t *read) { seq += read->seq.s; });
     return seq;
 }
 
