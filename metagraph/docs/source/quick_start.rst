@@ -868,13 +868,16 @@ Pass the graph that the annotation was built for with ``--remap-graph`` and the 
     metagraph transform_anno -v -p 36 --remap-graph graph.dbg -i graph.sshashdbg \
                              -o moved annotation.row_diff_brwt.annodbg
 
-The result keeps the labels, the BRWT tree and the relations of every k-mer.
+The result keeps the labels and the relations of every k-mer, and without conversion also the BRWT tree.
 Rows without a k-mer, such as the dummy nodes of a succinct graph, are dropped.
 The command stops with an error if the graphs differ in any k-mer.
 For ``row_diff_brwt``, it also stops if a row that is not an anchor would lose its successor.
 
 A ``row_diff_brwt`` annotation can be converted to ``row_diff_flat`` or ``row_diff_disk`` in the same run with ``--anno-type``.
-This skips writing and loading the intermediate ``row_diff_brwt`` file.
+This skips writing and loading the intermediate ``row_diff_brwt`` file::
+
+    metagraph transform_anno -v -p 36 --remap-graph graph.dbg -i graph.sshashdbg \
+                             --anno-type row_diff_disk -o moved annotation.row_diff_brwt.annodbg
 
 The command saves the matching of rows as ``moved.rowmap``.
 A repeated run with the same output name reuses this file and skips matching the rows again.
