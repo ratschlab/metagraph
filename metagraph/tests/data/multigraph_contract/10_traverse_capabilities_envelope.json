@@ -1,7 +1,7 @@
 {
  "route": "GET /traverse/capabilities",
  "status": 200,
- "note": "E3: without ?graph= every pair of the index (up to max_graphs_without_selection) in the envelope; ?graph=&graph_path=&annotation_path= (E12) select one pair, which answers in a one-entry envelope. Each probe states the server's maxima, max_request_memory_mb (E5b) and max_concurrent (E19: the caps on the requests of each long route run at once, 0 = none) among them.",
+ "note": "E3: without ?graph= every pair of the index (up to max_graphs_without_selection) in the envelope; ?graph=&graph_path=&annotation_path= (E12) select one pair, which answers in a one-entry envelope. Each probe states the server's maxima, max_request_memory_mb (E5b) and max_concurrent (E19: the caps on the requests of each long route run at once, 0 = none) among them, and (H1, train 3) the caps on a request's counts, max_explicit_labels, max_extra_labels and max_cost_entries (10,000 each by default; 0 = unlimited), the values of a real run of the H1 binary.",
  "body": {
   "envelope_version": 1,
   "route": "/traverse/capabilities",
@@ -152,6 +152,9 @@
      "/resolve": 0,
      "/traverse": 0
     },
+    "max_cost_entries": 10000,
+    "max_explicit_labels": 10000,
+    "max_extra_labels": 10000,
     "max_memory_mb": 0,
     "max_query_bp": 10000,
     "max_request_memory_mb": 0,
@@ -453,6 +456,9 @@
      "/resolve": 0,
      "/traverse": 0
     },
+    "max_cost_entries": 10000,
+    "max_explicit_labels": 10000,
+    "max_extra_labels": 10000,
     "max_memory_mb": 0,
     "max_query_bp": 10000,
     "max_request_memory_mb": 0,

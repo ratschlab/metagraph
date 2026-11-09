@@ -1,0 +1,19 @@
+{
+ "route": "POST /traverse",
+ "status": 413,
+ "note": "H1 (train 3; lane H1): a body longer than --max-request-body-mb (2 MiB here, the owner's planned cap; staging ran 256) is refused 413 Payload Too Large before it is read, on every route (/search and /align too: it replaces the closed connection of the existing cap, no new limit), with Connection: close and the body {error, code: \"body_too_large\", max_request_body_mb}, written in this order. A real run: the request was sent as its header alone (Content-Length 3145728) and the 413 read before any byte of the body was sent; the same body sent whole by a client that reads after sending (Python requests) got the same 413 (the server discards what the client still sends, up to 30 s, and then closes). A chunked body is read up to the cap and refused at the chunk that passes it, its error \"the request body (chunked) grew past what this server reads, 2 MiB (--max-request-body-mb): the rest was not read and nothing of it ran\". Nothing of the request ran or was registered: GET /requests/svc-trv-h1-27 answered 404. GET /capabilities states the cap and this shape (request_intake, sample 12).",
+ "request": {
+  "method": "POST",
+  "path": "/traverse",
+  "headers": {
+   "Content-Type": "application/json",
+   "Content-Length": "3145728"
+  },
+  "body": "not sent: the header alone, then the answer was read (the body: sample 05's request with attempt_id svc-trv-h1-27 and a member \"padding\" filling it to 3 MiB)"
+ },
+ "body": {
+  "error": "the request body (3145728 bytes) is larger than this server reads, 2 MiB (--max-request-body-mb): it was not read and nothing of it ran",
+  "code": "body_too_large",
+  "max_request_body_mb": 2
+ }
+}

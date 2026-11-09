@@ -4515,15 +4515,20 @@ class TestPatternRegression(TestingBase):
         # `headers_unique` (whether a header label names one record, SPEC-multigraph-envelope.md
         # "headers_unique (E22)"; test_multigraph.py checks its values) is a gain over every base,
         # and so are `expect_server_instance` (F3b: the routes that take the field, at the top level
-        # of a single-graph server, SPEC-multigraph-envelope.md section 8) and `pair_summary` (the
-        # capability profile of the pair, E17, SPEC-multigraph-envelope.md section 8.1)
-        only_gains(a, b, {'headers_unique', 'expect_server_instance', 'pair_summary'} | (
+        # of a single-graph server, SPEC-multigraph-envelope.md section 8), `pair_summary` (the
+        # capability profile of the pair, E17, SPEC-multigraph-envelope.md section 8.1) and
+        # `request_intake` (H1: the body limit, the value count and their refusals' shapes, at the
+        # top level of a single-graph server, SPEC-multigraph-envelope.md section 8)
+        only_gains(a, b, {'headers_unique', 'expect_server_instance', 'pair_summary',
+                          'request_intake'} | (
             set() if base_pattern else {
                 'pattern', 'resolve', 'in_ram', 'graph_summary', 'max_graphs_without_selection',
                 'max_request_body_mb'}), 'members')
         self.assertIn('headers_unique', b)
         self.assertEqual(['/traverse', '/resolve', '/pattern'], b['expect_server_instance'])
         self.assertIn('pair_summary', b)
+        self.assertEqual((None, 262144), (b['request_intake']['max_request_body_mb'],
+                                          b['request_intake']['max_request_json_values']))
         only_gains(a['routes'], b['routes'],
                    {'requests'} | (set() if base_pattern else {'pattern', 'pattern_capabilities'}),
                    'routes')
@@ -4547,8 +4552,9 @@ class TestPatternRegression(TestingBase):
         # k-mers, release 10's post-merge fix, SPEC-multigraph-envelope.md section 7) and
         # max_request_memory_mb (E5b: the request-wide memory bound of /traverse, 0 when off,
         # SPEC-labeled-traversal-core.md §5) and max_concurrent (E19: the caps on the requests of
-        # each long route run at once, 0 when none, §10.3), and against a base before the pattern
-        # search the gate block and the two blocks above
+        # each long route run at once, 0 when none, §10.3) and the request's counts of H1
+        # (max_explicit_labels, max_extra_labels, max_cost_entries: 10,000 each by default, §10.3),
+        # and against a base before the pattern search the gate block and the two blocks above
         a = without_reworded(without_instance(self.base.get('traverse/capabilities').json()))
         b = without_reworded(without_instance(self.new.get('traverse/capabilities').json()))
         without_poll_stride(a)
@@ -4556,12 +4562,15 @@ class TestPatternRegression(TestingBase):
         without_reserve_defaults(a)
         without_reserve_defaults(b)
         new_caps = self.new.get('capabilities').json()
-        gains = {'discovery_trace_scale', 'max_request_memory_mb', 'max_concurrent'} | (
+        gains = {'discovery_trace_scale', 'max_request_memory_mb', 'max_concurrent',
+                 'max_explicit_labels', 'max_extra_labels', 'max_cost_entries'} | (
             set() if base_pattern else {'pattern', 'resolve', 'in_ram'})
         only_gains(a, b, gains, 'probe')
         self.assertEqual('traced', b['discovery_trace_scale'])
         self.assertEqual(0, b['max_request_memory_mb'])
         self.assertEqual({'/pattern': 0, '/resolve': 0, '/traverse': 0}, b['max_concurrent'])
+        self.assertEqual((10000, 10000, 10000), (b['max_explicit_labels'], b['max_extra_labels'],
+                                                 b['max_cost_entries']))
         self.assertEqual(gate_block(new_caps['pattern']), b['pattern'])
         self.assertEqual(new_caps['resolve'], b['resolve'])
         self.assertEqual(new_caps['in_ram'], b['in_ram'])

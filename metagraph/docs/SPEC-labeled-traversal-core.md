@@ -370,8 +370,44 @@ deadline. `src/cli/traverse.cpp` `process_resolve_request`, `src/graph/traversal
   (§10.2). Before, these routes and the CLI took jsoncpp's defaults: a comment, a trailing comma and text after
   the value were accepted, a duplicated member kept its last value, and a body nested deeper than 1,000 was a 400
   with jsoncpp's text alone (`Exceeded stackLimit in readValue().`, now after the prefix).
+  *H1 (train 3; review 5 finding #2):* before it is parsed the body's **JSON values are counted** — the root,
+  each array element and each member's value (a member's name is none; an empty array or object holds none) — in
+  the same scan as the comment check, and a body with more than `--max-request-json-values` (§10.3; 262,144 by
+  default, 0 = unlimited) is refused **400** `{"error": "the request body holds more than N JSON values
+  (--max-request-json-values): it was not parsed and nothing of it ran; send fewer values (split the request)",
+  "code": "too_many_json_values", "max_request_json_values": N}`, its members written in this order (error, code,
+  the cap), on `/traverse`, `/resolve`, `POST /traverse/cancel` and `/pattern` alike: jsoncpp never builds its
+  tree, nothing is registered (no `usage`, an id not held). It comes where a fault of the body's JSON comes. A
+  body longer than `--max-request-body-mb` is refused **413** `body_too_large` before it is read (§10.3), on
+  every route. *H1, the review's S1:* the same scan refuses a **raw control character** (a byte below 0x20)
+  inside a string, which RFC 8259 §7 requires escaped: the body's JSON fault, `Bad json received: a control
+  character (byte 0x01) inside a string at byte 123: RFC 8259 requires it escaped (\u0001)` (on `/pattern` its
+  `invalid_request`, `request: not JSON: ...`). jsoncpp kept such a byte, and an answer quoting the string wrote
+  it as `\u00XX`, 6 bytes for 1. *GPT review 6, finding 2:* the scan also requires every string, member names
+  included, to be **well-formed UTF-8** (RFC 8259 §8.1, RFC 3629: a lead byte C2-DF, E0-EF or F0-F4 with its
+  continuation bytes, no overlong form, no surrogate, nothing above U+10FFFF, no sequence cut short) and every
+  `\u` escape of a surrogate to be half of a pair (`\ud800`-`\udbff` followed at once by `\udc00`-`\udfff`):
+  `Bad json received: invalid UTF-8 (byte 0xff) inside a string at byte 123: RFC 8259 requires UTF-8`, the first
+  byte of the sequence and its offset, and `Bad json received: an unpaired surrogate escape (\udc00) inside a
+  string at byte 123: a code point above U+FFFF is written as a high surrogate escape (\ud800-\udbff) followed by
+  a low one (\udc00-\udfff)`, the escape as the client wrote it (a lone high surrogate, which jsoncpp refused in
+  its own words, gets this text too). jsoncpp kept any byte, and its writer wrote a byte 0xF8-0xFF or a lead byte
+  cut by the string's end as `\ufffd`, 6 bytes for 1, and let other invalid lead bytes swallow up to three bytes,
+  so that distinct names echoed alike; it decoded a lone low surrogate escape to bytes that are no UTF-8 and read
+  `\ud800\u0041` as U+10041. The scan refuses at the first fault it meets in the text: a comment, a control
+  character, invalid UTF-8, an unpaired surrogate escape, or the value past the count. An escaped control
+  character (`\u0001`, `\n`), raw bytes from 0x20 to 0x7F, valid UTF-8 and every other `\u` escape (valid pairs
+  included) are read as before.
 - **Strict validation.** Unknown keys, wrong types, out-of-range values and unsupported `schema_version` are
-  rejected with a message naming the field; nothing is silently weakened. Defaults are filled in and the
+  rejected with a message naming the field; nothing is silently weakened. *H1:* every error text that quotes a
+  client's string (a label, a member name, a graph name or path, a parameter, a predicate name, `release`,
+  `seed_id`, and the JSON reader's own "Duplicate key: '...'" and "'...' is not a number.") writes it whole when
+  it is at most 1,024 bytes long, and otherwise as its first 1,024 bytes, cut on
+  a UTF-8 character boundary, followed by `... (N bytes)` (N its length) inside the quotes: `request: unknown
+  field 'kkk...kkk... (5000 bytes)'`. The threshold is the name's own length, not the message's: a name of at
+  most 1,024 bytes is quoted exactly as before, so a client matching "Label not found in the annotation:
+  '<name>'" against a label it sent is never affected, and a clipped name (longer than 1,024 bytes as written)
+  never equals a sent label. Lists in answers (`unknown_labels`, `dropped_labels`) are never clipped. Defaults are filled in and the
   **normalized strategy** is echoed. If the server clamps a bound (§10.3) the echo carries
   `clamped: [{field, requested, effective}]`, each value in its knob's type (an integer for an integer knob such
   as `labels.max_seed_labels`, a number for `bounds.time_budget_ms`).
@@ -460,7 +496,7 @@ deadline. `src/cli/traverse.cpp` `process_resolve_request`, `src/graph/traversal
   each seed left unstarted (its `final_bytes`: the fixed part of a result and its `seed_id`, §5, a few KB of
   text in fact); two request slots, 2R plus their soft excess, where without the bound n seeds could hold n × B.
   Beside that account a server process holds what no account counts: the request's body while it is read and
-  parsed (bounded only by `--max-request-body-mb`, `max_request_body_mb`; 0 = unlimited, the default), the
+  parsed (bounded by `--max-request-body-mb` and `--max-request-json-values`, below: *the intake bound*), the
   request's structures outside the account (the oracle's node-first cache for backward steps on a succinct graph,
   the parsed request, its registry entry), the allocator's retained free memory, and what `memory_bound_soft`
   lists as not observed (§7.3). *E5b's verification sweep* (2026-11-07; per-seed budgets of 64 MiB to 4 GiB under
@@ -475,8 +511,40 @@ deadline. `src/cli/traverse.cpp` `process_resolve_request`, `src/graph/traversal
   1-character labels refused in the seed phase; the JSON reader alone up to 52 times; 6-character labels 25 to 28
   times; long sequences 5 to 7 times. Under a cgroup limit of 256 MiB beside the idle charge, a 4.25 MiB body held
   and a 4.5 MiB one was killed. A cap of 2 MiB holds that part to about 128 MiB, half the overhead. With a larger
-  cap, or none (the default), a large body's structures are held beside R outside every bound, about 60 times its
-  size.
+  cap, or none (the default), a large body's structures were held beside R outside every bound, about 60 times
+  its size. **The intake bound** *(H1, train 3)*: the value count (`--max-request-json-values` V, 262,144 by
+  default) bounds the per-value part before the parse, and the counts of §10.3 (explicit labels, `extra`, table
+  entries, seeds and seed lengths) are checked before anything of the body is copied. A strict-JSON body of
+  B bytes and V values then holds outside every account at most, **per route** (measured on the H1 binary after
+  its review and again after its verification, 2026-11-08, macOS peak footprint above the idle, single-graph and
+  multi-graph, one request and two at once, at `--max-request-body-mb` 256 and 2; for `/traverse` Linux arm64
+  under a cgroup limit agreed within 1-15% on the binary before the review):
+  - **`/traverse`** (and `POST /traverse/cancel`): **8 × B + 256 bytes × V + 16 MiB**. The transport's buffer and
+    the route's copy of the body (2B: all a body refused at the count, or at a control character, holds),
+    jsoncpp's tree (101 to 165 bytes per value measured, plus each string's bytes: a long string or sequence holds
+    4B in all) and the copies of label names (the request's, a seed's dictionary and its checks: 4.5B for many
+    names, 6B for one huge name; an error text quotes at most 1 KiB of it, above; a number token no double holds,
+    which the JSON reader copies several times before its message, 7B). Measured at most 7.08 × B (1,812 MiB at
+    B = 256 MiB, that number token) and 41 MiB at B = 2 MiB, against 2.1 GiB and 96 MiB stated.
+  - **`/resolve` and `/pattern`** on P pairs (P = 1 on a single-graph server): **8 × B + 256 bytes × V + 16 MiB
+    + P × (10 × B + 320 bytes × V)**. On a multi-graph server each pair's job holds its own copy of the parsed
+    request, and each pair's answer echoes the names it was sent (`/resolve` lists every label that pair does not
+    hold, `/pattern` its predicate), which the writer escapes: up to 3 bytes for each byte of a name the scan
+    accepts, which is valid UTF-8 (a 2-byte character is written `\u00e9`, a 4-byte one as a surrogate pair; a raw
+    control byte, invalid UTF-8 and an unpaired surrogate escape are refused, above; `json_escaped_size` prices a
+    byte that begins no UTF-8 sequence at 6, which only an index's own names can hold), and the text and the
+    transport's copy of it are held at once, so a request's memory grows with its pairs, by up to about 8 × B
+    each. Measured *(verification of H1)* at B = 2 MiB on 1, 4 and 11 pairs, names of letters
+    and of 2-byte UTF-8: a `/resolve` of 262,141 labels 120, 322 and 787 MiB (190,640 UTF-8 labels: 89, 261 and
+    620 MiB), one name of 2 MiB in UTF-8 31, 74 and 202 MiB (`/pattern`: 33, 76 and 200 MiB); at B = 256 MiB on
+    1 and 4 pairs: up to 3,028 and 8,851 MiB (`/resolve`, UTF-8 labels) and 2,575 and 6,424 MiB (`/pattern`, a
+    UTF-8 name); at most 0.80 of the bound (the 2 MiB UTF-8 name on 11 pairs). On r237's 11 pairs at B = 2 MiB
+    that is at most 1.2 GiB for a body at the value count, about 290 MiB for one of at most 10,000 values. A
+    name of bytes that are no UTF-8 was written at 6 bytes per byte (GPT review 6, verification B: a 2 MiB name
+    of 0xFF on 11 pairs held 337 MiB, 1.34 of the bound); the scan refuses it now (above).
+  Two requests at once hold about twice one, so each route's concurrent requests (its slots) multiply it.
+  `/search` and `/align` read their body without a count (the owner's decision): their parse holds about 51
+  times the body (zeros), bounded by `--max-request-body-mb` alone.
   A seed the bound left unstarted is sent again in a new request (the action `split_request`).
 - **Attempt fields** (`DESIGN-traverse-graphlet.md` §14 and §14.1: the frozen wire contract's request fields;
   stage 4, backend half — the ledger itself lives in the search service): top-level `attempt_id`, `budget_id`
@@ -2937,7 +3005,8 @@ search's routes, `POST /pattern` and `GET /pattern/capabilities`, are `SPEC-patt
     server's probe to no `counts` member; a `/resolve` or `/traverse` answer's block carries the probe's value.
   - **`GET /traverse/capabilities`** (the probe; per graph in multi-graph mode, below): all of the above for its
     index, plus the server maxima (`max_time_ms`, `max_seeds`, `max_seed_bp`, `max_seed_labels`,
-    `max_query_bp`; from feature level 4 also `max_memory_mb` and `max_work_units`, the server's maxima of the
+    `max_query_bp`; from H1 `max_explicit_labels`, `max_extra_labels` and `max_cost_entries`, the request's counts
+    of the caps below, 0 when unlimited; from feature level 4 also `max_memory_mb` and `max_work_units`, the server's maxima of the
     budgets, 0 when off, below; from E5b `max_request_memory_mb` beside them, the request-wide memory bound, an
     integer, 0 when off (its presence says that the server can leave seeds unstarted for it, §5), which GET
     /capabilities' `multigraph` block states too, below; from E19 `max_concurrent`, the caps on the requests
@@ -3000,7 +3069,9 @@ search's routes, `POST /pattern` and `GET /pattern/capabilities`, are `SPEC-patt
     (`SPEC-pattern-search.md` §10, §23, §24; a multi-graph server's without a graph). Both state `in_ram` and,
     in multi-graph mode, `graph_summary` and `max_graphs_without_selection` (both `null` in single-graph mode;
     below, multi-graph mode), and in both modes `max_request_body_mb` (below, the caps: the largest request body
-    the server reads, `null` when unlimited) and `headers_unique` (E22: whether every sequence header names one
+    the server reads, `null` when unlimited) and `request_intake` (H1: that cap, the value count and the shapes of
+    their refusals, below; at the top level in single-graph mode and in the `multigraph` block in multi-graph mode,
+    `SPEC-multigraph-envelope.md` §8) and `headers_unique` (E22: whether every sequence header names one
     record; at the top level in single-graph mode, `null` while the index loads, and in `graph_summary` in
     multi-graph mode; `SPEC-multigraph-envelope.md` §9), and `expect_server_instance` (F3b: the routes that take
     the field, `["/traverse", "/resolve", "/pattern"]`; at the top level in single-graph mode, beside
@@ -3404,7 +3475,7 @@ search's routes, `POST /pattern` and `GET /pattern/capabilities`, are `SPEC-patt
     (SPEC-multigraph-envelope.md section 6: `/resolve` then runs on every pair, `/traverse` on the one pair of a
     server that holds one); a request that names its graphs or pairs is not bound by it. In both modes `GET /capabilities` states `max_request_body_mb` beside it (integer MiB,
     `--max-request-body-mb`, below; `null` when unlimited, the default): a client that may send a large body
-    reads the limit here, since the refusal of a longer body has no status (the connection is closed). Both GET
+    reads the limit here before it sends (a longer body is refused 413 `body_too_large`, below). Both GET
     routes state `in_ram`:
     `{"routes": ["pattern", "resolve", "search", "traverse"], "loads": <a multi-graph server on mmap with
     --mem-cap-gb above 0>, "mem_cap_gb": <--mem-cap-gb>, "budgets_start": "after_load"}`.
@@ -3427,19 +3498,63 @@ search's routes, `POST /pattern` and `GET /pattern/capabilities`, are `SPEC-patt
     ignored, as before.
 - Caps: `--traverse-max-time-ms` (default 30 000; also the cap of `/resolve`'s `bounds.time_budget_ms`, which
   it lowers, never sets, and which is never above 899 000 ms on the server, §4.5), `--traverse-max-seeds` (64),
-  `--traverse-max-seed-bp` (100 000), `--traverse-max-seed-labels` (10 000) and `--resolve-max-query-bp` (0 = unlimited). `0` means
-  unlimited for each. The four counts take integers in [0, 2⁵³ − 1] and `--traverse-max-time-ms` a finite number
+  `--traverse-max-seed-bp` (100 000), `--traverse-max-seed-labels` (10 000), `--traverse-max-explicit-labels`
+  (10 000), `--traverse-max-extra-labels` (10 000), `--traverse-max-cost-entries` (10 000) and
+  `--resolve-max-query-bp` (0 = unlimited). `0` means
+  unlimited for each. The counts take integers in [0, 2⁵³ − 1] and `--traverse-max-time-ms` a finite number
   ≥ 0; anything else refuses to start, naming the option and what it takes (read with atoll / atof before,
   `-1` started and was stated as 2⁶⁴ − 1, `abc` started as 0, unlimited, and `5x` as 5). A cap that lowers a request bound is **echoed** as `clamped` (§5); `max_seeds` and
-  `max_seed_bp` are refusals (400), not clamps. **The request-body limit** *(review of 2026-10-10, resources
+  `max_seed_bp` are refusals (400), not clamps. **The request's counts** *(H1, train 3; review 5 findings #2
+  and #6)*: `--traverse-max-explicit-labels` bounds the names of one seed's `labels`,
+  `--traverse-max-extra-labels` those of `strategy.labels.extra` and `--traverse-max-cost-entries` the entries of
+  a `change_cost` table, each stated by every `/traverse` capabilities probe (`max_explicit_labels`,
+  `max_extra_labels`, `max_cost_entries`) and refused 400 above it: `request.seeds[i].labels: at most N labels per
+  seed (--traverse-max-explicit-labels)`, `strategy.labels.extra: at most N labels (--traverse-max-extra-labels)`,
+  `strategy.labels.change_cost.entries: at most N entries (--traverse-max-cost-entries)`. They, `max_seeds` and
+  `max_seed_bp` (their words unchanged) are checked on the parsed body before anything of it is copied, in this
+  order: the seed count, then per seed its sequence's length and its labels, then `extra`, then the entries; so
+  they come before every other fault of the request's fields (a request with two faults, one a count, gets the
+  count's words), after the checks made before the parse — the body's count and JSON, the ids and
+  `finish_by_ms`, the admission's 409s (a repeated or expired id), then the selection and `in_ram` and, on a
+  multi-graph server, the index lease (`in_ram` on a server on mmap checks the fields before its load instead) —,
+  and a request with `attempt_id` states `usage` in their 400 as before. One refusal moved: a `release` that does
+  not match the index's was refused before `max_seeds`, and now the seed count comes first. A field of another type is left to the parse.
+  A seed's table is built by one hash lookup per entry (linear in its labels, `extra` and the entries; two scans
+  of the dictionary per entry before). **The value count** *(H1)*: `--max-request-json-values N` (an integer in
+  [0, 2⁵³ − 1]; 262,144 by default; 0 = unlimited) bounds the JSON values of the body of `POST /traverse`,
+  `/resolve`, `/pattern` and `/traverse/cancel` (§5, the body: 400 `too_many_json_values`); not `/search`'s or
+  `/align`'s. **The request-body limit** *(review of 2026-10-10, resources
   finding 2)*: `--max-request-body-mb N` (an integer in [0, 1 048 576] MiB; 0 = unlimited, the default; stated by
   `GET /capabilities` as `max_request_body_mb`, `null` when unlimited) bounds what the HTTP library reads of a
-  request, headers and body, on every route. A request with a longer body — a `Content-Length` above it, or a
-  chunked body growing past it — is dropped before any route runs: the library closes the connection **without a
-  response** (it builds a 413 it never sends; a JSON refusal would need a patch of the vendored library), and
-  the server logs it once per occurrence at warning level (`POST /traverse from <address> dropped: its body (<n>
-  bytes | chunked) exceeds --max-request-body-mb N MiB; connection closed without a response`). A client sees a
-  reset connection, not a status; it reads the limit from the capabilities. The limit is in MiB of bytes on the
+  request, headers and body, on every route. A request with a longer body is refused before any route runs with
+  **413** *(H1, train 3; before, the connection was closed without a response)*: status line `HTTP/1.1 413
+  Payload Too Large`, `Content-Type: application/json`, `Connection: close`, and the body `{"error": "the request
+  body (<n> bytes) is larger than this server reads, N MiB (--max-request-body-mb): it was not read and nothing
+  of it ran", "code": "body_too_large", "max_request_body_mb": N}`, its members written in this order (error,
+  code, the cap; uncompressed). A `Content-Length` above the limit is refused from the header, before any byte of
+  the body is read; a chunked body is read up to the limit and refused at the chunk that passes it (`error`: "the
+  request body (chunked) grew past what this server reads, N MiB (--max-request-body-mb): the rest was not read and
+  nothing of it ran"), the part read freed. After the 413 the server half-closes and reads and discards what the
+  client still sends, never keeping it, until the client closes, 30 s pass or it has read the larger of 64 MiB
+  and the limit, then closes: a client that sends its whole body before it reads gets the 413, one that waits for
+  `100 Continue` gets it without sending the body; an upload still running after 30 s, or sending more than that,
+  is cut (a reset). A `Content-Length` is read as RFC 9110 §8.6 reads it: decimal digits (leading zeros allowed)
+  below 2⁶⁴, the optional whitespace around them (SP, HTAB) trimmed, and a comma-separated list of the same count
+  (`3145728, 3145728`) as that count; an over-limit one is answered 413 in each of these forms. What still gets no
+  413: a `Content-Length` that is no byte count is closed without a response — `abc` and 2⁶⁴ and more by the library
+  itself (at any limit), and since H1 `-1`, `3145728junk` and a list of differing counts whenever the library's
+  reading of them (2⁶⁴ − 1, 3,145,728, the first count) is above the limit (logged `POST /traverse from <address>
+  dropped without an answer: its Content-Length '-1' is no byte count`); below the limit the library's reading
+  stands, as before H1 (`100junk` is a body of 100 bytes, `100, 200` one of 100); a header block longer than the
+  limit is closed without a response; a chunk size near 2⁶⁴ wraps the library's sum, so that body gets no 413 and
+  waits for the content timeout, its buffer still capped by the limit. Of duplicate `Content-Length` fields the first
+  counts (conflicting values are not refused), and a `Content-Length` beside `Transfer-Encoding: chunked` counts (RFC
+  9112 says chunked wins: a proxy in front should refuse such a request). Nothing of the request runs or is
+  registered (no slot, an id not held, no `usage`). The server logs it once per occurrence at warning level (`POST
+  /traverse from <address> refused 413: its body (<n> bytes | chunked) exceeds --max-request-body-mb N MiB`). The 413
+  is no new limit: it replaces the closed connection of the existing one, on every route (`/search` and `/align`
+  too).
+  `GET /capabilities`' `request_intake` states the limit and the 413's shape. The limit is in MiB of bytes on the
   wire (a body right at N MiB passes); it is not a cap on a pattern's length or a seed's (those have their own,
   above). **The budgets' maxima** *(feature level 4; R16, the owner's
   decision)*: `--traverse-max-memory-mb` (an integer in [0, 1 048 576]) and `--traverse-max-work-units` (an integer

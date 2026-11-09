@@ -621,6 +621,10 @@ def multi_capabilities(doc):
     check(doc['max_graphs_without_selection'] == 10, doc['max_graphs_without_selection'])
     # the request-body limit: null, the fixture servers start without --max-request-body-mb
     check(doc['max_request_body_mb'] is None, doc['max_request_body_mb'])
+    # what the server reads of a request (H1): in the multigraph block, the limits the defaults
+    check('request_intake' not in doc, sorted(doc))
+    intake = doc['multigraph']['request_intake']
+    check((intake['max_request_body_mb'], intake['max_request_json_values']) == (None, 262144), intake)
 
 
 def single_graph_selection(doc):
@@ -636,6 +640,9 @@ def single_graph_selection(doc):
     profile = doc['pair_summary']
     check(all(profile[t] is None for t in ('graph', 'graph_path', 'annotation_path')), profile)
     profile_fields(profile)
+    # what the server reads of a request (H1), at the top level, the limits the defaults
+    intake = doc['request_intake']
+    check((intake['max_request_body_mb'], intake['max_request_json_values']) == (None, 262144), intake)
 
 
 def profile_fields(pair):

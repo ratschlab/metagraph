@@ -1777,16 +1777,21 @@ class TestTraverseAPI(TestTraverseBase):
     @classmethod
     def tearDownClass(cls):
         cls.server_process.kill()
+        cls.server_process.wait()
+        cls.server_log.close()
         super().tearDownClass()
 
     @classmethod
     def _start_server(cls, graph, annotation, host, port):
-        # with the index identity, which every graphlet and capabilities response carries
+        # with the index identity, which every graphlet and capabilities response carries.
+        # Its log goes to a file: a pipe nobody reads fills (64 KiB on Linux) after enough
+        # requests of the class, and the server then blocks writing its next log line.
         command = (f'{METAGRAPH} server_query -i {graph} -a {annotation} '
                    f'--port {port} --address {host} -p 2 '
                    f'--index-name tiny --index-manifest {cls.manifest}')
+        cls.server_log = open(f'{cls.tempdir.name}/server-{port}.log', 'w')
         return subprocess.Popen(shlex.split(command), shell=False,
-                                stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+                                stdout=cls.server_log, stderr=subprocess.STDOUT)
 
     def _post(self, route, payload):
         return requests.post(url=f'http://{self.host}:{self.port}/{route}',
@@ -2058,7 +2063,8 @@ class TestTraverseAPI(TestTraverseBase):
         self.assertIn('forbid', caps['cost_models_available'])
         # A request may name no labels at all, which makes the SERVER choose the permitted
         # set: a deployment that configures nothing must not be the unlimited one.
-        for cap in ('max_time_ms', 'max_seeds', 'max_seed_bp', 'max_seed_labels'):
+        for cap in ('max_time_ms', 'max_seeds', 'max_seed_bp', 'max_seed_labels',
+                    'max_explicit_labels', 'max_extra_labels', 'max_cost_entries'):
             self.assertGreater(caps[cap], 0, cap)
         # the request budgets, and how far a work stop can exceed one: the rule is the SPEC's
         # section (SPEC §10.3, the rules are references), W a number beside it
@@ -2400,9 +2406,10 @@ class TestTraverseAPI(TestTraverseBase):
         (SPEC-labeled-traversal-core.md §5): one RFC 8259 JSON text whose member names are
         unique. A duplicated member (jsoncpp would keep its last value without a word: an
         attempt_id, a time budget, a wait_ms replaced silently), a comment, a trailing comma,
-        text after the value and more than 1000 nested arrays and objects are 400
-        {"error": "Bad json received: ..."}, without a code, as a body that is no JSON at all;
-        the same body written strictly is answered."""
+        text after the value, more than 1000 nested arrays and objects and (H1) a raw control
+        character inside a string, which RFC 8259 asks escaped, are 400 {"error": "Bad json
+        received: ..."}, without a code, as a body that is no JSON at all; the same body
+        written strictly is answered (an escaped control character too)."""
         traverse = json.dumps({
             'seeds': [{'sequence': self.element}],
             'strategy': {'direction': 'right',
@@ -2415,9 +2422,15 @@ class TestTraverseAPI(TestTraverseBase):
         comment = "a comment (or a '/' outside a string) at byte %d"
         deep = ('Exceeded stackLimit in readValue(). (more than 1000 nested arrays and '
                 'objects)')
+        control = ('a control character (byte 0x%02x) inside a string at byte %d: RFC 8259 '
+                   'requires it escaped (\\u00%02x)')
 
         def common(t):
-            return [('// a comment\n' + t, comment % 0),
+            # (a raw byte inside the first string: after its opening quote, byte 2)
+            raw = t[:2] + '\x01' + t[2:]
+            return [(raw, control % (1, 2, 1)),
+                    (t[:2] + '\t' + t[2:], control % (9, 2, 9)),
+                    ('// a comment\n' + t, comment % 0),
                     ('{/* a comment */' + t[1:], comment % 1),
                     # a '/' in a string is text; outside one it is no JSON
                     (t[:-1] + ', "x": "a/b" / 2}', comment % (len(t) + 12)),
@@ -2451,6 +2464,9 @@ class TestTraverseAPI(TestTraverseBase):
         for route, (strict, status, refused) in cases.items():
             ret = requests.post(url + route, data=strict)
             self.assertEqual(status, ret.status_code, (route, ret.text[:500]))
+            # an escaped control character is read
+            self.assertNotIn('control character', requests.post(
+                url + route, data=strict[:-1] + ', "x\\u0001": 0}').text)
             for body, words in refused:
                 with self.subTest(route=route, body=body[:120]):
                     ret = requests.post(url + route, data=body)
@@ -2836,14 +2852,27 @@ class TestTraverseAPI(TestTraverseBase):
         # take the field (F3b, SPEC-multigraph-envelope.md section 8; a single-graph server's
         # top level, a multi-graph server's multigraph block); 'pair_summary': the capability
         # profile of the server's pair (E17, SPEC-multigraph-envelope.md section 8.1;
-        # test_multigraph.py's TestCapabilityProfile checks it)
+        # test_multigraph.py's TestCapabilityProfile checks it); 'request_intake': what the server
+        # reads of a request (H1: the body limit, the value count and their refusals' shapes; a
+        # single-graph server's top level, a multi-graph server's multigraph block)
         self.assertEqual({'algorithm_version', 'attempts', 'compression_level',
                           'content_encodings', 'deadline_check', 'expect_server_instance',
                           'feature_level', 'features', 'graph_summary', 'graphs',
                           'headers_unique', 'in_ram', 'max_graphs_without_selection',
                           'max_request_body_mb', 'mode', 'pair_summary', 'pattern', 'ready',
-                          'release', 'resolve', 'routes', 'schema_version', 'server_instance'},
+                          'release', 'request_intake', 'resolve', 'routes', 'schema_version',
+                          'server_instance'},
                          set(c))
+        self.assertEqual({'max_request_body_mb': None,
+                          'body_too_large': {'status': 413, 'code': 'body_too_large',
+                                             'members': ['code', 'error', 'max_request_body_mb']},
+                          'max_request_json_values': 262144,
+                          'json_values_routes': ['/pattern', '/resolve', '/traverse',
+                                                 '/traverse/cancel'],
+                          'too_many_json_values': {'status': 400, 'code': 'too_many_json_values',
+                                                   'members': ['code', 'error',
+                                                               'max_request_json_values']}},
+                         c['request_intake'])
         self.assertEqual({'value': True, 'collisions': 0, 'examples': []}, c['headers_unique'])
         self.assertEqual(['/traverse', '/resolve', '/pattern'], c['expect_server_instance'])
         profile = c['pair_summary']
@@ -2931,65 +2960,160 @@ class TestTraverseAPI(TestTraverseBase):
                          (profile['index_meta_fp'], profile['alphabet'], profile['k'],
                           profile['traversal']['regime']))
 
-    def test_api_request_body_limit(self):
-        """--max-request-body-mb N (SPEC-labeled-traversal-core.md §10.3; 0 = unlimited, the
-        default): GET /capabilities states it as max_request_body_mb (null on this class's
-        server, test_api_server_capabilities), and a request with a longer body is dropped by
-        the HTTP library before any route runs: the connection is closed without a response
-        (the library builds a 413 it never sends), a Content-Length over the limit and a chunked
-        body growing past it alike, each logged at warning level; the server goes on
-        answering. A value out of [0, 1048576] refuses to start."""
+    def _flagged_server(self, flags, name):
+        """A single-graph server of this class's index with |flags| beside -p 2, its output in
+        a log file; returns (process, url, log path) once it answers GET /capabilities ready."""
         port = _free_port()
         url = f'http://{self.host}:{port}'
-        log_path = f'{self.tempdir.name}/body-limit-{port}.log'
+        log_path = f'{self.tempdir.name}/{name}-{port}.log'
         with open(log_path, 'w') as log:
             proc = subprocess.Popen(
                 shlex.split(METAGRAPH) + ['server_query', '-i', self.graph, '-a', self.anno,
-                                          '--port', str(port), '--address', self.host, '-p', '2',
-                                          '--max-request-body-mb', '1'],
-                stdout=log, stderr=subprocess.STDOUT)
+                                          '--port', str(port), '--address', self.host, '-p', '2']
+                + list(flags), stdout=log, stderr=subprocess.STDOUT)
+        for _ in range(600):
+            try:
+                ret = requests.get(url + '/capabilities', timeout=2)
+                if ret.ok and ret.json()['ready']:
+                    break
+            except requests.exceptions.RequestException:
+                pass
+            time.sleep(0.1)
+        return proc, url, log_path
+
+    def _exchange(self, port, payloads):
+        """Sends |payloads| on a new connection, then reads until the server closes it: what
+        came back (b'' for a reset)."""
+        sock = socket.create_connection((self.host, port))
+        sock.settimeout(20)
+        got = b''
         try:
-            for _ in range(600):
-                try:
-                    ret = requests.get(url + '/capabilities', timeout=2)
-                    if ret.ok and ret.json()['ready']:
-                        break
-                except requests.exceptions.RequestException:
-                    pass
-                time.sleep(0.1)
+            for payload in payloads:
+                sock.sendall(payload)
+            while True:
+                data = sock.recv(65536)
+                if not data:
+                    return got
+                got += data
+        except socket.timeout:
+            self.fail('the connection was neither answered and closed within 20 s: %r'
+                      % got[:300])
+        except OSError:
+            return got
+        finally:
+            sock.close()
+
+    @staticmethod
+    def _body_too_large(content_length, mb):
+        """the 413's body as the server writes it: error first, then code and the cap"""
+        what = (f'the request body ({content_length} bytes) is larger than this server reads, '
+                f'{mb} MiB (--max-request-body-mb): it was not read and nothing of it ran'
+                if content_length is not None else
+                f'the request body (chunked) grew past what this server reads, {mb} MiB '
+                f'(--max-request-body-mb): the rest was not read and nothing of it ran')
+        return ('{"error":' + json.dumps(what) + ',"code":"body_too_large",'
+                f'"max_request_body_mb":{mb}}}')
+
+    def test_api_request_body_limit(self):
+        """--max-request-body-mb N (SPEC-labeled-traversal-core.md §10.3; 0 = unlimited, the
+        default): GET /capabilities states it as max_request_body_mb and in request_intake
+        (null on this class's server, test_api_server_capabilities). A request with a longer
+        body is refused 413 body_too_large, on every route: from its Content-Length before the
+        body is read (a client that sends nothing of it, or all of it before it reads, gets the
+        413 alike), or at the chunk that passes the cap (chunked). The body is {error, code,
+        max_request_body_mb} in this order, with Connection: close, and the server closes the
+        connection after it; each is logged at warning level, and the server goes on
+        answering. A body right at N MiB is read. A value out of [0, 1048576] refuses to
+        start."""
+        proc, url, log_path = self._flagged_server(['--max-request-body-mb', '1'], 'body-limit')
+        port = int(url.rsplit(':', 1)[1])
+        try:
             caps = requests.get(url + '/capabilities').json()
             self.assertIs(type(caps['max_request_body_mb']), int)
             self.assertEqual(1, caps['max_request_body_mb'])
+            self.assertEqual(1, caps['request_intake']['max_request_body_mb'])
+            self.assertEqual({'status': 413, 'code': 'body_too_large',
+                              'members': ['code', 'error', 'max_request_body_mb']},
+                             caps['request_intake']['body_too_large'])
             request = {'seeds': [{'sequence': self.element}],
                        'strategy': {'direction': 'right', 'bounds': {'max_extension_bp': 10},
                                     'output': {'detail': 'summary', 'timing': False}}}
             oversized = json.dumps(dict(request, padding='x' * (2 << 20))).encode()
             self.assertGreater(len(oversized), 2 << 20)
-            with self.assertRaises(requests.exceptions.ConnectionError):
-                requests.post(url + '/traverse', data=oversized, timeout=30)
+            # a client that sends the whole body before it reads (the library: requests)
+            for route in ('/traverse', '/search', '/resolve', '/no_such_route'):
+                ret = requests.post(url + route, data=oversized, timeout=60)
+                self.assertEqual(413, ret.status_code, route)
+                self.assertEqual(self._body_too_large(len(oversized), 1), ret.text, route)
+                self.assertEqual('application/json', ret.headers['Content-Type'])
+                self.assertEqual('close', ret.headers['Connection'])
+                self.assertEqual(['error', 'code', 'max_request_body_mb'], list(ret.json()))
+            head = (b'POST /traverse HTTP/1.1\r\nHost: x\r\nContent-Type: application/json\r\n'
+                    + b'Content-Length: %d\r\n\r\n' % len(oversized))
 
-            def send_and_read(payloads):
-                # what comes back on the wire: nothing, the connection closed (a reset or a
-                # broken pipe while sending, else an empty read)
-                sock = socket.create_connection((self.host, port))
-                sock.settimeout(10)
-                try:
-                    for payload in payloads:
-                        sock.sendall(payload)
-                    return sock.recv(4096)
-                except socket.timeout:
-                    self.fail('neither an answer nor a close within 10 s')
-                except OSError:
-                    return b''
-                finally:
-                    sock.close()
-            self.assertEqual(b'', send_and_read([
-                b'POST /traverse HTTP/1.1\r\nHost: x\r\nContent-Type: application/json\r\n'
-                + b'Content-Length: %d\r\n\r\n' % len(oversized), oversized[:1000]]))
+            def answer_of(raw):
+                status, _, rest = raw.partition(b'\r\n')
+                fields, _, body = rest.partition(b'\r\n\r\n')
+                return status, fields.split(b'\r\n'), body.decode()
+            # answered from the Content-Length before the body is read: a client that sends
+            # the header alone reads the whole 413, then the end of the connection
+            status, fields, body = answer_of(self._exchange(port, [head]))
+            self.assertEqual(b'HTTP/1.1 413 Payload Too Large', status)
+            self.assertIn(b'Connection: close', fields)
+            self.assertIn(b'Content-Type: application/json', fields)
+            self.assertIn(b'Content-Length: %d' % len(body), fields)
+            self.assertEqual(self._body_too_large(len(oversized), 1), body)
+            # a part of the body sent first changes nothing
+            self.assertEqual(self._body_too_large(len(oversized), 1),
+                             answer_of(self._exchange(port, [head, oversized[:1000]]))[2])
+            # chunked: read up to the cap, refused at the chunk that passes it, the rest read
+            # and discarded so that the client finishes sending and reads the 413
             chunk = b'x' * 65536
-            self.assertEqual(b'', send_and_read(
+            status, fields, body = answer_of(self._exchange(port,
                 [b'POST /traverse HTTP/1.1\r\nHost: x\r\nTransfer-Encoding: chunked\r\n\r\n']
                 + [b'%x\r\n' % len(chunk) + chunk + b'\r\n'] * 40 + [b'0\r\n\r\n']))
+            self.assertEqual(b'HTTP/1.1 413 Payload Too Large', status)
+            self.assertEqual(self._body_too_large(None, 1), body)
+            # what HTTP reads as a byte count (RFC 9110 §8.6) is one: whitespace around it, leading
+            # zeros, a list of the same count
+            for value in (b' 3145728 ', b'3145728\t', b'\t3145728', b'000000000000003145728',
+                          b'3145728, 3145728'):
+                status, _, body = answer_of(self._exchange(port, [
+                    b'POST /traverse HTTP/1.1\r\nHost: x\r\nContent-Length: ' + value
+                    + b'\r\n\r\n']))
+                self.assertEqual(b'HTTP/1.1 413 Payload Too Large', status, value)
+                self.assertEqual(self._body_too_large(3145728, 1), body, value)
+            # one that is no byte count is closed without an answer (the library reads "-1" as
+            # 2^64 - 1 and "3145728junk" as 3145728), as one the library cannot read at all
+            # ("abc"); so is a list of differing counts
+            for value in (b'-1', b'3145728junk', b'abc', b'3145728, 3145729'):
+                self.assertEqual(b'', self._exchange(port, [
+                    b'POST /traverse HTTP/1.1\r\nHost: x\r\nContent-Length: ' + value
+                    + b'\r\n\r\n']), value)
+            # the drain ends after the larger of 64 MiB and the cap (1 MiB here) past the 413:
+            # a client sending 256 MiB is cut long before it sent them, and before 30 s
+            sock = socket.create_connection((self.host, port))
+            sock.settimeout(20)
+            sock.sendall(b'POST /traverse HTTP/1.1\r\nHost: x\r\nContent-Length: %d\r\n\r\n'
+                         % (256 << 20))
+            sent, start, chunk = 0, time.monotonic(), b'x' * (1 << 20)
+            try:
+                while sent < (256 << 20):
+                    sock.sendall(chunk)
+                    sent += len(chunk)
+            except OSError:
+                pass
+            finally:
+                sock.close()
+            self.assertLess(sent, 128 << 20)
+            self.assertLess(time.monotonic() - start, 25)
+            # a body right at the cap is read: its route answers it (here: the unknown field)
+            at_cap = json.dumps(dict(request, padding='')).encode()
+            at_cap = json.dumps(dict(request, padding='x' * ((1 << 20) - len(at_cap)))).encode()
+            self.assertEqual(1 << 20, len(at_cap))
+            ret = requests.post(url + '/traverse', data=at_cap)
+            self.assertEqual(400, ret.status_code, ret.text[:500])
+            self.assertEqual("request: unknown field 'padding'", ret.json()['error'])
             # the server goes on answering: the same request without the padding
             ret = requests.post(url + '/traverse', data=json.dumps(request))
             self.assertEqual(200, ret.status_code, ret.text[:500])
@@ -3001,15 +3125,25 @@ class TestTraverseAPI(TestTraverseBase):
         with open(log_path) as f:
             text = f.read()
         self.assertIn('[Server] Maximum request body: 1 MiB', text)
-        dropped = [line for line in text.splitlines() if ' dropped: its body (' in line]
-        self.assertGreaterEqual(len(dropped), 3, text[-3000:])
-        for line in dropped:
+        refused = [line for line in text.splitlines() if ' refused 413: its body (' in line]
+        self.assertEqual(13, len(refused), text[-3000:])
+        # the three Content-Lengths that are no byte count, stated as dropped ("abc": the
+        # library's protocol error)
+        dropped = [line for line in text.splitlines()
+                   if ' dropped without an answer: its Content-Length ' in line]
+        self.assertEqual(3, len(dropped), text[-3000:])
+        self.assertTrue(any("Content-Length '-1' is no byte count" in line for line in dropped))
+        for line in refused:
             self.assertIn('[warning]', line)
-            self.assertIn('POST /traverse from 127.0.0.1 dropped: its body (', line)
-            self.assertIn('exceeds --max-request-body-mb 1 MiB; connection closed without a '
-                          'response', line)
-        self.assertTrue(any('(chunked)' in line for line in dropped), dropped)
-        self.assertTrue(any('(%d bytes)' % len(oversized) in line for line in dropped), dropped)
+            self.assertIn('exceeds --max-request-body-mb 1 MiB', line)
+        self.assertTrue(any('POST /traverse from 127.0.0.1 refused 413: its body (chunked)'
+                            in line for line in refused), refused)
+        self.assertTrue(any('POST /search from 127.0.0.1 refused 413: its body (%d bytes)'
+                            % len(oversized) in line for line in refused), refused)
+        # the forms HTTP reads as a count are logged as that count (the five of 3,145,728)
+        self.assertEqual(5, sum('refused 413: its body (3145728 bytes)' in line
+                                for line in refused), refused)
+        self.assertNotIn('without a response', text)
         # a value out of range refuses to start
         for value in ('-1', '1048577', '1.5', 'x'):
             out = subprocess.run(
@@ -3020,6 +3154,365 @@ class TestTraverseAPI(TestTraverseBase):
             self.assertNotEqual(0, out.returncode, value)
             self.assertIn("--max-request-body-mb must be an integer in [0, 1048576], got '%s'"
                           % value, out.stderr + out.stdout, value)
+
+    @staticmethod
+    def _too_many_json_values(cap):
+        """the value count's 400 as the server writes it: error first, then code and the cap"""
+        what = (f'the request body holds more than {cap} JSON values (--max-request-json-values)'
+                ': it was not parsed and nothing of it ran; send fewer values (split the '
+                'request)')
+        return ('{"error":' + json.dumps(what) + ',"code":"too_many_json_values",'
+                f'"max_request_json_values":{cap}}}')
+
+    def test_api_request_json_values(self):
+        """--max-request-json-values N (H1; 262144 by default, 0 = unlimited): the body of
+        POST /traverse, /resolve, /pattern and /traverse/cancel holds at most N JSON values
+        (the root, each array element, each member's value), counted before it is parsed; one
+        more is refused 400 {error, code: "too_many_json_values", max_request_json_values} in
+        this order, the same on the four routes, before anything is registered. /search and
+        /align have no count. GET /capabilities states it in request_intake."""
+        caps = requests.get(f'http://{self.host}:{self.port}/capabilities').json()
+        self.assertEqual(262144, caps['request_intake']['max_request_json_values'])
+        proc, url, _ = self._flagged_server(['--max-request-json-values', '64'], 'json-values')
+        try:
+            intake = requests.get(url + '/capabilities').json()['request_intake']
+            self.assertEqual(64, intake['max_request_json_values'])
+            self.assertIs(type(intake['max_request_json_values']), int)
+            self.assertEqual(['/pattern', '/resolve', '/traverse', '/traverse/cancel'],
+                             intake['json_values_routes'])
+            self.assertEqual({'status': 400, 'code': 'too_many_json_values',
+                              'members': ['code', 'error', 'max_request_json_values']},
+                             intake['too_many_json_values'])
+            # 65 values: the root, attempt_id, the array and 62 zeros (one over); 63: within
+            over = {'attempt_id': 'json-values-1', 'x': [0] * 62}
+            within = {'x': [0] * 61}
+            for route in ('traverse', 'resolve', 'pattern', 'traverse/cancel'):
+                ret = requests.post(f'{url}/{route}', data=json.dumps(over))
+                self.assertEqual(400, ret.status_code, route)
+                self.assertEqual(self._too_many_json_values(64), ret.text, route)
+                ret = requests.post(f'{url}/{route}', data=json.dumps(within))
+                self.assertNotEqual('too_many_json_values', ret.json().get('code'), route)
+            # nothing was registered
+            self.assertEqual(404, requests.get(url + '/traverse/attempt/json-values-1')
+                             .status_code)
+            self.assertEqual(404, requests.get(url + '/requests/json-values-1').status_code)
+            # /search reads its body without a count
+            ret = requests.post(url + '/search', data=json.dumps(over))
+            self.assertNotIn('too_many_json_values', ret.text)
+            # a walk within the count runs
+            ret = requests.post(url + '/traverse', data=json.dumps(
+                {'seeds': [{'sequence': self.element}],
+                 'strategy': {'direction': 'right', 'bounds': {'max_extension_bp': 10},
+                              'output': {'detail': 'summary', 'timing': False}}}))
+            self.assertEqual(200, ret.status_code, ret.text[:500])
+        finally:
+            proc.kill()
+            proc.wait()
+        for value in ('-1', '1.5', 'x'):
+            out = subprocess.run(
+                shlex.split(METAGRAPH) + ['server_query', '-i', self.graph, '-a', self.anno,
+                                          '--port', str(_free_port()), '--address', self.host,
+                                          '--max-request-json-values', value],
+                capture_output=True, text=True, timeout=120)
+            self.assertNotEqual(0, out.returncode, value)
+            self.assertIn("--max-request-json-values must be an integer in [0, 2^53 - 1], got "
+                          "'%s'" % value, out.stderr + out.stdout, value)
+
+    def test_api_quoted_strings_are_clipped(self):
+        """An error text quotes a client's string whole up to 1 KiB, else its first 1,024 bytes,
+        "..." and its size (H1, review 5's S1: a 2 MiB name quoted in a 400, escaped again by the
+        answer, held 6 times the body), on every route: an unknown member name, a label the
+        index does not hold; a name of 1,024 bytes is quoted whole. /pattern answers a raw
+        control character in a string with its invalid_request ("request: not JSON: ")."""
+        url = f'http://{self.host}:{self.port}'
+        base = {'seeds': [{'sequence': self.element}],
+                'strategy': {'direction': 'right', 'bounds': {'max_extension_bp': 10},
+                             'output': {'detail': 'summary', 'timing': False}}}
+        resolve = {'sequence': self.element, 'labels': ['acc1']}
+        cancel = {'attempt_id': 'clip-cancel'}
+        clipped = 'k' * 1024 + '... (5000 bytes)'
+        for route, body, prefix in (('traverse', base, "request: unknown field '"),
+                                    ('resolve', resolve, "request: unknown field '"),
+                                    ('traverse/cancel', cancel, "request: unknown field '")):
+            ret = requests.post(f'{url}/{route}', data=json.dumps(dict(body, **{'k' * 5000: 1})))
+            self.assertEqual(400, ret.status_code, route)
+            self.assertEqual(prefix + clipped + "'", ret.json()['error'], route)
+            self.assertLess(len(ret.content), 2048, route)
+            ret = requests.post(f'{url}/{route}', data=json.dumps(dict(body, **{'k' * 1024: 1})))
+            self.assertEqual(prefix + 'k' * 1024 + "'", ret.json()['error'], route)
+            # jsoncpp's own quotes too: a duplicated member name, a number no double holds
+            name = '\u00e9' * 1500
+            text = json.dumps(body, ensure_ascii=False)[:-1]
+            for raw, quote in ((text + ', "' + name + '": 0, "' + name + '": 1}',
+                                "Duplicate key: '" + '\u00e9' * 512 + "... (3000 bytes)'"),
+                               (text + ', "x": ' + '1' * 3000 + '}',
+                                "'" + '1' * 1024 + "... (3000 bytes)' is not a number.")):
+                ret = requests.post(f'{url}/{route}', data=raw.encode())
+                self.assertEqual(400, ret.status_code, route)
+                self.assertIn(quote, ret.json()['error'], route)
+                self.assertLess(len(ret.content), 4096, route)
+        # a label the index does not hold
+        ret = requests.post(url + '/traverse', data=json.dumps(
+            dict(base, seeds=[{'sequence': self.element, 'labels': ['x' * 3000]}])))
+        self.assertEqual(400, ret.status_code)
+        self.assertIn("Label not found in the annotation: '" + 'x' * 1024 + "... (3000 bytes)'",
+                      ret.json()['error'])
+        self.assertLess(len(ret.content), 2048)
+        # /pattern: its invalid_request for the body's JSON fault
+        ret = requests.post(url + '/pattern', data='{"patterns": [{"id": "a\x02", "dna": "ACGT"}]}')
+        self.assertEqual(400, ret.status_code)
+        self.assertEqual('invalid_request', ret.json()['code'])
+        self.assertTrue(ret.json()['error'].startswith(
+            'request: not JSON: a control character (byte 0x02) inside a string at byte 23'),
+            ret.json()['error'])
+        # and jsoncpp's own quotes, clipped as on the other routes
+        name = 'é' * 1500
+        head = '{"patterns": [{"id": "a", "dna": "ACGT"}], '
+        for raw, quote in ((head + '"' + name + '": 0, "' + name + '": 1}',
+                            "Duplicate key: '" + 'é' * 512 + "... (3000 bytes)'"),
+                           (head + '"x": ' + '1' * 3000 + '}',
+                            "'" + '1' * 1024 + "... (3000 bytes)' is not a number.")):
+            ret = requests.post(url + '/pattern', data=raw.encode())
+            self.assertEqual(400, ret.status_code)
+            self.assertEqual('invalid_request', ret.json()['code'])
+            self.assertIn(quote, ret.json()['error'])
+            self.assertLess(len(ret.content), 4096)
+
+    def test_api_strings_are_utf8(self):
+        """RFC 8259 §8.1 (GPT review 6, finding 2): a string of a strict-JSON body, member names
+        included, is well-formed UTF-8, and a \\u escape of a surrogate is half of a pair. The
+        pre-scan refuses the first byte that begins no well-formed sequence and the first
+        unpaired surrogate escape with the route's JSON fault ("Bad json received: " on
+        /traverse, /resolve and /traverse/cancel; /pattern's invalid_request): jsoncpp kept any
+        byte and wrote 0xF8-0xFF as \\ufffd, 6 bytes for 1, and distinct names echoed alike.
+        Valid 2-, 3- and 4-byte UTF-8 and valid pairs are read as before."""
+        url = f'http://{self.host}:{self.port}'
+        seq = self.element.encode()
+        strategy = (b'"strategy": {"direction": "right", "bounds": {"max_extension_bp": 10}, '
+                    b'"output": {"detail": "summary", "timing": false}}')
+        routes = (('traverse', b'{"seeds": [{"sequence": "' + seq + b'", "labels": ["',
+                   b'"]}], ' + strategy + b'}', 'Bad json received: '),
+                  ('resolve', b'{"sequence": "' + seq + b'", "labels": ["', b'"]}',
+                   'Bad json received: '),
+                  ('traverse/cancel', b'{"attempt_id": "', b'"}', 'Bad json received: '),
+                  ('pattern', b'{"patterns": [{"dna": "ACGT", "id": "', b'"}]}',
+                   'request: not JSON: '))
+        # each class: no lead byte, a continuation byte alone, overlong, a surrogate in bytes,
+        # past U+10FFFF, cut by the closing quote, a lead byte before a character
+        invalid = ((b'\xff', 0xff), (b'\xfe', 0xfe), (b'\x80', 0x80), (b'\xc0\xaf', 0xc0),
+                   (b'\xe0\x80\xaf', 0xe0), (b'\xed\xa0\x80', 0xed), (b'\xf4\x90\x80\x80', 0xf4),
+                   (b'\xe2\x82', 0xe2), (b'Caf\xe9 au', 0xe9))
+        for route, head, tail, prefix in routes:
+            for bad, lead in invalid:
+                ret = requests.post(f'{url}/{route}', data=head + bad + tail)
+                self.assertEqual(400, ret.status_code, (route, bad))
+                at = len(head) + (3 if bad.startswith(b'Caf') else 0)
+                self.assertEqual(prefix + 'invalid UTF-8 (byte 0x%02x) inside a string at byte %d: '
+                                 'RFC 8259 requires UTF-8' % (lead, at),
+                                 ret.json()['error'], (route, bad))
+                if route == 'pattern':
+                    self.assertEqual('invalid_request', ret.json()['code'])
+                self.assertLess(len(ret.content), 1024, (route, bad))
+            for escape, quoted in ((b'\\udc00', 'dc00'), (b'\\ud800A', 'd800'),
+                                   (b'\\uD800\\u0041', 'D800'), (b'\\ud800', 'd800')):
+                ret = requests.post(f'{url}/{route}', data=head + escape + tail)
+                self.assertEqual(400, ret.status_code, (route, escape))
+                self.assertEqual(prefix + 'an unpaired surrogate escape (\\u%s) inside a string at '
+                                 'byte %d: a code point above U+FFFF is written as a high surrogate '
+                                 'escape (\\ud800-\\udbff) followed by a low one (\\udc00-\\udfff)'
+                                 % (quoted, len(head)), ret.json()['error'], (route, escape))
+        # in a member name too
+        ret = requests.post(url + '/resolve', data=b'{"sequence": "' + seq + b'", "\xff": 1}')
+        self.assertEqual('Bad json received: invalid UTF-8 (byte 0xff) inside a string at byte '
+                         '%d: RFC 8259 requires UTF-8' % (len(seq) + 18), ret.json()['error'])
+        # valid UTF-8, raw and escaped (json.dumps writes U+1F600 as a surrogate pair): read as
+        # sent, so the index's refusal of the unknown label quotes it unchanged
+        for name in ('caf\u00e9', '\u20ac', '\U0001f600', '\U0010ffff', 'x\ufffd'):
+            for data in (json.dumps({'sequence': self.element, 'labels': [name]}),
+                         json.dumps({'sequence': self.element, 'labels': [name]},
+                                    ensure_ascii=False).encode()):
+                ret = requests.post(url + '/resolve', data=data)
+                self.assertEqual(400, ret.status_code, ret.text[:500])
+                self.assertEqual("Label not found in the annotation: '%s'" % name,
+                                 ret.json()['error'])
+
+    def test_api_traverse_count_caps(self):
+        """/traverse's counts, checked before anything of the request is copied (H1; SPEC
+        §10.3): a seed's explicit labels (--traverse-max-explicit-labels), strategy.labels.extra
+        (--traverse-max-extra-labels) and a change_cost table's entries
+        (--traverse-max-cost-entries), 10,000 each by default and stated by GET
+        /traverse/capabilities; above one, a 400 naming the field, the cap and the flag, before
+        every other fault of the fields, with usage when the request is an attempt."""
+        url = f'http://{self.host}:{self.port}'
+        caps = requests.get(url + '/traverse/capabilities').json()
+        self.assertEqual((10000, 10000, 10000), (caps['max_explicit_labels'],
+                                                 caps['max_extra_labels'],
+                                                 caps['max_cost_entries']))
+        names = ['acc1'] + ['n%05d' % i for i in range(10000)]
+        base = {'seeds': [{'sequence': self.element}],
+                'strategy': {'direction': 'right', 'bounds': {'max_extension_bp': 10},
+                             'output': {'detail': 'summary', 'timing': False}}}
+
+        def post(seed_labels=None, labels=None, **top):
+            r = copy.deepcopy(base)
+            if seed_labels is not None:
+                r['seeds'][0]['labels'] = seed_labels
+            if labels is not None:
+                r['strategy']['labels'] = labels
+            r.update(top)
+            return requests.post(url + '/traverse', data=json.dumps(r))
+        ret = post(names, unknown=1)
+        self.assertEqual(400, ret.status_code)
+        self.assertEqual({'error': 'request.seeds[0].labels: at most 10000 labels per seed '
+                                   '(--traverse-max-explicit-labels)'}, ret.json())
+        # at the cap: the request's other faults
+        ret = post(names[:10000], unknown=1)
+        self.assertEqual("request: unknown field 'unknown'", ret.json()['error'])
+        extra = ['x%05d' % i for i in range(10001)]
+        ret = post(['acc1'], {'extra': extra, 'change_cost': {'model': 'constant', 'value': 1},
+                              'loss_budget': 5})
+        self.assertEqual({'error': 'strategy.labels.extra: at most 10000 labels '
+                                   '(--traverse-max-extra-labels)'}, ret.json())
+        entries = [['acc1', 'x%05d' % i, 1] for i in range(10001)]
+        ret = post(['acc1'], {'change_cost': {'model': 'table', 'entries': entries}})
+        self.assertEqual({'error': 'strategy.labels.change_cost.entries: at most 10000 entries '
+                                   '(--traverse-max-cost-entries)'}, ret.json())
+        ret = post(['acc1'], {'change_cost': {'model': 'table', 'entries': entries[:10000]}})
+        self.assertEqual(200, ret.status_code, ret.text[:500])
+        # an attempt: registered before its fields are parsed, so its 400 states usage
+        ret = post(names, attempt_id='count-caps-1')
+        self.assertEqual(400, ret.status_code)
+        self.assertEqual('request.seeds[0].labels: at most 10000 labels per seed '
+                         '(--traverse-max-explicit-labels)', ret.json()['error'])
+        self.assertIn('usage', ret.json())
+        # the seed count keeps its words, now before the copy
+        ret = requests.post(url + '/traverse', data=json.dumps(
+            dict(base, seeds=[{'sequence': self.element}] * (caps['max_seeds'] + 1), unknown=1)))
+        self.assertEqual({'error': 'request.seeds: at most %d seeds per request'
+                                   % caps['max_seeds']}, ret.json())
+
+    def test_api_make_cost_large_table(self):
+        """make_cost (review 5 #6) resolves a table's names by hash: the reviewer's request,
+        100,000 labels and 50,000 entries naming absent labels (10^10 string comparisons
+        before), on a server without the count caps, is answered (its label not found) at
+        once rather than after minutes."""
+        proc, url, _ = self._flagged_server(
+            ['--traverse-max-explicit-labels', '0', '--traverse-max-cost-entries', '0',
+             '--max-request-json-values', '0'], 'make-cost')
+        try:
+            r = {'seeds': [{'sequence': self.element,
+                            'labels': ['acc1'] + ['%06d' % i for i in range(99999)]}],
+                 'strategy': {'direction': 'right', 'bounds': {'max_extension_bp': 10},
+                              'labels': {'change_cost': {'model': 'table',
+                                                         'entries': [['absent', 'absent', 1]]
+                                                                    * 50000}},
+                              'output': {'detail': 'summary', 'timing': False}}}
+            start = time.monotonic()
+            ret = requests.post(url + '/traverse', data=json.dumps(r), timeout=600)
+            elapsed = time.monotonic() - start
+            self.assertEqual(400, ret.status_code, ret.text[:500])
+            self.assertIn('Label not found', ret.json()['error'])
+            # 0.1 s on the lane's Mac; the build before H1 took 28 s there
+            self.assertLess(elapsed, 10, elapsed)
+        finally:
+            proc.kill()
+            proc.wait()
+
+    def test_api_value_cap_memory(self):
+        """A body at the value cap (262,144 values, the default) stays within the bound H1
+        states for /traverse (SPEC-labeled-traversal-core.md §5): the server's peak memory above
+        its idle while it reads, parses and refuses it is at most 8 x its bytes + 256 bytes per
+        value + 16 MiB. Measured as the peak resident set above the idle one on Linux (VmHWM, reset
+        after a warm-up through clear_refs) and the peak physical footprint on macOS
+        (proc_pid_rusage); skipped elsewhere. Two shapes at the value cap: zeros under an
+        unknown member (the reader's worst per value) and 64 seeds of one-character labels (the
+        reader, the request's copy and a seed's); and three of 8 MiB for the part per byte
+        (the H1 review's S1), where 8 x the body is 64 of the 80 MiB allowed (about 6 x is held),
+        so that a threefold regression of the bytes held per body byte fails: one label of 8 MiB the index does not
+        hold (its 400 quotes it, clipped), an unknown member name of 4 Mi two-byte UTF-8
+        characters (which an answer would escape to 6 bytes each, were it quoted whole), and
+        one of raw control bytes (refused by the pre-scan)."""
+        if sys.platform.startswith('linux'):
+            def idle(pid):
+                with open(f'/proc/{pid}/clear_refs', 'w') as f:
+                    f.write('5')
+                return status_kb(pid, 'VmRSS') << 10
+
+            def status_kb(pid, key):
+                with open(f'/proc/{pid}/status') as f:
+                    for line in f:
+                        if line.startswith(key + ':'):
+                            return int(line.split()[1])
+                raise AssertionError(key)
+
+            def peak(pid):
+                return status_kb(pid, 'VmHWM') << 10
+        elif sys.platform == 'darwin':
+            import ctypes
+            libproc = ctypes.CDLL('/usr/lib/libproc.dylib', use_errno=True)
+
+            def rusage(pid):
+                buf = (ctypes.c_uint64 * 64)()
+                self.assertEqual(0, libproc.proc_pid_rusage(pid, 4, ctypes.byref(buf)))
+                return buf
+            # rusage_info_v4: 16 bytes of uuid, then ri_phys_footprint the 8th uint64 and
+            # ri_lifetime_max_phys_footprint the 29th
+
+            def idle(pid):
+                return rusage(pid)[2 + 7]
+
+            def peak(pid):
+                return rusage(pid)[2 + 28]
+        else:
+            self.skipTest('no peak memory reading on this platform')
+        cap = 262144
+        zeros = {'seeds': [{'sequence': self.element}], 'strategy': {}}
+        # the root, seeds, its seed, its sequence, strategy, x: 6 values beside the zeros
+        zeros['x'] = [0] * (cap - 6)
+        per_seed = (cap - 3) // 64 - 3          # a seed: its object, sequence, labels array
+        lab1 = {'seeds': [{'sequence': self.element, 'labels': ['a'] * per_seed}] * 64,
+                'strategy': {}}
+        big = 8 << 20
+        seed = {'sequence': self.element}
+        head = json.dumps({'seeds': [seed], 'strategy': {}}, separators=(',', ':'))[:-1]
+        shapes = [('zeros', json.dumps(zeros, separators=(',', ':')), "unknown field 'x'"),
+                  ('lab1', json.dumps(lab1, separators=(',', ':')), 'Label not found'),
+                  ('bigname', json.dumps({'seeds': [dict(seed, labels=['n' * big])],
+                                          'strategy': {}}, separators=(',', ':')),
+                   'Label not found'),
+                  ('bigkey_utf8', head + ',"' + '\u00e9' * (big // 2) + '":0}', 'unknown field'),
+                  ('bigkey_ctrl', head + ',"' + '\x01' * big + '":0}', 'a control character')]
+        for name, text, words in shapes:
+            text = text.encode()
+            # (no string of these bodies holds a bracket or a comma)
+            values = (text.count(b',') + text.count(b'[') + text.count(b'{') + 1
+                      - text.count(b'[]') - text.count(b'{}'))
+            self.assertLessEqual(values, cap, name)
+            if len(text) < big:
+                self.assertGreater(values, cap - 300, name)
+            proc, url, _ = self._flagged_server([], 'memory-' + name)
+            try:
+                # a warm-up walk faults in what a first request touches
+                warm = requests.post(url + '/traverse', data=json.dumps(
+                    {'seeds': [{'sequence': self.element, 'labels': ['acc1']}],
+                     'strategy': {'direction': 'right', 'bounds': {'max_extension_bp': 10}}}))
+                self.assertEqual(200, warm.status_code, warm.text[:300])
+                time.sleep(0.5)
+                before = idle(proc.pid)
+                ret = requests.post(url + '/traverse', data=text)
+                self.assertEqual(400, ret.status_code, ret.text[:300])
+                self.assertIn(words, ret.json()['error'], name)
+                # the answer quotes no more than about 1 KiB of the client's string
+                self.assertLess(len(ret.content), 4096, name)
+                above = peak(proc.pid) - before
+            finally:
+                proc.kill()
+                proc.wait()
+            bound = 8 * len(text) + 256 * values + (16 << 20)
+            print(f'value cap memory, {name}: {len(text)} bytes, {values} values, '
+                  f'{above / 2**20:.1f} MiB above idle, bound {bound / 2**20:.1f} MiB',
+                  file=sys.stderr)
+            self.assertLessEqual(above, bound, name)
 
     def test_api_attempts(self):
         """Attempts: a request with attempt_id (budget_id and locus_id echoed) states its
@@ -4086,6 +4579,113 @@ class TestTraverseMultiGraph(TestTraverseBase):
         finally:
             server.close()
 
+    def test_multi_invalid_utf8_on_eleven_pairs(self):
+        """GPT review 6, finding 2, verification B's case: one /resolve label of raw 0xFF bytes
+        filling a 2 MiB body, unknown to each of 11 pairs, was answered 200 with every pair's
+        unknown_labels echoing it as \\ufffd, 6 bytes per byte (a 132 MiB answer, 337 MiB held
+        against a stated 252). Now it is refused by the pre-scan before any pair runs: the
+        unwrapped 400 "Bad json received: invalid UTF-8 ...", no envelope, a small answer; two
+        distinct invalid labels ("\\xff", "\\xfe") no longer echo alike. The same body in valid
+        2-byte UTF-8 is answered by all 11 pairs, each echoing the label as sent."""
+        d = self.tempdir.name
+        lines = []
+        for i in range(1, 12):
+            pair = f'{d}/eleven/t{i}'
+            os.makedirs(pair, exist_ok=True)
+            for name in os.listdir(d):
+                if (name.startswith('graph_k31.dbg') or name.startswith('annotation.')) \
+                        and not os.path.exists(f'{pair}/{name}'):
+                    os.symlink(f'{d}/{name}', f'{pair}/{name}')
+            lines.append(f't{i},{pair}/graph_k31.dbg,'
+                         f'{pair}/annotation.row_diff_brwt_coord.annodbg')
+        csv = f'{d}/eleven.csv'
+        with open(csv, 'w') as f:
+            f.write('\n'.join(lines) + '\n')
+        server = self._Server(self, csv, flags=('--max-request-body-mb', '2',
+                                                '--max-graphs-without-selection', '20'))
+        try:
+            self.assertTrue(server.ready, server.text()[-2000:])
+            head = b'{"sequence": "' + self.element.encode() + b'", "labels": ["'
+            fill = (2 << 20) - len(head) - 3
+            ret = requests.post(server.url + '/resolve', data=head + b'\xff' * fill + b'"]}')
+            self.assertEqual(400, ret.status_code)
+            self.assertEqual({'error': 'Bad json received: invalid UTF-8 (byte 0xff) inside a '
+                                       'string at byte %d: RFC 8259 requires UTF-8' % len(head)},
+                             ret.json())
+            self.assertLess(len(ret.content), 512)
+            ret = requests.post(server.url + '/resolve', data=head + b'\xff", "\xfe"]}')
+            self.assertEqual(400, ret.status_code)
+            # valid UTF-8 of the same size: every pair answers, echoing the label as sent
+            label = '\u00e9' * (fill // 2)
+            ret = requests.post(server.url + '/resolve', data=head + label.encode() + b'"]}')
+            self.assertEqual(200, ret.status_code, ret.text[:500])
+            out = ret.json()
+            self.assertEqual((11, 11, 0), (len(out['answers']), out['answered'], out['refused']))
+            for answer in out['answers']:
+                self.assertEqual([label], answer['unknown_labels'])
+        finally:
+            server.close()
+
+    def test_multi_request_intake(self):
+        """H1 on a multi-graph server: GET /capabilities states request_intake in its multigraph
+        block (not at the top level, where max_request_body_mb stays), and the intake's
+        refusals are request-level, never an envelope: a body over --max-request-json-values is
+        400 too_many_json_values (error first, no usage, nothing registered), a seed over
+        --traverse-max-explicit-labels the unwrapped 400 with the attempt's usage (sample 08's
+        shape), a body over --max-request-body-mb the 413."""
+        caps = requests.get(self.server.url + '/capabilities').json()
+        self.assertNotIn('request_intake', caps)
+        self.assertIsNone(caps['max_request_body_mb'])
+        intake = caps['multigraph']['request_intake']
+        self.assertEqual((None, 262144), (intake['max_request_body_mb'],
+                                          intake['max_request_json_values']))
+        probes = requests.get(self.server.url + '/traverse/capabilities').json()
+        self.assertEqual({(10000, 10000, 10000)},
+                         {(e['max_explicit_labels'], e['max_extra_labels'], e['max_cost_entries'])
+                          for e in probes['answers']})
+        server = self._Server(self, self.csv, flags=('--max-request-body-mb', '1',
+                                                     '--max-request-json-values', '64',
+                                                     '--traverse-max-explicit-labels', '4'))
+        try:
+            self.assertTrue(server.ready, server.text()[-2000:])
+            caps = requests.get(server.url + '/capabilities').json()
+            self.assertEqual(1, caps['max_request_body_mb'])
+            self.assertEqual((1, 64), (caps['multigraph']['request_intake']['max_request_body_mb'],
+                                       caps['multigraph']['request_intake']
+                                       ['max_request_json_values']))
+            base = {'graph': 'A', 'seeds': [{'sequence': self.element}],
+                    'strategy': {'direction': 'right', 'bounds': {'max_extension_bp': 10},
+                                 'output': {'detail': 'summary', 'timing': False}}}
+            over = dict(base, attempt_id='multi-intake-1',
+                        seeds=[{'sequence': self.element,
+                                'labels': ['acc1'] + ['n%02d' % i for i in range(69)]}])
+            ret = requests.post(server.url + '/traverse', data=json.dumps(over))
+            self.assertEqual(400, ret.status_code)
+            self.assertTrue(ret.text.startswith('{"error":'), ret.text[:200])
+            self.assertEqual(['error', 'code', 'max_request_json_values'], list(ret.json()))
+            self.assertEqual(('too_many_json_values', 64),
+                             (ret.json()['code'], ret.json()['max_request_json_values']))
+            self.assertEqual(404, requests.get(server.url + '/requests/multi-intake-1')
+                             .status_code)
+            five = dict(base, attempt_id='multi-intake-2',
+                        seeds=[{'sequence': self.element,
+                                'labels': ['acc1', 'acc2', 'acc3', 'x1', 'x2']}])
+            ret = requests.post(server.url + '/traverse', data=json.dumps(five))
+            self.assertEqual(400, ret.status_code)
+            doc = ret.json()
+            self.assertNotIn('answers', doc)
+            self.assertEqual('request.seeds[0].labels: at most 4 labels per seed '
+                             '(--traverse-max-explicit-labels)', doc['error'])
+            self.assertEqual('multi-intake-2', doc['usage']['attempt_id'])
+            ret = requests.post(server.url + '/traverse',
+                                data=json.dumps(dict(base, padding='x' * (2 << 20))))
+            self.assertEqual(413, ret.status_code)
+            self.assertEqual(['error', 'code', 'max_request_body_mb'], list(ret.json()))
+            ret = requests.post(server.url + '/traverse', data=json.dumps(base))
+            self.assertEqual(200, ret.status_code, ret.text[:300])
+        finally:
+            server.close()
+
     def test_multi_request_memory_bound(self):
         """E5b on a multi-graph server: GET /capabilities' multigraph block and every
         /traverse capabilities probe (each entry of its envelope) state
@@ -4148,10 +4748,19 @@ class TestTraverseMultiGraph(TestTraverseBase):
                                '12_capabilities_multigraph.json')) as f:
             sample = json.load(f)['body']
         c = requests.get(self.server.url + '/capabilities').json()
+
+        def sample_block(caps):
+            # the sample's block, its request_intake's byte cap the server's (H1: the flag, as
+            # the top-level max_request_body_mb states it; the sample's server ran staging's 256)
+            block = copy.deepcopy(sample['multigraph'])
+            self.assertEqual(sample['max_request_body_mb'],
+                             block['request_intake']['max_request_body_mb'])
+            block['request_intake']['max_request_body_mb'] = caps['max_request_body_mb']
+            return block
         # B's second pair and C's second annotation have no manifest
         self.assertIsNone(c['composite_fp'])
         self.assertEqual(sample['composite_rule'], c['composite_rule'])
-        self.assertEqual(sample['multigraph'], c['multigraph'])
+        self.assertEqual(sample_block(c), c['multigraph'])
         self.assertEqual('GET /requests/{request_id}', c['routes']['requests'])
         # a manifest per pair: the composite is a value; A's pair under a second name is the
         # same pair and changes nothing
@@ -4168,7 +4777,7 @@ class TestTraverseMultiGraph(TestTraverseBase):
                 self.assertTrue(server.ready, server.text()[-2000:])
                 c = requests.get(server.url + '/capabilities').json()
                 composites.append(c['composite_fp'])
-                self.assertEqual(sample['multigraph'], c['multigraph'])
+                self.assertEqual(sample_block(c), c['multigraph'])
                 fps = sorted({p['index_fp'] for p in c['graph_summary']['pairs']})
                 self.assertEqual([min(self.index_fp, self.fp_two),
                                   max(self.index_fp, self.fp_two)], fps)

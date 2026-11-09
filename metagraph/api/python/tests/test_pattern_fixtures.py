@@ -3715,6 +3715,31 @@ class TestPatternFixtures(unittest.TestCase):
             check.ok(doc['max_request_body_mb'] is None
                      or (is_int(doc['max_request_body_mb']) and doc['max_request_body_mb'] >= 1),
                      'max_request_body_mb', 'an integer of at least 1, or null')
+
+            def request_intake(intake, path):
+                # H1 (SPEC-multigraph-envelope.md section 8): the body limit as stated at the
+                # top level, the value count (null: unlimited), the routes it counts, and the
+                # shapes of both refusals (their bodies' members, sorted)
+                check.keys(intake, {'max_request_body_mb', 'body_too_large',
+                                    'max_request_json_values', 'json_values_routes',
+                                    'too_many_json_values'}, path)
+                check.ok(intake['max_request_body_mb'] == doc['max_request_body_mb'],
+                         path + '.max_request_body_mb', 'the top-level max_request_body_mb')
+                check.ok(intake['max_request_json_values'] is None
+                         or (is_int(intake['max_request_json_values'])
+                             and intake['max_request_json_values'] >= 1),
+                         path + '.max_request_json_values', 'an integer of at least 1, or null')
+                check.ok(intake['json_values_routes']
+                         == ['/pattern', '/resolve', '/traverse', '/traverse/cancel'],
+                         path + '.json_values_routes', 'the four strict-JSON routes')
+                check.ok(intake['body_too_large']
+                         == {'status': 413, 'code': 'body_too_large',
+                             'members': ['code', 'error', 'max_request_body_mb']},
+                         path + '.body_too_large', 'the 413\'s shape')
+                check.ok(intake['too_many_json_values']
+                         == {'status': 400, 'code': 'too_many_json_values',
+                             'members': ['code', 'error', 'max_request_json_values']},
+                         path + '.too_many_json_values', 'the 400\'s shape')
             def headers_unique(h, path):
                 # SPEC-multigraph-envelope.md section 9: true, false or null (a pair without
                 # its .seqs), the repeated headers counted, at most 10 examples of at most 10
@@ -3782,11 +3807,17 @@ class TestPatternFixtures(unittest.TestCase):
                 # and its pair's profile (E17)
                 check.ok('pair_summary' in doc, 'pair_summary', 'at the top level')
                 profile(doc['pair_summary'], 'pair_summary')
+                # what it reads of a request (H1), at the top level
+                check.ok('request_intake' in doc, 'request_intake', 'at the top level')
+                request_intake(doc['request_intake'], 'request_intake')
                 return
             check.ok('headers_unique' not in doc, 'headers_unique',
                      'in graph_summary only on a multi-graph server')
             check.ok('pair_summary' not in doc, 'pair_summary',
                      'in graph_summary only on a multi-graph server')
+            check.ok('request_intake' not in doc, 'request_intake',
+                     'in the multigraph block on a multi-graph server')
+            request_intake(doc['multigraph']['request_intake'], 'multigraph.request_intake')
             # SPEC §24.1: the threshold of the selection rule (a request without `graphs`
             # queries every name of a list of at most that many), the server flag, at least 1
             check.ok(is_int(doc['max_graphs_without_selection'])

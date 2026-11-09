@@ -1,0 +1,81 @@
+{
+ "route": "POST /traverse",
+ "status": 400,
+ "note": "H1 (train 3; lane H1): /traverse's counts are checked before anything of the request is copied: one seed's explicit labels (--traverse-max-explicit-labels; 10,000 by default, 4 on the recording server so that the sample stays short), strategy.labels.extra (--traverse-max-extra-labels) and a change_cost table's entries (--traverse-max-cost-entries), 10,000 each by default, every /traverse capabilities probe stating them (sample 10); with max_seeds and max_seed_bp (their words unchanged) in this order, before every other fault of the request's fields. Above one, a 400 naming the field, the cap and the flag; an attempt is registered before its fields are parsed, so the 400 is unwrapped with usage on a multi-graph server too (sample 08's shape). A real run, its server named SERVER_INSTANCE as every sample's.",
+ "request": {
+  "graph": "bact_other",
+  "attempt_id": "svc-trv-h1-29",
+  "seeds": [
+   {
+    "labels": [
+     "acc1",
+     "acc2",
+     "acc3",
+     "GCF_000005845.2",
+     "GCF_000006945.2"
+    ],
+    "sequence": "TATGTACTGATTGCTTAAAGGAATATCATCTACGCTGGGATAGATGTTCAACATCGCGCAAAAGTGATGTCGATCGCGCAGTTATGCCACGCCGCATTCG"
+   }
+  ],
+  "strategy": {
+   "bounds": {
+    "max_extension_bp": 100,
+    "max_memory_mb": 512,
+    "max_output_bp": 500000,
+    "max_work_units": 100000000,
+    "time_budget_ms": 70000
+   },
+   "branching": {
+    "max_label_branches": 2
+   },
+   "direction": "both",
+   "exhaustive": false,
+   "labels": {
+    "mode": "constrain"
+   },
+   "output": {
+    "detail": "full",
+    "timing": true
+   }
+  },
+  "not_after_ms": 1794137469125
+ },
+ "body": {
+  "error": "request.seeds[0].labels: at most 4 labels per seed (--traverse-max-explicit-labels)",
+  "usage": {
+   "attempt_id": "svc-trv-h1-29",
+   "bound": {
+    "allowance_ms": 10000,
+    "capped_by": "content_timeout",
+    "enforced": true,
+    "seeds": 0,
+    "time_budget_ms": null,
+    "walk_until_ms": 894000
+   },
+   "bound_ms": 899000,
+   "elapsed_ms": 1,
+   "memory": {
+    "held_bound_bytes": null,
+    "peak_admitted_bytes": 0,
+    "soft_excess_bytes": null
+   },
+   "not_after_ms": 1794137469125,
+   "observed_max_uninterruptible_ms": 0,
+   "per_seed": [],
+   "reason": "error",
+   "received_at": "2026-11-08T11:30:09.125Z",
+   "seeds": {
+    "abandoned": 0,
+    "finished": 0,
+    "requested": 0,
+    "started": 0
+   },
+   "server_instance": "7c1e0f3a9b24d6e8",
+   "stopped_at": null,
+   "timing": {
+    "cpu_ms": 0.467625
+   },
+   "work_units": 0
+  }
+ }
+}

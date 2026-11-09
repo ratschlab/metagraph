@@ -21,6 +21,7 @@
 #include "annotation/binary_matrix/row_diff/row_diff.hpp"
 #include "common/seq_tools/reverse_complement.hpp"
 #include "common/unix_tools.hpp"
+#include "common/utils/string_utils.hpp"
 
 
 namespace mtg {
@@ -1216,8 +1217,10 @@ void Walker::validate_seed() {
         named.reserve(seed_.labels.size());
         for (size_t i = 0; i < seed_.labels.size(); ++i) {
             const std::string &name = seed_.labels[i];
-            if (!named.insert(name).second)
-                throw std::invalid_argument("Duplicate seed label '" + name + "'");
+            if (!named.insert(name).second) {
+                throw std::invalid_argument("Duplicate seed label '"
+                                            + ::utils::clip_for_message(name) + "'");
+            }
             Timer resolving;
             if (!strategy_.drop_labels_not_in_graph) {
                 seed_refs.push_back(oracle_.resolve_label(name));
@@ -1241,7 +1244,9 @@ void Walker::validate_seed() {
             const std::vector<std::string> &unknown = result_.unknown_labels;
             std::string names;
             for (size_t i = 0; i < std::min(kNamed, unknown.size()); ++i) {
-                names += (i ? ", " : "") + echoed(unknown[i], "seed label");
+                // (a client's name: clipped as every error text clips one, also without a budget)
+                names += (i ? ", " : "")
+                         + ::utils::clip_for_message(echoed(unknown[i], "seed label"));
             }
             if (unknown.size() > kNamed)
                 names += " and " + std::to_string(unknown.size() - kNamed) + " more";
@@ -1436,7 +1441,8 @@ void Walker::validate_seed() {
                 continue;
             LabelRef &ref = *found;
             if (!targets.insert(target_of(ref)).second) {
-                throw std::invalid_argument("Extra label '" + strategy_.extra[i]
+                throw std::invalid_argument("Extra label '"
+                                            + ::utils::clip_for_message(strategy_.extra[i])
                                             + "' duplicates a seed label");
             }
             dict_of_request[num_request_seed + i] = result_.label_dict.size();
@@ -1474,7 +1480,8 @@ void Walker::validate_seed() {
         constexpr size_t kNamed = 8;
         std::string names;
         for (size_t i = 0; i < std::min(kNamed, unreachable.size()); ++i) {
-            names += (i ? ", '" : "'") + result_.label_dict[unreachable[i]].name + "'";
+            names += (i ? ", '" : "'")
+                     + ::utils::clip_for_message(result_.label_dict[unreachable[i]].name) + "'";
         }
         if (unreachable.size() > kNamed)
             names += " and " + std::to_string(unreachable.size() - kNamed) + " more";

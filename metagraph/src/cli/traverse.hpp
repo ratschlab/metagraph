@@ -262,6 +262,12 @@ Json::Value capabilities_to_json(const graph::traversal::LabelOracle &oracle,
                                  const std::string &release,
                                  const IndexIdentity *identity = nullptr);
 
+// A seed's label-change cost over its label dictionary |dict| (the seed's labels, then
+// strategy.labels.extra): a table's entries by label id, a name's id its first position in
+// |dict|, an entry naming a label outside it dropped; linear in |dict| and the entries
+graph::traversal::LabelChangeCost make_cost(const CostSpec &spec,
+                                            const std::vector<std::string> &dict);
+
 // The width at which the delivery model prices an MGT float when nothing makes it wider.
 constexpr uint64_t kMgtFloatWidth = 24;
 // The widest an MGT float of a result walked under |st| and |cost| can be written (canonical
@@ -373,6 +379,11 @@ struct TraverseLimits {
     size_t max_seeds = 0;          // cap on |request.seeds|
     uint64_t max_seed_bp = 0;      // cap on the length of one seed
     size_t max_seed_labels = 0;    // cap on strategy.labels.max_seed_labels
+    // the counts checked on the parsed body before anything of it is copied, each refused 400
+    // above it (parse_traverse_request; max_seeds and max_seed_bp are checked there too)
+    uint64_t max_explicit_labels = 0;   // cap on |request.seeds[i].labels|
+    uint64_t max_extra_labels = 0;      // cap on |strategy.labels.extra|
+    uint64_t max_cost_entries = 0;      // cap on |strategy.labels.change_cost.entries|
     // the maxima of the request's budgets (SPEC §10.3; 0 = off): a larger budget is lowered
     // to it, an omitted one set to it, both echoed in strategy.clamped
     uint64_t max_memory_mb = 0;    // of strategy.bounds.max_memory_mb
@@ -413,6 +424,20 @@ struct TraverseLimits {
     // and timing.load_ms states it. None without `in_ram`
     std::optional<double> load_ms;
 };
+
+/**
+ * parse_traverse_request under the server's caps on the request's counts (H1;
+ * SPEC-labeled-traversal-core.md §10.3): before anything of |json| is copied, the number of
+ * seeds (|limits|.max_seeds), then per seed in order the length of its sequence (max_seed_bp)
+ * and the number of its labels (max_explicit_labels), then the names of strategy.labels.extra
+ * (max_extra_labels) and the entries of strategy.labels.change_cost (max_cost_entries); each
+ * above its cap (0: none) is refused (InvalidRequest, 400) naming the field, the cap and its
+ * flag (max_seeds and max_seed_bp in their words of before). Each check reads an array's size
+ * or a string's length only, and is skipped where the field has another type (the parse that
+ * follows refuses it in its words). So a body's copies are made only of counts within the
+ * caps, and these refusals come before every other fault of the request's fields
+ */
+TraverseRequest parse_traverse_request(const Json::Value &json, const TraverseLimits &limits);
 
 // The request-wide memory bound's check before seed i >= 1 (E5b,
 // TraverseLimits::max_request_memory_mb): whether the bytes the results of seeds 0 to i-1 hold

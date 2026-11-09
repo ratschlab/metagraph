@@ -212,6 +212,15 @@ The answer keeps its upstream shape (a list of `{seq_description, results, ...}`
   is retained like any answered request's (`GET /requests/{id}` states it ended, that pair `refused`), and a
   corrected request takes a new id. A fan-out is never forgotten because one of its pairs gave 400; only a 400 of
   the whole request frees the id. `/traverse` keeps checking expiry before its fields are parsed.
+- *H1 (train 3):* two refusals of the request's intake come before every check of its fields and before
+  admission, on every server and alike on a single-graph and a multi-graph one (never in an envelope): a body
+  longer than `--max-request-body-mb` is refused **413** `{"error", "code": "body_too_large",
+  "max_request_body_mb"}` before it is read (on every route; a `Content-Length` that is no byte count is closed
+  without a response, `SPEC-labeled-traversal-core.md` §10.3), and a body of `/resolve`, `/pattern`, `/traverse` or
+  `POST /traverse/cancel` with more JSON values than `--max-request-json-values` **400** `{"error", "code":
+  "too_many_json_values", "max_request_json_values"}` before it is parsed (members in this order;
+  `SPEC-labeled-traversal-core.md` §5 and §10.3). Neither holds an id: `GET /requests/{id}` answers 404 (never
+  admitted), and the same id runs once the request is sent within the limits.
 - A repeated `request_id` that is running, or retained after it finished, starts no work: 409, body = the registry
   entry (below) plus `error`.
 - `request_id` and `attempt_id` are one namespace, as `GET /requests/{id}` reads both: a `request_id` equal to a
@@ -227,7 +236,8 @@ The answer keeps its upstream shape (a list of `{seq_description, results, ...}`
   `GET /traverse/attempt/{attempt_id}`). An entry is retained for a period and a count set by server flags, then
   the id is unknown. `GET /requests/{id}` answers 404 `{error, request_id, server_instance, server_time_ms}` for an
   id this server instance does not hold, in three cases: NOT ADMITTED YET (the window between the request's receipt
-  and its admission), NEVER ADMITTED (refused by an HTTP-level 400, also one only the work finds, which frees the id
+  and its admission), NEVER ADMITTED (refused by an HTTP-level 400 — `too_many_json_values` included — or a 413
+  `body_too_large`, also by a 400 only the work finds, which frees the id
   when it is answered, or by the expired 409 or the instance_mismatch 409; or never received here), or ENDED AND DROPPED (past its retention, by
   time or by count). An id that breaks the token rule is 400. `reason`
   on `/resolve` and `/pattern`: `answered` (200 written), `client_gone` (nothing written), `deadline` (503),
@@ -335,9 +345,29 @@ the requests of each route the server runs at once (`--pattern-max-concurrent`, 
 `--traverse-max-concurrent`), integers, 0 for a route without one; above a cap the request is refused 503 `busy`
 (section 1.1). Every `/traverse` capabilities probe (each entry of its envelope, and a single-graph server's probe)
 states the same object beside its maxima.
+From H1 (train 3) the block also states `request_intake`: what the server reads of a request, the same object a
+single-graph server states at the top level of `GET /capabilities`:
+
+```json
+"request_intake": {
+  "max_request_body_mb": 256,
+  "body_too_large": {"status": 413, "code": "body_too_large", "members": ["code", "error", "max_request_body_mb"]},
+  "max_request_json_values": 262144,
+  "json_values_routes": ["/pattern", "/resolve", "/traverse", "/traverse/cancel"],
+  "too_many_json_values": {"status": 400, "code": "too_many_json_values", "members": ["code", "error", "max_request_json_values"]}
+}
+```
+
+`max_request_body_mb` is `--max-request-body-mb` in MiB (`null` when unlimited; the top-level member of that
+name, which stays in both modes, states the same), `max_request_json_values` is `--max-request-json-values`
+(`null` when unlimited), `json_values_routes` the routes whose body is counted. `members` lists each refusal's
+body members as a set (sorted); the body itself writes them `error` first, then `code`, then the cap (section 5;
+`SPEC-labeled-traversal-core.md` §5 and §10.3). The 413 answers a body over `max_request_body_mb` on every route,
+before it is read; the 400 a body of a listed route with more values, before it is parsed. Its presence is the
+marker: an engine without it closes the connection on an over-limit body and counts no values.
 A single-graph server, which states its request registry as `routes.requests`, states `expect_server_instance`
 (the same list) at the top level of `GET /capabilities`, beside `routes.requests` (the pattern of `headers_unique`:
-one reader serves both modes). An engine without the key refuses the field 400 (unknown field), so clients send it
+one reader serves both modes), and `request_intake` there too. An engine without the key refuses the field 400 (unknown field), so clients send it
 only where the key lists the route.
 Clients switch on these, never on dates.
 

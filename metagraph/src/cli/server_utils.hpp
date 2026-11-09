@@ -28,6 +28,33 @@ using HttpServer = SimpleWeb::Server<SimpleWeb::HTTP>;
  */
 bool client_gone(const HttpServer::Request &request);
 
+// How long the server reads and discards what the client of a 413 body_too_large still sends,
+// at most, before it closes the connection (refuse_body_too_large)
+constexpr long kBodyTooLargeDrainS = 30;
+// ... and how many bytes, at least: the drain ends after the larger of this and the cap
+constexpr uint64_t kBodyTooLargeDrainBytes = 64ull << 20;
+
+/**
+ * Answers |request|, whose body is longer than the server reads (--max-request-body-mb
+ * |max_mb| MiB: the HTTP library's message_size, reported to on_error), with the 413 of
+ * body_too_large_json, on its connection, then closes the connection; true when it answered.
+ * The library refuses such a request before reading its body (a Content-Length above the
+ * bound) or at the chunk that passes it (a chunked body); it prepares a 413 of its own but does
+ * not send it, so the connection would be closed with the body unread, a reset for the client.
+ * The answer is written here instead, on the connection reached as client_gone reaches it,
+ * with Connection: close; then the server half-closes and reads and discards (never keeps)
+ * what the client still sends, until the client closes, kBodyTooLargeDrainS pass (the
+ * connection's own timer) or the larger of kBodyTooLargeDrainBytes and the cap is read, so that
+ * a client that sends its whole body before it reads finds the 413 rather than a reset. A
+ * Content-Length that content_length_value reads as no byte count ("-1", "3145728junk", which
+ * the library's std::stoull reads as 2^64 - 1 and 3145728, or a list of differing counts) is
+ * closed without an answer (false), as the library drops one it cannot read at all. Every step
+ * runs under the library's handler runner, so a shutdown ends it. Called from on_error only,
+ * with no operation of the library pending on the connection.
+ */
+bool refuse_body_too_large(const std::shared_ptr<HttpServer::Request> &request,
+                           uint64_t max_mb);
+
 // Runs |process| on the request body and writes its JSON result; compressed with gzip or
 // deflate when the client's Accept-Encoding makes one acceptable (RFC 9110 weights; gzip
 // on a tie), uncompressed otherwise. |compact|

@@ -8,29 +8,36 @@
 
 namespace utils {
 
+size_t utf8_sequence_at(std::string_view s, size_t i) {
+    const unsigned char c = s[i];
+    if (c < 0x80)
+        return 1;
+    size_t n;
+    uint32_t cp;
+    if ((c & 0xE0) == 0xC0) { n = 1; cp = c & 0x1F; }
+    else if ((c & 0xF0) == 0xE0) { n = 2; cp = c & 0x0F; }
+    else if ((c & 0xF8) == 0xF0) { n = 3; cp = c & 0x07; }
+    else return 0;
+    if (i + n >= s.size())
+        return 0;
+    for (size_t j = 1; j <= n; ++j) {
+        const unsigned char d = s[i + j];
+        if ((d & 0xC0) != 0x80)
+            return 0;
+        cp = (cp << 6) | (d & 0x3F);
+    }
+    if ((n == 1 && cp < 0x80) || (n == 2 && cp < 0x800) || (n == 3 && cp < 0x10000)
+            || cp > 0x10FFFF || (cp >= 0xD800 && cp <= 0xDFFF))
+        return 0;
+    return n + 1;
+}
+
 bool valid_utf8(std::string_view s) {
-    size_t i = 0;
-    while (i < s.size()) {
-        const unsigned char c = s[i];
-        size_t n;
-        uint32_t cp;
-        if (c < 0x80) { i++; continue; }
-        if ((c & 0xE0) == 0xC0) { n = 1; cp = c & 0x1F; }
-        else if ((c & 0xF0) == 0xE0) { n = 2; cp = c & 0x0F; }
-        else if ((c & 0xF8) == 0xF0) { n = 3; cp = c & 0x07; }
-        else return false;
-        if (i + n >= s.size())
+    for (size_t i = 0; i < s.size(); ) {
+        const size_t n = utf8_sequence_at(s, i);
+        if (!n)
             return false;
-        for (size_t j = 1; j <= n; ++j) {
-            const unsigned char d = s[i + j];
-            if ((d & 0xC0) != 0x80)
-                return false;
-            cp = (cp << 6) | (d & 0x3F);
-        }
-        if ((n == 1 && cp < 0x80) || (n == 2 && cp < 0x800) || (n == 3 && cp < 0x10000)
-                || cp > 0x10FFFF || (cp >= 0xD800 && cp <= 0xDFFF))
-            return false;
-        i += n + 1;
+        i += n;
     }
     return true;
 }
@@ -44,6 +51,19 @@ std::string to_hex(std::string_view s) {
         out.push_back(digits[c & 0xF]);
     }
     return out;
+}
+
+std::string clip_for_message(std::string_view text, size_t max_bytes) {
+    if (text.size() <= max_bytes)
+        return std::string(text);
+    // never inside a UTF-8 sequence: back to its lead byte, at most 3 bytes back (a name that is
+    // no UTF-8 is cut where it falls), so that a clipped name keeps at least max_bytes - 3
+    size_t cut = max_bytes;
+    const size_t lowest = max_bytes > 3 ? max_bytes - 3 : 0;
+    while (cut > lowest && (static_cast<unsigned char>(text[cut]) & 0xC0) == 0x80) {
+        --cut;
+    }
+    return std::string(text.substr(0, cut)) + "... (" + std::to_string(text.size()) + " bytes)";
 }
 
 // Try to parse ka:f:[abundance] or km:f:[abundance] from header

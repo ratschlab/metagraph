@@ -125,9 +125,18 @@ What this build serves (milestone 1, and increment 3 where marked), against the 
 ## 3. Transport
 
 - `POST /pattern` with a JSON body: one RFC 8259 JSON text, with unique member names in every object, nothing
-  after it (no second value, no comment, no trailing comma) and nested at most 1,000 deep; anything else is 400
-  `invalid_request` (§5). `/resolve`, `/traverse` and `POST /traverse/cancel` read their body alike, with their
-  own error body (SPEC-labeled-traversal-core.md §5). The answer is compact JSON, gzip or deflate when the request's `Accept-Encoding` asks
+  after it (no second value, no comment, no trailing comma), no raw control character inside a string (H1: RFC
+  8259 asks it escaped; `request: not JSON: a control character (byte 0x01) inside a string at byte N: ...`),
+  every string well-formed UTF-8 with no unpaired surrogate escape (GPT review 6, finding 2: `request: not JSON:
+  invalid UTF-8 (byte 0xff) inside a string at byte N: RFC 8259 requires UTF-8`, `request: not JSON: an unpaired
+  surrogate escape (\udc00) inside a string at byte N: ...`; SPEC-labeled-traversal-core.md §5) and nested at most
+  1,000 deep; anything else is 400 `invalid_request` (§5). An error text quotes a client's string
+  (a member name, a predicate name or operator, a graph name) whole up to 1,024 bytes, longer ones as their first
+  1,024 bytes and `... (N bytes)` (SPEC-labeled-traversal-core.md §5, strict validation). `/resolve`, `/traverse` and `POST /traverse/cancel` read their body alike, with their
+  own error body (SPEC-labeled-traversal-core.md §5). Before it is parsed the body's JSON values are counted (H1:
+  the root, each array element, each member's value): more than `--max-request-json-values` (262,144 by default,
+  §4.5) is 400 `too_many_json_values` (§6), the same on those routes; a body longer than `--max-request-body-mb`
+  is 413 `body_too_large` (§6, §24.4) before it is read. The answer is compact JSON, gzip or deflate when the request's `Accept-Encoding` asks
   for it (zlib level `--traverse-compression-level`, 1 by default, to keep compression short; the time to write
   and compress the answer is kept back from the work, §7.6). Error bodies are never compressed.
 - The route runs on the server's handler threads (`--http-threads`, `-p` when not given; `--threads-each` is
@@ -317,6 +326,7 @@ They are served now, §4.1–§4.3.)
 | `--pattern-max-mismatches` | 3 | `max_mismatches` of `dna` and `iupac` patterns (increment 5m-3, §21.12): the most substitutions served per instance, `mismatches.max.dna` and `.iupac` of the capabilities; 0 serves none | the pattern's slot answers `mismatches_above_cap` (§21.8), never lowered; the flag is refused at start-up above 3 (or not an integer) |
 | `--pattern-max-mismatches-protein` | 3 (`--pattern-max-mismatches`) | `max_mismatches` of `protein` patterns, per residue (`mismatches.max.protein`); at most `--pattern-max-mismatches`: named above it, refused at start-up with both flags named; not named, it follows the former | likewise |
 | `--traverse-chunk-target-ms` | 50 | — (not a cap: the annotation reads under the deadline are decoded in chunks of about this duration, as `/traverse`'s) | — |
+| `--max-request-json-values` | 262,144 | — (H1: the JSON values of the body, counted before it is parsed, the root, each array element and each member's value; server-wide, the same on `/traverse`, `/resolve` and `POST /traverse/cancel`; 0 = unlimited; `GET /capabilities`' `request_intake`) | 400 `too_many_json_values`, before the parse (§6) |
 
 **Every cap of the capabilities' `caps`, classified** (the capabilities' `caps_rule` refers here):
 
@@ -361,14 +371,19 @@ server lowers them, so that a direct caller is not refused for a budget the host
 
 A request is refused by the first check it fails, in this order (with `--pattern-max-concurrent` set, a request
 of the route at its cap is refused 503 `busy`, §6, before all of them: after step 2's 503 on a single-graph
-server, before step 1 on a multi-graph one; its body is not parsed):
+server, before step 1 on a multi-graph one; its body is not parsed; a body longer than `--max-request-body-mb` is
+refused 413 `body_too_large` before any of it, by the HTTP layer, before the body is read, H1):
 
 1. multi-graph server: the order of §24.1 (the body, `graphs`, `in_ram`, then the request's fields -- steps 5 to 9,
    whose refusals are the request's -- then each pair from step 4 on, on its own: a pair's refusal, steps 4, 10, 11
    and the 503 `deadline`, is that pair's entry of the 200 envelope, not the request's);
 2. the single index still loading: 503, no `code` (§6);
-3. the body is not one RFC 8259 JSON text (§3: a comment, a trailing comma, anything after the value, a
-   duplicated member name, nesting deeper than 1,000): 400 `invalid_request`;
+3. the body holds more JSON values than `--max-request-json-values` (§3, H1; counted before it is parsed): 400
+   `too_many_json_values`; it is not one RFC 8259 JSON text (§3: a comment, a raw control character inside a
+   string, invalid UTF-8 or an unpaired surrogate escape inside a string, a trailing comma, anything after the
+   value, a duplicated member name, nesting deeper than 1,000): 400 `invalid_request` (the pre-scan refuses the
+   first of a comment, a control character, invalid UTF-8, an unpaired surrogate escape and the value past the
+   count that it meets; a text that is no JSON and holds too many values may get either);
 4. the graph (`PatternSearch::support`): 400 with the graph's reason (`mask_invalid`, `alphabet_untested`,
    `representation_unsupported`, …, §6), whatever the body asks; a graph without its mask passes (§7.4);
 5. the body is not an object: 400 `invalid_request`;
@@ -405,8 +420,10 @@ server, before step 1 on a multi-graph one; its body is not parsed):
 ## 6. Whole-request refusals
 
 The body is `{"error": <message>, "code": <code>}`, except the 503 during loading, which has no `code`, a
-selection refusal of a multi-graph server, which may add `candidates` (below), and the 503 `busy`, which adds
-`server_instance`.
+selection refusal of a multi-graph server, which may add `candidates` (below), the 503 `busy`, which adds
+`server_instance`, and the intake refusals of H1, which add their cap and are written `error` first, then `code`,
+then the cap: 400 `too_many_json_values` adds `max_request_json_values`, 413 `body_too_large` adds
+`max_request_body_mb`.
 
 On a multi-graph server (§24.1) a refusal that one pair alone would be answered -- its graph's support (step 4 of
 §5), its annotation (steps 10 and 11), its 503 `deadline`, a failure while it is processed -- is carried inside the
@@ -422,7 +439,8 @@ answered; the refusals that no pair decides (the body, `graphs`, `in_ram`, the r
 
 | status | `code` | when | what a client does |
 |---|---|---|---|
-| 400 | `invalid_request` | not JSON (§3: a comment, a trailing comma, content after the value, a duplicated member name, nesting deeper than 1,000), not an object, a wrong type or value, an unknown field, an empty or too long `patterns` list, `max_steps` < 1, `time_budget_ms` ≤ the reserve, `max_labels_per_anchor`, `max_annotation_work` or `max_memory_mb` < 1, `output.occurrences: true` without `output.labels: "all"`; increments 4 and 5: a `long_search` or `require_support` value not listed (§4.1), `require_support: "record_verified"` with `output.occurrences: false`, a `genetic_code` that is not an integer, none or more than one of `dna` / `iupac` / `protein`; increment 5b: a predicate that breaks a rule of §19.3 (the message names the path of the first fault, `request.predicate.and[1].none[0]`; a name that is a number names the fix, "write a taxid as \"562\""), `max_predicate_contexts` < 0, `max_predicate_work` < 1, a `predicate_strands` value not listed, `output.labels: "predicate_only"` without a predicate, a predicate with `long_search: "paths"`; increment 5s: a `supported_paths_level` value not listed, `"label_intersection"` with `require_support: "record_verified"` under `long_search: "supported_paths"`; §25: a `predicate_scope` value not listed, `"motif"` without a predicate; §21: a `max_mismatches` that is not an integer from 0 to 3 (`null` included) | fix the request |
+| 400 | `invalid_request` | not JSON (§3: a comment, a raw control character inside a string, invalid UTF-8 or an unpaired surrogate escape inside a string, a trailing comma, content after the value, a duplicated member name, nesting deeper than 1,000), not an object, a wrong type or value, an unknown field, an empty or too long `patterns` list, `max_steps` < 1, `time_budget_ms` ≤ the reserve, `max_labels_per_anchor`, `max_annotation_work` or `max_memory_mb` < 1, `output.occurrences: true` without `output.labels: "all"`; increments 4 and 5: a `long_search` or `require_support` value not listed (§4.1), `require_support: "record_verified"` with `output.occurrences: false`, a `genetic_code` that is not an integer, none or more than one of `dna` / `iupac` / `protein`; increment 5b: a predicate that breaks a rule of §19.3 (the message names the path of the first fault, `request.predicate.and[1].none[0]`; a name that is a number names the fix, "write a taxid as \"562\""), `max_predicate_contexts` < 0, `max_predicate_work` < 1, a `predicate_strands` value not listed, `output.labels: "predicate_only"` without a predicate, a predicate with `long_search: "paths"`; increment 5s: a `supported_paths_level` value not listed, `"label_intersection"` with `require_support: "record_verified"` under `long_search: "supported_paths"`; §25: a `predicate_scope` value not listed, `"motif"` without a predicate; §21: a `max_mismatches` that is not an integer from 0 to 3 (`null` included) | fix the request |
+| 400 | `too_many_json_values` | H1: the body holds more JSON values than `--max-request-json-values` (262,144 by default; the root, each array element, each member's value), counted before it is parsed: `{"error", "code", "max_request_json_values"}`; nothing ran, a `request_id` is not held. The same on `/traverse`, `/resolve` and `POST /traverse/cancel` | send fewer values: split the request |
 | 400 | `later_increment` | a field of §4.4 (`budget_split`); §21.16: `max_mismatches` above 0 with `output.labels` `"all"` or `"predicate_only"`, a predicate or `long_search: "supported_paths"` (the capabilities' `mismatches.later_increment`) | wait for the increment the capabilities will announce |
 | 400 | `predicate_too_large` | increment 5b: the predicate's lists name more than `caps.max_predicate_labels` names (10,000 by default; a name in two lists counted twice); the message names the count and the cap (§19.3) | send at most `caps.max_predicate_labels` names; split the cohort |
 | 400 | `support_unavailable` | increment 4: `require_support: "record_verified"` with `long_search: "paths"` and `output.labels: "all"` in a retrieval mode (increment 5s: with `long_search: "supported_paths"` in every mode), on an index that cannot verify a path in one record: not BASIC, no coordinates, or no record mapping (no `.seqs`, or `--no-coord-mapping`); capabilities `support` is then not `record_verified`. The message names the index's best support and placement | ask without `require_support`: each label of a path then states its support (`label_intersection` there) |
@@ -437,6 +455,7 @@ answered; the refusals that no pair decides (the body, `graphs`, `in_ram`, the r
 | 400 | `annotation_unbudgeted` | increment 3: `output.labels: "all"` in a retrieval mode, and the annotation has no budget-aware decode (capabilities `annotation: "unbudgeted"`: a column, BRWT, row or other annotation without row-diff, or `row_diff_int_disk` / `row_diff_disk_coord`; only the row-diff family has one, since E14 every deployed row-diff form); increment 5b: a request with a predicate on such an annotation, in every mode (its selection reads rows); increment 5s: a request with `long_search: "supported_paths"`, in every mode (its search reads rows) | set `allow_unbudgeted_annotation: true` to read it without a memory bound on the reads (§14.4; a selection then reads single cells for at most 16 labels where the annotation has direct access, `selection.access: "columns"`), or ask for `labels: "none"` or mode `count` (without a predicate) |
 | 400 | `graph_unknown`, `selection_conflict`, `pair_not_found`, `pair_ambiguous` | a multi-graph server's selection (§24.1; SPEC-multigraph-envelope.md section 6, its codes): an unknown name in `graphs` or `pairs`, `graphs` beside `pairs`, a pair object naming none or several pairs of its name; the body adds `candidates` (`[{graph, graph_path, annotation_path}]`) where a choice exists | fix the selection: GET /capabilities lists the pairs |
 | 503 | `deadline` | the answer could not be written by `time_budget_ms` (§7.6): nothing partial is sent | narrow the request: fewer patterns, a smaller `max_contexts` or `max_steps`; a larger budget helps only when it lets the work end early. The operator can raise `--pattern-finalize-ms` or lower the delivery rates (§4.5) |
+| 413 | `body_too_large` | H1: the body is longer than `--max-request-body-mb` (§24.4), refused from its `Content-Length` before it is read (a chunked body at the chunk that passes it), on every route: `{"error", "code", "max_request_body_mb"}`, `Connection: close`; nothing ran, a `request_id` is not held | send a shorter body (`GET /capabilities` states the limit) |
 | 503 | `busy` | E19: the server runs its most `/pattern` requests at once (`--pattern-max-concurrent`; `SPEC-multigraph-envelope.md` §1.1). Refused before the body is parsed, with `Retry-After: 1` and the server's `server_instance` in the body: nothing ran, its `request_id` is not registered | send it again after `Retry-After` (the same `request_id` is admitted) |
 | 503 | (none) | the single index is still loading (`Retry-After: 60`); every route answers so | retry later |
 
@@ -2913,8 +2932,9 @@ In mode `count` no projection is built (note `projection_not_read` when one was 
 
 - a predicate is a JSON object with **exactly one** member, one of the seven operators;
 - a name is a **non-empty JSON string of valid UTF-8** (a JSON text is UTF-8; jsoncpp passes the bytes of a
-  string through, so a string holding other bytes is refused here, with its path: no column whose name the
-  answer cannot carry, §8.9, can be named), an annotation column label as stored (case-sensitive, not trimmed;
+  string through, so a string holding other bytes is refused: since GPT review 6 by the body's pre-scan, §3, as
+  not JSON; the check here, with its path, stays behind it: no column whose name the answer cannot carry, §8.9,
+  can be named), an annotation column label as stored (case-sensitive, not trimmed;
   on refseq33m a taxid written as a string, `"562"`); a number is refused with the fix (P7: `write a taxid as
   "562"`, fixture `predicate_invalid`); a record header is not a predicate term in version 1 (P20: unknown,
   §19.4);
@@ -4400,10 +4420,13 @@ the other pairs.
   (no list to select from). Beside them, in both modes, `max_request_body_mb` (integer MiB; `null`: unlimited,
   the default): the largest request body the server reads, the server flag `--max-request-body-mb N` (an integer
   in [0, 1 048 576], 0 = unlimited). A request with a longer body — a `Content-Length` above it, or a chunked body
-  growing past it — is dropped before any route runs: the HTTP library closes the connection without a response
-  (it builds a 413 it never sends), on every route, and the server logs it at warning level
-  (`SPEC-labeled-traversal-core.md` §10.3, the caps). A client that may send large bodies reads the limit here
-  rather than from the refusal, which has no status.
+  growing past it — is refused before any route runs, on every route: 413 `body_too_large` (§6; H1, train 3:
+  before, the HTTP library closed the connection without a status), from the `Content-Length` before the body
+  is read (a `Content-Length` that is no byte count is closed without a response, `SPEC-labeled-traversal-core.md`
+  §10.3); the server logs it at warning level (`SPEC-labeled-traversal-core.md` §10.3, the caps). A client that
+  may send large bodies reads the limit here before it sends, or from `request_intake` (H1: the limit, the value
+  count of `--max-request-json-values` and the shapes of both refusals; at the top level on a single-graph
+  server, in the `multigraph` block on a multi-graph one, `SPEC-multigraph-envelope.md` section 8).
 
 <!-- schema: capabilities_pair -->
 | field | type | meaning |

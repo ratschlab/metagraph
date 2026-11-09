@@ -16,6 +16,7 @@
 #include "common/seq_tools/reverse_complement.hpp"
 #include "common/unix_tools.hpp"
 #include "common/logger.hpp"
+#include "common/utils/string_utils.hpp"
 
 
 namespace mtg {
@@ -335,7 +336,8 @@ std::optional<LabelRef> LabelOracle::find_label(const std::string &name) const {
 LabelRef LabelOracle::resolve_label(const std::string &name) const {
     if (std::optional<LabelRef> ref = find_label(name))
         return std::move(*ref);
-    throw std::invalid_argument("Label not found in the annotation: '" + name + "'"
+    throw std::invalid_argument("Label not found in the annotation: '"
+                                + ::utils::clip_for_message(name) + "'"
                                 + (coord_to_header_ ? "" : " (no sequence header index loaded)"));
 }
 
@@ -522,12 +524,16 @@ LabelQuery::LabelQuery(const LabelOracle &oracle,
     for (LabelId i = 0; i < labels_.size(); ++i) {
         const LabelRef &ref = labels_[i];
         if (ref.kind == LabelKind::COLUMN) {
-            if (!column_labels_.try_emplace(ref.column, i).second)
-                throw std::invalid_argument("Duplicate label '" + ref.name + "'");
+            if (!column_labels_.try_emplace(ref.column, i).second) {
+                throw std::invalid_argument("Duplicate label '"
+                                            + ::utils::clip_for_message(ref.name) + "'");
+            }
         } else {
             has_headers = true;
-            if (!header_labels_.try_emplace(std::make_pair(ref.column, ref.seq_id), i).second)
-                throw std::invalid_argument("Duplicate label '" + ref.name + "'");
+            if (!header_labels_.try_emplace(std::make_pair(ref.column, ref.seq_id), i).second) {
+                throw std::invalid_argument("Duplicate label '"
+                                            + ::utils::clip_for_message(ref.name) + "'");
+            }
             header_columns_.insert(ref.column);
         }
         direct_columns_.push_back(ref.column);

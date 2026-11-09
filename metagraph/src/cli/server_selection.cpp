@@ -57,7 +57,7 @@ TraversePairChoice choose_traverse_pair(const std::string &name, const std::stri
     auto it = indexes.find(name);
     if (it == indexes.end()) {
         choice.outcome = TraversePairChoice::UNKNOWN_GRAPH;
-        choice.error = "Bad request: unknown graph '" + name + "'";
+        choice.error = "Bad request: unknown graph '" + ::utils::clip_for_message(name) + "'";
         return choice;
     }
 
@@ -106,8 +106,8 @@ TraversePairChoice choose_traverse_pair(const std::string &name, const std::stri
         }
         if (!found) {
             choice.outcome = TraversePairChoice::NOT_PART;
-            choice.error = "Bad request: graph_path '" + *graph_path + "' is not part of "
-                           "index '" + name + "'";
+            choice.error = "Bad request: graph_path '" + ::utils::clip_for_message(*graph_path)
+                           + "' is not part of index '" + name + "'";
             return choice;
         }
         if (matching > 1)
@@ -205,11 +205,13 @@ probe_parameters(const std::vector<std::pair<std::string, std::string>> &query,
         std::optional<std::string> *slot = key == "graph" ? &name
                                          : key == "graph_path" ? &graph_path : nullptr;
         if (!slot) {
-            throw InvalidRequest("Bad request: unknown parameter '" + key + "' of GET "
-                                 + route + " (graph, graph_path)");
+            throw InvalidRequest("Bad request: unknown parameter '"
+                                 + ::utils::clip_for_message(key) + "' of GET " + route
+                                 + " (graph, graph_path)");
         }
         if (*slot)
-            throw InvalidRequest("Bad request: the parameter '" + key + "' is given twice");
+            throw InvalidRequest("Bad request: the parameter '" + ::utils::clip_for_message(key)
+                                 + "' is given twice");
         *slot = value;
     }
     if (!name) {
@@ -261,7 +263,10 @@ Json::Value candidates_of(const std::vector<SelectedPair> &pairs) {
     return candidates;
 }
 
-std::string in_quotes(const std::string &text) { return "'" + text + "'"; }
+// a name or path a selection refusal quotes, clipped as every error text clips a client's string
+std::string in_quotes(const std::string &text) {
+    return "'" + ::utils::clip_for_message(text) + "'";
+}
 
 // The names cap of a request without a selector: its existing 400 (no code), as POST /pattern
 // states it; |selector| names what the request would add

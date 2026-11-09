@@ -134,6 +134,14 @@ class Config {
     size_t traverse_max_seeds = 64;
     uint64_t traverse_max_seed_bp = 100'000;
     size_t traverse_max_seed_labels = 10'000;
+    // The counts of a /traverse request checked before anything of it is copied out of its
+    // parsed body (H1; SPEC-labeled-traversal-core.md §10.3), each refused 400 above it, 0 =
+    // unlimited: the names of one seed's explicit `labels`, of strategy.labels.extra and the
+    // entries of strategy.labels.change_cost's table. Stated by GET /traverse/capabilities
+    // (max_explicit_labels, max_extra_labels, max_cost_entries)
+    uint64_t traverse_max_explicit_labels = 10'000;
+    uint64_t traverse_max_extra_labels = 10'000;
+    uint64_t traverse_max_cost_entries = 10'000;
     uint64_t resolve_max_query_bp = 0;
     // A multi-graph server: a POST /search or /pattern request without `graphs` queries every
     // name of the graph list when the list has at most this many names, else it is refused
@@ -142,10 +150,16 @@ class Config {
     uint64_t max_graphs_without_selection = 10;
     // The largest request body the server reads, in MiB (0 = unlimited, the default): the
     // HTTP library's max_request_streambuf_size. A Content-Length above it, or a chunked body
-    // growing past it, is reported to on_error as message_size and the connection is closed
-    // without a response. Stated by GET /capabilities (max_request_body_mb, null when
-    // unlimited)
+    // growing past it, is reported to on_error as message_size, which answers 413
+    // body_too_large (refuse_body_too_large). Stated by GET /capabilities
+    // (max_request_body_mb, null when unlimited; request_intake)
     uint64_t max_request_body_mb = 0;
+    // The most JSON values the body of a strict-JSON route (POST /traverse, /resolve, /pattern,
+    // /traverse/cancel) may hold (0 = unlimited): counted before the body is parsed, so that
+    // jsoncpp never builds a larger tree (about 100 bytes and more per value); one more is
+    // refused 400 too_many_json_values. Not /search's nor /align's. Stated by GET /capabilities
+    // (request_intake.max_request_json_values). 2^18: 64 seeds of 4,000 explicit labels
+    uint64_t max_request_json_values = 262'144;
     // The server's maxima of a request's budgets (bounds.max_memory_mb, bounds.max_work_units;
     // SPEC-labeled-traversal-core.md §10.3): 0 = off (a request's budgets as given, an omitted
     // one none). Set, a larger budget is lowered to it and an omitted one set to it, echoed as

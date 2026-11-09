@@ -168,6 +168,34 @@
    "/resolve",
    "/pattern"
   ],
+  "request_intake": {
+   "body_too_large": {
+    "code": "body_too_large",
+    "members": [
+     "code",
+     "error",
+     "max_request_body_mb"
+    ],
+    "status": 413
+   },
+   "json_values_routes": [
+    "/pattern",
+    "/resolve",
+    "/traverse",
+    "/traverse/cancel"
+   ],
+   "max_request_body_mb": null,
+   "max_request_json_values": 262144,
+   "too_many_json_values": {
+    "code": "too_many_json_values",
+    "members": [
+     "code",
+     "error",
+     "max_request_json_values"
+    ],
+    "status": 400
+   }
+  },
   "requests_route": "GET /requests/{request_id}",
   "resolve_boundary_ties": true,
   "search_cuts": true,

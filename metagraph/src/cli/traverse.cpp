@@ -19,6 +19,7 @@
 #include <sstream>
 #include <string_view>
 #include <tuple>
+#include <unordered_map>
 #include <unordered_set>
 
 #include "cli/config/config.hpp"
@@ -217,7 +218,62 @@ static CostSpec parse_cost(const Json::Value &json, const std::string &path) {
     return cost;
 }
 
+// The request's counts under the server's caps, before anything of |json| is copied (the
+// declaration's rule, traverse.hpp)
+static void check_request_counts(const Json::Value &json, const TraverseLimits &limits) {
+    // (indexing a const Value that is no object or null would throw jsoncpp's LogicError)
+    auto member = [](const Json::Value &object, const char *key) -> const Json::Value& {
+        static const Json::Value kNone;
+        return object.isObject() ? object[key] : kNone;
+    };
+    const Json::Value &seeds = member(json, "seeds");
+    if (seeds.isArray()) {
+        if (limits.max_seeds && seeds.size() > limits.max_seeds) {
+            throw InvalidRequest("request.seeds: at most " + std::to_string(limits.max_seeds)
+                                 + " seeds per request");
+        }
+        for (Json::ArrayIndex i = 0; i < seeds.size(); ++i) {
+            // The derivation reads one full annotation row per seed k-mer, so the seed length
+            // is itself a cost the caller declares; /resolve bounds its query the same way
+            const Json::Value &sequence = member(seeds[i], "sequence");
+            const char *begin = nullptr;
+            const char *end = nullptr;
+            if (limits.max_seed_bp && sequence.isString() && sequence.getString(&begin, &end)
+                    && static_cast<uint64_t>(end - begin) > limits.max_seed_bp) {
+                throw InvalidRequest("request.seeds: a seed is longer than the server limit of "
+                                     + std::to_string(limits.max_seed_bp) + " bp");
+            }
+            const Json::Value &labels = member(seeds[i], "labels");
+            if (limits.max_explicit_labels && labels.isArray()
+                    && labels.size() > limits.max_explicit_labels) {
+                throw InvalidRequest("request.seeds[" + std::to_string(i) + "].labels: at most "
+                                     + std::to_string(limits.max_explicit_labels)
+                                     + " labels per seed (--traverse-max-explicit-labels)");
+            }
+        }
+    }
+    const Json::Value &labels = member(member(json, "strategy"), "labels");
+    const Json::Value &extra = member(labels, "extra");
+    if (limits.max_extra_labels && extra.isArray() && extra.size() > limits.max_extra_labels) {
+        throw InvalidRequest("strategy.labels.extra: at most "
+                             + std::to_string(limits.max_extra_labels)
+                             + " labels (--traverse-max-extra-labels)");
+    }
+    const Json::Value &entries = member(member(labels, "change_cost"), "entries");
+    if (limits.max_cost_entries && entries.isArray()
+            && entries.size() > limits.max_cost_entries) {
+        throw InvalidRequest("strategy.labels.change_cost.entries: at most "
+                             + std::to_string(limits.max_cost_entries)
+                             + " entries (--traverse-max-cost-entries)");
+    }
+}
+
 TraverseRequest parse_traverse_request(const Json::Value &json) {
+    return parse_traverse_request(json, TraverseLimits());
+}
+
+TraverseRequest parse_traverse_request(const Json::Value &json, const TraverseLimits &limits) {
+    check_request_counts(json, limits);
     TraverseRequest req;
     Strict s(json, "request");
     req.release = s.str("release", "");
@@ -3111,7 +3167,7 @@ class GraphletWriter {
             unrepresentable(std::string("empty ") + what);
         for (unsigned char c : t) {
             if (c < 0x21 || c > 0x7E)
-                unrepresentable(std::string(what) + " '" + std::string(t) + "' is not a token");
+                unrepresentable(std::string(what) + " '" + ::utils::clip_for_message(t) + "' is not a token");
         }
         out_ += t;
     }
@@ -4247,22 +4303,32 @@ DeliveryCosts delivery_costs(const std::string &detail, bool sequences, uint64_t
     return d;
 }
 
-static LabelChangeCost make_cost(const CostSpec &spec, const std::vector<std::string> &dict) {
+// The seed's cost model over its dictionary |dict| (its labels, then strategy.labels.extra): a
+// table's entries by label id, a name's id its FIRST position in |dict|. The names are looked
+// up in one hash map built per seed, O(|dict| + |entries|) (two linear scans of |dict| per entry
+// made a table of E entries over D names cost 2 E D string comparisons, review 5 #6); with the
+// server's caps (max_explicit_labels, max_extra_labels, max_cost_entries) a seed's
+// preprocessing is a few milliseconds at most, and a stop is seen between seeds and in the walk
+LabelChangeCost make_cost(const CostSpec &spec, const std::vector<std::string> &dict) {
     switch (spec.model) {
         case CostSpec::FORBID:
             return LabelChangeCost::forbid();
         case CostSpec::CONSTANT:
             return LabelChangeCost::constant(spec.value);
         case CostSpec::TABLE: {
+            std::unordered_map<std::string_view, LabelId> ids;
+            ids.reserve(dict.size());
+            // (a repeated name keeps its first id: emplace leaves an existing key alone)
+            for (size_t i = 0; i < dict.size(); ++i) {
+                ids.emplace(dict[i], static_cast<LabelId>(i));
+            }
             std::map<std::pair<LabelId, LabelId>, double> entries;
-            auto id_of = [&](const std::string &name) -> std::optional<LabelId> {
-                auto it = std::find(dict.begin(), dict.end(), name);
-                if (it == dict.end()) return std::nullopt;
-                return static_cast<LabelId>(it - dict.begin());
-            };
             for (const auto &[from, to, c] : spec.entries) {
-                auto a = id_of(from), b = id_of(to);
-                if (a && b) entries[{ *a, *b }] = c;   // entries for labels outside P are irrelevant
+                const auto a = ids.find(from);
+                const auto b = ids.find(to);
+                // entries for labels outside P are irrelevant
+                if (a != ids.end() && b != ids.end())
+                    entries[{ a->second, b->second }] = c;
             }
             return LabelChangeCost::table(std::move(entries), spec.default_cost);
         }
@@ -5026,7 +5092,9 @@ Json::Value process_traverse_request(const Json::Value &json,
     // on this thread from here to its top-level timing block, each seed's result written as text
     // included (the envelope's final assembly and compression come after it)
     const common::ThreadUsageMeter request_usage;
-    TraverseRequest req = parse_traverse_request(json);
+    // the counts first, before anything of the body is copied (max_seeds, max_seed_bp and the
+    // labels', extra's and table's caps)
+    TraverseRequest req = parse_traverse_request(json, limits);
     std::unique_ptr<Attempt> local;
     // a request-wide memory bound reads what the results before a seed hold from the attempt's
     // account (the server always has an attempt; the CLI sets no bound): one outside the server
@@ -5036,24 +5104,10 @@ Json::Value process_traverse_request(const Json::Value &json,
         attempt = local.get();
     }
     if (!req.release.empty() && !release.empty() && req.release != release)
-        throw InvalidRequest("request.release '" + req.release + "' does not match the loaded index release '"
+        throw InvalidRequest("request.release '" + ::utils::clip_for_message(req.release) + "' does not match the loaded index release '"
                              + release + "'");
     // a multi-graph server's pair answers for the labels it holds and states the others
     req.strategy.drop_labels_not_in_graph = limits.labels_not_in_graph_dropped;
-    if (limits.max_seeds && req.seeds.size() > limits.max_seeds) {
-        throw InvalidRequest("request.seeds: at most " + std::to_string(limits.max_seeds)
-                             + " seeds per request");
-    }
-    if (limits.max_seed_bp) {
-        // The derivation reads one full annotation row per seed k-mer, so the seed length
-        // is itself a cost the caller declares; /resolve bounds its query the same way.
-        for (const auto &seed : req.seeds) {
-            if (seed.sequence.size() > limits.max_seed_bp) {
-                throw InvalidRequest("request.seeds: a seed is longer than the server limit of "
-                                     + std::to_string(limits.max_seed_bp) + " bp");
-            }
-        }
-    }
     Json::Value clamped(Json::arrayValue);
     // the values keep the type of their knob: an integer knob echoes as an integer (as a
     // double it printed 10000.0, which a client reads as a float where the field is an
@@ -5562,7 +5616,7 @@ Json::Value process_traverse_request(const Json::Value &json,
                 // the only graph of this server (or the CLI's): the whole request fails (400),
                 // as every malformed seed fails it
                 walked("failed", "");
-                throw InvalidRequest(std::string("seed '") + (seed.seed_id.empty() ? seed.sequence.substr(0, 32) : seed.seed_id)
+                throw InvalidRequest(std::string("seed '") + (seed.seed_id.empty() ? seed.sequence.substr(0, 32) : ::utils::clip_for_message(seed.seed_id))
                                      + "': " + e.what());
             }
             // a chunk of a multi-graph server that does not hold the seed: stated per seed, the
@@ -5591,7 +5645,7 @@ Json::Value process_traverse_request(const Json::Value &json,
         } catch (const std::invalid_argument &e) {
             // the whole request fails (400); what the seed consumed is still the attempt's
             walked("failed", "");
-            throw InvalidRequest(std::string("seed '") + (seed.seed_id.empty() ? seed.sequence.substr(0, 32) : seed.seed_id)
+            throw InvalidRequest(std::string("seed '") + (seed.seed_id.empty() ? seed.sequence.substr(0, 32) : ::utils::clip_for_message(seed.seed_id))
                                  + "': " + e.what());
         }
     }
@@ -5686,7 +5740,7 @@ static std::string explicit_selection_blocked(const SupportProfile &profile,
             const bool profiled = std::any_of(profile.labels.begin(), profile.labels.end(),
                 [&](const LabelProfile &lp) { return lp.label.name == name; });
             if (!profiled && !absent(name))
-                throw InvalidRequest("Explicit seed label was not profiled: '" + name + "'");
+                throw InvalidRequest("Explicit seed label was not profiled: '" + ::utils::clip_for_message(name) + "'");
         }
     }
     for (size_t i = 0; i < policy.explicit_seeds.size(); ++i) {

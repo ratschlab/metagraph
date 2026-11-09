@@ -467,6 +467,15 @@ Config::Config(int argc, char *argv[]) {
             exact_ms(argv[i], get_value(i), &labels);
             traverse_max_seed_labels = labels;
             i++;
+        } else if (!strcmp(argv[i], "--traverse-max-explicit-labels")) {
+            exact_ms(argv[i], get_value(i), &traverse_max_explicit_labels);
+            i++;
+        } else if (!strcmp(argv[i], "--traverse-max-extra-labels")) {
+            exact_ms(argv[i], get_value(i), &traverse_max_extra_labels);
+            i++;
+        } else if (!strcmp(argv[i], "--traverse-max-cost-entries")) {
+            exact_ms(argv[i], get_value(i), &traverse_max_cost_entries);
+            i++;
         } else if (!strcmp(argv[i], "--resolve-max-query-bp")) {
             exact_ms(argv[i], get_value(i), &resolve_max_query_bp);
             i++;
@@ -485,6 +494,9 @@ Config::Config(int argc, char *argv[]) {
         } else if (!strcmp(argv[i], "--max-request-body-mb")) {
             // in MiB, at most 1 TiB: the library takes the bound as a size_t of bytes
             bounded(argv[i], get_value(i), 1048576, &max_request_body_mb);
+            i++;
+        } else if (!strcmp(argv[i], "--max-request-json-values")) {
+            exact_ms(argv[i], get_value(i), &max_request_json_values);
             i++;
         } else if (!strcmp(argv[i], "--traverse-max-memory-mb")) {
             exact_ms(argv[i], get_value(i), &traverse_max_memory_mb);
@@ -2030,7 +2042,8 @@ if (advanced) {
             fprintf(stderr, "\t   --no-coord-mapping \t\tquery without mapping coords to sequence headers even if the .seqs index exists [off]\n");
             fprintf(stderr, "\t   --mem-cap-gb [FLOAT] \tmemory in GB available for the server to load graphs for queries into RAM [0]\n");
             fprintf(stderr, "\t   --max-graphs-without-selection [INT] \ta POST /search or /pattern request without `graphs` queries every name of a graph list of at most this many names, and is refused (400) on a longer list; stated by GET /capabilities; at least 1 [10]\n");
-            fprintf(stderr, "\t   --max-request-body-mb [INT] \tlargest request body read, in MiB: a request with a longer body is dropped (its connection closed without a response, logged); stated by GET /capabilities; 0 = unlimited [0]\n");
+            fprintf(stderr, "\t   --max-request-body-mb [INT] \tlargest request body read, in MiB: a request with a longer body is refused 413 body_too_large before it is read (a chunked one at the chunk that passes it); stated by GET /capabilities; 0 = unlimited [0]\n");
+            fprintf(stderr, "\t   --max-request-json-values [INT] \tmost JSON values in the body of POST /traverse, /resolve, /pattern and /traverse/cancel, counted before it is parsed: one more is refused 400 too_many_json_values; stated by GET /capabilities; 0 = unlimited [262144]\n");
             fprintf(stderr, "\n\t   --index-release [STR] \trelease id echoed by /traverse and /resolve; requests may pin it []\n");
             fprintf(stderr, "\t   --index-name [STR] \t\tname of the index (-i / -a only) in capabilities and graphlets, [A-Za-z0-9._-]+ []\n");
             fprintf(stderr, "\t   --index-manifest [FILE] \tmanifest of the index bundle (-i / -a only); its digest is the index identity []\n");
@@ -2038,6 +2051,9 @@ if (advanced) {
             fprintf(stderr, "\t   --traverse-max-seeds [INT] \t\tcap on seeds per /traverse request, 0 = unlimited [64]\n");
             fprintf(stderr, "\t   --traverse-max-seed-bp [INT] \t\tcap on the length of a /traverse seed, 0 = unlimited [100000]\n");
             fprintf(stderr, "\t   --traverse-max-seed-labels [INT] \tcap on labels DERIVED from a seed, 0 = unlimited [10000]\n");
+            fprintf(stderr, "\t   --traverse-max-explicit-labels [INT] \tcap on the labels a /traverse seed names (its labels), refused 400 above it, 0 = unlimited [10000]\n");
+            fprintf(stderr, "\t   --traverse-max-extra-labels [INT] \tcap on strategy.labels.extra, refused 400 above it, 0 = unlimited [10000]\n");
+            fprintf(stderr, "\t   --traverse-max-cost-entries [INT] \tcap on the entries of a change_cost table, refused 400 above it, 0 = unlimited [10000]\n");
             fprintf(stderr, "\t   --resolve-max-query-bp [INT] \t\tcap on the /resolve query length, 0 = unlimited [0]\n");
             fprintf(stderr, "\t   --traverse-max-memory-mb [INT] \tmaximum of bounds.max_memory_mb per /traverse seed: a larger one is lowered to it, an omitted one set to it; 0 = off [0]\n");
             fprintf(stderr, "\t   --traverse-max-work-units [INT] \tmaximum of bounds.max_work_units per /traverse seed, likewise; 0 = off [0]\n");

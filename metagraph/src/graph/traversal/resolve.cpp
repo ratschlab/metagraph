@@ -16,6 +16,7 @@
 #include "annotation/binary_matrix/row_diff/row_diff_cache.hpp"
 #include "common/seq_tools/reverse_complement.hpp"
 #include "common/logger.hpp"
+#include "common/utils/string_utils.hpp"
 
 
 namespace mtg {
@@ -441,7 +442,7 @@ void check_explicit_seeds(const LabelOracle &oracle,
     if (range)
         throw std::invalid_argument("Explicit seed interval out of range");
     throw std::invalid_argument("Explicit seed label was not profiled: '"
-                                + *unlisted(seeds[faulty]) + "'");
+                                + ::utils::clip_for_message(*unlisted(seeds[faulty])) + "'");
 }
 
 SupportProfile resolve_support(LabelOracle &oracle,
@@ -1289,7 +1290,7 @@ SeedSelection select_seeds(const SupportProfile &profile,
                             p.labels_not_covering.push_back(name);
                             continue;
                         }
-                        throw std::invalid_argument("Explicit seed label was not profiled: '" + name + "'");
+                        throw std::invalid_argument("Explicit seed label was not profiled: '" + ::utils::clip_for_message(name) + "'");
                     }
                     if (covers(*it, ex.kmers)) {
                         p.labels.push_back(it - profile.labels.begin());
