@@ -62,7 +62,7 @@ def requests(index):
     out = {
         'resolve_discover_headers': ('resolve', {'sequence': ndm1, 'discover': {'kind': 'header'}}),
         'resolve_select_max_support': ('resolve', {'sequence': ndm1, 'discover': {'kind': 'header'},
-                                                   'select': {'policy': 'max_support', 'max_seeds': 3}}),
+                                                   'select': {'max_seeds': 3}}),
         'ndm1_derived': traverse({'sequence': ndm1}, bounds={'max_extension_bp': 3000}),
         'ndm1_derived_columns': traverse({'sequence': ndm1}, labels={'seed_label_kind': 'column'},
                                          bounds={'max_extension_bp': 2000}),
@@ -157,16 +157,12 @@ def project_resolve(response):
     out['candidates'] = [[c['kmer_interval'], c['labels']] for c in response['candidates']]
     if 'selection' in response:
         sel = response['selection']
-        # The seeds as a set, with overlaps named by seed id: the prototype lists merged
-        # seeds by position, and v1 keeps them in rank order.
-        ids = [s['seed_id'] for s in sel['seeds']]
+        # The seeds as a set: v1 keeps them in rank order, the prototype by position.
         out['selection'] = {
-            'counts': sel['counts'],
             'seeds': sorted([s['seed_id'], s['sequence'], s['kmer_interval'], s['labels'],
                              s['label_population']['supporting_total'],
                              s['label_population']['dropped_count'],
-                             s['label_population'].get('dropped_digest'),
-                             sorted(ids[j] for j in s['overlaps_with'])]
+                             s['label_population'].get('dropped_digest')]
                             for s in sel['seeds']),
         }
     return out
