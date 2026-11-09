@@ -4491,10 +4491,14 @@ class TestPatternRegression(TestingBase):
 
         def without_tombstone_hold(caps):
             # H3: attempts.tombstone_hold_s, the cap of a tombstone's hold (900 s by default,
-            # SPEC-labeled-traversal-core.md §10.3), a gain over every base
+            # SPEC-labeled-traversal-core.md §10.3), and attempts.not_after_horizon_ms, how far
+            # ahead a not_after_ms may lie (hard_cap_ms + the skew, 901000 ms; §5), gains over
+            # every base
             if caps is b:
-                self.assertEqual(900, caps['attempts'].get('tombstone_hold_s'))
+                self.assertEqual((900, 901000), (caps['attempts'].get('tombstone_hold_s'),
+                                                 caps['attempts'].get('not_after_horizon_ms')))
             caps['attempts'].pop('tombstone_hold_s', None)
+            caps['attempts'].pop('not_after_horizon_ms', None)
             return caps
 
         def only_gains(base, new, allowed, what):

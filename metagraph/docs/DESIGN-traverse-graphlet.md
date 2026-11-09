@@ -1367,7 +1367,10 @@ no stated bound, and that an answer of `running` or `stopping` past the instant 
 - **Holds.** A tombstone is held at least min(`retention_s`, `tombstone_hold_s`) and until the server's clock reads
   `not_after_ms + clock_skew_allowance_ms`, within `tombstone_hold_s` (`--traverse-attempt-tombstone-hold-s`, 900 by
   default; train 3, H3) and `--traverse-attempt-tombstone-max-s` (86,400 by default, never less than
-  `retention_s`; a held finished attempt's cap). A tombstone held for `retention_s` alone would not justify releasing capacity: a request half
+  `retention_s`; a held finished attempt's cap). A `not_after_ms` more than `hard_cap_ms` +
+  `clock_skew_allowance_ms` ahead (901 s; `attempts.not_after_horizon_ms`) is refused 400
+  `not_after_beyond_horizon` by `/traverse` and the cancel before anything is registered (train 3, H3; GPT review 6
+  #6a), so no hold outlasts 903 s from the request's arrival. A tombstone held for `retention_s` alone would not justify releasing capacity: a request half
   uploaded when it is cancelled can complete after a short retention and run. Every tombstone answer — the cancel's
   and a repeat's 404, the state's 404, and the 409 refusing a copy — states `suppressed_until_ms`, the `not_after_ms`
   it was judged against and `covers_admission` (true iff a `not_after_ms` was named and the expiry reaches it plus

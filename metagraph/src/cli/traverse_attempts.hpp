@@ -662,6 +662,20 @@ class AttemptRegistry {
             const std::function<std::optional<Json::Value>()> &taken = nullptr);
     // the wall clock not_after_ms is compared with (Unix epoch ms)
     uint64_t now_ms() const;
+    // The horizon of not_after_ms (H3, GPT review 6 #6a): how far ahead of this server's clock
+    // a /traverse or a cancel may name one, hard_cap_ms + clock_skew_ms (ms, hard_cap_ms
+    // rounded up; 0: none, there is no cap: the CLI). A request starts within the content
+    // timeout of its header or never, so a not_after_ms further ahead refuses nothing more at
+    // handler start; but the id of one that ran would be held until it (within
+    // tombstone_max_s, 24 h), however cheap the request
+    uint64_t not_after_horizon_ms() const;
+    // The 400 body refusing a not_after_ms (read from |where|) that lies beyond the horizon
+    // from now_ms(): {error, code: "not_after_beyond_horizon", not_after_ms,
+    // not_after_horizon_ms, server_time_ms}; none when it is absent, within the horizon, or
+    // there is no horizon. A route checks it before anything is registered or held (a past
+    // not_after_ms is never beyond it: its expired 409 stays)
+    std::optional<Json::Value> beyond_horizon_json(std::optional<uint64_t> not_after_ms,
+                                                   const std::string &where) const;
     // the `attempts` block of both capabilities routes: the fields, routes, retention, the
     // bound's parts with their number types (integers, ms), the clock skew a ledger adds to
     // not_after_ms, and the rules as references to the SPEC sections that state them
@@ -746,8 +760,10 @@ class AttemptRegistry {
     // wall-clock one has not (the wall clock stepped back)
     // is re-keyed to the time its wall clock still needs. A held finished attempt is never
     // dropped early, so the table can exceed retention_count by them: what it holds is bounded
-    // by the attempts that finish within tombstone_max_s (a cancel of an unknown id is refused,
-    // 429, by the tombstones alone: tombstones_)
+    // by the attempts that finish (or have a copy refused) within min(tombstone_max_s,
+    // hard_cap_ms + 2 x clock_skew_ms), the latter since the routes refuse a not_after_ms
+    // beyond the horizon (beyond_horizon_json); a cancel of an unknown id is refused, 429, by
+    // the tombstones alone (tombstones_)
     std::set<std::pair<Attempt::Clock::time_point, std::string>> tomb_expiry_;
     // the tombstones in |attempts_| (the cancels of unknown ids, until their hold ends): what a
     // cancel of an unknown id is refused 429 tombstones_full by, at retention_count (H3, S1:

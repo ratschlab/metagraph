@@ -95,6 +95,9 @@ SUBSTANCE = {
         'server_instance when the request was judged',
         'apart from what it runs past its bound up to its next delivery check',
         'a later get /traverse/attempt/{id} answers 404',
+        # H3 round 3 (GPT review 6 #6a): the horizon
+        'the horizon', 'not_after_beyond_horizon', 'hard_cap_ms + clock_skew_allowance_ms',
+        'so nothing is registered, held or extended', 'its expired 409 is unchanged',
     ],
     'attempts.instance': [
         'compared as given', 'checked first, ahead of a duplicate id and of not_after_ms',
@@ -134,7 +137,8 @@ SUBSTANCE = {
         'a 409 instance_mismatch release nothing', 'another server that serves the same ledger',
         "that the attempt's run past its bound has ended by then",
         'at most tombstone_max_s after it finished or after its latest refused copy',
-        'the finishes and refused copies within tombstone_max_s',
+        'the finishes and refused copies within min(tombstone_max_s, hard_cap_ms + 2 x '
+        'clock_skew_allowance_ms)', 'they do not count toward the tombstones\' retention_count',
     ],
     'attempts.delivery_reserve.rule': [
         'reserve_ms = 1.25 x ((t + e) / (compress_mbps x 1000) + e / (build_mbps x 1000)) '

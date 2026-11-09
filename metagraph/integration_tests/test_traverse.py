@@ -2653,6 +2653,29 @@ class TestTraverseAPI(TestTraverseBase):
             self.assertIn('not_after_ms', ret.json()['error'])
             self.assertNotIn('usage', ret.json())
         self.assertEqual(404, requests.get(url + '/traverse/attempt/na-bad').status_code)
+        # H3 (GPT review 6 #6a): beyond the horizon, hard_cap_ms + the skew ahead of the server's
+        # clock, a 400 naming the limit, error first, no usage, nothing registered -- with or
+        # without attempt_id, and on a cancel (nothing tombstoned); within it as before
+        self.assertEqual(901000, att['not_after_horizon_ms'])
+        self.assertIs(int, type(att['not_after_horizon_ms']))
+        far = now + 3_600_000
+        for body, path in ((dict(base, attempt_id='na-far', not_after_ms=far), 'traverse'),
+                           (dict(base, not_after_ms=far), 'traverse'),
+                           ({'attempt_id': 'na-far', 'not_after_ms': far}, 'traverse/cancel')):
+            ret = self._post(path, body)
+            self.assertEqual(400, ret.status_code, (path, ret.text))
+            self.assertTrue(ret.text.startswith('{"error":"request.not_after_ms: %d lies ' % far),
+                            ret.text)
+            refusal = ret.json()
+            self.assertEqual(['error', 'code', 'not_after_horizon_ms', 'not_after_ms',
+                              'server_time_ms'], list(refusal))
+            self.assertEqual(('not_after_beyond_horizon', 901000, far),
+                             (refusal['code'], refusal['not_after_horizon_ms'],
+                              refusal['not_after_ms']))
+            self.assertGreaterEqual(refusal['server_time_ms'], now)
+            self.assertIn('beyond the 901000 ms it accepts', refusal['error'])
+        self.assertEqual(404, requests.get(url + '/traverse/attempt/na-far').status_code)
+        self.assertNotIn('tombstone', requests.get(url + '/traverse/attempt/na-far').json())
         # /resolve reads it too (SPEC-multigraph-envelope.md section 4, E20): admission only,
         # the single-graph answer as before; passed, 409 expired and nothing runs
         resolve = {'sequence': self.element, 'labels': ['acc1']}
@@ -6900,16 +6923,23 @@ class TestServerConnectionsAndLabels(TestingBase):
 
     def test_held_finished_attempts_never_block_a_cancel(self):
         """H3, the review's S1 (e23/H3-review/exp_tomb_fill.py): with --traverse-attempt-retention
-        50, 101 malformed /traverse with an attempt_id and a not_after_ms 23 h ahead are registered,
-        refused 400, and their ids held past their retention (the first 51 by count, until that
-        not_after_ms); a real cancel-before-arrival after them is still tombstoned (404, covers
-        admission), not refused 429 tombstones_full: only tombstones count."""
+        50, 101 malformed /traverse with an attempt_id and a not_after_ms 800 s ahead are
+        registered, refused 400, and their ids held past their retention (the first 51 by count,
+        until that not_after_ms); a real cancel-before-arrival after them is still tombstoned (404,
+        covers admission), not refused 429 tombstones_full: only tombstones count. The review's
+        23 h is beyond the horizon now (GPT review 6 #6a): refused 400 before anything is
+        registered."""
         with self._Server(self, '--traverse-attempt-retention', '50') as server:
             now = int(time.time() * 1000)
+            beyond = server.post('traverse', {'attempt_id': 'h3-fill-far',
+                                              'not_after_ms': now + 23 * 3600 * 1000})
+            self.assertEqual((400, 'not_after_beyond_horizon'),
+                             (beyond.status_code, beyond.json().get('code')), beyond.text)
+            self.assertEqual(404, server.state('h3-fill-far').status_code)
             statuses = {}
             for i in range(101):
                 ret = server.post('traverse', {'attempt_id': f'h3-fill-{i}',
-                                               'not_after_ms': now + 23 * 3600 * 1000})
+                                               'not_after_ms': now + 800 * 1000})
                 statuses[ret.status_code] = statuses.get(ret.status_code, 0) + 1
             self.assertEqual({400: 101}, statuses)
             held = server.state('h3-fill-0')
@@ -6926,8 +6956,8 @@ class TestServerConnectionsAndLabels(TestingBase):
     def test_a_cancel_of_an_unknown_id_is_held_900_s(self):
         """At the defaults (retention 3600 s, tombstone_max_s 86400) a tombstone is held 900 s
         (--traverse-attempt-tombstone-hold-s), not 1 to 24 h: a cancel naming a not_after_ms up to
-        898 s ahead is covered, one further ahead is held 900 s and not covered
-        (beyond_tombstone_max); the attempts block states tombstone_hold_s"""
+        898 s ahead is covered, one further ahead (within the horizon, 901 s) is held 900 s and not
+        covered (beyond_tombstone_max); the attempts block states tombstone_hold_s"""
         with self._Server(self) as server:
             caps = requests.get(server.url + '/capabilities').json()['attempts']
             self.assertEqual((900, 86400, 3600), (caps['tombstone_hold_s'],
@@ -6942,7 +6972,7 @@ class TestServerConnectionsAndLabels(TestingBase):
             self.assertTrue(body['covers_admission'])
             self.assertAlmostEqual(now + 900000, body['suppressed_until_ms'], delta=5000)
             far = server.post('traverse/cancel', {'attempt_id': 'h3-far',
-                                                  'not_after_ms': now + 3600000}).json()
+                                                  'not_after_ms': now + 900000}).json()
             self.assertFalse(far['covers_admission'])
             self.assertEqual('beyond_tombstone_max', far['covers_admission_reason'])
             self.assertAlmostEqual(now + 900000, far['suppressed_until_ms'], delta=5000)
@@ -6955,8 +6985,14 @@ class TestServerConnectionsAndLabels(TestingBase):
             self.assertEqual(86400, caps['tombstone_hold_s'])
             now = int(time.time() * 1000)
             far = server.post('traverse/cancel', {'attempt_id': 'h3-far',
-                                                  'not_after_ms': now + 3600000}).json()
+                                                  'not_after_ms': now + 900000}).json()
             self.assertTrue(far['covers_admission'])
+            # an hour ahead is beyond the horizon whatever the hold (GPT review 6 #6a)
+            beyond = server.post('traverse/cancel', {'attempt_id': 'h3-beyond',
+                                                     'not_after_ms': now + 3600000})
+            self.assertEqual((400, 'not_after_beyond_horizon'),
+                             (beyond.status_code, beyond.json().get('code')), beyond.text)
+            self.assertNotIn('tombstone', server.state('h3-beyond').json())
 
 
 class TestTraverseSeedPhase(TestingBase):

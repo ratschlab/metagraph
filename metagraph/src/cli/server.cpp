@@ -2288,6 +2288,15 @@ int run_server(Config *config) {
             // a malformed id or not_after_ms is refused before anything is registered (400, no
             // usage)
             attempt->set_ids(attempt_ids(json));
+            // a not_after_ms beyond the horizon (hard_cap_ms + clock skew ahead: H3, GPT review
+            // 6 #6a) is refused here too, before anything is registered or held (400, no
+            // usage): once run, its id would be held until it. A past one is never beyond it
+            // (the expired 409 below stays)
+            if (auto beyond = attempts.beyond_horizon_json(attempt->ids().not_after_ms,
+                                                           "request")) {
+                std::string text = error_first_json_text(*beyond);
+                throw HttpError(400, std::move(*beyond), std::move(text));
+            }
             // finish_by_ms, the completion deadline (SPEC-multigraph-envelope.md section 4):
             // the attempt's bound and walk-until become the minimum of their own and it less
             // the clock skew allowance. Malformed, it is refused before anything is registered
@@ -2460,6 +2469,12 @@ int run_server(Config *config) {
         process_request(response, request, request_id, [&](const std::string &content) {
             const CancelRequest cancel = parse_cancel_request(
                     parse_traversal_body(content, config->max_request_json_values));
+            // the horizon of /traverse (H3, GPT review 6 #6a), before anything is looked up or
+            // tombstoned: a cancel names the not_after_ms of a request /traverse accepts
+            if (auto beyond = attempts.beyond_horizon_json(cancel.not_after_ms, "request")) {
+                std::string text = error_first_json_text(*beyond);
+                throw HttpError(400, std::move(*beyond), std::move(text));
+            }
             auto [status, body] = attempts.cancel(cancel.attempt_id, cancel.wait_ms,
                                                   cancel.not_after_ms);
             logger->info("[Server] Attempt {}: cancel requested (request {}): {} {}",

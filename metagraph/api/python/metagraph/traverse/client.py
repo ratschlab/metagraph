@@ -611,7 +611,9 @@ class TraverseClient:
         |not_after_ms| (feature level 5): the not_after_ms of the request being cancelled.
         The tombstone is then held until no copy of that request can start, within the
         server's tombstone_hold_s (900 s by default; tombstone_max_s before train 3), and the
-        answer states so (`suppression`: covers_admission);
+        answer states so (`suppression`: covers_admission). One further ahead of the server's
+        clock than its attempts.not_after_horizon_ms (hard_cap_ms + the skew, 901 s by
+        default; H3) is refused 400 `not_after_beyond_horizon`, as on /traverse;
         release_verdict() says whether the attempt's capacity may be released on it. Sent
         only to a server at feature level 5 or above: to an older one the cancel goes out
         without it (the cancel still stops the attempt; |sent| shows what went out, and the

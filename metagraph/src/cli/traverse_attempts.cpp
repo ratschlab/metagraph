@@ -1211,6 +1211,36 @@ uint64_t AttemptRegistry::now_ms() const {
     return ms > 0 ? static_cast<uint64_t>(ms) : 0;
 }
 
+uint64_t AttemptRegistry::not_after_horizon_ms() const {
+    if (!(settings_.hard_cap_ms > 0))
+        return 0;
+    return static_cast<uint64_t>(std::ceil(settings_.hard_cap_ms)) + settings_.clock_skew_ms;
+}
+
+std::optional<Json::Value>
+AttemptRegistry::beyond_horizon_json(std::optional<uint64_t> not_after_ms,
+                                     const std::string &where) const {
+    const uint64_t horizon = not_after_horizon_ms();
+    if (!not_after_ms || !horizon)
+        return std::nullopt;
+    const uint64_t now = now_ms();
+    if (*not_after_ms <= now || *not_after_ms - now <= horizon)
+        return std::nullopt;
+    Json::Value body(Json::objectValue);
+    body["code"] = "not_after_beyond_horizon";
+    body["error"] = where + ".not_after_ms: " + std::to_string(*not_after_ms) + " lies "
+            + std::to_string(*not_after_ms - now) + " ms after this server's clock ("
+            + std::to_string(now) + "), beyond the " + std::to_string(horizon) + " ms it "
+            "accepts (attempts.not_after_horizon_ms: hard_cap_ms, which no request outlasts, + "
+            "clock_skew_allowance_ms): a request starts within the content timeout of its header "
+            "or never, so a later not_after_ms adds nothing but the time its id is held. "
+            "Nothing was run or registered; send one at most that far ahead";
+    body["not_after_horizon_ms"] = uint_json(horizon);
+    body["not_after_ms"] = uint_json(*not_after_ms);
+    body["server_time_ms"] = uint_json(now);
+    return body;
+}
+
 std::optional<AttemptRegistry::StartRefusal>
 AttemptRegistry::start(const std::shared_ptr<Attempt> &attempt,
                        const std::function<std::optional<Json::Value>()> &taken) {
@@ -1283,6 +1313,11 @@ Json::Value AttemptRegistry::capabilities_json() const {
     att["content_timeout_s"] = uint_json(settings_.content_timeout_s);
     att["client_check_ms"] = uint_json(settings_.client_check_ms);
     att["clock_skew_allowance_ms"] = uint_json(settings_.clock_skew_ms);
+    // how far ahead a not_after_ms may lie (H3, GPT review 6 #6a: hard_cap_ms +
+    // clock_skew_allowance_ms; null without a cap): one further ahead is refused 400
+    // not_after_beyond_horizon, on /traverse and POST /traverse/cancel
+    const uint64_t horizon = not_after_horizon_ms();
+    att["not_after_horizon_ms"] = horizon ? uint_json(horizon) : Json::Value();
     // what the bound is and how it is enforced (the cap, the walk-until stated, what runs past
     // it up to the next delivery check): the SPEC's rule, the numbers in the fields above and
     // in deadline_check (poll_stride)

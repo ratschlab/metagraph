@@ -1831,6 +1831,70 @@ TEST(GraphletAttemptRegistry, HeldFinishedAttemptsNeverBlockACancel) {
     EXPECT_TRUE(registry.start(replay));
 }
 
+// H3, GPT review 6 #6a: the horizon of not_after_ms. /traverse and POST /traverse/cancel refuse
+// one further ahead of the server's clock than hard_cap_ms + clock_skew_ms (400
+// not_after_beyond_horizon, before anything is registered), so that no request, malformed or
+// not, holds its id longer than that after it arrived; a past one is never beyond it (its
+// expired 409 stays), and without a cap (the CLI) there is no horizon
+TEST(GraphletAttemptRegistry, TheNotAfterHorizonIsTheCapPlusTheSkew) {
+    FakeClock clock;
+    AttemptSettings settings = settings_with(&clock, 3600, 50);
+    settings.clock_skew_ms = 2000;
+    AttemptRegistry registry(settings);
+    ASSERT_EQ(901'000u, registry.not_after_horizon_ms());
+    const Json::Value caps = registry.capabilities_json();
+    EXPECT_EQ(901'000u, caps["not_after_horizon_ms"].asUInt64());
+    EXPECT_EQ(Json::uintValue, caps["not_after_horizon_ms"].type());
+    const uint64_t now = clock.wall_ms();
+    // absent, past, now, and up to the horizon inclusive: accepted
+    for (std::optional<uint64_t> v : { std::optional<uint64_t>(), std::optional<uint64_t>(0),
+                                       std::optional<uint64_t>(now - 1),
+                                       std::optional<uint64_t>(now),
+                                       std::optional<uint64_t>(now + 600'000),
+                                       std::optional<uint64_t>(now + 901'000) }) {
+        EXPECT_FALSE(registry.beyond_horizon_json(v, "request")) << v.value_or(0);
+    }
+    // one millisecond beyond it, and the largest accepted value: refused, the limit named
+    for (uint64_t v : { now + 901'001, kMaxNotAfterMs }) {
+        auto body = registry.beyond_horizon_json(v, "request");
+        ASSERT_TRUE(body) << v;
+        EXPECT_EQ((std::vector<std::string>{ "code", "error", "not_after_horizon_ms",
+                                             "not_after_ms", "server_time_ms" }),
+                  body->getMemberNames());
+        EXPECT_EQ("not_after_beyond_horizon", (*body)["code"].asString());
+        EXPECT_EQ(901'000u, (*body)["not_after_horizon_ms"].asUInt64());
+        EXPECT_EQ(v, (*body)["not_after_ms"].asUInt64());
+        EXPECT_EQ(now, (*body)["server_time_ms"].asUInt64());
+        EXPECT_EQ(0u, (*body)["error"].asString().find(
+                "request.not_after_ms: " + std::to_string(v) + " lies "
+                + std::to_string(v - now) + " ms after this server's clock ("
+                + std::to_string(now) + "), beyond the 901000 ms it accepts "
+                "(attempts.not_after_horizon_ms"));
+    }
+    // the horizon moves with the clock
+    clock.ms = 1000;
+    EXPECT_FALSE(registry.beyond_horizon_json(now + 901'001, "request"));
+    // the skew and the cap set it (the cap rounded up)
+    {
+        FakeClock c2;
+        AttemptSettings s2 = settings_with(&c2);
+        s2.clock_skew_ms = 0;
+        s2.hard_cap_ms = 2999.5;
+        AttemptRegistry r2(s2);
+        EXPECT_EQ(3000u, r2.not_after_horizon_ms());
+        EXPECT_TRUE(r2.beyond_horizon_json(c2.wall_ms() + 3001, "request"));
+    }
+    // no cap (the CLI): no horizon, stated null
+    {
+        AttemptSettings s3 = settings_with(nullptr);
+        s3.hard_cap_ms = 0;
+        AttemptRegistry r3(s3);
+        EXPECT_EQ(0u, r3.not_after_horizon_ms());
+        EXPECT_TRUE(r3.capabilities_json()["not_after_horizon_ms"].isNull());
+        EXPECT_FALSE(r3.beyond_horizon_json(kMaxNotAfterMs, "request"));
+    }
+}
+
 // A copy of a cancelled request refused at dispatch (409) extends the tombstone to its own
 // not_after_ms + clock_skew_ms and states the suppression against it, so that every later copy
 // (a proxy's replay carries the same not_after_ms) is refused while it could still be admitted

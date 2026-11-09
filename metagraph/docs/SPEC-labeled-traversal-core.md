@@ -578,8 +578,21 @@ deadline. `src/cli/traverse.cpp` `process_resolve_request`, `src/graph/traversal
   `server_instance` when the request was judged, and no copy can start there later while its clock
   does not step back to `not_after_ms` or earlier (a release ground, §10.3). The capabilities' `not_after`
   text states this order *(review of 2026-10-06, C24)*. A fraction, a sign, a string or a value above
-  2⁵³ − 1 is a 400 naming the field, without `usage`. It is echoed as `usage.not_after_ms` and in the
-  attempt's state, only when given. The CLI applies the same check (the 409 body on stdout, exit
+  2⁵³ − 1 is a 400 naming the field, without `usage`. **The horizon** *(H3, train 3; GPT review 6 #6a)*: a
+  `not_after_ms` more than `attempts.not_after_horizon_ms` ahead of the server's clock when the handler reads
+  it — `hard_cap_ms + clock_skew_allowance_ms`, 899 000 + 2 000 = 901 000 ms at the defaults — is refused
+  **400** `{error, code: "not_after_beyond_horizon", not_after_horizon_ms, not_after_ms, server_time_ms}`
+  (`error` first; no `usage`), with or without `attempt_id`, right after the ids are read: before
+  `finish_by_ms`, the instance, the duplicate and the expiry, so nothing is registered, held or extended. A
+  request starts within the content timeout of its header or never, so a later instant refuses nothing more
+  at handler start; but the id of a request that ran is held until its `not_after_ms` + skew (§10.3, the
+  release rule), and before the horizon one cheap request, malformed or not, held its id up to
+  `tombstone_max_s` (24 h) and kept it out of every count. A past `not_after_ms` is never beyond the
+  horizon, so its `expired` 409 is unchanged. The search service sends one at most about 15 s ahead (265 s
+  with its off-by-default flags), the suite at most 600 s. Without a cap (the CLI) there is no horizon
+  (`not_after_horizon_ms` null). `/resolve` and `/pattern` apply none: their request registry holds nothing
+  to a `not_after_ms` (its retention is by time and count, oldest dropped first). It is echoed as
+  `usage.not_after_ms` and in the attempt's state, only when given. The CLI applies the same check (the 409 body on stdout, exit
   status 1). `/resolve` and `/pattern` read it too, since release 10 (`SPEC-multigraph-envelope.md` §4).
 - **`expect_server_instance`** *(review of pass 5; with `attempt_id` only; `/resolve` and `/pattern` take it
   with `request_id` since F3b, `SPEC-multigraph-envelope.md` §5)*: the `server_instance` (§10.3) the
@@ -3597,8 +3610,10 @@ search's routes, `POST /pattern` and `GET /pattern/capabilities`, are `SPEC-patt
   (to §5, `expect_server_instance`; the three from feature level 5), `allowance_ms`, `hard_cap_ms`
   (`content_timeout_s` × 1000 − 1000 = 899 000: the bound never exceeds it), `content_timeout_s` (900),
   `client_check_ms` (100), `clock_skew_allowance_ms` (`--traverse-clock-skew-ms`, default 2000: what a ledger adds
-  to `not_after_ms`, §5; the server's own check adds nothing), `bound` and `not_after` (references to §6.8, the
-  attempt's bound, and to §5, `not_after_ms`) and
+  to `not_after_ms`, §5; the server's own check adds nothing), `not_after_horizon_ms` (H3, train 3; GPT review 6
+  #6a: how far ahead of the server's clock a `not_after_ms` may lie, `hard_cap_ms + clock_skew_allowance_ms`,
+  901 000 at the defaults, an integer; null without a cap; §5; its presence is the marker), `bound` and
+  `not_after` (references to §6.8, the attempt's bound, and to §5, `not_after_ms`) and
   `delivery_reserve` (`compress_mbps`, `build_mbps`, `account_per_text_byte: {json, graphlet}` (6 and 6; 30 and 50 until E5b's
   fix and its review, §6.8),
   `coordinate_account_per_text_byte` (feature level 6: 12, an integer, so that a ledger can reproduce the
@@ -3635,7 +3650,9 @@ search's routes, `POST /pattern` and `GET /pattern/capabilities`, are `SPEC-patt
     `{error, usage}` for a request error after the attempt was registered (a bad strategy, an unknown label or
     graph, too many seeds, an unreachable extra label, …); 400 with `{error}` alone for a malformed id, a malformed
     `not_after_ms`, a malformed `expect_server_instance` (§5: the ids' pattern), or `budget_id`, `locus_id` or
-    `expect_server_instance` without `attempt_id` *(the last two: review of 2026-10-06, X4)*; **409** with
+    `expect_server_instance` without `attempt_id` *(the last two: review of 2026-10-06, X4)*; 400 `{error, code:
+    "not_after_beyond_horizon", not_after_horizon_ms, not_after_ms, server_time_ms}` (no `usage`, nothing
+    registered) for a `not_after_ms` beyond the horizon (§5; H3, GPT review 6 #6a); **409** with
     `{error, attempt}` (the other
     attempt's state, no `usage`) when the id is running, retained, held past its retention (below), or tombstoned
     by a cancel (a tombstone's `attempt` carries its suppression, judged against this request's own `not_after_ms`
@@ -3650,7 +3667,8 @@ search's routes, `POST /pattern` and `GET /pattern/capabilities`, are `SPEC-patt
     response (with or without `attempt_id`).
   - `POST /traverse/cancel` `{"attempt_id": "…", "wait_ms": 0, "not_after_ms": …}` (`wait_ms` 0 … 10 000, default
     0: how long to wait for the attempt to finish; `not_after_ms` optional, feature level 5, validated as on
-    `/traverse` — the instant of the request being cancelled): **200** `{attempt_id, server_instance, cancelled:
+    `/traverse` — the instant of the request being cancelled; beyond the horizon, the same 400
+    `not_after_beyond_horizon` before the id is looked up, nothing cancelled or tombstoned, §5): **200** `{attempt_id, server_instance, cancelled:
     true, state: "stopping" | "finished", attempt}` when the attempt was asked to stop (now or before: idempotent;
     `state` `finished` when it finished within `wait_ms`); **404** `{error, attempt_id, server_instance, cancelled:
     false, state: "finished", attempt}` when it has finished; **404** `{error, attempt_id, server_instance,
@@ -3709,9 +3727,17 @@ search's routes, `POST /pattern` and `GET /pattern/capabilities`, are `SPEC-patt
     and a `not_after_ms` far ahead is registered, finishes as an error, and its id is then held until that
     `not_after_ms` (within `tombstone_max_s`, 86,400 s), and 101 of them at `retention_count` 50 made a real
     cancel-before-arrival 429 for 23 h. Now cancels are refused only by other cancels, each held at most
-    `tombstone_hold_s`. What still holds the attempt table beside the tombstones: the held finished attempts, each
-    at most `tombstone_max_s` after its finish or its latest refused copy, never dropped early and not bounded by
-    `retention_count` (by the attempts that finish within `tombstone_max_s`); they hold memory, not the cancels'
+    `tombstone_hold_s`. **What the attempt table holds** *(H3; GPT review 6 #6a)*: the running attempts (at most
+    the `/traverse` handlers running); the tombstones, at most `retention_count` (10 000), each at most
+    `tombstone_hold_s` (900 s); the finished attempts retained, at most `retention_count`, for `retention_s`; and
+    the finished attempts held past their retention (the release rule, below), never dropped early and not
+    bounded by `retention_count`. Since the horizon (§5) each of these is held at most until its `not_after_ms` +
+    `clock_skew_allowance_ms` ≤ its arrival + `hard_cap_ms` + 2 × `clock_skew_allowance_ms` (903 s at the
+    defaults), or a refused copy's arrival + that: so they are at most the `/traverse` requests with an
+    `attempt_id` and a `not_after_ms` that ran, or were refused as copies, in the last 903 s, where before they
+    were those of the last `tombstone_max_s` (24 h). The count is bounded by the rate of such requests, not by a
+    number: measured about 5 KB each (4.9 KB for a malformed request, 5.4 KB for a minimal valid one), a
+    sustained 100 per second holds at most about 90 000 of them (about 450 MB). They hold memory, not the cancels'
     count. With `retention_s` 0 (finding 4) the
     server keeps **no tombstones**: such a cancel is refused, **429** with `reason: "no_suppression"`, and a request
     with the id arriving later runs (the capabilities' `suppression` says so). 400 for a bad body. Not refused
@@ -3756,9 +3782,11 @@ search's routes, `POST /pattern` and `GET /pattern/capabilities`, are `SPEC-patt
     the request arrives after the attempt left retention; with `retention_s` 0 nothing is kept, and a finished
     state assumes that no copy arrives after it (a pinned copy is still refused by a restarted process). Held
     attempts are not bounded by `retention_count` (they are never dropped early): their number is at most the
-    finishes and refused copies within `tombstone_max_s`, so `--traverse-attempt-tombstone-max-s` and the rate of
-    refused copies bound their memory (copies that keep arriving keep an id held, and held attempts count toward
-    `retention_count` for the tombstones of unknown ids: 429 `tombstones_full`).
+    finishes and refused copies within min(`tombstone_max_s`, `hard_cap_ms` + 2 × `clock_skew_allowance_ms`) —
+    903 s at the defaults, since the horizon of `not_after_ms` (§5; H3, GPT review 6 #6a) —, so the rate of such
+    requests bounds their memory (copies that keep arriving keep an id held; "What the attempt table holds",
+    above). They do not count toward the tombstones' `retention_count` (H3, the review's S1: before, they did,
+    and a cancel of an unknown id was refused 429 `tombstones_full` while they were held).
     **An `expired` 409** (`state: "expired"`) for an attempt sent with exactly that `not_after_ms` — from the
     `server_instance` it named in `expect_server_instance`, when it named one — **releases** it: the server checks
     the id's registration (running, retained, held, tombstoned) before the expiry, under one lock (§5), so no copy
