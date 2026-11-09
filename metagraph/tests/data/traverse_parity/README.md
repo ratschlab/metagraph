@@ -15,7 +15,8 @@ The prototype was sent each request with the knobs v1 fixes stated explicitly
 `continuation_bp: 0`, `detail: full`.
 
 v1 picks seeds to cover the labels, where the prototype picked them by support, so the
-parity check covers discovery only (2026-11-09).
+`/resolve` part of the parity check covers discovery only; the `/traverse` cases compare as
+before (2026-11-09).
 
 The `labels` of `resolve_discover_headers.json` are sorted by support, then name (2026-11-09): equally
 supported labels are ranked differently by the prototype and v1.

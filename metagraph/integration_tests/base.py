@@ -44,10 +44,11 @@ MMAP_FLAG = ' --mmap' if MEMORY_MAPPING else ''
 def start_server(graph, annotation, host, port, extra_args=''):
     """Start `server_query` on the first free port from |port|: (process, port)."""
     for _ in range(100):
-        command = f'{METAGRAPH} server_query -i {graph} -a {annotation} ' \
-                  f'--port {port} --address {host} -p 2 {extra_args}'
-        process = subprocess.Popen(shlex.split(command), shell=False,
-                                   stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        command = [METAGRAPH, 'server_query', '-i', graph, '-a', annotation,
+                   '--port', str(port), '--address', host, '-p', '2'] + shlex.split(extra_args)
+        # the output is not read: a pipe would fill and block the server
+        process = subprocess.Popen(command, stdout=subprocess.DEVNULL,
+                                   stderr=subprocess.DEVNULL)
         try:
             process.wait(timeout=1)
         except subprocess.TimeoutExpired:
