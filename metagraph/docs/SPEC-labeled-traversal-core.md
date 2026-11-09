@@ -220,8 +220,10 @@ Deterministic, recorded in the output.
   server's `multigraph` block: `resolve_seed_order`), so that a client need not infer it from the build: the
   seeds are listed in rank order — `longest_first` picks merged where they overlap (with `merge_overlapping`), a
   merged seed with the rank of its best member; `max_support` picks in pick order; explicit seeds in the request's
-  order. An engine without the member orders as before 01c05323b: with `merge_overlapping`, the `max_support` and
-  `longest_first` seeds by position; explicit seeds in the request's order.
+  order. The member's absence states nothing: builds before 01c05323b order by position (with `merge_overlapping`,
+  the `max_support` and `longest_first` seeds; explicit seeds in the request's order), and 01c05323b and later
+  builds without the member already rank (01c05323b itself states no member), so a client that does not see the
+  member takes the order from the build: rank if and only if 01c05323b is an ancestor of the build.
 - `max_labels_per_seed`: if a candidate has more labels, keep that many in `label_order`: `hash` (default; FNV-1a of
   label + `sample_seed`, unbiased w.r.t. column order), `column_id`, or `kmers_supported`. Dropped labels are
   reported as `labels_dropped: {count, digest, labels (if ≤ 1000)}` so the complementary subset can be run.
@@ -3280,7 +3282,8 @@ search's routes, `POST /pattern` and `GET /pattern/capabilities`, are `SPEC-patt
     `resolve_discovery`. And `max_explicit_labels`: the cap
     on a request's explicit label lists (`--resolve-max-explicit-labels`, an integer, 0 = unlimited, §4.1), a
     multi-graph server's `multigraph` block stating it as `resolve_max_explicit_labels`. And `seed_order: "rank"`:
-    the order of a selection's seeds (§4.2, since 01c05323b; absent: the order before it), a multi-graph server's
+    the order of a selection's seeds (§4.2, since 01c05323b; its absence states nothing: builds before 01c05323b
+    order by position, 01c05323b and later builds without it already rank), a multi-graph server's
     `multigraph` block stating it as `resolve_seed_order`. On `GET /capabilities` it is
     index-free, so stated while a single index loads
     too. Its presence on either route is how a client knows the field is accepted (a

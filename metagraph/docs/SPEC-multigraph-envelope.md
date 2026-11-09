@@ -346,7 +346,9 @@ integers, 0 for none; `SPEC-labeled-traversal-core.md` §4.6), as the `resolve` 
 (`--resolve-max-explicit-labels`, `SPEC-labeled-traversal-core.md` §4.1), as the `resolve` block's
 `max_explicit_labels`; above it the whole request is refused 400, before any pair. And `resolve_seed_order`
 (`"rank"`, as the `resolve` block's `seed_order`; `SPEC-labeled-traversal-core.md` §4.2): the order of a `/resolve`
-selection's seeds, the same on every pair (one engine); absent on an engine that orders as before 01c05323b.
+selection's seeds, the same on every pair (one engine). Its absence states nothing: builds before 01c05323b order
+by position, 01c05323b and later builds without it already rank, so a client without it takes the order from the
+build (rank if and only if 01c05323b is an ancestor).
 From E19 the block also states `max_concurrent`: `{"/pattern": n, "/resolve": n, "/traverse": n}`, the caps on
 the requests of each route the server runs at once (`--pattern-max-concurrent`, `--resolve-max-concurrent`,
 `--traverse-max-concurrent`), integers, 0 for a route without one; above a cap the request is refused 503 `busy`
