@@ -38,8 +38,7 @@ names it is refused (HTTP 400). The server builds its header index when it start
   "sequence": "ATGGAATTGCCC...",
   "labels": ["NZ_CM008882.1", "562"],
   "discover": {"max_labels": 1000, "kind": "column"},
-  "select": {"policy": "max_support", "max_seeds": 10, "min_block_bp": 0,
-             "max_labels_per_seed": 1000}
+  "select": {"max_seeds": 10, "min_block_bp": 0, "max_labels_per_seed": 1000}
 }
 ```
 
@@ -49,8 +48,7 @@ names it is refused (HTTP 400). The server builds its header index when it start
 | `labels` | the labels to profile, at most 100,000 | exactly one of `labels` and `discover` |
 | `discover.max_labels` | keep the labels supporting the most k-mers, ranked as `/search` with `with_signature` ranks them | 1000 |
 | `discover.kind` | `column` or `header` | `column` |
-| `select` | also select seeds | none |
-| `select.policy` | `max_support`, the only policy: the interval contained in the most labels' support runs, repeatedly, outside the intervals picked before | `max_support` |
+| `select` | also select seeds: repeatedly, the interval contained in the most labels' support runs, outside the intervals picked before | none |
 | `select.max_seeds`, `select.min_block_bp` | at most that many seeds (at most 1000), each at least that long (at least k) | 10, 0 |
 | `select.max_labels_per_seed` | the labels kept per seed, by the FNV-1a hash of their names; the others are counted with a digest | 1000 |
 
@@ -66,9 +64,8 @@ The response:
   "candidates": [{"kmer_interval": [0, 783], "bp_interval": [0, 813],
                   "labels": ["NZ_CM008882.1"]}],
   "selection": {
-    "policy": {...}, "counts": {"candidates": 3, "eligible": 3, "selected": 1},
     "seeds": [{"seed_id": "4c1f...", "sequence": "ATGG...", "kmer_interval": [0, 783],
-               "labels": ["NZ_CM008882.1"], "overlaps_with": [],
+               "labels": ["NZ_CM008882.1"],
                "label_population": {"supporting_total": 1, "included": 1, "dropped_count": 0}}]
   }
 }
@@ -78,7 +75,7 @@ Intervals are half-open k-mer intervals `[begin, end)`, except `bp_interval`, wh
 bases. `graph_runs` are the runs of the query's k-mers present in the graph; a label's `runs`
 are the maximal runs of k-mers it carries. With discovery, `labels_truncated` states how many
 labels there were and where the cut fell. A selected seed is valid `/traverse` input as it
-stands, with its `seed_id`. Seeds are listed in the order the policy picked them, best first. Seeds never overlap. With `select.min_block_bp` set to the query's length, the one seed is the whole query, carried by the labels on all its k-mers. When no label carries all of them, there is no seed.
+stands, with its `seed_id`. Seeds are listed in the order they were picked, best first, and never overlap. With `select.min_block_bp` set to the query's length, the one seed is the whole query, carried by the labels on all its k-mers. When no label carries all of them, there is no seed.
 
 ## `/traverse`
 

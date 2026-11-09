@@ -212,7 +212,7 @@ class TestTraverseServer(TraverseFixture):
     def test_python_client(self):
         client = GraphClient(self.host, self.servers[True][1])
         profile = client.resolve(self.X + self.P, discover={},
-                                 select={'policy': 'longest_first', 'max_seeds': 1})
+                                 select={'min_block_bp': len(self.X + self.P), 'max_seeds': 1})
         seed = profile['selection']['seeds'][0]
         self.assertEqual(['A'], seed['labels'])
         result = client.traverse([{'seed_id': seed['seed_id'], 'sequence': seed['sequence'],
