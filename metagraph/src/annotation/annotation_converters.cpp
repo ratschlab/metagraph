@@ -893,7 +893,7 @@ void merge_row_disk_annotations(const std::vector<std::string> &files,
         LEncoder le;
         matrices[j] = std::make_unique<RowDisk>();
 
-        sdsl::mmap_ifstream in(files[j], std::ios::binary);
+        sdsl::shared_mapper_ifstream in(files[j], std::ios::binary);
         if (!le.load(in)) {
             logger->error("Can't load label encoder from {}", files[j]);
             exit(1);
@@ -1702,7 +1702,7 @@ template <class Annotator>
 StaticBinRelAnnotator<TupleCSCMatrix<typename Annotator::binary_matrix_type>, std::string>
 load_coords(Annotator&& anno, const std::vector<std::string> &files) {
     std::vector<bit_vector_smart> delimiters(anno.num_labels());
-    std::vector<sdsl::int_vector<>> column_values(anno.num_labels());
+    std::vector<sdsl::packed_vector_view<0>> column_values(anno.num_labels());
 
     #pragma omp parallel for num_threads(get_num_threads()) schedule(dynamic)
     for (size_t i = 0; i < files.size(); ++i) {

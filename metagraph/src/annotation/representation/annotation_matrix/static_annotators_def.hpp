@@ -2,6 +2,8 @@
 #define __STATIC_ANNOTATOR_DEFS_HPP__
 
 #include <sdsl/dac_vector.hpp>
+#include <sdsl/packed_vector_view.hpp>
+#include <sdsl/rank_support_v.hpp>
 
 #include "annotation_matrix.hpp"
 #include "annotation/binary_matrix/bin_rel_wt/bin_rel_wt.hpp"
@@ -49,7 +51,7 @@ typedef StaticBinRelAnnotator<matrix::RowDiff<matrix::RowSparse>, std::string> R
 
 typedef StaticBinRelAnnotator<matrix::RowDiff<matrix::RowDisk>, std::string> RowDiffDiskAnnotator;
 
-typedef sdsl::dac_vector_dp<> CountsVector;
+typedef sdsl::dac_vector_dp<sdsl::packed_vector_view<1>, 64, sdsl::packed_vector_view> CountsVector;
 
 typedef StaticBinRelAnnotator<matrix::CSCMatrix<matrix::BRWT, CountsVector>, std::string> IntMultiBRWTAnnotator;
 
