@@ -826,6 +826,9 @@ AnnotatedDBG::get_top_label_signatures(std::string_view sequence,
     assert(presence_fraction <= 1.);
     assert(check_compatibility());
 
+    if (num_passed)
+        *num_passed = 0;
+
     if (sequence.size() < dbg_.get_k())
         return {};
 
