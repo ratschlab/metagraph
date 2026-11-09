@@ -60,12 +60,6 @@ class DBGSSHash : public DeBruijnGraph {
     std::unique_ptr<NodeStream> node_stream(std::string_view sequence,
                                             bool sequential) const override;
 
-    template <bool with_rc = true>
-    void map_to_nodes_with_rc(
-            std::string_view sequence,
-            const std::function<void(node_index, bool)>& callback,
-            const std::function<bool()>& terminate = []() { return false; }) const;
-
     uint64_t num_nodes() const override;
 
     bool load(std::istream& in);

@@ -62,18 +62,11 @@ void CanonicalDBG
     std::vector<node_index> path;
     path.reserve(sequence.size() - get_k() + 1);
 
-    // map until the first mismatch
-    bool stop = false;
-    graph_->map_to_nodes_sequentially(sequence,
-        [&](node_index node) {
-            if (node) {
-                path.push_back(node);
-            } else {
-                stop = true;
-            }
-        },
-        [&]() { return stop; }
-    );
+    // map until the first mismatch, pulling single nodes to not map past it
+    auto stream = graph_->node_stream(sequence, true);
+    for (node_index node; stream->next({ &node, 1 }) && node; ) {
+        path.push_back(node);
+    }
 
     for (node_index node : path) {
         if (terminate())

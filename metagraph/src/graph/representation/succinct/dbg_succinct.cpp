@@ -285,23 +285,7 @@ std::string DBGSuccinct::get_node_sequence(node_index node) const {
 void DBGSuccinct::map_to_nodes_sequentially(std::string_view sequence,
                                             const std::function<void(node_index)> &callback,
                                             const std::function<bool()> &terminate) const {
-    if (sequence.size() < get_k())
-        return;
-
-    auto is_missing = get_missing_kmer_skipper(bloom_filter_.get(), sequence);
-
-    boss_graph_->map_to_edges(
-        sequence,
-        [&](BOSS::edge_index i) { callback(validate_edge(i)); },
-        terminate,
-        [&]() {
-            if (!is_missing())
-                return false;
-
-            callback(npos);
-            return true;
-        }
-    );
+    call_streamed_nodes(sequence, true, callback, terminate);
 }
 
 namespace {
@@ -463,72 +447,61 @@ void DBGSuccinct::traverse(node_index start,
 void DBGSuccinct::map_to_nodes(std::string_view sequence,
                                const std::function<void(node_index)> &callback,
                                const std::function<bool()> &terminate) const {
+    if (mode_ != CANONICAL) {
+        call_streamed_nodes(sequence, false, callback, terminate);
+        return;
+    }
+
     if (sequence.size() < get_k())
         return;
 
     auto is_missing = get_missing_kmer_skipper(bloom_filter_.get(), sequence);
 
-    if (mode_ == CANONICAL) {
-        std::string sequence_rev_compl(sequence.begin(), sequence.end());
-        reverse_complement(sequence_rev_compl.begin(), sequence_rev_compl.end());
+    std::string sequence_rev_compl(sequence.begin(), sequence.end());
+    reverse_complement(sequence_rev_compl.begin(), sequence_rev_compl.end());
 
-        std::vector<BOSS::edge_index> boss_edges;
-        boss_edges.resize(sequence.size() - get_k() + 1);
+    std::vector<BOSS::edge_index> boss_edges;
+    boss_edges.resize(sequence.size() - get_k() + 1);
 
-        auto jt = boss_edges.begin();
-        boss_graph_->map_to_edges(sequence,
-            [&](auto index) { *jt = index; ++jt; },
-            []() { return false; },
-            [&]() {
-                if (!is_missing())
-                    return false;
+    auto jt = boss_edges.begin();
+    boss_graph_->map_to_edges(sequence,
+        [&](auto index) { *jt = index; ++jt; },
+        []() { return false; },
+        [&]() {
+            if (!is_missing())
+                return false;
 
-                ++jt;
-                return true;
-            }
-        );
-
-        assert(jt == boss_edges.end());
-
-        auto it = boss_edges.rbegin();
-        boss_graph_->map_to_edges(sequence_rev_compl,
-            [&](auto rc_index) {
-                assert(it < boss_edges.rend());
-                *it = std::min(*it, rc_index);
-                ++it;
-            },
-            []() { return false; },
-            [&]() {
-                assert(it < boss_edges.rend());
-                // if a k-mer is missing, skip its reverse compliment, as it's missing too.
-                if (!*it) {
-                    ++it;
-                    return true;
-                } else {
-                    return false;
-                }
-            }
-        );
-
-        for (size_t i = 0; i < boss_edges.size() && !terminate(); ++i) {
-            // the definition of a canonical k-mer is redefined:
-            //      use k-mer with smaller index in the BOSS table.
-            callback(validate_edge(boss_edges[i]));
+            ++jt;
+            return true;
         }
+    );
 
-    } else {
-        boss_graph_->map_to_edges(
-            sequence,
-            [&](BOSS::edge_index i) { callback(validate_edge(i)); },
-            terminate,
-            [&]() {
-                if (!is_missing())
-                    return false;
+    assert(jt == boss_edges.end());
 
-                callback(npos);
+    auto it = boss_edges.rbegin();
+    boss_graph_->map_to_edges(sequence_rev_compl,
+        [&](auto rc_index) {
+            assert(it < boss_edges.rend());
+            *it = std::min(*it, rc_index);
+            ++it;
+        },
+        []() { return false; },
+        [&]() {
+            assert(it < boss_edges.rend());
+            // if a k-mer is missing, skip its reverse compliment, as it's missing too.
+            if (!*it) {
+                ++it;
                 return true;
+            } else {
+                return false;
             }
-        );
+        }
+    );
+
+    for (size_t i = 0; i < boss_edges.size() && !terminate(); ++i) {
+        // the definition of a canonical k-mer is redefined:
+        //      use k-mer with smaller index in the BOSS table.
+        callback(validate_edge(boss_edges[i]));
     }
 }
 

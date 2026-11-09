@@ -263,6 +263,12 @@ class DeBruijnGraph : public SequenceGraph {
 
     // Call all nodes that have no incoming edges
     virtual void call_source_nodes(const std::function<void(node_index)> &callback) const;
+
+  protected:
+    // Callback interface on top of node_stream, for graphs that override it
+    void call_streamed_nodes(std::string_view sequence, bool sequential,
+                             const std::function<void(node_index)> &callback,
+                             const std::function<bool()> &terminate) const;
 };
 
 

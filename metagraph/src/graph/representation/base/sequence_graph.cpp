@@ -1,5 +1,7 @@
 #include "sequence_graph.hpp"
 
+#include <algorithm>
+#include <array>
 #include <cassert>
 #include <progress_bar.hpp>
 #include <sdsl/int_vector.hpp>
@@ -544,6 +546,28 @@ SequenceGraph::node_stream(std::string_view sequence, bool sequential) const {
         sequential ? graph::map_to_nodes_sequentially(*this, sequence)
                    : graph::map_to_nodes(*this, sequence)
     );
+}
+
+void DeBruijnGraph::call_streamed_nodes(std::string_view sequence, bool sequential,
+                                        const std::function<void(node_index)> &callback,
+                                        const std::function<bool()> &terminate) const {
+    // Pull chunks of doubling size: a virtual call per node is slow for fast
+    // graphs, while terminate() may stop early, and then at most as many nodes
+    // are mapped in vain as were already passed to the callback
+    auto stream = node_stream(sequence, sequential);
+    std::array<node_index, NodeRange::kChunkSize> buffer;
+    for (size_t size = 1; !terminate(); size = std::min(2 * size, buffer.size())) {
+        size_t n = stream->next({ buffer.data(), size });
+        if (!n)
+            return;
+
+        for (size_t i = 0; i < n; ++i) {
+            if (i && terminate())
+                return;
+
+            callback(buffer[i]);
+        }
+    }
 }
 
 std::vector<SequenceGraph::node_index>

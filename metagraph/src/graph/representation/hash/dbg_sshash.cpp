@@ -281,102 +281,11 @@ void DBGSSHash::add_sequence(std::string_view sequence,
     throw std::logic_error("adding sequences not supported");
 }
 
-template <bool with_rc, class Dict>
-void map_to_nodes_with_rc_impl(const DBGSSHash& graph,
-                               const Dict& dict,
-                               std::string_view sequence,
-                               const std::function<void(sshash::lookup_result)>& callback,
-                               const std::function<bool()>& terminate) {
-    size_t k = graph.get_k();
-    size_t n = sequence.size();
-    if (terminate() || n < k)
-        return;
-
-    if (!dict.num_kmers()) {
-        for (size_t i = 0; i + k <= sequence.size() && !terminate(); ++i) {
-            callback(sshash::lookup_result());
-        }
-        return;
-    }
-
-    using kmer_t = typename Dict::kmer_type;
-
-    if (with_rc) {
-        auto parser = sshash::streaming_query<Dict>(&dict);
-        for (size_t i = 0; i + k <= sequence.size() && !terminate(); ++i) {
-            auto ret_val = parser.lookup(sequence.data() + i);
-            // Direct dictionary lookup assumes a valid alphabet. Streaming
-            // lookup also accepts ambiguous bases and returns no match.
-            assert(!sshash::util::is_valid<kmer_t>(sequence.data() + i, k)
-                   || sshash::equal_lookup_result(ret_val,
-                                               dict.lookup(sequence.data() + i, with_rc)));
-            callback(ret_val);
-        }
-    } else {
-        std::vector<bool> invalid_char(n);
-        for (size_t i = 0; i < n; ++i) {
-            invalid_char[i] = !kmer_t::is_valid(sequence[i]);
-        }
-
-        auto invalid_kmer = utils::drag_and_mark_segments(invalid_char, true, k);
-
-        bool begin = true;
-        kmer_t uint_kmer;
-        for (size_t i = 0; i + k <= n && !terminate(); ++i) {
-            sshash::lookup_result ret_val;
-            if (invalid_kmer[i + k - 1]) {
-                begin = true;
-                callback(ret_val);
-                continue;
-            }
-
-            if (begin) {
-                begin = false;
-                uint_kmer = sshash::util::string_to_uint_kmer<kmer_t>(sequence.data() + i, k);
-            } else {
-                uint_kmer.drop_char();
-                uint_kmer.set(k - 1, kmer_t::char_to_uint(sequence[i + k - 1]));
-            }
-            ret_val = dict.lookup(uint_kmer, with_rc);
-
-            assert(sshash::equal_lookup_result(ret_val,
-                                               dict.lookup(sequence.data() + i, with_rc)));
-            callback(ret_val);
-        }
-    }
-}
-
-template <bool with_rc>
-void DBGSSHash::map_to_nodes_with_rc(std::string_view sequence,
-                                     const std::function<void(node_index, bool)>& callback,
-                                     const std::function<bool()>& terminate) const {
-    std::visit(
-            [&](const auto& dict) {
-                map_to_nodes_with_rc_impl<with_rc>(
-                        *this, dict, sequence,
-                        [&](sshash::lookup_result res) {
-                            auto node = sshash_to_graph_index(res.kmer_id);
-                            assert(!node || in_graph(node));
-                            callback(node, res.kmer_orientation < 0);
-                        },
-                        terminate);
-            },
-            dict_);
-}
-
-template void
-DBGSSHash::map_to_nodes_with_rc<true>(std::string_view,
-                                      const std::function<void(node_index, bool)>&,
-                                      const std::function<bool()>&) const;
-template void
-DBGSSHash::map_to_nodes_with_rc<false>(std::string_view,
-                                       const std::function<void(node_index, bool)>&,
-                                       const std::function<bool()>&) const;
-
 namespace {
 
-// Streaming form of map_to_nodes_with_rc_impl. With |oriented|, k-mers matched
-// in reverse-complement orientation map to their reverse-complement nodes.
+// Maps k-mers with sshash::streaming_query (with_rc) or a rolling k-mer (basic).
+// With |oriented|, k-mers matched in reverse-complement orientation map to
+// their reverse-complement nodes.
 template <bool with_rc, class Dict>
 class SSHashNodeStream final : public NodeStream {
     using kmer_t = typename Dict::kmer_type;
@@ -470,12 +379,7 @@ DBGSSHash::node_stream(std::string_view sequence, bool sequential) const {
 void DBGSSHash::map_to_nodes(std::string_view sequence,
                              const std::function<void(node_index)>& callback,
                              const std::function<bool()>& terminate) const {
-    if (mode_ == BASIC) {
-        map_to_nodes_sequentially(sequence, callback, terminate);
-    } else {
-        map_to_nodes_with_rc<true>(
-                sequence, [&](node_index node, bool) { callback(node); }, terminate);
-    }
+    call_streamed_nodes(sequence, false, callback, terminate);
 }
 
 DBGSSHash::node_index DBGSSHash::reverse_complement(node_index node) const {
@@ -512,17 +416,7 @@ uint64_t DBGSSHash::num_nodes() const {
 void DBGSSHash::map_to_nodes_sequentially(std::string_view sequence,
                                           const std::function<void(node_index)>& callback,
                                           const std::function<bool()>& terminate) const {
-    if (mode_ != BASIC) {
-        map_to_nodes_with_rc<true>(
-                sequence,
-                [&](node_index n, bool revcompl) {
-                    callback(n && revcompl ? reverse_complement(n) : n);
-                },
-                terminate);
-    } else {
-        map_to_nodes_with_rc<false>(
-                sequence, [&](node_index node, bool) { callback(node); }, terminate);
-    }
+    call_streamed_nodes(sequence, true, callback, terminate);
 }
 
 DBGSSHash::node_index DBGSSHash::traverse(node_index node, char next_char) const {
