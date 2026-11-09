@@ -1,8 +1,9 @@
 # pymetagraph
 
 Python bindings for querying an annotated MetaGraph index in-process, without a running
-`metagraph server_query` process. They expose the label query behind `metagraph query` for batches of sequences
-and return plain `(label, k-mer count)` results. To query a remote server, use the `metagraph`
+`metagraph server_query` process. For batches of sequences, they expose the label query behind
+`metagraph query`, sequence-to-graph alignment as in `metagraph align`, and the seed-only label
+mapping of `metagraph align --align-map-only`, and return plain values. To query a remote server, use the `metagraph`
 client package in `metagraph/api/python` instead.
 
 The bindings are experimental.
@@ -48,12 +49,36 @@ graph.query("ACGT...")     # a single sequence gives a single list
 
 `query` has the defaults of `metagraph query`: all labels (`num_top_labels=None`),
 `discovery_fraction=0.7` (`--min-kmers-fraction-label`) and `presence_fraction=0.0`.
-It releases the GIL and spreads the sequences over `threads` threads.
+
+```python
+seqs = ["ACGT...", "TTGA..."]
+alignments = graph.align(seqs, min_exact_match=0.3)
+# [[GraphAlignment(labels=['ref_A'], score=612, cigar='300=', orientation=False,
+#                  query_begin=0, query_end=300)], []]   best first, per sequence
+graph.align(seqs, labeled=False)   # no labels, as the server's /align endpoint
+
+mappings = graph.map(seqs, min_exact_match=0.3)
+# [LabelMapping(labels=['ref_A'], num_matches=287, orientation=False,
+#               query_begin=0, query_end=300), None]
+```
+
+`align` follows the annotation and reports its labels (`metagraph align -a`). With
+`labeled=False` it aligns to the whole graph without labels, as the `/align` endpoint of
+`metagraph server_query` does. `map` finds and label-filters seeds as labeled alignment does but
+does not extend them. It reports the labels whose seeds cover the most of the sequence, which
+is enough for accept/reject decisions at a fraction of the cost.
+
+`align` takes the options of `/align`: `min_exact_match` (`--align-min-exact-match`),
+`max_alternative_alignments` (`--align-alternative-alignments`) and `max_num_nodes_per_seq_char`
+(`--align-max-nodes-per-seq-char`). `map` takes `min_exact_match`. Options left unset keep the
+defaults of `metagraph align`.
+
+All three methods release the GIL and spread the sequences over `threads` threads.
 
 ## Tests
 
 The tests build a small index with the `metagraph` binary, taken from `$METAGRAPH` or from `PATH`,
-and compare the results with `metagraph query`:
+and compare the results with `metagraph query` and `metagraph align`:
 
 ```
 METAGRAPH=/path/to/metagraph pytest tests
