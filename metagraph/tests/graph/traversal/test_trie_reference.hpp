@@ -12,6 +12,7 @@
 
 #include "graph/representation/base/sequence_graph.hpp"
 #include "graph/traversal/traversal_types.hpp"
+#include "tests/graph/traversal/traversal_test_helpers.hpp"
 #include "common/seq_tools/reverse_complement.hpp"
 
 /**
@@ -33,8 +34,6 @@ namespace trie {
 
 using mtg::graph::traversal::Arm;
 using mtg::graph::traversal::EndReason;
-
-inline std::string rc_of(std::string s) { ::reverse_complement(s); return s; }
 
 struct StringIndex {
     // 2-bit packed k-mers (k <= 31 on ACGT)
@@ -67,7 +66,7 @@ struct StringIndex {
                 const std::string kmer = seqs[i].substr(j, k);
                 by_label[labels[i]].insert(encode(kmer));
                 if (canonical)
-                    by_label[labels[i]].insert(encode(rc_of(kmer)));
+                    by_label[labels[i]].insert(encode(rc(kmer)));
             }
         }
     }
@@ -119,7 +118,7 @@ struct StringIndex {
             const std::string km = seed.substr(j, k);
             out.insert(km);
             if (canonical)
-                out.insert(rc_of(km));
+                out.insert(rc(km));
         }
         return out;
     }
@@ -145,9 +144,9 @@ struct StringIndex {
     bool is_hairpin(const std::string &u, const std::string &v, const std::string &edge) const {
         if (!canonical)
             return false;
-        if (rc_of(edge) == edge)
+        if (rc(edge) == edge)
             return true;
-        return k % 2 == 0 && (rc_of(v) == v || rc_of(u) == u);
+        return k % 2 == 0 && (rc(v) == v || rc(u) == u);
     }
 
     // the edge identity (canonical (k+1)-mer in canonical regimes) and whether the step
@@ -156,7 +155,7 @@ struct StringIndex {
         *flipped = false;
         if (!canonical)
             return edge;
-        const std::string r = rc_of(edge);
+        const std::string r = rc(edge);
         if (r < edge) {
             *flipped = true;
             return r;

@@ -31,16 +31,6 @@ using namespace mtg::graph;
 using namespace mtg::graph::traversal;
 using namespace mtg::test;
 
-std::vector<DeBruijnGraph::Mode> all_modes() {
-    return {
-        DeBruijnGraph::BASIC,
-#if ! _PROTEIN_GRAPH
-        DeBruijnGraph::CANONICAL,
-        DeBruijnGraph::PRIMARY,
-#endif
-    };
-}
-
 std::string reversed(std::string s) {
     std::reverse(s.begin(), s.end());
     return s;

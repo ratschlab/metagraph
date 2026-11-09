@@ -59,9 +59,9 @@ class CoordToHeader {
     // global_coord -> (seq_id, local_coord)
     std::pair<size_t, uint64_t> map_single_coord(Column col, uint64_t coord) const;
 
-    // The last global coordinate of a sequence (its first is the previous sequence's
-    // last + 1). Throws as num_kmers_in_sequence does.
-    uint64_t last_coord(Column col, size_t seq_id) const;
+    // The first and last global coordinates of a sequence. Throws std::out_of_range for a
+    // column or sequence id out of range.
+    std::pair<uint64_t, uint64_t> sequence_coords(Column col, size_t seq_id) const;
 
     /**
      * Batch variant of `map_single_coord` that replaces each global coord

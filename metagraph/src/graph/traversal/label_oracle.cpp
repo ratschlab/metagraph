@@ -39,7 +39,6 @@ LabelOracle::LabelOracle(const AnnotatedDBG &anno_graph) : anno_graph_(anno_grap
                                                                : Regime::BASIC;
         graph_ = &loaded;
     }
-    key_mapper_ = std::make_unique<AnnotationKeyMapper>(*graph_);
 
     // get_matrix() may lock and flush (ColumnCompressed): call it once per request
     matrix_ = &anno_graph_.get_annotator().get_matrix();
@@ -58,23 +57,6 @@ LabelOracle::~LabelOracle() {}
 size_t LabelOracle::get_k() const { return graph_->get_k(); }
 
 uint64_t LabelOracle::num_columns() const { return matrix_->num_columns(); }
-
-std::vector<node_index> LabelOracle::keys_of_sequence(std::string_view sequence) const {
-    std::vector<node_index> keys;
-    if (sequence.size() < get_k())
-        return keys;
-    keys.reserve(sequence.size() - get_k() + 1);
-    // map_to_nodes returns annotation keys in every regime: the node itself (BASIC),
-    // the primary node (CanonicalDBG), the canonical node (native CANONICAL graphs).
-    // Every graph calls them in query order, although the base class promises that only
-    // for map_to_nodes_sequentially; RegimeAndKeyMapping checks it per k-mer.
-    graph_->map_to_nodes(sequence, [&](node_index key) { keys.push_back(key); });
-    return keys;
-}
-
-node_index LabelOracle::key_of(node_index node, std::string_view kmer) const {
-    return node == npos ? npos : key_mapper_->key(node, kmer);
-}
 
 std::optional<Column> LabelOracle::find_column(const std::string &name) const {
     const auto &encoder = anno_graph_.get_annotator().get_label_encoder();
@@ -116,12 +98,6 @@ std::pair<uint64_t, uint64_t> LabelOracle::map_coord(Column column, uint64_t coo
     return coord_to_header_->map_single_coord(column, coord);
 }
 
-std::pair<uint64_t, uint64_t> LabelOracle::sequence_coords(Column column, uint64_t seq_id) const {
-    assert(coord_to_header_);
-    const uint64_t last = coord_to_header_->last_coord(column, seq_id);
-    const uint64_t first = seq_id ? coord_to_header_->last_coord(column, seq_id - 1) + 1 : 0;
-    return { first, last };
-}
 
 LabelRef LabelOracle::resolve_label(const std::string &name) const {
     auto column = find_column(name);
@@ -188,7 +164,7 @@ LabelQuery::LabelQuery(const LabelOracle &oracle,
                                         "coordinates and a CoordToHeader index");
         if (!headers.emplace(ref.column, ref.seq_id).second)
             throw std::invalid_argument("Duplicate label '" + ref.name + "'");
-        const auto [first, last] = oracle_.sequence_coords(ref.column, ref.seq_id);
+        const auto [first, last] = oracle_.coord_to_header()->sequence_coords(ref.column, ref.seq_id);
         header_ranges_[ref.column].push_back(HeaderRange{ first, last, i });
     }
     for (auto it = header_ranges_.begin(); it != header_ranges_.end(); ++it) {

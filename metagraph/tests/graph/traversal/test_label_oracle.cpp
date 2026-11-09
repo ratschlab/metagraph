@@ -6,8 +6,10 @@
 #include "tests/test_helpers.hpp"
 #include "tests/graph/all/test_dbg_helpers.hpp"
 #include "tests/annotation/test_annotated_dbg_helpers.hpp"
+#include "tests/graph/traversal/traversal_test_helpers.hpp"
 
 #include "graph/traversal/label_oracle.hpp"
+#include "graph/annotation_key_mapper.hpp"
 #include "graph/traversal/resolve.hpp"
 #include "graph/annotated_dbg.hpp"
 #include "graph/representation/canonical_dbg.hpp"
@@ -26,35 +28,6 @@ using namespace mtg::graph::traversal;
 using namespace mtg::test;
 
 const size_t kTestK = 11;
-
-// Fixed random sequences: long enough for every k-mer to be distinct with high
-// probability, short enough for RowDiff fixtures to build quickly.
-std::vector<std::string> make_sequences(size_t n, size_t len, uint32_t seed) {
-    std::mt19937 gen(seed);
-    std::vector<std::string> seqs;
-    for (size_t i = 0; i < n; ++i) {
-        std::string s(len, 'A');
-        for (char &c : s) {
-            c = "ACGT"[gen() % 4];
-        }
-        seqs.push_back(s);
-    }
-    return seqs;
-}
-
-#if ! _PROTEIN_GRAPH
-std::string rc(std::string s) { ::reverse_complement(s); return s; }
-#endif
-
-std::vector<DeBruijnGraph::Mode> all_modes() {
-    return {
-        DeBruijnGraph::BASIC,
-#if ! _PROTEIN_GRAPH
-        DeBruijnGraph::CANONICAL,
-        DeBruijnGraph::PRIMARY,
-#endif
-    };
-}
 
 template <typename Pair>
 class LabelOracleTest : public ::testing::Test {};
@@ -100,7 +73,7 @@ TYPED_TEST(LabelOracleTest, RegimeAndKeyMapping) {
         const DeBruijnGraph &graph = oracle.graph();
         for (size_t s = 0; s < seqs.size(); ++s) {
             const std::string &seq = seqs[s];
-            auto keys = oracle.keys_of_sequence(seq);
+            auto keys = map_to_nodes(oracle.graph(), seq);
             auto nodes = map_to_nodes_sequentially(graph, seq);
             ASSERT_EQ(seq.size() - kTestK + 1, keys.size());
             ASSERT_EQ(keys.size(), nodes.size());
@@ -111,7 +84,7 @@ TYPED_TEST(LabelOracleTest, RegimeAndKeyMapping) {
                 ASSERT_NE(npos, nodes[i]);
                 ASSERT_NE(npos, keys[i]);
                 std::string_view kmer(seq.data() + i, kTestK);
-                EXPECT_EQ(keys[i], oracle.key_of(nodes[i], kmer));
+                EXPECT_EQ(keys[i], AnnotationKeyMapper(oracle.graph()).key(nodes[i], kmer));
                 // the label written on this k-mer is visible through the key
                 EXPECT_EQ((LabelQuery::NodeHits{ 0 }), hits[i]) << "k-mer " << kmer;
             }
@@ -120,7 +93,7 @@ TYPED_TEST(LabelOracleTest, RegimeAndKeyMapping) {
             // reverse-complement orientation
             std::string seq_rc = rc(seq);
             auto nodes_rc = map_to_nodes_sequentially(graph, seq_rc);
-            auto keys_rc = oracle.keys_of_sequence(seq_rc);
+            auto keys_rc = map_to_nodes(oracle.graph(), seq_rc);
             std::reverse(nodes_rc.begin(), nodes_rc.end());
             std::reverse(keys_rc.begin(), keys_rc.end());
             auto hits_rc = query.fetch(keys_rc);
@@ -143,7 +116,7 @@ TYPED_TEST(LabelOracleTest, RegimeAndKeyMapping) {
                     ASSERT_NE(npos, nodes_rc[i]);
                     EXPECT_EQ(keys[i], keys_rc[i]);
                     std::string_view kmer_rc(seq_rc.data() + seq_rc.size() - kTestK - i, kTestK);
-                    EXPECT_EQ(keys[i], oracle.key_of(nodes_rc[i], kmer_rc));
+                    EXPECT_EQ(keys[i], AnnotationKeyMapper(oracle.graph()).key(nodes_rc[i], kmer_rc));
                     EXPECT_EQ((LabelQuery::NodeHits{ 0 }), hits_rc[i]);
                 }
             }
@@ -176,7 +149,7 @@ TYPED_TEST(LabelOracleTest, HitsAgreeWithGetLabels) {
             }
             LabelQuery query(oracle, refs);
             for (const auto &seq : seqs) {
-                auto keys = oracle.keys_of_sequence(seq);
+                auto keys = map_to_nodes(oracle.graph(), seq);
                 auto hits = query.fetch(keys);
                 ASSERT_EQ(keys.size(), hits.size());
                 for (size_t i = 0; i < keys.size(); ++i) {
@@ -214,7 +187,7 @@ TYPED_TEST(LabelOracleTest, RowDiffCacheGivesTheSameRows) {
     annot::matrix::RowDiffCache<annot::matrix::BinaryMatrix::SetBitPositions> cache(2048);
     for (const std::string &seq : seqs) {
         std::vector<Row> rows;
-        for (node_index key : oracle.keys_of_sequence(seq)) {
+        for (node_index key : map_to_nodes(oracle.graph(), seq)) {
             ASSERT_NE(npos, key);
             rows.push_back(AnnotatedDBG::graph_to_anno_index(key));
         }
@@ -250,7 +223,7 @@ TEST(LabelOracle, UnmaskedSuccinctKeys) {
         LabelOracle oracle(*anno);
         EXPECT_EQ(mode == DeBruijnGraph::BASIC ? Regime::BASIC : Regime::CANONICAL, oracle.regime());
         LabelQuery query(oracle, { oracle.resolve_label("A"), oracle.resolve_label("B") });
-        auto keys = oracle.keys_of_sequence(seqs[0]);
+        auto keys = map_to_nodes(oracle.graph(), seqs[0]);
         auto hits = query.fetch(keys);
         for (size_t i = 0; i < keys.size(); ++i) {
             ASSERT_NE(npos, keys[i]);
@@ -268,7 +241,7 @@ TEST(LabelOracle, EvictionKeepsTheCurrentBatchAnswerable) {
     auto anno = build_anno_graph<DBGSuccinct, annot::ColumnCompressed<>>(
             kTestK, seqs, { "A" }, DeBruijnGraph::BASIC);
     LabelOracle oracle(*anno);
-    auto keys = oracle.keys_of_sequence(seqs[0]);
+    auto keys = map_to_nodes(oracle.graph(), seqs[0]);
     ASSERT_GE(keys.size(), 3u);
 
     for (size_t capacity : { size_t(1), size_t(2), size_t(3) }) {
@@ -344,19 +317,19 @@ TYPED_TEST(LabelOracleCoordTest, HeaderLabels) {
     EXPECT_EQ(0u, acc1.seq_id);
     EXPECT_EQ(1u, acc2.seq_id);
     EXPECT_EQ(LabelKind::COLUMN, col_label_f.kind);
-    EXPECT_EQ(std::make_pair(n1, n1 + n2 - 1), oracle.sequence_coords(col_f, 1));
+    EXPECT_EQ(std::make_pair(n1, n1 + n2 - 1), oracle.coord_to_header()->sequence_coords(col_f, 1));
     EXPECT_EQ(std::make_pair(uint64_t(1), uint64_t(3)), oracle.map_coord(col_f, n1 + 3));
 
     LabelQuery query(oracle, { acc1, acc2, acc3, col_label_f });
 
     // s2's k-mers: header acc2 and column F, no acc1
-    auto hits2 = query.fetch(oracle.keys_of_sequence(s2));
+    auto hits2 = query.fetch(map_to_nodes(oracle.graph(), s2));
     for (size_t i = 0; i < hits2.size(); ++i) {
         EXPECT_EQ((LabelQuery::NodeHits{ 1, 3 }), hits2[i]) << "s2 k-mer " << i;
     }
 
     // s1's k-mers: acc1 everywhere; acc3 on the k-mers shared with s3
-    auto hits1 = query.fetch(oracle.keys_of_sequence(s1));
+    auto hits1 = query.fetch(map_to_nodes(oracle.graph(), s1));
     for (size_t i = 0; i < hits1.size(); ++i) {
         bool shared = s3.find(s1.substr(i, kTestK)) != std::string::npos;
         const LabelQuery::NodeHits expected = shared ? LabelQuery::NodeHits{ 0, 2, 3 }
@@ -411,7 +384,7 @@ TYPED_TEST(LabelOracleCoordTest, HeaderLabels) {
     annot::matrix::RowDiffCache<annot::matrix::MultiIntMatrix::RowTuples> cache(2048);
     for (const std::string &seq : seqs) {
         std::vector<Row> rows;
-        for (node_index key : oracle.keys_of_sequence(seq)) {
+        for (node_index key : map_to_nodes(oracle.graph(), seq)) {
             rows.push_back(AnnotatedDBG::graph_to_anno_index(key));
         }
         for (Row row : rows) {
