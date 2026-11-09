@@ -164,8 +164,8 @@ class GraphClientJson:
     def stats(self, timeout=None) -> JsonDict:
         return self._do_request("stats", {}, post_req=False, timeout=timeout)
 
-    def ready(self) -> bool:
-        ret = requests.get(url=f'{self.server}/stats')
+    def ready(self, timeout=None) -> bool:
+        ret = requests.get(url=f'{self.server}/stats', timeout=timeout)
         # The server answers 503 Service Unavailable while it loads the index.
         if ret.status_code == 503:
             return False
@@ -249,8 +249,8 @@ class GraphClient:
     def column_labels(self) -> List[str]:
         return self._json_client.column_labels()
 
-    def ready(self) -> bool:
-        return self._json_client.ready()
+    def ready(self, timeout=None) -> bool:
+        return self._json_client.ready(timeout=timeout)
 
 
 class MultiGraphClient:

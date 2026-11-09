@@ -2,8 +2,10 @@
 
 #include <queue>
 #include <numeric>
+#include <mutex>
 
 #include <progress_bar.hpp>
+#include <sdsl/int_vector_buffer.hpp>
 
 #include "common/algorithms.hpp"
 #include "common/serialization.hpp"
@@ -594,6 +596,108 @@ void BRWT::BFT(std::function<void(const BRWT &node)> callback) const {
         nodes_queue.pop();
     }
 }
+
+
+namespace {
+
+// Remap the index of one node. Returns, for every set bit of the old index in
+// order, its new rank + 1 among the set bits of the new index (0 if dropped).
+// This is the row map of the node's children. Returns an empty vector for leaves.
+template <class RowMap>
+sdsl::int_vector<> remap_index(const bit_vector &old_index, RowMap &new_row,
+                               uint64_t num_new_rows, bool leaf,
+                               std::unique_ptr<bit_vector> *new_index) {
+    sdsl::bit_vector buffer(num_new_rows, false);
+    sdsl::int_vector<> child_row;
+    if (!leaf) {
+        child_row = sdsl::int_vector<>(old_index.num_set_bits(), 0,
+                                       num_new_rows ? sdsl::bits::hi(num_new_rows) + 1 : 1);
+    }
+    uint64_t r = 0;
+    old_index.call_ones([&](uint64_t i) {
+        uint64_t v = new_row[i];
+        if (v) {
+            if (v > num_new_rows)
+                throw std::runtime_error("BRWT row remap: target row out of range");
+            if (buffer[v - 1])
+                throw std::runtime_error("BRWT row remap: two rows map to the same row");
+            buffer[v - 1] = true;
+        }
+        if (!leaf)
+            child_row[r] = v;
+        ++r;
+    });
+
+    *new_index = std::make_unique<bit_vector_smallrank>(std::move(buffer));
+
+    for (uint64_t j = 0; j < child_row.size(); ++j) {
+        if (uint64_t v = child_row[j])
+            child_row[j] = (*new_index)->rank1(v - 1);
+    }
+    return child_row;
+}
+
+} // namespace
+
+template <class RowMap>
+std::unique_ptr<BRWT> BRWT::remap_rows(RowMap &new_row, uint64_t num_new_rows,
+                                       size_t num_threads) const {
+    auto result = std::make_unique<BRWT>();
+
+    // The root map can be large and is read sequentially, in a single thread.
+    auto child_row = std::make_shared<const sdsl::int_vector<>>(
+        remap_index(*nonzero_rows_, new_row, num_new_rows, child_nodes_.empty(),
+                    &result->nonzero_rows_));
+
+    std::mutex error_mutex;
+    std::exception_ptr error;
+
+    std::function<void(const BRWT *, BRWT *, std::shared_ptr<const sdsl::int_vector<>>)> remap_children
+        = [&](const BRWT *source, BRWT *target, std::shared_ptr<const sdsl::int_vector<>> rows) {
+        target->assignments_ = source->assignments_;
+        if (source->child_nodes_.empty())
+            return;
+
+        uint64_t num_child_rows = target->nonzero_rows_->num_set_bits();
+        target->child_nodes_.resize(source->child_nodes_.size());
+        for (size_t c = 0; c < source->child_nodes_.size(); ++c) {
+            target->child_nodes_[c] = std::make_unique<BRWT>();
+            const BRWT *child = source->child_nodes_[c].get();
+            BRWT *new_child = target->child_nodes_[c].get();
+            #pragma omp task firstprivate(rows, child, new_child, num_child_rows) \
+                             shared(remap_children, error, error_mutex)
+            {
+                try {
+                    auto grandchild_rows = std::make_shared<const sdsl::int_vector<>>(
+                        remap_index(*child->nonzero_rows_, *rows, num_child_rows,
+                                    child->child_nodes_.empty(), &new_child->nonzero_rows_));
+                    rows.reset();
+                    remap_children(child, new_child, std::move(grandchild_rows));
+                } catch (...) {
+                    std::lock_guard<std::mutex> lock(error_mutex);
+                    if (!error)
+                        error = std::current_exception();
+                }
+            }
+        }
+    };
+
+    #pragma omp parallel num_threads(std::max<size_t>(1, num_threads))
+    #pragma omp single
+    remap_children(this, result.get(), std::move(child_row));
+
+    if (error)
+        std::rethrow_exception(error);
+
+    return result;
+}
+
+template std::unique_ptr<BRWT>
+BRWT::remap_rows(sdsl::int_vector<> &, uint64_t, size_t) const;
+template std::unique_ptr<BRWT>
+BRWT::remap_rows(sdsl::int_vector_buffer<> &, uint64_t, size_t) const;
+template std::unique_ptr<BRWT>
+BRWT::remap_rows(const sdsl::int_vector<> &, uint64_t, size_t) const;
 
 } // namespace matrix
 } // namespace annot
