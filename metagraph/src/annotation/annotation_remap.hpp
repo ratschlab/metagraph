@@ -33,8 +33,8 @@ sdsl::int_vector<> map_rows_to_graph(const graph::DeBruijnGraph &source,
 
 /**
  * Check a saved row map against both graphs. Returns false if the row counts
- * differ or if one of num_samples evenly spaced kept rows maps to another
- * target row than its k-mer.
+ * differ, or if a kept row maps to another target row than its k-mer. The
+ * k-mer check covers num_samples evenly spaced rows and skips dropped ones.
  */
 bool check_row_map(const graph::DeBruijnGraph &source,
                    const graph::DeBruijnGraph &target,
