@@ -22,41 +22,6 @@ const char* to_string(LabelKind kind) {
     return "unknown";
 }
 
-const char* to_string(Arm arm) {
-    return arm == Arm::LEFT ? "left" : "right";
-}
-
-const char* to_string(EndReason reason) {
-    switch (reason) {
-        case EndReason::DEAD_END: return "dead_end";
-        case EndReason::LABEL_LOST: return "label_lost";
-        case EndReason::BRANCH: return "branch";
-        case EndReason::EDGE_REUSE: return "edge_reuse";
-        case EndReason::EDGE_REUSE_RC: return "edge_reuse_rc";
-        case EndReason::REACHED_SEED: return "rejoined_seed";
-        case EndReason::MAX_EXTENSION: return "max_extension_bp";
-        case EndReason::MAX_STEPS: return "max_steps";
-        case EndReason::MAX_LIVE_PATHS: return "max_live_paths";
-        case EndReason::MAX_PATHS: return "max_paths";
-        case EndReason::MAX_SPLITS: return "max_splits_per_path";
-        case EndReason::TIME_BUDGET: return "time_budget";
-    }
-    return "unknown";
-}
-
-bool is_resource_stop(EndReason reason) {
-    switch (reason) {
-        case EndReason::MAX_STEPS:
-        case EndReason::MAX_LIVE_PATHS:
-        case EndReason::MAX_PATHS:
-        case EndReason::MAX_SPLITS:
-        case EndReason::TIME_BUDGET:
-            return true;
-        default:
-            return false;
-    }
-}
-
 } // namespace traversal
 } // namespace graph
 } // namespace mtg

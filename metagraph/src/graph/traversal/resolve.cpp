@@ -2,7 +2,6 @@
 
 #include <algorithm>
 #include <cctype>
-#include <map>
 #include <optional>
 
 #include <tsl/hopscotch_map.h>
@@ -55,8 +54,7 @@ std::string make_seed_id(std::string_view sequence,
             seq = rc;
     }
     std::sort(labels.begin(), labels.end());
-    // an empty release name and a tab come first: the id of the labeled-traversal
-    // prototype for an index without a release name
+    // a leading tab, as in the ids of the labeled-traversal prototype
     uint64_t h = fnv1a64("\t");
     h = fnv1a64(seq, h);
     h = fnv1a64("\t", h);
@@ -82,6 +80,9 @@ std::string encode_runs(const std::vector<KmerInterval> &runs, uint64_t num_kmer
 
 
 namespace {
+
+// The rows a profile of explicit labels decodes at once
+constexpr size_t kResolveBatchRows = 4096;
 
 // The support of one label, built k-mer by k-mer in ascending order (each k-mer at most once)
 struct LabelSupport {
@@ -145,11 +146,6 @@ SupportProfile resolve_support(const LabelOracle &oracle,
     } else {
         if (options.discover_kind == LabelKind::HEADER && !oracle.coord_to_header())
             throw std::invalid_argument("Header discovery requires a CoordToHeader index");
-        if (options.discover_kind == LabelKind::HEADER
-                && oracle.coord_to_header() != oracle.anno_graph().get_coord_to_header()) {
-            throw std::invalid_argument("Header discovery reads the annotation's own sequence "
-                                        "header index, not the oracle's override");
-        }
         // the ranking of /search with signatures, so that both report the same labels,
         // counts and runs
         const bool headers = options.discover_kind == LabelKind::HEADER;
@@ -196,25 +192,6 @@ SupportProfile resolve_support(const LabelOracle &oracle,
         lp.runs = std::move(support[l].runs);
         profile.labels.push_back(std::move(lp));
     }
-
-    // ---- seed candidates: identical maximal runs grouped
-    std::map<KmerInterval, std::vector<LabelId>> groups;
-    for (LabelId l = 0; l < profile.labels.size(); ++l) {
-        for (const auto &run : profile.labels[l].runs) {
-            groups[run].push_back(l);
-        }
-    }
-    for (auto &[iv, labels] : groups) {
-        profile.candidates.push_back({ iv, std::move(labels) });
-    }
-    std::sort(profile.candidates.begin(), profile.candidates.end(),
-              [](const SeedCandidate &a, const SeedCandidate &b) {
-                  if (a.kmers.size() != b.kmers.size())
-                      return a.kmers.size() > b.kmers.size();
-                  if (a.labels.size() != b.labels.size())
-                      return a.labels.size() > b.labels.size();
-                  return a.kmers.begin < b.kmers.begin;
-              });
     return profile;
 }
 
@@ -280,7 +257,7 @@ struct Picked {
     std::vector<LabelId> labels;
 };
 
-// MAX_SUPPORT: repeatedly pick the interval of at least |min_kmers| k-mers contained in the
+// Repeatedly pick the interval of at least |min_kmers| k-mers contained in the
 // most support runs, outside the intervals picked before.
 //
 // For a fixed start a, the count |{runs [s, e) : s <= a, e >= b}| is non-increasing in b, so
@@ -385,11 +362,11 @@ std::vector<Picked> pick_max_support(const SupportProfile &profile, uint64_t min
 
 } // namespace
 
-SeedSelection select_seeds(const SupportProfile &profile,
-                           std::string_view query,
-                           const SelectionPolicy &policy_in,
-                           bool canonical_orientation) {
-    SeedSelection selection;
+std::vector<FrozenSeed> select_seeds(const SupportProfile &profile,
+                                     std::string_view query,
+                                     const SelectionPolicy &policy_in,
+                                     bool canonical_orientation) {
+    std::vector<FrozenSeed> seeds;
     SelectionPolicy policy = policy_in;
     if (policy.min_block_bp < profile.k)
         policy.min_block_bp = profile.k;
@@ -424,14 +401,13 @@ SeedSelection select_seeds(const SupportProfile &profile,
                     seed.population.dropped.push_back(ordered[i].second);
             }
         }
-        seed.population.included = seed.labels.size();
         if (seed.population.dropped_count)
             seed.population.dropped_digest = hex64(digest);
         std::sort(seed.labels.begin(), seed.labels.end());
         seed.seed_id = make_seed_id(seed.sequence, canonical_orientation, seed.labels);
-        selection.seeds.push_back(std::move(seed));
+        seeds.push_back(std::move(seed));
     }
-    return selection;
+    return seeds;
 }
 
 } // namespace traversal

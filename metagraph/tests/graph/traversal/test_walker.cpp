@@ -970,9 +970,9 @@ TEST(WalkerDerive, IntersectionStartsFromTheCheapestRowOfTheFirstWindow) {
         headers[c] = { "h_" + labels[i] };
         num_kmers[c].assign(1, seqs[i].size() - kK + 1);
     }
-    annot::CoordToHeader cth(std::move(headers), std::move(num_kmers));
+    anno = with_coord_to_header(std::move(anno), std::move(headers), std::move(num_kmers));
 
-    LabelOracle oracle(*anno, &cth);
+    LabelOracle oracle(*anno);
     Seed seed;
     seed.sequence = seed_seq;
     auto derived = traverse_seed(oracle, seed, Strategy());
@@ -983,8 +983,6 @@ TEST(WalkerDerive, IntersectionStartsFromTheCheapestRowOfTheFirstWindow) {
         names.insert(l.name);
     }
     EXPECT_EQ((std::set<std::string>{ "h_carrierA", "h_carrierB" }), names);
-    // the decoys' coordinates of U were never mapped to their sequences
-    EXPECT_LT(derived.annotation_counters.coords_mapped, kDecoys);
 }
 
 // a header in two columns cannot be resubmitted by name: refused, with the lever
@@ -1001,9 +999,9 @@ TEST(WalkerDerive, AmbiguousDerivedHeaderNamesAreRefused) {
     num_kmers[static_cast<Column>(encoder.encode("colA"))].assign(1, (S + T).size() - kK + 1);
     headers[static_cast<Column>(encoder.encode("colB"))] = { "ACC1" };
     num_kmers[static_cast<Column>(encoder.encode("colB"))].assign(1, S.size() - kK + 1);
-    annot::CoordToHeader cth(std::move(headers), std::move(num_kmers));
+    anno = with_coord_to_header(std::move(anno), std::move(headers), std::move(num_kmers));
 
-    LabelOracle oracle(*anno, &cth);
+    LabelOracle oracle(*anno);
     Seed seed;
     seed.sequence = S;                  // carried in full by both columns
     Strategy st;
@@ -1040,8 +1038,8 @@ TEST(WalkerDerive, DerivedHeaderMustNotBeAColumnName) {
     num_kmers[enc.encode("ACC")].assign(1, in_acc.size() - kK + 1);
     headers[enc.encode("B")] = { "ACC" };
     num_kmers[enc.encode("B")].assign(1, in_b.size() - kK + 1);
-    annot::CoordToHeader cth(std::move(headers), std::move(num_kmers));
-    LabelOracle oracle(*anno, &cth);
+    anno = with_coord_to_header(std::move(anno), std::move(headers), std::move(num_kmers));
+    LabelOracle oracle(*anno);
 
     Seed seed;
     seed.sequence = M;

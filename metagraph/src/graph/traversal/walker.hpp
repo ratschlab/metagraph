@@ -16,6 +16,28 @@ namespace mtg {
 namespace graph {
 namespace traversal {
 
+enum class Arm : uint8_t { LEFT = 0, RIGHT = 1 };
+const char* to_string(Arm arm);
+
+// Why a label left a path, or why a path ended.
+enum class EndReason : uint8_t {
+    // semantic, per label
+    DEAD_END = 0,     // no structural successor in this direction
+    LABEL_LOST,       // successors exist but none carries the label
+    BRANCH,           // the label is on several successors and its branch limit is exhausted
+    EDGE_REUSE,       // the label's continuation uses an edge already used on this path
+    EDGE_REUSE_RC,    // ... used in the opposite orientation (hairpin / inverted repeat)
+    REACHED_SEED,     // ... the edge leads back into the seed (e.g. a closed circle)
+    MAX_EXTENSION,    // the requested extension length was reached
+    // caps: exploration of the requested extension is incomplete
+    MAX_STEPS,
+    MAX_LIVE_PATHS,
+    MAX_PATHS,
+    MAX_SPLITS,       // a path reached its split limit: the walks past that fork are missing
+    TIME_BUDGET,
+};
+const char* to_string(EndReason reason);
+
 /**
  * Label-constrained extension of a seed.
  *
@@ -220,7 +242,6 @@ struct SeedResult {
     std::string labels_dropped_digest;
     std::vector<DroppedLabel> dropped_labels;
     std::array<ArmResult, 2> arms;   // indexed by Arm
-    LabelOracle::Counters annotation_counters;
     double elapsed_seconds = 0;
 };
 
