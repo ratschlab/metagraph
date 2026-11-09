@@ -233,7 +233,8 @@ TYPED_TEST(WalkerReference, RadiusAtEveryBoundary) {
     CASE_TYPES;
     auto b = clean_blocks({ 40, 30, 50 }, 103);
     const std::string &L = b[0], &S = b[1], &R = b[2];
-    for (uint64_t radius : { 0ul, 1ul, 2ul, R.size() - 1, R.size(), R.size() + 1 }) {
+    // radius 0 is refused: the extension cap must be positive
+    for (uint64_t radius : { 1ul, 2ul, R.size() - 1, R.size(), R.size() + 1 }) {
         check_case<Graph, Annotation>({ "Radius" + std::to_string(radius), kK,
                                         { L + S + R }, { "A" }, S, radius });
     }
