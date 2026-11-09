@@ -14,7 +14,9 @@ NUM_THREADS = 4
 K = 21
 
 anno_file_extension = {'brwt': '.brwt.annodbg',
-                       'row_diff_brwt': '.row_diff_brwt.annodbg'}
+                       'row_diff_brwt': '.row_diff_brwt.annodbg',
+                       'row_diff_flat': '.row_diff_flat.annodbg',
+                       'row_diff_disk': '.row_diff_disk.annodbg'}
 
 
 @unittest.skipIf(PROTEIN_MODE, 'SSHash graphs need DNA')
@@ -55,10 +57,11 @@ class TestRemapAnnotation(TestingBase):
         self.assertEqual(res.returncode, 0, res.stderr.decode())
         return sorted(res.stdout.decode().splitlines())
 
-    def _remap(self, anno, out, target):
+    def _remap(self, anno, out, target, anno_type=None):
+        anno_type_flag = f' --anno-type {anno_type}' if anno_type else ''
         return subprocess.run(
             f'{METAGRAPH} transform_anno -p {NUM_THREADS} --remap-graph {self.source}'
-            f' -i {target} -o {out} {anno}',
+            f' -i {target}{anno_type_flag} -o {out} {anno}',
             shell=True, stdout=PIPE, stderr=PIPE)
 
     @parameterized.expand([
@@ -102,6 +105,41 @@ class TestRemapAnnotation(TestingBase):
         res = self._remap(anno, out, self.partial_target)
         self.assertNotEqual(res.returncode, 0)
         self.assertIn('does not match', res.stderr.decode() + res.stdout.decode())
+
+    @parameterized.expand(['row_diff_flat', 'row_diff_disk'])
+    def test_remap_and_convert(self, anno_type):
+        prefix = f'{self.tempdir.name}/convert_{anno_type}'
+        self._annotate_graph(INPUT, self.source, prefix, 'row_diff_brwt',
+                             num_threads=NUM_THREADS)
+        anno = prefix + anno_file_extension['row_diff_brwt']
+        out = prefix + '_remapped'
+        out_anno = out + anno_file_extension[anno_type]
+
+        res = self._remap(anno, out, self.target, anno_type)
+        self.assertEqual(res.returncode, 0, res.stderr.decode())
+        self.assertFalse(os.path.exists(out + anno_file_extension['row_diff_brwt']))
+
+        stats = self._get_stats(f'-a {out_anno}')
+        self.assertEqual(stats['returncode'], 0)
+        self.assertEqual(stats['objects'], self._get_stats(self.target)['nodes (k)'])
+        for mode in ['labels', 'matches']:
+            self.assertEqual(self._query(self.source, anno, mode),
+                             self._query(self.target, out_anno, mode))
+
+    @parameterized.expand([
+        ('brwt', 'row_diff_flat'),
+        ('row_diff_brwt', 'column'),
+        ('row_diff_brwt', 'brwt'),
+    ])
+    def test_remap_rejects_conversion(self, anno_repr, anno_type):
+        prefix = f'{self.tempdir.name}/reject_{anno_repr}_{anno_type}'
+        self._annotate_graph(INPUT, self.source, prefix, anno_repr,
+                             num_threads=NUM_THREADS)
+        res = self._remap(prefix + anno_file_extension[anno_repr],
+                          prefix + '_remapped', self.target, anno_type)
+        self.assertNotEqual(res.returncode, 0)
+        self.assertIn('--anno-type' if anno_repr == 'row_diff_brwt' else 'can convert only',
+                      res.stderr.decode() + res.stdout.decode())
 
     def test_remap_rejects_different_kmers(self):
         prefix = f'{self.tempdir.name}/mismatch'

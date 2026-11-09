@@ -126,6 +126,7 @@ Config::Config(int argc, char *argv[]) {
     };
 
     bool print_usage_and_exit = false;
+    bool anno_type_given = false;
     bool xdrop_override = false;
 
     // parse remaining command line items
@@ -350,6 +351,7 @@ Config::Config(int argc, char *argv[]) {
 
         } else if (!strcmp(argv[i], "--anno-type")) {
             anno_type = string_to_annotype(get_value(i++));
+            anno_type_given = true;
         } else if (!strcmp(argv[i], "--graph")) {
             graph_type = string_to_graphtype(get_value(i++));
         } else if (!strcmp(argv[i], "--rename-cols")) {
@@ -654,6 +656,12 @@ Config::Config(int argc, char *argv[]) {
         if (infbase.empty() || fnames.size() != 1) {
             std::cerr << "--remap-graph needs one annotation and the target graph"
                          " passed with '-i <GRAPH>'" << std::endl;
+            print_usage_and_exit = true;
+        }
+        if (anno_type_given && anno_type != RowDiffRowFlat && anno_type != RowDiffDisk) {
+            std::cerr << "With --remap-graph, --anno-type can only be "
+                      << annotype_to_string(RowDiffRowFlat) << " or "
+                      << annotype_to_string(RowDiffDisk) << std::endl;
             print_usage_and_exit = true;
         }
     } else if (identity == TRANSFORM_ANNOTATION) {
@@ -1341,7 +1349,8 @@ if (advanced) {
             fprintf(stderr, "\t   --remap-graph [STR] \tmove the rows of a brwt or row_diff_brwt annotation built for this graph\n");
             fprintf(stderr, "\t                       \tto the graph given with -i, matching nodes by k-mer. Both graphs must be\n");
             fprintf(stderr, "\t                       \tin basic mode and have the same k-mers. The row map is saved as\n");
-            fprintf(stderr, "\t                       \t<OUT>.rowmap and reused if present []\n");
+            fprintf(stderr, "\t                       \t<OUT>.rowmap and reused if present. A row_diff_brwt annotation can be\n");
+            fprintf(stderr, "\t                       \tconverted in the same run with --anno-type row_diff_flat or row_diff_disk []\n");
             fprintf(stderr, "\t   --anno-type [STR] \ttarget annotation format [column]\n");
             fprintf(stderr, "%s\n", annotation_list);
             fprintf(stderr, "\t   --arity \t\tarity in the brwt tree [2]\n");

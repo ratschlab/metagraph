@@ -327,6 +327,16 @@ int transform_annotation(Config *config) {
             exit(1);
         }
 
+        // Without --anno-type the input format is kept (checked in Config).
+        const bool convert = config->anno_type == Config::RowDiffRowFlat
+                                || config->anno_type == Config::RowDiffDisk;
+        if (convert && input_anno_type != Config::RowDiffBRWT) {
+            logger->error("--remap-graph can convert only {} annotations to {}",
+                          Config::annotype_to_string(Config::RowDiffBRWT),
+                          Config::annotype_to_string(config->anno_type));
+            exit(1);
+        }
+
         // The row map is the expensive part, so keep it for a rerun.
         const std::string row_map_fname = config->outfbase + ".rowmap";
         sdsl::int_vector<> row_map;
@@ -383,7 +393,18 @@ int transform_annotation(Config *config) {
             exit(1);
         }
         annotation.reset();
-        remapped->serialize(config->outfbase);
+        row_map = sdsl::int_vector<>();
+        source.reset();
+
+        if (!convert) {
+            remapped->serialize(config->outfbase);
+        } else if (config->anno_type == Config::RowDiffRowFlat) {
+            convert_to_row_diff<RowDiffRowFlatAnnotator>(
+                    dynamic_cast<const RowDiffBRWTAnnotator &>(*remapped), config->outfbase);
+        } else {
+            convert_to_row_diff<RowDiffDiskAnnotator>(
+                    dynamic_cast<const RowDiffBRWTAnnotator &>(*remapped), config->outfbase);
+        }
         logger->trace("Remapped annotation serialized to {} in {} sec",
                       config->outfbase, timer.elapsed());
         return 0;

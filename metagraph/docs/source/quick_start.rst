@@ -873,6 +873,9 @@ Rows without a k-mer, such as the dummy nodes of a succinct graph, are dropped.
 The command stops with an error if the graphs differ in any k-mer.
 For ``row_diff_brwt``, it also stops if a row that is not an anchor would lose its successor.
 
+A ``row_diff_brwt`` annotation can be converted to ``row_diff_flat`` or ``row_diff_disk`` in the same run with ``--anno-type``.
+This skips writing and loading the intermediate ``row_diff_brwt`` file.
+
 The command saves the matching of rows as ``moved.rowmap``.
 A repeated run with the same output name reuses this file and skips matching the rows again.
 Before reusing it, the command checks a sample of rows against both graphs and stops if they no longer match.
