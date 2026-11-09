@@ -27,9 +27,6 @@ struct KmerInterval {
     }
 };
 
-// The rows a profile of explicit labels decodes at once
-constexpr size_t kResolveBatchRows = 4096;
-
 struct ResolveOptions {
     // exactly one of |labels| (explicit) or |discover| must be set
     std::vector<std::string> labels;
@@ -42,11 +39,6 @@ struct LabelProfile {
     LabelRef label;
     uint64_t kmers_supported = 0;
     std::vector<KmerInterval> runs;          // maximal support runs
-};
-
-struct SeedCandidate {
-    KmerInterval kmers;
-    std::vector<LabelId> labels;             // indices into SupportProfile::labels, sorted
 };
 
 // A discovery that found more labels than |discover_max_labels| keeps those supporting the
@@ -66,12 +58,6 @@ struct SupportProfile {
     std::vector<KmerInterval> graph_runs;    // runs of k-mers present in the graph
     std::vector<LabelProfile> labels;
     std::optional<LabelTruncation> labels_truncated;
-    std::vector<SeedCandidate> candidates;   // ordered: longer, more labels, smaller begin
-
-    // base interval of a k-mer interval
-    std::pair<uint64_t, uint64_t> bp_interval(const KmerInterval &iv) const {
-        return { iv.begin, iv.end + k - 1 };
-    }
 };
 
 // Resolve where |query| is supported by which labels. No traversal.
@@ -92,7 +78,6 @@ struct SelectionPolicy {
 // first in the order of their FNV-1a hash, so a cut is reproducible and unbiased by name
 struct LabelPopulation {
     size_t supporting_total = 0;             // labels supporting the whole interval
-    size_t included = 0;
     std::vector<std::string> dropped;        // kept only if <= 1000
     size_t dropped_count = 0;
     std::string dropped_digest;
@@ -106,14 +91,11 @@ struct FrozenSeed {
     LabelPopulation population;
 };
 
-struct SeedSelection {
-    std::vector<FrozenSeed> seeds;
-};
-
-SeedSelection select_seeds(const SupportProfile &profile,
-                           std::string_view query,
-                           const SelectionPolicy &policy,
-                           bool canonical_orientation);
+// Picks are listed best first and never overlap
+std::vector<FrozenSeed> select_seeds(const SupportProfile &profile,
+                                     std::string_view query,
+                                     const SelectionPolicy &policy,
+                                     bool canonical_orientation);
 
 // seed_id = hex FNV-1a-64 over the case-mapped (and in canonical graphs canonical)
 // sequence and the length-prefixed sorted labels

@@ -43,20 +43,7 @@ namespace traversal {
  */
 class LabelOracle {
   public:
-    struct Counters {
-        uint64_t keys_mapped = 0;          // oriented nodes mapped to annotation keys
-        uint64_t rows_requested = 0;       // annotation rows requested (incl. cache hits)
-        uint64_t cache_hits = 0;
-        // rows read with get_rows and get_row_tuples, decoded or taken from a RowDiffCache
-        uint64_t rows_fetched = 0;
-        uint64_t tuple_rows_fetched = 0;
-        uint64_t coords_mapped = 0;        // coordinates mapped to (sequence, local coord)
-        double fetch_seconds = 0;
-    };
-
-    // |coord_to_header_override| replaces the mapping loaded with the index (tests).
-    explicit LabelOracle(const AnnotatedDBG &anno_graph,
-                         const annot::CoordToHeader *coord_to_header_override = nullptr);
+    explicit LabelOracle(const AnnotatedDBG &anno_graph);
     ~LabelOracle();
 
     const AnnotatedDBG& anno_graph() const { return anno_graph_; }
@@ -94,7 +81,7 @@ class LabelOracle {
     // records.
     LabelRef resolve_label(const std::string &name) const;
 
-    // Batched row access (rows = annotation key - 1). Updates the counters. On a row-diff
+    // Batched row access (rows = annotation key - 1). On a row-diff
     // annotation, |cache| keeps the decoded rows across calls: for a walk, which reads the
     // rows of neighbouring nodes call after call.
     std::vector<annot::matrix::BinaryMatrix::SetBitPositions>
@@ -108,8 +95,6 @@ class LabelOracle {
     // whether the annotation is row-diff transformed, and so a cache helps
     bool is_row_diff() const { return row_diff_; }
 
-    Counters& counters() const { return counters_; }
-
   private:
     const AnnotatedDBG &anno_graph_;
     std::shared_ptr<CanonicalDBG> local_canonical_;
@@ -121,8 +106,6 @@ class LabelOracle {
     const annot::matrix::MultiIntMatrix *tuples_ = nullptr;
     const annot::matrix::IRowDiff *row_diff_ = nullptr;
     const annot::CoordToHeader *coord_to_header_ = nullptr;
-
-    mutable Counters counters_;
 };
 
 
@@ -145,10 +128,6 @@ class LabelQuery {
     LabelQuery(const LabelOracle &oracle,
                std::vector<LabelRef> labels,
                size_t max_cache_size = 1'000'000);
-
-    const std::vector<LabelRef>& labels() const { return labels_; }
-    // which accessor is used: "rows" or "tuples"
-    const char* access_path() const { return tuples_ ? "tuples" : "rows"; }
 
     // Hits for every annotation key (npos yields no hits).
     std::vector<NodeHits> fetch(const std::vector<node_index> &keys);

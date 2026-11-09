@@ -493,7 +493,7 @@ ResolveRequest parse_resolve_request(const Json::Value &json) {
     return req;
 }
 
-Json::Value profile_to_json(const SupportProfile &p, const SeedSelection *sel) {
+Json::Value profile_to_json(const SupportProfile &p, const std::vector<FrozenSeed> *sel) {
     Json::Value j;
     j["k"] = uint_json(p.k);
     j["regime"] = to_string(p.regime);
@@ -519,24 +519,10 @@ Json::Value profile_to_json(const SupportProfile &p, const SeedSelection *sel) {
     } else {
         j["labels_truncated"] = Json::Value::null;
     }
-    Json::Value cands(Json::arrayValue);
-    for (const SeedCandidate &c : p.candidates) {
-        Json::Value cj;
-        cj["kmer_interval"] = interval_json(c.kmers.begin, c.kmers.end);
-        const auto [a, b] = p.bp_interval(c.kmers);
-        cj["bp_interval"] = interval_json(a, b);
-        Json::Value ls(Json::arrayValue);
-        for (LabelId l : c.labels) {
-            ls.append(p.labels[l].label.name);
-        }
-        cj["labels"] = std::move(ls);
-        cands.append(std::move(cj));
-    }
-    j["candidates"] = std::move(cands);
     if (sel) {
         Json::Value &s = j["selection"];
         Json::Value seeds(Json::arrayValue);
-        for (const FrozenSeed &seed : sel->seeds) {
+        for (const FrozenSeed &seed : *sel) {
             Json::Value sj;
             sj["seed_id"] = seed.seed_id;
             sj["sequence"] = seed.sequence;
@@ -548,7 +534,6 @@ Json::Value profile_to_json(const SupportProfile &p, const SeedSelection *sel) {
             sj["labels"] = std::move(ls);
             Json::Value &pop = sj["label_population"];
             pop["supporting_total"] = uint_json(seed.population.supporting_total);
-            pop["included"] = uint_json(seed.population.included);
             pop["dropped_count"] = uint_json(seed.population.dropped_count);
             if (seed.population.dropped_count) {
                 pop["dropped_digest"] = seed.population.dropped_digest;
@@ -602,9 +587,9 @@ Json::Value process_resolve_request(const Json::Value &request,
     const SupportProfile profile = resolve_support(oracle, req.sequence, req.options);
     if (!req.select)
         return profile_to_json(profile, nullptr);
-    const SeedSelection selection = select_seeds(profile, req.sequence, req.policy,
-                                                 oracle.regime() != Regime::BASIC);
-    return profile_to_json(profile, &selection);
+    const std::vector<FrozenSeed> seeds = select_seeds(profile, req.sequence, req.policy,
+                                                       oracle.regime() != Regime::BASIC);
+    return profile_to_json(profile, &seeds);
 }
 
 Json::Value traverse_capabilities(const AnnotatedDBG &anno_graph, const TraverseLimits &limits) {

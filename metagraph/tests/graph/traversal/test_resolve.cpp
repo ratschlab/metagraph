@@ -92,33 +92,26 @@ TYPED_TEST(ResolveTest, ThreeStatesAndRuns) {
         EXPECT_EQ(iv({ {100, 190} }), B.runs);
         EXPECT_EQ(90u, B.kmers_supported);
 
-        // candidates: identical runs grouped, ordered longer first
-        ASSERT_EQ(3u, profile.candidates.size());
-        EXPECT_EQ((KmerInterval{ 100, 190 }), profile.candidates[0].kmers);
-        EXPECT_EQ((std::vector<LabelId>{ 1 }), profile.candidates[0].labels);
-        EXPECT_EQ((KmerInterval{ 0, 70 }), profile.candidates[1].kmers);
-        EXPECT_EQ((KmerInterval{ 95, 110 }), profile.candidates[2].kmers);
-
         EXPECT_EQ("x70o25x15o80", encode_runs(A.runs, profile.num_kmers));
 
         // several seeds: the shared [100,110) first, then the runs outside it
         SelectionPolicy pol;
         pol.max_seeds = 3;
         auto sel = select_seeds(profile, q, pol, canonical);
-        ASSERT_EQ(3u, sel.seeds.size());
+        ASSERT_EQ(3u, sel.size());
         // ties at one label go to the longer interval: B's [110,190), then A's [0,70)
-        EXPECT_EQ((KmerInterval{ 100, 110 }), sel.seeds[0].kmers);
-        EXPECT_EQ((KmerInterval{ 110, 190 }), sel.seeds[1].kmers);
-        EXPECT_EQ((KmerInterval{ 0, 70 }), sel.seeds[2].kmers);
-        EXPECT_EQ((std::vector<std::string>{ "A", "B" }), sel.seeds[0].labels);
-        EXPECT_EQ((std::vector<std::string>{ "B" }), sel.seeds[1].labels);
-        EXPECT_EQ((std::vector<std::string>{ "A" }), sel.seeds[2].labels);
-        for (size_t i = 0; i < sel.seeds.size(); ++i) {
-            const auto &seed = sel.seeds[i];
+        EXPECT_EQ((KmerInterval{ 100, 110 }), sel[0].kmers);
+        EXPECT_EQ((KmerInterval{ 110, 190 }), sel[1].kmers);
+        EXPECT_EQ((KmerInterval{ 0, 70 }), sel[2].kmers);
+        EXPECT_EQ((std::vector<std::string>{ "A", "B" }), sel[0].labels);
+        EXPECT_EQ((std::vector<std::string>{ "B" }), sel[1].labels);
+        EXPECT_EQ((std::vector<std::string>{ "A" }), sel[2].labels);
+        for (size_t i = 0; i < sel.size(); ++i) {
+            const auto &seed = sel[i];
             EXPECT_EQ(q.substr(seed.kmers.begin, seed.kmers.size() + kK - 1), seed.sequence);
             EXPECT_EQ(16u, seed.seed_id.size());
             for (size_t j = 0; j < i; ++j) {
-                EXPECT_NE(sel.seeds[j].seed_id, seed.seed_id);
+                EXPECT_NE(sel[j].seed_id, seed.seed_id);
             }
         }
 
@@ -126,21 +119,21 @@ TYPED_TEST(ResolveTest, ThreeStatesAndRuns) {
         pol = SelectionPolicy();
         pol.max_seeds = 1;
         sel = select_seeds(profile, q, pol, canonical);
-        ASSERT_EQ(1u, sel.seeds.size());
-        EXPECT_EQ((KmerInterval{ 100, 110 }), sel.seeds[0].kmers);
-        EXPECT_EQ((std::vector<std::string>{ "A", "B" }), sel.seeds[0].labels);
-        EXPECT_EQ(2u, sel.seeds[0].population.supporting_total);
+        ASSERT_EQ(1u, sel.size());
+        EXPECT_EQ((KmerInterval{ 100, 110 }), sel[0].kmers);
+        EXPECT_EQ((std::vector<std::string>{ "A", "B" }), sel[0].labels);
+        EXPECT_EQ(2u, sel[0].population.supporting_total);
 
         // max_labels_per_seed drops deterministically and reports the drop
         pol.max_seeds = 1;
         pol.max_labels_per_seed = 1;
         sel = select_seeds(profile, q, pol, canonical);
-        ASSERT_EQ(1u, sel.seeds.size());
-        EXPECT_EQ(1u, sel.seeds[0].labels.size());
-        EXPECT_EQ(1u, sel.seeds[0].population.dropped_count);
-        EXPECT_EQ(1u, sel.seeds[0].population.dropped.size());
-        EXPECT_FALSE(sel.seeds[0].population.dropped_digest.empty());
-        EXPECT_EQ(sel.seeds[0].labels, select_seeds(profile, q, pol, canonical).seeds[0].labels);
+        ASSERT_EQ(1u, sel.size());
+        EXPECT_EQ(1u, sel[0].labels.size());
+        EXPECT_EQ(1u, sel[0].population.dropped_count);
+        EXPECT_EQ(1u, sel[0].population.dropped.size());
+        EXPECT_FALSE(sel[0].population.dropped_digest.empty());
+        EXPECT_EQ(sel[0].labels, select_seeds(profile, q, pol, canonical)[0].labels);
 
         // agreement with the signature API for the labels present
         auto sigs = anno->get_top_label_signatures(q, 10, 0.0, 0.0);
@@ -228,33 +221,30 @@ TEST(Resolve, MaxSupportScalesWithManyLabels) {
         lp.kmers_supported = end;
         profile.labels.push_back(lp);
     }
-    for (LabelId l = 0; l < profile.labels.size(); ++l) {
-        profile.candidates.push_back({ profile.labels[l].runs[0], { l } });
-    }
 
     SelectionPolicy policy;
     policy.max_seeds = 1;
     policy.min_block_bp = kK;   // min_kmers == 1
     const std::string query(num_kmers + kK - 1, 'A');
     auto selection = select_seeds(profile, query, policy, false);
-    ASSERT_EQ(1u, selection.seeds.size());
+    ASSERT_EQ(1u, selection.size());
     uint64_t smallest_end = num_kmers;
     for (const auto &lp : profile.labels) {
         smallest_end = std::min(smallest_end, lp.runs[0].end);
     }
-    EXPECT_EQ((KmerInterval{ 0, smallest_end }), selection.seeds[0].kmers);
-    EXPECT_EQ(num_labels, selection.seeds[0].labels.size());
+    EXPECT_EQ((KmerInterval{ 0, smallest_end }), selection[0].kmers);
+    EXPECT_EQ(num_labels, selection[0].labels.size());
 
     // a length floor trades labels for length
     policy.min_block_bp = 3000 + kK - 1;
     auto longer = select_seeds(profile, query, policy, false);
-    ASSERT_EQ(1u, longer.seeds.size());
-    EXPECT_GE(longer.seeds[0].kmers.size(), 3000u);
-    EXPECT_LT(longer.seeds[0].labels.size(), num_labels);
-    for (const auto &name : longer.seeds[0].labels) {
+    ASSERT_EQ(1u, longer.size());
+    EXPECT_GE(longer[0].kmers.size(), 3000u);
+    EXPECT_LT(longer[0].labels.size(), num_labels);
+    for (const auto &name : longer[0].labels) {
         const auto &lp = *std::find_if(profile.labels.begin(), profile.labels.end(),
                                        [&](const LabelProfile &x) { return x.label.name == name; });
-        EXPECT_GE(lp.runs[0].end, longer.seeds[0].kmers.end);
+        EXPECT_GE(lp.runs[0].end, longer[0].kmers.end);
     }
 }
 
@@ -279,11 +269,11 @@ TEST(Resolve, MaxSupportClipsRunsBetweenRounds) {
     policy.max_seeds = 2;
     policy.min_block_bp = kK;          // min_kmers == 1
     auto sel = select_seeds(profile, std::string(10 + kK - 1, 'A'), policy, false);
-    ASSERT_EQ(2u, sel.seeds.size());
-    EXPECT_EQ((KmerInterval{ 0, 5 }), sel.seeds[0].kmers);
-    EXPECT_EQ((std::vector<std::string>{ "A", "B" }), sel.seeds[0].labels);
-    EXPECT_EQ((KmerInterval{ 5, 10 }), sel.seeds[1].kmers);
-    EXPECT_EQ((std::vector<std::string>{ "A" }), sel.seeds[1].labels);
+    ASSERT_EQ(2u, sel.size());
+    EXPECT_EQ((KmerInterval{ 0, 5 }), sel[0].kmers);
+    EXPECT_EQ((std::vector<std::string>{ "A", "B" }), sel[0].labels);
+    EXPECT_EQ((KmerInterval{ 5, 10 }), sel[1].kmers);
+    EXPECT_EQ((std::vector<std::string>{ "A" }), sel[1].labels);
 }
 
 // seed ids: canonical orientation and label order do not change the id
@@ -399,7 +389,6 @@ TYPED_TEST(ResolveCoordTest, ExplicitLabelsGiveTheDiscoverysProfiles) {
     const LabelProfile &absent = *by_name.at("absent");
     EXPECT_TRUE(absent.runs.empty());
     EXPECT_EQ(0u, absent.kmers_supported);
-    EXPECT_EQ(discovered.candidates.size(), explicit_.candidates.size());
 }
 
 } // namespace
