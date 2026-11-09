@@ -50,7 +50,7 @@ names it is refused (HTTP 400). The server builds its header index when it start
 | `discover.kind` | `column` or `header` | `column` |
 | `select` | also select seeds: repeatedly, the interval contained in the most labels' support runs, outside the intervals picked before | none |
 | `select.max_seeds`, `select.min_block_bp` | at most that many seeds (at most 1000), each at least that long (at least k) | 10, 0 |
-| `select.max_labels_per_seed` | the labels kept per seed, by the FNV-1a hash of their names; the others are counted with a digest | 1000 |
+| `select.max_labels_per_seed` | the labels kept per seed, by the FNV-1a hash of their names; the others are listed and counted | 1000 |
 
 The response:
 
@@ -71,7 +71,7 @@ The response:
 
 Intervals are half-open k-mer intervals `[begin, end)`. `graph_runs` are the runs of the query's k-mers present in the graph; a label's `runs`
 are the maximal runs of k-mers it carries. With discovery, `labels_truncated` states how many
-labels there were and where the cut fell. A selected seed is valid `/traverse` input as it
+labels were kept of how many found. A selected seed is valid `/traverse` input as it
 stands, with its `seed_id`. Seeds are listed in the order they were picked, best first, and never overlap. With `select.min_block_bp` set to the query's length, the one seed is the whole query, carried by the labels on all its k-mers. When no label carries all of them, there is no seed.
 
 ## `/traverse`
@@ -150,7 +150,7 @@ limit ends only the path that reached it. Any cap makes the arm `truncated`:
         "length_bp": 813, "num_kmers": 783,
         "labels": ["NZ_CM008882.1"],
         "labels_from_seed": false, "labels_supporting_total": 1,
-        "labels_dropped": 0, "labels_dropped_digest": "",
+        "labels_dropped": 0,
         "dropped_labels": [{"label": "562", "runs": [[0, 231]]}]
       },
       "label_dict": [{"name": "NZ_CM008882.1", "kind": "header", "column": 6, "seq_id": 3}],
@@ -181,7 +181,7 @@ limit ends only the path that reached it. Any cap makes the arm `truncated`:
 - `validated_seed_id` is the hex FNV-1a-64 of the case-mapped seed (in canonical graphs the
   smaller of it and its reverse complement) and its sorted labels: the id `/resolve` gives.
 - A derived set over `max_seed_labels` states how many labels it dropped
-  (`labels_dropped`) and the FNV-1a-64 digest of their names.
+  (`labels_dropped`).
 - A segment's `sequence` is in natural orientation on both arms; on the left arm a
   segment's bases precede its children's. `from_bp` is the distance of its first base from
   the seed boundary.
