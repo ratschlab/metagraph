@@ -15,13 +15,11 @@
 #include "common/algorithms.hpp"
 #include "common/utils/template_utils.hpp"
 #include "common/vector_map.hpp"
-#include "common/logger.hpp"
 
 
 namespace mtg {
 namespace graph {
 
-using mtg::common::logger;
 using mtg::annot::matrix::BinaryMatrix;
 using mtg::annot::matrix::IntMatrix;
 using mtg::annot::matrix::MultiIntMatrix;
@@ -569,7 +567,6 @@ AnnotatedDBG::get_header_results(std::string_view sequence, size_t num_top_label
             weights.push_back(positions.size());
     }
     const auto *matrix = dynamic_cast<const MultiIntMatrix *>(&annotator_->get_matrix());
-    // a server answers these per request, so they must not end the process
     if (!matrix)
         throw std::runtime_error("k-mer coordinates are not indexed in this annotator");
     if (annotator_->num_labels() != coord_to_header_->num_columns())
@@ -682,10 +679,8 @@ AnnotatedDBG::get_kmer_counts(std::string_view sequence,
         return {};
 
     const auto *int_matrix = dynamic_cast<const IntMatrix *>(&annotator_->get_matrix());
-    if (!int_matrix) {
-        logger->error("k-mer counts are not indexed in this annotator");
-        exit(1);
-    }
+    if (!int_matrix)
+        throw std::runtime_error("k-mer counts are not indexed in this annotator");
 
     auto get_results = [&](const auto &enumerate_rows) {
         auto results = filter_and_aggregate<std::vector<std::tuple<std::string, size_t, std::vector<size_t>>>>(
@@ -739,19 +734,14 @@ AnnotatedDBG::get_kmer_coordinates(std::string_view sequence,
         return {};
 
     const auto *tuple_matrix = dynamic_cast<const MultiIntMatrix *>(&annotator_->get_matrix());
-    if (!tuple_matrix) {
-        logger->error("k-mer coordinates are not indexed in this annotator");
-        exit(1);
-    }
+    if (!tuple_matrix)
+        throw std::runtime_error("k-mer coordinates are not indexed in this annotator");
 
     auto rows_tuples = tuple_matrix->get_row_tuples(row_indices);
 
     if (coord_to_header_) {
-        if (annotator_->num_labels() != coord_to_header_->num_columns()) {
-            logger->error("Incompatible number of columns in CoordToHeader and annotation matrix: "
-                          "{} != {}", coord_to_header_->num_columns(), annotator_->num_labels());
-            exit(1);
-        }
+        if (annotator_->num_labels() != coord_to_header_->num_columns())
+            throw std::runtime_error("Incompatible number of columns in CoordToHeader and annotation matrix");
 
         coord_to_header_->map_to_local_coords(&rows_tuples);
         // Now each coord in `rows_tuples` is `coord = local_coord * num_sequences[j] + seq_id`

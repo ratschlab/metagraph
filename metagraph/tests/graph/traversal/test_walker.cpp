@@ -1,7 +1,10 @@
 #include "gtest/gtest.h"
 
 #include <algorithm>
+#include <cmath>
 #include <cstring>
+#include <functional>
+#include <limits>
 #include <map>
 #include <random>
 #include <set>
@@ -785,7 +788,12 @@ TYPED_TEST(WalkerTest, SeedValidation) {
         EXPECT_EQ(make_seed_id(seed, mode != DeBruijnGraph::BASIC, { "B" }), res.validated_seed_id);
         EXPECT_EQ(f.Y.substr(5), spell_path(res.arms[kRight], res.arms[kRight].paths[0]));
 
-        EXPECT_THROW(run(*anno, f.W + f.R, { "B" }), std::invalid_argument);     // unsupported
+        try {
+            run(*anno, f.W + f.R, { "B" });  // unsupported
+            ADD_FAILURE() << "a seed no named label carries must fail";
+        } catch (const SeedDerivationError &e) {
+            EXPECT_EQ(SeedDerivationError::NO_CARRIER, e.cause());
+        }
         EXPECT_THROW(run(*anno, random_seq(40, 99), { "A" }), SeedNotInGraph);
         EXPECT_THROW(run(*anno, f.R + "ACGTACGTACGTACGT", { "A", "B" }), SeedNotInGraph);
         EXPECT_THROW(run(*anno, f.R, { "C" }), std::invalid_argument);           // unknown
@@ -931,7 +939,7 @@ TEST(WalkerDerive, DerivationHonoursTheTimeBudget) {
 }
 
 // a seed starting in a repetitive k-mer: the intersection starts from the narrowest row
-TEST(WalkerDerive, IntersectionStartsFromTheCheapestRowOfTheFirstWindow) {
+TEST(WalkerDerive, DerivationNarrowsAWideFirstKmerToItsCarriers) {
     constexpr size_t kDecoys = 100;
     auto b = clean_blocks({ kK, 30 }, 137);
     const std::string U = b[0], V = b[1];     // U is exactly one k-mer
@@ -1009,6 +1017,32 @@ TEST(WalkerDerive, AmbiguousDerivedHeaderNamesAreRefused) {
     // named explicitly, the header of two records is refused as ambiguous
     seed.labels = { "ACC1" };
     EXPECT_THROW(traverse_seed(oracle, seed, Strategy()), std::invalid_argument);
+}
+
+// zero caps, a radius of 0 and a non-finite or negative time budget are refused
+TEST(Walker, RefusesInvalidCaps) {
+    const std::string s = random_seq(60, 17);
+    auto anno = build_anno_graph<DBGSuccinct, annot::ColumnCompressed<>>(
+            kK, { s }, { "A" }, DeBruijnGraph::BASIC);
+    LabelOracle oracle(*anno);
+    Seed seed;
+    seed.sequence = s.substr(10, 30);
+    EXPECT_NO_THROW(traverse_seed(oracle, seed, Strategy()));
+    const std::vector<std::function<void(Strategy &)>> invalid {
+        [](Strategy &st) { st.max_seed_labels = 0; },
+        [](Strategy &st) { st.max_steps = 0; },
+        [](Strategy &st) { st.max_live_paths = 0; },
+        [](Strategy &st) { st.max_paths = 0; },
+        [](Strategy &st) { st.max_extension_bp = 0; },
+        [](Strategy &st) { st.time_budget_ms = std::numeric_limits<double>::infinity(); },
+        [](Strategy &st) { st.time_budget_ms = std::nan(""); },
+        [](Strategy &st) { st.time_budget_ms = -1; },
+    };
+    for (size_t i = 0; i < invalid.size(); ++i) {
+        Strategy st;
+        invalid[i](st);
+        EXPECT_THROW(traverse_seed(oracle, seed, st), std::invalid_argument) << "case " << i;
+    }
 }
 
 // a derived header that an explicit list would resolve to a column is refused
