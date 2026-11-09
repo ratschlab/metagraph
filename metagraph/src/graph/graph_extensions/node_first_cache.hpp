@@ -1,9 +1,9 @@
 #ifndef __NODE_FIRST_CACHE_HPP__
 #define __NODE_FIRST_CACHE_HPP__
 
-#include <cache.hpp>
-#include <lru_cache_policy.hpp>
+#include <array>
 
+#include "common/shared_cache.hpp"
 #include "graph/representation/succinct/dbg_succinct.hpp"
 
 
@@ -47,8 +47,7 @@ class NodeFirstCache : public SequenceGraph::GraphExtension {
     // Maps a BOSS edge e to the pair (bwd(e), bwd^(k-1)(e)), where k is the node
     // size in a BOSS graph.
     // Thus, first_cache_[e] == boss.get_minus_k_value(e, boss.get_k() - 1).first
-    mutable caches::fixed_sized_cache<edge_index, std::pair<edge_index, edge_index>,
-                                      caches::LRUCachePolicy<edge_index>> first_cache_;
+    mutable common::SharedCache<edge_index, std::array<edge_index, 2>> first_cache_;
 
     // Fetch or compute (bwd(edge), bwd^(k-1)(edge)), then cache the value.
     // If child_hint != 0, then check first_cache_ if child_hint_'s corresponding
@@ -57,10 +56,8 @@ class NodeFirstCache : public SequenceGraph::GraphExtension {
     std::pair<edge_index, edge_index>
     get_parent_pair(edge_index edge, edge_index child_hint = 0) const;
 
-    mutable caches::fixed_sized_cache<edge_index, edge_index,
-                                      caches::LRUCachePolicy<edge_index>> prefix_rc_cache_;
-    mutable caches::fixed_sized_cache<edge_index, edge_index,
-                                      caches::LRUCachePolicy<edge_index>> suffix_rc_cache_;
+    mutable common::SharedCache<edge_index, edge_index> prefix_rc_cache_;
+    mutable common::SharedCache<edge_index, edge_index> suffix_rc_cache_;
 };
 
 } // namespace graph
