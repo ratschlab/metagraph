@@ -197,6 +197,35 @@ def test_align_matches_cli(graph, index, tmp_path, labeled, min_exact_match):
         assert best.score <= best.max_score
 
 
+def test_align_masked_graph_matches_cli(tmp_path):
+    """`metagraph align` drops the dummy k-mer mask before aligning, so a graph
+    with a mask must align as without one."""
+    if METAGRAPH is None:
+        pytest.skip("metagraph binary not found")
+    out = tmp_path / "masked"
+    subprocess.run([METAGRAPH, "build", "-k", str(K), "--mask-dummy", "--in-ram",
+                    "-o", str(out), str(DATA)], check=True, capture_output=True)
+    assert Path(f"{out}.edgemask").exists()
+    subprocess.run([METAGRAPH, "annotate", "-i", f"{out}.dbg", "--anno-header",
+                    "-o", str(out), str(DATA)], check=True, capture_output=True)
+    index = (Path(f"{out}.dbg"), Path(f"{out}.column.annodbg"))
+    masked = pymetagraph.AnnotatedGraph(*index, threads=2)
+    queries, fasta = write_align_queries(tmp_path)
+    expected = cli_align(index, fasta, True, ["--align-min-exact-match", "0.0"])
+    for i, alignments in enumerate(masked.align(queries, min_exact_match=0.0)):
+        if expected[i] is None:
+            assert alignments == []
+            continue
+        best = alignments[0]
+        assert ("-" if best.orientation else "+", best.score, best.cigar,
+                ";".join(best.labels)) == expected[i]
+    # the label query is unaffected by dropping the mask
+    queries, fasta = write_queries(tmp_path)
+    expected = cli_query(index, fasta, 0.0)
+    for i, hits in enumerate(masked.query(queries, discovery_fraction=0.0)):
+        assert sorted(hits) == sorted(expected.get(i, []))
+
+
 def test_align_alternatives_and_options(graph):
     seq = next(iter(read_fasta(DATA).values()))
     assert len(graph.align(seq, max_alternative_alignments=3)) >= 1
@@ -208,8 +237,7 @@ def test_align_alternatives_and_options(graph):
     assert graph.align(["", "ACGT"]) == [[], []]
     assert graph.align([]) == []
     for kwargs in ({"min_exact_match": 1.5}, {"min_exact_match": float("nan")},
-                   {"max_alternative_alignments": 0}, {"max_nodes_per_seq_char": 0},
-                   {"min_seed_length": 30, "max_seed_length": 20}):
+                   {"max_alternative_alignments": 0}, {"max_num_nodes_per_seq_char": 0}):
         with pytest.raises(ValueError):
             graph.align(seq, **kwargs)
 

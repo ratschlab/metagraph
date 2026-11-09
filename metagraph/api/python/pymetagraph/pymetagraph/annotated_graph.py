@@ -65,20 +65,16 @@ class AnnotatedGraph:
               labeled: bool = True,
               min_exact_match: Optional[float] = None,
               max_alternative_alignments: Optional[int] = None,
-              min_seed_length: Optional[int] = None,
-              max_seed_length: Optional[int] = None,
-              max_nodes_per_seq_char: Optional[float] = None
+              max_num_nodes_per_seq_char: Optional[float] = None
               ) -> Union[List[GraphAlignment], List[List[GraphAlignment]]]:
         """Alignments of each sequence to the graph, as in ``metagraph align``.
 
         With ``labeled=True`` the alignments follow the annotation and report
         its labels (``metagraph align -a``). With ``labeled=False`` they are
-        unlabeled, as from the server's ``/align`` endpoint. Arguments left at
-        ``None`` keep the defaults of ``metagraph align``: ``min_exact_match=0.7``
-        (``--align-min-exact-match``), one alignment per sequence
-        (``--align-alternative-alignments``), seeds of at least ``min(k, 19)``
-        characters (``--align-min-seed-length``) and
-        ``max_nodes_per_seq_char=5`` (``--align-max-nodes-per-seq-char``).
+        unlabeled, as from the server's ``/align`` endpoint. The options are
+        those of ``/align``. Arguments left at ``None`` keep the defaults of
+        ``metagraph align`` (``--align-min-exact-match``,
+        ``--align-alternative-alignments``, ``--align-max-nodes-per-seq-char``).
 
         :param seqs: A sequence, or an iterable of sequences.
         :return: For each sequence, a list of :class:`GraphAlignment` (labels,
@@ -88,21 +84,20 @@ class AnnotatedGraph:
             sequence gives a single list.
         """
         args = (labeled, min_exact_match, max_alternative_alignments,
-                min_seed_length, max_seed_length, max_nodes_per_seq_char)
+                max_num_nodes_per_seq_char)
         if isinstance(seqs, str):
             return self._graph.align([seqs], *args)[0]
         return self._graph.align(list(seqs), *args)
 
     def map(self, seqs: Union[str, Iterable[str]],
-            min_exact_match: Optional[float] = None,
-            min_seed_length: Optional[int] = None,
-            max_seed_length: Optional[int] = None
+            min_exact_match: Optional[float] = None
             ) -> Union[Optional[LabelMapping], List[Optional[LabelMapping]]]:
         """Labels of each sequence from its seeds alone, without alignment.
 
         Same as ``metagraph align -a --align-map-only``: seeds are found and
         filtered by label as for labeled :meth:`align`, but not extended, which
-        is much faster. Unset arguments keep the defaults of ``metagraph align``.
+        is much faster. ``min_exact_match`` left at ``None`` keeps the default
+        of ``metagraph align`` (``--align-min-exact-match``).
 
         :param seqs: A sequence, or an iterable of sequences.
         :return: For each sequence, a :class:`LabelMapping` (the labels whose
@@ -110,7 +105,7 @@ class AnnotatedGraph:
             num_matches, orientation, and the query_begin/query_end they span on
             the forward query), or None. A single sequence gives a single result.
         """
-        args = (min_exact_match, min_seed_length, max_seed_length)
+        args = (min_exact_match,)
         if isinstance(seqs, str):
             return self._graph.map([seqs], *args)[0]
         return self._graph.map(list(seqs), *args)
