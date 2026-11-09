@@ -292,6 +292,7 @@
      ]
     },
     "max_explicit_labels": 10000,
+    "seed_order": "rank",
     "time_budget": {
      "accepted": true,
      "check_kmers": 4096,

@@ -780,11 +780,15 @@ TEST(ResolveBoundsRoute, TheCutAndTheMemoryStopAreStated) {
 TEST(ResolveBoundsRoute, CapabilitiesBlock) {
     const Json::Value c = cli::resolve_capabilities_json({ 30000, cli::kResolveFinalizeMs,
                                                            1'000'000, 1024, 10'000, 10'000 });
-    EXPECT_EQ((std::vector<std::string>{ "discovery", "max_explicit_labels", "time_budget" }),
+    EXPECT_EQ((std::vector<std::string>{ "discovery", "max_explicit_labels", "seed_order",
+                                         "time_budget" }),
               c.getMemberNames());
     EXPECT_TRUE(c["max_explicit_labels"].isUInt64());
     EXPECT_EQ(10000u, c["max_explicit_labels"].asUInt64());
     EXPECT_EQ(0u, cli::resolve_capabilities_json({})["max_explicit_labels"].asUInt64());
+    // the order of a selection's seeds (§4.2), whatever the bounds
+    EXPECT_EQ("rank", c["seed_order"].asString());
+    EXPECT_EQ("rank", cli::resolve_capabilities_json({})["seed_order"].asString());
     EXPECT_EQ("{\"max_answer_labels\":10000,\"max_memory_mb\":1024,\"max_tracked_labels\":1000000,"
               "\"rule\":\"SPEC-labeled-traversal-core.md section 4.6\",\"stop_reasons\":[\"time\","
               "\"memory\"]}", compact(c["discovery"]));

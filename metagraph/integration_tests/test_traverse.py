@@ -3557,6 +3557,9 @@ class TestResolveDiscoveryBounds(TestingBase):
                     # the cap on a request's explicit label lists (its default)
                     self.assertEqual(10000, requests.get(url + route).json()['resolve'][
                         'max_explicit_labels'])
+                    # the order of a selection's seeds (§4.2, since 01c05323b)
+                    self.assertEqual('rank', requests.get(url + route).json()['resolve'][
+                        'seed_order'])
 
     def test_the_answers_labels_are_clamped(self):
         """--resolve-max-discover-answer-labels (10,000 by default): a larger discover.max_labels

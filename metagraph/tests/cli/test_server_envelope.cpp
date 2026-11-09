@@ -536,6 +536,10 @@ TEST(ServerEnvelope, Sample12MultigraphBlock) {
     EXPECT_EQ("10000", text(body["multigraph"]["resolve_max_explicit_labels"]));
     EXPECT_EQ(text(body["resolve"]["max_explicit_labels"]),
               text(body["multigraph"]["resolve_max_explicit_labels"]));
+    // the order of a /resolve selection's seeds (addendum 3, SPEC-labeled-traversal-core.md
+    // §4.2), as the resolve block states it
+    EXPECT_EQ("\"rank\"", text(body["multigraph"]["resolve_seed_order"]));
+    EXPECT_EQ(text(body["resolve"]["seed_order"]), text(body["multigraph"]["resolve_seed_order"]));
     EXPECT_EQ(body["routes"]["requests"].asString(), std::string(kRequestsRoute));
     EXPECT_EQ(body["multigraph"]["requests_route"].asString(), std::string(kRequestsRoute));
     // the request-wide memory bound of /traverse (E5b): 0 when off, as the sample's server,

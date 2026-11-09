@@ -116,11 +116,13 @@ Json::Value composite_fp_json(std::vector<std::string> index_fps);
  * finish_by_ms, request_id and expect_server_instance, the registry's route (requests_route),
  * the flags
  * unknown_labels (section 2), search_cuts (section 3) and resolve_boundary_ties (section 7),
- * discovery_trace_scale, |max_request_memory_mb| (the server's request-wide memory bound of
- * /traverse, --traverse-max-request-memory-mb; 0 = off) and |caps| (max_concurrent, E19), which
- * every /traverse capabilities probe states too: a graph-less probe sees them without reading a
- * pair; and |discovery| (resolve_discovery: the bounds of a /resolve discovery per pair, as the
- * `resolve` block's `discovery` states them, SPEC-labeled-traversal-core.md §4.6)
+ * resolve_seed_order (the order of a /resolve selection's seeds,
+ * SPEC-labeled-traversal-core.md §4.2), discovery_trace_scale, |max_request_memory_mb| (the
+ * server's request-wide memory bound of /traverse, --traverse-max-request-memory-mb; 0 = off)
+ * and |caps| (max_concurrent, E19), which every /traverse capabilities probe states too: a
+ * graph-less probe sees them without reading a pair; and |discovery| (resolve_discovery: the
+ * bounds of a /resolve discovery per pair, as the `resolve` block's `discovery` states them,
+ * SPEC-labeled-traversal-core.md §4.6)
  */
 struct ResolveDiscoveryBounds {
     uint64_t max_tracked_labels = 0;     // --resolve-max-discover-labels (0: none)

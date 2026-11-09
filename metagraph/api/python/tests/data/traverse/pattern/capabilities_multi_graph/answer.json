@@ -176,6 +176,7 @@
    "max_tracked_labels": 1000000
   },
   "resolve_max_explicit_labels": 10000,
+  "resolve_seed_order": "rank",
   "search_cuts": true,
   "selectors": {
    "/pattern": [
@@ -420,6 +421,7 @@
    ]
   },
   "max_explicit_labels": 10000,
+  "seed_order": "rank",
   "time_budget": {
    "accepted": true,
    "check_kmers": 4096,

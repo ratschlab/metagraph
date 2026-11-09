@@ -319,6 +319,13 @@ struct SeedSelection {
 uint64_t profile_bytes(const SupportProfile &profile);
 uint64_t selection_bytes(const SeedSelection &selection);
 
+// The order select_seeds lists the seeds in, as the capabilities state it (the `resolve`
+// block's seed_order, the multigraph block's resolve_seed_order; SPEC-labeled-traversal-core.md
+// §4.2): "rank" since 01c05323b -- longest_first picks merged where they overlap, a merged seed
+// with the rank of its best member, the seeds in rank order; max_support picks in pick order;
+// explicit seeds in the request's order
+constexpr char kSeedOrder[] = "rank";
+
 SeedSelection select_seeds(const SupportProfile &profile,
                            std::string_view query,
                            const SelectionPolicy &policy,

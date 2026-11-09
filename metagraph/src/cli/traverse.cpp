@@ -5740,6 +5740,8 @@ Json::Value resolve_capabilities_json(const ResolveTimeLimits &limits) {
     // the cap on a request's explicit label lists (--resolve-max-explicit-labels; 0: none):
     // the request's `labels` and each explicit seed's, a 400 above it
     r["max_explicit_labels"] = uint_json(limits.max_explicit_labels);
+    // the order of a selection's seeds (§4.2): a client need not infer it from the build
+    r["seed_order"] = kSeedOrder;
     return r;
 }
 

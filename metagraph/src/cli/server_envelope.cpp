@@ -245,6 +245,8 @@ Json::Value multigraph_capabilities_json(uint64_t max_request_memory_mb, const R
     m["unknown_labels"] = true;
     m["search_cuts"] = true;
     m["resolve_boundary_ties"] = true;
+    // the order of a /resolve selection's seeds, as the `resolve` block's seed_order states it
+    m["resolve_seed_order"] = graph::traversal::kSeedOrder;
     // a discovery under support "trace" ranks by traced k-mers (section 7), as every
     // /traverse capabilities block states it
     m["discovery_trace_scale"] = "traced";
