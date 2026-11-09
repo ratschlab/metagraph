@@ -107,7 +107,13 @@ TYPED_TEST(ResolveTest, ThreeStatesAndRuns) {
         auto sel = select_seeds(profile, q, pol, canonical);
         EXPECT_EQ(3u, sel.num_candidates);
         ASSERT_EQ(3u, sel.seeds.size());
+        // ties at one label go to the longer interval: B's [110,190), then A's [0,70)
         EXPECT_EQ((KmerInterval{ 100, 110 }), sel.seeds[0].kmers);
+        EXPECT_EQ((KmerInterval{ 110, 190 }), sel.seeds[1].kmers);
+        EXPECT_EQ((KmerInterval{ 0, 70 }), sel.seeds[2].kmers);
+        EXPECT_EQ((std::vector<std::string>{ "A", "B" }), sel.seeds[0].labels);
+        EXPECT_EQ((std::vector<std::string>{ "B" }), sel.seeds[1].labels);
+        EXPECT_EQ((std::vector<std::string>{ "A" }), sel.seeds[2].labels);
         for (size_t i = 0; i < sel.seeds.size(); ++i) {
             const auto &seed = sel.seeds[i];
             EXPECT_EQ(q.substr(seed.kmers.begin, seed.kmers.size() + kK - 1), seed.sequence);
