@@ -155,6 +155,10 @@ class AnnotatedDBG : public AnnotatedSequenceGraph {
     std::unique_ptr<annot::CoordToHeader> coord_to_header_;
 };
 
+// Encode a k-mer presence bitmask as alternating x<len>o<len>... runs (x = ones,
+// o = zeros), trailing zeros included. Example: 11100110 -> x3o2x2o1
+std::string encode_presence_mask(const sdsl::bit_vector &mask);
+
 } // namespace graph
 } // namespace mtg
 

@@ -198,20 +198,8 @@ CoordToHeader::map_single_coord(Column col, uint64_t coord) const {
     return { header, local_coord };
 }
 
-uint64_t CoordToHeader::last_coord(Column col, size_t seq_id) const {
-    if (col >= num_columns()) {
-        throw std::out_of_range(fmt::format("Column {} out of range "
-                "(CoordToHeader has {} columns)", col, num_columns()));
-    }
-    if (seq_id >= num_sequences(col)) {
-        throw std::out_of_range(fmt::format("Sequence id {} out of range for column {} "
-                "({} sequences)", seq_id, col, num_sequences(col)));
-    }
-    // a set bit marks the last coordinate of each sequence
-    return coord_offsets_[col].select1(seq_id + 1);
-}
-
-uint64_t CoordToHeader::num_kmers_in_sequence(Column col, size_t seq_id) const {
+std::pair<uint64_t, uint64_t>
+CoordToHeader::sequence_coords(Column col, size_t seq_id) const {
     if (col >= num_columns()) {
         throw std::out_of_range(fmt::format("Column {} out of range "
                 "(CoordToHeader has {} columns)", col, num_columns()));
@@ -221,12 +209,13 @@ uint64_t CoordToHeader::num_kmers_in_sequence(Column col, size_t seq_id) const {
         throw std::out_of_range(fmt::format("Sequence id {} out of range for column {} "
                 "({} sequences)", seq_id, col, num_sequences(col)));
     }
-    // coord_offsets_ has a set bit at the partial-sum boundary of each
-    // sequence, so the k-mer count for sequence s is
-    //     select1(s+1) - (s == 0 ? -1 : select1(s)).
-    uint64_t end = offsets.select1(seq_id + 1);
-    uint64_t start = seq_id ? offsets.select1(seq_id) + 1 : 0;
-    return end - start + 1;
+    // coord_offsets_ has a set bit at the last coordinate of each sequence
+    return { seq_id ? offsets.select1(seq_id) + 1 : 0, offsets.select1(seq_id + 1) };
+}
+
+uint64_t CoordToHeader::num_kmers_in_sequence(Column col, size_t seq_id) const {
+    const auto [first, last] = sequence_coords(col, seq_id);
+    return last - first + 1;
 }
 
 bool CoordToHeader::load(const std::string &filename_base) {
