@@ -93,6 +93,7 @@ class TestTraverseProtein(TestingBase):
         lines = res.stdout.decode().split('\n')
         columns = lines[lines.index('Number of columns: 2') + 1:][:2]
         assert sorted(columns) == sorted(cls.files), columns
+        cls.columns = columns
         cls._run_command(
             f'{METAGRAPH} annotate -i {cls.graph} --anno-filename --index-header-coords '
             f'-o {cls.anno_base} {" ".join(columns)}',
@@ -463,6 +464,64 @@ class TestTraverseProtein(TestingBase):
         supported = {l['label']: l['kmers_supported'] for l in out['labels']}
         self.assertEqual({'prot1': 2 * BLOCK - K + 1, 'prot2': 3 * BLOCK - K + 1,
                           'prot3': BLOCK - K + 1}, supported)
+
+    def test_the_record_mapping_is_checked_at_load(self):
+        """The load's check of the .seqs (SPEC-multigraph-envelope.md section 10, H4) on a protein
+        coordinate index, as UniParc's: the fixture's mapping states its labels (verified), one
+        written for the files in the other order is refused at load, and annotate -a spot-checks
+        the files against the annotation's columns (the coordinates of their first and last k-mers
+        in the graph; a file with none is refused)."""
+        caps = self.session.get(f'{self.url}/capabilities', timeout=30).json()
+        self.assertEqual('verified', caps['pair_summary']['seqs_order'])
+        self.assertEqual({'value': True, 'collisions': 0, 'examples': []}, caps['labels_disjoint'])
+        d = os.path.join(self.tempdir.name, 'mapping_check')
+        os.makedirs(d, exist_ok=True)
+        anno = os.path.join(d, 'annotation.row_diff_brwt_coord.annodbg')
+        with open(self.anno, 'rb') as src, open(anno, 'wb') as dst:
+            dst.write(src.read())
+
+        def annotate(*args):
+            return subprocess.run([METAGRAPH, 'annotate', '-i', self.graph, '--anno-filename',
+                                   '--index-header-coords', '-o', os.path.join(d, 'annotation'),
+                                   *args], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+
+        def query():
+            return subprocess.run([METAGRAPH, 'query', '--query-mode', 'coords', '-i', self.graph,
+                                   '-a', anno, self.files[0]],
+                                  stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+
+        swapped = list(reversed(self.columns))
+        res = annotate(*swapped)
+        self.assertEqual(0, res.returncode, res.stderr.decode())
+        res = query()
+        self.assertEqual(1, res.returncode)
+        self.assertIn(f"The record mapping '{os.path.join(d, 'annotation.seqs')}' does not belong "
+                      f"to the annotation '{anno}': its column 0 is '{swapped[0]}', the "
+                      f"annotation's column 0 '{self.columns[0]}'", res.stderr.decode())
+        # -a: the swapped files are refused and nothing is written; in column order they pass
+        os.remove(os.path.join(d, 'annotation.seqs'))
+        res = annotate('-a', anno, *swapped)
+        self.assertEqual(1, res.returncode)
+        self.assertIn(f"The file '{swapped[0]}' is not column 0 ('{self.columns[0]}') of the "
+                      f"annotation '{anno}'", res.stderr.decode())
+        self.assertFalse(os.path.exists(os.path.join(d, 'annotation.seqs')))
+        res = annotate('-a', anno, *self.columns)
+        self.assertEqual(0, res.returncode, res.stderr.decode())
+        res = query()
+        self.assertEqual(0, res.returncode, res.stderr.decode())
+        # a file with k-mers none of which the graph has is refused, nothing written (GPT review
+        # 6, finding 12: it passed, nothing checked)
+        foreign = os.path.join(d, 'foreign.fa')
+        rng = random.Random(20261109)
+        with open(foreign, 'w') as f:
+            f.write('>f1\n' + ''.join(rng.choice('ACDEFGHIKLMNPQRSTVWY') for _ in range(300)) + '\n')
+        os.remove(os.path.join(d, 'annotation.seqs'))
+        res = annotate('-a', anno, foreign, *self.columns[1:])
+        self.assertEqual(1, res.returncode, res.stderr.decode())
+        self.assertIn(f"The file '{foreign}' has no k-mer of the graph: it cannot be checked "
+                      f"against column 0 ('{self.columns[0]}') of the annotation '{anno}'",
+                      res.stderr.decode())
+        self.assertFalse(os.path.exists(os.path.join(d, 'annotation.seqs')))
 
 
 if __name__ == '__main__':

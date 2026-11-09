@@ -4556,17 +4556,19 @@ class TestPatternRegression(TestingBase):
         # "headers_unique (E22)"; test_multigraph.py checks its values) is a gain over every base,
         # and so are `expect_server_instance` (F3b: the routes that take the field, at the top level
         # of a single-graph server, SPEC-multigraph-envelope.md section 8), `pair_summary` (the
-        # capability profile of the pair, E17, SPEC-multigraph-envelope.md section 8.1) and
+        # capability profile of the pair, E17, SPEC-multigraph-envelope.md section 8.1),
         # `request_intake` (H1: the body limit, the value count and their refusals' shapes, at the
         # top level of a single-graph server, SPEC-multigraph-envelope.md section 8; H3: the
-        # connection cap) and `column_labels` (H3: GET /column_labels' byte cap, paging, 400 and
-        # total, placed as request_intake)
+        # connection cap), `column_labels` (H3: GET /column_labels' byte cap, paging, 400 and
+        # total, placed as request_intake) and `labels_disjoint` (whether no header equals a
+        # column name, H4, section 9.1)
         only_gains(a, b, {'headers_unique', 'expect_server_instance', 'pair_summary',
-                          'request_intake', 'column_labels'} | (
+                          'request_intake', 'column_labels', 'labels_disjoint'} | (
             set() if base_pattern else {
                 'pattern', 'resolve', 'in_ram', 'graph_summary', 'max_graphs_without_selection',
                 'max_request_body_mb'}), 'members')
         self.assertIn('headers_unique', b)
+        self.assertIn('labels_disjoint', b)
         self.assertEqual(['/traverse', '/resolve', '/pattern'], b['expect_server_instance'])
         self.assertIn('pair_summary', b)
         self.assertEqual((None, 262144, None), (b['request_intake']['max_request_body_mb'],

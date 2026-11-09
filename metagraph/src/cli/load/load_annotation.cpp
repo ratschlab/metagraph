@@ -18,6 +18,13 @@ const uint64_t kBytesInGigabyte = 1'000'000'000;
 
 
 Config::AnnotationType parse_annotation_type(const std::string &filename) {
+    if (const auto type = try_parse_annotation_type(filename))
+        return *type;
+    logger->error("Unknown annotation format in '{}'", filename);
+    exit(1);
+}
+
+std::optional<Config::AnnotationType> try_parse_annotation_type(const std::string &filename) {
     if (filename.ends_with(annot::ColumnCompressed<>::kExtension)) {
         return Config::AnnotationType::ColumnCompressed;
 
@@ -82,8 +89,7 @@ Config::AnnotationType parse_annotation_type(const std::string &filename) {
         return Config::AnnotationType::IntRowDiffBRWT;
 
     } else {
-        logger->error("Unknown annotation format in '{}'", filename);
-        exit(1);
+        return std::nullopt;
     }
 }
 

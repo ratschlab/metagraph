@@ -771,6 +771,189 @@ TEST(HeadersUnique, ExamplesAreTheSmallestHeadersAndBounded) {
 }
 
 
+// ---------------------------------------------------------------- labels_disjoint (H4)
+
+namespace {
+
+Json::Value pair_tags(const std::string &name) {
+    Json::Value t;
+    t["graph"] = name;
+    t["graph_path"] = "/" + name + ".dbg";
+    t["annotation_path"] = "/" + name + ".annodbg";
+    return t;
+}
+
+} // namespace
+
+// Headers and column names apart: true, no collision, no example (headers_unique says nothing of
+// it); a server without pairs, or none of whose pairs has headers, has no header to clash
+TEST(MultiGraphLabelsDisjoint, DisjointNamesAreCertified) {
+    const std::vector<std::string> a_columns { "a.fa", "b.fa" };
+    const std::vector<std::string> b_columns { "c.fa" };
+    auto a = record_mapping({ { "NC_1", "NC_2" }, { "NC_3" } });
+    auto b = record_mapping({ { "NZ_1", "NC_1" } });
+    const std::vector<HeaderPair> pairs { header_pair("a", a.get(), &a_columns),
+                                          header_pair("b", b.get(), &b_columns) };
+    EXPECT_EQ(parse(R"({"value": true, "collisions": 0, "examples": []})"),
+              as_read(labels_disjoint_json(pairs)));
+    // the two certificates are apart: a header in two pairs is no clash with a column
+    EXPECT_FALSE(headers_unique_json(pairs)["value"].asBool());
+    EXPECT_TRUE(labels_disjoint_json({})["value"].asBool());
+    auto empty = record_mapping({ {} });
+    EXPECT_TRUE(labels_disjoint_json({ header_pair("e", empty.get(), &b_columns) })["value"]
+                        .asBool());
+}
+
+// A header equal to a column name of another pair, or of its own pair, is a collision: a
+// label with that name selects the column wherever one has it (LabelOracle::find_label looks
+// up the columns first). Each example lists the pairs with a record of that header (the column
+// of its first record there) and the pairs with a column of that name, in pair order
+TEST(MultiGraphLabelsDisjoint, AHeaderEqualToAColumnNameIsACollision) {
+    const std::vector<std::string> a_columns { "a.fa", "b.fa" };
+    const std::vector<std::string> b_columns { "c.fa", "shared.fa" };
+    const std::vector<std::string> c_columns { "shared.fa" };
+    // a: a header b.fa (its own column) in a.fa, and a header c.fa (b's column) twice;
+    // b: a header a.fa (a's column); c: a header shared.fa (a column of b and of c)
+    auto a = record_mapping({ { "NC_1", "b.fa" }, { "c.fa", "NC_2" } });
+    auto b = record_mapping({ { "a.fa" }, { "NZ_1", "c.fa" } });
+    auto c = record_mapping({ { "x", "shared.fa" } });
+    const std::vector<HeaderPair> pairs { header_pair("a", a.get(), &a_columns),
+                                          header_pair("b", b.get(), &b_columns),
+                                          header_pair("c", c.get(), &c_columns) };
+    for (size_t threads : { size_t(0), size_t(1), size_t(4) }) {
+        const Json::Value certificate = as_read(labels_disjoint_json(pairs, threads));
+        Json::Value expected = parse(R"({"value": false, "collisions": 4, "examples": [
+            {"header": "a.fa", "records": [], "columns": []},
+            {"header": "b.fa", "records": [], "columns": []},
+            {"header": "c.fa", "records": [], "columns": []},
+            {"header": "shared.fa", "records": [], "columns": []}]})");
+        auto record = [](const std::string &name, const std::string &column) {
+            Json::Value r = pair_tags(name);
+            r["column"] = column;
+            return r;
+        };
+        expected["examples"][0]["records"].append(record("b", "c.fa"));
+        expected["examples"][0]["columns"].append(pair_tags("a"));
+        expected["examples"][1]["records"].append(record("a", "a.fa"));
+        expected["examples"][1]["columns"].append(pair_tags("a"));
+        expected["examples"][2]["records"].append(record("a", "b.fa"));
+        expected["examples"][2]["records"].append(record("b", "shared.fa"));
+        expected["examples"][2]["columns"].append(pair_tags("b"));
+        expected["examples"][3]["records"].append(record("c", "shared.fa"));
+        expected["examples"][3]["columns"].append(pair_tags("b"));
+        expected["examples"][3]["columns"].append(pair_tags("c"));
+        EXPECT_EQ(expected, certificate) << threads << certificate;
+    }
+    // every header is unique: headers_unique cannot see these
+    EXPECT_FALSE(headers_unique_json(pairs)["value"].asBool());  // c.fa twice
+    auto unique_a = record_mapping({ { "NC_1", "b.fa" } });
+    const std::vector<std::string> one_column { "b.fa" };
+    const std::vector<HeaderPair> own { header_pair("a", unique_a.get(), &one_column) };
+    EXPECT_TRUE(headers_unique_json(own)["value"].asBool());
+    EXPECT_FALSE(labels_disjoint_json(own)["value"].asBool());
+
+    // a single-graph server's one pair: null tags, the record's column named
+    HeaderPair single { Json::Value(), Json::Value(), Json::Value(), unique_a.get(),
+                        &one_column };
+    const Json::Value one = labels_disjoint_json({ single });
+    ASSERT_EQ(1u, one["examples"].size()) << one;
+    Json::Value untagged;
+    untagged["graph"] = Json::Value();
+    untagged["graph_path"] = Json::Value();
+    untagged["annotation_path"] = Json::Value();
+    EXPECT_EQ(untagged, one["examples"][0]["columns"][0]) << one;
+    untagged["column"] = "b.fa";
+    EXPECT_EQ(untagged, one["examples"][0]["records"][0]) << one;
+}
+
+// A pair without a .seqs makes the value null, as headers_unique's; its column names are still
+// compared with the headers of the pairs that have one
+TEST(MultiGraphLabelsDisjoint, APairWithoutRecordMappingMakesItUnknown) {
+    const std::vector<std::string> a_columns { "x.fa" };
+    const std::vector<std::string> none_columns { "r1" };
+    auto a = record_mapping({ { "r1", "r2" } });
+    Json::Value certificate = as_read(labels_disjoint_json({
+            header_pair("a", a.get(), &a_columns), header_pair("none", nullptr, &a_columns) }));
+    EXPECT_EQ(parse(R"({"value": null, "collisions": 0, "examples": []})"), certificate)
+            << certificate;
+    certificate = as_read(labels_disjoint_json({ header_pair("none", nullptr, &none_columns),
+                                                 header_pair("a", a.get(), &a_columns) }));
+    EXPECT_TRUE(certificate["value"].isNull()) << certificate;
+    EXPECT_EQ(1u, certificate["collisions"].asUInt64());
+    ASSERT_EQ(1u, certificate["examples"].size());
+    EXPECT_EQ("r1", certificate["examples"][0]["header"].asString());
+    EXPECT_EQ("none", certificate["examples"][0]["columns"][0]["graph"].asString());
+    EXPECT_EQ("a", certificate["examples"][0]["records"][0]["graph"].asString());
+    EXPECT_EQ(parse(R"({"value": null, "collisions": 0, "examples": []})"),
+              as_read(labels_disjoint_json({ header_pair("none", nullptr, &none_columns) })));
+}
+
+// The examples are the byte-smallest names, at most |max_examples|, each list at most
+// |max_listed| pairs long; the count covers every such name
+TEST(MultiGraphLabelsDisjoint, ExamplesAreTheSmallestNamesAndBounded) {
+    std::vector<std::string> columns, headers;
+    for (int i = 0; i < 40; ++i) {
+        columns.push_back("h" + std::to_string(139 - i));
+        headers.push_back("h" + std::to_string(100 + i));
+    }
+    columns.push_back("many");
+    auto a = record_mapping({ headers, { "many" } });
+    auto b = record_mapping({ { "many" } });
+    const std::vector<std::string> b_columns { "many" };
+    std::vector<HeaderPair> pairs { header_pair("a", a.get(), &columns),
+                                    header_pair("b", b.get(), &b_columns),
+                                    header_pair("c", nullptr, &b_columns),
+                                    header_pair("d", b.get(), &b_columns) };
+    const Json::Value certificate = labels_disjoint_json(pairs, 2, 10, 2);
+    EXPECT_TRUE(certificate["value"].isNull());
+    EXPECT_EQ(41u, certificate["collisions"].asUInt64());
+    ASSERT_EQ(10u, certificate["examples"].size());
+    for (int i = 0; i < 10; ++i) {
+        EXPECT_EQ("h" + std::to_string(100 + i),
+                  certificate["examples"][i]["header"].asString());
+    }
+    const Json::Value all = labels_disjoint_json(pairs, 2, 1000, 2);
+    ASSERT_EQ(41u, all["examples"].size());
+    const Json::Value &many = all["examples"][40];
+    EXPECT_EQ("many", many["header"].asString());
+    // a record in a, b and d, a column of a, b, c and d: two of each listed
+    ASSERT_EQ(2u, many["records"].size());
+    EXPECT_EQ("a", many["records"][0]["graph"].asString());
+    EXPECT_EQ("b", many["records"][1]["graph"].asString());
+    ASSERT_EQ(2u, many["columns"].size());
+    EXPECT_EQ("a", many["columns"][0]["graph"].asString());
+    EXPECT_EQ("b", many["columns"][1]["graph"].asString());
+    EXPECT_EQ(0u, labels_disjoint_json(pairs, 2, 0)["examples"].size());
+}
+
+
+// A file's stamp (H4): equal while the file is the same, different once it is rewritten or
+// renamed over, none for a file that does not exist
+TEST(MultiGraphInRam, FileStampTellsAReplacedFile) {
+    const std::string dir = test_dump_dir();
+    const std::string path = dir + "/stamped.annodbg";
+    auto write = [](const std::string &file, const std::string &text) {
+        std::ofstream out(file, std::ios::binary | std::ios::trunc);
+        out << text;
+    };
+    write(path, "annotation 1");
+    const auto first = file_stamp(path);
+    ASSERT_TRUE(first);
+    EXPECT_EQ(first, file_stamp(path));
+    EXPECT_EQ(12u, first->size);
+    // another file of the same size renamed over it
+    write(path + ".new", "annotation 2");
+    fs::rename(path + ".new", path);
+    const auto renamed = file_stamp(path);
+    ASSERT_TRUE(renamed);
+    EXPECT_NE(*first, *renamed);
+    // rewritten in place with other bytes, longer
+    write(path, "annotation 3 rebuilt");
+    EXPECT_NE(renamed, file_stamp(path));
+    EXPECT_FALSE(file_stamp(dir + "/no_such_file.annodbg"));
+}
+
+
 // ---------------------------------------------------------------- the mask's sampled check
 
 namespace {

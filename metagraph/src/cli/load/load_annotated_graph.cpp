@@ -1,6 +1,8 @@
 #include "load_annotated_graph.hpp"
 
 #include <cassert>
+#include <cstdio>
+#include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <mutex>
@@ -13,6 +15,7 @@
 #include "annotation/binary_matrix/column_sparse/column_major.hpp"
 #include "annotation/binary_matrix/row_diff/row_diff.hpp"
 #include "annotation/binary_matrix/row_sparse/row_sparse.hpp"
+#include "annotation/int_matrix/rank_extended/tuple_csc_matrix.hpp"
 #include "annotation/representation/column_compressed/annotate_column_compressed.hpp"
 #include "annotation/coord_to_header.hpp"
 #include "graph/representation/canonical_dbg.hpp"
@@ -36,6 +39,30 @@ using namespace mtg::graph;
 using mtg::common::logger;
 
 namespace {
+
+// Ends the process at a load that cannot go on (LoadFailure::EXIT), its log line written: at
+// once, as the server's shutdown does, since the loads run in loading threads beside a
+// single-graph server's listener or a multi-graph server's other loads, where exit() destroys
+// the process's statics under them (status -11 seen instead of 1, H4). Nothing is written
+// yet that needs flushing but the log and stdio.
+[[noreturn]] void exit_at_load() {
+    logger->flush();
+    std::fflush(nullptr);
+    std::_Exit(1);
+}
+
+// An annotation file whose extension no annotation type has fails as |on_failure| says, before
+// initialize_annotation would exit on it: thrown (the Python bindings raise it, a server's
+// request fails), or logged and ended through exit_at_load
+void check_annotation_extension(const std::string &file, LoadFailure on_failure) {
+    if (try_parse_annotation_type(file))
+        return;
+    const std::string message = fmt::format("Unknown annotation format in '{}'", file);
+    if (on_failure == LoadFailure::THROW)
+        throw std::runtime_error(message);
+    logger->error("{}", message);
+    exit_at_load();
+}
 
 // The graphs whose mask build_mask_at_load built. Weak references: a graph freed and another
 // allocated at its address must not pass for it (the unit tests load many graphs).
@@ -94,7 +121,7 @@ void build_mask_at_load(const std::shared_ptr<DeBruijnGraph> &graph, bool stdout
     } catch (const std::exception &e) {
         logger->error("--pattern-build-mask: the dummy-edge mask could not be built: {}",
                       e.what());
-        exit(1);
+        exit_at_load();
     }
     std::lock_guard<std::mutex> lock(built_masks_mutex);
     built_masks.emplace_back(dbg_succ);
@@ -251,7 +278,18 @@ std::shared_future<std::shared_ptr<DeBruijnGraph>>
 load_dbg_async(const std::string &path, const PatternPreparation &prep, LoadFailure on_failure) {
     return std::async(std::launch::async,
                       [path, prep, on_failure]() -> std::shared_ptr<DeBruijnGraph> {
-        auto graph = load_critical_dbg(path, on_failure);
+        std::shared_ptr<DeBruijnGraph> graph;
+        if (on_failure == LoadFailure::THROW) {
+            graph = load_critical_dbg(path, LoadFailure::THROW);
+        } else {
+            // logged and ended through exit_at_load: this is a loading thread
+            try {
+                graph = load_critical_dbg(path, LoadFailure::THROW);
+            } catch (const std::exception &e) {
+                logger->error("{}", e.what());
+                exit_at_load();
+            }
+        }
         // here, in the loading thread: while the annotation loads, and before the graph is
         // shared with anyone, so that nothing ever sees it without the mask
         prepare_pattern_graph(graph, path, prep);
@@ -292,6 +330,42 @@ std::string coord_to_header_file(const annot::MultiLabelAnnotation<std::string> 
             + annot::CoordToHeader::kExtension;
 }
 
+} // namespace
+
+std::string check_record_mapping(const annot::MultiLabelAnnotation<std::string> &annotation,
+                                 annot::CoordToHeader *mapping) {
+    assert(mapping);
+    const auto &labels = annotation.get_label_encoder().get_labels();
+    if (std::string why = mapping->check_columns(labels); !why.empty())
+        return why;
+    // the coordinates of a column are distinct values below the k-mers of its files, so a
+    // column that holds more of them than the mapping states k-mers for it is another file's
+    // (or another build's): checked where the annotation states its coordinates per column
+    // without decoding them; the row-diff forms store differences along paths, and decoding
+    // every row would cost the annotation's size
+    auto bound = [&](const auto &tuples) -> std::string {
+        for (uint64_t j = 0; j < mapping->num_columns(); ++j) {
+            const uint64_t coordinates = tuples.num_column_attributes(j);
+            if (coordinates > mapping->num_kmers(j)) {
+                return fmt::format("column {} ('{}') of the annotation holds {} coordinates, "
+                                   "more than the {} k-mers the mapping states for it (the "
+                                   "files were passed in another order)", j, labels[j],
+                                   coordinates, mapping->num_kmers(j));
+            }
+        }
+        return "";
+    };
+    using namespace annot::matrix;
+    const BinaryMatrix &matrix = annotation.get_matrix();
+    if (const auto *tuples = dynamic_cast<const TupleCSCMatrix<ColumnMajor> *>(&matrix))
+        return bound(*tuples);
+    if (const auto *tuples = dynamic_cast<const TupleCSCMatrix<BRWT> *>(&matrix))
+        return bound(*tuples);
+    return "";
+}
+
+namespace {
+
 std::unique_ptr<annot::CoordToHeader>
 load_coord_to_header(const annot::MultiLabelAnnotation<std::string> &annotation,
                      const Config &config, LoadFailure on_failure) {
@@ -306,7 +380,26 @@ load_coord_to_header(const annot::MultiLabelAnnotation<std::string> &annotation,
                 if (on_failure == LoadFailure::THROW) {
                     throw std::runtime_error(load_failure("the record mapping", cth_fname));
                 }
-                exit(1);
+                exit_at_load();
+            }
+            // the mapping of this annotation, or none: refused here, before the index is built
+            // (a server before it is ready), never by a request that reads it
+            if (std::string why = check_record_mapping(annotation, coord_to_header.get());
+                    !why.empty()) {
+                const std::string message = fmt::format(
+                        "The record mapping '{}' does not belong to the annotation '{}': {}. "
+                        "Rebuild it against this annotation with every input file in column "
+                        "order (metagraph stats --print-col-names lists them): metagraph "
+                        "annotate --anno-filename --index-header-coords -i {} -a {} -o {} "
+                        "<files>; or load the annotation without it (--no-coord-mapping)",
+                        cth_fname, config.infbase_annotators.at(0), why, config.infbase,
+                        config.infbase_annotators.at(0),
+                        utils::remove_suffix(config.infbase_annotators.at(0),
+                                             annotation.file_extension()));
+                if (on_failure == LoadFailure::THROW)
+                    throw std::runtime_error(message);
+                logger->error("{}", message);
+                exit_at_load();
             }
             logger->trace("CoordToHeader mapping loaded successfully from {}. "
                           "All queries will be performed against individual sequences.",
@@ -320,11 +413,13 @@ load_coord_to_header(const annot::MultiLabelAnnotation<std::string> &annotation,
                          "sequence length needed to compute the fraction of the target covered "
                          "('kmers_in_target' for query, 'nt_length' for align) will be omitted. "
                          "To enable per-sequence reporting, run once against the final annotation "
-                         "with all input FASTA/FASTQ files in annotation column order:\n"
+                         "with all input FASTA/FASTQ files in annotation column order (-a checks "
+                         "each file against its column):\n"
                          "    metagraph annotate --anno-filename --index-header-coords "
-                         "-i {} -o {} <input_files>\n"
+                         "-i {} -a {} -o {} <input_files>\n"
                          "Pass '--no-coord-mapping' to suppress this warning.",
-                         cth_fname, config.infbase, anno_basename);
+                         cth_fname, config.infbase, config.infbase_annotators.at(0),
+                         anno_basename);
         }
     }
 
@@ -365,6 +460,7 @@ void check_annotation_files_open(const Config &config, bool loads_mapping) {
         return;
     }
     // an empty annotator of the annotation's type: its file extension and matrix type
+    check_annotation_extension(config.infbase_annotators.at(0), LoadFailure::THROW);
     const auto annotation = initialize_annotation(config.infbase_annotators.at(0), config);
     const std::string extension = annotation->file_extension();
     const bool merged
@@ -418,6 +514,7 @@ build_annotated_dbg(std::shared_future<std::shared_ptr<DeBruijnGraph>> graph_fut
         annotation = initialize_annotation(config.anno_type, config,
                                            graph->max_index(), max_chunks_open);
     } else {
+        check_annotation_extension(config.infbase_annotators.at(0), on_failure);
         annotation = initialize_annotation(config.infbase_annotators.at(0),
                                            config, 0, max_chunks_open);
 
@@ -436,7 +533,7 @@ build_annotated_dbg(std::shared_future<std::shared_ptr<DeBruijnGraph>> graph_fut
                 throw std::runtime_error(annotation_load_failure(config.infbase_annotators,
                                                                  annotation->file_extension()));
             }
-            exit(1);
+            exit_at_load();
         }
 
         // The mapping another index of this annotation holds is shared (a column per label,
@@ -465,8 +562,11 @@ build_annotated_dbg(std::shared_future<std::shared_ptr<DeBruijnGraph>> graph_fut
                 const std::string anchor = config.infbase + kRowDiffAnchorExt;
                 const std::string fork_succ = config.infbase + kRowDiffForkSuccExt;
                 if (on_failure == LoadFailure::EXIT) {
-                    row_diff_column->load_anchor(anchor);
-                    row_diff_column->load_fork_succ(fork_succ);
+                    // (each logs its failure)
+                    if (!row_diff_column->try_load_anchor(anchor)
+                            || !row_diff_column->try_load_fork_succ(fork_succ)) {
+                        exit_at_load();
+                    }
                 } else if (!row_diff_column->try_load_anchor(anchor)) {
                     throw std::runtime_error(load_failure("anchor", anchor));
                 } else if (!row_diff_column->try_load_fork_succ(fork_succ)) {
@@ -492,7 +592,7 @@ build_annotated_dbg(std::shared_future<std::shared_ptr<DeBruijnGraph>> graph_fut
                     fmt::join(config.infbase_annotators, "', '")));
         }
         logger->error("Graph and annotation are not compatible");
-        exit(1);
+        exit_at_load();
     }
     if (graph->get_mode() == DeBruijnGraph::PRIMARY) {
         graph = std::make_shared<CanonicalDBG>(graph);
@@ -514,6 +614,16 @@ std::unique_ptr<AnnotatedDBG> initialize_annotated_dbg(std::shared_ptr<DeBruijnG
 
 std::unique_ptr<AnnotatedDBG> initialize_annotated_dbg(const Config &config) {
     return build_annotated_dbg(async_load_critical_dbg(config), config, kDefaultMaxChunksOpen);
+}
+
+std::unique_ptr<AnnotatedDBG> initialize_annotated_dbg(std::shared_ptr<DeBruijnGraph> graph,
+                                                       const Config &config,
+                                                       size_t max_chunks_open,
+                                                       LoadFailure on_failure) {
+    std::promise<std::shared_ptr<DeBruijnGraph>> ready;
+    ready.set_value(std::move(graph));
+    return build_annotated_dbg(ready.get_future().share(), config, max_chunks_open, nullptr,
+                               on_failure);
 }
 
 std::unique_ptr<AnnotatedDBG>

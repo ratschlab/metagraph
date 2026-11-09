@@ -552,6 +552,36 @@ was built in multiple chunks (multiple ``metagraph annotate`` invocations with d
 with ``--separately``, run ``--index-header-coords`` once after all annotation/transform steps are complete,
 passing every input FASTA in column order. ``metagraph stats --print-col-names`` will show the column order.
 
+The ``.seqs`` file states the label of each of its columns: the name of the file it was made from, exactly as
+passed (the label ``--anno-filename`` gives that file). When MetaGraph loads a ``.seqs``, it checks it against the
+annotation and refuses to load the index (``query``, ``align`` and ``server_query`` exit with an error naming both
+files) when the number of columns differs, when a stated label differs from the annotation's label of that column
+(the files were passed in another order, or under another spelling of their paths: pass them as
+``metagraph stats --print-col-names`` prints them), or, on ``column_coord`` and ``brwt_coord`` annotations, when a
+column holds more coordinates than the ``.seqs`` states k-mers for it. Pass the annotation with ``-a`` to
+spot-check the files against it while the mapping is built: each file's column must hold the coordinates of the
+file's first and last k-mers that the graph has (gaps of ``N`` are passed over, and a file with k-mers none of which
+the graph has is refused), and the annotation's labels are stated, so that files at another path or renamed columns
+pass the check at load. The spot check refuses files passed in another order or from another file set, but a file
+of the same sequences under other headers passes: that the records are those the annotation was made from rests on
+passing the files it was built from::
+
+    metagraph annotate --anno-filename --index-header-coords -i graph.dbg \
+                       -a annotation.row_diff_brwt_coord.annodbg -o annotation <files in column order>
+
+A ``.seqs`` written by an earlier version states no labels: its number of columns is checked, and its column order
+only by the coordinate check on ``column_coord`` and ``brwt_coord``. A ``.seqs`` cut short inside its columns or its
+labels is refused. To certify an earlier file, build the mapping again with the current version (with ``-a``) and
+check that the new file starts with the old file's bytes and that the labels' marker ``mtg-cols`` follows exactly
+where the old file ends (the commands work with GNU and macOS tools)::
+
+    n=$(wc -c < old.seqs)
+    head -c "$n" new.seqs | cmp -s - old.seqs \
+      && [ "$(tail -c +$((n + 1)) new.seqs | head -c 8)" = mtg-cols ] && echo certified
+
+Then use the new file. ``annotate -a`` loads the graph and the whole annotation; on a shared host, build one
+mapping at a time with ``--mmap``. Earlier versions read a ``.seqs`` with labels as before.
+
 All other flags (e.g., ``--separately`` and ``--disk-swap``) described above are also supported similarly as for binary annotations.
 
 .. _query_kmer_coordinates:

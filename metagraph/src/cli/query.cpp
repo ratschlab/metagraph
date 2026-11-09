@@ -1,5 +1,6 @@
 #include "query.hpp"
 
+#include <exception>
 #include <mutex>
 #include <sstream>
 
@@ -1211,7 +1212,14 @@ int query_graph(Config *config) {
                                               config->verbose_output, k) + "\n";
             }
         };
-        size_t num_bp = query_fasta(file, query_callback, *config, *anno_graph, aligner_config.get());
+        size_t num_bp;
+        try {
+            num_bp = query_fasta(file, query_callback, *config, *anno_graph,
+                                 aligner_config.get());
+        } catch (const std::exception &e) {
+            logger->error("Cannot query '{}': {}", file, e.what());
+            return 1;
+        }
         auto time = curr_timer.elapsed();
         logger->trace("File '{}' with {} base pairs was processed in {:.3f} sec, throughput: {:.1f} bp/s",
                       file, num_bp, time, (double)num_bp / time);
@@ -1337,17 +1345,33 @@ size_t query_fasta(const std::string &file,
     size_t seq_count = 0;
     size_t num_bp = 0;
 
+    // A task that throws on a worker ends the process (ThreadPool), so each task keeps the
+    // first exception, which is rethrown here once every task has finished: a server's request
+    // then fails with its route's answer to an error and the server runs on, and the CLI exits
+    // with the message (a record mapping whose columns are in another order, which a .seqs
+    // written before H4 can be on a row-diff form, maps a coordinate out of its column's range:
+    // one /search aborted the server, GPT review 5 #7, H4's verification)
+    std::mutex error_mutex;
+    std::exception_ptr error;
     ThreadPool thread_pool(get_num_threads(), 1000);
     for (const seq_io::kseq_t &kseq : fasta_parser) {
         thread_pool.enqueue([&](QuerySequence &sequence) {
-            // Callback with the SeqSearchResult
-            callback(query_sequence(std::move(sequence), anno_graph,
-                                    config, aligner_config));
+            try {
+                // Callback with the SeqSearchResult
+                callback(query_sequence(std::move(sequence), anno_graph,
+                                        config, aligner_config));
+            } catch (...) {
+                std::lock_guard<std::mutex> lock(error_mutex);
+                if (!error)
+                    error = std::current_exception();
+            }
         }, QuerySequence { seq_count++, std::string(kseq.name.s), std::string(kseq.seq.s) });
         num_bp += kseq.seq.l;
     }
     // wait while all threads finish processing the current file
     thread_pool.join();
+    if (error)
+        std::rethrow_exception(error);
 
     return num_bp;
 }
@@ -1367,6 +1391,16 @@ size_t batched_query_fasta(seq_io::FastaParser &fasta_parser,
 
     size_t parallel_each = std::max<size_t>(1, config.parallel_each);
     size_t threads_per_batch = std::max<size_t>(1, get_num_threads() / parallel_each);
+    // as query_fasta's pool: an exception must not leave an OpenMP task or loop iteration (it
+    // ends the process), so each keeps the first one, rethrown once the parallel region has
+    // ended (a server's request then fails with its route's answer, the CLI exits with it)
+    std::mutex error_mutex;
+    std::exception_ptr error;
+    auto keep_error = [&](std::exception_ptr e) {
+        std::lock_guard<std::mutex> lock(error_mutex);
+        if (!error)
+            error = std::move(e);
+    };
     omp_set_max_active_levels(2);
     #pragma omp parallel num_threads(parallel_each)
     #pragma omp single
@@ -1386,7 +1420,8 @@ size_t batched_query_fasta(seq_io::FastaParser &fasta_parser,
 
         #pragma omp task firstprivate(seq_batch_p, num_bytes_read) shared(callback)
         {
-            std::unique_ptr<std::vector<QuerySequence>> seq_batch(seq_batch_p);
+          std::unique_ptr<std::vector<QuerySequence>> seq_batch(seq_batch_p);
+          try {
             Timer batch_timer;
             std::vector<Alignment> alignments_batch;
             // Align sequences ahead of time on full graph if we don't have batch_align
@@ -1397,9 +1432,13 @@ size_t batched_query_fasta(seq_io::FastaParser &fasta_parser,
 
                 #pragma omp parallel for num_threads(threads_per_batch) schedule(dynamic)
                 for (size_t i = 0; i < seq_batch->size(); ++i) {
-                    // Set alignment for this seq_batch
-                    alignments_batch[i] = align_sequence(&(*seq_batch)[i].sequence,
-                                                         anno_graph.get_graph(), *aligner_config);
+                    try {
+                        // Set alignment for this seq_batch
+                        alignments_batch[i] = align_sequence(&(*seq_batch)[i].sequence,
+                                                             anno_graph.get_graph(), *aligner_config);
+                    } catch (...) {
+                        keep_error(std::current_exception());
+                    }
                 }
                 logger->trace("Sequences alignment took {} sec", batch_timer.elapsed());
                 batch_timer.reset();
@@ -1422,14 +1461,18 @@ size_t batched_query_fasta(seq_io::FastaParser &fasta_parser,
 
             #pragma omp parallel for num_threads(threads_per_batch) schedule(dynamic)
             for (size_t i = 0; i < seq_batch->size(); ++i) {
-                SeqSearchResult search_result
-                    = query_sequence(std::move((*seq_batch)[i]), *query_graph, config,
-                                     config.batch_align ? aligner_config : NULL);
+                try {
+                    SeqSearchResult search_result
+                        = query_sequence(std::move((*seq_batch)[i]), *query_graph, config,
+                                         config.batch_align ? aligner_config : NULL);
 
-                if (alignments_batch.size())
-                    search_result.get_alignment() = std::move(alignments_batch[i]);
+                    if (alignments_batch.size())
+                        search_result.get_alignment() = std::move(alignments_batch[i]);
 
-                callback(search_result);
+                    callback(search_result);
+                } catch (...) {
+                    keep_error(std::current_exception());
+                }
             }
             auto query_time = batch_timer.elapsed();
 
@@ -1441,10 +1484,15 @@ size_t batched_query_fasta(seq_io::FastaParser &fasta_parser,
                           threads_per_batch,
                           query_time, query_graph_construction + query_time,
                           num_bytes_read / (query_graph_construction + query_time));
+          } catch (...) {
+            keep_error(std::current_exception());
+          }
         }
 
         num_bp += num_bytes_read;
     }
+    if (error)
+        std::rethrow_exception(error);
 
     return num_bp;
 }

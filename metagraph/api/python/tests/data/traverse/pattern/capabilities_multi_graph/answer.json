@@ -87,6 +87,11 @@
    "examples": [],
    "value": true
   },
+  "labels_disjoint": {
+   "collisions": 0,
+   "examples": [],
+   "value": true
+  },
   "pairs": [
    {
     "alphabet": "$ACGT",
@@ -104,7 +109,8 @@
     "index_ns": null,
     "k": 31,
     "mask": "file",
-    "support_fp": "193e045bcaf413d8",
+    "seqs_order": "count_only",
+    "support_fp": "ffb6b826d432321d",
     "traversal": {
      "counts": null,
      "has_coord_to_header": true,

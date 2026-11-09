@@ -36,11 +36,18 @@ jobs:
       # annotation code they read through. The tests on the mini index skip here
       # (unit_tests_parallel runs each shard in a directory of its own, without mini_refseq/)
       # and run in mini-index-tests. The multi-graph fan-out and its request registry
-      # (ServerFanout, IdNamespace) are whole suites: *Attempt* alone matched a few of their tests
-      unit_test_filter: '*Walker*:*LabelOracle*:*Resolve*:*Trie*:*SupportStep*:*Graphlet*:*Stage2Review*:*Attempt*:*ServerRequest*:*PathCache*:*Pattern*:*CoordToHeader*:*AlignmentFormatCoords*:*HeaderIndex*:*RowDiff*:*BRWT*:*Annotat*:*MultiGraph*:*MaskCheck*:*TraverseNotInGraph*:ServerFanout.*:IdNamespace.*:*ServerCapacity*'
+      # (ServerFanout, IdNamespace) are whole suites: *Attempt* alone matched a few of their tests.
+      # The server's other suites (the header certificates, the envelope, the selection, the
+      # cache, labels not in a graph, index names, task resources, the query's helpers) and
+      # inner_prod's (GPT review 5, finding 10) are named one by one: none matched before
+      unit_test_filter: '*Walker*:*LabelOracle*:*Resolve*:*Trie*:*SupportStep*:*Graphlet*:*Stage2Review*:*Attempt*:*ServerRequest*:*PathCache*:*Pattern*:*CoordToHeader*:*AlignmentFormatCoords*:*HeaderIndex*:*RowDiff*:*BRWT*:*Annotat*:*MultiGraph*:*MaskCheck*:*TraverseNotInGraph*:ServerFanout.*:IdNamespace.*:*ServerCapacity*:HeadersUnique.*:ServerEnvelope.*:ServerSelection.*:ServerCacheConfig.*:ServerQueryCache.*:ServerSearchRequest.*:LabelsNotInGraph.*:IndexNames.*:TaskResources.*:ThreadUsage.*:SeqSearchResult.*:collapse_coord_ranges.*:construct_query_graph.*:encode_presence_mask.*:split_contigs_for_rebalancing.*:bit_vector.inner_prod*'
       # the branch's integration modules, whole; their classes on the mini index skip here and
-      # run in mini-index-tests
-      integration_test_filters: '*(test_traverse.* *(test_pattern.* *(test_multigraph.* *(test_transform_mask.*'
+      # run in mini-index-tests. Since GPT review 5 (finding 17) also E14's per-form traversal
+      # tests (test_traverse_forms: `*(test_traverse.*` does not match them) and the server's
+      # upstream modules the branch changed: the /search cache, the shutdown, /align, query
+      # and the API. test_query (about 20 minutes here) runs in a second job beside the others
+      integration_test_filters: '*(test_traverse.* *(test_traverse_forms.* *(test_pattern.* *(test_multigraph.* *(test_transform_mask.* *(test_server_cache.* *(test_server_shutdown.* *(test_align.* *(test_api.*'
+      integration_test_filters_2: '*(test_query.*'
       examples: false
       mini_refseq: fetch
 
@@ -62,8 +69,11 @@ jobs:
       cxx: g++-13
       build_static: 'OFF'
       with_avx: 'ON'
-      unit_test_filter: '*Walker*:*LabelOracle*:*Resolve*:*Trie*:*SupportStep*:*Graphlet*:*Stage2Review*:*Attempt*:*ServerRequest*:*PathCache*:*Pattern*:*CoordToHeader*:*AlignmentFormatCoords*:*HeaderIndex*:*RowDiff*:*BRWT*:*Annotat*:*MultiGraph*:*MaskCheck*:*TraverseNotInGraph*'
-      integration_test_filters: '*(test_traverse.* *(test_traverse_protein.* *(test_pattern_protein.*'
+      unit_test_filter: '*Walker*:*LabelOracle*:*Resolve*:*Trie*:*SupportStep*:*Graphlet*:*Stage2Review*:*Attempt*:*ServerRequest*:*PathCache*:*Pattern*:*CoordToHeader*:*AlignmentFormatCoords*:*HeaderIndex*:*RowDiff*:*BRWT*:*Annotat*:*MultiGraph*:*MaskCheck*:*TraverseNotInGraph*:HeadersUnique.*:bit_vector.inner_prod*'
+      # and the server's upstream modules on protein graphs (test_traverse_forms is DNA only),
+      # test_query in a second job beside the others
+      integration_test_filters: '*(test_traverse.* *(test_traverse_protein.* *(test_pattern_protein.* *(test_server_cache.* *(test_server_shutdown.* *(test_align.* *(test_api.*'
+      integration_test_filters_2: '*(test_query.*'
       examples: false
 
   # The generated test data against their generators, without a build: the MGT v1 codec

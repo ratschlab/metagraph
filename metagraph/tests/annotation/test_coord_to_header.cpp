@@ -1,14 +1,22 @@
 #include <gtest/gtest.h>
 
 #include <atomic>
+#include <fstream>
+#include <iterator>
 #include <map>
 #include <random>
+#include <sstream>
 #include <thread>
 
 #include "../test_helpers.hpp"
 #include "annotation/coord_to_header.hpp"
+#include "annotation/representation/column_compressed/annotate_column_compressed.hpp"
+#include "cli/load/load_annotated_graph.hpp"
+#include "common/serialization.hpp"
+#include "common/utils/file_utils.hpp"
 #include "graph/alignment/alignment.hpp"
 #include "annotation/representation/base/annotation.hpp"
+#include "coordinate_test_graph.hpp"
 
 
 namespace {
@@ -219,6 +227,248 @@ TEST(CoordToHeader, SerializeLoadRoundTrip) {
                 << "col " << col << " coord " << coord;
         }
     }
+}
+
+// the bytes of a file
+std::string file_bytes(const std::string &path) {
+    std::ifstream in(path, std::ios::binary);
+    return std::string(std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>());
+}
+
+CoordToHeader three_columns() {
+    return CoordToHeader({ { "only" }, { "a", "b", "c" }, { "head", "mid", "tail" } },
+                         { { 7 }, { 1, 4, 2 }, { 3, 1, 5 } });
+}
+
+// The .seqs states its column labels after its columns (H4): the bytes before them are a file
+// without labels, which loads as before (none stated), and a load reads them back
+TEST(CoordToHeader, ColumnLabelsTrailerRoundTrip) {
+    const std::vector<std::string> labels { "dir/x.fa", "y.fa.gz", "" };
+    CoordToHeader plain = three_columns();
+    CoordToHeader labelled = three_columns();
+    EXPECT_FALSE(labelled.column_labels());
+    labelled.set_column_labels(std::vector<std::string>(labels));
+    ASSERT_TRUE(labelled.column_labels());
+    EXPECT_EQ(labels, *labelled.column_labels());
+    const std::string plain_base = test_dump_dir() + "/cth_plain";
+    const std::string labelled_base = test_dump_dir() + "/cth_labelled";
+    plain.serialize(plain_base);
+    labelled.serialize(labelled_base);
+    const std::string old_bytes = file_bytes(plain_base + CoordToHeader::kExtension);
+    const std::string new_bytes = file_bytes(labelled_base + CoordToHeader::kExtension);
+    ASSERT_LT(old_bytes.size(), new_bytes.size());
+    EXPECT_EQ(old_bytes, new_bytes.substr(0, old_bytes.size()));
+    // the trailer: the marker, then the labels as a string vector
+    std::ostringstream trailer;
+    serialize_number(trailer, CoordToHeader::kColumnLabelsMarker);
+    serialize_string_vector(trailer, labels);
+    EXPECT_EQ(trailer.str(), new_bytes.substr(old_bytes.size()));
+    EXPECT_EQ("mtg-cols", new_bytes.substr(old_bytes.size(), 8));
+
+    CoordToHeader old_file;
+    ASSERT_TRUE(old_file.load(plain_base));
+    EXPECT_FALSE(old_file.column_labels());
+    CoordToHeader new_file;
+    ASSERT_TRUE(new_file.load(labelled_base));
+    ASSERT_TRUE(new_file.column_labels());
+    EXPECT_EQ(labels, *new_file.column_labels());
+    for (uint64_t col = 0; col < plain.num_columns(); ++col) {
+        EXPECT_EQ(plain.get_headers(col), new_file.get_headers(col));
+        EXPECT_EQ(plain.num_kmers(col), new_file.num_kmers(col));
+    }
+    // a load of a file without labels forgets the labels loaded before
+    ASSERT_TRUE(new_file.load(plain_base));
+    EXPECT_FALSE(new_file.column_labels());
+    // labels of another number than the columns are refused
+    EXPECT_THROW(plain.set_column_labels({ "a", "b" }), std::invalid_argument);
+}
+
+// check_columns: the count always; the order when the labels are stated, which it drops once
+// they matched (column_order_verified); a mismatch keeps everything as it was
+TEST(CoordToHeader, CheckColumnsAgainstTheAnnotationsLabels) {
+    const std::vector<std::string> labels { "x.fa", "y.fa", "z.fa" };
+    CoordToHeader unlabelled = three_columns();
+    EXPECT_EQ("it has 3 columns, the annotation 2 labels",
+              unlabelled.check_columns({ "x.fa", "y.fa" }));
+    EXPECT_EQ("", unlabelled.check_columns({ "a", "b", "c" }));
+    EXPECT_FALSE(unlabelled.column_order_verified());
+
+    CoordToHeader labelled = three_columns();
+    labelled.set_column_labels(std::vector<std::string>(labels));
+    EXPECT_EQ("it has 3 columns, the annotation 4 labels",
+              labelled.check_columns({ "x.fa", "y.fa", "z.fa", "w.fa" }));
+    EXPECT_EQ("its column 1 is 'y.fa', the annotation's column 1 'z.fa' (the files were passed "
+              "in another order or under other names)",
+              labelled.check_columns({ "x.fa", "z.fa", "y.fa" }));
+    EXPECT_EQ("its column 0 is 'x.fa', the annotation's column 0 '/abs/x.fa' (the files were "
+              "passed in another order or under other names)",
+              labelled.check_columns({ "/abs/x.fa", "y.fa", "z.fa" }));
+    EXPECT_FALSE(labelled.column_order_verified());
+    ASSERT_TRUE(labelled.column_labels());
+    EXPECT_EQ("", labelled.check_columns(labels));
+    EXPECT_TRUE(labelled.column_order_verified());
+    EXPECT_FALSE(labelled.column_labels());
+    // a copy keeps what was verified
+    EXPECT_TRUE(CoordToHeader(labelled).column_order_verified());
+}
+
+// Data after the columns is the trailer or a corrupt file: anything else fails the load
+TEST(CoordToHeader, LoadRefusesUnknownDataAfterTheColumns) {
+    const std::string base = test_dump_dir() + "/cth_tail";
+    const std::string path = base + CoordToHeader::kExtension;
+    three_columns().serialize(base);
+    const std::string columns = file_bytes(path);
+    auto write = [&](const std::string &tail) {
+        std::ofstream out(path, std::ios::binary | std::ios::trunc);
+        out << columns << tail;
+    };
+    auto trailer = [](uint64_t marker, const std::vector<std::string> &labels) {
+        std::ostringstream out;
+        serialize_number(out, marker);
+        serialize_string_vector(out, labels);
+        return out.str();
+    };
+    CoordToHeader cth;
+    write(trailer(CoordToHeader::kColumnLabelsMarker, { "a", "b", "c" }));
+    EXPECT_TRUE(cth.load(base));
+    // another marker, labels for another number of columns, data after the labels, a cut file
+    write(trailer(CoordToHeader::kColumnLabelsMarker + 1, { "a", "b", "c" }));
+    EXPECT_FALSE(cth.load(base));
+    write(trailer(CoordToHeader::kColumnLabelsMarker, { "a", "b" }));
+    EXPECT_FALSE(cth.load(base));
+    write(trailer(CoordToHeader::kColumnLabelsMarker, { "a", "b", "c" }) + "x");
+    EXPECT_FALSE(cth.load(base));
+    write("tail");
+    EXPECT_FALSE(cth.load(base));
+    const std::string whole = trailer(CoordToHeader::kColumnLabelsMarker, { "a", "b", "c" });
+    write(whole.substr(0, whole.size() - 1));
+    EXPECT_FALSE(cth.load(base));
+    write("");
+    EXPECT_TRUE(cth.load(base));
+    EXPECT_FALSE(cth.column_labels());
+}
+
+// A file cut anywhere is refused, also one written before the trailer and cut inside its last
+// column: its load must not end in a failed read that looks like the end of an old file (H4
+// review S1: cut 1, 9 or 40 bytes, it loaded as an old file and answered without the last
+// column's records, or aborted on a coordinate it could not place)
+TEST(CoordToHeader, LoadRefusesATruncatedFile) {
+    const std::string base = test_dump_dir() + "/cth_cut";
+    const std::string path = base + CoordToHeader::kExtension;
+    for (bool labelled : { false, true }) {
+        CoordToHeader cth = three_columns();
+        if (labelled)
+            cth.set_column_labels({ "x.fa", "y.fa", "z.fa" });
+        cth.serialize(base);
+        const std::string whole = file_bytes(path);
+        CoordToHeader loaded;
+        ASSERT_TRUE(loaded.load(base));
+        for (size_t cut : std::initializer_list<size_t> { 1, 8, 9, 40 }) {
+            ASSERT_LT(cut, whole.size());
+            {
+                std::ofstream out(path, std::ios::binary | std::ios::trunc);
+                out << whole.substr(0, whole.size() - cut);
+            }
+            EXPECT_FALSE(loaded.load(base)) << cut << (labelled ? " labelled" : " old");
+        }
+        // every shorter prefix of an old file too
+        if (!labelled) {
+            for (size_t size = 0; size < whole.size(); ++size) {
+                {
+                    std::ofstream out(path, std::ios::binary | std::ios::trunc);
+                    out << whole.substr(0, size);
+                }
+                EXPECT_FALSE(loaded.load(base)) << size << " of " << whole.size() << " bytes";
+            }
+        }
+    }
+}
+
+// An empty file fails its load, also when the stream maps it (--mmap: mapping an empty file
+// throws, which ended the process before its load could name the file)
+TEST(CoordToHeader, AnEmptyFileFailsItsLoad) {
+    const std::string base = test_dump_dir() + "/cth_empty";
+    { std::ofstream out(base + CoordToHeader::kExtension, std::ios::binary | std::ios::trunc); }
+    CoordToHeader cth;
+    EXPECT_FALSE(cth.load(base));
+    const bool mmap = utils::with_mmap();
+    utils::set_mmap(true);
+    EXPECT_FALSE(cth.load(base));
+    utils::set_mmap(mmap);
+}
+
+// The load's check of a record mapping against its annotation (cli::check_record_mapping): the
+// count, the stated labels, and the coordinates of a column against its k-mers where the
+// annotation states them per column (column_coord, brwt_coord); the row-diff form only by count
+TEST(CoordToHeader, RecordMappingCheckAtLoad) {
+    // A: two records of 26 k-mers each, B: one of 8 (k = 5)
+    const std::vector<test::CoordinateRecord> records {
+        { "ACGTTGCATGACCTAGGATCCGATTACGGA", "A", "a1" },
+        { "TTGACCGTAGGCATCAGTCAATGGCTTCAG", "A", "a2" },
+        { "GGCATTACCAGT", "B", "b1" },
+    };
+    auto mapping = [](bool swapped) {
+        return swapped ? CoordToHeader({ { "b1" }, { "a1", "a2" } }, { { 8 }, { 26, 26 } })
+                       : CoordToHeader({ { "a1", "a2" }, { "b1" } }, { { 26, 26 }, { 8 } });
+    };
+    for (const auto &[row_diff, brwt] : std::vector<std::pair<bool, bool>> {
+            { false, false }, { false, true }, { true, false }, { true, true } }) {
+        SCOPED_TRACE(std::string(row_diff ? "row_diff " : "") + (brwt ? "brwt" : "column"));
+        auto index = test::coordinate_test_graph(5, records, row_diff, brwt);
+        const auto &annotation = index->get_annotator();
+        ASSERT_EQ((std::vector<std::string> { "A", "B" }),
+                  annotation.get_label_encoder().get_labels());
+        // the right mapping, without and with its labels
+        CoordToHeader right = mapping(false);
+        EXPECT_EQ("", cli::check_record_mapping(annotation, &right));
+        EXPECT_FALSE(right.column_order_verified());
+        right.set_column_labels({ "A", "B" });
+        EXPECT_EQ("", cli::check_record_mapping(annotation, &right));
+        EXPECT_TRUE(right.column_order_verified());
+        // another number of columns
+        CoordToHeader one({ { "a1" } }, { { 26 } });
+        EXPECT_EQ("it has 1 columns, the annotation 2 labels",
+                  cli::check_record_mapping(annotation, &one));
+        // the columns swapped, their labels stated
+        CoordToHeader swapped_labelled = mapping(true);
+        swapped_labelled.set_column_labels({ "B", "A" });
+        EXPECT_EQ("its column 0 is 'B', the annotation's column 0 'A' (the files were passed in "
+                  "another order or under other names)",
+                  cli::check_record_mapping(annotation, &swapped_labelled));
+        // the columns swapped, without labels: A's 52 coordinates do not fit B's 8 k-mers where
+        // the annotation states them per column; the row-diff forms check the count only
+        CoordToHeader swapped = mapping(true);
+        if (row_diff) {
+            EXPECT_EQ("", cli::check_record_mapping(annotation, &swapped));
+        } else {
+            EXPECT_EQ("column 0 ('A') of the annotation holds 52 coordinates, more than the 8 "
+                      "k-mers the mapping states for it (the files were passed in another order)",
+                      cli::check_record_mapping(annotation, &swapped));
+        }
+        EXPECT_FALSE(swapped.column_order_verified());
+    }
+}
+
+// An index is never built with a mapping of another column count: no query has to check it
+TEST(CoordToHeader, AnIndexRefusesAMappingOfAnotherColumnCount) {
+    auto dbg = std::make_shared<graph::DBGSuccinct>(5);
+    dbg->add_sequence("ACGTTGCATGACCTAGGA");
+    auto annotation = [&]() {
+        auto anno = std::make_unique<ColumnCompressed<>>(dbg->max_index());
+        anno->add_labels({ 0 }, { "A", "B" });
+        return anno;
+    };
+    EXPECT_THROW(graph::AnnotatedDBG(dbg, annotation(), false,
+                                     std::make_shared<CoordToHeader>(
+                                             std::vector<std::vector<std::string>> { { "a1" } },
+                                             std::vector<std::vector<uint64_t>> { { 3 } })),
+                 std::invalid_argument);
+    EXPECT_NO_THROW(graph::AnnotatedDBG(dbg, annotation(), false,
+                                        std::make_shared<CoordToHeader>(
+                                                std::vector<std::vector<std::string>> {
+                                                        { "a1" }, { "b1" } },
+                                                std::vector<std::vector<uint64_t>> {
+                                                        { 3 }, { 4 } })));
 }
 
 TEST(CoordToHeader, FindDuplicateHeadersNamesEveryRepeatAgainstTheFirst) {

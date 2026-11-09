@@ -718,8 +718,9 @@ struct HeaderPair {
 
 /**
  * GET /capabilities' `headers_unique` (SPEC-multigraph-envelope.md, "headers_unique (E22)"):
- * whether every sequence header of the server names one record, so that a header label
- * selects one sequence of one pair. |pairs| are the server's (graph, annotation) pairs, each
+ * whether every sequence header of the server names one record (a header label selects one
+ * sequence of one pair only when labels_disjoint_json holds too: this compares headers with
+ * headers, never with column names). |pairs| are the server's (graph, annotation) pairs, each
  * once (a single-graph server's one pair with null tags). A header repeated across pairs,
  * across the columns of a pair or within a column is a collision
  * (CoordToHeader::find_repeated_headers, which builds each pair's header index if not built
@@ -732,6 +733,43 @@ struct HeaderPair {
  */
 Json::Value headers_unique_json(const std::vector<HeaderPair> &pairs, size_t num_threads = 0,
                                 size_t max_examples = 10, size_t max_listed = 10);
+
+/**
+ * GET /capabilities' `labels_disjoint` (SPEC-multigraph-envelope.md, "labels_disjoint (H4)"):
+ * whether no sequence header of the server equals a column name of any pair. A label is
+ * resolved as a column name first (LabelOracle::find_label), so a header equal to a column name
+ * selects that column in a pair that has it, never its record: headers_unique alone (headers
+ * against headers) does not certify that a header label selects one record. |pairs| as for
+ * headers_unique_json. Each distinct column name of every pair is looked up in the header index
+ * of every pair with a .seqs (CoordToHeader::find_header, built if not built yet), on
+ * |num_threads| threads (0: get_num_threads()); no lookup when no pair has a .seqs.
+ *   {"value": true | false | null, "collisions": n, "examples": [{"header",
+ *    "records": [{graph, graph_path, annotation_path, column}...],
+ *    "columns": [{graph, graph_path, annotation_path}...]}...]}
+ * value is null when a pair has no .seqs (as headers_unique's; collisions and examples then
+ * count every pair's columns against the headers of the pairs that have one); collisions is the
+ * number of distinct names that are both; examples are the |max_examples| byte-smallest, each
+ * with the pairs whose .seqs has a record of that header (the column of its first record there,
+ * by name) and the pairs with a column of that name, each list in pair order, at most
+ * |max_listed| long.
+ */
+Json::Value labels_disjoint_json(const std::vector<HeaderPair> &pairs, size_t num_threads = 0,
+                                 size_t max_examples = 10, size_t max_listed = 10);
+
+// The identity of a file on disk at one moment: its device, inode, size and modification time
+// (ns, the clock of std::filesystem::last_write_time). A file renamed over, rewritten or rebuilt
+// differs in one of them at least. A server compares an annotation's stamp with the one taken
+// at start-up before it loads the pair into RAM with the resident pair's record mapping (H4)
+struct FileStamp {
+    uint64_t device = 0;
+    uint64_t inode = 0;
+    uint64_t size = 0;
+    int64_t mtime_ns = 0;
+
+    bool operator==(const FileStamp &other) const = default;
+};
+// |path|'s stamp now, nullopt when it cannot be read (no such file, no permission)
+std::optional<FileStamp> file_stamp(const std::string &path);
 
 } // namespace cli
 } // namespace mtg

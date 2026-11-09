@@ -77,7 +77,37 @@ CoordToHeader::~CoordToHeader() {}
 // built it, so a copy builds its own on first use (with the same hash)
 CoordToHeader::CoordToHeader(const CoordToHeader &other)
       : headers_(other.headers_), coord_offsets_(other.coord_offsets_),
+        column_labels_(other.column_labels_),
+        column_order_verified_(other.column_order_verified_),
         header_hash_(other.header_hash_) {}
+
+void CoordToHeader::set_column_labels(std::vector<std::string> &&labels) {
+    if (labels.size() != num_columns()) {
+        throw std::invalid_argument(fmt::format("{} column labels for a record mapping of {} "
+                                                "columns", labels.size(), num_columns()));
+    }
+    column_labels_ = std::move(labels);
+    column_order_verified_ = false;
+}
+
+std::string CoordToHeader::check_columns(const std::vector<std::string> &labels) {
+    if (labels.size() != num_columns()) {
+        return fmt::format("it has {} columns, the annotation {} labels", num_columns(),
+                           labels.size());
+    }
+    if (column_labels_) {
+        for (size_t i = 0; i < labels.size(); ++i) {
+            if ((*column_labels_)[i] != labels[i]) {
+                return fmt::format("its column {} is '{}', the annotation's column {} '{}' (the "
+                                   "files were passed in another order or under other names)",
+                                   i, (*column_labels_)[i], i, labels[i]);
+            }
+        }
+        column_labels_.reset();
+        column_order_verified_ = true;
+    }
+    return "";
+}
 
 uint64_t CoordToHeader::default_header_hash(std::string_view header) {
     // std::hash of a string is 64 bits wide on the platforms built (libc++'s CityHash64,
@@ -503,8 +533,17 @@ uint64_t CoordToHeader::num_kmers_in_sequence(Column col, size_t seq_id) const {
 
 bool CoordToHeader::load(const std::string &filename_base) {
     const std::string path = utils::make_suffix(filename_base, kExtension);
-    std::unique_ptr<std::ifstream> in = utils::open_ifstream(path);
-    if (!in->good()) {
+    std::unique_ptr<std::ifstream> in;
+    try {
+        // (with --mmap the stream maps the file, which throws on an empty one: a copy cut
+        // before its first byte must fail its load, naming the file, not end the process)
+        in = utils::open_ifstream(path);
+    } catch (const std::exception &e) {
+        logger->error("Cannot load CoordToHeader from '{}': {} (caught: {})", path,
+                      utils::file_read_failure_detail(path), e.what());
+        return false;
+    }
+    if (!in || !in->good()) {
         logger->error("Cannot open CoordToHeader file '{}': {}", path,
                       utils::file_read_failure_detail(path));
         return false;
@@ -515,14 +554,46 @@ bool CoordToHeader::load(const std::string &filename_base) {
         header_index_.reset();
     }
 
+    column_labels_.reset();
+    column_order_verified_ = false;
     try {
         uint64_t num_columns = load_number(*in);
         headers_.resize(num_columns);
         coord_offsets_.resize(num_columns);
 
         for (uint64_t i = 0; i < num_columns; ++i) {
-            load_string_vector(*in, &headers_[i]);
-            coord_offsets_[i].load(*in);
+            if (!load_string_vector(*in, &headers_[i]))
+                throw std::runtime_error(fmt::format("the headers of column {}", i));
+            // every column read whole: a file cut inside its last column would otherwise
+            // reach the test below in a failed state, where peek() answers EOF as at the end
+            // of a file written before the trailer
+            if (!coord_offsets_[i].load(*in) || in->fail())
+                throw std::runtime_error(fmt::format("the coordinate offsets of column {}", i));
+            // one set bit per record, the last coordinate of each
+            if (coord_offsets_[i].num_set_bits() != headers_[i].size()) {
+                throw std::runtime_error(fmt::format(
+                        "column {}: {} records, {} record ends in its coordinate offsets", i,
+                        headers_[i].size(), coord_offsets_[i].num_set_bits()));
+            }
+        }
+        // the trailer of column labels, if any (a file written before it ends here)
+        if (in->peek() != std::char_traits<char>::eof()) {
+            if (load_number(*in) != kColumnLabelsMarker)
+                throw std::runtime_error("unexpected data after the columns");
+            // the number of labels compared before anything is allocated for them
+            const uint64_t num_labels = load_number(*in);
+            if (num_labels != num_columns) {
+                throw std::runtime_error(fmt::format("{} column labels for {} columns",
+                                                     num_labels, num_columns));
+            }
+            std::vector<std::string> labels(num_labels);
+            for (std::string &label : labels) {
+                if (!load_string(*in, &label))
+                    throw std::runtime_error("the column labels");
+            }
+            if (in->peek() != std::char_traits<char>::eof())
+                throw std::runtime_error("unexpected data after the column labels");
+            column_labels_ = std::move(labels);
         }
         return true;
 
@@ -546,6 +617,10 @@ void CoordToHeader::serialize(const std::string &filename_base) const {
     for (size_t i = 0; i < headers_.size(); ++i) {
         serialize_string_vector(out, headers_[i]);
         coord_offsets_[i].serialize(out);
+    }
+    if (column_labels_) {
+        serialize_number(out, kColumnLabelsMarker);
+        serialize_string_vector(out, *column_labels_);
     }
 }
 

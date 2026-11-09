@@ -120,6 +120,11 @@
    "traverse"
   ]
  },
+ "labels_disjoint": {
+  "collisions": 0,
+  "examples": [],
+  "value": true
+ },
  "max_graphs_without_selection": null,
  "max_request_body_mb": null,
  "mode": "single",
@@ -139,7 +144,8 @@
   "index_ns": "mini_refseq",
   "k": 31,
   "mask": "file",
-  "support_fp": "193e045bcaf413d8",
+  "seqs_order": "count_only",
+  "support_fp": "ffb6b826d432321d",
   "traversal": {
    "counts": null,
    "has_coord_to_header": true,

@@ -614,6 +614,27 @@ static Json::Value headers_unique(const std::vector<HeaderPair> &pairs, size_t n
     return certificate;
 }
 
+// GET /capabilities' labels_disjoint (labels_disjoint_json) over |pairs|, logged with the time it
+// took (beside headers_unique's): the pairs' column names looked up in their header indexes
+static Json::Value labels_disjoint(const std::vector<HeaderPair> &pairs, size_t num_threads) {
+    Timer timer;
+    Json::Value certificate = labels_disjoint_json(pairs, num_threads);
+    const uint64_t collisions = certificate["collisions"].asUInt64();
+    if (certificate["value"].isNull()) {
+        logger->info("[Server] labels_disjoint: null, a pair has no .seqs ({} headers that are "
+                     "also column names among the pairs that have one), computed in {:.1f} s",
+                     collisions, timer.elapsed());
+    } else if (collisions) {
+        logger->warn("[Server] labels_disjoint: false, {} headers are also column names (one of "
+                     "them: '{}'); a label with such a name selects the column where one has it. "
+                     "Computed in {:.1f} s", collisions,
+                     certificate["examples"][0]["header"].asString(), timer.elapsed());
+    } else {
+        logger->info("[Server] labels_disjoint: true, computed in {:.1f} s", timer.elapsed());
+    }
+    return certificate;
+}
+
 /**
  * GET /capabilities' graph_summary of a multi-graph server, computed once at start-up, so that
  * a service learns every pair with one probe: per (name, pair), in ordered_pairs' order, the
@@ -666,12 +687,11 @@ static Json::Value multi_graph_summary(
     return summary;
 }
 
-// GET /capabilities' headers_unique of a multi-graph server: over its pairs, each once, tagged
+// The pairs of a multi-graph server's headers_unique and labels_disjoint: each once, tagged
 // with the first name that lists it in ordered_pairs' order
-static Json::Value multi_graph_headers_unique(
+static std::vector<HeaderPair> multi_graph_header_pairs(
         const GraphIndexes &indexes,
-        const VectorMap<GraphPair, std::unique_ptr<AnnotatedDBG>> &graphs_cache,
-        size_t num_threads) {
+        const VectorMap<GraphPair, std::unique_ptr<AnnotatedDBG>> &graphs_cache) {
     std::vector<HeaderPair> pairs;
     std::set<GraphPair> seen;
     for (const auto &[name, pair] : ordered_pairs(indexes, sorted_names(indexes))) {
@@ -681,7 +701,7 @@ static Json::Value multi_graph_headers_unique(
         pairs.push_back({ name, pair.first, pair.second, index.get_coord_to_header(),
                           &index.get_annotator().get_label_encoder().get_labels() });
     }
-    return headers_unique(pairs, num_threads);
+    return pairs;
 }
 
 int run_server(Config *config) {
@@ -763,8 +783,53 @@ int run_server(Config *config) {
     Json::Value graph_summary;
     // and the identity of the indexes it serves together (GET /capabilities' composite_fp)
     Json::Value composite_fp;
-    // a single-graph server's headers_unique of GET /capabilities, set before its index is ready
+    // the stamp of each pair's annotation file when its load began (a multi-graph server): a
+    // copy of the pair loaded into RAM for one request shares the resident pair's record mapping
+    // only while the annotation on disk is still that file (resident_mapping)
+    std::map<GraphPair, std::optional<FileStamp>> annotation_stamps;
+    // The record mapping a copy of |pair| loaded into RAM for one request is built with: the
+    // resident index's, checked at start-up, while the pair's annotation on disk is the file
+    // loaded then (its stamp unchanged), so that no request reads its .seqs again; null when the
+    // annotation was replaced (or cannot be stat'ed): the copy then loads its .seqs from disk
+    // with the load's checks (H4, the verification's finding 2: a replaced annotation paired
+    // with the resident mapping answered other records)
+    auto stamp_unchanged = [&](const GraphPair &pair) {
+        const auto it = annotation_stamps.find(pair);
+        return it != annotation_stamps.end() && it->second && *it->second == file_stamp(pair.second);
+    };
+    auto resident_mapping = [&](const GraphPair &pair, const AnnotatedDBG &resident)
+            -> std::shared_ptr<const annot::CoordToHeader> {
+        return stamp_unchanged(pair) ? resident.share_coord_to_header() : nullptr;
+    };
+    // A copy of |pair| loaded into RAM for one request: with the resident pair's mapping while its
+    // annotation is unchanged (resident_mapping), and checked once loaded, since the file may be
+    // replaced between that stamp and the load's open (H4's re-check, N-a: under a 1-ms swap loop
+    // about 1% of the answers came from a new annotation with the resident mapping). The copy
+    // keeps the shared mapping only when the stamp still is the start-up one after the load and
+    // its labels are the resident's (a file swapped in and back during the load has other labels
+    // unless it is a rebuild of the same files in the same order, whose mapping is the resident's);
+    // else it is loaded again with its own .seqs, checked. |load|(mapping) loads it
+    auto load_copy = [&](const GraphPair &pair, const AnnotatedDBG &resident,
+                         const std::function<std::unique_ptr<AnnotatedDBG>(
+                                 std::shared_ptr<const annot::CoordToHeader>)> &load) {
+        auto mapping = resident_mapping(pair, resident);
+        if (!mapping)
+            return load(nullptr);
+        auto copy = load(std::move(mapping));
+        if (stamp_unchanged(pair)
+                && copy->get_annotator().get_label_encoder().get_labels()
+                        == resident.get_annotator().get_label_encoder().get_labels()) {
+            return copy;
+        }
+        logger->warn("[Server] The annotation '{}' was replaced while a copy of it loaded: loaded "
+                     "again with its own record mapping", pair.second);
+        copy.reset();
+        return load(nullptr);
+    };
+    // a single-graph server's headers_unique and labels_disjoint of GET /capabilities, set before
+    // its index is ready
     Json::Value single_headers_unique;
+    Json::Value single_labels_disjoint;
     // and its pair's profile (pair_summary of GET /capabilities, E17), set then too
     Json::Value single_pair_summary;
     // the list GET /column_labels answers on a multi-graph server (H3): each distinct pair
@@ -802,11 +867,13 @@ int run_server(Config *config) {
             single_identity.meta_fp = index_meta_fingerprint(graph::traversal::LabelOracle(*anno_graph));
             build_header_index(*anno_graph, get_num_threads() * num_server_threads);
             // the one pair, with null tags as a single-graph server's /search cuts
-            single_headers_unique = headers_unique(
-                    { { Json::Value(), Json::Value(), Json::Value(),
-                        anno_graph->get_coord_to_header(),
-                        &anno_graph->get_annotator().get_label_encoder().get_labels() } },
-                    get_num_threads() * num_server_threads);
+            const std::vector<HeaderPair> header_pair { { Json::Value(), Json::Value(),
+                    Json::Value(), anno_graph->get_coord_to_header(),
+                    &anno_graph->get_annotator().get_label_encoder().get_labels() } };
+            single_headers_unique = headers_unique(header_pair,
+                                                   get_num_threads() * num_server_threads);
+            single_labels_disjoint = labels_disjoint(header_pair,
+                                                     get_num_threads() * num_server_threads);
             // its profile, with null tags as its headers_unique
             single_pair_summary = pair_summary_json(*anno_graph, single_identity, Json::Value(),
                                                     Json::Value(), Json::Value());
@@ -936,6 +1003,10 @@ int run_server(Config *config) {
             prepare_pattern_graph(loaded_graphs[i], unique_graph_paths[i], list_preparation);
         }
 
+        // each annotation's stamp before it is read (resident_mapping)
+        for (const auto &[pair, index] : graphs_cache) {
+            annotation_stamps[pair] = file_stamp(pair.second);
+        }
         logger->info("[Server] Loading {} annotation(s)...", graphs_cache.size());
         #pragma omp parallel for num_threads(get_num_threads() * num_server_threads) schedule(dynamic)
         for (size_t i = 0; i < graphs_cache.size(); ++i) {
@@ -990,8 +1061,12 @@ int run_server(Config *config) {
         logger->info("[Server] Composite fingerprint of the {} pairs: {}", graphs_cache.size(),
                      composite_fp.isNull() ? std::string("null (a pair has no manifest)")
                                            : composite_fp.asString());
-        graph_summary["headers_unique"] = multi_graph_headers_unique(
-                indexes, graphs_cache, get_num_threads() * num_server_threads);
+        const std::vector<HeaderPair> header_pairs
+                = multi_graph_header_pairs(indexes, graphs_cache);
+        graph_summary["headers_unique"]
+                = headers_unique(header_pairs, get_num_threads() * num_server_threads);
+        graph_summary["labels_disjoint"]
+                = labels_disjoint(header_pairs, get_num_threads() * num_server_threads);
         {
             // GET /column_labels' list (H3): the rule of headers_unique, each pair once
             std::vector<const std::vector<std::string> *> parts;
@@ -1192,7 +1267,24 @@ int run_server(Config *config) {
                                             Config config_copy = *config;
                                             config_copy.infbase = graph_fname;
                                             config_copy.infbase_annotators = { anno_fname };
-                                            index_loaded = initialize_annotated_dbg(config_copy);
+                                            // as /traverse, /resolve and /pattern load a pair
+                                            // into RAM: with the resident pair's mapping while
+                                            // its annotation is unchanged (resident_mapping),
+                                            // and a load that fails throws, so that it fails
+                                            // this request alone (the route's 400 with the
+                                            // load's message), never the server (H4 review S2)
+                                            const AnnotatedDBG &resident
+                                                    = *graphs_cache.at({ graph_fname, anno_fname });
+                                            config_copy.no_coord_mapping
+                                                    = !resident.get_coord_to_header();
+                                            PatternPreparation preparation;
+                                            preparation.progress = false;
+                                            index_loaded = load_copy(
+                                                    { graph_fname, anno_fname }, resident,
+                                                    [&](auto mapping) {
+                                                return initialize_annotated_dbg(
+                                                        config_copy, preparation, std::move(mapping));
+                                            });
                                             index = index_loaded.get();
                                         } else {
                                             index = graphs_cache.at({ graph_fname, anno_fname }).get();
@@ -1372,13 +1464,15 @@ int run_server(Config *config) {
             preparation.progress = false;
             // the resident index of this very pair (graphs_cache's key is the pair, its
             // annotation path the one loaded here), so its mapping is this annotation's
-            // .seqs, and a resident without one (no .seqs beside the annotation, or
-            // --no-coord-mapping) has none for its copy either: the .seqs is not looked for
-            // again, so the operator's notice of a missing one is logged at start-up, not
-            // by every request
-            auto mapping = resident.share_coord_to_header();
-            config_copy.no_coord_mapping = !mapping;
-            return initialize_annotated_dbg(config_copy, preparation, std::move(mapping));
+            // .seqs while the annotation on disk is the file loaded at start-up
+            // (resident_mapping; else the copy loads its .seqs, with the load's checks), and a
+            // resident without one (no .seqs beside the annotation, or --no-coord-mapping) has
+            // none for its copy either: the .seqs is not looked for again, so the operator's
+            // notice of a missing one is logged at start-up, not by every request
+            config_copy.no_coord_mapping = !resident.get_coord_to_header();
+            return load_copy(pair, resident, [&](auto mapping) {
+                return initialize_annotated_dbg(config_copy, preparation, std::move(mapping));
+            });
         }, [&](std::unique_ptr<AnnotatedDBG> &&loaded, LoadReservation &&reservation) {
             const double load_ms = timer.elapsed() * 1000;
             logger->info("[Server] Request {}: ({}, {}) loaded into RAM for it in {:.0f} ms (the "
@@ -2806,6 +2900,10 @@ int run_server(Config *config) {
             // server, here on a single-graph one (null while its index loads)
             if (!multi)
                 c["headers_unique"] = c["ready"].asBool() ? single_headers_unique : Json::Value();
+            // and whether no header is also a column name (H4: a header label selects one
+            // record only when both hold), placed as headers_unique
+            if (!multi)
+                c["labels_disjoint"] = c["ready"].asBool() ? single_labels_disjoint : Json::Value();
             // the capability profile of a single-graph server's pair (E17): a graph_summary
             // entry with null tags, null while its index loads (each pair's is in graph_summary
             // on a multi-graph server)

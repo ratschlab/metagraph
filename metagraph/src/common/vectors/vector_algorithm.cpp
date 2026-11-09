@@ -136,8 +136,11 @@ uint64_t inner_prod(const sdsl::bit_vector &first,
     if (first.empty())
         return 0;
 
+    // the words of the logical size: the capacity may exceed the rounded size (the pinned
+    // SDSL keeps it on a shrinking resize, after reserve() and as push_back() grows), and
+    // the words above it are |second|'s to own or not and hold stale bits
     const uint64_t *first_data = first.data();
-    const uint64_t *first_end = first.data() + (first.capacity() >> 6);
+    const uint64_t *first_end = first.data() + ((first.size() + 63) >> 6);
     const uint64_t *second_data = second.data();
 
     uint64_t count = 0;

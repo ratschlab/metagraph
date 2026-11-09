@@ -3051,9 +3051,13 @@ Per-step costs to expect: `basic` DBGSuccinct right step O(σ) rank/select, left
 The reverse header index (header → `(column, seq_id)`, for resolving a header label by name) belongs to the
 `CoordToHeader` itself: built while the index loads (§10.3; feature level 5 — before, on its first lookup, inside
 that request's budget), shared by every request on the loaded index, and freed with it. A copy of a pair loaded
-into RAM for one request (`in_ram`, §10.3) holds the resident pair's `CoordToHeader` — the mapping depends on the
-`.seqs` alone, which both are loaded from — so it reads the index built at start-up and builds none. It is never a process-wide cache keyed by the object's address: an object made later at a freed address
-could be answered from another's index, which no partial fingerprint of the headers can rule out.
+into RAM for one request (`in_ram`, §10.3) holds the resident pair's `CoordToHeader` while the pair's annotation
+on disk is the file loaded at start-up (its stamp unchanged before and after the copy's load, and the copy's labels
+the resident's: `SPEC-multigraph-envelope.md` §10) — the mapping depends on the `.seqs` alone, which both are loaded
+from — so it reads the index built at start-up and builds none; a copy of a replaced annotation loads its own
+`.seqs`, with the load's checks, and builds its own index. It is never a process-wide cache keyed by the object's
+address: an object made later at a freed address could be answered from another's index, which no partial
+fingerprint of the headers can rule out.
 
 **The row-diff path cache** *(efficiency pass; feature level 4)*. On a row-diff annotation every read of a
 `/traverse` request — the default reads and the budget-aware ones (§6.8), a level's fetch, the lookahead, a
@@ -3326,7 +3330,9 @@ search's routes, `POST /pattern` and `GET /pattern/capabilities`, are `SPEC-patt
     their refusals, below; at the top level in single-graph mode and in the `multigraph` block in multi-graph mode,
     `SPEC-multigraph-envelope.md` §8) and `headers_unique` (E22: whether every sequence header names one
     record; at the top level in single-graph mode, `null` while the index loads, and in `graph_summary` in
-    multi-graph mode; `SPEC-multigraph-envelope.md` §9), and `expect_server_instance` (F3b: the routes that take
+    multi-graph mode; `SPEC-multigraph-envelope.md` §9) and, placed alike, `labels_disjoint` (H4: whether no
+    sequence header equals a column name; a header label selects one record only when both are true;
+    `SPEC-multigraph-envelope.md` §9.1), and `expect_server_instance` (F3b: the routes that take
     the field, `["/traverse", "/resolve", "/pattern"]`; at the top level in single-graph mode, beside
     `routes.requests`, and in the `multigraph` block in multi-graph mode; `SPEC-multigraph-envelope.md` §8).
     Single-graph mode adds `pair_summary` (E17: its pair's capability profile, a `graph_summary` entry with null
@@ -3724,11 +3730,12 @@ search's routes, `POST /pattern` and `GET /pattern/capabilities`, are `SPEC-patt
     §24.2 names the messages). The loaded copy
     states the pair's identity: `index_fp` and `index_meta_fp` are per (graph, annotation) pair.
   - **`GET /capabilities`** of a multi-graph server (the owner's decision of 2026-10-09): `graph_summary`, so that
-    a service learns every pair with one probe — `{columns_disjoint, shared_columns, pairs: [{graph, graph_path,
-    annotation_path, index_ns, index_fp, index_meta_fp, k, alphabet, graph_representation, annotation_form,
-    decode_charged, graph_mode, available, unavailable_reason, mask, counting, traversal: {regime, num_labels,
-    has_coordinates, has_coord_to_header, supports_trace, counts}, support_fp}]}` (the capability profile and
-    `support_fp`, E17: `SPEC-multigraph-envelope.md` §8.1), one entry per (name, pair),
+    a service learns every pair with one probe — `{columns_disjoint, shared_columns, headers_unique,
+    labels_disjoint, pairs: [{graph, graph_path, annotation_path, index_ns, index_fp, index_meta_fp, k, alphabet,
+    graph_representation, annotation_form, decode_charged, seqs_order, graph_mode, available, unavailable_reason,
+    mask, counting, traversal: {regime, num_labels, has_coordinates, has_coord_to_header, supports_trace, counts},
+    support_fp}]}` (the capability profile and `support_fp`, E17: `SPEC-multigraph-envelope.md` §8.1; the header
+    certificates, E22 and H4, and `seqs_order`, H4: §9 and §9.1), one entry per (name, pair),
     the names in byte order, computed once at start-up (the schema is `SPEC-pattern-search.md` §24.4; about 670
     bytes per entry, which makes the route's document large on a long graph list). `columns_disjoint`:
     no column name is a column of two distinct pairs — the chunks of an index partition its samples —, which
@@ -4310,10 +4317,12 @@ search's routes, `POST /pattern` and `GET /pattern/capabilities`, are `SPEC-patt
     refseq33m, a first header-named walk ran 9,947 ms on a 1,000 ms budget, 689 ms of it reading). It holds 16
     bytes per header (the header's 64-bit hash, its column and its record; on refseq33m, 33 M headers, about
     0.53 GB; the hash table before E11 took about 40 bytes per header, on the order of 1-2 GB there), which a
-    server that serves header labels would have built anyway. The CLI builds it once before its requests. A copy of a pair loaded into RAM
-    for one request (`in_ram`, multi-graph mode) shares the resident pair's mapping and so its index: the load
-    neither reads the `.seqs` nor builds (the log holds the one start-up line per pair with a mapping, none per
-    request).
+    server that serves header labels would have built anyway. The CLI builds it once before its requests. A copy
+    of a pair loaded into RAM for one request (`in_ram`, multi-graph mode) shares the resident pair's mapping and so
+    its index while the pair's annotation on disk is the file loaded at start-up (`SPEC-multigraph-envelope.md`
+    §10): the load then neither reads the `.seqs` nor builds (the log holds the one start-up line per pair with a
+    mapping, none per request); a copy of a replaced annotation reads its own `.seqs`, checked, and builds its
+    index for that request.
 
 ## 11. Tests
 

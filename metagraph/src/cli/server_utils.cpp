@@ -22,6 +22,7 @@
 #include <netinet/tcp_fsm.h>
 #endif
 #include <sys/socket.h>
+#include <sys/stat.h>
 #include <zlib.h>
 #include <spdlog/fmt/fmt.h>
 #include <json/json.h>
@@ -30,6 +31,7 @@
 #include "annotation/coord_to_header.hpp"
 #include "cli/json_helpers.hpp"
 #include "common/logger.hpp"
+#include "common/threads/threading.hpp"
 #include "common/unix_tools.hpp"
 #include "common/utils/string_utils.hpp"
 #include "graph/alignment/pattern_search.hpp"
@@ -1770,6 +1772,114 @@ Json::Value headers_unique_json(const std::vector<HeaderPair> &pairs, size_t num
         result["examples"].append(std::move(example));
     }
     return result;
+}
+
+Json::Value labels_disjoint_json(const std::vector<HeaderPair> &pairs, size_t num_threads,
+                                 size_t max_examples, size_t max_listed) {
+    bool every_pair = true;
+    std::vector<size_t> with_seqs;
+    for (size_t p = 0; p < pairs.size(); ++p) {
+        if (pairs[p].coord_to_header) {
+            with_seqs.push_back(p);
+        } else {
+            every_pair = false;
+        }
+    }
+    // every column name with its pair, by name, then pair (views into the annotations' labels:
+    // 24 bytes per column); none is needed when no pair has headers
+    std::vector<std::pair<std::string_view, size_t>> names;
+    if (!with_seqs.empty()) {
+        for (size_t p = 0; p < pairs.size(); ++p) {
+            if (!pairs[p].columns)
+                continue;
+            for (const std::string &name : *pairs[p].columns) {
+                names.emplace_back(name, p);
+            }
+        }
+        std::sort(names.begin(), names.end());
+    }
+    // the distinct names (their first entry), and whether each is a header of a pair
+    std::vector<size_t> distinct;
+    for (size_t i = 0; i < names.size(); ++i) {
+        if (!i || names[i].first != names[i - 1].first)
+            distinct.push_back(i);
+    }
+    std::vector<uint8_t> is_header(distinct.size(), false);
+    #pragma omp parallel for num_threads(num_threads ? num_threads : get_num_threads()) schedule(dynamic, 1024)
+    for (size_t d = 0; d < distinct.size(); ++d) {
+        const std::string_view name = names[distinct[d]].first;
+        for (size_t p : with_seqs) {
+            if (pairs[p].coord_to_header->find_header(name)) {
+                is_header[d] = true;
+                break;
+            }
+        }
+    }
+    auto tags = [&](size_t p) {
+        Json::Value t;
+        t["graph"] = pairs[p].graph;
+        t["graph_path"] = pairs[p].graph_path;
+        t["annotation_path"] = pairs[p].annotation_path;
+        return t;
+    };
+    uint64_t collisions = 0;
+    Json::Value examples(Json::arrayValue);
+    for (size_t d = 0; d < distinct.size(); ++d) {
+        if (!is_header[d])
+            continue;
+        ++collisions;
+        // the names come in byte order: the first ones are the byte-smallest
+        if (examples.size() >= max_examples)
+            continue;
+        const std::string_view name = names[distinct[d]].first;
+        Json::Value example;
+        example["header"] = std::string(name);
+        Json::Value records(Json::arrayValue);
+        for (size_t p : with_seqs) {
+            if (records.size() >= max_listed)
+                break;
+            if (auto found = pairs[p].coord_to_header->find_header(name)) {
+                Json::Value r = tags(p);
+                const auto column = found->first;
+                r["column"] = pairs[p].columns && column < pairs[p].columns->size()
+                        ? Json::Value((*pairs[p].columns)[column])
+                        : Json::Value();
+                records.append(std::move(r));
+            }
+        }
+        Json::Value columns(Json::arrayValue);
+        const size_t end = d + 1 < distinct.size() ? distinct[d + 1] : names.size();
+        for (size_t i = distinct[d]; i < end && columns.size() < max_listed; ++i) {
+            // (a pair listed twice for one name would repeat: a name labels one column of a pair)
+            if (i == distinct[d] || names[i].second != names[i - 1].second)
+                columns.append(tags(names[i].second));
+        }
+        example["records"] = std::move(records);
+        example["columns"] = std::move(columns);
+        examples.append(std::move(example));
+    }
+    Json::Value result;
+    result["value"] = every_pair ? Json::Value(collisions == 0) : Json::Value();
+    result["collisions"] = Json::Value(static_cast<Json::UInt64>(collisions));
+    result["examples"] = std::move(examples);
+    return result;
+}
+
+std::optional<FileStamp> file_stamp(const std::string &path) {
+    struct stat st;
+    if (::stat(path.c_str(), &st))
+        return std::nullopt;
+    std::error_code error;
+    const auto mtime = std::filesystem::last_write_time(path, error);
+    if (error)
+        return std::nullopt;
+    FileStamp stamp;
+    stamp.device = static_cast<uint64_t>(st.st_dev);
+    stamp.inode = static_cast<uint64_t>(st.st_ino);
+    stamp.size = static_cast<uint64_t>(st.st_size);
+    stamp.mtime_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(
+            mtime.time_since_epoch()).count();
+    return stamp;
 }
 
 } // namespace cli

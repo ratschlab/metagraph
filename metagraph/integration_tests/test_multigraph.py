@@ -84,6 +84,18 @@ def free_port():
         return s.getsockname()[1]
 
 
+def strip_column_labels(seqs):
+    """|seqs| (a .seqs written since H4) rewritten as an earlier binary writes it: its columns
+    without the trailer of column labels (the marker "mtg-cols", then the labels), which an H4
+    load reads as a mapping that states none (seqs_order "count_only")"""
+    with open(seqs, 'rb') as f:
+        data = f.read()
+    at = data.rfind(b'mtg-cols')
+    assert at > 0, seqs
+    with open(seqs, 'wb') as f:
+        f.write(data[:at])
+
+
 def named_records_of(paths):
     """The (header, sequence) of every record of the FASTA files, in their order"""
     out = []
@@ -3255,6 +3267,8 @@ class TestCapabilityProfile(TestingBase):
                'row_diff_brwt_coord', 'row_diff_disk', 'row_diff_sparse', 'row_diff_flat',
                'row_diff_int_brwt'}
     COUNTS = {'int_brwt', 'row_diff_int_brwt', 'row_diff_int_disk'}
+    # the forms whose .seqs is written as before H4 (no column labels), as r237's
+    COUNT_ONLY = {'row_diff_brwt_coord'}
 
     @classmethod
     def write_records(cls, path, headers, seed):
@@ -3282,6 +3296,10 @@ class TestCapabilityProfile(TestingBase):
                 cls._run_command(f'{METAGRAPH} annotate -p 1 -i {graph} --anno-filename '
                                  f'--index-header-coords -o {out}/anno {cls.fasta}',
                                  'annotate --index-header-coords')
+                # r237's profile: its .seqs written before H4, without column labels
+                # (seqs_order "count_only"); the other forms' state theirs ("verified")
+                if form in cls.COUNT_ONLY:
+                    strip_column_labels(os.path.join(out, 'anno.seqs'))
             cls.pairs[form] = (graph, os.path.join(out, f'anno.{form}.annodbg'))
             assert all(os.path.exists(p) for p in cls.pairs[form]), cls.pairs[form]
         # a second chunk of the column build: other records, other columns
@@ -3328,6 +3346,10 @@ class TestCapabilityProfile(TestingBase):
                                  (p['traversal']['has_coordinates'],
                                   p['traversal']['has_coord_to_header'],
                                   p['traversal']['supports_trace']))
+                # what the load verified of the .seqs's column order (H4, section 9.1)
+                self.assertEqual(None if not coordinates
+                                 else 'count_only' if form in self.COUNT_ONLY else 'verified',
+                                 p['seqs_order'])
                 self.assertEqual(('basic', 31, True, 'absent', 'upper_bound'),
                                  (p['traversal']['regime'], p['k'], p['available'], p['mask'],
                                   p['counting']))
@@ -3412,6 +3434,512 @@ class TestCapabilityProfile(TestingBase):
                 self.assertEqual(support_fp(pair), pair['support_fp'])
                 self.assertEqual(live['support_fp'], pair['support_fp'])
                 self.assertRegex(pair['index_meta_fp'], r'^[0-9a-f]{16}$')
+
+
+def run_to_exit(args, log_path, timeout=300):
+    """server_query |args| on a free port, run until it exits by itself: (exit status, log)"""
+    with open(log_path, 'wb') as log:
+        res = subprocess.run(shlex.split(METAGRAPH) + ['server_query'] + args
+                             + ['--port', str(free_port()), '--address', '127.0.0.1', '-p', '2'],
+                             stdout=log, stderr=subprocess.STDOUT, timeout=timeout)
+    with open(log_path) as f:
+        return res.returncode, f.read()
+
+
+@unittest.skipIf(PROTEIN_MODE, "the fixture is DNA")
+class TestRecordMappingAtLoad(TestingBase):
+    """A record mapping (.seqs) that is not its annotation's is refused when the index loads
+    (SPEC-multigraph-envelope.md section 10, H4), never by a request: another number of
+    columns; stated column labels (written by annotate --index-header-coords since H4) that are
+    not the annotation's, in its order; on column_coord, a column holding more coordinates than
+    the mapping states k-mers for it. The fixture: one graph of big.fa (two records of 300 bp)
+    and small.fa (one of 60 bp), annotated by file name on one thread (columns big.fa,
+    small.fa), as column_coord and row_diff_brwt_coord; each variant of the .seqs beside a copy
+    of the annotation. A .seqs without labels (as earlier binaries write it) is served with
+    seqs_order "count_only"; on the row-diff form, where only the count is checked, even when
+    its columns are swapped."""
+
+    maxDiff = None
+    REFUSAL = "does not belong to the annotation"
+
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        d = cls.d = cls.tempdir.name
+        rng = random.Random(20261108)
+        records = {'big.fa': [('b1', 300), ('b2', 300)], 'small.fa': [('s1', 60)]}
+        for fname, recs in records.items():
+            with open(os.path.join(d, fname), 'w') as f:
+                for header, length in recs:
+                    f.write(f'>{header}\n{"".join(rng.choice("ACGT") for _ in range(length))}\n')
+
+        def run(cmd):
+            res = subprocess.run(shlex.split(METAGRAPH) + cmd, cwd=d, stdout=subprocess.PIPE,
+                                 stderr=subprocess.STDOUT)
+            assert res.returncode == 0, (cmd, res.stdout.decode()[-3000:])
+
+        run(['build', '-p', '1', '--mode', 'basic', '--graph', 'succinct', '-k', '31',
+             '-o', 'graph', 'big.fa', 'small.fa'])
+        run(['annotate', '-p', '1', '--anno-filename', '-i', 'graph.dbg', '--anno-type', 'column',
+             '--coordinates', '-o', 'anno', 'big.fa', 'small.fa'])
+        run(['transform_anno', '-p', '1', '--anno-type', 'column_coord', '--coordinates',
+             '-o', 'anno', 'anno.column.annodbg'])
+        rd = ['transform_anno', '-p', '1', '--anno-type', 'row_diff', '--coordinates', '-o',
+              'anno', '-i', 'graph.dbg', 'anno.column.annodbg']
+        run(rd)
+        run(rd + ['--row-diff-stage', '1'])
+        run(rd + ['--row-diff-stage', '2'])
+        run(['transform_anno', '-p', '1', '--anno-type', 'row_diff_brwt_coord', '--greedy',
+             '-o', 'anno', '-i', 'graph.dbg', 'anno.column.annodbg'])
+        run(['relax_brwt', '-p', '1', '-o', 'anno', 'anno.row_diff_brwt_coord.annodbg'])
+        # an annotation of three columns over the same graph (small.fa's record again, in
+        # third.fa), for an annotation replaced under a running server
+        with open(os.path.join(d, 'small.fa')) as f, open(os.path.join(d, 'third.fa'), 'w') as g:
+            g.write(f.read().replace('>s1', '>t1'))
+        run(['annotate', '-p', '1', '--anno-filename', '-i', 'graph.dbg', '--anno-type', 'column',
+             '--coordinates', '-o', 'three', 'big.fa', 'small.fa', 'third.fa'])
+        run(['transform_anno', '-p', '1', '--anno-type', 'column_coord', '--coordinates',
+             '-o', 'three', 'three.column.annodbg'])
+        # a rebuild of the same files in the other order, with its own .seqs: consistent, and
+        # of the same column count as the annotation it replaces under a running server
+        run(['annotate', '-p', '1', '--anno-filename', '-i', 'graph.dbg', '--anno-type', 'column',
+             '--coordinates', '-o', 'rev', 'small.fa', 'big.fa'])
+        run(['transform_anno', '-p', '1', '--anno-type', 'column_coord', '--coordinates',
+             '-o', 'rev', 'rev.column.annodbg'])
+        run(['annotate', '-p', '1', '-i', 'graph.dbg', '--anno-filename', '--index-header-coords',
+             '-o', 'rev', 'small.fa', 'big.fa'])
+        # the mappings: of the files in column order, in the other order, and of one file
+        for name, files in (('right', ['big.fa', 'small.fa']), ('swapped', ['small.fa', 'big.fa']),
+                            ('subset', ['big.fa'])):
+            run(['annotate', '-p', '1', '-i', 'graph.dbg', '--anno-filename',
+                 '--index-header-coords', '-o', name, *files])
+        cls.graph = os.path.join(d, 'graph.dbg')
+
+    def pair(self, form, mapping, labels=True):
+        """A copy of the |form| annotation beside a copy of the |mapping| .seqs (without its
+        labels unless |labels|): (graph, annotation)"""
+        out = os.path.join(self.d, f'{form}_{mapping}_{"labels" if labels else "old"}')
+        if not os.path.isdir(out):
+            os.makedirs(out)
+            shutil.copyfile(os.path.join(self.d, f'anno.{form}.annodbg'),
+                            os.path.join(out, f'anno.{form}.annodbg'))
+            shutil.copyfile(os.path.join(self.d, f'{mapping}.seqs'), os.path.join(out, 'anno.seqs'))
+            if not labels:
+                strip_column_labels(os.path.join(out, 'anno.seqs'))
+        return self.graph, os.path.join(out, f'anno.{form}.annodbg')
+
+    def test_the_mapping_states_the_files_as_passed(self):
+        # the columns, then the marker and the labels: the files' names as passed
+        with open(os.path.join(self.d, 'swapped.seqs'), 'rb') as f:
+            data = f.read()
+        at = data.rfind(b'mtg-cols')
+        self.assertGreater(at, 0)
+        self.assertIn(b'small.fa', data[at:])
+        self.assertLess(data[at:].index(b'small.fa'), data[at:].index(b'big.fa'))
+        # stats states whether a .seqs states its labels
+        stats = subprocess.run(shlex.split(METAGRAPH) + ['stats', os.path.join(self.d, 'right.seqs')],
+                               stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        self.assertEqual(0, stats.returncode, stats.stderr.decode())
+        self.assertIn('columns: 2', stats.stdout.decode())
+        self.assertIn('column labels: stated', stats.stdout.decode())
+        old = os.path.join(self.d, 'old.seqs')
+        shutil.copyfile(os.path.join(self.d, 'right.seqs'), old)
+        strip_column_labels(old)
+        stats = subprocess.run(shlex.split(METAGRAPH) + ['stats', old],
+                               stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        self.assertEqual(0, stats.returncode, stats.stderr.decode())
+        self.assertIn('column labels: none', stats.stdout.decode())
+
+    def test_a_mapping_of_the_annotation_is_served(self):
+        for form in ('column_coord', 'row_diff_brwt_coord'):
+            for labels, order in ((True, 'verified'), (False, 'count_only')):
+                graph, anno = self.pair(form, 'right', labels)
+                server = Server(['-i', graph, '-a', anno],
+                                os.path.join(self.d, f'served_{form}_{labels}.log'))
+                try:
+                    caps = server.get('capabilities').json()
+                finally:
+                    server.stop()
+                with self.subTest(form=form, labels=labels):
+                    self.assertTrue(caps['ready'])
+                    self.assertEqual(order, caps['pair_summary']['seqs_order'])
+
+    def test_another_mapping_is_refused_at_start_up(self):
+        cases = [
+            ('column_coord', 'subset', True, "it has 1 columns, the annotation 2 labels"),
+            ('row_diff_brwt_coord', 'subset', False, "it has 1 columns, the annotation 2 labels"),
+            ('column_coord', 'swapped', True,
+             "its column 0 is 'small.fa', the annotation's column 0 'big.fa' (the files were "
+             "passed in another order or under other names)"),
+            ('row_diff_brwt_coord', 'swapped', True,
+             "its column 0 is 'small.fa', the annotation's column 0 'big.fa'"),
+            # without labels, column_coord's coordinates do not fit the swapped k-mers: big.fa's
+            # 2 * (300 - 31 + 1) coordinates against small.fa's 60 - 31 + 1 k-mers
+            ('column_coord', 'swapped', False,
+             "column 0 ('big.fa') of the annotation holds 540 coordinates, more than the 30 "
+             "k-mers the mapping states for it (the files were passed in another order)"),
+        ]
+        for form, mapping, labels, reason in cases:
+            graph, anno = self.pair(form, mapping, labels)
+            seqs = anno[:-len(f'.{form}.annodbg')] + '.seqs'
+            line = (f"The record mapping '{seqs}' does not belong to the annotation '{anno}': "
+                    f"{reason}")
+            with self.subTest(form=form, mapping=mapping, labels=labels):
+                # a single-graph server: exits 1 before it is ready
+                status, log = run_to_exit(['-i', graph, '-a', anno],
+                                          os.path.join(self.d, f'single_{form}_{mapping}_{labels}.log'))
+                self.assertEqual(1, status, log)
+                self.assertIn(line, log)
+                self.assertNotIn('Annotated graph loaded', log)
+                # a multi-graph server, the pair beside a good one: exits 1 before it is ready
+                good = self.pair(form, 'right', True)
+                csv = os.path.join(self.d, f'list_{form}_{mapping}_{labels}.csv')
+                with open(csv, 'w') as f:
+                    f.write(f'good,{good[0]},{good[1]}\nbad,{graph},{anno}\n')
+                status, log = run_to_exit([csv], csv + '.log')
+                self.assertEqual(1, status, log)
+                self.assertIn(line, log)
+                self.assertNotIn('Ready to serve queries', log)
+                # the CLI, at its load
+                res = subprocess.run(shlex.split(METAGRAPH) + [
+                        'query', '--query-mode', 'coords', '-i', graph, '-a', anno,
+                        os.path.join(self.d, 'small.fa')],
+                        stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+                self.assertEqual(1, res.returncode, res.stderr.decode())
+                self.assertIn(line, res.stderr.decode())
+                # and none with --no-coord-mapping
+                res = subprocess.run(shlex.split(METAGRAPH) + [
+                        'query', '--query-mode', 'coords', '--no-coord-mapping', '-i', graph,
+                        '-a', anno, os.path.join(self.d, 'small.fa')],
+                        stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+                self.assertEqual(0, res.returncode, res.stderr.decode())
+
+    def test_annotate_with_the_annotation_checks_the_files(self):
+        # -a: each file is spot-checked against its column of the annotation (the column holds
+        # the coordinates of its first and last k-mers in the graph), and the annotation's labels
+        # are stated, so that files at another path pass the load's check; without -a they are
+        # refused there
+        def annotate(out, *args):
+            return subprocess.run(shlex.split(METAGRAPH) + [
+                    'annotate', '-p', '1', '-i', 'graph.dbg', '--anno-filename',
+                    '--index-header-coords', '-o', out, *args],
+                    cwd=self.d, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        absolute = [os.path.join(self.d, f) for f in ('big.fa', 'small.fa')]
+        for form in ('column_coord', 'row_diff_brwt_coord'):
+            anno = f'anno.{form}.annodbg'
+            with self.subTest(form=form):
+                res = annotate(f'checked_{form}', '-a', anno, *absolute)
+                self.assertEqual(0, res.returncode, res.stderr.decode())
+                with open(os.path.join(self.d, f'checked_{form}.seqs'), 'rb') as f:
+                    data = f.read()
+                trailer = data[data.rfind(b'mtg-cols'):]
+                self.assertIn(b'big.fa', trailer)
+                self.assertNotIn(self.d.encode(), trailer)
+                res = annotate(f'swapped_{form}', '-a', anno, 'small.fa', 'big.fa')
+                self.assertEqual(1, res.returncode)
+                self.assertIn(f"The file 'small.fa' is not column 0 ('big.fa') of the annotation "
+                              f"'{anno}': the column lacks the file's k-mer at coordinate",
+                              res.stderr.decode())
+                self.assertFalse(os.path.exists(os.path.join(self.d, f'swapped_{form}.seqs')))
+                res = annotate(f'subset_{form}', '-a', anno, 'big.fa')
+                self.assertEqual(1, res.returncode)
+                self.assertIn(f"The annotation '{anno}' has 2 columns, and 1 files were passed",
+                              res.stderr.decode())
+        # served: with -a's labels; without, the absolute names are refused at load
+        out = os.path.join(self.d, 'moved')
+        os.makedirs(out)
+        shutil.copyfile(os.path.join(self.d, 'anno.column_coord.annodbg'),
+                        os.path.join(out, 'anno.column_coord.annodbg'))
+        shutil.copyfile(os.path.join(self.d, 'checked_column_coord.seqs'),
+                        os.path.join(out, 'anno.seqs'))
+        server = Server(['-i', self.graph, '-a', os.path.join(out, 'anno.column_coord.annodbg')],
+                        os.path.join(self.d, 'moved.log'))
+        try:
+            self.assertEqual('verified',
+                             server.get('capabilities').json()['pair_summary']['seqs_order'])
+        finally:
+            server.stop()
+        res = annotate(os.path.join(out, 'anno'), *absolute)
+        self.assertEqual(0, res.returncode, res.stderr.decode())
+        status, log = run_to_exit(['-i', self.graph, '-a',
+                                   os.path.join(out, 'anno.column_coord.annodbg')],
+                                  os.path.join(self.d, 'moved_refused.log'))
+        self.assertEqual(1, status, log)
+        self.assertIn(f"its column 0 is '{absolute[0]}', the annotation's column 0 'big.fa'", log)
+
+    def test_annotate_with_the_annotation_is_a_spot_check(self):
+        # -a's check is a spot check (SPEC-multigraph-envelope.md sections 9.1 and 10; GPT review
+        # 6, finding 12): a file's probes are its first stretch with a k-mer the graph has and its
+        # last one in the end of its last record, past a gap of Ns longer than a probe. A file
+        # with k-mers none of which the graph has is refused, nothing written (before, nothing was
+        # checked and the pair was served "verified"). The same sequences under other headers
+        # pass: what the records are rests on the files passed, which no spot check can tell
+        d = os.path.join(self.d, 'spot')
+        os.makedirs(d)
+        rng = random.Random(20261109)
+        seq = lambda n: ''.join(rng.choice('ACGT') for _ in range(n))
+        gap = 'N' * 2500
+        g1, g2, p1 = seq(300), seq(300), seq(300)
+        files = {
+            'gapped.fa': [('g1', gap + g1), ('g2', g2 + gap)],
+            'plain.fa': [('p1', p1)],
+            # the gaps, and plain.fa's record between them: in the graph, not in column 0
+            'other.fa': [('o1', gap + p1), ('o2', p1 + gap)],
+            'foreign.fa': [('f1', seq(300)), ('f2', seq(300))],
+            'renamed.fa': [('r1', gap + g1), ('r2', g2 + gap)],
+            # gapped.fa's records and one of Ns alone, longer than the end the tail is looked in
+            'trailing.fa': [('g1', gap + g1), ('g2', g2 + gap), ('g3', 'N' * 70000)],
+        }
+        for fname, recs in files.items():
+            with open(os.path.join(d, fname), 'w') as f:
+                f.writelines(f'>{h}\n{s}\n' for h, s in recs)
+
+        def run(*cmd):
+            return subprocess.run(shlex.split(METAGRAPH) + list(cmd), cwd=d,
+                                  stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        for cmd in (['build', '-p', '1', '--mode', 'basic', '--graph', 'succinct', '-k', '31',
+                     '-o', 'graph', 'gapped.fa', 'plain.fa'],
+                    ['annotate', '-p', '1', '--anno-filename', '-i', 'graph.dbg', '--anno-type',
+                     'column', '--coordinates', '-o', 'anno', 'gapped.fa', 'plain.fa'],
+                    ['transform_anno', '-p', '1', '--anno-type', 'column_coord', '--coordinates',
+                     '-o', 'anno', 'anno.column.annodbg']):
+            res = run(*cmd)
+            self.assertEqual(0, res.returncode, res.stderr.decode()[-3000:])
+        anno = 'anno.column_coord.annodbg'
+
+        def annotate(out, *inputs):
+            return run('annotate', '-p', '1', '-i', 'graph.dbg', '--anno-filename',
+                       '--index-header-coords', '-a', anno, '-o', out, *inputs)
+        seqs = lambda out: os.path.join(d, f'{out}.seqs')
+        # the probes pass over the gaps, and are checked
+        res = annotate('gapped', 'gapped.fa', 'plain.fa')
+        self.assertEqual(0, res.returncode, res.stderr.decode())
+        self.assertNotIn('has no k-mer of the graph', res.stderr.decode())
+        res = annotate('other', 'other.fa', 'plain.fa')
+        self.assertEqual(1, res.returncode, res.stderr.decode())
+        self.assertIn(f"The file 'other.fa' is not column 0 ('gapped.fa') of the annotation "
+                      f"'{anno}': the column lacks the file's k-mer at coordinate 2500",
+                      res.stderr.decode())
+        self.assertFalse(os.path.exists(seqs('other')))
+        # no k-mer of the graph: refused
+        res = annotate('foreign', 'gapped.fa', 'foreign.fa')
+        self.assertEqual(1, res.returncode, res.stderr.decode())
+        self.assertIn(f"The file 'foreign.fa' has no k-mer of the graph: it cannot be checked "
+                      f"against column 1 ('plain.fa') of the annotation '{anno}'. Pass the files "
+                      f"the annotation was made from, in its column order", res.stderr.decode())
+        self.assertFalse(os.path.exists(seqs('foreign')))
+        # a last record without a k-mer of the graph in its end: the head alone, with a warning
+        res = annotate('trailing', 'trailing.fa', 'plain.fa')
+        self.assertEqual(0, res.returncode, res.stderr.decode())
+        self.assertIn("The last record of 'trailing.fa' has no k-mer of the graph in its last "
+                      "65536 characters: the file is checked by its first k-mers alone",
+                      res.stderr.decode())
+        # the limit: the same sequences under other headers pass, the mapping naming r1 and r2
+        res = annotate('renamed', 'renamed.fa', 'plain.fa')
+        self.assertEqual(0, res.returncode, res.stderr.decode())
+        with open(seqs('renamed'), 'rb') as f:
+            data = f.read()
+        self.assertIn(b'r1', data)
+        self.assertNotIn(b'g1', data)
+
+    def test_a_search_load_into_ram_never_exits_the_server(self):
+        # /search with in_ram on a --mmap server loads the pair with the resident pair's
+        # mapping, checked at start-up, as /traverse, /resolve and /pattern do, while the
+        # annotation on disk is the file loaded then: a .seqs replaced alone is not read again;
+        # an annotation replaced has its .seqs read and checked. A load that fails (here the
+        # annotation replaced by one of three columns, and the .seqs on disk of two columns
+        # refused) fails that request alone, the route's 400 with the load's
+        # message as error (as /traverse, /resolve and /pattern answer a load that fails), and
+        # the server runs on (H4 review S2: it exited)
+        out = os.path.join(self.d, 'live')
+        os.makedirs(out)
+        anno = os.path.join(out, 'anno.column_coord.annodbg')
+        seqs = os.path.join(out, 'anno.seqs')
+        shutil.copyfile(os.path.join(self.d, 'anno.column_coord.annodbg'), anno)
+        shutil.copyfile(os.path.join(self.d, 'right.seqs'), seqs)
+
+        def replace(source, target):
+            # a new file renamed over the old: the resident's mapped file keeps its inode
+            shutil.copyfile(source, target + '.new')
+            os.replace(target + '.new', target)
+
+        csv = os.path.join(self.d, 'live.csv')
+        with open(csv, 'w') as f:
+            f.write(f'live,{self.graph},{anno}\n')
+        with open(os.path.join(self.d, 'small.fa')) as f:
+            fasta = f.read()
+        query = {'FASTA': fasta, 'graphs': ['live'], 'discovery_fraction': 0.5}
+        server = Server([csv, '--mmap', '--mem-cap-gb', '1', '--cache-size', '0'],
+                        os.path.join(self.d, 'live.log'))
+        try:
+            resident = server.post('search', query)
+            self.assertEqual(200, resident.status_code, resident.text)
+            self.assertTrue(resident.json()[0]['results'], resident.text)
+            loaded = server.post('search', dict(query, in_ram=True))
+            self.assertEqual((200, resident.json()), (loaded.status_code, loaded.json()))
+            # the .seqs replaced (the files in another order): the resident's mapping serves
+            replace(os.path.join(self.d, 'swapped.seqs'), seqs)
+            loaded = server.post('search', dict(query, in_ram=True))
+            self.assertEqual((200, resident.json()), (loaded.status_code, loaded.json()))
+            # the annotation and its .seqs replaced by a rebuild of the files in the other
+            # order (the same column count): the annotation is not the one loaded at start-up,
+            # so the copy loads its .seqs from disk with the load's checks, and answers the
+            # same records (with the resident's mapping it answered big.fa's for small.fa's:
+            # H4's verification, finding 2)
+            replace(os.path.join(self.d, 'rev.column_coord.annodbg'), anno)
+            replace(os.path.join(self.d, 'rev.seqs'), seqs)
+            loaded = server.post('search', dict(query, in_ram=True))
+            self.assertEqual((200, resident.json()), (loaded.status_code, loaded.json()))
+            self.assertEqual(['s1'], [r['sample'] for r in loaded.json()[0]['results']])
+            # the annotation replaced: the request fails, the route's 400 with the load's message
+            replace(os.path.join(self.d, 'three.column_coord.annodbg'), anno)
+            failed = server.post('search', dict(query, in_ram=True))
+            self.assertEqual(400, failed.status_code, failed.text)
+            self.assertEqual(['error'], list(failed.json()))
+            self.assertTrue(failed.json()['error'].startswith(
+                    f"The record mapping '{seqs}' does not belong to the annotation '{anno}': "
+                    f"it has 2 columns, the annotation 3 labels. Rebuild it"), failed.text)
+            # the server runs on, its resident pair answering as before
+            self.assertIsNone(server.process.poll())
+            again = server.post('search', query)
+            self.assertEqual((200, resident.json()), (again.status_code, again.json()))
+        finally:
+            server.stop()
+        # a replaced annotation is never offered the resident's mapping: its own .seqs is read
+        self.assertNotIn("The record mapping offered for " + anno, server.text())
+
+    def test_the_row_diff_form_checks_an_old_mapping_by_its_count_only(self):
+        # the documented limit: the row-diff forms state no coordinates per column, so an old
+        # .seqs of the right count but swapped columns is served, its order stated unverified
+        graph, anno = self.pair('row_diff_brwt_coord', 'swapped', False)
+        # a query of b2's tail: its k-mers sit at coordinates 510-539 of big.fa's column, which
+        # the swapped mapping states 30 k-mers for (small.fa's), so mapping them to records
+        # throws. The request fails with the route's 400 naming the coordinate, and the server
+        # runs on (it aborted: the query's pool ended the process on a task that threw, H4's
+        # verification, finding 1); the CLI exits 1 with the message
+        records = dict(named_records_of([os.path.join(self.d, 'big.fa')]))
+        tail = records['b2'][-60:]
+        server = Server(['-i', graph, '-a', anno], os.path.join(self.d, 'rd_swapped.log'))
+        try:
+            caps = server.get('capabilities').json()
+            for query in ({'FASTA': f'>q\n{tail}'},
+                          {'FASTA': f'>q\n{tail}', 'query_coords': True}):
+                with self.subTest(query=query):
+                    ret = server.post('search', query)
+                    self.assertEqual(400, ret.status_code, ret.text)
+                    self.assertIn('Coordinate', ret.json()['error'])
+                    self.assertIn('out of range', ret.json()['error'])
+                    self.assertIsNone(server.process.poll())
+            self.assertEqual(200, server.get('capabilities').status_code)
+        finally:
+            server.stop()
+        self.assertEqual('count_only', caps['pair_summary']['seqs_order'])
+        tail_fa = os.path.join(self.d, 'tail.fa')
+        with open(tail_fa, 'w') as f:
+            f.write(f'>q\n{tail}\n')
+        res = subprocess.run(shlex.split(METAGRAPH) + ['query', '--query-mode', 'coords', '-i', graph,
+                                                       '-a', anno, tail_fa],
+                             stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        self.assertEqual(1, res.returncode, res.stderr.decode())
+        self.assertIn(f"Cannot query '{tail_fa}': Coordinate", res.stderr.decode())
+
+
+@unittest.skipIf(PROTEIN_MODE, "the fixture is DNA")
+class TestLabelsDisjoint(TestingBase):
+    """GET /capabilities' labels_disjoint (SPEC-multigraph-envelope.md section 9.1, H4): whether no
+    sequence header equals a column name of any pair, the second certificate a header label's
+    record selection needs beside headers_unique. Two pairs of small random records, annotated
+    by file name in their directories (a column's label is its file name), each with its .seqs
+    (stating its labels: seqs_order "verified"): left x1.fa [acc1, acc2], x2.fa [acc3]; right
+    y1.fa [acc4, x1.fa], y2.fa [y1.fa]: the header x1.fa is a column of left, the header y1.fa a
+    column of right itself; every header is distinct (headers_unique true)."""
+
+    maxDiff = None
+    PAIRS = {
+        'left': {'x1.fa': ['acc1', 'acc2'], 'x2.fa': ['acc3']},
+        'right': {'y1.fa': ['acc4', 'x1.fa'], 'y2.fa': ['y1.fa']},
+    }
+
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        rng = random.Random(20261108)
+        cls.pairs = {}
+        for name, files in cls.PAIRS.items():
+            d = os.path.join(cls.tempdir.name, name)
+            os.makedirs(d)
+            for fname, headers in files.items():
+                with open(os.path.join(d, fname), 'w') as f:
+                    for h in headers:
+                        f.write(f'>{h}\n{"".join(rng.choice("ACGT") for _ in range(80))}\n')
+            fastas = list(files)
+            for cmd in (['build', '-p', '1', '--mode', 'basic', '--graph', 'succinct', '-k', '31',
+                         '-o', 'graph', *fastas],
+                        ['annotate', '-p', '1', '--anno-filename', '-i', 'graph.dbg',
+                         '--anno-type', 'column', '--coordinates', '-o', 'anno', *fastas],
+                        ['transform_anno', '-p', '1', '--anno-type', 'column_coord',
+                         '--coordinates', '-o', 'anno', 'anno.column.annodbg'],
+                        ['annotate', '-p', '1', '-i', 'graph.dbg', '--anno-filename',
+                         '--index-header-coords', '-o', 'anno', *fastas]):
+                res = subprocess.run(shlex.split(METAGRAPH) + cmd, cwd=d,
+                                     stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+                assert res.returncode == 0, (cmd, res.stdout.decode()[-3000:])
+            cls.pairs[name] = (os.path.join(d, 'graph.dbg'),
+                               os.path.join(d, 'anno.column_coord.annodbg'))
+
+    def tags(self, name):
+        return {'graph': name, 'graph_path': self.pairs[name][0],
+                'annotation_path': self.pairs[name][1]}
+
+    def serve(self, names):
+        csv = os.path.join(self.tempdir.name, '_'.join(names) + '.csv')
+        with open(csv, 'w') as f:
+            for name in names:
+                f.write(f'{name},{self.pairs[name][0]},{self.pairs[name][1]}\n')
+        server = Server([csv], csv + '.log')
+        try:
+            caps = server.get('capabilities').json()
+        finally:
+            server.stop()
+        self.assertNotIn('labels_disjoint', caps)
+        return caps, server.text()
+
+    def test_a_header_equal_to_a_column_name_is_a_collision(self):
+        caps, log = self.serve(['left', 'right'])
+        summary = caps['graph_summary']
+        self.assertEqual({'value': True, 'collisions': 0, 'examples': []},
+                         summary['headers_unique'])
+        self.assertEqual({'value': False, 'collisions': 2, 'examples': [
+            {'header': 'x1.fa', 'records': [dict(self.tags('right'), column='y1.fa')],
+             'columns': [self.tags('left')]},
+            {'header': 'y1.fa', 'records': [dict(self.tags('right'), column='y2.fa')],
+             'columns': [self.tags('right')]},
+        ]}, summary['labels_disjoint'])
+        self.assertIn("labels_disjoint: false, 2 headers are also column names (one of them: "
+                      "'x1.fa'); a label with such a name selects the column where one has it",
+                      log)
+        self.assertEqual(['verified', 'verified'], [p['seqs_order'] for p in summary['pairs']])
+
+    def test_disjoint_names_are_certified(self):
+        caps, log = self.serve(['left'])
+        self.assertEqual({'value': True, 'collisions': 0, 'examples': []},
+                         caps['graph_summary']['labels_disjoint'])
+        self.assertIn('labels_disjoint: true, computed in', log)
+
+    def test_single_graph_server_states_it_at_the_top(self):
+        graph, anno = self.pairs['right']
+        server = Server(['-i', graph, '-a', anno], os.path.join(self.tempdir.name, 'single.log'))
+        try:
+            caps = server.get('capabilities').json()
+        finally:
+            server.stop()
+        untagged = {'graph': None, 'graph_path': None, 'annotation_path': None}
+        # right alone: its own column y1.fa shadows its record y1.fa
+        self.assertEqual({'value': False, 'collisions': 1, 'examples': [
+            {'header': 'y1.fa', 'records': [dict(untagged, column='y2.fa')],
+             'columns': [untagged]}]}, caps['labels_disjoint'])
+        self.assertTrue(caps['headers_unique']['value'])
+        self.assertEqual('verified', caps['pair_summary']['seqs_order'])
 
 
 if __name__ == '__main__':

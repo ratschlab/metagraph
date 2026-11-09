@@ -140,3 +140,38 @@ def test_invalid_arguments(graph, index):
 def test_worker_error_raises():
     with pytest.raises(RuntimeError, match="error in worker"):
         pymetagraph._pymetagraph_core._raise_in_worker(threads=2)
+
+
+def test_record_mapping_of_another_annotation_raises(tmp_path):
+    # a coordinate annotation by file name with a record mapping (.seqs) of two columns where
+    # the annotation has one: refused at load (RuntimeError), never ending the Python process;
+    # the annotation's own mapping loads
+    if METAGRAPH is None:
+        pytest.skip("metagraph binary not found")
+
+    def run(*args):
+        subprocess.run([METAGRAPH, *args], cwd=tmp_path, check=True, capture_output=True)
+
+    shutil.copyfile(DATA, tmp_path / "data.fa")
+    run("build", "-k", str(K), "-o", "graph", "data.fa")
+    run("annotate", "-i", "graph.dbg", "--anno-filename", "--coordinates", "-o", "anno",
+        "data.fa")
+    run("transform_anno", "--anno-type", "column_coord", "--coordinates", "-o", "anno",
+        "anno.column.annodbg")
+    graph_path, anno_path = tmp_path / "graph.dbg", tmp_path / "anno.column_coord.annodbg"
+    run("annotate", "-i", "graph.dbg", "--anno-filename", "--index-header-coords", "-o",
+        "anno", "data.fa", "data.fa")
+    with pytest.raises(RuntimeError, match="does not belong to the annotation"):
+        pymetagraph.AnnotatedGraph(graph_path, anno_path)
+    run("annotate", "-i", "graph.dbg", "--anno-filename", "--index-header-coords", "-o",
+        "anno", "data.fa")
+    assert pymetagraph.AnnotatedGraph(graph_path, anno_path).labels == ["data.fa"]
+
+
+def test_annotation_of_unknown_format_raises(index, tmp_path):
+    # an existing annotation file whose extension no annotation type has: RuntimeError, never
+    # the end of the Python process
+    unknown = tmp_path / "graph.unknown.annodbg"
+    shutil.copyfile(index[1], unknown)
+    with pytest.raises(RuntimeError, match="Unknown annotation format"):
+        pymetagraph.AnnotatedGraph(index[0], unknown)

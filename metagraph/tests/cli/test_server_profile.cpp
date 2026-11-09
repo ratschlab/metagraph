@@ -27,6 +27,7 @@
 #include "graph/representation/hash/dbg_sshash.hpp"
 #include "graph/representation/succinct/dbg_succinct.hpp"
 #include "graph/traversal/label_oracle.hpp"
+#include "tests/annotation/coordinate_test_graph.hpp"
 #include "tests/annotation/test_annotated_dbg_helpers.hpp"
 #include "tests/source_path.hpp"
 
@@ -319,7 +320,46 @@ TEST(MultiGraphProfile, ExactlyTheCapabilityFieldsEnterSupportFp) {
         EXPECT_EQ(fp, support_fingerprint(changed)) << name;
     }
     // the version line is part of the text: another version, another fingerprint
-    EXPECT_EQ(0u, support_text(p).find("mgt-support 1\n"));
+    EXPECT_EQ(0u, support_text(p).find("mgt-support 2\n"));
+}
+
+// seqs_order (H4, SPEC-multigraph-envelope.md section 9.1): what the load verified of the
+// order of the record mapping's columns, a capability field (hashed): "verified" once its
+// stated labels matched the annotation's, "count_only" for a mapping that states none, null
+// without a mapping; pairs that differ in it have different profiles
+TEST(MultiGraphProfile, SeqsOrderStatesWhatTheLoadVerified) {
+    using namespace mtg::annot;
+    using namespace mtg::graph;
+    const std::vector<test::CoordinateRecord> records {
+        { "ACGTTGCATGACCTAGGATCCGATTACGGA", "A", "a1" },
+        { "GGCATTACCAGTTCAGGA", "B", "b1" },
+    };
+    auto count_only = test::coordinate_test_graph(5, records, true, true);
+    auto verified = test::coordinate_test_graph(5, records, true, true, true);
+    auto without = test::build_anno_graph<DBGSuccinct, RowDiffColumnAnnotator>(
+            21, random_sequences(3, 80, 5), names("L", 3), DeBruijnGraph::BASIC, true);
+    const Json::Value c = profile(*count_only);
+    const Json::Value v = profile(*verified);
+    const Json::Value w = profile(*without);
+    EXPECT_EQ("count_only", c["seqs_order"].asString());
+    EXPECT_EQ("verified", v["seqs_order"].asString());
+    ASSERT_TRUE(w.isMember("seqs_order"));
+    EXPECT_TRUE(w["seqs_order"].isNull());
+    EXPECT_FALSE(w["traversal"]["has_coord_to_header"].asBool());
+    EXPECT_TRUE(c["traversal"]["has_coord_to_header"].asBool());
+    // the one difference of the two pairs, and support_fp tells them apart
+    Json::Value c_but_verified = c;
+    c_but_verified["seqs_order"] = "verified";
+    c_but_verified.removeMember("support_fp");
+    Json::Value v_without_fp = v;
+    v_without_fp.removeMember("support_fp");
+    EXPECT_EQ(v_without_fp, c_but_verified);
+    EXPECT_NE(c["support_fp"], v["support_fp"]);
+    // its line after mask's, before traversal's (the names' byte order)
+    const std::string text = support_text(v);
+    const size_t line = text.find("\nseqs_order=\"verified\"\ntraversal.counts=");
+    ASSERT_NE(std::string::npos, line) << text;
+    EXPECT_LT(text.find("\nmask="), line) << text;
 }
 
 // Every member of the entry, and of its `traversal`, is either a field support_fp hashes or

@@ -350,7 +350,7 @@ capabilities probe (each entry of its envelope) states too, beside `max_memory_m
 without reading a pair. A seed the bound leaves unstarted is a result of the pair's entry (a failed result with
 `resource_stop.scope: "request"`, phase `not_started`, its `unknown_labels` stated as every result of the pair
 states them); the envelope is the one-entry envelope of a named `/traverse` as with any other result.
-Its `graph_summary` states `headers_unique` (section 9).
+Its `graph_summary` states `headers_unique` (section 9) and `labels_disjoint` (section 9.1).
 From H2 (train 3) the block also states `resolve_discovery`: `{"max_tracked_labels": n, "max_memory_mb": n,
 "max_answer_labels": n}`, the bounds of a `/resolve` discovery per pair (`--resolve-max-discover-labels`,
 `--resolve-max-discover-memory-mb`, `--resolve-max-discover-answer-labels`;
@@ -430,24 +430,25 @@ listens:
 | `graph_representation` | string | the graph's type as `--graph` names it: `succinct`, `hash` (an ordered hash graph, packed or not: one file extension), `hashstr`, `hashfast`, `sshash` or `bitmap`; of a PRIMARY graph (wrapped in `CanonicalDBG`) the wrapped graph's |
 | `annotation_form` | string | the annotation's type as `--anno-type` names it: the class the loader constructed from the file's extension, e.g. `row_diff_brwt_coord` (RefSeq r237, AllTheBacteria, UniParc), `row_diff_int_brwt` (Logan's `*_RNA` chunks), `row_diff_disk`, `column` |
 | `decode_charged` | bool | whether a traversal under a memory budget charges the pair's annotation reads before they are held (`SPEC-labeled-traversal-core.md` §6.8): the traversal oracle's own predicate on the matrix. True on the row-diff forms over an index matrix with a single-row read (`row_diff`, `row_diff_coord`, `row_diff_brwt`, `row_diff_brwt_coord`, `row_diff_disk`, `row_diff_sparse`, `row_diff_flat`, `row_diff_int_brwt`) and on plain `brwt` and `column`; false on `column_coord`, `brwt_coord`, `int_brwt`, `row_diff_int_disk`, `row_diff_disk_coord`, `flat`, `row_sparse`, `row`, `bin_rel_wt`, `rbfish` and `rb_brwt`. Plain `brwt` and `column` stay `annotation: "unbudgeted"` on `/pattern` (budgeted there is a row-diff form only): the two fields together state that nuance |
+| `seqs_order` | string or null | what the load verified of the order of the pair's record mapping (`.seqs`) columns (H4, sections 9.1 and 10): `"verified"`, its stated column labels equalled the annotation's, in order (the column order: the records rest on the build's provenance, section 9.1); `"count_only"`, it states none (written before H4): its column count was checked and its order not certified (on `column_coord` and `brwt_coord` its columns' coordinates were also bounded, section 10, which certifies no order); null, no `.seqs` loaded (`traversal.has_coord_to_header` false) |
 | `traversal.counts` | string or null | `"presence_only"` on a count annotation (`row_diff_int_brwt`, `int_brwt`, `row_diff_int_disk`: walks read presence, `SPEC-labeled-traversal-core.md` §10.3), null on the others, so that a client without a graph sees it per pair |
 | `support_fp` | string | FNV-1a-64, 16 lowercase hex digits, over the pair's capability fields (below) |
 
-`support_fp` fingerprints what the routes can do on the pair, not its content. Two pairs with equal values agree
-on the graph representation, k, regime, alphabet, annotation form, coordinates, record mapping (`.seqs`), trace,
-charged reads, counts and the pattern fields (`graph_mode`, `available`, `unavailable_reason`, `mask`,
-`counting`), so that a service probes the routes once per distinct `support_fp` (the chunks of one Logan build
-share it) and keeps outcomes that depend on the data (a seed or a label absent from one pair) per request.
-`graph_representation` stays in `support_fp` although no answer of `/traverse`, `/resolve` or `/pattern` depends on
-it beyond what `alphabet` and `available` already state: pairs that run different code are probed apart (a wrong
-split costs one probe, a wrong merge carries one pair's outcome to another). The
-identity (`graph`, `graph_path`, `annotation_path`, `index_ns`, `index_fp`, `index_meta_fp`) and the size
-(`traversal.num_labels`) are left out; the pattern block's `dummy_fraction` (sampled from the graph's data) is not
-a member of the entry. The hashed text is a version line, then one line per field in this order (byte order of
+`support_fp` fingerprints what the routes can do on the pair, not its content. Two pairs with equal values agree on
+the graph representation, k, regime, alphabet, annotation form, coordinates, record mapping (`.seqs`) and what its
+load verified of its column order (`seqs_order`), trace, charged reads, counts and the pattern fields (`graph_mode`,
+`available`, `unavailable_reason`, `mask`, `counting`), so that a service probes the routes once per distinct
+`support_fp` (the chunks of one Logan build share it) and keeps outcomes that depend on the data (a seed or a label
+absent from one pair) per request. `graph_representation` stays in `support_fp` although no answer of `/traverse`,
+`/resolve` or `/pattern` depends on it beyond what `alphabet` and `available` already state: pairs that run
+different code are probed apart (a wrong split costs one probe, a wrong merge carries one pair's outcome to
+another). The identity (`graph`, `graph_path`, `annotation_path`, `index_ns`, `index_fp`, `index_meta_fp`) and the
+size (`traversal.num_labels`) are left out; the pattern block's `dummy_fraction` (sampled from the graph's data) is
+not a member of the entry. The hashed text is a version line, then one line per field in this order (byte order of
 the names; a member of `traversal` named `traversal.<member>`), each line ending with `\n`:
 
 ```
-mgt-support 1
+mgt-support 2
 alphabet=<value>
 annotation_form=<value>
 available=<value>
@@ -457,6 +458,7 @@ graph_mode=<value>
 graph_representation=<value>
 k=<value>
 mask=<value>
+seqs_order=<value>
 traversal.counts=<value>
 traversal.has_coord_to_header=<value>
 traversal.has_coordinates=<value>
@@ -473,6 +475,8 @@ version: a capability field added to the profile later changes the version and t
 pair's `support_fp`, so that values of servers of different versions differ even for one profile, while equal
 values (up to FNV-1a-64 collisions) always mean one profile of one rule. A client compares `support_fp` within
 one server's document or between servers of one version, and never keeps it as the identity of an index.
+Version 2 (H4) added `seqs_order`: it changes what a header answer on the pair certifies, so pairs that differ in it
+are profiled apart (as `traversal.has_coord_to_header` already parted pairs with and without a `.seqs`).
 
 A single-graph server states its pair's profile at the top level of `GET /capabilities` as `pair_summary`: the
 same entry, with `graph`, `graph_path` and `annotation_path` null (as its `headers_unique` tags its pair) and
@@ -488,9 +492,11 @@ tags rewritten to sample 12's paths: `support_fp` is r237's (a client recomputes
 
 ## 9. headers_unique (E22)
 
-Whether every sequence header of a server names one record, so that a header label (a `.seqs` record name) selects
-one sequence of one pair. Computed once at start-up from the pairs' header indexes (a merge of their sorted hash
-arrays; equal hashes are confirmed on the header text, so a hash collision is never counted).
+Whether every sequence header of a server names one record: no header repeats in a pair or across pairs. A header
+label (a `.seqs` record name) selects one sequence of one pair only when `labels_disjoint` (section 9.1) holds too:
+this certificate compares headers with headers, never with column names. Computed once at start-up from the pairs'
+header indexes (a merge of their sorted hash arrays; equal hashes are confirmed on the header text, so a hash
+collision is never counted).
 
 - Multi-graph server: `GET /capabilities` `graph_summary.headers_unique`, over every pair as listed, each once: a
   (graph_path, annotation_path) as the graph list spells it, as `composite_fp` (section 8) and
@@ -519,8 +525,168 @@ true | false | null`), a repeat as a warning naming one header. The certificate 
 rows keep their shape (no (pair, column, record) per row); such a fallback is later work, built only if a deployed
 index's certificate comes out false.
 
+**Record selection needs both certificates.** A header label selects one record of one pair only when
+`headers_unique.value` and `labels_disjoint.value` (section 9.1) are both true. `headers_unique` says that no
+header names two records; it compares headers with headers only. A label is resolved as a column name first
+(`LabelOracle::find_label`), so a header equal to a column name of a pair selects that column there, never the
+record, and across pairs one name selects a record in one pair and a column in another: `labels_disjoint` states
+whether any header equals any column name. A client that merges header-label answers over pairs as one record's
+requires both; with either false or null it treats a header label as possibly naming another thing. Which record a
+header names in a pair rests on the pair's record mapping, whose column order the load verifies when the `.seqs`
+states its column labels: each pair's `seqs_order` (section 9.1).
+
 Reference instances: sample 12 (illustrative: `false` on a multi-graph server, one header in two pairs) and the
 pattern fixtures (`api/python/tests/data/traverse/pattern/`, `SPEC-pattern-search.md` §11) `capabilities`
 (single-graph, `true`), `capabilities_repeated_headers` (single-graph, `false`: one header in both files of the pair,
 its occurrences with null pair tags), `capabilities_representation_unsupported` (`null`: the pair has no `.seqs`) and
 `capabilities_multi_graph` (`true`, in `graph_summary`).
+
+### 9.1 labels_disjoint (H4)
+
+Whether no sequence header of a server equals a column name of any of its pairs: the second certificate a header
+label's record selection needs (section 9). Computed once at start-up, beside `headers_unique`: each distinct column
+name of every pair is looked up in the header index of every pair that has a `.seqs` (`find_header`: a binary
+search in the 16-byte hash array the load built, then a comparison of the text), on the server's threads; a server
+none of whose pairs has a `.seqs` looks up nothing. r237: 651 names in 11 pairs, 7,161 lookups; memory: a view per
+column name (24 bytes: the view and its pair) and the examples.
+
+Placed as `headers_unique`:
+- Multi-graph server: `GET /capabilities` `graph_summary.labels_disjoint`, over every pair as listed, each once (a
+  pair listed under several names counts once and is tagged with the first name in pair order). There is no
+  top-level member.
+- Single-graph server: `GET /capabilities` `labels_disjoint` at the top level, over its one pair, with null pair
+  tags; null while the index loads (`ready: false`).
+
+`{"value": true | false | null, "collisions": n, "examples": [{"header", "records": [{graph, graph_path,
+annotation_path, column}...], "columns": [{graph, graph_path, annotation_path}...]}...]}`:
+
+| Member | Type | Meaning |
+| --- | --- | --- |
+| `value` | bool or null | true: no sequence header of any pair equals a column name of any pair; false: one does; null: a pair has no `.seqs` loaded, as `headers_unique`'s (header labels are not certified) |
+| `collisions` | int | the number of distinct names that are a sequence header of a pair and a column name of a pair (the same pair or another). With `value` null it counts every pair's column names against the headers of the pairs that have a `.seqs` |
+| `examples` | [object] | up to 10 such names, the byte-smallest |
+| `examples[].header` | string | the name |
+| `examples[].records` | [object] | the pairs whose `.seqs` has a record with this header, in pair order (at most 10): `{graph, graph_path, annotation_path, column}`, `column` the column (by label) of the header's first record in the pair, the record a header label would select there were no column so named |
+| `examples[].columns` | [object] | the pairs with a column of this name, in pair order (at most 10): `{graph, graph_path, annotation_path}`; in each of them a label with this name selects the column |
+
+The server logs the certificate at start-up (`labels_disjoint: true | false | null`), a clash as a warning naming
+one header (`labels_disjoint: false, N headers are also column names (one of them: '<name>'); a label with such a
+name selects the column where one has it`).
+
+**`seqs_order`.** Each pair's capability profile (section 8.1: `graph_summary.pairs[]`, a single-graph server's
+`pair_summary`) states what the load verified of the order of the pair's `.seqs` columns (section 10):
+
+| Value | Guarantee |
+| --- | --- |
+| `"verified"` | the `.seqs` states its column labels (written by `annotate --index-header-coords` since H4) and they equal the annotation's column labels, in order. Written without `-a`, the labels are the files' names as passed: the files were passed in the annotation's column order under the names it gave them. Written with `-a`, the labels are the annotation's own, copied once each file passed the spot check of section 10: its column holds the coordinates of the file's probed k-mers (its first and last k-mers that the graph has), and a file with k-mers none of which the graph has is refused. Neither establishes that the records are those the columns were made from: that rests on the build's provenance (the files passed are those the annotation was made from). A file of the same sequences under other headers passes either way, and with `-a` so does one whose records between its probes differ |
+| `"count_only"` | the `.seqs` states no labels (written before H4): its number of columns equalled the annotation's, its order was not verified. On `column_coord` and `brwt_coord` each column's coordinates were also checked against its k-mers, which refuses some permutations but certifies none. A header-label answer on such a pair rests on a column order the load did not check: a `.seqs` written for the files in another order maps coordinates to other records |
+| null | no `.seqs` loaded: the pair's labels are columns only |
+
+A client that merges header-label answers requires `"verified"` on every pair it merges, beside `headers_unique` and
+`labels_disjoint` true: the column order is then checked, and the records rest on the build's provenance, which no
+value of the load certifies. Every r237 pair states `"count_only"` until its `.seqs` is rebuilt and certified
+(section 10).
+
+Reference instances: sample 12 (`graph_summary.labels_disjoint` true beside `headers_unique` false: the certificates
+are independent; each pair `seqs_order: "count_only"`, r237's), sample 27 (a real run: `labels_disjoint` false, a
+header equal to a column of the other pair and one equal to a column of its own pair, `headers_unique` true; its
+pairs `"verified"`), and the pattern fixtures' `capabilities*` bodies (`labels_disjoint` beside `headers_unique` at
+the top level or in `graph_summary`; `pair_summary.seqs_order`).
+
+## 10. The record mapping at load (H4)
+
+A record mapping (`.seqs`) is the mapping of one annotation: per column, the headers of its records and their k-mer
+coordinate offsets, in the annotation's column order. Wherever one is loaded beside a coordinate annotation (a
+server's pairs at start-up, `query`, `align`, `traverse`, `pattern`; none with `--no-coord-mapping`), it is checked
+before the index is built:
+
+1. its number of columns must equal the annotation's labels;
+2. when it states its column labels, each must equal the annotation's label of that column (byte equality);
+3. on `column_coord` and `brwt_coord`, which state their coordinates per column without decoding, no column may hold
+   more coordinates than the k-mers the mapping states for it (the coordinates of a column are distinct values
+   below that, so more of them is another file's column). The row-diff forms (`row_diff_coord`,
+   `row_diff_brwt_coord`, `row_diff_disk_coord`) store differences along paths and have no such count: there a
+   `.seqs` without labels is checked by its count only.
+
+A failed check is a start-up failure, never a request's: `server_query` logs one error line and exits with status 1
+before it is ready (a single-graph server before `ready` turns true, a multi-graph server before `Ready to serve
+queries`), and a CLI command exits 1 at its load. The index loader ends the process at once after its line is
+written, as the server's shutdown does, on every failure it meets at start-up: a single-graph server's graph, an
+annotation that cannot be loaded or whose format is unknown, a `row_diff` annotation's anchors and fork successors,
+a `.seqs` that cannot be loaded or is refused, `--pattern-build-mask`; a multi-graph server's graphs, loaded before
+its annotations and before it listens, exit as before. A server's per-request load into RAM (`in_ram`: `/traverse`,
+`/resolve`, `/pattern` and, since the review of H4, `/search`) is built with the resident pair's mapping, checked at
+start-up, while the pair's annotation on disk is the file loaded then (its device, inode, size and modification time
+unchanged before the copy's load and after it, and the copy's labels the resident's), so that it reads no `.seqs`
+again; once the annotation was replaced, even during the copy's load, the copy reads its `.seqs` from disk with the
+checks above. A load of it that fails (an annotation replaced by one whose `.seqs` is refused; a file that cannot be
+read) throws, and that request alone fails with the route's 400, the loader's message as `error` (`/search`:
+`{"error": "<message>"}`, for instance `The record mapping '<anno-base>.seqs' does not belong to the annotation
+'<annotation>': it has 2 columns, the annotation 3 labels. Rebuild it ...`), while the server runs on with its
+resident indexes. A mapping that passed the load but places a coordinate past the end of its column (an old `.seqs`
+of a `count_only` pair written for the files in another order, or a corrupt one) fails the query that meets it:
+`/search` answers 400 `{"error": "Coordinate <c> for column <j> out of range (CoordToHeader has <n> coordinates for
+that column)"}` and the server runs on (before H4's verification the query's thread pool ended the process), and
+`metagraph query` exits 1 (`Cannot query '<file>': <message>`); a coordinate within the column maps to another
+record, undetected. The Python bindings (`pymetagraph.AnnotatedGraph`) raise the load's message as a `RuntimeError`.
+The refusal's line: `The record mapping '<anno-base>.seqs' does not belong to the annotation '<annotation>':
+<reason>. Rebuild it against this annotation with every input file in column order (metagraph stats
+--print-col-names lists them): metagraph annotate --anno-filename --index-header-coords -i <graph> -a <annotation>
+-o <anno-base> <files>; or load the annotation without it (--no-coord-mapping)`, the reason one of `it has <n>
+columns, the annotation <m> labels`, `its column <i> is '<label>', the annotation's column <i> '<label>' (the files
+were passed in another order or under other names)` and `column <i> ('<label>') of the annotation holds <c>
+coordinates, more than the <n> k-mers the mapping states for it (the files were passed in another order)`. An index
+is never built with a mapping of another column count, so no query checks it (before H4 a query exited the process
+on it).
+
+**The stated labels.** `annotate --index-header-coords` writes, after the columns, the number `0x6d74672d636f6c73`
+(the bytes `mtg-cols`, 8 bytes big-endian as every number of the file), then the column labels (their number, equal
+to the columns', then each label, as the file's string vectors are written): for its i-th input file the label
+`--anno-filename` gives that file, its name exactly as passed. The check passes when the files are passed under the
+names the annotation's columns carry, in that order; a file passed under another spelling of its path is refused.
+With `-a <annotation>` the command spot-checks each file against that annotation instead. The file's head probe is
+its first stretch of 1000 characters holding a k-mer the graph has, its tail probe the last such stretch in the last
+65536 characters of its last record (stretches without one, an assembly's gap of Ns, are passed over); the file's
+column must hold the coordinates of the first and last k-mer of each probe that the graph has, at their nodes, else
+it exits 1 naming the file, the column and the coordinate (`The file '<file>' is not column <i> ('<label>') of the
+annotation '<annotation>': the column lacks the file's k-mer at coordinate <c>. ...`), and writes nothing. A file
+with k-mers none of which the graph has is refused the same way, nothing written: `The file '<file>' has no k-mer of
+the graph: it cannot be checked against column <i> ('<label>') of the annotation '<annotation>'. Pass the files the
+annotation was made from, in its column order (metagraph stats --print-col-names lists the columns)` (before GPT
+review 6 it passed, nothing checked). A file whose last record has no k-mer of the graph in those 65536 characters is
+checked by its head probe alone, with a warning (`The last record of '<file>' has no k-mer of the graph in its last
+65536 characters: the file is checked by its first k-mers alone`); a file without k-mers (every record shorter than
+k) has no records in the mapping and nothing to check. The command then states the annotation's labels. That is how a
+mapping is written for an annotation whose columns were renamed, or whose files have moved. It is a spot check: it
+refuses files passed in another order and files of another file set whose probed k-mers the graph or the column
+lacks, but a file of the same sequences under other headers passes, and so does one whose records between its probes
+differ. What records a column's labels select rests on the build's provenance: the files passed are those the
+annotation was made from (section 9.1, `seqs_order`).
+Binaries before H4 read the columns and stop, so a `.seqs` with labels serves on them unchanged; an H4 binary reads a
+file that ends after its columns as one without labels, and fails the load of one with any other data after them.
+`metagraph stats <base>.seqs` states which it is (`column labels: stated` or `column labels: none`).
+
+**Certifying an existing `.seqs`.** The bytes before the labels are those an older binary writes for the same
+inputs. Rebuild the mapping with an H4 binary from the files (with `-a`, the spot-checked way, wherever they are now:
+the files the annotation was made from, since the certificate below shows that the old file is the mapping of the
+files passed, in that order, and no more). The
+old file is the mapping of those files in that order when it is exactly the new one's columns: the new file starts with
+the old file's bytes AND the labels' marker `mtg-cols` starts exactly where the old file ends (a prefix alone is not
+enough: a truncated old file is a prefix too; since H4's review its load fails, see above). Portable (POSIX `wc`,
+`head`, `tail` and `cmp`; GNU and macOS alike):
+
+```
+n=$(wc -c < old.seqs)
+head -c "$n" new.seqs | cmp -s - old.seqs \
+  && [ "$(tail -c +$((n + 1)) new.seqs | head -c 8)" = mtg-cols ] && echo certified
+```
+
+The new file then replaces it (renamed over it: a running server keeps its own; its manifest and `index_fp` change)
+and the pair states `seqs_order: "verified"`. `annotate -a` loads the graph and the whole annotation: on the shared
+host (mex) rebuild one pair at a time, with `--mmap`.
+
+A `.seqs` cut inside its columns or its trailer fails its load (a column whose coordinate offsets do not read whole,
+or whose record ends are not one per record, is refused, and data after the columns must be the labels' trailer
+whole), and so does an empty one, with `--mmap` too, naming the file. A labelled file cut exactly at the end of its
+columns, its whole trailer gone, cannot be told from one written before the trailer: it loads as such
+(`count_only`, the same answers).

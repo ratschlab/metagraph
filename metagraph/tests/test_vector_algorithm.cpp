@@ -589,6 +589,88 @@ TEST(bit_vector, inner_prod_disjoint) {
     }
 }
 
+// the common set bits of |first| and |second| below their size, bit by bit
+uint64_t inner_prod_naive(const sdsl::bit_vector &first, const sdsl::bit_vector &second) {
+    uint64_t count = 0;
+    for (size_t i = 0; i < first.size(); ++i) {
+        count += first[i] && second[i];
+    }
+    return count;
+}
+
+// pseudo-random words over the logical words of |v|
+void fill_words(sdsl::bit_vector *v, uint64_t seed) {
+    for (size_t i = 0; i < (v->size() + 63) >> 6; ++i) {
+        v->data()[i] = 18446744073709551557llu * (seed + i) + i * 32416189321llu;
+    }
+}
+
+const std::vector<size_t> kSizesAroundWords = { 1, 2, 63, 64, 65, 127, 128, 129, 255, 256, 257,
+                                                1000, 4095, 4096, 4097, 16384, 16385 };
+
+// The pinned SDSL keeps a capacity above the rounded size after reserve(): inner_prod reads the
+// words of the size, of both vectors, and masks the last of them, whatever either capacity
+// (GPT review 5, finding 10: it read |first|'s capacity, over |second|'s end)
+TEST(bit_vector, inner_prod_unequal_capacity_reserve) {
+    for (size_t size : kSizesAroundWords) {
+        for (bool reserve_first : { true, false }) {
+            sdsl::bit_vector first(size);
+            sdsl::bit_vector second(size);
+            fill_words(&first, size);
+            fill_words(&second, size + 7);
+            sdsl::bit_vector &reserved = reserve_first ? first : second;
+            reserved.reserve(4 * size + 4096);
+            ASSERT_GT(reserved.capacity(), ((size + 63) >> 6) << 6) << size;
+            // stale ones in every word above the size, and above the size in its last word
+            for (size_t i = (size + 63) >> 6; i < reserved.capacity() >> 6; ++i) {
+                reserved.data()[i] = ~uint64_t(0);
+            }
+            if (size & 0x3F)
+                reserved.data()[size >> 6] |= ~sdsl::bits::lo_set[size & 0x3F];
+            EXPECT_EQ(inner_prod_naive(first, second), inner_prod(first, second))
+                    << size << (reserve_first ? " first" : " second") << " reserved";
+        }
+    }
+    // the reviewer's case: two equal vectors of one word, the first with 64 words reserved
+    sdsl::bit_vector a(64, 1);
+    sdsl::bit_vector b(64, 1);
+    a.reserve(4096);
+    EXPECT_EQ(64u, inner_prod(a, b));
+    EXPECT_EQ(64u, inner_prod(b, a));
+}
+
+// A shrinking resize keeps the capacity and the bits above the new size
+TEST(bit_vector, inner_prod_shrinking_resize) {
+    for (size_t size : kSizesAroundWords) {
+        sdsl::bit_vector first(size + 1000, 1);
+        first.resize(size);
+        ASSERT_GT(first.capacity(), ((size + 63) >> 6) << 6) << size;
+        sdsl::bit_vector second(size, 1);
+        EXPECT_EQ(size, inner_prod(first, second)) << size;
+        EXPECT_EQ(size, inner_prod(second, first)) << size;
+        // and both shrunk from different sizes, with other bits
+        sdsl::bit_vector other(size + 3000);
+        fill_words(&other, size);
+        other.resize(size);
+        EXPECT_EQ(inner_prod_naive(first, other), inner_prod(first, other)) << size;
+        EXPECT_EQ(inner_prod_naive(other, first), inner_prod(other, first)) << size;
+    }
+}
+
+// push_back() grows the capacity by half its size
+TEST(bit_vector, inner_prod_grown_by_push_back) {
+    for (size_t size : kSizesAroundWords) {
+        sdsl::bit_vector first;
+        for (size_t i = 0; i < size; ++i) {
+            first.push_back(i % 3 != 0);
+        }
+        sdsl::bit_vector second(size);
+        fill_words(&second, size);
+        EXPECT_EQ(inner_prod_naive(first, second), inner_prod(first, second)) << size;
+        EXPECT_EQ(inner_prod_naive(second, first), inner_prod(second, first)) << size;
+    }
+}
+
 
 TEST(bit_vector, to_sdsl_empty) {
     EXPECT_EQ(0u, to_sdsl(std::vector<bool>()).size());

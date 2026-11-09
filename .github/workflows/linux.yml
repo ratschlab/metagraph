@@ -36,6 +36,13 @@ on:
         required: false
         type: string
         default: '*'
+      integration_test_filters_2:
+        description: >-
+          more main.py --test_filter patterns, run by a second integration job on the same build,
+          beside the first (a long module apart); empty: no second job
+        required: false
+        type: string
+        default: ''
       examples:
         description: build and run the examples
         required: false
@@ -269,6 +276,53 @@ jobs:
           pip install -r metagraph/workflows/requirements.txt
           cd metagraph/workflows
           pytest
+
+
+  # integration_test_filters_2 on the same build, beside integration-tests (dev-branch.yml: test_query
+  # apart, about 20 minutes of the runner's), so that the two run at once
+  integration-tests-2:
+    if: inputs.integration_test_filters_2 != ''
+    runs-on: *platform
+    needs: [build]
+
+    env: *linux-build-env
+
+    name: Integration Tests (2)
+
+    defaults: *linux-shell-defaults
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: 3.13
+          cache: pip
+          cache-dependency-path: metagraph/workflows/requirements.txt
+
+      - *install-linux-deps
+
+      - name: Install Python packages for tests
+        run: |
+          pip3 install parameterized
+          sudo apt-get install python3-venv
+
+      - *download-build-artifacts
+
+      - *recreate-metagraph-symlink
+
+      - name: Run integration tests
+        env:
+          INTEGRATION_TEST_FILTERS: ${{ inputs.integration_test_filters_2 }}
+        run: |
+          ./metagraph/integration_tests/install_test_environment.sh metagraph/api/python metagraph/build/test_venv
+          cd metagraph/build
+          # read -a: the patterns are split at spaces and never expanded as file names
+          read -r -a filters <<< "$INTEGRATION_TEST_FILTERS"
+          for filter in "${filters[@]}"; do
+            ./test_venv/bin/python ../integration_tests/main.py --test_filter "$filter"
+          done
 
 
   # The Python library's tests (metagraph/api/python/tests: metagraph.traverse and the pattern

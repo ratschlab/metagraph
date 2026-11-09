@@ -26,7 +26,7 @@
    "status": 200,
    "hand_made": false,
    "headers": {},
-   "shows": "GET /capabilities of a single-graph server whose graph has its mask: `pattern` in features and routes, the block available (basic, mask file, counting exact, placement record); graph_summary and max_graphs_without_selection null (no graph list); headers_unique at the top level (SPEC-multigraph-envelope.md section 9): true, every header of the .seqs names one record; pair_summary at the top level (E17, section 8.1): the pair's capability profile, its tags null"
+   "shows": "GET /capabilities of a single-graph server whose graph has its mask: `pattern` in features and routes, the block available (basic, mask file, counting exact, placement record); graph_summary and max_graphs_without_selection null (no graph list); headers_unique at the top level (SPEC-multigraph-envelope.md section 9): true, every header of the .seqs names one record; labels_disjoint beside it (H4, section 9.1): true, no header is a column's name; pair_summary at the top level (E17, section 8.1): the pair's capability profile, its tags null, its seqs_order count_only (the mini index's .seqs states no column labels)"
   },
   "capabilities_repeated_headers": {
    "server": "repeated_headers",
@@ -35,7 +35,7 @@
    "status": 200,
    "hand_made": false,
    "headers": {},
-   "shows": "GET /capabilities of a single-graph server whose pair names one header twice (r9, in its files e1.fa and e2.fa): headers_unique at the top level false, one collision, its example listing both occurrences by column with null pair tags (SPEC-multigraph-envelope.md section 9); the block available (basic, mask file, counting exact)"
+   "shows": "GET /capabilities of a single-graph server whose pair names one header twice (r9, in its files e1.fa and e2.fa): headers_unique at the top level false, one collision, its example listing both occurrences by column with null pair tags (SPEC-multigraph-envelope.md section 9); labels_disjoint true (no header is a column's name: the certificates are apart, section 9.1); seqs_order verified (its .seqs, written by this build, states its column labels); the block available (basic, mask file, counting exact)"
   },
   "traverse_capabilities": {
    "server": "masked",
@@ -134,7 +134,7 @@
    "status": 200,
    "hand_made": false,
    "headers": {},
-   "shows": "a multi-graph server: the `pattern` feature, its routes per pair (?graph=), the block with the contract and the caps and no graph (available: a pair is served), graph_summary (each pair: available, mask, counting, k, graph_mode, index_fp, traversal, and its capability profile, E17: index_meta_fp, alphabet, graph_representation, annotation_form, decode_charged, traversal.counts, support_fp, SPEC-multigraph-envelope.md section 8.1; columns_disjoint; headers_unique, section 9) and max_graphs_without_selection (the threshold of the selection rule: a request without `graphs` queries every name of a list of at most that many, the server flag, 10 by default)"
+   "shows": "a multi-graph server: the `pattern` feature, its routes per pair (?graph=), the block with the contract and the caps and no graph (available: a pair is served), graph_summary (each pair: available, mask, counting, k, graph_mode, index_fp, traversal, and its capability profile, E17: index_meta_fp, alphabet, graph_representation, annotation_form, decode_charged, traversal.counts, support_fp, seqs_order, SPEC-multigraph-envelope.md section 8.1; columns_disjoint; headers_unique, section 9; labels_disjoint, section 9.1) and max_graphs_without_selection (the threshold of the selection rule: a request without `graphs` queries every name of a list of at most that many, the server flag, 10 by default)"
   },
   "traverse_capabilities_multi_graph": {
    "server": "multi",
@@ -224,7 +224,7 @@
    "status": 200,
    "hand_made": false,
    "headers": {},
-   "shows": "a graph the engine does not recognise (a hash graph): the feature and route listed, the block available false, unavailable_reason representation_unsupported, graph_mode null and only k set; headers_unique null (the pair has no .seqs)"
+   "shows": "a graph the engine does not recognise (a hash graph): the feature and route listed, the block available false, unavailable_reason representation_unsupported, graph_mode null and only k set; headers_unique and labels_disjoint null, seqs_order null (the pair has no .seqs)"
   },
   "traverse_capabilities_representation_unsupported": {
    "server": "hash",

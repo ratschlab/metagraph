@@ -139,6 +139,11 @@
    "traverse"
   ]
  },
+ "labels_disjoint": {
+  "collisions": 0,
+  "examples": [],
+  "value": true
+ },
  "max_graphs_without_selection": null,
  "max_request_body_mb": null,
  "mode": "single",
@@ -158,7 +163,8 @@
   "index_ns": null,
   "k": 31,
   "mask": "file",
-  "support_fp": "cccbed9b50804c63",
+  "seqs_order": "verified",
+  "support_fp": "72fbd8fd9c344b40",
   "traversal": {
    "counts": null,
    "has_coord_to_header": true,

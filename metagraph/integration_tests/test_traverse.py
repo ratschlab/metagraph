@@ -2880,14 +2880,16 @@ class TestTraverseAPI(TestTraverseBase):
         # reads of a request (H1: the body limit, the value count and their refusals' shapes; a
         # single-graph server's top level, a multi-graph server's multigraph block; H3: the
         # connection cap); 'column_labels': GET /column_labels' byte cap, paging, 400 and total
-        # (H3; placed as request_intake)
+        # (H3; placed as request_intake); 'labels_disjoint': whether no header equals a column
+        # name (H4, section 9.1; test_multigraph.py's TestLabelsDisjoint checks it), true here:
+        # the headers acc1-acc3, the column the file's path
         self.assertEqual({'algorithm_version', 'attempts', 'column_labels', 'compression_level',
                           'content_encodings', 'deadline_check', 'expect_server_instance',
                           'feature_level', 'features', 'graph_summary', 'graphs',
-                          'headers_unique', 'in_ram', 'max_graphs_without_selection',
-                          'max_request_body_mb', 'mode', 'pair_summary', 'pattern', 'ready',
-                          'release', 'request_intake', 'resolve', 'routes', 'schema_version',
-                          'server_instance'},
+                          'headers_unique', 'in_ram', 'labels_disjoint',
+                          'max_graphs_without_selection', 'max_request_body_mb', 'mode',
+                          'pair_summary', 'pattern', 'ready', 'release', 'request_intake',
+                          'resolve', 'routes', 'schema_version', 'server_instance'},
                          set(c))
         self.assertEqual({'max_request_body_mb': None,
                           'body_too_large': {'status': 413, 'code': 'body_too_large',
@@ -2907,6 +2909,7 @@ class TestTraverseAPI(TestTraverseBase):
                           'total': 1},
                          c['column_labels'])
         self.assertEqual({'value': True, 'collisions': 0, 'examples': []}, c['headers_unique'])
+        self.assertEqual({'value': True, 'collisions': 0, 'examples': []}, c['labels_disjoint'])
         self.assertEqual(['/traverse', '/resolve', '/pattern'], c['expect_server_instance'])
         profile = c['pair_summary']
         self.assertEqual((None, None, None), (profile['graph'], profile['graph_path'],
@@ -5243,8 +5246,11 @@ class TestTraverseMultiGraph(TestTraverseBase):
             if header:
                 with open(f'{d}/{side}/source.fa', 'w') as f:
                     f.write('>' + header + '\n' + seq + '\n')
+                # with -a: the file is spot-checked against the shared annotation's column, whose label
+                # (the shared source's path) the mapping states, as a load requires (H4)
                 self._run_ok(f'{METAGRAPH} annotate -p 1 -i graph.dbg --anno-filename '
-                             '--index-header-coords -o annotation source.fa', f'{d}/{side}')
+                             '--index-header-coords -a annotation.column_coord.annodbg '
+                             '-o annotation source.fa', f'{d}/{side}')
         return seq
 
     def _start_refused(self, csv):

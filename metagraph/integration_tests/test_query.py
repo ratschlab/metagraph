@@ -1314,7 +1314,9 @@ class TestCoordToHeader(TestingBase):
         self.assertEqual(lines[11], '  sequences: 3 (seq3\tbad\tseq4)')
         self.assertEqual(lines[12], '  k-mers: 44')
         self.assertEqual(lines[13], '  k-mers per sequence: 14.7')
-        self.assertEqual(lines[14], '========================================================')
+        # the mapping states its column labels (the files' names), which a load checks
+        self.assertEqual(lines[14], 'column labels: stated')
+        self.assertEqual(lines[15], '========================================================')
 
         # Expected: coordinates should map to sequence headers (seq1, seq2, seq3, seq4)
         query_command = f'{METAGRAPH} query --query-mode coords -i {graph} -a {anno} \
@@ -1366,12 +1368,15 @@ class TestCoordToHeader(TestingBase):
         self.assertEqual(res.returncode, 0)
         lines = res.stdout.decode().strip().split('\n')
         self.assertEqual(lines[2], "columns: 1")
-        # The query is expected to fail because the mapping file is incompatible with the annotation
+        # The query is expected to fail because the mapping file is incompatible with the
+        # annotation: refused when the index loads (check_record_mapping), before any query
         query_command = f'{METAGRAPH} query --query-mode coords -i {graph} -a {anno} \
                          --min-kmers-fraction-label 0.0 {file1}' + MMAP_FLAG
         res = subprocess.run([query_command], shell=True, stdout=PIPE, stderr=PIPE)
         self.assertNotEqual(res.returncode, 0, f"Query with incompatible .seq mapping must fail")
-        self.assertIn("[error] Incompatible number of columns", res.stderr.decode())
+        self.assertIn(f"[error] The record mapping '{anno_base}.seqs' does not belong to the "
+                      f"annotation '{anno}': it has 1 columns, the annotation 2 labels",
+                      res.stderr.decode())
 
     def test_query_with_filters(self):
         """Test that --num-top-labels and --min-kmers-fraction-label work correctly with mapping"""

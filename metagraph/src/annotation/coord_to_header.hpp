@@ -39,7 +39,10 @@ namespace annot {
  * `seq_id` is the 0-based index of a sequence within its column.
  *
  * Built by `annotate --index-header-coords` and stored alongside the column
- * annotation as a ".seqs" file.
+ * annotation as a ".seqs" file: the number of columns, then per column its headers
+ * and coordinate offsets, then (since H4, train 3) a trailer stating the label of
+ * each column (kColumnLabelsMarker, then the labels), which binaries before it never
+ * read: they stop after the columns.
  */
 class CoordToHeader {
   public:
@@ -56,8 +59,36 @@ class CoordToHeader {
     // a copy starts without a header index of its own (find_header); not assignable
     CoordToHeader(const CoordToHeader &other);
 
+    // load() reads the trailer of column labels when the file has one (column_labels()); data
+    // after the columns that is not that trailer, or a trailer of another number of labels, fails
+    // the load. serialize() writes the trailer when the labels are set (set_column_labels)
     bool load(const std::string &filename_base);
     void serialize(const std::string &filename_base) const;
+
+    // The labels of the annotation columns this mapping was built for, in column order, as
+    // `annotate --index-header-coords` states them: for its i-th file the label --anno-filename
+    // gives it (the file name as passed). Null when none are stated (a file written before
+    // H4, or a mapping constructed without them).
+    const std::vector<std::string>* column_labels() const {
+        return column_labels_ ? &*column_labels_ : nullptr;
+    }
+    // |labels|: one per column (std::invalid_argument otherwise)
+    void set_column_labels(std::vector<std::string> &&labels);
+    /**
+     * Why this mapping is not the record mapping of an annotation whose labels are |labels|, in
+     * column order, or "" when it is (as far as the mapping can tell): another number of
+     * columns ("it has n columns, the annotation m labels"), or, when the mapping states its
+     * column labels, the first column whose label differs ("its column i is 'x', the
+     * annotation's column i 'y' ..."). On success the stated labels are dropped (the annotation
+     * holds the same bytes) and column_order_verified() turns true if there were any: a loader
+     * calls it once, before the mapping is shared.
+     */
+    std::string check_columns(const std::vector<std::string> &labels);
+    // Whether check_columns() matched every column's stated label with the annotation's: the
+    // column order of this mapping was verified at load (SPEC-multigraph-envelope.md section
+    // 9.1, seqs_order "verified"). False for a mapping that states no labels: its column count
+    // alone was checked ("count_only")
+    bool column_order_verified() const { return column_order_verified_; }
 
     // global_coord -> (seq_id, local_coord)
     std::pair<size_t, uint64_t> map_single_coord(Column col, uint64_t coord) const;
@@ -192,6 +223,9 @@ class CoordToHeader {
                                        const std::function<bool(size_t, size_t)> &callback);
 
     static constexpr auto kExtension = ".seqs";
+    // the number that opens the trailer of column labels (the bytes "mtg-cols", written big-endian
+    // as every number of the file)
+    static constexpr uint64_t kColumnLabelsMarker = 0x6d74672d636f6c73;
 
   private:
     struct HeaderIndex;
@@ -202,6 +236,9 @@ class CoordToHeader {
 
     std::vector<std::vector<std::string>> headers_;
     std::vector<bit_vector_sd> coord_offsets_;
+    // the trailer's labels while they are kept (until check_columns), and what it verified
+    std::optional<std::vector<std::string>> column_labels_;
+    bool column_order_verified_ = false;
 
     // find_header(): the entries name records of |headers_|, which only load() changes, and
     // load() drops the index first

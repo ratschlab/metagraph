@@ -62,8 +62,9 @@ METAGRAPH=/path/to/metagraph pytest tests
 ## Known limitations
 
 - Exactly one annotation file is supported.
-- Missing files raise `FileNotFoundError`, but a graph or annotation that MetaGraph cannot load
-  ends the Python process, as the loaders exit on errors.
+- Missing files raise `FileNotFoundError`; a graph or annotation that MetaGraph cannot load (an
+  unreadable or corrupt file, an unknown annotation format, a `.seqs` record mapping that is not
+  the annotation's) raises `RuntimeError` with the loader's message.
 - On Linux, the extension links Boost dynamically and the wheel does not bundle it, so the Boost
   runtime (`libboost_iostreams`) it was built against must be installed where it is imported.
   The wheel is meant for the machine that built it.

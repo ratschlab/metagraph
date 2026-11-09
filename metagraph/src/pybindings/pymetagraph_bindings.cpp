@@ -97,8 +97,12 @@ class AnnotatedGraph {
                    unsigned int threads) {
         std::unique_lock<std::shared_mutex> lock(num_threads_mutex);
         auto config = make_config(graph, annotation, threads);
-        graph_ = mtg::cli::load_critical_dbg(config.infbase);
-        anno_dbg_ = mtg::cli::initialize_annotated_dbg(graph_, config);
+        // a file that cannot be loaded, or a record mapping (.seqs) that is not the
+        // annotation's, raises (RuntimeError) instead of ending the Python process
+        graph_ = mtg::cli::load_critical_dbg(config.infbase, mtg::cli::LoadFailure::THROW);
+        anno_dbg_ = mtg::cli::initialize_annotated_dbg(graph_, config,
+                                                       mtg::cli::kDefaultMaxChunksOpen,
+                                                       mtg::cli::LoadFailure::THROW);
         thread_pool_ = std::make_unique<ThreadPool>(std::max(1u, threads));
     }
 

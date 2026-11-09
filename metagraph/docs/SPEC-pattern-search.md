@@ -4449,6 +4449,7 @@ two thousand chunks (a name over many chunks repeats each chunk's entry); a clie
 | `columns_disjoint` | boolean | no column name is a column of two pairs (each pair counted once, whatever names list it): a label's counts and occurrences summed over the pairs count each column once — the chunks of an index that partition its samples |
 | `shared_columns` | integer | the column names of more than one pair (0 exactly when disjoint); the start-up log names one |
 | `headers_unique` | object | whether every sequence header names one record over the pairs (each pair once): `{value, collisions, examples}`, SPEC-multigraph-envelope.md §9 |
+| `labels_disjoint` | object | whether no sequence header equals a column name of any pair (each pair once): `{value, collisions, examples}`, SPEC-multigraph-envelope.md §9.1 (H4); a header label selects one record only when both certificates are true |
 | `pairs` | list of objects | one per (name, pair), in §24.1's order (a pair under two names twice): `graph_summary_pair` |
 
 <!-- schema: graph_summary_pair -->
@@ -4471,6 +4472,7 @@ two thousand chunks (a name over many chunks repeats each chunk's entry); a clie
 | `graph_representation` | string | the graph's type as `--graph` names it (`succinct`, `hash`, `hashstr`, `hashfast`, `sshash`, `bitmap`) |
 | `annotation_form` | string | the annotation's type as `--anno-type` names it (e.g. `row_diff_brwt_coord`) |
 | `decode_charged` | boolean | a traversal under a memory budget charges its annotation reads before they are held |
+| `seqs_order` | string \| null | what the load verified of the order of its record mapping's (`.seqs`) columns: `"verified"` (its stated column labels matched the annotation's, in order: the column order, the records resting on the build's provenance), `"count_only"` (it states none: its column count was checked, its order not certified), null without a `.seqs` (H4, SPEC-multigraph-envelope.md §9.1) |
 | `support_fp` | string | FNV-1a-64 (16 hex) over its capability fields, not its identity or size: SPEC-multigraph-envelope.md §8.1 states the fields and the text |
 
 <!-- schema: graph_summary_traversal -->
