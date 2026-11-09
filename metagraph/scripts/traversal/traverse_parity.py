@@ -153,9 +153,9 @@ def project_resolve(response):
     out = {key: response[key] for key in ('k', 'num_kmers', 'graph_runs')}
     cut = response['labels_truncated']
     out['labels_truncated'] = cut and {'kept': cut['kept'], 'total': cut['total']}
-    # the labels as a set: the ranking breaks ties among equally supported labels its own way
-    out['labels'] = sorted([l['label'], l['kind'], l['kmers_supported'], l['runs']]
-                           for l in response['labels'])
+    # the labels by support, ties by name: the ranking breaks ties its own way
+    out['labels'] = sorted(([l['label'], l['kind'], l['kmers_supported'], l['runs']]
+                            for l in response['labels']), key=lambda l: (-l[2], l[0]))
     if 'selection' in response:
         sel = response['selection']
         # The seeds as a set: v1 keeps them in rank order, the prototype by position.
