@@ -1,5 +1,6 @@
 #include "query.hpp"
 
+#include <exception>
 #include <mutex>
 #include <sstream>
 
@@ -1275,17 +1276,29 @@ size_t query_fasta(const std::string &file,
     size_t seq_count = 0;
     size_t num_bp = 0;
 
+    // a task that throws on a worker would terminate the process: keep the first error and
+    // rethrow it to the caller, which a server reports per request
+    std::exception_ptr error;
+    std::mutex error_mutex;
     ThreadPool thread_pool(get_num_threads(), 1000);
     for (const seq_io::kseq_t &kseq : fasta_parser) {
         thread_pool.enqueue([&](QuerySequence &sequence) {
-            // Callback with the SeqSearchResult
-            callback(query_sequence(std::move(sequence), anno_graph,
-                                    config, aligner_config));
+            try {
+                // Callback with the SeqSearchResult
+                callback(query_sequence(std::move(sequence), anno_graph,
+                                        config, aligner_config));
+            } catch (...) {
+                std::lock_guard<std::mutex> lock(error_mutex);
+                if (!error)
+                    error = std::current_exception();
+            }
         }, QuerySequence { seq_count++, std::string(kseq.name.s), std::string(kseq.seq.s) });
         num_bp += kseq.seq.l;
     }
     // wait while all threads finish processing the current file
     thread_pool.join();
+    if (error)
+        std::rethrow_exception(error);
 
     return num_bp;
 }
