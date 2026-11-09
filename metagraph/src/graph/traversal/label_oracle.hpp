@@ -13,12 +13,16 @@
 #include "traversal_types.hpp"
 #include "graph/annotation_key_mapper.hpp"
 #include "annotation/int_matrix/base/int_matrix.hpp"
+#include "annotation/binary_matrix/row_diff/row_diff_cache.hpp"
 
 
 namespace mtg {
 
 namespace annot {
 class CoordToHeader;
+namespace matrix {
+class IRowDiff;
+} // namespace matrix
 } // namespace annot
 
 namespace graph {
@@ -89,11 +93,19 @@ class LabelOracle {
     // records.
     LabelRef resolve_label(const std::string &name) const;
 
-    // Batched row access (rows = annotation key - 1). Updates the counters.
+    // Batched row access (rows = annotation key - 1). Updates the counters. On a row-diff
+    // annotation, |cache| keeps the decoded rows across calls: for a walk, which reads the
+    // rows of neighbouring nodes call after call.
     std::vector<annot::matrix::BinaryMatrix::SetBitPositions>
-    get_rows(const std::vector<Row> &rows) const;
+    get_rows(const std::vector<Row> &rows,
+             annot::matrix::RowDiffCache<annot::matrix::BinaryMatrix::SetBitPositions> *cache
+                 = nullptr) const;
     std::vector<annot::matrix::MultiIntMatrix::RowTuples>
-    get_row_tuples(const std::vector<Row> &rows) const;
+    get_row_tuples(const std::vector<Row> &rows,
+                   annot::matrix::RowDiffCache<annot::matrix::MultiIntMatrix::RowTuples> *cache
+                       = nullptr) const;
+    // whether the annotation is row-diff transformed, and so a cache helps
+    bool is_row_diff() const { return row_diff_; }
 
     Counters& counters() const { return counters_; }
 
@@ -106,6 +118,7 @@ class LabelOracle {
 
     const annot::matrix::BinaryMatrix *matrix_ = nullptr;
     const annot::matrix::MultiIntMatrix *tuples_ = nullptr;
+    const annot::matrix::IRowDiff *row_diff_ = nullptr;
     const annot::CoordToHeader *coord_to_header_ = nullptr;
 
     mutable Counters counters_;
@@ -117,7 +130,9 @@ class LabelOracle {
  * labels are read from whole rows; header labels (one sequence of a column) from tuple
  * rows, a coordinate counting for a label when it falls into that label's sequence.
  * Results are cached per key, up to |max_cache_size| keys, then the cache is cleared. A
- * batch with more keys than that is answered without caching it.
+ * batch with more keys than that is answered without caching it. On a row-diff
+ * annotation, the decoded rows are kept too (RowDiffCache), so that the rows of the next
+ * step of a walk are decoded from them.
  */
 class LabelQuery {
   public:
@@ -145,7 +160,7 @@ class LabelQuery {
     };
 
     void read_hits(const std::vector<node_index> &keys,
-                   tsl::hopscotch_map<node_index, NodeHits> *out) const;
+                   tsl::hopscotch_map<node_index, NodeHits> *out);
     void hits_from_row(const annot::matrix::BinaryMatrix::SetBitPositions &row,
                        NodeHits *hits) const;
     void hits_from_tuples(const annot::matrix::MultiIntMatrix::RowTuples &row,
@@ -164,6 +179,8 @@ class LabelQuery {
     tsl::hopscotch_map<Column, std::vector<HeaderRange>> header_ranges_;
 
     tsl::hopscotch_map<node_index, NodeHits> cache_;
+    annot::matrix::RowDiffCache<annot::matrix::BinaryMatrix::SetBitPositions> row_cache_;
+    annot::matrix::RowDiffCache<annot::matrix::MultiIntMatrix::RowTuples> tuple_cache_;
 };
 
 } // namespace traversal

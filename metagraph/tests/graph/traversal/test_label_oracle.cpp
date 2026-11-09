@@ -205,6 +205,37 @@ TYPED_TEST(LabelOracleTest, HitsAgreeWithGetLabels) {
     }
 }
 
+// Rows read with a RowDiffCache are the rows read without one: one key at a time, as a
+// walk reads them, in both directions, and in batches. The bound is small, so that the
+// cache drops generations.
+TYPED_TEST(LabelOracleTest, RowDiffCacheGivesTheSameRows) {
+    using Graph = typename TypeParam::first_type;
+    using Annotation = typename TypeParam::second_type;
+    auto seqs = make_sequences(3, 80, 5);
+    auto anno = build_anno_graph<Graph, Annotation>(kTestK, seqs, { "A", "B", "C" });
+    LabelOracle oracle(*anno);
+    annot::matrix::RowDiffCache<annot::matrix::BinaryMatrix::SetBitPositions> cache(2048);
+    for (const std::string &seq : seqs) {
+        std::vector<Row> rows;
+        for (node_index key : oracle.keys_of_sequence(seq)) {
+            ASSERT_NE(npos, key);
+            rows.push_back(AnnotatedDBG::graph_to_anno_index(key));
+        }
+        for (Row row : rows) {
+            EXPECT_EQ(oracle.get_rows({ row }), oracle.get_rows({ row }, &cache));
+        }
+        for (auto it = rows.rbegin(); it != rows.rend(); ++it) {
+            EXPECT_EQ(oracle.get_rows({ *it }), oracle.get_rows({ *it }, &cache));
+        }
+        EXPECT_EQ(oracle.get_rows(rows), oracle.get_rows(rows, &cache));
+    }
+    if (oracle.is_row_diff()) {
+        EXPECT_GT(cache.hits, 0u);
+    } else {
+        EXPECT_EQ(0u, cache.hits);
+    }
+}
+
 // Unmasked DBGSuccinct (CLI-built graphs keep dummy k-mers): keys never point at dummies
 TEST(LabelOracle, UnmaskedSuccinctKeys) {
     auto seqs = make_sequences(2, 60, 3);
@@ -365,6 +396,23 @@ TYPED_TEST(LabelOracleCoordTest, HeaderLabels) {
     for (const auto &support : profile.labels) {
         EXPECT_EQ(col_f, support.label.column);
     }
+
+    // tuple rows read with a RowDiffCache are the rows read without one
+    annot::matrix::RowDiffCache<annot::matrix::MultiIntMatrix::RowTuples> cache(2048);
+    for (const std::string &seq : seqs) {
+        std::vector<Row> rows;
+        for (node_index key : oracle.keys_of_sequence(seq)) {
+            rows.push_back(AnnotatedDBG::graph_to_anno_index(key));
+        }
+        for (Row row : rows) {
+            EXPECT_EQ(oracle.get_row_tuples({ row }), oracle.get_row_tuples({ row }, &cache));
+        }
+        for (auto it = rows.rbegin(); it != rows.rend(); ++it) {
+            EXPECT_EQ(oracle.get_row_tuples({ *it }), oracle.get_row_tuples({ *it }, &cache));
+        }
+        EXPECT_EQ(oracle.get_row_tuples(rows), oracle.get_row_tuples(rows, &cache));
+    }
+    EXPECT_EQ(oracle.is_row_diff(), cache.hits > 0);
 
     // header labels need a CoordToHeader
     LabelOracle no_headers(*anno);
