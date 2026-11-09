@@ -430,7 +430,11 @@ Config::Config(int argc, char *argv[]) {
         } else if (!strcmp(argv[i], "--experimental-traverse")) {
             experimental_traverse = true;
         } else if (!strcmp(argv[i], "--traverse-max-time-ms")) {
-            traverse_max_time_ms = std::stod(get_value(i++));
+            try {
+                traverse_max_time_ms = std::stod(get_value(i++));
+            } catch (const std::exception &) {
+                traverse_max_time_ms = -1;   // refused below
+            }
         } else if (!strcmp(argv[i], "--traverse-max-seeds")) {
             // a value below 1 becomes 0, which the check below refuses
             traverse_max_seeds = std::max(0LL, atoll(get_value(i++)));
@@ -640,9 +644,10 @@ Config::Config(int argc, char *argv[]) {
     }
 
     if ((identity == TRAVERSE || identity == SERVER_QUERY)
-            && (!(traverse_max_time_ms > 0) || !traverse_max_seeds || !traverse_max_seed_bp)) {
+            && (!std::isfinite(traverse_max_time_ms) || !(traverse_max_time_ms > 0)
+                || !traverse_max_seeds || !traverse_max_seed_bp)) {
         std::cerr << "Error: --traverse-max-time-ms, --traverse-max-seeds and"
-                     " --traverse-max-seed-bp must be positive" << std::endl;
+                     " --traverse-max-seed-bp must be positive and finite" << std::endl;
         print_usage_and_exit = true;
     }
 

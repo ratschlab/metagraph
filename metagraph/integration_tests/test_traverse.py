@@ -99,8 +99,10 @@ class TestTraverseCLI(TraverseFixture):
         for path in right['paths']:
             self.assertEqual(10, path['length_bp'])
             self.assertEqual('max_extension_bp', path['path_reason'])
-        for segment in right['segments']:
-            self.assertNotIn('sequence', segment)
+        # the bases of each path, with the bound applied
+        for path in right['paths']:
+            flank = ''.join(right['segments'][s]['sequence'] for s in path['segments'])
+            self.assertEqual(10, len(flank))
 
     def test_branch_limit(self):
         # A and B diverge after the seed: with or without a branch allowance, each label
