@@ -218,7 +218,8 @@ The answer keeps its upstream shape (a list of `{seq_description, results, ...}`
 - *H1 (train 3):* two refusals of the request's intake come before every check of its fields and before
   admission, on every server and alike on a single-graph and a multi-graph one (never in an envelope): a body
   longer than `--max-request-body-mb` is refused **413** `{"error", "code": "body_too_large",
-  "max_request_body_mb"}` before it is read (on every route), and a body of `/resolve`, `/pattern`, `/traverse` or
+  "max_request_body_mb"}` before it is read (on every route; a `Content-Length` that is no byte count is closed
+  without a response, `SPEC-labeled-traversal-core.md` §10.3), and a body of `/resolve`, `/pattern`, `/traverse` or
   `POST /traverse/cancel` with more JSON values than `--max-request-json-values` **400** `{"error", "code":
   "too_many_json_values", "max_request_json_values"}` before it is parsed (members in this order;
   `SPEC-labeled-traversal-core.md` §5 and §10.3). Neither holds an id: `GET /requests/{id}` answers 404 (never

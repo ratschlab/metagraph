@@ -506,6 +506,16 @@ Json::Value max_graphs_without_selection_json(bool multi_graph, uint64_t thresho
  */
 Json::Value max_request_body_mb_json(uint64_t mb);
 
+/**
+ * A Content-Length field's value as a byte count (RFC 9110 §8.6): decimal digits, leading zeros
+ * allowed, below 2^64, the optional whitespace around it (SP, HTAB) trimmed; a comma-separated
+ * list of values that are all the same count (a field repeated by a proxy) is that count. None
+ * for anything else: no digits, a sign ("-1"), other characters ("3145728junk"), 2^64 and more,
+ * a list of differing values (refuse_body_too_large then closes the connection without an
+ * answer)
+ */
+std::optional<uint64_t> content_length_value(const std::string &text);
+
 // The routes whose body is read by parse_strict_json and counted against
 // --max-request-json-values (request_intake.json_values_routes), sorted
 constexpr const char *kJsonValuesRoutes[] = { "/pattern", "/resolve", "/traverse",

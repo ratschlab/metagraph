@@ -370,18 +370,6 @@ void discard_until_closed(std::shared_ptr<Connection> connection, std::shared_pt
     });
 }
 
-// |text| a plain decimal number below 2^64 (what a Content-Length is): its value
-std::optional<uint64_t> decimal(const std::string &text) {
-    auto digit = [](unsigned char c) { return std::isdigit(c) != 0; };
-    if (text.empty() || text.size() > 20 || !std::all_of(text.begin(), text.end(), digit))
-        return std::nullopt;
-    try {
-        return std::stoull(text);
-    } catch (const std::exception &) {
-        return std::nullopt;
-    }
-}
-
 } // namespace
 
 bool refuse_body_too_large(const std::shared_ptr<HttpServer::Request> &request,
@@ -392,9 +380,9 @@ bool refuse_body_too_large(const std::shared_ptr<HttpServer::Request> &request,
     std::optional<uint64_t> length;
     if (auto it = request->header.find("Content-Length"); it != request->header.end()) {
         // the library read it with std::stoull, which takes "-1" as 2^64 - 1 and "3145728junk"
-        // as 3145728: a Content-Length that is no plain decimal number is no byte count, and the
-        // request is dropped as the library drops one it cannot read at all ("abc", 2^64)
-        length = decimal(it->second);
+        // as 3145728: a Content-Length that is no byte count (content_length_value) is
+        // dropped as the library drops one it cannot read at all ("abc", 2^64)
+        length = content_length_value(it->second);
         if (!length) {
             connection->close();
             return false;
@@ -1277,6 +1265,39 @@ Json::Value max_graphs_without_selection_json(bool multi_graph, uint64_t thresho
 
 Json::Value max_request_body_mb_json(uint64_t mb) {
     return mb ? Json::Value(Json::UInt64(mb)) : Json::Value();
+}
+
+std::optional<uint64_t> content_length_value(const std::string &text) {
+    std::optional<uint64_t> count;
+    size_t from = 0;
+    while (true) {
+        size_t to = text.find(',', from);
+        if (to == std::string::npos)
+            to = text.size();
+        size_t a = from, b = to;
+        while (a < b && (text[a] == ' ' || text[a] == '\t'))
+            ++a;
+        while (b > a && (text[b - 1] == ' ' || text[b - 1] == '\t'))
+            --b;
+        // leading zeros are the same count; at most 20 digits remain below 2^64
+        while (a + 1 < b && text[a] == '0')
+            ++a;
+        if (a == b || b - a > 20 || !std::all_of(text.begin() + a, text.begin() + b,
+                                                 [](unsigned char c) { return std::isdigit(c); }))
+            return std::nullopt;
+        uint64_t value;
+        try {
+            value = std::stoull(text.substr(a, b - a));
+        } catch (const std::exception &) {
+            return std::nullopt;     // 2^64 and more
+        }
+        if (count && *count != value)
+            return std::nullopt;     // a list of differing counts
+        count = value;
+        if (to == text.size())
+            return count;
+        from = to + 1;
+    }
 }
 
 Json::Value body_too_large_json(std::optional<uint64_t> content_length, uint64_t max_mb) {

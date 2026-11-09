@@ -388,7 +388,8 @@ deadline. `src/cli/traverse.cpp` `process_resolve_request`, `src/graph/traversal
 - **Strict validation.** Unknown keys, wrong types, out-of-range values and unsupported `schema_version` are
   rejected with a message naming the field; nothing is silently weakened. *H1:* every error text that quotes a
   client's string (a label, a member name, a graph name or path, a parameter, a predicate name, `release`,
-  `seed_id`) writes it whole when it is at most 1,024 bytes long, and otherwise as its first 1,024 bytes, cut on
+  `seed_id`, and the JSON reader's own "Duplicate key: '...'" and "'...' is not a number.") writes it whole when
+  it is at most 1,024 bytes long, and otherwise as its first 1,024 bytes, cut on
   a UTF-8 character boundary, followed by `... (N bytes)` (N its length) inside the quotes: `request: unknown
   field 'kkk...kkk... (5000 bytes)'`. The threshold is the name's own length, not the message's: a name of at
   most 1,024 bytes is quoted exactly as before, so a client matching "Label not found in the annotation:
@@ -502,22 +503,28 @@ deadline. `src/cli/traverse.cpp` `process_resolve_request`, `src/graph/traversal
   default) bounds the per-value part before the parse, and the counts of §10.3 (explicit labels, `extra`, table
   entries, seeds and seed lengths) are checked before anything of the body is copied. A strict-JSON body of
   B bytes and V values then holds outside every account at most, **per route** (measured on the H1 binary after
-  its review, 2026-11-08, macOS peak footprint above the idle, single-graph and multi-graph, one request and two
-  at once, at `--max-request-body-mb` 256 and 2; for `/traverse` Linux arm64 under a cgroup limit agreed within
-  1-15% on the binary before the review):
+  its review and again after its verification, 2026-11-08, macOS peak footprint above the idle, single-graph and
+  multi-graph, one request and two at once, at `--max-request-body-mb` 256 and 2; for `/traverse` Linux arm64
+  under a cgroup limit agreed within 1-15% on the binary before the review):
   - **`/traverse`** (and `POST /traverse/cancel`): **8 × B + 256 bytes × V + 16 MiB**. The transport's buffer and
     the route's copy of the body (2B: all a body refused at the count, or at a control character, holds),
     jsoncpp's tree (101 to 165 bytes per value measured, plus each string's bytes: a long string or sequence holds
     4B in all) and the copies of label names (the request's, a seed's dictionary and its checks: 4.5B for many
-    names, 6B for one huge name; an error text quotes at most 1 KiB of it, above). Measured at most 6.04 × B
-    (1,546 MiB at B = 256 MiB) and 41 MiB at B = 2 MiB, against 2.1 GiB and 96 MiB stated.
+    names, 6B for one huge name; an error text quotes at most 1 KiB of it, above; a number token no double holds,
+    which the JSON reader copies several times before its message, 7B). Measured at most 7.08 × B (1,812 MiB at
+    B = 256 MiB, that number token) and 41 MiB at B = 2 MiB, against 2.1 GiB and 96 MiB stated.
   - **`/resolve` and `/pattern`** on P pairs (P = 1 on a single-graph server): **8 × B + 256 bytes × V + 16 MiB
-    + P × (6 × B + 320 bytes × V)**. On a multi-graph server each pair's job holds its own copy of the parsed
-    request, and each pair's `/resolve` answer lists every label that pair does not hold, so a request's memory
-    grows with its pairs. Measured at B = 2 MiB on 1, 4 and 11 pairs: a `/resolve` of 262,141 labels 125, 326 and
-    791 MiB, a `/pattern` predicate of 10,000 names 21, 60 and 139 MiB; at B = 256 MiB on 1 and 4 pairs: 2,365 and
-    6,042 MiB (`/resolve`), 1,802 and 3,083 MiB (`/pattern`), at most 0.73 of the bound. On r237's 11 pairs at
-    B = 2 MiB that is at most 1.1 GiB for a body at the value count, 200 MiB for one of at most 10,000 values.
+    + P × (10 × B + 320 bytes × V)**. On a multi-graph server each pair's job holds its own copy of the parsed
+    request, and each pair's answer echoes the names it was sent (`/resolve` lists every label that pair does not
+    hold, `/pattern` its predicate), which the writer escapes: up to 3 bytes for each byte of a name (a 2-byte
+    UTF-8 character is written `\u00e9`, a 4-byte one as a surrogate pair; a raw control byte is refused, above),
+    and the text and the transport's copy of it are held at once, so a request's memory grows with its pairs, by
+    up to about 8 × B each. Measured *(verification of H1)* at B = 2 MiB on 1, 4 and 11 pairs, names of letters
+    and of 2-byte UTF-8: a `/resolve` of 262,141 labels 120, 322 and 787 MiB (190,640 UTF-8 labels: 89, 261 and
+    620 MiB), one name of 2 MiB in UTF-8 31, 74 and 202 MiB (`/pattern`: 33, 76 and 200 MiB); at B = 256 MiB on
+    1 and 4 pairs: up to 3,028 and 8,851 MiB (`/resolve`, UTF-8 labels) and 2,575 and 6,424 MiB (`/pattern`, a
+    UTF-8 name); at most 0.80 of the bound (the 2 MiB UTF-8 name on 11 pairs). On r237's 11 pairs at B = 2 MiB
+    that is at most 1.2 GiB for a body at the value count, about 290 MiB for one of at most 10,000 values.
   Two requests at once hold about twice one, so each route's concurrent requests (its slots) multiply it.
   `/search` and `/align` read their body without a count (the owner's decision): their parse holds about 51
   times the body (zeros), bounded by `--max-request-body-mb` alone.
@@ -3519,17 +3526,22 @@ search's routes, `POST /pattern` and `GET /pattern/capabilities`, are `SPEC-patt
   client still sends, never keeping it, until the client closes, 30 s pass or it has read the larger of 64 MiB
   and the limit, then closes: a client that sends its whole body before it reads gets the 413, one that waits for
   `100 Continue` gets it without sending the body; an upload still running after 30 s, or sending more than that,
-  is cut (a reset). What still gets no 413 (the library's reading of the header, unchanged): a `Content-Length`
-  that is not a plain decimal number below 2⁶⁴ — `abc`, `2^64` and more, and since H1 also `-1` and
-  `3145728junk`, which the library reads as 2⁶⁴ − 1 and 3,145,728 — is closed without a response (logged
-  "dropped, no byte count"); a header block longer than the limit is closed without a response; a chunk size near
-  2⁶⁴ wraps the library's sum, so that body gets no 413 and waits for the content timeout, its buffer still
-  capped by the limit. Of duplicate `Content-Length` fields the first counts (conflicting values are not
-  refused), and a `Content-Length` beside `Transfer-Encoding: chunked` counts (RFC 9112 says chunked wins: a
-  proxy in front should refuse such a request). Nothing of the request runs or is registered (no slot, an
-  id not held, no `usage`). The server logs it once per occurrence at warning level (`POST /traverse from
-  <address> refused 413: its body (<n> bytes | chunked) exceeds --max-request-body-mb N MiB`). The 413 is no new
-  limit: it replaces the closed connection of the existing one, on every route (`/search` and `/align` too).
+  is cut (a reset). A `Content-Length` is read as RFC 9110 §8.6 reads it: decimal digits (leading zeros allowed)
+  below 2⁶⁴, the optional whitespace around them (SP, HTAB) trimmed, and a comma-separated list of the same count
+  (`3145728, 3145728`) as that count; an over-limit one is answered 413 in each of these forms. What still gets no
+  413: a `Content-Length` that is no byte count is closed without a response — `abc` and 2⁶⁴ and more by the library
+  itself (at any limit), and since H1 `-1`, `3145728junk` and a list of differing counts whenever the library's
+  reading of them (2⁶⁴ − 1, 3,145,728, the first count) is above the limit (logged `POST /traverse from <address>
+  dropped without an answer: its Content-Length '-1' is no byte count`); below the limit the library's reading
+  stands, as before H1 (`100junk` is a body of 100 bytes, `100, 200` one of 100); a header block longer than the
+  limit is closed without a response; a chunk size near 2⁶⁴ wraps the library's sum, so that body gets no 413 and
+  waits for the content timeout, its buffer still capped by the limit. Of duplicate `Content-Length` fields the first
+  counts (conflicting values are not refused), and a `Content-Length` beside `Transfer-Encoding: chunked` counts (RFC
+  9112 says chunked wins: a proxy in front should refuse such a request). Nothing of the request runs or is
+  registered (no slot, an id not held, no `usage`). The server logs it once per occurrence at warning level (`POST
+  /traverse from <address> refused 413: its body (<n> bytes | chunked) exceeds --max-request-body-mb N MiB`). The 413
+  is no new limit: it replaces the closed connection of the existing one, on every route (`/search` and `/align`
+  too).
   `GET /capabilities`' `request_intake` states the limit and the 413's shape. The limit is in MiB of bytes on the
   wire (a body right at N MiB passes); it is not a cap on a pattern's length or a seed's (those have their own,
   above). **The budgets' maxima** *(feature level 4; R16, the owner's

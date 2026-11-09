@@ -3079,10 +3079,19 @@ class TestTraverseAPI(TestTraverseBase):
                 + [b'%x\r\n' % len(chunk) + chunk + b'\r\n'] * 40 + [b'0\r\n\r\n']))
             self.assertEqual(b'HTTP/1.1 413 Payload Too Large', status)
             self.assertEqual(self._body_too_large(None, 1), body)
-            # a Content-Length that is no plain decimal number is no byte count: closed without
-            # an answer (the library reads "-1" as 2^64 - 1 and "3145728junk" as 3145728), as
-            # one the library cannot read at all ("abc")
-            for value in (b'-1', b'3145728junk', b'abc'):
+            # what HTTP reads as a byte count (RFC 9110 §8.6) is one: whitespace around it, leading
+            # zeros, a list of the same count
+            for value in (b' 3145728 ', b'3145728\t', b'\t3145728', b'000000000000003145728',
+                          b'3145728, 3145728'):
+                status, _, body = answer_of(self._exchange(port, [
+                    b'POST /traverse HTTP/1.1\r\nHost: x\r\nContent-Length: ' + value
+                    + b'\r\n\r\n']))
+                self.assertEqual(b'HTTP/1.1 413 Payload Too Large', status, value)
+                self.assertEqual(self._body_too_large(3145728, 1), body, value)
+            # one that is no byte count is closed without an answer (the library reads "-1" as
+            # 2^64 - 1 and "3145728junk" as 3145728), as one the library cannot read at all
+            # ("abc"); so is a list of differing counts
+            for value in (b'-1', b'3145728junk', b'abc', b'3145728, 3145729'):
                 self.assertEqual(b'', self._exchange(port, [
                     b'POST /traverse HTTP/1.1\r\nHost: x\r\nContent-Length: ' + value
                     + b'\r\n\r\n']), value)
@@ -3122,11 +3131,13 @@ class TestTraverseAPI(TestTraverseBase):
             text = f.read()
         self.assertIn('[Server] Maximum request body: 1 MiB', text)
         refused = [line for line in text.splitlines() if ' refused 413: its body (' in line]
-        self.assertEqual(8, len(refused), text[-3000:])
-        # the two Content-Lengths that are no byte count, stated as dropped ("abc": the
+        self.assertEqual(13, len(refused), text[-3000:])
+        # the three Content-Lengths that are no byte count, stated as dropped ("abc": the
         # library's protocol error)
-        dropped = [line for line in text.splitlines() if ' dropped, no byte count: ' in line]
-        self.assertEqual(2, len(dropped), text[-3000:])
+        dropped = [line for line in text.splitlines()
+                   if ' dropped without an answer: its Content-Length ' in line]
+        self.assertEqual(3, len(dropped), text[-3000:])
+        self.assertTrue(any("Content-Length '-1' is no byte count" in line for line in dropped))
         for line in refused:
             self.assertIn('[warning]', line)
             self.assertIn('exceeds --max-request-body-mb 1 MiB', line)
@@ -3134,6 +3145,9 @@ class TestTraverseAPI(TestTraverseBase):
                             in line for line in refused), refused)
         self.assertTrue(any('POST /search from 127.0.0.1 refused 413: its body (%d bytes)'
                             % len(oversized) in line for line in refused), refused)
+        # the forms HTTP reads as a count are logged as that count (the five of 3,145,728)
+        self.assertEqual(5, sum('refused 413: its body (3145728 bytes)' in line
+                                for line in refused), refused)
         self.assertNotIn('without a response', text)
         # a value out of range refuses to start
         for value in ('-1', '1048577', '1.5', 'x'):
@@ -3231,6 +3245,17 @@ class TestTraverseAPI(TestTraverseBase):
             self.assertLess(len(ret.content), 2048, route)
             ret = requests.post(f'{url}/{route}', data=json.dumps(dict(body, **{'k' * 1024: 1})))
             self.assertEqual(prefix + 'k' * 1024 + "'", ret.json()['error'], route)
+            # jsoncpp's own quotes too: a duplicated member name, a number no double holds
+            name = '\u00e9' * 1500
+            text = json.dumps(body, ensure_ascii=False)[:-1]
+            for raw, quote in ((text + ', "' + name + '": 0, "' + name + '": 1}',
+                                "Duplicate key: '" + '\u00e9' * 512 + "... (3000 bytes)'"),
+                               (text + ', "x": ' + '1' * 3000 + '}',
+                                "'" + '1' * 1024 + "... (3000 bytes)' is not a number.")):
+                ret = requests.post(f'{url}/{route}', data=raw.encode())
+                self.assertEqual(400, ret.status_code, route)
+                self.assertIn(quote, ret.json()['error'], route)
+                self.assertLess(len(ret.content), 4096, route)
         # a label the index does not hold
         ret = requests.post(url + '/traverse', data=json.dumps(
             dict(base, seeds=[{'sequence': self.element, 'labels': ['x' * 3000]}])))
@@ -3245,6 +3270,18 @@ class TestTraverseAPI(TestTraverseBase):
         self.assertTrue(ret.json()['error'].startswith(
             'request: not JSON: a control character (byte 0x02) inside a string at byte 23'),
             ret.json()['error'])
+        # and jsoncpp's own quotes, clipped as on the other routes
+        name = 'é' * 1500
+        head = '{"patterns": [{"id": "a", "dna": "ACGT"}], '
+        for raw, quote in ((head + '"' + name + '": 0, "' + name + '": 1}',
+                            "Duplicate key: '" + 'é' * 512 + "... (3000 bytes)'"),
+                           (head + '"x": ' + '1' * 3000 + '}',
+                            "'" + '1' * 1024 + "... (3000 bytes)' is not a number.")):
+            ret = requests.post(url + '/pattern', data=raw.encode())
+            self.assertEqual(400, ret.status_code)
+            self.assertEqual('invalid_request', ret.json()['code'])
+            self.assertIn(quote, ret.json()['error'])
+            self.assertLess(len(ret.content), 4096)
 
     def test_api_traverse_count_caps(self):
         """/traverse's counts, checked before anything of the request is copied (H1; SPEC

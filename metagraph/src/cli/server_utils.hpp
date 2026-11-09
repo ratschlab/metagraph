@@ -77,11 +77,11 @@ constexpr uint64_t kBodyTooLargeDrainBytes = 64ull << 20;
  * what the client still sends, until the client closes, kBodyTooLargeDrainS pass (the
  * connection's own timer) or the larger of kBodyTooLargeDrainBytes and the cap is read, so that
  * a client that sends its whole body before it reads finds the 413 rather than a reset. A
- * Content-Length that is no plain decimal number ("-1", "3145728junk", which the library's
- * std::stoull reads as 2^64 - 1 and 3145728) is no byte count: the connection is closed without
- * an answer (false), as the library drops one it cannot read at all. Every step runs under the
- * library's handler runner, so a shutdown ends it. Called from on_error only, with no operation
- * of the library pending on the connection.
+ * Content-Length that content_length_value reads as no byte count ("-1", "3145728junk", which
+ * the library's std::stoull reads as 2^64 - 1 and 3145728, or a list of differing counts) is
+ * closed without an answer (false), as the library drops one it cannot read at all. Every step
+ * runs under the library's handler runner, so a shutdown ends it. Called from on_error only,
+ * with no operation of the library pending on the connection.
  */
 bool refuse_body_too_large(const std::shared_ptr<HttpServer::Request> &request,
                            uint64_t max_mb);

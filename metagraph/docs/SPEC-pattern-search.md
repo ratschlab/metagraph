@@ -4417,7 +4417,8 @@ the other pairs.
   in [0, 1 048 576], 0 = unlimited). A request with a longer body — a `Content-Length` above it, or a chunked body
   growing past it — is refused before any route runs, on every route: 413 `body_too_large` (§6; H1, train 3:
   before, the HTTP library closed the connection without a status), from the `Content-Length` before the body
-  is read; the server logs it at warning level (`SPEC-labeled-traversal-core.md` §10.3, the caps). A client that
+  is read (a `Content-Length` that is no byte count is closed without a response, `SPEC-labeled-traversal-core.md`
+  §10.3); the server logs it at warning level (`SPEC-labeled-traversal-core.md` §10.3, the caps). A client that
   may send large bodies reads the limit here before it sends, or from `request_intake` (H1: the limit, the value
   count of `--max-request-json-values` and the shapes of both refusals; H3: `max_connections`, the cap on the
   connections held open; at the top level on a single-graph server, in the `multigraph` block on a multi-graph

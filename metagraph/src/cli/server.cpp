@@ -2972,13 +2972,23 @@ int run_server(Config *config) {
             const auto it = request->header.find("Content-Length");
             const std::string address = request->remote_endpoint().address().to_string();
             const bool answered = refuse_body_too_large(request, config->max_request_body_mb);
-            logger->warn("[Server] {} {} from {} {}: its body ({}) exceeds "
-                         "--max-request-body-mb {} MiB",
-                         request->method, ::utils::clip_for_message(request->path, 256),
-                         address, answered ? "refused 413" : "dropped, no byte count",
-                         it != request->header.end()
-                             ? ::utils::clip_for_message(it->second, 64) + " bytes" : "chunked",
-                         config->max_request_body_mb);
+            const std::string length = it != request->header.end()
+                    ? ::utils::clip_for_message(it->second, 64) : std::string();
+            if (answered) {
+                // the count as the 413 states it (content_length_value: " 3145728 " is 3145728)
+                const auto count = it != request->header.end()
+                        ? content_length_value(it->second) : std::nullopt;
+                logger->warn("[Server] {} {} from {} refused 413: its body ({}) exceeds "
+                             "--max-request-body-mb {} MiB",
+                             request->method, ::utils::clip_for_message(request->path, 256),
+                             address, count ? std::to_string(*count) + " bytes" : "chunked",
+                             config->max_request_body_mb);
+            } else {
+                logger->warn("[Server] {} {} from {} dropped without an answer: its "
+                             "Content-Length '{}' is no byte count",
+                             request->method, ::utils::clip_for_message(request->path, 256),
+                             address, length);
+            }
             return;
         }
         // Handle errors here, ignoring a few trivial ones.

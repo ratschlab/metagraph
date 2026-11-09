@@ -508,3 +508,50 @@ TEST(ServerRequestIntake, QuotedClientStringsAreClipped) {
                   o.finish();
               }));
 }
+
+// jsoncpp's own messages that quote the client's text are clipped by the same rule: the quoted
+// text whole up to 1,024 bytes of its own, else its first 1,024 bytes and "... (N bytes)"
+TEST(ServerRequestIntake, TheReadersQuotesAreClipped) {
+    auto refusal = [](const std::string &text) {
+        return refusal_of([&] { parse_strict_json<RefuseRequest>(text, "P: "); });
+    };
+    const std::string k(3000, 'k');
+    const std::string duplicate = refusal("{\"" + k + "\": 0, \"" + k + "\": 1}");
+    EXPECT_NE(std::string::npos,
+              duplicate.find("Duplicate key: '" + std::string(1024, 'k') + "... (3000 bytes)'"))
+            << duplicate.substr(0, 200);
+    EXPECT_LT(duplicate.size(), 1200u);
+    // a name with a quote inside: its closing quote is the message's last
+    const std::string quoted = "a'" + std::string(2000, 'q');
+    EXPECT_NE(std::string::npos,
+              refusal("{\"" + quoted + "\": 0, \"" + quoted + "\": 1}")
+                      .find("Duplicate key: '" + quoted.substr(0, 1024) + "... (2002 bytes)'"));
+    // short: whole, as before
+    EXPECT_NE(std::string::npos,
+              refusal("{\"" + std::string(1024, 'k') + "\": 0, \"" + std::string(1024, 'k')
+                      + "\": 1}").find("Duplicate key: '" + std::string(1024, 'k') + "'\n"));
+    // a number token no double holds
+    const std::string number = refusal("[" + std::string(3000, '1') + "]");
+    EXPECT_NE(std::string::npos,
+              number.find("'" + std::string(1024, '1') + "... (3000 bytes)' is not a number."))
+            << number.substr(0, 200);
+    EXPECT_EQ("x", clip_reader_quotes("x"));
+    EXPECT_EQ("'1e' is not a number.", clip_reader_quotes("'1e' is not a number."));
+}
+
+// A Content-Length as a byte count (RFC 9110 §8.6): digits with leading zeros, the optional
+// whitespace trimmed, a list of identical counts; nothing else
+TEST(ServerRequestIntake, ContentLengthValues) {
+    for (const auto &[text, value] : std::vector<std::pair<std::string, uint64_t>> {
+             { "3145728", 3145728 }, { " 3145728", 3145728 }, { "3145728 ", 3145728 },
+             { "\t3145728\t", 3145728 }, { "000000000000003145728", 3145728 },
+             { "3145728, 3145728", 3145728 }, { "3145728,3145728 ,\t3145728", 3145728 },
+             { "0", 0 }, { "000", 0 }, { "18446744073709551615", 18446744073709551615ull } }) {
+        EXPECT_EQ(std::optional<uint64_t>(value), content_length_value(text)) << text;
+    }
+    for (const std::string text : { "", " ", "-1", "+1", "3145728junk", "abc", "1 2", "1, 2",
+                                    "1,", ",1", "1,,1", "0x10", "18446744073709551616",
+                                    "99999999999999999999999" }) {
+        EXPECT_EQ(std::nullopt, content_length_value(text)) << text;
+    }
+}
