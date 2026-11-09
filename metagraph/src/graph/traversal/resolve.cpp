@@ -152,8 +152,6 @@ SupportProfile resolve_support(const LabelOracle &oracle,
         size_t total = 0;
         auto top = oracle.anno_graph().get_top_label_signatures(
                 query, options.discover_max_labels, 0.0, 0.0, &total, headers);
-        if (total > options.discover_max_labels)
-            profile.labels_truncated = LabelTruncation { options.discover_max_labels, total };
         for (const auto &[name, count, presence] : top) {
             // a name /traverse would refuse as ambiguous (a column and a header, or the
             // header of several records) is left out, so that every label can be resubmitted
@@ -172,6 +170,9 @@ SupportProfile resolve_support(const LabelOracle &oracle,
             refs.push_back(std::move(ref));
             support.push_back(std::move(found));
         }
+        // kept: the labels returned, after the ambiguous ones are left out
+        if (total > options.discover_max_labels)
+            profile.labels_truncated = LabelTruncation { refs.size(), total };
     }
 
     for (LabelId l = 0; l < refs.size(); ++l) {
