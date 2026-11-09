@@ -182,6 +182,14 @@ SupportProfile resolve_support(const LabelOracle &oracle,
         lp.runs = std::move(support[l].runs);
         profile.labels.push_back(std::move(lp));
     }
+    // discovered labels, most supported first: the ranking only sorts when it cuts the list
+    if (options.discover) {
+        std::sort(profile.labels.begin(), profile.labels.end(),
+                  [](const LabelProfile &a, const LabelProfile &b) {
+                      return std::make_tuple(b.kmers_supported, a.label.column, a.label.seq_id)
+                           < std::make_tuple(a.kmers_supported, b.label.column, b.label.seq_id);
+                  });
+    }
     return profile;
 }
 
