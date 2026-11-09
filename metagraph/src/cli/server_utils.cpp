@@ -1376,45 +1376,140 @@ ColumnLabelList::ColumnLabelList(std::vector<const std::vector<std::string> *> p
     }
 }
 
-size_t append_json_string(std::string *out, const std::string &label) {
-    // what jsoncpp quotes as it is (isAnyCharRequiredQuoting): printable ASCII but `"` and `\`
-    bool plain = true;
+namespace {
+
+// What jsoncpp quotes as it is (isAnyCharRequiredQuoting): printable ASCII but `"` and `\`
+bool plain_json_string(const std::string &label) {
     for (char c : label) {
         const auto u = static_cast<unsigned char>(c);
-        if (u < 0x20 || u >= 0x80 || c == '"' || c == '\\') {
-            plain = false;
-            break;
+        if (u < 0x20 || u >= 0x80 || c == '"' || c == '\\')
+            return false;
+    }
+    return true;
+}
+
+// The code point jsoncpp's writer reads at |*s| (its utf8ToCodepoint, byte for byte: a lead byte
+// is taken with as many following bytes as it announces, whatever they are, and anything it
+// cannot read is U+FFFD), |*s| left on the code point's last byte
+unsigned int jsoncpp_codepoint(const char *&s, const char *e) {
+    constexpr unsigned int kReplacement = 0xFFFD;
+    const unsigned int b0 = static_cast<unsigned char>(*s);
+    auto cont = [&](int i) { return static_cast<unsigned int>(s[i]) & 0x3F; };
+    if (b0 < 0x80)
+        return b0;
+    if (b0 < 0xE0) {
+        if (e - s < 2)
+            return kReplacement;
+        const unsigned int c = ((b0 & 0x1F) << 6) | cont(1);
+        s += 1;
+        return c < 0x80 ? kReplacement : c;
+    }
+    if (b0 < 0xF0) {
+        if (e - s < 3)
+            return kReplacement;
+        const unsigned int c = ((b0 & 0x0F) << 12) | (cont(1) << 6) | cont(2);
+        s += 2;
+        if (c >= 0xD800 && c <= 0xDFFF)
+            return kReplacement;
+        return c < 0x800 ? kReplacement : c;
+    }
+    if (b0 < 0xF8) {
+        if (e - s < 4)
+            return kReplacement;
+        const unsigned int c = ((b0 & 0x07) << 18) | (cont(1) << 12) | (cont(2) << 6) | cont(3);
+        s += 3;
+        return c < 0x10000 ? kReplacement : c;
+    }
+    return kReplacement;
+}
+
+// The JSON string jsoncpp writes for |label| (valueToQuotedStringN without emitUTF8, as
+// json_text and Json::writeString write it), passed piece by piece to |emit|(data, size):
+// quoted, `"` `\` \b \f \n \r \t as two characters, every other code point outside
+// [0x20, 0x7F] as \uxxxx (a surrogate pair beyond the BMP). Nothing is built: |emit| counts
+// the length or appends the text
+template <class Emit>
+void jsoncpp_json_string(const std::string &label, Emit &&emit) {
+    emit("\"", 1);
+    if (plain_json_string(label)) {
+        emit(label.data(), label.size());
+        emit("\"", 1);
+        return;
+    }
+    static const char kHex[] = "0123456789abcdef";
+    auto u16 = [&](unsigned int x) {
+        const char t[6] = { '\\', 'u', kHex[(x >> 12) & 0xF], kHex[(x >> 8) & 0xF],
+                            kHex[(x >> 4) & 0xF], kHex[x & 0xF] };
+        emit(t, 6);
+    };
+    const char *const end = label.data() + label.size();
+    for (const char *c = label.data(); c != end; ++c) {
+        switch (*c) {
+            case '"': emit("\\\"", 2); break;
+            case '\\': emit("\\\\", 2); break;
+            case '\b': emit("\\b", 2); break;
+            case '\f': emit("\\f", 2); break;
+            case '\n': emit("\\n", 2); break;
+            case '\r': emit("\\r", 2); break;
+            case '\t': emit("\\t", 2); break;
+            default: {
+                unsigned int cp = jsoncpp_codepoint(c, end);
+                if (cp >= 0x20 && cp <= 0x7F) {
+                    const char ch = static_cast<char>(cp);
+                    emit(&ch, 1);
+                } else if (cp < 0x10000) {
+                    u16(cp);
+                } else {
+                    cp -= 0x10000;
+                    u16((cp >> 10) + 0xD800);
+                    u16((cp & 0x3FF) + 0xDC00);
+                }
+            }
         }
     }
-    if (plain) {
-        out->push_back('"');
-        out->append(label);
-        out->push_back('"');
+    emit("\"", 1);
+}
+
+} // namespace
+
+size_t json_string_length(const std::string &label) {
+    if (plain_json_string(label))
         return label.size() + 2;
-    }
-    // else jsoncpp's own escaping, as json_text writes the label (default settings: no UTF-8
-    // emitted, every non-ASCII code point escaped)
-    const std::string quoted = Json::writeString(Json::StreamWriterBuilder(), Json::Value(label));
-    out->append(quoted);
-    return quoted.size();
+    size_t n = 0;
+    jsoncpp_json_string(label, [&n](const char *, size_t k) { n += k; });
+    return n;
+}
+
+size_t append_json_string(std::string *out, const std::string &label) {
+    const size_t before = out->size();
+    jsoncpp_json_string(label, [out](const char *data, size_t k) { out->append(data, k); });
+    return out->size() - before;
 }
 
 std::optional<std::string> column_labels_text(const ColumnLabelList &list, uint64_t max_bytes) {
-    // json_text's styled array: "[", then each element on its own line after a tab, the
-    // elements separated by ",", then "\n]"; an empty array "[]"
-    std::string out = "[";
+    // GPT review 6 #13: the labels' JSON strings are measured first, nothing built, so that a
+    // refusal allocates nothing and an answer is built at its final size
     uint64_t bytes = 0;
     bool over = false;
-    bool first = true;
     list.visit_from(0, [&](const std::string &label) {
-        out.append(first ? "\n\t" : ",\n\t");
-        first = false;
-        bytes += append_json_string(&out, label);
+        bytes += json_string_length(label);
         over = max_bytes && bytes > max_bytes;
         return !over;
     });
     if (over)
         return std::nullopt;
+    // json_text's styled array: "[", then each element on its own line after a tab, the
+    // elements separated by ",", then "\n]"; an empty array "[]"
+    std::string out;
+    out.reserve(bytes + 3 * list.total() + 2);
+    out.push_back('[');
+    bool first = true;
+    list.visit_from(0, [&](const std::string &label) {
+        out.append(first ? "\n\t" : ",\n\t");
+        first = false;
+        append_json_string(&out, label);
+        return true;
+    });
     out.append(list.total() ? "\n]" : "]");
     return out;
 }
@@ -1479,15 +1574,15 @@ std::string column_labels_page_text(const ColumnLabelList &list, const ColumnLab
     list.visit_from(page.offset, [&](const std::string &label) {
         if (page.limit && count >= *page.limit)
             return false;
-        const size_t before = out.size();
+        // measured before it is written (GPT review 6 #13: a label that does not fit is never
+        // built); at least one label a page, so that paging moves on past a label longer than
+        // the cap
+        const size_t n = json_string_length(label);
+        if (count && max_bytes && bytes + n > max_bytes)
+            return false;
         if (count)
             out.push_back(',');
-        const size_t n = append_json_string(&out, label);
-        // at least one label a page, so that paging moves on past a label longer than the cap
-        if (count && max_bytes && bytes + n > max_bytes) {
-            out.resize(before);
-            return false;
-        }
+        append_json_string(&out, label);
         bytes += n;
         ++count;
         return true;

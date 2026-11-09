@@ -598,14 +598,18 @@ class ColumnLabelList {
 };
 
 // Appends to |out| the JSON string jsoncpp writes for |label| (json_text's: quoted, `"` `\` and
-// control characters escaped, every non-ASCII code point as \uXXXX); returns its length
+// control characters escaped, every non-ASCII code point as \uXXXX), byte for byte, written in
+// place (no copy of it is built); returns its length
 size_t append_json_string(std::string *out, const std::string &label);
+// The length of that JSON string, computed without building it (GPT review 6 #13: a label is
+// measured before it is written, so one that does not fit allocates nothing)
+size_t json_string_length(const std::string &label);
 
 /**
  * GET /column_labels without parameters: |list| as the array json_text writes it (styled, one
  * label per line, byte for byte), or nullopt when the labels' JSON strings (quotes and escapes
- * counted) sum to more than |max_bytes| (0: unlimited) -- decided while writing, so a refusal
- * costs at most |max_bytes| of text.
+ * counted) sum to more than |max_bytes| (0: unlimited) -- measured before anything is written,
+ * so a refusal allocates nothing and an answer is built at its final size.
  */
 std::optional<std::string> column_labels_text(const ColumnLabelList &list, uint64_t max_bytes);
 
@@ -629,7 +633,10 @@ ColumnLabelsPage column_labels_parameters(
  * The page of GET /column_labels?offset=&limit=, compact, members in byte order:
  * {"labels": [...], "next_offset": n | null, "offset": o, "total": t}. The labels from position
  * o on, at most |page.limit| of them, and at most as many as their JSON strings fit in
- * |max_bytes| (0: unlimited) -- at least one when o < t, so that paging moves on;
+ * |max_bytes| (0: unlimited; each measured before it is written, so a label that does not fit
+ * is never built) -- at least one when o < t, so that paging moves on (a first label longer
+ * than the cap is the page alone: a page's labels take at most max(|max_bytes|, the longest
+ * label's JSON string));
  * next_offset is o + the labels returned, null at the end (an offset at or past the end:
  * no labels).
  */

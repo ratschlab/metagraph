@@ -7,6 +7,7 @@
 #include <future>
 #include <memory>
 #include <optional>
+#include <random>
 #include <string>
 #include <thread>
 #include <utility>
@@ -493,6 +494,99 @@ TEST(ServerRequestColumnLabels, Pages) {
 
 // The parameters: none (unpaged), offset and limit (paged), each refused when unknown,
 // repeated or not an integer in its range
+// GPT review 6 #13: a label's JSON string is written in place and measured without being built,
+// both byte for byte jsoncpp's (Json::writeString, as json_text writes it): escapes, control
+// characters, every non-ASCII code point as \uxxxx, and whatever jsoncpp makes of bytes that are
+// no UTF-8 (truncated, overlong, surrogates, beyond U+10FFFF, stray continuation bytes)
+TEST(ServerRequestColumnLabels, TheJsonStringIsJsoncppsByteForByte) {
+    auto jsoncpp = [](const std::string &label) {
+        return Json::writeString(Json::StreamWriterBuilder(), Json::Value(label));
+    };
+    auto check = [&](const std::string &label) {
+        std::string out = "x";
+        const size_t n = append_json_string(&out, label);
+        const std::string want = jsoncpp(label);
+        ASSERT_EQ("x" + want, out) << ::testing::PrintToString(label);
+        ASSERT_EQ(want.size(), n);
+        ASSERT_EQ(want.size(), json_string_length(label)) << ::testing::PrintToString(label);
+    };
+    for (const std::string &label : {
+             std::string(), std::string("a"), std::string("quote\"d back\\slash"),
+             std::string("\b\f\n\r\t\x01\x1f\x7f"), std::string("nul\0x", 5),
+             std::string("caf\xc3\xa9"), std::string("\xe2\x82\xac"), std::string("\xf0\x9f\xa7\xac"),
+             std::string("\xc3"), std::string("\xe2\x82"), std::string("\xf0\x9f\xa7"),
+             std::string("\xc0\x80"), std::string("\xe0\x80\x80"), std::string("\xf0\x80\x80\x80"),
+             std::string("\xed\xa0\x80"), std::string("\xf4\x90\x80\x80"), std::string("\xf8\x88"),
+             std::string("\xff\xfe"), std::string("\x80" "abc"), std::string("a\xc3(b"),
+             std::string("\xef\xbf\xbf"), std::string("\xf4\x8f\xbf\xbf") }) {
+        check(label);
+    }
+    // random bytes, and random mixes of the pieces above
+    std::mt19937 rng(20261109);
+    const std::vector<std::string> pieces = { "a", "\"", "\\", "\n", "\x01", "\x7f", "\xc3\xa9",
+                                              "\xe2\x82\xac", "\xf0\x9f\xa7\xac", "\xc3", "\xe2",
+                                              "\xf0", "\x80", "\xff", "\xed\xa0\x80", "/" };
+    for (int i = 0; i < 20000; ++i) {
+        std::string label;
+        const int n = static_cast<int>(rng() % 12);
+        for (int j = 0; j < n; ++j) {
+            if (i % 2) {
+                label.push_back(static_cast<char>(rng() % 256));
+            } else {
+                label += pieces[rng() % pieces.size()];
+            }
+        }
+        check(label);
+    }
+}
+
+// GPT review 6 #13: a label that does not fit is measured, never built. A page stops before it
+// (the answer's buffer stays the page's size: before, the label was appended, 6 bytes per control
+// byte, and cut off again, its capacity kept), the unpaged list is refused before anything is
+// written; a label that fits exactly is answered, one byte more is not; a first label longer
+// than the cap is a page alone
+TEST(ServerRequestColumnLabels, ALabelThatDoesNotFitIsNeverBuilt) {
+    constexpr uint64_t kCap = 1 << 20;
+    const std::vector<std::string> labels = { "a", std::string(kCap / 2, '\x01') };
+    ASSERT_EQ(6 * (kCap / 2) + 2, json_string_length(labels[1]));
+    const ColumnLabelList list({ &labels });
+    ColumnLabelsPage p;
+    p.paged = true;
+    const std::string first = column_labels_page_text(list, p, kCap);
+    EXPECT_EQ(R"x({"labels":["a"],"next_offset":1,"offset":0,"total":2})x", first);
+    EXPECT_LT(first.capacity(), 4096u);
+    EXPECT_FALSE(column_labels_text(list, kCap));
+    // alone over the cap: the page of it alone, whole
+    p.offset = 1;
+    const std::string alone = column_labels_page_text(list, p, kCap);
+    EXPECT_EQ(6 * (kCap / 2) + 2, alone.size() - std::string(
+            R"x({"labels":[],"next_offset":null,"offset":1,"total":2})x").size());
+    // an index label near the cap: kCap - 2 characters fit exactly (quotes counted), one more not
+    for (uint64_t size : { kCap - 3, kCap - 2, kCap - 1 }) {
+        const std::vector<std::string> near = { std::string(size, 'x') };
+        const ColumnLabelList one({ &near });
+        const std::optional<std::string> text = column_labels_text(one, kCap);
+        EXPECT_EQ(size + 2 <= kCap, text.has_value()) << size;
+        if (text) {
+            EXPECT_EQ(json_text(array_of(near), false), *text);
+            // built at its final size
+            EXPECT_LE(text->capacity(), text->size() + 32);
+        }
+        const std::vector<std::string> two = { "b", std::string(size, 'x') };
+        const ColumnLabelList pair({ &two });
+        ColumnLabelsPage q;
+        q.paged = true;
+        // "b" takes 3 bytes: the long label fits beside it only when 3 + size + 2 <= kCap
+        const std::string page = column_labels_page_text(pair, q, kCap);
+        if (3 + size + 2 <= kCap) {
+            EXPECT_EQ(R"x({"labels":["b",")x" + two[1] + R"x("],"next_offset":null,"offset":0,)x"
+                      R"x("total":2})x", page);
+        } else {
+            EXPECT_EQ(R"x({"labels":["b"],"next_offset":1,"offset":0,"total":2})x", page) << size;
+        }
+    }
+}
+
 TEST(ServerRequestColumnLabels, Parameters) {
     using Query = std::vector<std::pair<std::string, std::string>>;
     EXPECT_FALSE(column_labels_parameters({}).paged);

@@ -3943,20 +3943,26 @@ search's routes, `POST /pattern` and `GET /pattern/capabilities`, are `SPEC-patt
     unlimited): then **400** `{"error": "the column labels (<t> labels) take more than <m> bytes of JSON strings,
     more than one answer holds (--max-column-labels-bytes): page through them with GET
     /column_labels?offset=0&limit=<n>, following next_offset", "code": "column_labels_too_large",
-    "max_column_labels_bytes": <m>, "total": <t>}`, written `error` first. The text stops at the cap, so a
-    refusal costs at most that.
+    "max_column_labels_bytes": <m>, "total": <t>}`, written `error` first. The labels' JSON strings are
+    measured before anything is written *(GPT review 6 #13: the text was appended, then cut at the cap)*, so a
+    refusal builds no text at all, and an answer is built at its final size.
   - With `offset` (an integer in [0, 2⁵³ − 1]) or `limit` (in [1, 2⁵³ − 1]) or both: a page, compact,
     `{"labels": [...], "next_offset": n | null, "offset": o, "total": t}` — the labels from position o, at most
     `limit` of them and at most as many as fit `--max-column-labels-bytes`, at least one while o < t (a label
-    longer than the cap alone); `next_offset` o + the labels returned, `null` at the end; an offset at or past
+    longer than the cap alone: a page's labels take at most max(M, the longest label's JSON string)), each
+    label measured before it is written, so the one that does not fit is never built *(GPT review 6 #13:
+    before, it was appended and cut off again, its buffer kept: a 16 MiB label of control bytes, 6 bytes each
+    escaped, held 316 MiB for a 53-byte page)*; `next_offset` o + the labels returned, `null` at the end; an offset at or past
     the end gives no labels. An unknown, repeated or malformed parameter is a 400 `{"error"}` without a code, as
     the probes' parameter faults (`Bad request: unknown parameter '<key>' of GET /column_labels (offset,
     limit)`, `Bad request: the parameter '<key>' is given twice`, `Bad request: GET /column_labels: 'offset' must
     be an integer in [0, 9007199254740991], got '<value>'`, likewise `'limit'`; a key or value longer than 1 KiB
     quoted clipped, as every error text quotes a client's string).
   - The 503 while a single index loads comes first, as before. The list is written as text from the label
-    vectors, without a copy of them and without a JSON tree: an answer holds at most 2.5 M + 64 bytes of text
-    (M the cap; at least 2 bytes a label), at most three copies of it at once (the text, a compressed copy, the
+    vectors, without a copy of them and without a JSON tree (a label's escapes written in place, as jsoncpp
+    writes them, byte for byte): an answer holds at most 2.5 M + 64 bytes of text (M the cap; at least 2 bytes
+    a label; a page of one label longer than M, that label's JSON string + 64), at most three copies of it at
+    once (the text, a compressed copy, the
     transport's), so at most 120 MiB at the default; the time is that of finding the offset's pair (a binary
     search) and writing the page.
   - Stated by `GET /capabilities` as `column_labels: {"max_column_labels_bytes", "paging": ["limit", "offset"],
