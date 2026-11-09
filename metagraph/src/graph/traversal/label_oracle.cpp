@@ -6,6 +6,7 @@
 #include "graph/annotated_dbg.hpp"
 #include "graph/representation/canonical_dbg.hpp"
 #include "annotation/coord_to_header.hpp"
+#include "annotation/binary_matrix/row_diff/row_diff.hpp"
 #include "common/logger.hpp"
 #include "common/unix_tools.hpp"
 
@@ -45,6 +46,7 @@ LabelOracle::LabelOracle(const AnnotatedDBG &anno_graph,
     // get_matrix() may lock and flush (ColumnCompressed): call it once per request
     matrix_ = &anno_graph_.get_annotator().get_matrix();
     tuples_ = dynamic_cast<const MultiIntMatrix*>(matrix_);
+    row_diff_ = dynamic_cast<const annot::matrix::IRowDiff*>(matrix_);
     coord_to_header_ = coord_to_header_override ? coord_to_header_override
                                                 : anno_graph_.get_coord_to_header();
     if (coord_to_header_ && !tuples_) {
@@ -152,20 +154,26 @@ LabelRef LabelOracle::resolve_label(const std::string &name) const {
 }
 
 std::vector<BinaryMatrix::SetBitPositions>
-LabelOracle::get_rows(const std::vector<Row> &rows) const {
+LabelOracle::get_rows(const std::vector<Row> &rows,
+                      annot::matrix::RowDiffCache<BinaryMatrix::SetBitPositions> *cache) const {
     Timer timer;
-    auto result = matrix_->get_rows(rows);
+    std::vector<BinaryMatrix::SetBitPositions> result;
+    if (!cache || !row_diff_ || !row_diff_->get_rows_cached(rows, *cache, &result))
+        result = matrix_->get_rows(rows);
     counters_.rows_fetched += rows.size();
     counters_.fetch_seconds += timer.elapsed();
     return result;
 }
 
 std::vector<MultiIntMatrix::RowTuples>
-LabelOracle::get_row_tuples(const std::vector<Row> &rows) const {
+LabelOracle::get_row_tuples(const std::vector<Row> &rows,
+                            annot::matrix::RowDiffCache<MultiIntMatrix::RowTuples> *cache) const {
     if (!tuples_)
         throw std::logic_error("The annotation has no coordinates");
     Timer timer;
-    auto result = tuples_->get_row_tuples(rows);
+    std::vector<MultiIntMatrix::RowTuples> result;
+    if (!cache || !row_diff_ || !row_diff_->get_row_tuples_cached(rows, *cache, &result))
+        result = tuples_->get_row_tuples(rows);
     counters_.tuple_rows_fetched += rows.size();
     counters_.fetch_seconds += timer.elapsed();
     return result;
@@ -199,7 +207,9 @@ LabelQuery::LabelQuery(const LabelOracle &oracle,
         std::sort(it.value().begin(), it.value().end(),
                   [](const HeaderRange &a, const HeaderRange &b) { return a.first < b.first; });
     }
-    tuples_ = !header_ranges_.empty();
+    // A row-diff coordinate annotation decodes tuple rows for rows too: reading them lets
+    // the decoded rows be kept (RowDiffCache) for column labels as well.
+    tuples_ = !header_ranges_.empty() || (oracle_.has_coordinates() && oracle_.is_row_diff());
 }
 
 void LabelQuery::hits_from_row(const BinaryMatrix::SetBitPositions &row, NodeHits *hits) const {
@@ -232,7 +242,7 @@ void LabelQuery::hits_from_tuples(const MultiIntMatrix::RowTuples &row, NodeHits
 }
 
 void LabelQuery::read_hits(const std::vector<node_index> &keys,
-                           tsl::hopscotch_map<node_index, NodeHits> *out) const {
+                           tsl::hopscotch_map<node_index, NodeHits> *out) {
     if (keys.empty())
         return;
     std::vector<Row> rows;
@@ -241,12 +251,12 @@ void LabelQuery::read_hits(const std::vector<node_index> &keys,
         rows.push_back(AnnotatedDBG::graph_to_anno_index(key));
     }
     if (tuples_) {
-        auto tuple_rows = oracle_.get_row_tuples(rows);
+        auto tuple_rows = oracle_.get_row_tuples(rows, &tuple_cache_);
         for (size_t i = 0; i < keys.size(); ++i) {
             hits_from_tuples(tuple_rows[i], &(*out)[keys[i]]);
         }
     } else {
-        auto set_rows = oracle_.get_rows(rows);
+        auto set_rows = oracle_.get_rows(rows, &row_cache_);
         for (size_t i = 0; i < keys.size(); ++i) {
             hits_from_row(set_rows[i], &(*out)[keys[i]]);
         }
