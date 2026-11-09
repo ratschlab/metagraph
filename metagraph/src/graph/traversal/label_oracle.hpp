@@ -11,7 +11,6 @@
 #include <tsl/hopscotch_set.h>
 
 #include "traversal_types.hpp"
-#include "graph/annotation_key_mapper.hpp"
 #include "annotation/int_matrix/base/int_matrix.hpp"
 #include "annotation/binary_matrix/row_diff/row_diff_cache.hpp"
 
@@ -58,10 +57,8 @@ class LabelOracle {
     const annot::CoordToHeader* coord_to_header() const { return coord_to_header_; }
     uint64_t num_columns() const;
 
-    // Annotation keys of all k-mers of |sequence| (npos for k-mers not in the graph).
-    std::vector<node_index> keys_of_sequence(std::string_view sequence) const;
-    // Annotation key of the oriented |node| spelling |kmer|.
-    node_index key_of(node_index node, std::string_view kmer) const;
+    // map_to_nodes(graph(), sequence) gives the annotation keys of a sequence's k-mers in
+    // every regime; AnnotationKeyMapper gives the key of a single oriented node.
 
     // Label resolution
     std::optional<Column> find_column(const std::string &name) const;
@@ -74,8 +71,6 @@ class LabelOracle {
     bool has_header_records(Column column) const;
     // (seq_id, local coordinate) of a column coordinate. Requires a CoordToHeader.
     std::pair<uint64_t, uint64_t> map_coord(Column column, uint64_t coord) const;
-    // The first and last column coordinates of sequence |seq_id|. Requires a CoordToHeader.
-    std::pair<uint64_t, uint64_t> sequence_coords(Column column, uint64_t seq_id) const;
     // A column name or a header. Throws std::invalid_argument naming the label if neither
     // exists, or if it is ambiguous: both a column and a header, or the header of several
     // records.
@@ -99,7 +94,6 @@ class LabelOracle {
     const AnnotatedDBG &anno_graph_;
     std::shared_ptr<CanonicalDBG> local_canonical_;
     const DeBruijnGraph *graph_ = nullptr;
-    std::unique_ptr<AnnotationKeyMapper> key_mapper_;
     Regime regime_ = Regime::BASIC;
 
     const annot::matrix::BinaryMatrix *matrix_ = nullptr;

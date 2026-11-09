@@ -61,8 +61,6 @@ def requests(index):
 
     out = {
         'resolve_discover_headers': ('resolve', {'sequence': ndm1, 'discover': {'kind': 'header'}}),
-        'resolve_select_max_support': ('resolve', {'sequence': ndm1, 'discover': {'kind': 'header'},
-                                                   'select': {'max_seeds': 3}}),
         'ndm1_derived': traverse({'sequence': ndm1}, bounds={'max_extension_bp': 3000}),
         'ndm1_derived_columns': traverse({'sequence': ndm1}, labels={'seed_label_kind': 'column'},
                                          bounds={'max_extension_bp': 2000}),
@@ -156,15 +154,6 @@ def project_resolve(response):
     # the labels by support, ties by name: the ranking breaks ties its own way
     out['labels'] = sorted(([l['label'], l['kind'], l['kmers_supported'], l['runs']]
                             for l in response['labels']), key=lambda l: (-l[2], l[0]))
-    if 'selection' in response:
-        sel = response['selection']
-        # The seeds as a set: v1 keeps them in rank order, the prototype by position.
-        out['selection'] = {
-            'seeds': sorted([s['seed_id'], s['sequence'], s['kmer_interval'], s['labels'],
-                             s['label_population']['supporting_total'],
-                             s['label_population']['dropped_count']]
-                            for s in sel['seeds']),
-        }
     return out
 
 

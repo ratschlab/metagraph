@@ -124,24 +124,6 @@ Json::Value adjust_for_types(const std::string &v) {
 }
 
 
-// Encode a k-mer presence bitmask as alternating x<len>o<len>... runs
-// (x = ones, o = zeros). Trailing zeros are included so the total length
-// is recoverable as the sum of all run lengths.
-// Example: 11100110 → x3o2x2o1
-std::string encode_presence_mask(const sdsl::bit_vector &mask) {
-    std::string result;
-    size_t pos = 0;
-    while (pos < mask.size()) {
-        bool bit = mask[pos];
-        size_t run_start = pos;
-        while (pos < mask.size() && (bool)mask[pos] == bit) ++pos;
-        result += (bit ? 'x' : 'o');
-        result += std::to_string(pos - run_start);
-    }
-    return result;
-}
-
-
 /**
  * Given a label string in the format '<sample_name>(;<property_name>=<property_value>)*'
  * return a JSON representation of the label with its properties.

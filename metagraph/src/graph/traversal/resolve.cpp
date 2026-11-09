@@ -4,6 +4,8 @@
 #include <cctype>
 #include <optional>
 
+#include <fmt/format.h>
+#include <folly/hash/FnvHash.h>
 #include <tsl/hopscotch_map.h>
 
 #include "graph/annotated_dbg.hpp"
@@ -18,22 +20,14 @@ namespace traversal {
 using annot::matrix::BinaryMatrix;
 using annot::matrix::MultiIntMatrix;
 
-uint64_t fnv1a64(std::string_view data, uint64_t hash) {
-    for (unsigned char c : data) {
-        hash ^= c;
-        hash *= 0x100000001b3ULL;
+std::string in_graph_case(std::string_view sequence) {
+    std::string seq(sequence);
+#if ! _DNA_CASE_SENSITIVE_GRAPH
+    for (char &c : seq) {
+        c = std::toupper(static_cast<unsigned char>(c));
     }
-    return hash;
-}
-
-std::string hex64(uint64_t x) {
-    static const char *digits = "0123456789abcdef";
-    std::string s(16, '0');
-    for (int i = 15; i >= 0; --i) {
-        s[i] = digits[x & 15];
-        x >>= 4;
-    }
-    return s;
+#endif
+    return seq;
 }
 
 std::string make_seed_id(std::string_view sequence,
@@ -41,12 +35,7 @@ std::string make_seed_id(std::string_view sequence,
                          std::vector<std::string> labels) {
     // defined over the sequence after the build's case mapping, so that a seed resubmitted
     // in another case keeps its id
-    std::string seq(sequence);
-#if ! _DNA_CASE_SENSITIVE_GRAPH
-    for (char &c : seq) {
-        c = std::toupper(static_cast<unsigned char>(c));
-    }
-#endif
+    std::string seq = in_graph_case(sequence);
     if (canonical_orientation) {
         std::string rc(seq);
         ::reverse_complement(rc);
@@ -55,29 +44,14 @@ std::string make_seed_id(std::string_view sequence,
     }
     std::sort(labels.begin(), labels.end());
     // a leading tab, as in the ids of the labeled-traversal prototype
-    uint64_t h = fnv1a64("\t");
-    h = fnv1a64(seq, h);
-    h = fnv1a64("\t", h);
+    uint64_t h = folly::hash::fnva64("\t");
+    h = folly::hash::fnva64(seq, h);
+    h = folly::hash::fnva64("\t", h);
     for (const auto &l : labels) {
-        h = fnv1a64(std::to_string(l.size()) + ":" + l, h);
+        h = folly::hash::fnva64(std::to_string(l.size()) + ":" + l, h);
     }
-    return hex64(h);
+    return fmt::format("{:016x}", h);
 }
-
-std::string encode_runs(const std::vector<KmerInterval> &runs, uint64_t num_kmers) {
-    std::string out;
-    uint64_t pos = 0;
-    for (const auto &run : runs) {
-        if (run.begin > pos)
-            out += "o" + std::to_string(run.begin - pos);
-        out += "x" + std::to_string(run.size());
-        pos = run.end;
-    }
-    if (num_kmers > pos)
-        out += "o" + std::to_string(num_kmers - pos);
-    return out;
-}
-
 
 namespace {
 
@@ -119,7 +93,7 @@ SupportProfile resolve_support(const LabelOracle &oracle,
         throw std::invalid_argument("Discovery needs discover_max_labels of at least 1");
 
     profile.num_kmers = query.size() - profile.k + 1;
-    const std::vector<node_index> keys = oracle.keys_of_sequence(query);
+    const std::vector<node_index> keys = map_to_nodes(oracle.graph(), query);
     assert(keys.size() == profile.num_kmers);
 
     profile.graph_runs = runs_of(profile.num_kmers, [&](uint64_t i) { return keys[i] != npos; });
@@ -255,50 +229,38 @@ struct Picked {
     std::vector<LabelId> labels;
 };
 
-// Repeatedly pick the interval of at least |min_kmers| k-mers contained in the
-// most support runs, outside the intervals picked before.
+// Seeds that cover the labels: each round picks the interval of at least |min_kmers| k-mers
+// contained in the most runs of labels that no earlier seed carries (greedy max coverage).
+// A seed may overlap earlier ones; picking stops when every label is carried by a seed.
 //
 // For a fixed start a, the count |{runs [s, e) : s <= a, e >= b}| is non-increasing in b, so
 // the best count is reached at the shortest admissible b = a + min_kmers, and the longest
 // interval with that count ends at b = min{e : e >= a + min_kmers}. So one search per
 // candidate a suffices, and a ranges over run starts and over (e - min_kmers): O(R log R) per
-// round for R runs.
-std::vector<Picked> pick_max_support(const SupportProfile &profile, uint64_t min_kmers,
-                                     size_t max_seeds) {
-    struct Run { uint64_t begin, end; };
+// round for R runs. A label's runs are disjoint, so a count of runs is a count of labels.
+std::vector<Picked> pick_covering(const SupportProfile &profile, uint64_t min_kmers,
+                                  size_t max_seeds) {
+    struct Run { uint64_t begin, end; LabelId label; };
     std::vector<Run> all_runs;
-    for (const auto &lp : profile.labels) {
-        for (const auto &run : lp.runs) {
+    for (LabelId l = 0; l < profile.labels.size(); ++l) {
+        for (const auto &run : profile.labels[l].runs) {
             if (run.size() >= min_kmers)
-                all_runs.push_back({ run.begin, run.end });
+                all_runs.push_back({ run.begin, run.end, l });
         }
     }
     std::sort(all_runs.begin(), all_runs.end(),
               [](const Run &a, const Run &b) { return a.begin < b.begin; });
 
     std::vector<Picked> picked;
-    // intervals already claimed by a picked seed, as sorted disjoint ranges
-    std::vector<KmerInterval> taken;
+    std::vector<bool> covered(profile.labels.size(), false);
     std::vector<Run> runs;
     while (picked.size() < max_seeds) {
-        // the runs with the claimed intervals subtracted, so that later rounds see the
-        // clipped runs' own endpoints (with A=[0,10), B=[0,5) and [0,5) taken, [5,10) is
-        // only reachable through them)
+        // the runs of the labels without a seed
         runs.clear();
         for (const Run &run : all_runs) {
-            uint64_t begin = run.begin;
-            for (const auto &t : taken) {
-                if (t.end <= begin || t.begin >= run.end)
-                    continue;
-                if (t.begin > begin && t.begin - begin >= min_kmers)
-                    runs.push_back({ begin, t.begin });
-                begin = std::max(begin, t.end);
-            }
-            if (begin < run.end && run.end - begin >= min_kmers)
-                runs.push_back({ begin, run.end });
+            if (!covered[run.label])
+                runs.push_back(run);
         }
-        std::sort(runs.begin(), runs.end(),
-                  [](const Run &a, const Run &b) { return a.begin < b.begin; });
         if (runs.empty())
             break;
 
@@ -350,10 +312,12 @@ std::vector<Picked> pick_max_support(const SupportProfile &profile, uint64_t min
         }
         if (!best)
             break;
+        // the seed carries every label on the interval, the covered ones included
         picked.push_back({ *best, covering_labels(profile, *best) });
-        assert(picked.back().labels.size() == best_count);
-        taken.push_back(*best);
-        std::sort(taken.begin(), taken.end());
+        assert(picked.back().labels.size() >= best_count);
+        for (LabelId l : picked.back().labels) {
+            covered[l] = true;
+        }
     }
     return picked;
 }
@@ -370,8 +334,7 @@ std::vector<FrozenSeed> select_seeds(const SupportProfile &profile,
         policy.min_block_bp = profile.k;
     const uint64_t min_kmers = policy.min_block_bp - profile.k + 1;
 
-    // the picks never overlap: each is outside the earlier ones
-    const std::vector<Picked> picked = pick_max_support(profile, min_kmers, policy.max_seeds);
+    const std::vector<Picked> picked = pick_covering(profile, min_kmers, policy.max_seeds);
 
     // freeze
     for (auto &p : picked) {
@@ -383,7 +346,7 @@ std::vector<FrozenSeed> select_seeds(const SupportProfile &profile,
         std::vector<std::pair<uint64_t, std::string>> ordered;
         for (LabelId l : p.labels) {
             const std::string &name = profile.labels[l].label.name;
-            ordered.emplace_back(fnv1a64(name + "\t0"), name);
+            ordered.emplace_back(folly::hash::fnva64(name + "\t0"), name);
         }
         std::sort(ordered.begin(), ordered.end());
 

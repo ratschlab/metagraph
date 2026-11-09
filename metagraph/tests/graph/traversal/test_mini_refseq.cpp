@@ -12,6 +12,7 @@
 #include "tests/graph/traversal/test_trie_reference.hpp"
 
 #include "graph/traversal/resolve.hpp"
+#include "seq_io/sequence_io.hpp"
 #include "graph/traversal/walker.hpp"
 #include "graph/annotated_dbg.hpp"
 #include "graph/representation/succinct/dbg_succinct.hpp"
@@ -64,28 +65,16 @@ std::vector<std::pair<std::string, std::string>> read_records(const std::string 
     std::sort(files.begin(), files.end());
     std::vector<std::pair<std::string, std::string>> records;
     for (const auto &path : files) {
-        std::ifstream in(path);
-        std::string line;
-        while (std::getline(in, line)) {
-            if (!line.empty() && line.back() == '\r')
-                line.pop_back();
-            if (!line.empty() && line[0] == '>') {
-                records.emplace_back(line.substr(1, line.find_first_of(" \t") - 1), "");
-            } else if (!records.empty()) {
-                records.back().second += line;
-            }
-        }
+        seq_io::read_fasta_file_critical(path, [&](kseq_t *read) {
+            records.emplace_back(read->name.s, read->seq.s);
+        });
     }
     return records;
 }
 
 std::string read_query() {
-    std::ifstream in(kQueryFasta);
-    std::string line, seq;
-    while (std::getline(in, line)) {
-        if (!line.empty() && line[0] != '>')
-            seq += line;
-    }
+    std::string seq;
+    seq_io::read_fasta_file_critical(kQueryFasta, [&](kseq_t *read) { seq += read->seq.s; });
     return seq;
 }
 
@@ -186,7 +175,7 @@ TEST_F(MiniRefSeq, DiscoverBlaNDMCarriers) {
     auto it = std::find_if(profile.labels.begin(), profile.labels.end(),
                            [](const LabelProfile &l) { return l.label.name == "NZ_CM008882.1"; });
     ASSERT_NE(profile.labels.end(), it);
-    EXPECT_EQ("x783", encode_runs(it->runs, profile.num_kmers));
+    EXPECT_EQ((std::vector<KmerInterval>{ { 0, 783 } }), it->runs);
 
     // the same labels named explicitly give the same profiles
     ResolveOptions named;
@@ -210,7 +199,7 @@ TEST_F(MiniRefSeq, HeaderHitsFilterRequestedRanges) {
     }
     std::vector<node_index> keys;
     std::vector<Row> rows;
-    for (node_index key : oracle_->keys_of_sequence(query_)) {
+    for (node_index key : map_to_nodes(oracle_->graph(), query_)) {
         keys.push_back(key);
         rows.push_back(AnnotatedDBG::graph_to_anno_index(key));
     }
@@ -237,7 +226,8 @@ TEST_F(MiniRefSeq, PartialCarrierRunsMatchPresenceMask) {
     options.labels = { "NZ_MOIC01000010.1" };        // x231o31x167o31x323 on refseq33m
     auto profile = resolve_support(*oracle_, query_, options);
     ASSERT_EQ(1u, profile.labels.size());
-    EXPECT_EQ("x231o31x167o31x323", encode_runs(profile.labels[0].runs, profile.num_kmers));
+    EXPECT_EQ((std::vector<KmerInterval>{ { 0, 231 }, { 262, 429 }, { 460, 783 } }),
+              profile.labels[0].runs);
     EXPECT_EQ(721u, profile.labels[0].kmers_supported);
 
     options.labels = { "562" };                      // Escherichia coli

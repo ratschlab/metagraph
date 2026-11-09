@@ -6,10 +6,12 @@
 
 #include <tsl/hopscotch_map.h>
 #include <tsl/hopscotch_set.h>
+#include <folly/hash/FnvHash.h>
 
 #include "resolve.hpp"
 #include "graph/annotated_dbg.hpp"
 #include "graph/representation/canonical_dbg.hpp"
+#include "graph/annotation_key_mapper.hpp"
 #include "graph/representation/succinct/boss.hpp"
 #include "common/seq_tools/reverse_complement.hpp"
 #include "common/unix_tools.hpp"
@@ -183,8 +185,8 @@ struct ArmState {
 class Walker {
   public:
     Walker(const LabelOracle &oracle, const Seed &seed, const Strategy &strategy)
-          : oracle_(oracle), graph_(oracle.graph()), seed_(seed), strategy_(strategy),
-            k_(graph_.get_k()), regime_(oracle.regime()),
+          : oracle_(oracle), graph_(oracle.graph()), key_mapper_(graph_), seed_(seed),
+            strategy_(strategy), k_(graph_.get_k()), regime_(oracle.regime()),
             canonical_(dynamic_cast<const CanonicalDBG*>(&graph_)) {
         size_t n = 0;
         code_.fill(255);
@@ -204,6 +206,7 @@ class Walker {
   private:
     const LabelOracle &oracle_;
     const DeBruijnGraph &graph_;
+    const AnnotationKeyMapper key_mapper_;
     const Seed &seed_;
     const Strategy &strategy_;
     const size_t k_;
@@ -270,31 +273,21 @@ class Walker {
 
 /******************************** seed phase ********************************/
 
-std::string seed_in_graph_case(const std::string &seq) {
-    std::string upper = seq;
-#if ! _DNA_CASE_SENSITIVE_GRAPH
-    for (char &c : upper) {
-        c = std::toupper(static_cast<unsigned char>(c));
-    }
-#endif
-    return upper;
-}
-
 void Walker::validate_seed() {
     check_seed(oracle_, seed_);
     const std::string &seq = seed_.sequence;
-    seed_upper_ = seed_in_graph_case(seq);
+    seed_upper_ = in_graph_case(seq);
 
     nodes_ = map_to_nodes_sequentially(graph_, seed_upper_);
     assert(nodes_.size() == seq.size() - k_ + 1);
     if (std::find(nodes_.begin(), nodes_.end(), npos) != nodes_.end()) {
-        const auto runs = runs_of(nodes_.size(), [&](uint64_t i) { return nodes_[i] != npos; });
-        uint64_t present = 0;
-        for (const KmerInterval &run : runs) {
-            present += run.size();
+        sdsl::bit_vector present(nodes_.size());
+        for (size_t i = 0; i < nodes_.size(); ++i) {
+            present[i] = nodes_[i] != npos;
         }
         throw SeedNotInGraph("Seed is not fully present in the graph; graph runs: "
-                             + encode_runs(runs, nodes_.size()), nodes_.size(), present);
+                             + encode_presence_mask(present), nodes_.size(),
+                             sdsl::util::cnt_one_bits(present));
     }
     result_.seed_id = seed_.seed_id;
     result_.length_bp = seq.size();
@@ -314,33 +307,23 @@ void Walker::validate_seed() {
         }
     }
 
-    const std::vector<node_index> keys = oracle_.keys_of_sequence(seed_upper_);
     std::vector<LabelRef> refs;
     if (seed_.labels.empty()) {
         // every derived label carries every seed k-mer
-        derive_seed_labels(keys, &refs);
+        derive_seed_labels(map_to_nodes(graph_, seed_upper_), &refs);
         result_.label_dict = refs;
     } else {
-        for (const auto &name : seed_.labels) {
-            refs.push_back(oracle_.resolve_label(name));  // check_seed refused duplicates
-        }
         // a label that does not carry every seed k-mer is dropped, with the runs it carries
-        const auto hits = LabelQuery(oracle_, refs).fetch(keys);
-        std::vector<std::vector<std::pair<uint64_t, uint64_t>>> runs(refs.size());
-        for (uint64_t i = 0; i < hits.size(); ++i) {
-            for (LabelId l : hits[i]) {
-                if (runs[l].empty() || runs[l].back().second != i) {
-                    runs[l].emplace_back(i, i + 1);
-                } else {
-                    runs[l].back().second = i + 1;
-                }
-            }
-        }
-        for (LabelId l = 0; l < refs.size(); ++l) {
-            if (runs[l].size() == 1 && runs[l][0] == std::make_pair(uint64_t(0), keys.size())) {
-                result_.label_dict.push_back(refs[l]);
+        // (check_seed refused duplicates)
+        ResolveOptions options;
+        options.labels = seed_.labels;
+        SupportProfile profile = resolve_support(oracle_, seed_upper_, options);
+        const KmerInterval whole { 0, nodes_.size() };
+        for (LabelProfile &lp : profile.labels) {
+            if (lp.runs.size() == 1 && lp.runs[0] == whole) {
+                result_.label_dict.push_back(std::move(lp.label));
             } else {
-                result_.dropped_labels.push_back({ refs[l].name, std::move(runs[l]) });
+                result_.dropped_labels.push_back({ lp.label.name, std::move(lp.runs) });
             }
         }
         if (result_.label_dict.empty())
@@ -638,8 +621,8 @@ std::pair<EdgeKey, bool> Walker::edge_key(const std::string &step) const {
             key.lo = (key.lo << bits_) | code_[static_cast<unsigned char>(c)];
         }
     } else {
-        key.lo = fnv1a64(s);
-        key.hi = fnv1a64(s, 0x84222325cbf29ce4ULL);
+        key.lo = folly::hash::fnva64_buf(s.data(), s.size());
+        key.hi = folly::hash::fnva64_buf(s.data(), s.size(), 0x84222325cbf29ce4ULL);
     }
     return { key, flip };
 }
@@ -1059,7 +1042,7 @@ void Walker::run_level(ArmState &arm, uint64_t depth) {
             // the spelling is only needed by native canonical graphs
             if (regime_ == Regime::CANONICAL)
                 succ_kmer(arm.arm, items[i].kmer, s.ch, &kmer);
-            keys.push_back(oracle_.key_of(s.node, kmer));
+            keys.push_back(key_mapper_.key(s.node, kmer));
         }
     }
     const std::vector<LabelQuery::NodeHits> hits = query_->fetch(keys);
@@ -1173,7 +1156,7 @@ void check_seed(const LabelOracle &oracle, const Seed &seed) {
     const std::string &seq = seed.sequence;
     if (seq.size() < oracle.get_k())
         throw std::invalid_argument("Seed shorter than k");
-    const std::string upper = seed_in_graph_case(seq);
+    const std::string upper = in_graph_case(seq);
     const std::string &alphabet = oracle.graph().alphabet();
     for (size_t i = 0; i < upper.size(); ++i) {
         if (upper[i] == kSentinel || alphabet.find(upper[i]) == std::string::npos) {

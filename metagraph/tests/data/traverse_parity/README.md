@@ -14,10 +14,8 @@ The prototype was sent each request with the knobs v1 fixes stated explicitly
 (`to_prototype()`): `on_reconverge: keep`, `hairpins: skip`, `max_splits_per_path: 64`,
 `continuation_bp: 0`, `detail: full`.
 
-The `selection` of `resolve_select_max_support.json` was rewritten from the recorded data,
-without a new run: the seeds are sorted (v1 keeps them in rank order where the prototype lists
-them by position), and `counts` and each seed's `overlaps_with` were removed with those fields
-(2026-11-09).
+v1 picks seeds to cover the labels, where the prototype picked them by support, so the
+parity check covers discovery only (2026-11-09).
 
-The `labels` of the `resolve_*` files are sorted by support, then name (2026-11-09): equally
+The `labels` of `resolve_discover_headers.json` are sorted by support, then name (2026-11-09): equally
 supported labels are ranked differently by the prototype and v1.

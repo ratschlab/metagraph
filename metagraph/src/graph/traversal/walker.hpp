@@ -10,6 +10,7 @@
 
 #include "traversal_types.hpp"
 #include "label_oracle.hpp"
+#include "resolve.hpp"
 
 
 namespace mtg {
@@ -222,7 +223,7 @@ struct ArmResult {
 // A seed label that does not carry every seed k-mer
 struct DroppedLabel {
     std::string name;
-    std::vector<std::pair<uint64_t, uint64_t>> runs;   // the k-mer runs it carries
+    std::vector<KmerInterval> runs;   // the k-mer runs it carries
 };
 
 struct SeedResult {

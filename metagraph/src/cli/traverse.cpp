@@ -402,11 +402,7 @@ Json::Value seed_result_to_json(const SeedResult &r, const Strategy &st) {
     for (const DroppedLabel &d : r.dropped_labels) {
         Json::Value dj;
         dj["label"] = d.name;
-        Json::Value runs(Json::arrayValue);
-        for (const auto &[a, b] : d.runs) {
-            runs.append(interval_json(a, b));
-        }
-        dj["runs"] = std::move(runs);
+        dj["runs"] = runs_json(d.runs);
         dropped.append(std::move(dj));
     }
     seed["dropped_labels"] = std::move(dropped);

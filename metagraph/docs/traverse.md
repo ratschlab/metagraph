@@ -47,7 +47,7 @@ names it is refused (HTTP 400). The server builds its header index when it start
 | `labels` | the labels to profile, at most 100,000 | exactly one of `labels` and `discover` |
 | `discover.max_labels` | keep the labels supporting the most k-mers, ranked as `/search` with `with_signature` ranks them | 1000 |
 | `discover.kind` | `column` or `header` | `column` |
-| `select` | also select seeds: repeatedly, the interval contained in the most labels' support runs, outside the intervals picked before | none |
+| `select` | also select seeds: first the interval contained in the most labels' support runs, then each time the interval contained in the most runs of labels no seed carries yet, until every label has a seed | none |
 | `select.max_seeds`, `select.min_block_bp` | at most that many seeds (at most 1000), each at least that long (at least k) | 10, 0 |
 | `select.max_labels_per_seed` | the labels kept per seed, by the FNV-1a hash of their names; dropped labels are counted, and listed when at most 1000 are dropped | 1000 |
 
@@ -72,7 +72,7 @@ Intervals are half-open k-mer intervals `[begin, end)`. `graph_runs` are the run
 are the maximal runs of k-mers it carries. With discovery, `labels_truncated` states how many
 labels were kept of how many found. Discovery leaves out names that `/traverse` would refuse
 as ambiguous: a column that is also a header, or a header of several records. So a selected
-seed is valid `/traverse` input as it stands, with its `seed_id`. Seeds are listed in the order they were picked, best first, and never overlap. With `select.min_block_bp` set to the query's length, the one seed is the whole query, carried by the labels on all its k-mers. When no label carries all of them, there is no seed.
+seed is valid `/traverse` input as it stands, with its `seed_id`. Seeds are listed in the order they were picked and may overlap. With `select.min_block_bp` set to the query's length, the one seed is the whole query, carried by the labels on all its k-mers. When no label carries all of them, there is no seed.
 
 ## `/traverse`
 
