@@ -420,7 +420,15 @@ std::thread start_server(HttpServer &server_startup, Config &config, size_t num_
 
     logger->info("[Server] Will listen on {} port {}",
                  server_startup.config.address, server_startup.config.port);
-    logger->info("[Server] Maximum connections: {}", num_threads);
+    // the handler threads (this line said "Maximum connections" before H3), and the true cap
+    // on the connections (--max-connections, CappedHttpServer)
+    logger->info("[Server] HTTP handler threads: {}", num_threads);
+    if (config.max_connections) {
+        logger->info("[Server] Maximum connections: {} (--max-connections; a further connection "
+                     "waits in the listen queue until one closes)", config.max_connections);
+    } else {
+        logger->info("[Server] Maximum connections: unlimited (--max-connections 0)");
+    }
     if (config.max_request_body_mb)
         logger->info("[Server] Maximum request body: {} MiB", config.max_request_body_mb);
     return std::thread([&server_startup, on_accepting]() {
@@ -759,6 +767,10 @@ int run_server(Config *config) {
     Json::Value single_headers_unique;
     // and its pair's profile (pair_summary of GET /capabilities, E17), set then too
     Json::Value single_pair_summary;
+    // the list GET /column_labels answers on a multi-graph server (H3): each distinct pair
+    // once, at its first place in the answers' order, its labels in column order; set once its
+    // indexes are loaded (a single-graph server's list is its one annotation's)
+    ColumnLabelList multi_column_labels;
 
     if (config->infbase_annotators.size() == 1) {
         assert(config->fnames.empty());
@@ -980,6 +992,18 @@ int run_server(Config *config) {
                                            : composite_fp.asString());
         graph_summary["headers_unique"] = multi_graph_headers_unique(
                 indexes, graphs_cache, get_num_threads() * num_server_threads);
+        {
+            // GET /column_labels' list (H3): the rule of headers_unique, each pair once
+            std::vector<const std::vector<std::string> *> parts;
+            std::set<GraphPair> seen;
+            for (const auto &[name, pair] : ordered_pairs(indexes, sorted_names(indexes))) {
+                if (seen.insert(pair).second) {
+                    parts.push_back(&graphs_cache.at(pair)->get_annotator().get_label_encoder()
+                                                          .get_labels());
+                }
+            }
+            multi_column_labels = ColumnLabelList(std::move(parts));
+        }
         logger->info("[Server] All graphs were loaded ({}). Ready to serve queries.",
                      loaded_with_mmap ? "with mmap" : "into RAM");
         // Dynamic per-request loads (in_ram path) should always be in RAM.
@@ -1019,7 +1043,10 @@ int run_server(Config *config) {
                      route_caps.traverse, route_caps.resolve, route_caps.pattern,
                      kBusyRetryAfterS, num_server_threads);
     }
-    HttpServer server;
+    // the HTTP server, with the cap on the connections it holds open (H3: --max-connections,
+    // 0 = none; a further connection waits in the listen queue until one closes)
+    CappedHttpServer server;
+    server.set_max_connections(config->max_connections);
 
     // Keep the cache handle alive until the asynchronous response write completes.
     server.resource["^/search"]["POST"] = [&](shared_ptr<HttpServer::Response> response,
@@ -1075,10 +1102,12 @@ int run_server(Config *config) {
                     if (!handle_holder->is_miss()) {
                         auto cached = handle_holder->get();
                         logger->info("[Server] Request {}: cache HIT  {:.1f} KB  "
-                                     "(occupancy {:.1f}/{:.0f} MB, {} entries)",
+                                     "(occupancy {:.1f}/{:.0f} MB, pinned {:.1f} MB, {} "
+                                     "entries)",
                                      request_id, cached->size() / 1e3,
                                      search_cache.size_bytes() / 1e6,
                                      cache_size_bytes / 1e6,
+                                     search_cache.pinned_bytes() / 1e6,
                                      search_cache.entry_count());
                         return *cached;
                     }
@@ -1224,11 +1253,14 @@ int run_server(Config *config) {
                 std::string serialized = Json::writeString(Json::StreamWriterBuilder(), result);
                 if (handle_holder) {
                     bool retained = handle_holder->set_result(serialized);
+                    // BYPASS: larger than the budget, or than what the entries still being
+                    // delivered (pinned) leave of it: delivered, not retained (H3)
                     logger->info("[Server] Request {}: cache {} {:.1f} KB  "
-                                 "(occupancy {:.1f}/{:.0f} MB, {} entries)",
+                                 "(occupancy {:.1f}/{:.0f} MB, pinned {:.1f} MB, {} entries)",
                                  request_id, retained ? "STORE" : "BYPASS", serialized.size() / 1e3,
                                  search_cache.size_bytes() / 1e6,
                                  cache_size_bytes / 1e6,
+                                 search_cache.pinned_bytes() / 1e6,
                                  search_cache.entry_count());
                 }
                 return serialized;
@@ -1372,6 +1404,7 @@ int run_server(Config *config) {
     attempt_settings.retention_s = config->traverse_attempt_retention_s;
     attempt_settings.retention_count = config->traverse_attempt_retention;
     attempt_settings.tombstone_max_s = config->traverse_attempt_tombstone_max_s;
+    attempt_settings.tombstone_hold_s = config->traverse_attempt_tombstone_hold_s;
     attempt_settings.clock_skew_ms = config->traverse_clock_skew_ms;
     attempt_settings.content_timeout_s = kContentTimeoutS;
     attempt_settings.observed_window_s = config->traverse_observed_window_s;
@@ -2255,6 +2288,15 @@ int run_server(Config *config) {
             // a malformed id or not_after_ms is refused before anything is registered (400, no
             // usage)
             attempt->set_ids(attempt_ids(json));
+            // a not_after_ms beyond the horizon (hard_cap_ms + clock skew ahead: H3, GPT review
+            // 6 #6a) is refused here too, before anything is registered or held (400, no
+            // usage): once run, its id would be held until it. A past one is never beyond it
+            // (the expired 409 below stays)
+            if (auto beyond = attempts.beyond_horizon_json(attempt->ids().not_after_ms,
+                                                           "request")) {
+                std::string text = error_first_json_text(*beyond);
+                throw HttpError(400, std::move(*beyond), std::move(text));
+            }
             // finish_by_ms, the completion deadline (SPEC-multigraph-envelope.md section 4):
             // the attempt's bound and walk-until become the minimum of their own and it less
             // the clock skew allowance. Malformed, it is refused before anything is registered
@@ -2427,6 +2469,12 @@ int run_server(Config *config) {
         process_request(response, request, request_id, [&](const std::string &content) {
             const CancelRequest cancel = parse_cancel_request(
                     parse_traversal_body(content, config->max_request_json_values));
+            // the horizon of /traverse (H3, GPT review 6 #6a), before anything is looked up or
+            // tombstoned: a cancel names the not_after_ms of a request /traverse accepts
+            if (auto beyond = attempts.beyond_horizon_json(cancel.not_after_ms, "request")) {
+                std::string text = error_first_json_text(*beyond);
+                throw HttpError(400, std::move(*beyond), std::move(text));
+            }
             auto [status, body] = attempts.cancel(cancel.attempt_id, cancel.wait_ms,
                                                   cancel.not_after_ms);
             logger->info("[Server] Attempt {}: cancel requested (request {}): {} {}",
@@ -2772,9 +2820,22 @@ int run_server(Config *config) {
             // server, here on a single-graph one (one reader for both, as
             // expect_server_instance)
             const Json::Value intake = request_intake_json(config->max_request_body_mb,
-                                                           config->max_request_json_values);
+                                                           config->max_request_json_values,
+                                                           config->max_connections);
             if (!multi)
                 c["request_intake"] = intake;
+            // GET /column_labels (H3): its byte cap, its paging, its 400 and the list's length
+            // (null while a single index loads); placed as request_intake
+            std::optional<uint64_t> labels_total;
+            if (multi) {
+                labels_total = multi_column_labels.total();
+            } else if (c["ready"].asBool()) {
+                labels_total = anno_graph.get()->get_annotator().get_label_encoder().size();
+            }
+            const Json::Value column_labels = column_labels_capabilities_json(
+                    config->max_column_labels_bytes, labels_total);
+            if (!multi)
+                c["column_labels"] = column_labels;
             c["release"] = config->index_release;
             if (multi) {
                 // the identity of the indexes served together (SPEC-multigraph-envelope.md
@@ -2784,7 +2845,8 @@ int run_server(Config *config) {
                 c["composite_fp"] = composite_fp;
                 c["composite_rule"] = kCompositeRule;
                 c["multigraph"] = multigraph_capabilities_json(
-                        config->traverse_max_request_memory_mb, route_caps, intake);
+                        config->traverse_max_request_memory_mb, route_caps, intake,
+                        column_labels);
             }
             // the request registry (section 5) on every server: a single-graph /resolve or
             // /pattern with request_id registers too, and GET /requests/{attempt_id} reads a
@@ -2801,30 +2863,46 @@ int run_server(Config *config) {
         }, /* compact */ true, &traversal_io);
     };
 
+    // The column labels (H3, review 5 #4; SPEC-labeled-traversal-core.md §10.3): a single-graph
+    // server's annotation in column order; a multi-graph server's pairs each once, at their
+    // first place in the answers' order (multi_column_labels). Without parameters the array as
+    // before, refused 400 column_labels_too_large when its labels' JSON strings pass
+    // --max-column-labels-bytes; with ?offset=&limit= a page. Written as text directly: no copy
+    // of a label vector, no JSON tree of the whole list
     server.resource["^/column_labels"]["GET"] = [&](shared_ptr<HttpServer::Response> response,
                                                     shared_ptr<HttpServer::Request> request) {
+        std::string text;
+        ResponseControl control;
+        control.write = [&](const Json::Value &, const std::function<void()> &) {
+            return std::move(text);
+        };
         process_request(response, request, num_requests++, [&](const std::string&) {
             if (!config->fnames.size() && anno_graph.wait_for(0s) != std::future_status::ready)
                 throw CurrentlyInitializingError(); // the index is not loaded yet, so we can't process the request
 
-            Json::Value root(Json::arrayValue);
-            if (!config->fnames.size()) {
-                auto labels = anno_graph.get()->get_annotator().get_label_encoder().get_labels();
-                for (const std::string &label : labels) {
-                    root.append(label);
-                }
-            } else {
-                for (const auto &[name, graphs] : indexes) {
-                    for (const auto &[graph_fname, anno_fname] : graphs) {
-                        const auto &labels = graphs_cache.at({ graph_fname, anno_fname })->get_annotator().get_label_encoder().get_labels();
-                        for (const std::string &label : labels) {
-                            root.append(label);
-                        }
-                    }
-                }
+            const auto query = request->parse_query_string();
+            const ColumnLabelsPage page = column_labels_parameters(
+                    std::vector<std::pair<std::string, std::string>>(query.begin(), query.end()));
+            const ColumnLabelList single_list = config->fnames.empty()
+                ? ColumnLabelList({ &anno_graph.get()->get_annotator().get_label_encoder()
+                                                       .get_labels() })
+                : ColumnLabelList();
+            const ColumnLabelList &list = config->fnames.empty() ? single_list
+                                                                 : multi_column_labels;
+            const uint64_t max_bytes = config->max_column_labels_bytes;
+            if (page.paged) {
+                text = column_labels_page_text(list, page, max_bytes);
+                return Json::Value();
             }
-            return root;
-        });
+            std::optional<std::string> all = column_labels_text(list, max_bytes);
+            if (!all) {
+                Json::Value body = column_labels_too_large_json(list.total(), max_bytes);
+                std::string refusal = error_first_json_text(body);
+                throw HttpError(400, std::move(body), std::move(refusal));
+            }
+            text = std::move(*all);
+            return Json::Value();
+        }, /* compact */ false, &control);
     };
 
     server.resource["^/stats"]["GET"] = [&](shared_ptr<HttpServer::Response> response,

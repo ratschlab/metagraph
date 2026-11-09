@@ -47,12 +47,14 @@
   "id_pattern": "^[A-Za-z0-9._:-]{1,128}$",
   "instance": "SPEC-labeled-traversal-core.md section 5, expect_server_instance",
   "not_after": "SPEC-labeled-traversal-core.md section 5, not_after_ms",
+  "not_after_horizon_ms": 901000,
   "release_rule": "SPEC-labeled-traversal-core.md section 10.3, the release rule",
   "retention_count": 10000,
   "retention_s": 3600,
   "server_instance": "9786130e8e4a268f",
   "state": "GET /traverse/attempt/{attempt_id}",
   "suppression": "SPEC-labeled-traversal-core.md section 10.3, POST /traverse/cancel: the tombstone",
+  "tombstone_hold_s": 900,
   "tombstone_max_s": 86400
  },
  "composite_fp": null,
@@ -134,6 +136,24 @@
  "max_request_body_mb": null,
  "mode": "multi",
  "multigraph": {
+  "column_labels": {
+   "max_column_labels_bytes": 16777216,
+   "paging": [
+    "limit",
+    "offset"
+   ],
+   "too_large": {
+    "code": "column_labels_too_large",
+    "members": [
+     "code",
+     "error",
+     "max_column_labels_bytes",
+     "total"
+    ],
+    "status": 400
+   },
+   "total": 9
+  },
   "discovery_trace_scale": "traced",
   "envelope_routes": [
    "/resolve",
@@ -184,6 +204,7 @@
     "/traverse",
     "/traverse/cancel"
    ],
+   "max_connections": null,
    "max_request_body_mb": null,
    "max_request_json_values": 262144,
    "too_many_json_values": {

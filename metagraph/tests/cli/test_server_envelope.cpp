@@ -517,11 +517,19 @@ TEST(ServerEnvelope, CompositeRule) {
 }
 
 // The multigraph block and routes.requests are sample 12's (its server: --max-request-body-mb
-// 256, --max-request-json-values at its default)
+// 256, --max-request-json-values, --max-column-labels-bytes and --max-connections at their
+// defaults, as staging's)
 TEST(ServerEnvelope, Sample12MultigraphBlock) {
     const Json::Value body = sample("12_capabilities_multigraph.json")["body"];
-    const Json::Value intake = request_intake_json(256, 262144);
-    EXPECT_EQ(text(body["multigraph"]), text(multigraph_capabilities_json(0, {}, intake)));
+    const Json::Value intake = request_intake_json(256, 262144, 0);
+    EXPECT_TRUE(body["multigraph"]["request_intake"]["max_connections"].isNull());
+    // GET /column_labels (H3): the cap at its default, the list of the sample's pairs
+    const Json::Value &labels_total = body["multigraph"]["column_labels"]["total"];
+    ASSERT_TRUE(labels_total.isUInt64());
+    const Json::Value column_labels
+            = column_labels_capabilities_json(16 << 20, labels_total.asUInt64());
+    EXPECT_EQ(text(body["multigraph"]),
+              text(multigraph_capabilities_json(0, {}, intake, column_labels)));
     // request_intake (H1): the byte cap as the top-level member states it
     EXPECT_EQ(text(body["max_request_body_mb"]),
               text(body["multigraph"]["request_intake"]["max_request_body_mb"]));
@@ -531,12 +539,12 @@ TEST(ServerEnvelope, Sample12MultigraphBlock) {
     // else the flag's value, an integer
     EXPECT_TRUE(body["multigraph"]["max_request_memory_mb"].isUInt64());
     EXPECT_EQ(0u, body["multigraph"]["max_request_memory_mb"].asUInt64());
-    const Json::Value set = multigraph_capabilities_json(8192, {}, intake);
+    const Json::Value set = multigraph_capabilities_json(8192, {}, intake, column_labels);
     EXPECT_TRUE(set["max_request_memory_mb"].isIntegral());
     EXPECT_EQ("8192", text(set["max_request_memory_mb"]));
     Json::Value rest = set;
     rest["max_request_memory_mb"] = 0;
-    EXPECT_EQ(text(multigraph_capabilities_json(0, {}, intake)), text(rest));
+    EXPECT_EQ(text(multigraph_capabilities_json(0, {}, intake, column_labels)), text(rest));
 }
 
 // Sample 10: every /traverse capabilities probe states the request-wide memory bound beside

@@ -28,10 +28,14 @@ struct SearchRequest;
  * but are still evicted if necessary. A successful delivery ends that preference
  * permanently, even if another delivery fails later.
  *
- * The budget estimates string allocations and entry overhead. Pinned entries
- * can temporarily exceed it. Oversized results are shared with existing waiters
- * but not retained. A zero budget disables retention and deduplication.
- * Compression is applied per response, after reading the cached JSON body.
+ * The budget estimates string allocations and entry overhead, and it bounds every
+ * entry the cache holds, the pinned ones (with waiters: a response still being
+ * delivered) included: size_bytes() never exceeds it (H3, review 5 #1; before,
+ * pinned entries could hold the cache above it). A result is retained only when
+ * it fits beside the pinned entries (pinned_bytes()), unpinned ones evicted for it;
+ * otherwise it is shared with its waiters and not retained, as an oversized one.
+ * A zero budget disables retention and deduplication. Compression is applied per
+ * response, after reading the cached JSON body.
  */
 class ServerQueryCache {
   public:
@@ -122,8 +126,10 @@ class ServerQueryCache {
      */
     Handle acquire(const std::string &key);
 
-    // Diagnostics / tests.
+    // Diagnostics / tests. size_bytes() <= the budget always; pinned_bytes() is the part
+    // of it held by entries with waiters, which no eviction can free
     size_t size_bytes() const;
+    size_t pinned_bytes() const;
     size_t entry_count() const;
     bool contains(const std::string &key) const;
 
@@ -136,7 +142,9 @@ class ServerQueryCache {
         // every waiter (including late arrivals) reads via .get().
         ResultFuture future;
         // RAII-managed by Handle: producer + each reader contributes 1.
-        // An entry with waiters > 0 is never evicted.
+        // An entry with waiters > 0 is never evicted. Changed under the cache's
+        // mutex only (but for the disabled cache's detached entries), so that
+        // pinned_bytes_ follows it
         std::atomic<int>      waiters{0};
         // Set when the producer publishes a result (on_result_ready),
         // and refreshed on every cache hit while
@@ -176,6 +184,9 @@ class ServerQueryCache {
     // LRU: front = MRU, back = LRU candidate.
     std::list<std::shared_ptr<Entry>> lru_;
     size_t total_size_bytes_ = 0;
+    // the charged bytes of the entries in the cache that have waiters (part of
+    // total_size_bytes_)
+    size_t pinned_bytes_ = 0;
 };
 
 

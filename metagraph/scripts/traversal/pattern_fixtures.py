@@ -624,7 +624,12 @@ def multi_capabilities(doc):
     # what the server reads of a request (H1): in the multigraph block, the limits the defaults
     check('request_intake' not in doc, sorted(doc))
     intake = doc['multigraph']['request_intake']
-    check((intake['max_request_body_mb'], intake['max_request_json_values']) == (None, 262144), intake)
+    check((intake['max_request_body_mb'], intake['max_request_json_values'], intake['max_connections'])
+          == (None, 262144, None), intake)
+    # GET /column_labels (H3): in the multigraph block, the byte cap the default
+    check('column_labels' not in doc, sorted(doc))
+    check(doc['multigraph']['column_labels']['max_column_labels_bytes'] == 16777216,
+          doc['multigraph']['column_labels'])
 
 
 def single_graph_selection(doc):
@@ -642,7 +647,10 @@ def single_graph_selection(doc):
     profile_fields(profile)
     # what the server reads of a request (H1), at the top level, the limits the defaults
     intake = doc['request_intake']
-    check((intake['max_request_body_mb'], intake['max_request_json_values']) == (None, 262144), intake)
+    check((intake['max_request_body_mb'], intake['max_request_json_values'], intake['max_connections'])
+          == (None, 262144, None), intake)
+    # GET /column_labels (H3), at the top level, the byte cap the default
+    check(doc['column_labels']['max_column_labels_bytes'] == 16777216, doc['column_labels'])
 
 
 def profile_fields(pair):

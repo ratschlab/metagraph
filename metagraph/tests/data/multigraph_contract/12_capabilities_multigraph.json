@@ -1,7 +1,7 @@
 {
  "route": "GET /capabilities",
  "status": 200,
- "note": "Illustrative graph_summary.headers_unique (E22, section 9): recorded on three fixture pairs served as bact_other, bact_pseudomonadota and inv_insecta (one header, acc2, in a column of each of the first two: false, one example), its pair tags rewritten to sample 12's r237 paths; r237's real value is read from staging's GET /capabilities after the deploy. A header label acc2 answers each pair's own first occurrence. E3/E4/E9/E12/E20/E22 advertised: composite_fp (C3, with its rule) beside graph_summary; the multigraph block lists the envelope routes, the selectors per route, the routes that read not_after_ms, finish_by_ms, request_id and expect_server_instance (F3b), and the registry route, max_request_memory_mb (E5b) and max_concurrent (E19: the caps on the requests of each long route run at once, 0 = none; above one 503 busy, sample 24) and request_intake (H1, train 3: what the server reads of a request -- max_request_body_mb, the 413 body_too_large's shape, max_request_json_values (the value count of the strict-JSON routes, 262,144 by default), the routes it counts and the 400 too_many_json_values's shape; \"members\" lists each body's members as a sorted set, the bodies write error first, then code, then the cap: samples 27 and 28; a single-graph server states it at its top level; a real run's, with staging's --max-request-body-mb 256). E17 (section 8.1): each pair states its capability profile, recorded on eleven fixture pairs of r237's profile served under these names, their tags, identity and num_labels staging's: index_meta_fp (computed at start-up; the fixture pairs', r237's own are read from staging after the deploy), alphabet, graph_representation, annotation_form, decode_charged, traversal.counts and support_fp, the FNV-1a-64 over the capability fields that a client recomputes from the entry (r237's: one value for every pair). Clients switch on these, never by date.",
+ "note": "Illustrative graph_summary.headers_unique (E22, section 9): recorded on three fixture pairs served as bact_other, bact_pseudomonadota and inv_insecta (one header, acc2, in a column of each of the first two: false, one example), its pair tags rewritten to sample 12's r237 paths; r237's real value is read from staging's GET /capabilities after the deploy. A header label acc2 answers each pair's own first occurrence. E3/E4/E9/E12/E20/E22 advertised: composite_fp (C3, with its rule) beside graph_summary; the multigraph block lists the envelope routes, the selectors per route, the routes that read not_after_ms, finish_by_ms, request_id and expect_server_instance (F3b), and the registry route, max_request_memory_mb (E5b) and max_concurrent (E19: the caps on the requests of each long route run at once, 0 = none; above one 503 busy, sample 24) and request_intake (H1, train 3: what the server reads of a request -- max_request_body_mb, the 413 body_too_large's shape, max_request_json_values (the value count of the strict-JSON routes, 262,144 by default), the routes it counts and the 400 too_many_json_values's shape; \"members\" lists each body's members as a sorted set, the bodies write error first, then code, then the cap: samples 27 and 28; a single-graph server states it at its top level; a real run's, with staging's --max-request-body-mb 256). E17 (section 8.1): each pair states its capability profile, recorded on eleven fixture pairs of r237's profile served under these names, their tags, identity and num_labels staging's: index_meta_fp (computed at start-up; the fixture pairs', r237's own are read from staging after the deploy), alphabet, graph_representation, annotation_form, decode_charged, traversal.counts and support_fp, the FNV-1a-64 over the capability fields that a client recomputes from the entry (r237's: one value for every pair). H3 (train 3): request_intake states max_connections (--max-connections, the most TCP connections held open at once: null without a cap, the default and staging's, as here; an integer when an operator sets one, at which a further connection waits in the listen queue, never refused), the block states column_labels (GET /column_labels: the byte cap of an answer, 16 MiB by default, the paging parameters, the 400 column_labels_too_large's shape and the list's length, r237's 651; samples 30 and 31; a single-graph server states it at its top level), and the attempts block tombstone_hold_s (900 s by default, sample 32) and (round 3) not_after_horizon_ms (901,000 ms: hard_cap_ms + clock_skew_allowance_ms, the furthest ahead a /traverse or a cancel may name a not_after_ms; sample 33); a real run's. Clients switch on these, never by date.",
  "body": {
   "algorithm_version": "traverse-0.2",
   "attempts": {
@@ -51,12 +51,14 @@
    "id_pattern": "^[A-Za-z0-9._:-]{1,128}$",
    "instance": "SPEC-labeled-traversal-core.md section 5, expect_server_instance",
    "not_after": "SPEC-labeled-traversal-core.md section 5, not_after_ms",
+   "not_after_horizon_ms": 901000,
    "release_rule": "SPEC-labeled-traversal-core.md section 10.3, the release rule",
    "retention_count": 10000,
    "retention_s": 3600,
    "server_instance": "7c1e0f3a9b24d6e8",
    "state": "GET /traverse/attempt/{attempt_id}",
    "suppression": "SPEC-labeled-traversal-core.md section 10.3, POST /traverse/cancel: the tombstone",
+   "tombstone_hold_s": 900,
    "tombstone_max_s": 86400
   },
   "compression_level": 1,
@@ -753,6 +755,7 @@
      "/traverse",
      "/traverse/cancel"
     ],
+    "max_connections": null,
     "max_request_body_mb": 256,
     "max_request_json_values": 262144,
     "too_many_json_values": {
@@ -764,6 +767,24 @@
      ],
      "status": 400
     }
+   },
+   "column_labels": {
+    "max_column_labels_bytes": 16777216,
+    "paging": [
+     "limit",
+     "offset"
+    ],
+    "too_large": {
+     "code": "column_labels_too_large",
+     "members": [
+      "code",
+      "error",
+      "max_column_labels_bytes",
+      "total"
+     ],
+     "status": 400
+    },
+    "total": 651
    }
   }
  }

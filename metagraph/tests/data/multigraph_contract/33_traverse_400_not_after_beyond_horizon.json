@@ -1,0 +1,23 @@
+{
+ "route": "POST /traverse",
+ "status": 400,
+ "note": "H3 round 3 (train 3; GPT review 6 #6a): a not_after_ms more than attempts.not_after_horizon_ms ahead of the server's clock (hard_cap_ms + clock_skew_allowance_ms = 899,000 + 2,000 ms at the defaults) is refused 400 {error, code: \"not_after_beyond_horizon\", not_after_horizon_ms, not_after_ms, server_time_ms}, error first, no usage, with or without attempt_id, right after the ids are read: before finish_by_ms, the selection, the instance, a duplicate id and the expiry, so nothing is registered, held or tombstoned (GET /traverse/attempt/svc-trv-h3-33 then answered 404 without a tombstone). POST /traverse/cancel naming the same not_after_ms gets the same 400, before the id is looked up (nothing tombstoned). Before, such a request ran (or was refused 400 for its body after it registered), and its id was held until that not_after_ms, up to tombstone_max_s (24 h), by one cheap POST. A past not_after_ms is never beyond the horizon: its 409 expired is unchanged. The search service sends one at most about 15 s ahead, the suite at most 600 s. A real run (this request an hour ahead), its server named SERVER_INSTANCE as every sample's.",
+ "request": {
+  "graph": "bact_other",
+  "seeds": [
+   {
+    "sequence": "ACGTACGTACGTACGTACGTACGTACGTACGTACGT"
+   }
+  ],
+  "attempt_id": "svc-trv-h3-33",
+  "budget_id": "svc-budget-0033",
+  "not_after_ms": 1794237488477
+ },
+ "body": {
+  "error": "request.not_after_ms: 1794237488477 lies 3599999 ms after this server's clock (1794233888478), beyond the 901000 ms it accepts (attempts.not_after_horizon_ms: hard_cap_ms, which no request outlasts, + clock_skew_allowance_ms): a request starts within the content timeout of its header or never, so a later not_after_ms adds nothing but the time its id is held. Nothing was run or registered; send one at most that far ahead",
+  "code": "not_after_beyond_horizon",
+  "not_after_horizon_ms": 901000,
+  "not_after_ms": 1794237488477,
+  "server_time_ms": 1794233888478
+ }
+}

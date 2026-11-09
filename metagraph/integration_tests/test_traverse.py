@@ -3,6 +3,7 @@ import datetime
 import filecmp
 import gzip
 import hashlib
+import http.client
 import json
 import os
 import random
@@ -2657,6 +2658,29 @@ class TestTraverseAPI(TestTraverseBase):
             self.assertIn('not_after_ms', ret.json()['error'])
             self.assertNotIn('usage', ret.json())
         self.assertEqual(404, requests.get(url + '/traverse/attempt/na-bad').status_code)
+        # H3 (GPT review 6 #6a): beyond the horizon, hard_cap_ms + the skew ahead of the server's
+        # clock, a 400 naming the limit, error first, no usage, nothing registered -- with or
+        # without attempt_id, and on a cancel (nothing tombstoned); within it as before
+        self.assertEqual(901000, att['not_after_horizon_ms'])
+        self.assertIs(int, type(att['not_after_horizon_ms']))
+        far = now + 3_600_000
+        for body, path in ((dict(base, attempt_id='na-far', not_after_ms=far), 'traverse'),
+                           (dict(base, not_after_ms=far), 'traverse'),
+                           ({'attempt_id': 'na-far', 'not_after_ms': far}, 'traverse/cancel')):
+            ret = self._post(path, body)
+            self.assertEqual(400, ret.status_code, (path, ret.text))
+            self.assertTrue(ret.text.startswith('{"error":"request.not_after_ms: %d lies ' % far),
+                            ret.text)
+            refusal = ret.json()
+            self.assertEqual(['error', 'code', 'not_after_horizon_ms', 'not_after_ms',
+                              'server_time_ms'], list(refusal))
+            self.assertEqual(('not_after_beyond_horizon', 901000, far),
+                             (refusal['code'], refusal['not_after_horizon_ms'],
+                              refusal['not_after_ms']))
+            self.assertGreaterEqual(refusal['server_time_ms'], now)
+            self.assertIn('beyond the 901000 ms it accepts', refusal['error'])
+        self.assertEqual(404, requests.get(url + '/traverse/attempt/na-far').status_code)
+        self.assertNotIn('tombstone', requests.get(url + '/traverse/attempt/na-far').json())
         # /resolve reads it too (SPEC-multigraph-envelope.md section 4, E20): admission only,
         # the single-graph answer as before; passed, 409 expired and nothing runs
         resolve = {'sequence': self.element, 'labels': ['acc1']}
@@ -2854,8 +2878,10 @@ class TestTraverseAPI(TestTraverseBase):
         # profile of the server's pair (E17, SPEC-multigraph-envelope.md section 8.1;
         # test_multigraph.py's TestCapabilityProfile checks it); 'request_intake': what the server
         # reads of a request (H1: the body limit, the value count and their refusals' shapes; a
-        # single-graph server's top level, a multi-graph server's multigraph block)
-        self.assertEqual({'algorithm_version', 'attempts', 'compression_level',
+        # single-graph server's top level, a multi-graph server's multigraph block; H3: the
+        # connection cap); 'column_labels': GET /column_labels' byte cap, paging, 400 and total
+        # (H3; placed as request_intake)
+        self.assertEqual({'algorithm_version', 'attempts', 'column_labels', 'compression_level',
                           'content_encodings', 'deadline_check', 'expect_server_instance',
                           'feature_level', 'features', 'graph_summary', 'graphs',
                           'headers_unique', 'in_ram', 'max_graphs_without_selection',
@@ -2871,8 +2897,15 @@ class TestTraverseAPI(TestTraverseBase):
                                                  '/traverse/cancel'],
                           'too_many_json_values': {'status': 400, 'code': 'too_many_json_values',
                                                    'members': ['code', 'error',
-                                                               'max_request_json_values']}},
+                                                               'max_request_json_values']},
+                          'max_connections': None},
                          c['request_intake'])
+        self.assertEqual({'max_column_labels_bytes': 16777216, 'paging': ['limit', 'offset'],
+                          'too_large': {'status': 400, 'code': 'column_labels_too_large',
+                                        'members': ['code', 'error', 'max_column_labels_bytes',
+                                                    'total']},
+                          'total': 1},
+                         c['column_labels'])
         self.assertEqual({'value': True, 'collisions': 0, 'examples': []}, c['headers_unique'])
         self.assertEqual(['/traverse', '/resolve', '/pattern'], c['expect_server_instance'])
         profile = c['pair_summary']
@@ -4626,6 +4659,34 @@ class TestTraverseMultiGraph(TestTraverseBase):
         finally:
             server.close()
 
+    def test_multi_column_labels(self):
+        """H3 (SPEC-multigraph-envelope.md sections 3 and 8): GET /column_labels on a multi-graph
+        server lists each distinct pair once, at its first place in the answers' order (the
+        names in byte order, each name's pairs in the list's order), its labels in column
+        order: A's pair (listed twice under A and once under C) once, then B's two pairs, then
+        C's second annotation. Before H3 the names came in the hash map's order and A's pair
+        three times. The pages walk the same list; GET /capabilities states column_labels in its
+        multigraph block (not at the top level)."""
+        ret = requests.get(self.server.url + '/column_labels')
+        self.assertEqual(200, ret.status_code, ret.text)
+        expected = [self.fasta, 'acc1', 'acc2', 'acc1', 'acc2', 'acc3']
+        self.assertEqual(expected, ret.json())
+        caps = requests.get(self.server.url + '/capabilities').json()
+        self.assertNotIn('column_labels', caps)
+        self.assertEqual(6, caps['multigraph']['column_labels']['total'])
+        self.assertEqual(16777216, caps['multigraph']['column_labels']['max_column_labels_bytes'])
+        self.assertIsNone(caps['multigraph']['request_intake']['max_connections'])
+        walked, offset = [], 0
+        while offset is not None:
+            page = requests.get(f'{self.server.url}/column_labels?offset={offset}&limit=4').json()
+            self.assertEqual(6, page['total'])
+            walked += page['labels']
+            offset = page['next_offset']
+        self.assertEqual(expected, walked)
+        self.assertEqual({'labels': ['acc2', 'acc1'], 'next_offset': 4, 'offset': 2, 'total': 6},
+                         requests.get(self.server.url
+                                      + '/column_labels?offset=2&limit=2').json())
+
     def test_multi_request_intake(self):
         """H1 on a multi-graph server: GET /capabilities states request_intake in its multigraph
         block (not at the top level, where max_request_body_mb stays), and the intake's
@@ -4756,6 +4817,11 @@ class TestTraverseMultiGraph(TestTraverseBase):
             self.assertEqual(sample['max_request_body_mb'],
                              block['request_intake']['max_request_body_mb'])
             block['request_intake']['max_request_body_mb'] = caps['max_request_body_mb']
+            # H3: the sample's server ran --max-connections 256 and served other pairs: the cap
+            # and the length of GET /column_labels' list are this server's
+            block['request_intake']['max_connections'] \
+                = caps['multigraph']['request_intake']['max_connections']
+            block['column_labels']['total'] = caps['multigraph']['column_labels']['total']
             return block
         # B's second pair and C's second annotation have no manifest
         self.assertIsNone(c['composite_fp'])
@@ -6606,7 +6672,10 @@ class TestTraverseAttempts(TestingBase):
             self.assertEqual({'/pattern': 0, '/resolve': 0, '/traverse': 0},
                              probe['max_concurrent'])
             self.assertTrue(all(type(v) is int for v in probe['max_concurrent'].values()))
-            self.assertIn('Maximum connections: 4', server.text())
+            # the handler threads (the line said "Maximum connections" before H3), and no
+            # connection cap
+            self.assertIn('HTTP handler threads: 4', server.text())
+            self.assertIn('Maximum connections: unlimited (--max-connections 0)', server.text())
             self.assertNotIn('Handler threads:', server.text())
         for flags, needed in ((['-p', '2', '--traverse-max-concurrent', '2'], 3),
                               (['--http-threads', '3', '--traverse-max-concurrent', '1',
@@ -6627,7 +6696,7 @@ class TestTraverseAttempts(TestingBase):
             probe = requests.get(server.url + '/traverse/capabilities').json()
             self.assertEqual({'/pattern': 2, '/resolve': 2, '/traverse': 3},
                              probe['max_concurrent'])
-            self.assertIn('Maximum connections: 8', server.text())
+            self.assertIn('HTTP handler threads: 8', server.text())
             self.assertIn('Handler threads: 8 (--http-threads); requests run at once at most: '
                           '/traverse 3, /resolve 2, /pattern 2', server.text())
 
@@ -6787,6 +6856,255 @@ class TestTraverseAttempts(TestingBase):
             self.assertEqual(4, log.count(': busy, 2 of 2 running (--traverse-max-concurrent)'))
             print(f'\n[E19 saturation] light routes beside a full /traverse cap (s): '
                   + ', '.join(f'{k} {v:.3f}' for k, v in took.items()), flush=True)
+
+
+class TestServerConnectionsAndLabels(TestingBase):
+    """H3 (train 3; review 5 #1, #4, #14; SPEC-labeled-traversal-core.md §10.3): the cap on the
+    connections a server holds open (--max-connections: at the cap a further connection waits,
+    unaccepted, until one closes; never refused), GET /column_labels (the unpaged array as
+    before under --max-column-labels-bytes, else 400 column_labels_too_large; pages with
+    ?offset=&limit=) and the hold of a tombstone (--traverse-attempt-tombstone-hold-s, 900 s by
+    default). A small index of three files, its labels their paths (anno_type filename)."""
+
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        rng = random.Random(20261108)
+        d = cls.tempdir.name
+        cls.fastas = []
+        for name in ('one', 'two', 'three'):
+            cls.fastas.append(f'{d}/{name}.fa')
+            with open(cls.fastas[-1], 'w') as f:
+                f.write(f'>{name}\n' + ''.join(rng.choice('ACGT') for _ in range(300)) + '\n')
+        cls.graph = d + '/h3_k31.dbg'
+        cls._build_graph(cls.fastas, cls.graph, K, 'succinct', mode='basic')
+        cls._annotate_graph(cls.fastas, cls.graph, d + '/h3', 'column', anno_type='filename')
+        cls.anno = d + '/h3.column.annodbg'
+
+    _Server = TestTraverseAttempts._Server
+
+    def _connection(self, server, timeout=5):
+        """A kept-alive connection to |server| that has been answered once (GET /stats)"""
+        conn = http.client.HTTPConnection('127.0.0.1', server.port, timeout=timeout)
+        conn.request('GET', '/stats')
+        ret = conn.getresponse()
+        ret.read()
+        self.assertEqual(200, ret.status)
+        return conn
+
+    def test_max_connections_delays_and_never_refuses(self):
+        """With --max-connections 3 the server holds three connections open (kept alive); a
+        fourth is connected by the kernel but not answered until one of them closes, then
+        answered (no refusal, no status); a request on an open connection is answered at once.
+        GET /capabilities states the cap; the log names the threads, the cap and the pause."""
+        with self._Server(self, '--max-connections', '3', threads=2) as server:
+            caps = requests.get(server.url + '/capabilities').json()
+            self.assertEqual(3, caps['request_intake']['max_connections'])
+            self.assertIn('HTTP handler threads: 2', server.text())
+            self.assertIn('Maximum connections: 3 (--max-connections; a further connection '
+                          'waits in the listen queue until one closes)', server.text())
+            time.sleep(0.5)   # the probes' connections closed
+            held = [self._connection(server) for _ in range(3)]
+            waiting = socket.create_connection(('127.0.0.1', server.port), timeout=5)
+            waiting.sendall(b'GET /stats HTTP/1.1\r\nHost: x\r\n\r\n')
+            waiting.settimeout(1.0)
+            with self.assertRaises(socket.timeout):
+                waiting.recv(1)
+            # a request on an open connection is not delayed
+            start = time.monotonic()
+            held[1].request('GET', '/stats')
+            ret = held[1].getresponse()
+            ret.read()
+            self.assertEqual(200, ret.status)
+            self.assertLess(time.monotonic() - start, 2.0)
+            # one closes: the waiting connection is accepted and answered
+            held[0].close()
+            waiting.settimeout(10)
+            got = b''
+            while b'\r\n\r\n' not in got:
+                chunk = waiting.recv(4096)
+                if not chunk:
+                    break
+                got += chunk
+            self.assertTrue(got.startswith(b'HTTP/1.1 200'), got[:200])
+            waiting.close()
+            for conn in held[1:]:
+                conn.close()
+            for _ in range(50):
+                if 'Accepting connections again after' in server.text():
+                    break
+                time.sleep(0.1)
+            self.assertIn('connections open (--max-connections 3): new connections wait in the '
+                          'listen queue until one closes', server.text())
+            self.assertIn('Accepting connections again after', server.text())
+
+    def test_max_connections_is_validated(self):
+        """--max-connections is an integer in [0, 1048576], 0 or above the handler threads, else
+        the server refuses to start, naming it"""
+        for flags, words in ((['-p', '2', '--max-connections', '2'],
+                              '--max-connections must be 0 (no cap) or above the handler '
+                              'threads, 2 (-p\'s value: --http-threads not given); got 2. '
+                              'Necessary, not sufficient, for the light routes'),
+                             (['--http-threads', '4', '--max-connections', '4'],
+                              '--max-connections must be 0 (no cap) or above the handler '
+                              'threads, 4 (--http-threads)'),
+                             (['--max-connections', '1048577'],
+                              '--max-connections must be an integer in [0, 1048576]'),
+                             (['--max-connections', '-1'],
+                              '--max-connections must be an integer in [0, 1048576]'),
+                             (['--max-column-labels-bytes', '1099511627777'],
+                              '--max-column-labels-bytes must be an integer in [0, '
+                              '1099511627776]'),
+                             (['--traverse-attempt-tombstone-hold-s', '0'],
+                              '--traverse-attempt-tombstone-hold-s must be an integer in [1, '
+                              '31536000]')):
+            res = subprocess.run(shlex.split(METAGRAPH) + [
+                'server_query', '-i', self.graph, '-a', self.anno, '--port', str(_free_port()),
+                '--address', '127.0.0.1'] + flags, stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE, timeout=60)
+            self.assertNotEqual(0, res.returncode, flags)
+            self.assertIn(words, res.stderr.decode(), flags)
+
+    def test_column_labels(self):
+        """GET /column_labels: the array as before (indented, the labels in column order), a
+        page with ?offset=&limit= (compact: labels, next_offset, offset, total), the
+        parameters' faults (400, no code), GET /capabilities' column_labels; with a small
+        --max-column-labels-bytes the unpaged list is refused 400 column_labels_too_large
+        (error first) and the pages stop at the cap, at least one label each."""
+        with self._Server(self) as server:
+            ret = requests.get(server.url + '/column_labels')
+            self.assertEqual(200, ret.status_code, ret.text)
+            # the annotation's column order (not necessarily the files' order on the command line)
+            labels = ret.json()
+            self.assertEqual(sorted(self.fastas), sorted(labels))
+            self.assertEqual('[\n' + ',\n'.join('\t' + json.dumps(l) for l in labels) + '\n]',
+                             ret.text)
+            caps = requests.get(server.url + '/capabilities').json()['column_labels']
+            self.assertEqual((16777216, 3), (caps['max_column_labels_bytes'], caps['total']))
+            ret = requests.get(server.url + '/column_labels?offset=1&limit=1')
+            self.assertEqual(200, ret.status_code, ret.text)
+            self.assertEqual('{"labels":[%s],"next_offset":2,"offset":1,"total":3}'
+                             % json.dumps(labels[1]), ret.text)
+            self.assertEqual({'labels': labels[1:], 'next_offset': None, 'offset': 1,
+                              'total': 3},
+                             requests.get(server.url + '/column_labels?offset=1').json())
+            self.assertEqual({'labels': [], 'next_offset': None, 'offset': 7, 'total': 3},
+                             requests.get(server.url + '/column_labels?offset=7').json())
+            self.assertEqual({'labels': labels[:2], 'next_offset': 2, 'offset': 0, 'total': 3},
+                             requests.get(server.url + '/column_labels?limit=2').json())
+            for query, error in (
+                    ('graph=A', "Bad request: unknown parameter 'graph' of GET /column_labels "
+                                "(offset, limit)"),
+                    ('offset=1&offset=2', "Bad request: the parameter 'offset' is given twice"),
+                    ('limit=0', "Bad request: GET /column_labels: 'limit' must be an integer "
+                                "in [1, 9007199254740991], got '0'"),
+                    ('offset=-1', "Bad request: GET /column_labels: 'offset' must be an "
+                                  "integer in [0, 9007199254740991], got '-1'")):
+                ret = requests.get(server.url + '/column_labels?' + query)
+                self.assertEqual(400, ret.status_code, query)
+                self.assertEqual({'error': error}, ret.json(), query)
+        cap = len(json.dumps(labels[0])) + len(json.dumps(labels[1]))
+        with self._Server(self, '--max-column-labels-bytes', str(cap)) as server:
+            ret = requests.get(server.url + '/column_labels')
+            self.assertEqual(400, ret.status_code, ret.text)
+            self.assertTrue(ret.text.startswith('{"error":'), ret.text)
+            self.assertEqual({'error': f'the column labels (3 labels) take more than {cap} bytes '
+                                       'of JSON strings, more than one answer holds '
+                                       '(--max-column-labels-bytes): page through them with GET '
+                                       '/column_labels?offset=0&limit=<n>, following next_offset',
+                              'code': 'column_labels_too_large',
+                              'max_column_labels_bytes': cap, 'total': 3}, ret.json())
+            self.assertEqual({'labels': labels[:2], 'next_offset': 2, 'offset': 0, 'total': 3},
+                             requests.get(server.url + '/column_labels?offset=0').json())
+            caps = requests.get(server.url + '/capabilities').json()['column_labels']
+            self.assertEqual(cap, caps['max_column_labels_bytes'])
+            # the Python client reads a refused list page by page (CI's venv installs api/python
+            # with pandas: a missing client fails here rather than skipping the check)
+            from metagraph.client import GraphClient
+            self.assertEqual(labels, GraphClient('127.0.0.1', server.port, 'h3').column_labels())
+        # a cap below one label: one label a page
+        with self._Server(self, '--max-column-labels-bytes', '1') as server:
+            pages, offset = [], 0
+            while offset is not None:
+                page = requests.get(f'{server.url}/column_labels?offset={offset}').json()
+                pages.append(page['labels'])
+                offset = page['next_offset']
+            self.assertEqual([[l] for l in labels], pages)
+
+    def test_held_finished_attempts_never_block_a_cancel(self):
+        """H3, the review's S1 (e23/H3-review/exp_tomb_fill.py): with --traverse-attempt-retention
+        50, 101 malformed /traverse with an attempt_id and a not_after_ms 800 s ahead are
+        registered, refused 400, and their ids held past their retention (the first 51 by count,
+        until that not_after_ms); a real cancel-before-arrival after them is still tombstoned (404,
+        covers admission), not refused 429 tombstones_full: only tombstones count. The review's
+        23 h is beyond the horizon now (GPT review 6 #6a): refused 400 before anything is
+        registered."""
+        with self._Server(self, '--traverse-attempt-retention', '50') as server:
+            now = int(time.time() * 1000)
+            beyond = server.post('traverse', {'attempt_id': 'h3-fill-far',
+                                              'not_after_ms': now + 23 * 3600 * 1000})
+            self.assertEqual((400, 'not_after_beyond_horizon'),
+                             (beyond.status_code, beyond.json().get('code')), beyond.text)
+            self.assertEqual(404, server.state('h3-fill-far').status_code)
+            statuses = {}
+            for i in range(101):
+                ret = server.post('traverse', {'attempt_id': f'h3-fill-{i}',
+                                               'not_after_ms': now + 800 * 1000})
+                statuses[ret.status_code] = statuses.get(ret.status_code, 0) + 1
+            self.assertEqual({400: 101}, statuses)
+            held = server.state('h3-fill-0')
+            self.assertEqual(200, held.status_code, held.text)
+            self.assertEqual('finished', held.json()['state'])
+            cancel = server.post('traverse/cancel', {'attempt_id': 'h3-real-cancel',
+                                                     'not_after_ms': now + 10000})
+            self.assertEqual(404, cancel.status_code, cancel.text)
+            self.assertTrue(cancel.json()['tombstone'])
+            self.assertTrue(cancel.json()['covers_admission'])
+            self.assertIn('(held beside the tombstones, on their clocks, not counted with them)',
+                          cancel.json()['error'])
+            self.assertIn('while fewer than 50 tombstones are held (else the cancel is refused, 429)',
+                          cancel.json()['error'])
+
+    def test_a_cancel_of_an_unknown_id_is_held_900_s(self):
+        """At the defaults (retention 3600 s, tombstone_max_s 86400) a tombstone is held 900 s
+        (--traverse-attempt-tombstone-hold-s), not 1 to 24 h: a cancel naming a not_after_ms up to
+        898 s ahead is covered, one further ahead (within the horizon, 901 s) is held 900 s and not
+        covered (beyond_tombstone_max); the attempts block states tombstone_hold_s"""
+        with self._Server(self) as server:
+            caps = requests.get(server.url + '/capabilities').json()['attempts']
+            self.assertEqual((900, 86400, 3600), (caps['tombstone_hold_s'],
+                                                  caps['tombstone_max_s'], caps['retention_s']))
+            self.assertIs(int, type(caps['tombstone_hold_s']))
+            now = int(time.time() * 1000)
+            near = server.post('traverse/cancel', {'attempt_id': 'h3-near',
+                                                   'not_after_ms': now + 10000})
+            self.assertEqual(404, near.status_code, near.text)
+            body = near.json()
+            self.assertTrue(body['tombstone'])
+            self.assertTrue(body['covers_admission'])
+            self.assertAlmostEqual(now + 900000, body['suppressed_until_ms'], delta=5000)
+            far = server.post('traverse/cancel', {'attempt_id': 'h3-far',
+                                                  'not_after_ms': now + 900000}).json()
+            self.assertFalse(far['covers_admission'])
+            self.assertEqual('beyond_tombstone_max', far['covers_admission_reason'])
+            self.assertAlmostEqual(now + 900000, far['suppressed_until_ms'], delta=5000)
+            plain = server.post('traverse/cancel', {'attempt_id': 'h3-plain'}).json()
+            self.assertAlmostEqual(now + 900000, plain['suppressed_until_ms'], delta=5000)
+            self.assertIn('a cancel of an unknown id tombstones it at least 900 s, and until the '
+                          'not_after_ms it names + 2000 ms, at most 900 s', plain['error'])
+        with self._Server(self, '--traverse-attempt-tombstone-hold-s', '31536000') as server:
+            caps = requests.get(server.url + '/capabilities').json()['attempts']
+            self.assertEqual(86400, caps['tombstone_hold_s'])
+            now = int(time.time() * 1000)
+            far = server.post('traverse/cancel', {'attempt_id': 'h3-far',
+                                                  'not_after_ms': now + 900000}).json()
+            self.assertTrue(far['covers_admission'])
+            # an hour ahead is beyond the horizon whatever the hold (GPT review 6 #6a)
+            beyond = server.post('traverse/cancel', {'attempt_id': 'h3-beyond',
+                                                     'not_after_ms': now + 3600000})
+            self.assertEqual((400, 'not_after_beyond_horizon'),
+                             (beyond.status_code, beyond.json().get('code')), beyond.text)
+            self.assertNotIn('tombstone', server.state('h3-beyond').json())
 
 
 class TestTraverseSeedPhase(TestingBase):

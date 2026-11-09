@@ -1,0 +1,15 @@
+{
+ "route": "GET /column_labels",
+ "status": 400,
+ "note": "H3 (train 3; lane H3): the unpaged GET /column_labels whose labels' JSON strings (quotes and escapes counted) pass --max-column-labels-bytes (16 MiB by default; 32 bytes on the recording server so that the sample stays short) is refused 400 {error, code: \"column_labels_too_large\", max_column_labels_bytes, total}, written in this order (error first, as H1's refusals). The text stops at the cap, so the refusal costs at most that. The pages still answer: ?offset=0 gave {\"labels\": [\"NZ_CP000001.1\", \"NZ_CP000002.1\"], \"next_offset\": 2, \"offset\": 0, \"total\": 5} (sample 30). GET /capabilities states the cap and this shape (column_labels, sample 12). A real run, sample 30's pairs.",
+ "request": {
+  "method": "GET",
+  "path": "/column_labels"
+ },
+ "body": {
+  "error": "the column labels (5 labels) take more than 32 bytes of JSON strings, more than one answer holds (--max-column-labels-bytes): page through them with GET /column_labels?offset=0&limit=<n>, following next_offset",
+  "code": "column_labels_too_large",
+  "max_column_labels_bytes": 32,
+  "total": 5
+ }
+}

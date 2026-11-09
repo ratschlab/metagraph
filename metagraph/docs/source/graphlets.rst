@@ -187,7 +187,10 @@ traversal: nothing is written. ``not_after_ms=`` (Unix
 epoch ms, with or without ``attempt_id``) is the instant after which the request must not
 be started: a server whose clock has passed it when the request arrives refuses it, and the
 client raises ``AttemptExpired`` (a 409 with ``state: "expired"``: nothing ran, nothing was
-registered, no usage).
+registered, no usage). One further ahead of the server's clock than its
+``attempts.not_after_horizon_ms`` (``hard_cap_ms`` + ``clock_skew_allowance_ms``, 901 s by
+default) is refused 400 ``not_after_beyond_horizon``, on ``traverse`` and ``cancel`` alike:
+nothing runs, nothing is registered or tombstoned.
 
 .. code-block:: python
 
@@ -207,8 +210,9 @@ holds no tombstones. Two request fields close both gaps, and the capabilities'
 * ``cancel(attempt_id, wait_ms=None, not_after_ms=None)``: ``not_after_ms`` is the
   ``not_after_ms`` of the request being cancelled. A tombstone is then held until no
   copy of that request can start -- this server's clock past ``not_after_ms`` plus its
-  ``clock_skew_allowance_ms`` --, within the server's ``tombstone_max_s``, and every
-  tombstone answer states it.
+  ``clock_skew_allowance_ms`` --, within the server's ``tombstone_hold_s`` (900 s by
+  default, from train 3; ``tombstone_max_s`` before), and every tombstone answer states
+  it (``covers_admission`` is false for a ``not_after_ms`` beyond the hold).
 * ``traverse(..., attempt_id=..., expect_server_instance=...)`` (with ``attempt_id``
   only): the ``server_instance`` the attempt is meant for, a string or ``'auto'`` (the
   client fills in the server's own, ``client.server_instance()``, read from

@@ -498,6 +498,12 @@ Config::Config(int argc, char *argv[]) {
         } else if (!strcmp(argv[i], "--max-request-json-values")) {
             exact_ms(argv[i], get_value(i), &max_request_json_values);
             i++;
+        } else if (!strcmp(argv[i], "--max-connections")) {
+            bounded(argv[i], get_value(i), kMaxConnections, &max_connections);
+            i++;
+        } else if (!strcmp(argv[i], "--max-column-labels-bytes")) {
+            bounded(argv[i], get_value(i), kMaxColumnLabelsBytes, &max_column_labels_bytes);
+            i++;
         } else if (!strcmp(argv[i], "--traverse-max-memory-mb")) {
             exact_ms(argv[i], get_value(i), &traverse_max_memory_mb);
             i++;
@@ -563,6 +569,10 @@ Config::Config(int argc, char *argv[]) {
         } else if (!strcmp(argv[i], "--traverse-attempt-tombstone-max-s")) {
             bounded(argv[i], get_value(i), kMaxAttemptRetentionS,
                     &traverse_attempt_tombstone_max_s);
+            i++;
+        } else if (!strcmp(argv[i], "--traverse-attempt-tombstone-hold-s")) {
+            in_range(argv[i], get_value(i), 1, kMaxAttemptRetentionS,
+                     &traverse_attempt_tombstone_hold_s);
             i++;
         } else if (!strcmp(argv[i], "--traverse-observed-window-s")) {
             in_range(argv[i], get_value(i), 1, kMaxAttemptRetentionS,
@@ -1098,6 +1108,22 @@ Config::Config(int argc, char *argv[]) {
                       << "; and above the capped sum by the uncapped long calls that run at once "
                          "(/search, /align, a route without a cap, POST /traverse/cancel with "
                          "wait_ms), for the light routes to keep a thread" << std::endl;
+            print_usage_and_exit = true;
+        }
+        // a connection cap leaves a connection beyond the handler threads (H3): at the cap,
+        // the light routes (the cancel, the states, the capabilities) need one to be read.
+        // Necessary, not sufficient: idle keep-alives, slow uploads and 413 drains hold
+        // connections beyond the threads too (SPEC §10.3, Connections)
+        if (max_connections && max_connections <= threads) {
+            std::cerr << "Error: --max-connections must be 0 (no cap) or above the handler "
+                         "threads, " << threads
+                      << (http_threads ? " (--http-threads)" : " (-p's value: --http-threads "
+                                                               "not given)")
+                      << "; got " << max_connections << ". Necessary, not sufficient, for the "
+                         "light routes to find a connection beside the requests that hold the "
+                         "threads: idle keep-alives (up to 30 s), slow uploads (up to the 900 s "
+                         "content deadline) and 413 drains (up to 30 s) hold connections too"
+                      << std::endl;
             print_usage_and_exit = true;
         }
     }
@@ -2030,7 +2056,7 @@ if (advanced) {
 }
             // fprintf(stderr, "\t-o --outfile-base [STR] \tbasename of output file []\n");
             // fprintf(stderr, "\t-d --distance [INT] \tmax allowed alignment distance [0]\n");
-            fprintf(stderr, "\t-p --parallel [INT] \tmaximum number of parallel connections, and the threads of the graphs' pool (multi-graph fan-outs, /search's graphs) and of loading a graph list; with --http-threads given, only the latter two [1]\n");
+            fprintf(stderr, "\t-p --parallel [INT] \tthe HTTP handler threads (the requests handled at once), and the threads of the graphs' pool (multi-graph fan-outs, /search's graphs) and of loading a graph list; with --http-threads given, only the latter two (--max-connections caps the connections) [1]\n");
             fprintf(stderr, "\t   --threads-each [INT] \tnumber of threads per graph [1]\n");
             fprintf(stderr, "\t   --http-threads [INT] \tthe HTTP handler threads, on which every request runs (-p then sizes only the graphs' pool and the loading); for the capabilities, state and cancel routes to answer beside long calls, above the caps' sum plus the uncapped long calls run at once (/search, /align, routes without a cap, cancels with wait_ms); in [0, 4096], 0 = -p's value [0]\n");
             fprintf(stderr, "\t   --traverse-max-concurrent [INT] \tmost POST /traverse requests run at once, a further one refused 503 busy (Retry-After 1); in [0, 4096], 0 = no cap; the caps set must sum to less than the handler threads (necessary, not sufficient: see --http-threads) [0]\n");
@@ -2044,6 +2070,8 @@ if (advanced) {
             fprintf(stderr, "\t   --max-graphs-without-selection [INT] \ta POST /search or /pattern request without `graphs` queries every name of a graph list of at most this many names, and is refused (400) on a longer list; stated by GET /capabilities; at least 1 [10]\n");
             fprintf(stderr, "\t   --max-request-body-mb [INT] \tlargest request body read, in MiB: a request with a longer body is refused 413 body_too_large before it is read (a chunked one at the chunk that passes it); stated by GET /capabilities; 0 = unlimited [0]\n");
             fprintf(stderr, "\t   --max-request-json-values [INT] \tmost JSON values in the body of POST /traverse, /resolve, /pattern and /traverse/cancel, counted before it is parsed: one more is refused 400 too_many_json_values; stated by GET /capabilities; 0 = unlimited [262144]\n");
+            fprintf(stderr, "\t   --max-connections [INT] \tmost TCP connections held open at once: at it the server stops accepting and a further connection waits in the listen queue until one closes (a delay, never a refusal); counted from accept to close; 0 or above the handler threads, in [0, 1048576]; stated by GET /capabilities; 0 = no cap [0]\n");
+            fprintf(stderr, "\t   --max-column-labels-bytes [INT] \tmost bytes of label text (the labels' JSON strings) one GET /column_labels answer holds: the unpaged list above it is refused 400 column_labels_too_large, a page (?offset=&limit=) ends before it; in [0, 2^40]; 0 = unlimited [16777216]\n");
             fprintf(stderr, "\n\t   --index-release [STR] \trelease id echoed by /traverse and /resolve; requests may pin it []\n");
             fprintf(stderr, "\t   --index-name [STR] \t\tname of the index (-i / -a only) in capabilities and graphlets, [A-Za-z0-9._-]+ []\n");
             fprintf(stderr, "\t   --index-manifest [FILE] \tmanifest of the index bundle (-i / -a only); its digest is the index identity []\n");
@@ -2059,11 +2087,12 @@ if (advanced) {
             fprintf(stderr, "\t   --traverse-max-work-units [INT] \tmaximum of bounds.max_work_units per /traverse seed, likewise; 0 = off [0]\n");
             fprintf(stderr, "\t   --traverse-max-request-memory-mb [INT] \trequest-wide memory bound of a /traverse, in MiB: a seed after the first is not started (failed per seed, resource_stop scope request) when the results of the seeds before it and its memory budget would pass it; needs --traverse-max-memory-mb in [1, this]; in [0, 1048576], 0 = off [0]\n");
             fprintf(stderr, "\t   --traverse-attempt-allowance-ms [INT] \tadded to seeds x time budget in the bound enforced on a /traverse with attempt_id [10000]\n");
-            fprintf(stderr, "\t   --traverse-attempt-retention-s [INT] \tfinished attempts stay queryable this long (and their ids refused; one sent with not_after_ms is held until not_after_ms + the clock skew allowance, within the tombstone cap), and a cancel of an unknown id tombstones it at least this long, in [0, 31536000]; 0 = nothing kept, no tombstones (such a cancel is refused, 429) [3600]\n");
-            fprintf(stderr, "\t   --traverse-attempt-retention [INT] \tat most this many finished attempts are kept (oldest dropped first; one sent with not_after_ms stays held, its id refused, as --traverse-attempt-retention-s says), and a cancel of an unknown id is tombstoned only while fewer than this many tombstones and held attempts are held (else it is refused, 429), in [0, 10000000] [10000]\n");
+            fprintf(stderr, "\t   --traverse-attempt-retention-s [INT] \tfinished attempts stay queryable this long (and their ids refused; one sent with not_after_ms is held until not_after_ms + the clock skew allowance, within the tombstone cap), and a cancel of an unknown id tombstones it at least this long (at most --traverse-attempt-tombstone-hold-s), in [0, 31536000]; 0 = nothing kept, no tombstones (such a cancel is refused, 429) [3600]\n");
+            fprintf(stderr, "\t   --traverse-attempt-retention [INT] \tat most this many finished attempts are kept (oldest dropped first; one sent with not_after_ms stays held, its id refused, as --traverse-attempt-retention-s says), and a cancel of an unknown id is tombstoned only while fewer than this many tombstones are held (the held finished attempts not counted; else it is refused, 429), in [0, 10000000] [10000]\n");
             fprintf(stderr, "\t   --request-retention-s [INT] \tended /resolve and /pattern requests with a request_id stay queryable (GET /requests/{request_id}) this long, their ids refused (409), in [0, 31536000]; 0 = nothing kept [3600]\n");
             fprintf(stderr, "\t   --request-retention [INT] \tat most this many ended requests are kept (oldest dropped first), in [0, 10000000] [10000]\n");
-            fprintf(stderr, "\t   --traverse-attempt-tombstone-max-s [INT] \tthe longest a tombstone, or a finished attempt's id, is held to cover a not_after_ms (+ the clock skew allowance), from the latest cancel, finish or refused copy of the request, in [0, 31536000]; never less than --traverse-attempt-retention-s [86400]\n");
+            fprintf(stderr, "\t   --traverse-attempt-tombstone-max-s [INT] \tthe longest a finished attempt's id, or a tombstone (within --traverse-attempt-tombstone-hold-s), is held to cover a not_after_ms (+ the clock skew allowance), from the latest cancel, finish or refused copy of the request, in [0, 31536000]; never less than --traverse-attempt-retention-s [86400]\n");
+            fprintf(stderr, "\t   --traverse-attempt-tombstone-hold-s [INT] \tthe longest a tombstone (a cancel of an unknown id) is held, from its latest cancel or refused copy: at least the retention (or this, when shorter), and to cover the not_after_ms it names (+ the clock skew allowance) within this; a not_after_ms beyond it is not covered (covers_admission false); in [1, 31536000] [900]\n");
             fprintf(stderr, "\t   --traverse-clock-skew-ms [INT] \tclock skew a ledger adds to not_after_ms, stated in the capabilities [2000]\n");
             fprintf(stderr, "\t   --traverse-observed-window-s [INT] \tthe capabilities state the longest uninterruptible piece of a /traverse seen within the last this many seconds, in [1, 31536000] [3600]\n");
             fprintf(stderr, "\t   --traverse-chunk-target-ms [INT] \tdecode an annotation read a deadline may fall into in chunks of about this duration, the deadline checked between them; 0 = one piece per read [50]\n");

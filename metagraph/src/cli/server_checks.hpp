@@ -1,6 +1,7 @@
 #ifndef __METAGRAPH_SERVER_CHECKS_HPP__
 #define __METAGRAPH_SERVER_CHECKS_HPP__
 
+#include <algorithm>
 #include <chrono>
 #include <condition_variable>
 #include <cstdint>
@@ -551,10 +552,111 @@ std::string error_first_json_text(const Json::Value &body);
  * (`max_request_body_mb`, null when unlimited, as the top-level member of that name) and its
  * 413's shape (`body_too_large`: status, code, the body's members), the value count of the
  * strict-JSON routes (`max_request_json_values`, null when unlimited; `json_values_routes`)
- * and its 400's shape (`too_many_json_values`). In the multigraph block on a multi-graph
+ * and its 400's shape (`too_many_json_values`), and the cap on the connections the server
+ * holds open (`max_connections`, H3: --max-connections, null when there is none; at it a
+ * further connection waits in the listen queue). In the multigraph block on a multi-graph
  * server, at the top level on a single-graph one.
  */
-Json::Value request_intake_json(uint64_t max_body_mb, uint64_t max_json_values);
+Json::Value request_intake_json(uint64_t max_body_mb, uint64_t max_json_values,
+                                uint64_t max_connections);
+
+/**
+ * The list GET /column_labels answers (H3, review 5 #4; SPEC-labeled-traversal-core.md §10.3):
+ * the label vectors of the server's pairs in the list's order -- a single-graph server's one
+ * annotation; on a multi-graph server each distinct (graph, annotation) pair once, at its first
+ * place in the answers' order (ordered_pairs over the names in byte order) -- each in its
+ * column order. Holds the vectors by pointer (no copy): they live as long as the indexes.
+ */
+class ColumnLabelList {
+  public:
+    ColumnLabelList() = default;
+    explicit ColumnLabelList(std::vector<const std::vector<std::string> *> parts);
+
+    uint64_t total() const { return total_; }
+    // Calls |visit|(label) for the labels from position |from| on, in order, until it
+    // returns false or the list ends
+    template <class Visit>
+    void visit_from(uint64_t from, Visit visit) const {
+        if (from >= total_)
+            return;
+        // the part holding |from|: the last whose start is at most it
+        size_t p = std::upper_bound(starts_.begin(), starts_.end(), from) - starts_.begin() - 1;
+        uint64_t i = from - starts_[p];
+        for (; p < parts_.size(); ++p, i = 0) {
+            for (; i < parts_[p]->size(); ++i) {
+                if (!visit((*parts_[p])[i]))
+                    return;
+            }
+        }
+    }
+
+  private:
+    std::vector<const std::vector<std::string> *> parts_;
+    // the position of each part's first label (parts without labels kept: harmless)
+    std::vector<uint64_t> starts_;
+    uint64_t total_ = 0;
+};
+
+// Appends to |out| the JSON string jsoncpp writes for |label| (json_text's: quoted, `"` `\` and
+// control characters escaped, every non-ASCII code point as \uXXXX), byte for byte, written in
+// place (no copy of it is built); returns its length
+size_t append_json_string(std::string *out, const std::string &label);
+// The length of that JSON string, computed without building it (GPT review 6 #13: a label is
+// measured before it is written, so one that does not fit allocates nothing)
+size_t json_string_length(const std::string &label);
+
+/**
+ * GET /column_labels without parameters: |list| as the array json_text writes it (styled, one
+ * label per line, byte for byte), or nullopt when the labels' JSON strings (quotes and escapes
+ * counted) sum to more than |max_bytes| (0: unlimited) -- measured before anything is written,
+ * so a refusal allocates nothing and an answer is built at its final size.
+ */
+std::optional<std::string> column_labels_text(const ColumnLabelList &list, uint64_t max_bytes);
+
+// The page of GET /column_labels?offset=&limit= (|limit| nullopt: none)
+struct ColumnLabelsPage {
+    bool paged = false;
+    uint64_t offset = 0;
+    std::optional<uint64_t> limit;
+};
+
+/**
+ * The parameters of GET /column_labels: none (unpaged), or `offset` (an integer in [0, 2^53 -
+ * 1], 0 when only `limit` is given) and `limit` (in [1, 2^53 - 1]), either making it paged. An
+ * unknown, repeated or malformed parameter is std::invalid_argument (400 {"error"}, the GET
+ * probes' parameter faults).
+ */
+ColumnLabelsPage column_labels_parameters(
+        const std::vector<std::pair<std::string, std::string>> &query);
+
+/**
+ * The page of GET /column_labels?offset=&limit=, compact, members in byte order:
+ * {"labels": [...], "next_offset": n | null, "offset": o, "total": t}. The labels from position
+ * o on, at most |page.limit| of them, and at most as many as their JSON strings fit in
+ * |max_bytes| (0: unlimited; each measured before it is written, so a label that does not fit
+ * is never built) -- at least one when o < t, so that paging moves on (a first label longer
+ * than the cap is the page alone: a page's labels take at most max(|max_bytes|, the longest
+ * label's JSON string));
+ * next_offset is o + the labels returned, null at the end (an offset at or past the end:
+ * no labels).
+ */
+std::string column_labels_page_text(const ColumnLabelList &list, const ColumnLabelsPage &page,
+                                    uint64_t max_bytes);
+
+/**
+ * The 400 of the unpaged GET /column_labels whose labels' JSON strings pass |max_bytes|:
+ * {"error", "code": "column_labels_too_large", "max_column_labels_bytes", "total"} (written
+ * error first: error_first_json_text).
+ */
+Json::Value column_labels_too_large_json(uint64_t total, uint64_t max_bytes);
+
+/**
+ * GET /capabilities' `column_labels` (H3; in the multigraph block on a multi-graph server, at
+ * the top level on a single-graph one): {"max_column_labels_bytes" (null when unlimited),
+ * "paging": ["limit", "offset"], "too_large": {status, code, members}, "total" (null while a
+ * single index loads)}.
+ */
+Json::Value column_labels_capabilities_json(uint64_t max_bytes, std::optional<uint64_t> total);
 
 /**
  * The envelope POST /pattern answers on a multi-graph server (SPEC §24.1): one entry per

@@ -1682,6 +1682,227 @@ TEST(GraphletAttemptRegistry, TombstonesAreNeverShortenedAndCapped) {
     EXPECT_TRUE(b6["covers_admission"].asBool());
 }
 
+// H3 (review 5 #14): a tombstone -- the cancel of an id this server never ran, which anyone can
+// make with a cheap POST -- is held at most tombstone_hold_s (900 s by default) from its latest
+// cancel or refused copy: at least min(retention_s, it), and to cover a not_after_ms within it.
+// A burst of cancels of made-up ids fills the table for at most that long. A held finished
+// attempt (it ran) keeps the tombstone cap; tombstone_hold_s at or above it is today's rule
+TEST(GraphletAttemptRegistry, TheTombstoneHoldBoundsACancelOfAnUnknownId) {
+    FakeClock clock;
+    AttemptSettings settings = settings_with(&clock, 3600, 5);
+    settings.clock_skew_ms = 2000;
+    AttemptRegistry registry(settings);
+    ASSERT_EQ(900'000u, registry.settings().tombstone_hold_s * 1000);
+    const uint64_t t0 = clock.wall_ms();
+    // no not_after_ms: held 900 s, not 3600 (retention_s), covering nothing
+    auto [s1, plain] = registry.cancel("plain", 0);
+    ASSERT_EQ(404, s1);
+    EXPECT_EQ(t0 + 900'000, plain["suppressed_until_ms"].asUInt64());
+    EXPECT_FALSE(plain["covers_admission"].asBool());
+    EXPECT_EQ("no_not_after_ms", plain["covers_admission_reason"].asString());
+    // a not_after_ms within the hold: covered (the service's are at most seconds ahead)
+    auto [s2, near] = registry.cancel("near", 0, t0 + 10'000);
+    EXPECT_EQ(t0 + 900'000, near["suppressed_until_ms"].asUInt64());
+    EXPECT_TRUE(near["covers_admission"].asBool());
+    auto [s3, edge] = registry.cancel("edge", 0, t0 + 898'000);
+    EXPECT_TRUE(edge["covers_admission"].asBool());
+    // beyond it: held to the hold, not covered (before H3: held 24 h)
+    auto [s4, far] = registry.cancel("far", 0, t0 + 898'001);
+    EXPECT_EQ(t0 + 900'000, far["suppressed_until_ms"].asUInt64());
+    EXPECT_FALSE(far["covers_admission"].asBool());
+    EXPECT_EQ("beyond_tombstone_max", far["covers_admission_reason"].asString());
+    // a refused copy extends a tombstone by the same rule, from its arrival
+    clock.ms = 100'000;
+    auto copy = attempt_of(registry, "far");
+    AttemptIds ids = copy->ids();
+    ids.not_after_ms = t0 + 86'000'000;
+    copy->set_ids(ids);
+    auto refused = registry.start(copy);
+    ASSERT_TRUE(refused);
+    EXPECT_EQ(t0 + 1'000'000, refused->body["suppressed_until_ms"].asUInt64());
+    EXPECT_FALSE(refused->body["covers_admission"].asBool());
+    // the table (retention_count 5) is full: a sixth is refused, nothing promised
+    EXPECT_EQ(404, registry.cancel("fifth", 0).first);
+    EXPECT_EQ(429, registry.cancel("sixth", 0).first);
+    // 900 s later (inclusive) the tombstones of the burst are gone, "far" (extended) is not
+    clock.ms = 900'000;
+    EXPECT_EQ(429, registry.cancel("sixth", 0).first);
+    clock.ms = 900'001;
+    EXPECT_EQ(404, registry.cancel("sixth", 0).first);
+    EXPECT_TRUE(registry.state("far").second.isMember("tombstone"));
+    EXPECT_FALSE(registry.state("plain").second.isMember("tombstone"));
+    // the capabilities state both caps, as applied
+    const Json::Value caps = registry.capabilities_json();
+    EXPECT_EQ(900u, caps["tombstone_hold_s"].asUInt64());
+    EXPECT_EQ(86400u, caps["tombstone_max_s"].asUInt64());
+    EXPECT_NE(std::string::npos, registry.retention_text().find(
+            "a cancel of an unknown id tombstones it at least 900 s, and until the not_after_ms "
+            "it names + 2000 ms, at most 900 s, while fewer than 5 tombstones are held (else the "
+            "cancel is refused, 429)"));
+    // one statement of where the held finished attempts are (the verification's nit B: "held
+    // among the tombstones" and "kept apart" in one text)
+    EXPECT_NE(std::string::npos, registry.retention_text().find(
+            "after its latest refused copy (held beside the tombstones, on their clocks, not "
+            "counted with them); a cancel"));
+    EXPECT_EQ(std::string::npos, registry.retention_text().find("among the tombstones"));
+    EXPECT_EQ(std::string::npos, registry.retention_text().find("kept apart"));
+
+    // a finished attempt sent with a far not_after_ms keeps the tombstone cap (it ran)
+    {
+        FakeClock c2;
+        AttemptSettings s2 = settings_with(&c2, 60, 5);
+        s2.clock_skew_ms = 0;
+        AttemptRegistry r2(s2);
+        auto ran = attempt_of(r2, "ran");
+        AttemptIds rid = ran->ids();
+        rid.not_after_ms = c2.wall_ms() + 3'600'000;
+        ran->set_ids(rid);
+        ASSERT_FALSE(r2.start(ran));
+        r2.finish(ran, "completed", 200, 1);
+        c2.ms = 3'000'000;   // past the retention (60 s) and the tombstone hold (900 s)
+        auto replay = attempt_of(r2, "ran");
+        replay->set_ids(rid);
+        auto again = r2.start(replay);
+        ASSERT_TRUE(again);
+        EXPECT_FALSE(again->expired);
+        EXPECT_EQ("finished", again->body["state"].asString());
+    }
+    // tombstone_hold_s at or above the cap: the rule before H3 (at least retention_s, covered
+    // to the cap)
+    {
+        FakeClock c3;
+        AttemptSettings s3 = settings_with(&c3, 3600, 5);
+        s3.clock_skew_ms = 2000;
+        s3.tombstone_hold_s = 31'536'000;
+        AttemptRegistry r3(s3);
+        const uint64_t w = c3.wall_ms();
+        EXPECT_EQ(w + 3'600'000, r3.cancel("p", 0).second["suppressed_until_ms"].asUInt64());
+        auto [s, b] = r3.cancel("f", 0, w + 50'000'000);
+        EXPECT_EQ(w + 50'002'000, b["suppressed_until_ms"].asUInt64());
+        EXPECT_TRUE(b["covers_admission"].asBool());
+        EXPECT_EQ(86400u, r3.capabilities_json()["tombstone_hold_s"].asUInt64());
+    }
+    // a hold shorter than retention_s is also the floor
+    {
+        FakeClock c4;
+        AttemptSettings s4 = settings_with(&c4, 3600, 5);
+        s4.tombstone_hold_s = 30;
+        AttemptRegistry r4(s4);
+        EXPECT_EQ(c4.wall_ms() + 30'000,
+                  r4.cancel("p", 0).second["suppressed_until_ms"].asUInt64());
+    }
+}
+
+// H3, the review's S1 (e23/H3-review/exp_tomb_fill.py): finished attempts sent with a far
+// not_after_ms -- malformed requests that registered and finished as errors -- are held past
+// their retention, for up to tombstone_max_s, but never count against the cancels: a real
+// cancel-before-arrival is tombstoned, however many of them are held; only tombstones fill the
+// count, and each holds it at most tombstone_hold_s
+TEST(GraphletAttemptRegistry, HeldFinishedAttemptsNeverBlockACancel) {
+    FakeClock clock;
+    AttemptSettings settings = settings_with(&clock, 3600, 50);
+    settings.clock_skew_ms = 2000;
+    AttemptRegistry registry(settings);
+    const uint64_t far = clock.wall_ms() + 23ull * 3600 * 1000;
+    for (int i = 0; i < 101; ++i) {
+        auto a = attempt_of(registry, "fill-" + std::to_string(i));
+        AttemptIds ids = a->ids();
+        ids.not_after_ms = far;
+        a->set_ids(ids);
+        ASSERT_FALSE(registry.start(a));
+        registry.finish(a, "error", 400, 100);
+    }
+    // the first 51 left the retention by count and are held until far + skew: refused
+    auto replay = attempt_of(registry, "fill-0");
+    AttemptIds ids = replay->ids();
+    ids.not_after_ms = far;
+    replay->set_ids(ids);
+    auto refused = registry.start(replay);
+    ASSERT_TRUE(refused);
+    EXPECT_EQ("finished", refused->body["state"].asString());
+    // a cancel-before-arrival is tombstoned (before H3's S1 fix: 429 tombstones_full)
+    auto [status, body] = registry.cancel("real-cancel", 0, clock.wall_ms() + 10'000);
+    EXPECT_EQ(404, status) << body["error"].asString();
+    EXPECT_TRUE(body["tombstone"].asBool());
+    EXPECT_TRUE(body["covers_admission"].asBool());
+    // tombstones alone fill the count: 49 more, then the 51st cancel is refused
+    for (int i = 0; i < 49; ++i) {
+        ASSERT_EQ(404, registry.cancel("c-" + std::to_string(i), 0).first) << i;
+    }
+    auto [full, refusal] = registry.cancel("c-49", 0);
+    EXPECT_EQ(429, full);
+    EXPECT_NE(std::string::npos, refusal["error"].asString().find(
+            "50 tombstones (cancels of unknown ids) are held already"));
+    // after the tombstones' hold (900 s) the cancels pass again, the held attempts still held
+    clock.ms = 900'001;
+    EXPECT_EQ(404, registry.cancel("c-49", 0).first);
+    EXPECT_TRUE(registry.start(replay));
+}
+
+// H3, GPT review 6 #6a: the horizon of not_after_ms. /traverse and POST /traverse/cancel refuse
+// one further ahead of the server's clock than hard_cap_ms + clock_skew_ms (400
+// not_after_beyond_horizon, before anything is registered), so that no request, malformed or
+// not, holds its id longer than that after it arrived; a past one is never beyond it (its
+// expired 409 stays), and without a cap (the CLI) there is no horizon
+TEST(GraphletAttemptRegistry, TheNotAfterHorizonIsTheCapPlusTheSkew) {
+    FakeClock clock;
+    AttemptSettings settings = settings_with(&clock, 3600, 50);
+    settings.clock_skew_ms = 2000;
+    AttemptRegistry registry(settings);
+    ASSERT_EQ(901'000u, registry.not_after_horizon_ms());
+    const Json::Value caps = registry.capabilities_json();
+    EXPECT_EQ(901'000u, caps["not_after_horizon_ms"].asUInt64());
+    EXPECT_EQ(Json::uintValue, caps["not_after_horizon_ms"].type());
+    const uint64_t now = clock.wall_ms();
+    // absent, past, now, and up to the horizon inclusive: accepted
+    for (std::optional<uint64_t> v : { std::optional<uint64_t>(), std::optional<uint64_t>(0),
+                                       std::optional<uint64_t>(now - 1),
+                                       std::optional<uint64_t>(now),
+                                       std::optional<uint64_t>(now + 600'000),
+                                       std::optional<uint64_t>(now + 901'000) }) {
+        EXPECT_FALSE(registry.beyond_horizon_json(v, "request")) << v.value_or(0);
+    }
+    // one millisecond beyond it, and the largest accepted value: refused, the limit named
+    for (uint64_t v : { now + 901'001, kMaxNotAfterMs }) {
+        auto body = registry.beyond_horizon_json(v, "request");
+        ASSERT_TRUE(body) << v;
+        EXPECT_EQ((std::vector<std::string>{ "code", "error", "not_after_horizon_ms",
+                                             "not_after_ms", "server_time_ms" }),
+                  body->getMemberNames());
+        EXPECT_EQ("not_after_beyond_horizon", (*body)["code"].asString());
+        EXPECT_EQ(901'000u, (*body)["not_after_horizon_ms"].asUInt64());
+        EXPECT_EQ(v, (*body)["not_after_ms"].asUInt64());
+        EXPECT_EQ(now, (*body)["server_time_ms"].asUInt64());
+        EXPECT_EQ(0u, (*body)["error"].asString().find(
+                "request.not_after_ms: " + std::to_string(v) + " lies "
+                + std::to_string(v - now) + " ms after this server's clock ("
+                + std::to_string(now) + "), beyond the 901000 ms it accepts "
+                "(attempts.not_after_horizon_ms"));
+    }
+    // the horizon moves with the clock
+    clock.ms = 1000;
+    EXPECT_FALSE(registry.beyond_horizon_json(now + 901'001, "request"));
+    // the skew and the cap set it (the cap rounded up)
+    {
+        FakeClock c2;
+        AttemptSettings s2 = settings_with(&c2);
+        s2.clock_skew_ms = 0;
+        s2.hard_cap_ms = 2999.5;
+        AttemptRegistry r2(s2);
+        EXPECT_EQ(3000u, r2.not_after_horizon_ms());
+        EXPECT_TRUE(r2.beyond_horizon_json(c2.wall_ms() + 3001, "request"));
+    }
+    // no cap (the CLI): no horizon, stated null
+    {
+        AttemptSettings s3 = settings_with(nullptr);
+        s3.hard_cap_ms = 0;
+        AttemptRegistry r3(s3);
+        EXPECT_EQ(0u, r3.not_after_horizon_ms());
+        EXPECT_TRUE(r3.capabilities_json()["not_after_horizon_ms"].isNull());
+        EXPECT_FALSE(r3.beyond_horizon_json(kMaxNotAfterMs, "request"));
+    }
+}
+
 // A copy of a cancelled request refused at dispatch (409) extends the tombstone to its own
 // not_after_ms + clock_skew_ms and states the suppression against it, so that every later copy
 // (a proxy's replay carries the same not_after_ms) is refused while it could still be admitted
@@ -1875,11 +2096,15 @@ TEST(GraphletAttemptRegistry, FinishedAttemptsAreHeldThroughTheirNotAfterMs) {
         ASSERT_TRUE(replay);
         EXPECT_FALSE(replay->expired);
         EXPECT_EQ("finished", replay->body["state"].asString());
-        // held among the tombstones: the table (retention_count 1) is full, so a cancel of an
-        // unknown id promises nothing
-        auto [full, refused] = registry.cancel("unknown-1", 0);
+        // held beside the tombstones, and not counted by the cancels' 429 (H3, the review's S1):
+        // a cancel of an unknown id is tombstoned; a second fills retention_count 1 with
+        // tombstones alone, and is refused, promising nothing
+        EXPECT_EQ(404, registry.cancel("unknown-1", 0).first);
+        auto [full, refused] = registry.cancel("unknown-2", 0);
         EXPECT_EQ(429, full);
         EXPECT_EQ("tombstones_full", refused["reason"].asString());
+        EXPECT_NE(std::string::npos, refused["error"].asString().find(
+                "1 tombstones (cancels of unknown ids) are held already"));
         // one without not_after_ms is dropped by count: a replay of it runs
         auto bare = sent(registry, "ev-3", std::nullopt);
         ASSERT_FALSE(registry.start(bare));
@@ -1893,7 +2118,10 @@ TEST(GraphletAttemptRegistry, FinishedAttemptsAreHeldThroughTheirNotAfterMs) {
         EXPECT_TRUE(registry.start(sent(registry, "ev-1", not_after)));
         clock.ms = 62'001;
         EXPECT_TRUE(registry.start(sent(registry, "ev-1", not_after))->expired);
-        EXPECT_EQ(404, registry.cancel("unknown-2", 0).first);
+        // the tombstone of unknown-1 holds the cancels' count until its hold ends (900 s)
+        EXPECT_EQ(429, registry.cancel("unknown-3", 0).first);
+        clock.ms = 900'001;
+        EXPECT_EQ(404, registry.cancel("unknown-3", 0).first);
     }
     {
         // the cap: held at most tombstone_max_s after the finish (stated: a not_after_ms

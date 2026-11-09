@@ -805,7 +805,8 @@ if(METAGRAPH_BUILD_EXECUTABLE)
   # the source tree, from which the tests read their data and the specs whatever directory they
   # run in (tests/source_path.hpp; unit_tests_parallel runs each shard in a directory of its own)
   target_compile_definitions(unit_tests PRIVATE METAGRAPH_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
-  target_link_libraries(unit_tests gtest_main gtest gmock metagraph-core metagraph-cli)
+  # simple-web-server: tests/cli/test_server_connections.cpp runs the HTTP server (H3: the connection cap)
+  target_link_libraries(unit_tests gtest_main gtest gmock metagraph-core metagraph-cli simple-web-server)
 
   target_compile_options(unit_tests PRIVATE -Wno-uninitialized ${DEATH_TEST_FLAG})
 

@@ -4489,6 +4489,18 @@ class TestPatternRegression(TestingBase):
             caps['attempts']['delivery_reserve']['account_per_text_byte'] = None
             return caps
 
+        def without_tombstone_hold(caps):
+            # H3: attempts.tombstone_hold_s, the cap of a tombstone's hold (900 s by default,
+            # SPEC-labeled-traversal-core.md §10.3), and attempts.not_after_horizon_ms, how far
+            # ahead a not_after_ms may lie (hard_cap_ms + the skew, 901000 ms; §5), gains over
+            # every base
+            if caps is b:
+                self.assertEqual((900, 901000), (caps['attempts'].get('tombstone_hold_s'),
+                                                 caps['attempts'].get('not_after_horizon_ms')))
+            caps['attempts'].pop('tombstone_hold_s', None)
+            caps['attempts'].pop('not_after_horizon_ms', None)
+            return caps
+
         def only_gains(base, new, allowed, what):
             # every member of |base| is in |new|, and what |new| adds is documented
             self.assertLessEqual(set(base), set(new), what)
@@ -4500,6 +4512,8 @@ class TestPatternRegression(TestingBase):
         without_poll_stride(b)
         without_reserve_defaults(a)
         without_reserve_defaults(b)
+        without_tombstone_hold(a)
+        without_tombstone_hold(b)
         # The documented gains, compared as sets: routes.requests (GET /requests/{request_id},
         # release 10, on every server); against a base before the pattern search also the
         # feature `pattern` with its routes and its blocks -- `pattern`, `resolve` (the block of
@@ -4518,17 +4532,21 @@ class TestPatternRegression(TestingBase):
         # of a single-graph server, SPEC-multigraph-envelope.md section 8), `pair_summary` (the
         # capability profile of the pair, E17, SPEC-multigraph-envelope.md section 8.1) and
         # `request_intake` (H1: the body limit, the value count and their refusals' shapes, at the
-        # top level of a single-graph server, SPEC-multigraph-envelope.md section 8)
+        # top level of a single-graph server, SPEC-multigraph-envelope.md section 8; H3: the
+        # connection cap) and `column_labels` (H3: GET /column_labels' byte cap, paging, 400 and
+        # total, placed as request_intake)
         only_gains(a, b, {'headers_unique', 'expect_server_instance', 'pair_summary',
-                          'request_intake'} | (
+                          'request_intake', 'column_labels'} | (
             set() if base_pattern else {
                 'pattern', 'resolve', 'in_ram', 'graph_summary', 'max_graphs_without_selection',
                 'max_request_body_mb'}), 'members')
         self.assertIn('headers_unique', b)
         self.assertEqual(['/traverse', '/resolve', '/pattern'], b['expect_server_instance'])
         self.assertIn('pair_summary', b)
-        self.assertEqual((None, 262144), (b['request_intake']['max_request_body_mb'],
-                                          b['request_intake']['max_request_json_values']))
+        self.assertEqual((None, 262144, None), (b['request_intake']['max_request_body_mb'],
+                                                b['request_intake']['max_request_json_values'],
+                                                b['request_intake']['max_connections']))
+        self.assertEqual(16777216, b['column_labels']['max_column_labels_bytes'])
         only_gains(a['routes'], b['routes'],
                    {'requests'} | (set() if base_pattern else {'pattern', 'pattern_capabilities'}),
                    'routes')
@@ -4561,6 +4579,8 @@ class TestPatternRegression(TestingBase):
         without_poll_stride(b)
         without_reserve_defaults(a)
         without_reserve_defaults(b)
+        without_tombstone_hold(a)
+        without_tombstone_hold(b)
         new_caps = self.new.get('capabilities').json()
         gains = {'discovery_trace_scale', 'max_request_memory_mb', 'max_concurrent',
                  'max_explicit_labels', 'max_extra_labels', 'max_cost_entries'} | (

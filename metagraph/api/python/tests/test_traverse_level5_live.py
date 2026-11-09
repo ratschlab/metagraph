@@ -186,7 +186,12 @@ class TestLevel5Live(unittest.TestCase):
         v = release_verdict(got, AttemptSent(aid, _now_ms() + 60000, self.c.server_instance()))
         self.assertEqual('covers_admission_false', v.code)
         aid = _id('far')
-        far = _now_ms() + self.main.doc['attempts']['tombstone_max_s'] * 1000 + 10 ** 6
+        # beyond the tombstone's hold (min(tombstone_max_s, tombstone_hold_s), 900 s by
+        # default) and within the not_after horizon (hard_cap_ms + the skew, 901 s; H3)
+        attempts = self.main.doc['attempts']
+        hold_ms = 1000 * min(attempts['tombstone_max_s'],
+                             attempts.get('tombstone_hold_s') or attempts['tombstone_max_s'])
+        far = _now_ms() + min(hold_ms, attempts.get('not_after_horizon_ms') or hold_ms + 10 ** 6)
         got = self.c.cancel(aid, not_after_ms=far)
         self.assertEqual('beyond_tombstone_max', got.suppression.covers_admission_reason)
         self.assertFalse(release_verdict(got, AttemptSent(aid, far, self.c.server_instance())))

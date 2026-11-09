@@ -122,6 +122,9 @@ The answer keeps its upstream shape (a list of `{seq_description, results, ...}`
   ordered by label.
 - The result cache key includes the selected names (with their pairs), so a pair listed under two names never
   returns rows tagged with the other name.
+- `GET /column_labels` (H3), which tags nothing with a name, lists each distinct pair once, at its first place in
+  the answers' order (the names in byte order, each name's pairs in the list's order), its labels in column
+  order (section 8).
 - The CLI's `metagraph query --query-mode labels` (every label above the thresholds, no counts, no cut) keeps the
   annotation's column order, not the C5 order; `/search` has no such mode, so it is not reachable over HTTP.
 - `/search` takes `graphs` only (no `pairs`; it has no re-ask): `pairs` is refused 400 `pairs_unsupported` on every
@@ -354,7 +357,8 @@ single-graph server states at the top level of `GET /capabilities`:
   "body_too_large": {"status": 413, "code": "body_too_large", "members": ["code", "error", "max_request_body_mb"]},
   "max_request_json_values": 262144,
   "json_values_routes": ["/pattern", "/resolve", "/traverse", "/traverse/cancel"],
-  "too_many_json_values": {"status": 400, "code": "too_many_json_values", "members": ["code", "error", "max_request_json_values"]}
+  "too_many_json_values": {"status": 400, "code": "too_many_json_values", "members": ["code", "error", "max_request_json_values"]},
+  "max_connections": null
 }
 ```
 
@@ -365,6 +369,29 @@ body members as a set (sorted); the body itself writes them `error` first, then 
 `SPEC-labeled-traversal-core.md` §5 and §10.3). The 413 answers a body over `max_request_body_mb` on every route,
 before it is read; the 400 a body of a listed route with more values, before it is parsed. Its presence is the
 marker: an engine without it closes the connection on an over-limit body and counts no values.
+From H3 (train 3) `request_intake` also states `max_connections`: `--max-connections`, the most TCP connections the
+server holds open at once (`null` without a cap, the default and staging's, as in the example; an integer when
+the operator sets one; at it a further connection waits in the listen queue until one closes, never refused;
+`SPEC-labeled-traversal-core.md` §10.3, Connections). Its presence is the
+marker: an engine without it never stops accepting. The block also states `column_labels`, what `GET
+/column_labels` answers, the same object a single-graph server states at the top level of `GET /capabilities`:
+
+```json
+"column_labels": {
+  "max_column_labels_bytes": 16777216,
+  "paging": ["limit", "offset"],
+  "too_large": {"status": 400, "code": "column_labels_too_large", "members": ["code", "error", "max_column_labels_bytes", "total"]},
+  "total": 651
+}
+```
+
+`max_column_labels_bytes` is `--max-column-labels-bytes` (`null` when unlimited): the most bytes of the labels' JSON
+strings one answer holds; the unpaged list above it is refused 400 `column_labels_too_large` (`members` as for
+`request_intake`'s refusals; the body writes `error` first). `paging` names the query parameters of a page
+(`?offset=&limit=`, which answers `{"labels", "next_offset", "offset", "total"}`), `total` the length of the list
+(`null` while a single index loads). On a multi-graph server the list holds each distinct (graph, annotation) pair
+once, at its first place in the answers' order (section 3). Its presence is the marker: an engine without it
+ignores the parameters and answers the whole array (`SPEC-labeled-traversal-core.md` §10.3, `GET /column_labels`).
 A single-graph server, which states its request registry as `routes.requests`, states `expect_server_instance`
 (the same list) at the top level of `GET /capabilities`, beside `routes.requests` (the pattern of `headers_unique`:
 one reader serves both modes), and `request_intake` there too. An engine without the key refuses the field 400 (unknown field), so clients send it

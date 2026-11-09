@@ -128,12 +128,13 @@ class GraphClientJson:
 
         return self._do_request(endpoint, payload)
 
-    def _do_request(self, endpoint, payload, post_req=True, timeout=None) -> Tuple[JsonDict, str]:
+    def _do_request(self, endpoint, payload, post_req=True, timeout=None,
+                    params=None) -> Tuple[JsonDict, str]:
         url = f'{self.server}/{endpoint}'
         if post_req:
             ret = requests.post(url=url, json=payload, timeout=timeout)
         else:
-            ret = requests.get(url=url, timeout=timeout)
+            ret = requests.get(url=url, timeout=timeout, params=params)
 
         try:
             json_obj = ret.json()
@@ -149,12 +150,20 @@ class GraphClientJson:
         return json_obj
 
     # noinspection PyTypeChecker
-    def column_labels(self) -> Tuple[JsonStrList, str]:
+    def column_labels(self, offset: int = None, limit: int = None) -> Tuple[JsonStrList, str]:
         """
-        :returns:   All column labels
-        :rtype:     JSON list
+        :param offset: with |limit|, or alone: one page of the list (a server of train 3, H3,
+                       and later; an older server ignores both and answers the whole list)
+        :returns:   All column labels (a JSON list), or with |offset| or |limit| the page
+                    {"labels", "next_offset", "offset", "total"}
+        :rtype:     JSON list, or JSON object
         """
-        return self._do_request("column_labels", {}, post_req=False)
+        params = {}
+        if offset is not None:
+            params['offset'] = offset
+        if limit is not None:
+            params['limit'] = limit
+        return self._do_request("column_labels", {}, post_req=False, params=params or None)
 
     def stats(self, timeout=None) -> Tuple[dict, str]:
         return self._do_request("stats", {}, post_req=False, timeout=timeout)
@@ -243,7 +252,21 @@ class GraphClient:
         return helpers.df_from_align_result(json_obj)
 
     def column_labels(self) -> List[str]:
-        return self._json_client.column_labels()
+        """Every column label of the server. A list longer than the server answers at once
+        (400 column_labels_too_large: --max-column-labels-bytes, train 3's H3) is read page by
+        page."""
+        try:
+            return self._json_client.column_labels()
+        except RuntimeError as e:
+            if 'column_labels_too_large' not in str(e) and '--max-column-labels-bytes' not in str(e):
+                raise
+        labels = []
+        offset = 0
+        while offset is not None:
+            page = self._json_client.column_labels(offset=offset)
+            labels += page['labels']
+            offset = page['next_offset']
+        return labels
 
     def ready(self) -> bool:
         return self._json_client.ready()

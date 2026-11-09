@@ -52,12 +52,14 @@
     "id_pattern": "^[A-Za-z0-9._:-]{1,128}$",
     "instance": "SPEC-labeled-traversal-core.md section 5, expect_server_instance",
     "not_after": "SPEC-labeled-traversal-core.md section 5, not_after_ms",
+    "not_after_horizon_ms": 901000,
     "release_rule": "SPEC-labeled-traversal-core.md section 10.3, the release rule",
     "retention_count": 10000,
     "retention_s": 3600,
     "server_instance": "fac021dbd33d53f8",
     "state": "GET /traverse/attempt/{attempt_id}",
     "suppression": "SPEC-labeled-traversal-core.md section 10.3, POST /traverse/cancel: the tombstone",
+    "tombstone_hold_s": 900,
     "tombstone_max_s": 86400
    },
    "budgets": [
