@@ -147,8 +147,9 @@ void check_case(const Case &c, std::vector<DeBruijnGraph::Mode> modes = all_mode
             }
             for (const auto &[l, n] : ref_walks) {
                 // walks that part ways part at a fork the label is on: allowance 0 ends it there
-                if (n >= 2)
+                if (n >= 2) {
                     EXPECT_GE(branch_ends[l], 1u) << where << ": " << l;
+                }
             }
             // every walk of the reference is covered by a limited claim on its prefix
             for (const auto &[ref_key, ref_reason] : expected) {
