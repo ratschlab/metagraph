@@ -82,6 +82,7 @@ class BOSS {
     // Traverse graph mapping k-mers from sequence to the graph edges
     // and run callback for each edge until the termination condition is satisfied
     // Invokes #callback with npos if a k-mer can't be mapped to the graph edges
+    // or if #skip returns true for it (#skip is called once per k-mer)
     void map_to_edges(std::string_view sequence,
                       const std::function<void(edge_index)> &callback,
                       const std::function<bool()> &terminate = ALWAYS_FALSE,
@@ -101,10 +102,13 @@ class BOSS {
 
     // Pull-based form of map_to_edges: each next() returns the edge of the next
     // (k+1)-mer of |sequence|, or npos if it is missing, invalid, or skipped.
-    // |sequence| must outlive the stream.
     class EdgeStream {
       public:
         EdgeStream(const BOSS &boss, std::string_view sequence,
+                   std::function<bool()> skip = {})
+              : EdgeStream(boss, boss.encode(sequence), std::move(skip)) {}
+        // |seq_encoded| must have no sentinels (zeros)
+        EdgeStream(const BOSS &boss, std::vector<TAlphabet>&& seq_encoded,
                    std::function<bool()> skip = {});
 
         bool done() const { return i_ + boss_->k_ + 1 > seq_.size(); }

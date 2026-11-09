@@ -68,13 +68,7 @@ bool DBGSuccinct::find(std::string_view sequence,
         },
         [&]() { return num_kmers_missing > max_kmers_missing
                         || num_kmers_discovered >= min_kmers_discovered; },
-        [&]() {
-            if (!is_invalid())
-                return false;
-
-            num_kmers_missing++;
-            return true;
-        }
+        is_invalid
     );
 
     return num_kmers_missing <= max_kmers_missing;
@@ -467,13 +461,7 @@ void DBGSuccinct::map_to_nodes(std::string_view sequence,
     boss_graph_->map_to_edges(sequence,
         [&](auto index) { *jt = index; ++jt; },
         []() { return false; },
-        [&]() {
-            if (!is_missing())
-                return false;
-
-            ++jt;
-            return true;
-        }
+        is_missing
     );
 
     assert(jt == boss_edges.end());
@@ -489,12 +477,7 @@ void DBGSuccinct::map_to_nodes(std::string_view sequence,
         [&]() {
             assert(it < boss_edges.rend());
             // if a k-mer is missing, skip its reverse compliment, as it's missing too.
-            if (!*it) {
-                ++it;
-                return true;
-            } else {
-                return false;
-            }
+            return !*it;
         }
     );
 

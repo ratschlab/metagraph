@@ -104,15 +104,7 @@ void CanonicalDBG
                 ++it;
             },
             []() { return false; },
-            [&]() {
-                if (is_missing() || *it) {
-                    path.push_back(npos);
-                    ++it;
-                    return true;
-                } else {
-                    return false;
-                }
-            }
+            [&]() { return is_missing() || *it; }
         );
 
         assert(it == rev_path.rend());
