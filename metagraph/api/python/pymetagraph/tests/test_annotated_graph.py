@@ -3,7 +3,7 @@
 The fixture is built from metagraph's own test data with the `metagraph`
 binary (taken from $METAGRAPH, else from PATH); the tests using it are skipped if
 neither is available, unless PYMETAGRAPH_REQUIRE_METAGRAPH=1. Query results
-are compared to `metagraph query`.
+are compared to `metagraph query`, alignments and mappings to `metagraph align`.
 """
 import os
 import re
@@ -135,6 +135,123 @@ def test_invalid_arguments(graph, index):
         # the extension checks the same without the Python wrapper
         with pytest.raises(ValueError):
             graph._graph.query(["ACGT"], None, fraction, 0.0)
+
+
+def mutate(seq, every=37):
+    """seq with a substitution every |every| characters"""
+    swap = {"A": "C", "C": "G", "G": "T", "T": "A"}
+    return "".join(swap.get(c, c) if i % every == every // 2 else c for i, c in enumerate(seq))
+
+
+def write_align_queries(tmp_path):
+    seqs = list(read_fasta(DATA).values())
+    queries = [seqs[0], mutate(seqs[1]), seqs[2][30:230], "ACGT" * 30,
+               mutate(seqs[0][:200], every=11)]
+    # also the reverse complement of a reference sequence
+    rc = {"A": "T", "C": "G", "G": "C", "T": "A"}
+    queries.append("".join(rc.get(c, c) for c in reversed(seqs[1])))
+    fasta = tmp_path / "align_queries.fa"
+    fasta.write_text("".join(f">{i}\n{s}\n" for i, s in enumerate(queries)))
+    return queries, fasta
+
+
+def cli_align(index, fasta, labeled, options=()):
+    """{sequence index: (strand, score, cigar, labels)} of the best alignment
+    reported by `metagraph align`, None for unaligned sequences."""
+    anno = ["-a", str(index[1])] if labeled else []
+    result = subprocess.run(
+        [METAGRAPH, "align", "-i", str(index[0]), *anno, *options, str(fasta)],
+        check=True, capture_output=True, text=True)
+    alignments = {}
+    for line in result.stdout.splitlines():
+        # header, query, then strand, path sequence, score, matches, cigar,
+        # offset and, if labeled, labels
+        fields = line.split("\t")
+        if fields[2] == "*":
+            alignments[int(fields[0])] = None
+            continue
+        # labels joined by ";" (which test labels contain as well)
+        labels = fields[8] if labeled else ""
+        alignments[int(fields[0])] = (fields[2], int(fields[4]), fields[6], labels)
+    return alignments
+
+
+@pytest.mark.parametrize("labeled", [True, False])
+@pytest.mark.parametrize("min_exact_match", [None, 0.0, 0.3])
+def test_align_matches_cli(graph, index, tmp_path, labeled, min_exact_match):
+    queries, fasta = write_align_queries(tmp_path)
+    options = [] if min_exact_match is None else ["--align-min-exact-match", str(min_exact_match)]
+    expected = cli_align(index, fasta, labeled, options)
+    result = graph.align(queries, labeled=labeled, min_exact_match=min_exact_match)
+    assert len(result) == len(queries)
+    assert sum(bool(alignments) for alignments in result) >= 4
+    for i, alignments in enumerate(result):
+        if expected[i] is None:
+            assert alignments == []
+            continue
+        best = alignments[0]
+        assert ("-" if best.orientation else "+", best.score, best.cigar,
+                ";".join(best.labels)) == expected[i]
+        assert bool(best.labels) == labeled
+        assert 0 <= best.query_begin < best.query_end <= len(queries[i])
+        assert best.score <= best.max_score
+
+
+def test_align_alternatives_and_options(graph):
+    seq = next(iter(read_fasta(DATA).values()))
+    assert len(graph.align(seq, max_alternative_alignments=3)) >= 1
+    exact = graph.align(seq)[0]
+    assert exact.cigar == f"{len(seq)}="
+    assert (exact.query_begin, exact.query_end) == (0, len(seq))
+    assert exact.score == exact.max_score
+    assert [a.cigar for a in graph.align(seq)] == [a.cigar for a in graph.align([seq])[0]]
+    assert graph.align(["", "ACGT"]) == [[], []]
+    assert graph.align([]) == []
+    for kwargs in ({"min_exact_match": 1.5}, {"min_exact_match": float("nan")},
+                   {"max_alternative_alignments": 0}, {"max_nodes_per_seq_char": 0},
+                   {"min_seed_length": 30, "max_seed_length": 20}):
+        with pytest.raises(ValueError):
+            graph.align(seq, **kwargs)
+
+
+def cli_map(index, fasta, options=()):
+    """{sequence index: (strand, labels, matches, begin, end)} from
+    `metagraph align --align-map-only`, None for unmapped sequences."""
+    result = subprocess.run(
+        [METAGRAPH, "align", "-i", str(index[0]), "-a", str(index[1]), "--align-map-only",
+         *options, str(fasta)], check=True, capture_output=True, text=True)
+    mappings = {}
+    for line in result.stdout.splitlines():
+        header, strand, labels, matches, begin, end = line.split("\t")
+        mappings[int(header)] = None if strand == "*" else \
+            (strand, labels, int(matches), int(begin), int(end))
+    return mappings
+
+
+@pytest.mark.parametrize("min_exact_match", [None, 0.0, 0.3])
+def test_map_matches_cli(graph, index, tmp_path, min_exact_match):
+    queries, fasta = write_align_queries(tmp_path)
+    options = [] if min_exact_match is None else ["--align-min-exact-match", str(min_exact_match)]
+    expected = cli_map(index, fasta, options)
+    result = graph.map(queries, min_exact_match=min_exact_match)
+    assert len(result) == len(queries)
+    assert sum(m is not None for m in result) >= 4
+    for i, mapping in enumerate(result):
+        if expected[i] is None:
+            assert mapping is None
+            continue
+        assert ("-" if mapping.orientation else "+", ";".join(mapping.labels),
+                mapping.num_matches, mapping.query_begin, mapping.query_end) == expected[i]
+
+
+def test_map_edge_cases(graph):
+    seq = next(iter(read_fasta(DATA).values()))
+    mapping = graph.map(seq)
+    assert mapping.num_matches == len(seq)
+    assert graph.map(["", "ACGT"]) == [None, None]
+    assert graph.map([]) == []
+    with pytest.raises(ValueError):
+        graph.map(seq, min_exact_match=-1)
 
 
 def test_worker_error_raises():
