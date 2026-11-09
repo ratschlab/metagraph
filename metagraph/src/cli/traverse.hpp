@@ -576,7 +576,7 @@ struct ResolveWriting {
 Json::Value resolve_capabilities_json(const ResolveTimeLimits &limits);
 
 // The `discovery` member of the `resolve` block: {max_tracked_labels, max_memory_mb,
-// stop_reasons, rule}; the multigraph block states its two numbers
+// max_answer_labels, stop_reasons, rule}; the multigraph block states its three numbers
 Json::Value resolve_discovery_json(const ResolveTimeLimits &limits);
 
 // |client_gone|: polled between the phases of the request (the discovery read, the support

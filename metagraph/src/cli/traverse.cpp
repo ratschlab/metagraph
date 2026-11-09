@@ -6056,7 +6056,23 @@ Json::Value process_resolve_request(
                 selection = select_seeds(profile, req.sequence, req.policy, oracle.regime() != Regime::BASIC);
         }
     } catch (const std::invalid_argument &e) {
-        throw InvalidRequest(e.what());
+        std::string message = e.what();
+        // a seed's label that the answer-labels clamp may have left out: the discovery ranked
+        // more labels than the clamp kept, so the request's own max_labels might have kept it
+        // (§4.6); the refusal names the clamp (where it dropped nothing, the 400 is as before)
+        if (max_labels_clamped && profile.labels_truncated
+                && message.rfind(kSeedLabelNotProfiled, 0) == 0) {
+            const std::string effective = std::to_string(req.options.discover_max_labels);
+            message += "; discover.max_labels was lowered from "
+                + std::to_string(max_labels_requested) + " to " + effective
+                + " (--resolve-max-discover-answer-labels), and the discovery kept " + effective
+                + " of the " + std::to_string(profile.labels_truncated->total)
+                + " labels it ranked: the label may be one ranked past " + effective
+                + ". Ask for at most " + effective
+                + " labels and choose the seeds among them, or resolve with the seed's label "
+                  "named in labels";
+        }
+        throw InvalidRequest(message);
     }
     // the selection is not polled: read once it is done
     if (req.options.finish_check)

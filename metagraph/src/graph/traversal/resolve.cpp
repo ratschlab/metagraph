@@ -590,8 +590,7 @@ void check_explicit_seeds(const LabelOracle &oracle,
     }
     if (range)
         throw std::invalid_argument("Explicit seed interval out of range");
-    throw std::invalid_argument("Explicit seed label was not profiled: '"
-                                + *unlisted(seeds[faulty]) + "'");
+    throw std::invalid_argument(kSeedLabelNotProfiled + *unlisted(seeds[faulty]) + "'");
 }
 
 SupportProfile resolve_support(LabelOracle &oracle,
@@ -1780,7 +1779,7 @@ SeedSelection select_seeds(const SupportProfile &profile,
                             p.labels_not_covering.push_back(name);
                             continue;
                         }
-                        throw std::invalid_argument("Explicit seed label was not profiled: '" + name + "'");
+                        throw std::invalid_argument(kSeedLabelNotProfiled + name + "'");
                     }
                     if (covers(profile.labels[it->second], ex.kmers)) {
                         p.labels.push_back(it->second);

@@ -887,6 +887,56 @@ TEST(ResolveBoundsRoute, ExplicitSeedsUnderAnExactCut) {
     EXPECT_EQ(compact(b["selection"]), compact(a["selection"]));
 }
 
+// NF1 of the verification: an explicit seed naming a label the answer-labels clamp may have left
+// out is refused naming the clamp (A, B and D carry the whole query; C, from k-mer 20, ranks
+// fourth: kept with max_labels 5, not with the clamp at 3); where the clamp dropped nothing, or
+// did not lower max_labels, the 400 is the plain one
+TEST(ResolveBoundsRoute, ExplicitSeedsUnderTheAnswerClamp) {
+    const std::string q = random_seq(100, 606);
+    auto anno = build_anno_graph<DBGSuccinct, annot::ColumnCompressed<>>(
+            kK, { q, q, q.substr(20), q, q.substr(50) }, { "A", "B", "C", "D", "E" });
+    Json::Value request;
+    request["sequence"] = q;
+    request["discover"]["max_labels"] = 5;
+    Json::Value seed;
+    seed["kmer_interval"].append(30);
+    seed["kmer_interval"].append(40);
+    seed["labels"].append("C");
+    request["select"]["policy"] = "explicit";
+    request["select"]["seeds"].append(seed);
+    auto refusal = [&](const Json::Value &body, const cli::ResolveTimeLimits &limits) {
+        try {
+            cli::process_resolve_request(body, *anno, "r1", 0, nullptr, nullptr, limits);
+        } catch (const cli::InvalidRequest &e) {
+            return std::string(e.what());
+        }
+        return std::string();
+    };
+    // without the clamp C is kept and the seed made
+    EXPECT_EQ("", refusal(request, {}));
+    cli::ResolveTimeLimits limits;
+    limits.max_discover_answer_labels = 3;
+    EXPECT_EQ("Explicit seed label was not profiled: 'C'; discover.max_labels was lowered from 5 "
+              "to 3 (--resolve-max-discover-answer-labels), and the discovery kept 3 of the 5 "
+              "labels it ranked: the label may be one ranked past 3. Ask for at most 3 labels "
+              "and choose the seeds among them, or resolve with the seed's label named in labels",
+              refusal(request, limits));
+    // a label the discovery never met, the clamp having dropped labels: the same words (the
+    // answer cannot tell the two apart)
+    Json::Value unknown = request;
+    unknown["select"]["seeds"][0]["labels"][0] = "Z";
+    EXPECT_EQ(0u, refusal(unknown, limits).find(
+            "Explicit seed label was not profiled: 'Z'; discover.max_labels was lowered from 5 "));
+    // the clamp lowering max_labels but dropping nothing: the plain 400
+    limits.max_discover_answer_labels = 6;
+    unknown["discover"]["max_labels"] = 7;
+    EXPECT_EQ("Explicit seed label was not profiled: 'Z'", refusal(unknown, limits));
+    // max_labels at the clamp (not lowered): the plain 400, C ranked past 3 by the request
+    limits.max_discover_answer_labels = 3;
+    request["discover"]["max_labels"] = 3;
+    EXPECT_EQ("Explicit seed label was not profiled: 'C'", refusal(request, limits));
+}
+
 // ---- the cap on a request's explicit label lists (--resolve-max-explicit-labels, SPEC §4.1)
 
 std::string refusal_of(const Json::Value &request, uint64_t cap) {

@@ -119,6 +119,11 @@ constexpr uint64_t kDiscoverBreakBytes = 16;
 // sort scratch of an unsorted column (8 B a coordinate, charged before it grows)
 constexpr uint64_t kDiscoverChainBytes = 16;
 
+// The start of the refusal of an explicit seed naming a label the profile does not hold
+// (select_seeds and the first-fault order of an explicit selection); the route adds to it what
+// the answer-labels clamp left out (SPEC-labeled-traversal-core.md §4.6)
+constexpr char kSeedLabelNotProfiled[] = "Explicit seed label was not profiled: '";
+
 struct LabelProfile {
     LabelRef label;
     uint64_t kmers_supported = 0;
