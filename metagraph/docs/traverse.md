@@ -79,7 +79,7 @@ seed is valid `/traverse` input as it stands, with its `seed_id`. Seeds are list
 ```json
 {
   "seeds": [
-    {"seed_id": "4c1f...", "sequence": "ATGGAATTGCCC...", "labels": ["NZ_CM008882.1"]}
+    {"seed_id": "4c1f...", "sequence": "ATGGAATTGCCC...", "labels": ["NZ_CM008882.1", "562"]}
   ],
   "strategy": {
     "schema_version": 1,
@@ -99,7 +99,7 @@ seed is valid `/traverse` input as it stands, with its `seed_id`. Seeds are list
 | `direction` | `both`, `left` or `right` | `both` |
 | `labels.max_seed_labels` | the most labels a derived set keeps, in ascending (column, sequence) order (at most 100,000) | 1000 |
 | `labels.seed_label_kind` | what a derived label is: `column`, `header`, or `auto` (header on an index with a header index) | `auto` |
-| `branching.max_label_branches` | how many times a label may continue on more than one successor: an integer, or `"unlimited"` | 0 |
+| `branching.max_label_branches` | how many times a label may continue on more than one successor: an integer up to 1,000,000, or `"unlimited"` | 0 |
 | `bounds.max_extension_bp` | the extension length per arm | 5000 |
 | `bounds.time_budget_ms` | per seed, at least 1, so a request may take up to its number of seeds times this; clamped to `--traverse-max-time-ms` | `--traverse-max-time-ms` |
 
@@ -193,7 +193,7 @@ limit ends only the path that reached it. Any cap makes the arm `truncated`:
 - `cap_trigger` (`reason`, `at_bp`, `demand`) is set when a bound stopped the arm
   (`status: "truncated"`).
 
-A seed whose labels cannot be derived — no label carries every k-mer (`no_carrier`), the
+A seed whose labels cannot be found — no label, named or derived, carries every k-mer (`no_carrier`), the
 narrowest of its first 64 k-mers carries too many labels (`too_wide`), the time budget ran out
 (`time_budget`), or a derived header name is ambiguous (`ambiguous_header`) — is reported in
 place, and the other seeds are still walked:
