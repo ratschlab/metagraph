@@ -36,8 +36,7 @@ names it is refused (HTTP 400). The server builds its header index when it start
 ```json
 {
   "sequence": "ATGGAATTGCCC...",
-  "labels": ["NZ_CM008882.1", "562"],
-  "discover": {"max_labels": 1000, "kind": "column"},
+  "discover": {"max_labels": 1000, "kind": "header"},
   "select": {"max_seeds": 10, "min_block_bp": 0, "max_labels_per_seed": 1000}
 }
 ```
@@ -50,7 +49,7 @@ names it is refused (HTTP 400). The server builds its header index when it start
 | `discover.kind` | `column` or `header` | `column` |
 | `select` | also select seeds: repeatedly, the interval contained in the most labels' support runs, outside the intervals picked before | none |
 | `select.max_seeds`, `select.min_block_bp` | at most that many seeds (at most 1000), each at least that long (at least k) | 10, 0 |
-| `select.max_labels_per_seed` | the labels kept per seed, by the FNV-1a hash of their names; the others are listed and counted | 1000 |
+| `select.max_labels_per_seed` | the labels kept per seed, by the FNV-1a hash of their names; dropped labels are counted, and listed when at most 1000 are dropped | 1000 |
 
 The response:
 
@@ -71,8 +70,9 @@ The response:
 
 Intervals are half-open k-mer intervals `[begin, end)`. `graph_runs` are the runs of the query's k-mers present in the graph; a label's `runs`
 are the maximal runs of k-mers it carries. With discovery, `labels_truncated` states how many
-labels were kept of how many found. A selected seed is valid `/traverse` input as it
-stands, with its `seed_id`. Seeds are listed in the order they were picked, best first, and never overlap. With `select.min_block_bp` set to the query's length, the one seed is the whole query, carried by the labels on all its k-mers. When no label carries all of them, there is no seed.
+labels were kept of how many found. Discovery leaves out names that `/traverse` would refuse
+as ambiguous: a column that is also a header, or a header of several records. So a selected
+seed is valid `/traverse` input as it stands, with its `seed_id`. Seeds are listed in the order they were picked, best first, and never overlap. With `select.min_block_bp` set to the query's length, the one seed is the whole query, carried by the labels on all its k-mers. When no label carries all of them, there is no seed.
 
 ## `/traverse`
 
@@ -193,8 +193,8 @@ limit ends only the path that reached it. Any cap makes the arm `truncated`:
 - `cap_trigger` (`reason`, `at_bp`, `demand`) is set when a bound stopped the arm
   (`status: "truncated"`).
 
-A seed whose labels cannot be derived — no label carries every k-mer (`no_carrier`), its
-cheapest first k-mer carries too many labels (`too_wide`), the time budget ran out
+A seed whose labels cannot be derived — no label carries every k-mer (`no_carrier`), the
+narrowest of its first 64 k-mers carries too many labels (`too_wide`), the time budget ran out
 (`time_budget`), or a derived header name is ambiguous (`ambiguous_header`) — is reported in
 place, and the other seeds are still walked:
 
