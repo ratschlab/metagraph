@@ -3551,11 +3551,25 @@ class TestResolveDiscoveryBounds(TestingBase):
                 for route in ('/capabilities', '/traverse/capabilities'):
                     d = requests.get(url + route).json()['resolve']['discovery']
                     self.assertEqual({'max_tracked_labels': labels, 'max_memory_mb': memory,
+                                      'max_answer_labels': 10000,
                                       'stop_reasons': ['time', 'memory'],
                                       'rule': 'SPEC-labeled-traversal-core.md section 4.6'}, d)
                     # the cap on a request's explicit label lists (its default)
                     self.assertEqual(10000, requests.get(url + route).json()['resolve'][
                         'max_explicit_labels'])
+
+    def test_the_answers_labels_are_clamped(self):
+        """--resolve-max-discover-answer-labels (10,000 by default): a larger discover.max_labels
+        is lowered to it, stated in limits.clamped (here without a deadline: limits holds the clamp
+        alone), the answer that of the effective value"""
+        out = self._post('default', self._discovery(self.core, 20000))
+        self.assertEqual({'clamped': [{'field': 'discover.max_labels', 'requested': 20000,
+                                       'effective': 10000}]}, out['limits'])
+        self.assertEqual(self.RECORDS, len(out['labels']))
+        plain = self._post('default', self._discovery(self.core, 10000))
+        self.assertNotIn('limits', plain)
+        self.assertEqual(self._untimed(plain),
+                         self._untimed({k: v for k, v in out.items() if k != 'limits'}))
 
     def test_the_explicit_labels_cap(self):
         """--resolve-max-explicit-labels (10,000 by default): a request's `labels` or an explicit
@@ -3647,7 +3661,25 @@ class TestResolveDiscoveryBounds(TestingBase):
                         self.assertEqual([l['label'] for l in uncut['labels'][:max_labels]],
                                          [l['label'] for l in kept])
                     self.assertEqual(min(tracked, max_labels), len(kept))
-                    self.assertIn('Resolve the sequence from base ' + str(cut), c['message'])
+                    # the records present at the cut k-mer (tracked and new): more than the cap,
+                    # and a discovery of the sequence from there meets them all at its first
+                    # k-mer, so it tracks nothing, which the message states
+                    present = self._cli(self._discovery(self.core, self.RECORDS, 'kmer'))
+                    at_cut = sum(1 for l in present['labels']
+                                 if any(a <= cut < b for a, b in l['runs']))
+                    again = self._post('cap', self._discovery(self.core[cut:], max_labels,
+                                                              support))['labels_capped']
+                    if at_cut > 500:
+                        self.assertIn('. A discovery of the sequence from base %d cannot track '
+                                      'them under this cap: its first k-mer alone holds %d '
+                                      'labels, more than 500' % (cut, at_cut), c['message'])
+                        self.assertEqual((0, 0, at_cut),
+                                         (again['cut_kmer'], again['tracked'],
+                                          again['new_at_cut']))
+                    else:
+                        self.assertIn('. Resolve the sequence from base %d to discover the '
+                                      'untracked labels' % cut, c['message'])
+                        self.assertGreater(again['tracked'], 0)
                     # the remainder holds every untracked record
                     rest = self._cli(self._discovery(self.core[cut:], self.RECORDS, support))
                     found = {l['label'] for l in rest['labels']}
@@ -3664,6 +3696,10 @@ class TestResolveDiscoveryBounds(TestingBase):
                 x = stop['resolved_kmers']
                 self.assertEqual(('rows', 'memory', 1), (stop['phase'], stop['reason'],
                                                          stop['max_memory_mb']))
+                # past the first k-mer in the graph: the rest can progress, and the message
+                # says to resolve it
+                self.assertIn('; resolve the rest from base %d' % stop['resolved_kmers'],
+                              stop['message'])
                 self.assertEqual((x, self.CORE_BP - K + 1, x),
                                  (out['num_kmers'], stop['query_kmers'],
                                   stop['remainder_from_bp']))

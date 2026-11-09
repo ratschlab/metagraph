@@ -2278,8 +2278,17 @@ static Json::Value labels_capped_json(const SupportProfile &p) {
                 + " <= " + u + " k-mers";
         }
     }
-    m += ". Resolve the sequence from base " + std::to_string(cap.cut_kmer)
-        + " to discover the untracked labels";
+    if (cap.labels_at_cut > cap.max_tracked) {
+        // the labels present at the cut k-mer are all new to a discovery of the sequence from
+        // there: more than the cap, so it cuts at its first k-mer and tracks nothing
+        m += ". A discovery of the sequence from base " + std::to_string(cap.cut_kmer)
+            + " cannot track them under this cap: its first k-mer alone holds "
+            + std::to_string(cap.labels_at_cut) + " labels, more than "
+            + std::to_string(cap.max_tracked);
+    } else {
+        m += ". Resolve the sequence from base " + std::to_string(cap.cut_kmer)
+            + " to discover the untracked labels";
+    }
     c["message"] = std::move(m);
     return c;
 }
@@ -5741,6 +5750,8 @@ Json::Value resolve_discovery_json(const ResolveTimeLimits &limits) {
     // (the cut, what the ranking then covers, what is charged, where the pass stops) is §4.6
     d["max_tracked_labels"] = uint_json(limits.max_discover_labels);
     d["max_memory_mb"] = uint_json(limits.max_discover_memory_mb);
+    // the most labels an answer keeps (discover.max_labels lowered to it, limits.clamped)
+    d["max_answer_labels"] = uint_json(limits.max_discover_answer_labels);
     d["stop_reasons"] = strings_json({ "time", "memory" });
     d["rule"] = kResolveDiscoveryRule;
     return d;
@@ -5839,8 +5850,15 @@ static Json::Value resolve_stop_json(const ResolveStop &stop, size_t k, double b
         + ": this answer is exactly the resolve of the sequence's first "
         + std::to_string(stop.resolved_kmers) + " of " + std::to_string(stop.query_kmers)
         + " k-mers" + (stop.resolved_kmers ? " (a run ending there may continue past it)" : "")
-        + "; resolve the rest from base " + std::to_string(stop.resolved_kmers)
-        + (memory ? "" : ", or raise bounds.time_budget_ms");
+        + (stop.cannot_progress
+            // the query's first k-mer in the graph did not fit: its remainder has the same k-mers
+            // in the graph, setup and first row (§4.6)
+            ? "; it cannot be resolved past base " + std::to_string(stop.resolved_kmers)
+              + " under this bound: its first k-mer in the graph does not fit beside the query's "
+              + "own setup, and a resolve of the sequence from base "
+              + std::to_string(stop.resolved_kmers) + " stops there again"
+            : "; resolve the rest from base " + std::to_string(stop.resolved_kmers)
+              + (memory ? "" : ", or raise bounds.time_budget_ms"));
     if (!not_made.empty())
         message += "; the explicit selection was not made (selection null): " + not_made;
     s["message"] = std::move(message);
@@ -5893,6 +5911,13 @@ Json::Value process_resolve_request(
     // the bounds of a discovery (§4.6; 0: none)
     req.options.discover_max_tracked = time.max_discover_labels;
     req.options.discover_max_memory = time.max_discover_memory_mb << 20;
+    // the labels a discovery's answer keeps (discover.max_labels), lowered to the server's
+    // maximum (§4.6) and stated in limits.clamped below
+    const bool max_labels_clamped = req.options.discover && time.max_discover_answer_labels
+            && req.options.discover_max_labels > time.max_discover_answer_labels;
+    const uint64_t max_labels_requested = req.options.discover_max_labels;
+    if (max_labels_clamped)
+        req.options.discover_max_labels = time.max_discover_answer_labels;
     // a client that is gone is not answered: the request is abandoned at the next phase
     auto abandon = []() {
         throw AttemptAborted("the client closed its connection: the resolve request was abandoned");
@@ -5908,6 +5933,10 @@ Json::Value process_resolve_request(
     // always gave
     std::optional<Deadline> deadline;
     Json::Value clamped(Json::arrayValue);
+    if (max_labels_clamped) {
+        note_clamped(&clamped, "discover.max_labels", uint_json(max_labels_requested),
+                     uint_json(req.options.discover_max_labels));
+    }
     std::string late;
     // the budget an answer whose work did not stop by time states (the request's, under the
     // server's cap and finish_by_ms), and a pooled pair's budget cut at the work cutoff
@@ -6017,7 +6046,9 @@ Json::Value process_resolve_request(
             // under a stop the selection is the prefix's, made from it unless an
             // explicit seed reaches beyond what the prefix can tell; under a discovery's label
             // cap, unless a seed names a label it did not keep (§4.6)
-            if ((profile.stop || profile.labels_capped)
+            // (a cut whose ranking is exact kept the uncut discovery's labels: its seeds are
+            // judged as the uncut answer judges them, a label not kept refused as there)
+            if ((profile.stop || (profile.labels_capped && !profile.labels_capped->ranking_exact))
                     && req.policy.policy == SelectionPolicy::EXPLICIT)
                 not_made = explicit_selection_blocked(profile, req.policy,
                                                       req.options.discover);
@@ -6072,6 +6103,12 @@ Json::Value process_resolve_request(
         // stop block is stated whatever the request asked
         assert(profile.stop->reason == ResolveStop::MEMORY);
         out["stop"] = resolve_stop_json(*profile.stop, profile.k, 0, 0, not_made);
+    }
+    if (!deadline && !clamped.empty()) {
+        // a clamp without a deadline (discover.max_labels): `limits` holds it alone
+        Json::Value l;
+        l["clamped"] = std::move(clamped);
+        out["limits"] = std::move(l);
     }
     // the request's modelled memory at its largest (SPEC §4.4, §7.2.2): the work's peak, or
     // the profile with the selection made from it, whichever is larger (the answer's tree and

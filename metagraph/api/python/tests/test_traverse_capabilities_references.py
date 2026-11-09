@@ -89,6 +89,9 @@ SUBSTANCE = {
         'does not fit beside what the k-mers before it hold',
         "exactly the resolve of the query's first x k-mers", 'resolved_kmers carries x',
         "one vector's growth in flight is not counted", 'reason: "memory"',
+        '--resolve-max-discover-answer-labels', 'a presence discovery keeps nothing per coordinate',
+        'cannot be resolved past base x under this bound',
+        'either progresses or is told that it cannot',
     ],
     'attempts.bound': [
         "which starts when the server read the request's header",

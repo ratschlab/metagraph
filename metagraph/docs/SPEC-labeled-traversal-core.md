@@ -116,8 +116,10 @@ walks.
   on its own. It is checked at the start of the parse, on the parsed JSON, before anything of it is copied or a name
   is looked up — `labels` first, then the seeds in order, each check reading only an array's size (a list of another
   type is the parse's to refuse, in its words) —, so it comes before every other fault of the request's fields; on a
-  multi-graph server it refuses the whole request, before any pair. The 400 `{"error"}` names the list, the cap and
-  the flag: `request.labels: at most 10000 labels (--resolve-max-explicit-labels)`,
+  multi-graph server it comes after the pair selection (the selection's shape, `in_ram`, the names the request
+  selects: SPEC-multigraph-envelope.md §6, whose faults come first), as /traverse's counts do, and refuses the whole
+  request, before any pair. The 400 `{"error"}` names the list, the cap and the flag:
+  `request.labels: at most 10000 labels (--resolve-max-explicit-labels)`,
   `request.select.seeds[3].labels: at most 10000 labels per seed (--resolve-max-explicit-labels)`. Stated as the
   `resolve` block's `max_explicit_labels` (§10.3) and a multi-graph server's `multigraph.resolve_max_explicit_labels`.
   The explicit seeds' names are looked up by hash (one set or map per list), linear in the names (review 5 #6).
@@ -338,15 +340,17 @@ deadline. `src/cli/traverse.cpp` `process_resolve_request`, `src/graph/traversal
 `src/cli/traverse.cpp`.)* Before, a discovery kept an accumulator for every label it met and applied
 `discover.max_labels` only after the pass, so a short common query with header discovery on an index of tens of
 millions of records held millions of accumulators (about 200 B each) per request, beside rows decoded by the
-unbudgeted read; its memory was modelled (`work.memory_bytes`), never enforced. Two server flags bound it, per pair
-(each pair of a multi-graph fan-out has its own), and the CLI, which an operator runs, applies neither:
+unbudgeted read; its memory was modelled (`work.memory_bytes`), never enforced, and the answer kept as many labels
+as the request asked. Three server flags bound it, per pair (each pair of a multi-graph fan-out has its own), and
+the CLI, which an operator runs, applies none:
 
 | Flag | Default | 0 |
 | --- | --- | --- |
 | `--resolve-max-discover-labels` | 1,000,000 | no cap |
 | `--resolve-max-discover-memory-mb` | 1024 | no bound (the reads are charged all the same, never refused) |
+| `--resolve-max-discover-answer-labels` | 10,000 | no maximum of `discover.max_labels` |
 
-A request that binds neither is answered byte for byte as before. Explicit labels (`labels`) are not these bounds':
+A request that binds none is answered byte for byte as before. Explicit labels (`labels`) are not these bounds':
 their number is capped by `--resolve-max-explicit-labels` (§4.1), and their reads stay the default ones.
 
 **The label cap: the first-met rule.** A discovery tracks a label from the first k-mer it is met at, in k-mer
@@ -372,46 +376,60 @@ dropped. The answer states the cut, only where the cap bound:
 first met there (none tracked); `met_at_least` = `tracked + new_at_cut`, a lower bound of the distinct labels the
 query meets (the labels first met after the cut k-mer are not counted: that would need the memory the cap saves);
 `untracked_max_kmers` U; `remainder_from_bp` = `cut_kmer`, the base from which the sequence holds every k-mer an
-untracked label is present at, so a client discovers them by resolving it.
+untracked label is present at, so a client discovers them by resolving it — unless the cut k-mer alone holds more
+than N labels (tracked and new): a discovery of the sequence from there meets them all at its first k-mer and
+tracks nothing, and the message says so ("A discovery of the sequence from base x cannot track them under this cap:
+its first k-mer alone holds L labels, more than N"). That is the rule, not the exception, where the tracked labels
+share the stretch on to the cut k-mer (records holding a common sequence: each is present there, so the k-mer holds
+`met_at_least` > N labels); the untracked labels are then found only with a larger cap, or from a later base where
+fewer labels are present.
 
 - **What the ranking covers.** Every label supporting more than U k-mers is tracked, so the kept labels supporting
-  more than U k-mers are exactly the uncut discovery's labels supporting more than U k-mers, in its order (a tie
-  group above U holds tracked labels only). **`ranking_exact` is checkable from the answer alone: it is true exactly
-  when the kept list (`labels`) has `discover.max_labels` entries and its last entry supports more than
-  `untracked_max_kmers` k-mers** (`kmers_supported`); the kept list is then the uncut discovery's top `max_labels`,
-  in its order. It cannot be guaranteed otherwise — fewer than `max_labels` labels were tracked (an untracked label
-  would have been kept), or the last kept label supports at most U (an untracked label could support more, or as
-  many and sort before it by name) —, and the message says which. An answer in which the two disagree is a defect.
+  more than U k-mers are exactly the labels the uncut discovery keeps that support more than U k-mers, in its order
+  (a tie group above U holds tracked labels only). **`ranking_exact` is checkable from the answer alone: it is true
+  exactly when the kept list (`labels`) has `discover.max_labels` entries and its last entry supports more than
+  `untracked_max_kmers` k-mers** (`kmers_supported`; `max_labels` the effective one, after the clamp below); the
+  kept list is then the uncut discovery's top `max_labels`, in its order. It cannot be guaranteed otherwise — fewer
+  than `max_labels` labels were tracked (an untracked label would have been kept), or the last kept label supports at
+  most U (an untracked label could support more, or as many and sort before it by name) —, and the message says
+  which. An answer in which the two disagree is a defect.
 - **`labels_truncated` under the cut.** `dropped_full_length` stays the uncut one (a label is tracked only if it
   was met at an in-graph k-mer before the cut k-mer, where no untracked label is present); `max_dropped_kmers` is a
   lower bound of the uncut one where it is at most U; `total`, `tied_at_boundary` and `tied_kept` are the tracked
   labels' (with `ranking_exact`, `tied_at_boundary` and `tied_kept` are the uncut ones).
-- A cut at the query's first k-mer in the graph tracks nothing: `labels` [] , `labels_truncated` null,
+- A cut at the query's first k-mer in the graph tracks nothing: `labels` empty, `labels_truncated` null,
   `ranking_exact` false (the query is too unspecific for the cap); no refusal.
-- An explicit `select` (policy `explicit`) whose seed names a label the capped discovery did not keep is **not made**
-  (`selection: null`), the reason appended to `labels_capped.message` (whether the uncut discovery would have kept
-  it is unknown, and a 400 would blame the request for the server's cap); what holds whatever the cut stays a 400
-  (an interval empty, out of range or not fully in the graph). The other policies select from the kept labels.
+- **An explicit `select`** (policy `explicit`) on a capped discovery: with `ranking_exact` true the kept list is the
+  uncut discovery's, so the seeds are judged as the uncut answer judges them — a seed naming a label not kept is the
+  same 400 (`Explicit seed label was not profiled`). With `ranking_exact` false a seed naming a label the capped
+  discovery did not keep is **not made** (`selection: null`), the reason appended to `labels_capped.message`
+  (whether the uncut discovery would have kept it is unknown, and a 400 would blame the request for the server's
+  cap); what holds whatever the cut stays a 400 (an interval empty, out of range or not fully in the graph). The
+  other policies select from the kept labels.
 
 **The memory bound.** A discovery's pass charges what it holds to one budget of M MiB (the flag), before it is
 allocated: the rows, by the budget-aware reads of the annotation (`LabelOracle::get_rows` / `get_row_tuples` with a
 `DecodeBudget`, E14: every buffer of a decode, its row-diff path included, charged before it is allocated, a read
 that does not fit refused whole without side effects); the rows kept for a later occurrence of their k-mer, while
-kept; the next occurrence of every in-graph k-mer (8 B each) and the table that finds them (transient); the label
-index (4 B a column for column labels; for header labels 8 B a column, the records it has tracked, and 112 B a
-tracked record: a hash table at most 90% full, growth included); per tracked label 152 B (its accumulator and id, in deques that never relocate), per run 32 B,
-per trace break 16 B, and the heap of the chains' coordinates and of the scratch as it grows. This is a model of the
-heap (size classes, vectors at most twice their size; one vector's growth in flight is not counted), never a
-measurement. A charge that does not fit is met, in this order, by decoding the batch in halves, by giving up the
-rows kept (decoded again when needed) and by reading the next row alone; only when **the next k-mer's row read
-alone, or the most its accumulation can add** (counted from its row: its new labels, a run and a trace break per
-label it touches, 64 B per coordinate) **does not fit beside what the k-mers before it hold**, the work stops before
-that k-mer. That k-mer x depends on the k-mers before it and its own row only, not on the batches, the rows kept or
-the time; a larger bound never stops earlier. The answer is then **exactly the resolve of the query's first x
-k-mers**, as a time stop's (§4.5): `num_kmers` = x, `graph_runs` cut at x, the labels met in the prefix,
-`labels_truncated` and `labels_capped` the prefix's, the selection the prefix's (an explicit seed past x not made),
-and the `stop` block of §4.5, its members the same names with the same meaning — **`resolved_kmers` carries x** and
-`remainder_from_bp` (= x) the base the rest of the sequence starts at —, with `reason: "memory"` and `max_memory_mb`:
+kept; the next occurrence of every in-graph k-mer (8 B each) and the table that finds them (transient, 80 B each);
+the label index (4 B a column for column labels; for header labels 8 B a column, the records it has tracked, and 112
+B a tracked record: a hash table at most 90% full, growth included); per tracked label 152 B (its accumulator and
+id, in deques that never relocate), per run 32 B, per trace break 16 B; under `trace` 16 B per coordinate of a row
+(the chains' coordinates) and the growth of the scratch the coordinates are chained and mapped in (to twice the
+row's widest column); and the sort scratch of a row's largest unsorted column (8 B a coordinate, charged before it
+grows; the row-diff forms' tuples are sorted and need none). A presence discovery keeps nothing per coordinate. This
+is a model of the heap (size classes, vectors at most twice their size; one vector's growth in flight is not
+counted), never a measurement. A charge that does not fit is met, in this order, by decoding the batch in halves, by
+giving up the rows kept (decoded again when needed) and by reading the next row alone; only when **the next k-mer's
+row read alone, or the most its accumulation can add** (counted from its row: its new labels, a run and a trace
+break per label it touches, its coordinates as above) **does not fit beside what the k-mers before it hold**, the
+work stops before that k-mer. That k-mer x depends on the k-mers before it and its own row only, not on the batches,
+the rows kept or the time; a larger bound never stops earlier. The answer is then **exactly the resolve of the
+query's first x k-mers**, as a time stop's (§4.5): `num_kmers` = x, `graph_runs` cut at x, the labels met in the
+prefix, `labels_truncated` and `labels_capped` the prefix's, the selection the prefix's (an explicit seed past x not
+made), and the `stop` block of §4.5, its members the same names with the same meaning — **`resolved_kmers` carries
+x** and `remainder_from_bp` (= x) the base the rest of the sequence starts at —, with `reason: "memory"` and
+`max_memory_mb`:
 
 ```json
 "stop": {"phase": "rows", "reason": "memory", "max_memory_mb": 1024, "resolved_kmers": 1984, "query_kmers": 2970,
@@ -420,39 +438,89 @@ and the `stop` block of §4.5, its members the same names with the same meaning 
 ```
 
 - `stop` is stated whenever the memory bound stopped the work, with or without `bounds.time_budget_ms`; `limits`
-  only with it, as before. The phase is `rows`.
+  only with it or with a clamp. The phase is `rows`.
+- **No progress.** A memory stop at the query's first k-mer in the graph (`resolved_kmers` 0, or only absent
+  k-mers before it) cannot progress under the same bound: the sequence from `remainder_from_bp` has the same k-mers
+  in the graph, so the same setup and the same first row, and a resolve of it stops there again. Its message says so
+  instead of "resolve the rest from base x": "… it cannot be resolved past base x under this bound: its first k-mer
+  in the graph does not fit beside the query's own setup, and a resolve of the sequence from base x stops there
+  again". Every other memory stop resolves at least one k-mer in the graph. Whether its rest progresses is not
+  known at the stop (the rest's first k-mer meets all its labels as new, beside a smaller setup): the answer to the
+  rest says so when it cannot. So **a client that follows `remainder_from_bp` either progresses or is told that it
+  cannot**, at most one request after the last k-mer it resolved; it never loops. Only a larger bound or a shorter
+  query (less setup: 8 B, and transiently 80 B, per k-mer in the graph) can then pass x.
 - A refused charge the pass recovers from (a batch in halves, the kept rows given up, a row alone) changes no
   member of the answer but `work.memory_bytes` (the rows held at once are fewer).
 - On a pair whose reads are not charged (`decode_charged: false` in its capability profile,
   SPEC-multigraph-envelope.md §8.1: `column_coord`, `brwt_coord`, `flat`, `row_sparse`, …) a batch is read by the
   default read and its rows counted after it (`row_copy_bytes`), the read refused if they do not fit: the bound can
-  be passed by one row while it is decoded.
+  be passed by a whole batch while it is decoded (the first 64 rows, then up to twice the previous batch's rows and
+  at most 4,096, sized from its widest row; not r237's form).
+
+**The answer's labels.** The answer is not charged against M (the bound covers the pass): `discover.max_labels`
+above `--resolve-max-discover-answer-labels` is lowered to it and stated in `limits.clamped` as every clamp is,
+`{"field": "discover.max_labels", "requested": …, "effective": …}`, the answer then being that of the effective
+value; `limits` is present also without a deadline then, holding `clamped` alone. What a kept label costs, measured once
+(the physical footprint, below): about 0.8-1.3 KB a kept label of one run (two fixtures, names of 7-8 characters;
+its name held twice, its JSON object, the written text of about 90-100 B), and about 750 B each further run of a kept
+label (its JSON array and about 40 B of text). **So per pair at the default flags: M charged, plus about 13 MiB for
+10,000 kept labels of one run each, plus about 750 B each further run of a kept label.** The kept labels' runs are
+not clamped: they are at most the runs the pass held (charged 32 B each within M), so a request whose kept labels
+have many runs each (a long query against records that differ from it every few hundred bases) can make the answer
+far larger than M (10,000 labels of 1,000 runs: about 7.5 GB; the run format `rle` writes a label's runs as one
+string). A multi-graph envelope holds every pair's answer until it is written.
 
 **What this bounds.** Per discovery and pair: M (1 GiB by default) charged; at the default N, 1,000,000 records hold
-about 264 MB of it (column labels 152 MB), so the cap binds before the memory bound on any query whose rows fit,
-the memory stop being the backstop for wide rows and run-heavy queries. Not charged, bounded otherwise: the
-query's own arrays (about 41 B per k-mer: keys, presence, in-graph keys and positions, graph runs; the query's
-length is bounded by `--resolve-max-query-bp`, `bounds.max_query_bp` and the body cap), the ranking array after the
-pass (24 B per tracked label) and the answer (at most min(`max_labels`, N) labels with their runs).
+about 264 MB of it (column labels 152 MB). The memory bound binds on a k-mer whose row, read alone (on the
+row-diff forms with the rows of its diff path: 14-15 MiB a row on the fixture below, whose rows hold up to 600,000
+coordinates), with the setup and the accumulators of the k-mers before it does not fit, and on queries whose labels
+and runs grow past it; a presence discovery's row is charged as decoded, nothing more per coordinate. Not charged,
+bounded otherwise: the query's own arrays (about 41 B per k-mer: keys, presence, in-graph keys and positions, graph
+runs; the query's length is bounded by `--resolve-max-query-bp`, `bounds.max_query_bp` and the body cap), the
+ranking array after the pass (24 B per tracked label) and the answer (at most `--resolve-max-discover-answer-labels`
+labels with their runs, above).
 
 **Measured** (the physical footprint a request adds to an idle server, macOS `proc_pid_rusage` interval maximum,
-three fresh servers each, load 12-17; `e23/H2/mem/` of train 3): a header discovery of a 90 bp stretch that 600,000
+fresh servers; `e23/H2/mem/` and `e23/H2/rerun/` of train 3): a header discovery of a 90 bp stretch that 600,000
 records hold from starts of their own (k-mers 0-39), a `row_diff_brwt_coord` index with its `.seqs`, 60 k-mers whose
-tuple rows hold up to 600,000 coordinates. The build before (6d97d6e8a): 372 MiB, every record tracked, 1.6-1.8 s.
-This build with the default bounds, which bind on nothing here: 309 MiB (the accumulators in deques), the same
-answer byte for byte, 1.7-1.8 s. With `--resolve-max-discover-labels 100000`: 215 MiB, 94,614 records tracked
-(the cut at k-mer 6, `ranking_exact` true), 1.0 s; the rows of the 60 k-mers then dominate. With
-`--resolve-max-discover-memory-mb 256`: 251-254 MiB, the whole answer (the batches decoded smaller, the kept rows
-given up), 2.1-2.2 s; with 64: 64-69 MiB, a memory stop at k-mer 11, 0.3 s. A footprint above the bound is what is
-not charged (the answer, the request's own structures) and the allocator's.
+tuple rows hold up to 600,000 coordinates; three fresh servers each, load 24-30:
+
+| Server | Footprint | Answer | Time |
+| --- | --- | --- | --- |
+| the build before (6d97d6e8a) | 372.5-372.6 MiB | every record tracked | 2.3-3.1 s |
+| this build, default bounds (binding on nothing here) | 308.9-309.0 MiB | the same, byte for byte (the accumulators in deques) | 2.7-3.0 s |
+| `--resolve-max-discover-labels 100000` | 214-215 MiB | 94,614 tracked, the cut at k-mer 6, `ranking_exact` true (the 60 k-mers' rows then dominate) | 1.4-1.8 s |
+| `--resolve-max-discover-memory-mb 256` | 251.5-252.7 MiB | the whole answer (the batches decoded smaller, the kept rows given up) | 2.4-4.2 s |
+| `--resolve-max-discover-memory-mb 64` | 64-71 MiB | a memory stop at k-mer 13 | 0.5-0.6 s |
+
+A footprint above the bound is what is not charged (the answer, the request's own structures) and the allocator's.
+The answer's labels, on the same fixture and request with `max_labels` 600,000 (every record kept): 751-753 MiB with
+the clamp lifted (`--resolve-max-discover-answer-labels 0`; 51.4 MB written), 309.0 MiB at the default clamp (10,000
+kept, `limits.clamped` stated; 0.85 MB written), 308.9 MiB with `max_labels` 10: about 770 B a kept label of one
+run, the 10,000 of the clamp below the pass's own peak. On the review's fixture of 20,000 records (a small pass, so
+the answer sets the peak) with the clamp lifted and every record kept: CORE once 38.4 MiB (22,893 runs; 12.8 MiB
+with `max_labels` 10), CORE 20 times between random 40 bp spacers 364-368 MiB (457,891 runs, 18.4 MB written;
+28.9 MiB with `max_labels` 10): about 1.3 KB a kept label and 750 B a further run.
+
+**The review's bisection and remainder walks, re-run** (the review's scripts, `e23/H2/rerun/` of train 3, recording
+the no-progress statement; the review measured the build before these rules). On the fixture above, a header
+presence discovery of CORE with `--resolve-max-discover-labels 1` (the cut at k-mer 0, nothing tracked), bisected over
+M: the smallest bound that answers the whole query is 15 MiB (42 MiB when every coordinate was charged 64 B); every
+smaller one (1, 8, 12, 14 MiB) stops at k-mer 0, where the first row's read alone (its diff path) does not fit, with
+`resolved_kmers` 0 and the no-progress statement. The prefix check on the review's fixtures of 6,000 and 20,000
+records (bounds 1-8 MiB, caps 1,000,000 and 2,500; 1,184 answers): 176 memory stops, each the plain resolve of its
+prefix (identical but `timing`, `work`, `stop`), none with the no-progress statement (none at a first k-mer); 37
+remainder walks (every fifth stop), of which 12 answered the whole rest and 25 reached an answer that stops at its
+own first k-mer and states that it cannot progress (25 of 25; the review's 44 stuck walks of 51 had no statement).
 
 **Capabilities** (§10.3): the `resolve` block of both GET routes states `discovery: {max_tracked_labels,
-max_memory_mb, stop_reasons: ["time", "memory"], rule}` (integers, 0 for none; `rule` a reference to this section);
-a multi-graph server's `multigraph` block states `resolve_discovery: {max_tracked_labels, max_memory_mb}`. No
-`feature_level` (every `/resolve` and `/traverse` answer states it). A client merging the discoveries of several
-pairs follows SPEC-multigraph-envelope.md §7. Reference instances: the contract samples
-(`tests/data/multigraph_contract/`) `30_resolve_labels_capped.json` (a cut, `ranking_exact` true) and
-`31_resolve_memory_stop.json` (a memory stop without a deadline), real runs.
+max_memory_mb, max_answer_labels, stop_reasons: ["time", "memory"], rule}` (integers, 0 for none; `rule` a reference
+to this section); a multi-graph server's `multigraph` block states `resolve_discovery: {max_tracked_labels,
+max_memory_mb, max_answer_labels}`. No `feature_level` (every `/resolve` and `/traverse` answer states it). A client
+merging the discoveries of several pairs follows SPEC-multigraph-envelope.md §7. Reference instances: the contract
+samples (`tests/data/multigraph_contract/`) `30_resolve_labels_capped.json` (a cut, `ranking_exact` true, whose cut
+k-mer holds more labels than the cap) and `31_resolve_memory_stop.json` (a memory stop without a deadline), real
+runs.
 
 ## 5. `traverse` request
 
@@ -3182,12 +3250,13 @@ search's routes, `POST /pattern` and `GET /pattern/capabilities`, are `SPEC-patt
     time, and `rule` a reference to §4.5, which states the rule: opt-in, the 400 and the clamp, where the deadline
     is read, the stop block and the prefix it answers, the selection not made and the 400s that hold whatever the
     stop, the reserve and its 503, and what is not polled. Beside it, `discovery` (GPT review 5, finding 3; §4.6):
-    `{"max_tracked_labels": 1000000, "max_memory_mb": 1024, "stop_reasons": ["time", "memory"], "rule": "…"}` —
-    the server's bounds of a discovery per pair (`--resolve-max-discover-labels`,
-    `--resolve-max-discover-memory-mb`; integers, 0 for none), the reasons a `stop` states, and `rule` a
-    reference to §4.6 (the first-met cut and `labels_capped`, what the ranking then covers and when
-    `ranking_exact` holds, what is charged, where the pass stops and the prefix it answers); a multi-graph
-    server's `multigraph` block states the two numbers as `resolve_discovery`. And `max_explicit_labels`: the cap
+    `{"max_tracked_labels": 1000000, "max_memory_mb": 1024, "max_answer_labels": 10000, "stop_reasons": ["time",
+    "memory"], "rule": "…"}` — the server's bounds of a discovery per pair (`--resolve-max-discover-labels`,
+    `--resolve-max-discover-memory-mb`, `--resolve-max-discover-answer-labels`; integers, 0 for none), the reasons a
+    `stop` states, and `rule` a reference to §4.6 (the first-met cut and `labels_capped`, what the ranking then
+    covers and when `ranking_exact` holds, what is charged, where the pass stops and the prefix it answers, when the
+    rest cannot progress, the answer's clamp); a multi-graph server's `multigraph` block states the three numbers as
+    `resolve_discovery`. And `max_explicit_labels`: the cap
     on a request's explicit label lists (`--resolve-max-explicit-labels`, an integer, 0 = unlimited, §4.1), a
     multi-graph server's `multigraph` block stating it as `resolve_max_explicit_labels`. On `GET /capabilities` it is
     index-free, so stated while a single index loads
@@ -3579,8 +3648,9 @@ search's routes, `POST /pattern` and `GET /pattern/capabilities`, are `SPEC-patt
     answers HTTP 200 in that envelope too (section 1.1 there: the attempt's `usage` at its top level); its other
     statuses are unchanged. In single-graph mode `graph` and `graph_path` are a 400, any other parameter is
     ignored, as before.
-- A `/resolve` discovery's bounds (§4.6): `--resolve-max-discover-labels` (1 000 000) and
-  `--resolve-max-discover-memory-mb` (1024, an integer in [0, 1 048 576] MiB), `0` none for each; stated by both
+- A `/resolve` discovery's bounds (§4.6): `--resolve-max-discover-labels` (1 000 000),
+  `--resolve-max-discover-memory-mb` (1024, an integer in [0, 1 048 576] MiB) and
+  `--resolve-max-discover-answer-labels` (10 000, the maximum of `discover.max_labels`), `0` none for each; stated by both
   capabilities routes in the `resolve` block's `discovery` (and a multi-graph server's `multigraph` block); the CLI
   applies neither. And `--resolve-max-explicit-labels` (10 000; 0 = unlimited): the cap on a `/resolve`'s explicit
   label lists (§4.1), the `resolve` block's `max_explicit_labels`.
@@ -4051,7 +4121,7 @@ test T24 runs in `build_tsan/` (`-DCMAKE_BUILD_TYPE=Threads`). One ASan run befo
 | T64 | a failed `in_ram` load (§10.3, `in_ram`; no feature level) | `MultiGraphInRam.AFailedLoadThrowsForTheRequest` (a pair on disk: the per-request loader throws the loader's message, naming the file, for an annotation, a graph and a `.seqs` that cannot be read (the `.seqs` not read when the resident's mapping is shared), an annotation cut inside its label encoder, a graph and annotation that are not compatible, and a `row_diff` annotation without its anchors and without its fork successors; the start-up loader exits with the loader's line for each; a truncated `.seqs`, anchors file and fork successors file, which open, refused by their loads with `could not read contents`, the anchors also as an rrr vector cut in its data, whose half-read vector is never queried — `BitVectorCutTest.*` refuses every cut of a small serialization of each sdsl-based vector and of the sd vector, `BitVectorCut.*` sampled cuts of a 2^28-bit rrr and il vector); `MultiGraphInRam.AFileThatCannotBeOpenedFailsBeforeTheGraphLoads` (the graph a FIFO no one writes to, which a graph load waits on: an annotation missing or unreadable, an unreadable `.seqs`, a `row_diff` annotation's anchors or fork successors missing or unreadable each fail at once with the loader's message); integration `TestMultiGraphServer.test_a_failed_in_ram_load_is_answered_and_the_server_lives` (a server on copies of two pairs with a cap that holds one copy of the smaller; its annotation made unreadable after start-up: `/pattern` with `in_ram` answers 200 with the pair's entry `refused`, `http_status` 400, the message as `error` and no `code`; `/traverse` 400 with it, `usage` beside it on a managed attempt; `/resolve` 400 with it; a malformed body with `in_ram` naming the pair refused 400 with no load attempted (the server's line of the failed load, one per load attempted, not logged again); afterwards the pair without `in_ram` and the other pair with it (above the cap) answer, and once readable again the pair loads under the cap, so no failed load kept its reservation) | §10.3 |
 | T65 | the budget-charged reads on every deployed annotation form (E14; §6.8, §10.3 `counts`; no feature level) | Annotation library: `RowDiffBudgetedDecode.RowMajorReadsEqualTheBatchedRead` (RowFlat, RowSparse and RowDisk single-row reads equal the batched reads at densities 0 to 1, charged only as the scratch grows, RowDisk's reader charged around a read alone and refused below its size), `.EveryDeployedFormEqualsTheDefaultDecode`, `.EveryDeployedFormCostsAreBatchIndependent`, `.EveryDeployedFormRefusalsHaveNoSideEffects` (`row_diff_flat`, `row_diff_sparse`, `row_diff_disk`, `row_diff_int_brwt`), `.RowMajorFormsChargeAsTheColumnForm` (the same rows, held bytes and costs as `row_diff`, `row_diff_disk`'s demand plus its reader), `.CountsAreReadAsPresence` (diffs that change a count without cancelling it: decoded as bits more than a tenth of the rows would lose a column; the counts' decode returns `get_rows()`), `.ModelBoundsTheAllocator` (jemalloc builds: the new forms too), `BudgetedRowsAlone.PlainBrwtAndColumnMajor` (each row alone: `get_rows()`, no dependency rows, the demand a budget of exactly the peak admits and one byte less refuses, every denied charge without side effects), `BudgetedRowsAlone.PlainBrwtKeepsTheOrderOfItsBatchedRead` (a BRWT whose column groups are not ranges of columns: the rows of `get_rows()` in its tree order, not sorted), `RowDiffPathCache.CachedDecodeEqualsTheDefaultDecode` and `.BudgetedCostsDoNotDependOnTheCache` over the row-major forms. Traversal: `LabelOracleBudgetedQuery.PlainAnnotationsReadEachRowAlone` (column and a plain BRWT: the fetch, warm and recorder give the unbudgeted hits and labels, by rows), `LabelOracleBudgetedQuery.PlainBrwtRecorderNamesTheLabelsOfItsUnbudgetedRead` (a BRWT out of column order: the annotate recorder's lists, totals and dictionary under a budget are the unbudgeted ones, with every label kept and with a cap of 2), `LabelOracleBudgetedQuery.PlainAnnotationsReadFewLabelsCellByCell` (`auto` picks `direct` under a budget: the unbudgeted hits and `direct_reads`, no row read, each key's cells charged and admitted against its demand, a budget that holds none refused whole), `LabelOracleBudgeted.DecodeChargedTruthTable` (`reads_charged`: a work budget alone charges the row-diff forms only), `GraphletStage3Review.LabelsThatDoNotFitAreNotARowStop` (row-diff, column and flat), `TaskResources.TraverseMemoryIsDeterministicAndBudgetFree` (the column fixture under a memory budget with the access path and `direct_reads` of its unbudgeted walk). Integration `test_traverse_forms.py`: `TestTraverseRowDiffForms` (a 20,000 bp record, anchors at most 1,000,000 rows apart: on `row_diff_brwt`, `row_diff_brwt_coord`, `row_diff_disk`, `row_diff_sparse`, `row_diff_flat` and `row_diff_int_brwt` the walks of both label modes without a budget, under 64 MiB and under a work budget alone are the control's; under 1 MiB each stops in phase `annotation_decode`; a work stop counts dependency rows; `/resolve` equal and refusing `bounds.max_memory_mb`; `counts: "presence_only"` on the count annotation in the probe and in every response, absent on the others; `/pattern` reads them `budgeted`), `TestTraversePlainForms` (100,000 records sharing a k-mer: one label read cell by cell under a memory budget as without one, the walk complete under 1 MiB with the unbudgeted access path and reads; with 17 labels, read by rows, on `column` and a relaxed `brwt` a walk into it stops in phase `annotation_decode` at the same depth, its message without dependency rows, and a seed on it fails by the row's demand, `flat` reads it observed only; a work budget alone keeps the default reads, the same stop on the three forms; `/pattern` keeps them `unbudgeted`), `TestTraverseGreedyBrwt` (four records a `--greedy` relaxed brwt reads out of column order: annotate walks with every label kept and with `max_labels_per_node` 2, and constrain walks, on `column`, `brwt`, the greedy brwt and `flat`, the unbudgeted ones under budgets that do not bind), `TestTraverseRowDiffForms.test_pattern_memory_limit_on_every_form` (`/pattern` under `max_memory_mb` 1 on every row-diff form: `rows_refused`, `labels_status` `refused`, `all_or_count` withheld `annotation_budget`); with `$METAGRAPH_BASE_BINARY` (a build of release 10), `TestTraverseRowDiffFormsAsTheBase`, `TestTraversePlainFormsAsTheBase` and `TestTraverseGreedyBrwtAsTheBase` (the answers of every form without a budget and under budgets that do not bind byte for byte the base's, but `capabilities.counts` on the count form, and on a form E14 made budget-aware under those budgets `memory_bound_soft` and, on a row-diff form, `counters.work_units`). Contract fixture: `traverse_capabilities_counts` (GET /traverse/capabilities of a `row_diff_int_brwt` annotation, `api/python/tests/data/traverse/pattern/`) and `pattern_capabilities_counts` (its server's full block), pinned by `TestPatternFixtures.test_counts_is_stated_on_a_count_annotation_only` | §6.8, §10.3 |
 | T66 | protein graphs (§6.12; no feature level) | a Protein build: the unit suite on the basic regime (the canonical and primary cases compiled out, `construct_query_graph.batched_counts_search_answers_as_unbatched`'s among them; `Trie.CheckersAcceptGenuineTunedRunsOnDenseGraphs` and the graphlet budget cases on more basic graphs in place of the stranded ones, the dense sweep's among them holding each record's reverse complement as a record; `Trie.WalkRuleStatesWhatTheWalkerEnforces` packing at the alphabet's bits per character, 5 on protein; the DNA pattern suites compiled out, the protein ones (`PatternProtein`, `PatternProteinRoute`: E16) in). Integration `test_traverse_protein.py` (`TestTraverseProtein`, k 15, basic, `row_diff_brwt_coord` and a `.seqs`, two families of proteins sharing a domain and their termini): `capabilities.alphabet` in the probe, the server's and the CLI's responses; header-label discovery and per-protein support in residues; the walk splitting where the proteins diverge, each leaf reading its terminus, `reach_bp` in residues; a header or column label reading its protein end to end; derived labels (headers, resubmitted verbatim with the same result; columns); one strand (the reversed domain absent), `walk_rule`'s forward (k+1)-mers hashed at k 15, `*` refused naming its position, a lower-case seed the upper-case one; record coordinates under `support: trace` confirmed in the proteins; the graphlet's `H` record naming the protein alphabet, round trip and rules; the server's bytes the CLI's. `test_traverse.py` in a Protein build (its DNA fixtures as protein graphs; T37's documents and the mini index skipped, its `/pattern` requests sending the build's kind and its capabilities stating the protein kind (E16); `test_pattern_protein.py` the pattern search on protein graphs, SPEC-pattern-search.md §29). CI: the `Linux-Protein` job of `dev-branch.yml` | §6.12 |
-| T67 | the bounds of a `/resolve` discovery (§4.6; GPT review 5, finding 3; no feature level) | `ResolveBoundsTest.BoundsThatDoNotBindChangeNothing` (a cap at the labels met and a memory bound with room: the unbounded profile, `memory_peak` included, nothing stated; one label fewer binds), `.TheCapTracksTheLabelsFirstMetBeforeTheCut` (every cap from 1 to the labels met, column and header labels, presence and trace, `max_labels` all, 1 and 7, on a column and a row-diff coordinate annotation: the labels tracked are those first met before the cut k-mer, each with its uncut profile; `cut_kmer`, `new_at_cut`, `met_at_least` and `untracked_max_kmers` as the uncut discovery gives them; every untracked label within the bound; the kept labels above it the uncut ones in order; `ranking_exact` true exactly when the kept list has `max_labels` entries and the last supports more than the bound, the kept list then the uncut top), `.AMemoryStopIsTheResolveOfAPrefix` (bounds from 1 KiB up, with and without the cap: each stop by reason `memory` in phase `rows` exactly the resolve of the prefix of `resolved_kmers` k-mers, its cut included, never moving back; past the last stop the unbounded profile), `.AMemoryStopDoesNotDependOnTheBatches` (batches of 1 to 4,096 rows, 0 or 256 MiB kept: the same k-mer), `.TheCutUnderADeadlineIsThePrefixs`, `ResolveBounds.ACutAtTheFirstKmerTracksNothing`, `ResolveBounds.ReadsThatAreNotChargedAreCountedAfterTheRead` (a row-flat annotation), and on every capped answer `ranking_exact` checked from the answer alone; `ResolveBoundsRoute.AnswersThatBindNeitherAreUnchanged` (the server's default bounds against none, column and header, presence and trace: byte for byte, `timing` apart), `.TheCutAndTheMemoryStopAreStated` (the `labels_capped` members and message, an explicit seed on a label not kept not made, a 400 without the cap; the memory stop without a deadline and with one), `.CapabilitiesBlock`; `ServerEnvelope.Sample12MultigraphBlock` (`resolve_discovery`, `resolve_max_explicit_labels`);
+| T67 | the bounds of a `/resolve` discovery (§4.6; GPT review 5, finding 3; no feature level) | `ResolveBoundsTest.BoundsThatDoNotBindChangeNothing` (a cap at the labels met and a memory bound with room: the unbounded profile, `memory_peak` included, nothing stated; one label fewer binds), `.TheCapTracksTheLabelsFirstMetBeforeTheCut` (every cap from 1 to the labels met, column and header labels, presence and trace, `max_labels` all, 1 and 7, on a column and a row-diff coordinate annotation: the labels tracked are those first met before the cut k-mer, each with its uncut profile; `cut_kmer`, `new_at_cut`, `met_at_least` and `untracked_max_kmers` as the uncut discovery gives them; every untracked label within the bound; the kept labels above it the uncut ones in order; `ranking_exact` true exactly when the kept list has `max_labels` entries and the last supports more than the bound, the kept list then the uncut top), `.AMemoryStopIsTheResolveOfAPrefix` (bounds from 1 KiB up, with and without the cap: each stop by reason `memory` in phase `rows` exactly the resolve of the prefix of `resolved_kmers` k-mers, its cut included, never moving back; past the last stop the unbounded profile), `.TheRemainderProgressesOrSaysItCannot` (bounds from 1 KiB, a client following `remainder_from_bp`: every memory stop past the query's first k-mer in the graph resolves at least that k-mer, and a stop at it states `cannot_progress`, the sequence from there stopping at its first k-mer again), `.AMemoryStopDoesNotDependOnTheBatches` (batches of 1 to 4,096 rows, 0 or 256 MiB kept: the same k-mer), `.TheCutUnderADeadlineIsThePrefixs`, `ResolveBounds.ACutAtTheFirstKmerTracksNothing`, `ResolveBounds.ReadsThatAreNotChargedAreCountedAfterTheRead` (a row-flat annotation), and on every capped answer `ranking_exact` checked from the answer alone; `ResolveBoundsRoute.AnswersThatBindNeitherAreUnchanged` (the server's default bounds against none, column and header, presence and trace: byte for byte, `timing` apart), `.TheCutAndTheMemoryStopAreStated` (the `labels_capped` members and message, its no-progress variant where the cut k-mer holds more labels than the cap, an explicit seed on a label not kept not made, a 400 without the cap; the memory stop without a deadline and with one, at the query's first k-mer with the no-progress statement), `.CapabilitiesBlock`, `.TheAnswersLabelsAreClamped` (`discover.max_labels` above `--resolve-max-discover-answer-labels` lowered and stated in `limits.clamped`, without a deadline too; the answer that of the effective value), `.ExplicitSeedsUnderAnExactCut` (with `ranking_exact` true a seed naming a label not kept is the uncut answer's 400); `ServerEnvelope.Sample12MultigraphBlock` (`resolve_discovery`, `resolve_max_explicit_labels`);
 `ResolveBoundsRoute.TheExplicitLabelsCap` (the two texts, N passes and N + 1 is refused, `labels` before the seeds
 and before every other fault, a list of another type left to the parse, 0 no cap, the route's limit) and
 `.ExplicitSeedNamesAreLookedUpByHash` (100,000 names a pair does not hold in an explicit seed: the selection, the

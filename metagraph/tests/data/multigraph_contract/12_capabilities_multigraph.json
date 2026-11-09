@@ -1,7 +1,7 @@
 {
  "route": "GET /capabilities",
  "status": 200,
- "note": "Illustrative graph_summary.headers_unique (E22, section 9): recorded on three fixture pairs served as bact_other, bact_pseudomonadota and inv_insecta (one header, acc2, in a column of each of the first two: false, one example), its pair tags rewritten to sample 12's r237 paths; r237's real value is read from staging's GET /capabilities after the deploy. A header label acc2 answers each pair's own first occurrence. E3/E4/E9/E12/E20/E22 advertised: composite_fp (C3, with its rule) beside graph_summary; the multigraph block lists the envelope routes, the selectors per route, the routes that read not_after_ms, finish_by_ms, request_id and expect_server_instance (F3b), and the registry route, max_request_memory_mb (E5b) and max_concurrent (E19: the caps on the requests of each long route run at once, 0 = none; above one 503 busy, sample 24). H2 (train 3): the multigraph block states resolve_discovery, the bounds of a /resolve discovery per pair (--resolve-max-discover-labels, --resolve-max-discover-memory-mb; the defaults), as the resolve block's discovery states them (SPEC-labeled-traversal-core.md section 4.6), and resolve_max_explicit_labels, the cap on a /resolve's explicit label lists (--resolve-max-explicit-labels, 10,000 by default; sample 32), as the resolve block's max_explicit_labels. E17 (section 8.1): each pair states its capability profile, recorded on eleven fixture pairs of r237's profile served under these names, their tags, identity and num_labels staging's: index_meta_fp (computed at start-up; the fixture pairs', r237's own are read from staging after the deploy), alphabet, graph_representation, annotation_form, decode_charged, traversal.counts and support_fp, the FNV-1a-64 over the capability fields that a client recomputes from the entry (r237's: one value for every pair). Clients switch on these, never by date.",
+ "note": "Illustrative graph_summary.headers_unique (E22, section 9): recorded on three fixture pairs served as bact_other, bact_pseudomonadota and inv_insecta (one header, acc2, in a column of each of the first two: false, one example), its pair tags rewritten to sample 12's r237 paths; r237's real value is read from staging's GET /capabilities after the deploy. A header label acc2 answers each pair's own first occurrence. E3/E4/E9/E12/E20/E22 advertised: composite_fp (C3, with its rule) beside graph_summary; the multigraph block lists the envelope routes, the selectors per route, the routes that read not_after_ms, finish_by_ms, request_id and expect_server_instance (F3b), and the registry route, max_request_memory_mb (E5b) and max_concurrent (E19: the caps on the requests of each long route run at once, 0 = none; above one 503 busy, sample 24). H2 (train 3): the multigraph block states resolve_discovery, the bounds of a /resolve discovery per pair (--resolve-max-discover-labels, --resolve-max-discover-memory-mb, --resolve-max-discover-answer-labels: the maximum of discover.max_labels; the defaults), as the resolve block's discovery states them (SPEC-labeled-traversal-core.md section 4.6), and resolve_max_explicit_labels, the cap on a /resolve's explicit label lists (--resolve-max-explicit-labels, 10,000 by default; sample 32), as the resolve block's max_explicit_labels. E17 (section 8.1): each pair states its capability profile, recorded on eleven fixture pairs of r237's profile served under these names, their tags, identity and num_labels staging's: index_meta_fp (computed at start-up; the fixture pairs', r237's own are read from staging after the deploy), alphabet, graph_representation, annotation_form, decode_charged, traversal.counts and support_fp, the FNV-1a-64 over the capability fields that a client recomputes from the entry (r237's: one value for every pair). Clients switch on these, never by date.",
  "body": {
   "algorithm_version": "traverse-0.2",
   "attempts": {
@@ -636,6 +636,7 @@
   "release": "refseq237",
   "resolve": {
    "discovery": {
+    "max_answer_labels": 10000,
     "max_memory_mb": 1024,
     "max_tracked_labels": 1000000,
     "rule": "SPEC-labeled-traversal-core.md section 4.6",
@@ -749,7 +750,8 @@
    },
    "resolve_discovery": {
     "max_tracked_labels": 1000000,
-    "max_memory_mb": 1024
+    "max_memory_mb": 1024,
+    "max_answer_labels": 10000
    },
    "resolve_max_explicit_labels": 10000
   }

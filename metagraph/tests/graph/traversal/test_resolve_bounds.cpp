@@ -328,6 +328,19 @@ TYPED_TEST(ResolveBoundsTest, TheCapTracksTheLabelsFirstMetBeforeTheCut) {
                         above_uncut.push_back(lp.label.name);
                 }
                 EXPECT_EQ(above_uncut, above) << what;
+                // the labels present at the cut k-mer: above the cap, a discovery of the sequence
+                // from it cuts at its first k-mer and tracks nothing (the message says so)
+                if (max_labels == kAll) {
+                    const SupportProfile rest = resolve_support(oracle, r.q.substr(cut), opts);
+                    ASSERT_TRUE(capped.labels_at_cut <= cap || rest.labels_capped) << what;
+                    if (capped.labels_at_cut > cap) {
+                        EXPECT_EQ(0u, rest.labels_capped->tracked) << what;
+                        EXPECT_EQ(rest.graph_runs.front().begin, rest.labels_capped->cut_kmer)
+                            << what;
+                    } else {
+                        EXPECT_TRUE(!rest.labels_capped || rest.labels_capped->tracked) << what;
+                    }
+                }
                 const bool exact_here = kept == max_labels && kept
                         && got.labels.back().kmers_supported > bound;
                 EXPECT_EQ(exact_here, capped.ranking_exact) << what;
@@ -402,6 +415,53 @@ TYPED_TEST(ResolveBoundsTest, AMemoryStopIsTheResolveOfAPrefix) {
         }
     }
     EXPECT_GT(stops, 100u);
+}
+
+// A client following remainder_from_bp either progresses or is told it cannot: every memory stop
+// past the query's first k-mer in the graph resolves at least that k-mer, and a stop at it states
+// cannot_progress -- and then a resolve of the sequence from there stops there again
+TYPED_TEST(ResolveBoundsTest, TheRemainderProgressesOrSaysItCannot) {
+    using Graph = typename TypeParam::first_type;
+    using Annotation = typename TypeParam::second_type;
+    const Records r = make_records<Graph, Annotation>(40, 5, 313);
+    LabelOracle oracle(*r.anno, r.cth.get());
+    size_t walks = 0, stuck = 0, steps = 0;
+    for (const Case &c : kCases) {
+        for (uint64_t bound = 1024; bound < (uint64_t(1) << 20);
+                bound += bound < 65536 ? 1024 : bound / 4) {
+            ResolveOptions opts = discovery(c, 10);
+            opts.discover_max_memory = bound;
+            std::string rest = r.q;
+            ++walks;
+            for (size_t step = 0; step < 1000 && rest.size() >= kK; ++step) {
+                const std::string what = c.name() + " bound " + std::to_string(bound) + " step "
+                        + std::to_string(step);
+                const SupportProfile got = resolve_support(oracle, rest, opts);
+                if (!got.stop)
+                    break;
+                ++steps;
+                const uint64_t x = got.stop->resolved_kmers;
+                const uint64_t first = got.stop->query_graph_runs.empty()
+                        ? got.stop->query_kmers : got.stop->query_graph_runs.front().begin;
+                EXPECT_EQ(x == first, got.stop->cannot_progress) << what;
+                if (got.stop->cannot_progress) {
+                    // the claim: the sequence from x stops at its first k-mer in the graph again
+                    const SupportProfile again = resolve_support(oracle, rest.substr(x), opts);
+                    ASSERT_TRUE(again.stop) << what;
+                    EXPECT_TRUE(again.stop->cannot_progress) << what;
+                    EXPECT_EQ(again.stop->query_graph_runs.front().begin,
+                              again.stop->resolved_kmers) << what;
+                    ++stuck;
+                    break;
+                }
+                EXPECT_GT(x, first) << what;
+                rest = rest.substr(x);
+            }
+        }
+    }
+    EXPECT_GT(stuck, 0u);
+    EXPECT_GT(steps, stuck);
+    EXPECT_GT(walks, 10u);
 }
 
 // Where the memory bound stops the pass depends on the k-mers before it and its own row only:
@@ -644,12 +704,20 @@ TEST(ResolveBoundsRoute, TheCutAndTheMemoryStopAreStated) {
               c["ranking_exact"].asBool());
     const std::string message = c["message"].asString();
     EXPECT_EQ(0u, message.find("--resolve-max-discover-labels 20: the "));
-    EXPECT_NE(std::string::npos, message.find("Resolve the sequence from base "
-                                              + std::to_string(c["cut_kmer"].asUInt64())));
+    // the remainder's discovery from the cut: resolve it, or (the cut k-mer alone holding more
+    // labels than the cap) it cannot track them
+    const std::string from = "from base " + std::to_string(c["cut_kmer"].asUInt64());
+    EXPECT_NE(message.find("Resolve the sequence " + from) == std::string::npos,
+              message.find("A discovery of the sequence " + from + " cannot track them under "
+                           "this cap: its first k-mer alone holds ") == std::string::npos)
+        << message;
     EXPECT_FALSE(out.isMember("stop"));
 
-    // an explicit seed naming a label the capped discovery did not keep: not made
+    // an explicit seed naming a label the capped discovery did not keep: not made where the
+    // ranking is not exact (here fewer labels tracked than max_labels 1000); where it is
+    // exact, the uncut answer's 400 (ExplicitSeedsUnderAnExactCut)
     Json::Value select = request;
+    select["discover"]["max_labels"] = 1000;
     const uint64_t first = out["graph_runs"][0][0].asUInt64();
     Json::Value seed;
     seed["kmer_interval"].append(first);
@@ -689,6 +757,15 @@ TEST(ResolveBoundsRoute, TheCutAndTheMemoryStopAreStated) {
                                                "the annotation rows of the query's k-mers were "
                                                "read: this answer is exactly the resolve of the "
                                                "sequence's first "));
+    // at the query's first k-mer in the graph: the sequence from there cannot progress either
+    // (the graph runs cut at x: none before the query's first k-mer in the graph)
+    EXPECT_EQ(0u, stopped["graph_runs"].size());
+    EXPECT_NE(std::string::npos, s["message"].asString().find(
+            "; it cannot be resolved past base " + std::to_string(s["resolved_kmers"].asUInt64())
+            + " under this bound: its first k-mer in the graph does not fit beside the query's "
+              "own setup, and a resolve of the sequence from base "
+            + std::to_string(s["resolved_kmers"].asUInt64()) + " stops there again"))
+        << s["message"].asString();
     EXPECT_FALSE(stopped.isMember("limits"));
     // with a deadline the stop is stated as before, beside the limits
     big["bounds"]["time_budget_ms"] = 100000;
@@ -702,19 +779,112 @@ TEST(ResolveBoundsRoute, TheCutAndTheMemoryStopAreStated) {
 // The capabilities' `discovery` member of the `resolve` block (§4.6, §10.3)
 TEST(ResolveBoundsRoute, CapabilitiesBlock) {
     const Json::Value c = cli::resolve_capabilities_json({ 30000, cli::kResolveFinalizeMs,
-                                                           1'000'000, 1024, 10'000 });
+                                                           1'000'000, 1024, 10'000, 10'000 });
     EXPECT_EQ((std::vector<std::string>{ "discovery", "max_explicit_labels", "time_budget" }),
               c.getMemberNames());
     EXPECT_TRUE(c["max_explicit_labels"].isUInt64());
     EXPECT_EQ(10000u, c["max_explicit_labels"].asUInt64());
     EXPECT_EQ(0u, cli::resolve_capabilities_json({})["max_explicit_labels"].asUInt64());
-    EXPECT_EQ("{\"max_memory_mb\":1024,\"max_tracked_labels\":1000000,\"rule\":"
-              "\"SPEC-labeled-traversal-core.md section 4.6\",\"stop_reasons\":[\"time\","
+    EXPECT_EQ("{\"max_answer_labels\":10000,\"max_memory_mb\":1024,\"max_tracked_labels\":1000000,"
+              "\"rule\":\"SPEC-labeled-traversal-core.md section 4.6\",\"stop_reasons\":[\"time\","
               "\"memory\"]}", compact(c["discovery"]));
     EXPECT_TRUE(c["discovery"]["max_memory_mb"].isUInt64());
-    EXPECT_EQ("{\"max_memory_mb\":0,\"max_tracked_labels\":0,\"rule\":"
+    EXPECT_EQ("{\"max_answer_labels\":0,\"max_memory_mb\":0,\"max_tracked_labels\":0,\"rule\":"
               "\"SPEC-labeled-traversal-core.md section 4.6\",\"stop_reasons\":[\"time\","
               "\"memory\"]}", compact(cli::resolve_capabilities_json({})["discovery"]));
+}
+
+// A discover.max_labels above the server's maximum (--resolve-max-discover-answer-labels) is
+// lowered to it and stated in limits.clamped, with or without a deadline; the answer is that of
+// the maximum; at the maximum, or with none, nothing is stated
+TEST(ResolveBoundsRoute, TheAnswersLabelsAreClamped) {
+    const Records r = make_records<DBGSuccinct, annot::ColumnCompressed<>>(40, 5, 707);
+    const auto index = with_mapping(r);
+    Json::Value request;
+    request["sequence"] = r.q;
+    request["discover"]["kind"] = "header";
+    request["discover"]["max_labels"] = 50;
+    cli::ResolveTimeLimits limits;
+    limits.max_discover_answer_labels = 7;
+    const Json::Value clamped = cli::process_resolve_request(request, *index, "r1", 0, nullptr,
+                                                             nullptr, limits);
+    EXPECT_EQ("{\"clamped\":[{\"effective\":7,\"field\":\"discover.max_labels\",\"requested\":50}]}",
+              compact(clamped["limits"]));
+    EXPECT_EQ(7u, clamped["labels"].size());
+    EXPECT_FALSE(clamped.isMember("stop"));
+    // the answer of max_labels 7
+    Json::Value seven = request;
+    seven["discover"]["max_labels"] = 7;
+    Json::Value plain = cli::process_resolve_request(seven, *index, "r1", 0, nullptr, nullptr,
+                                                     limits);
+    EXPECT_FALSE(plain.isMember("limits"));
+    Json::Value got = clamped;
+    got.removeMember("limits");
+    got.removeMember("timing");
+    plain.removeMember("timing");
+    EXPECT_EQ(compact(plain), compact(got));
+    // with a deadline: the clamp first, beside the budget
+    Json::Value timed = request;
+    timed["bounds"]["time_budget_ms"] = 100000;
+    limits.max_time_ms = 60000;
+    const Json::Value both = cli::process_resolve_request(timed, *index, "r1", 0, nullptr,
+                                                          nullptr, limits);
+    EXPECT_EQ("[{\"effective\":7,\"field\":\"discover.max_labels\",\"requested\":50},"
+              "{\"effective\":60000,\"field\":\"bounds.time_budget_ms\",\"requested\":100000}]",
+              compact(both["limits"]["clamped"]));
+    // none without the maximum or under it
+    EXPECT_FALSE(cli::process_resolve_request(request, *index, "r1", 0, nullptr, nullptr, {})
+                         .isMember("limits"));
+    limits = {};
+    limits.max_discover_answer_labels = 50;
+    EXPECT_FALSE(cli::process_resolve_request(request, *index, "r1", 0, nullptr, nullptr, limits)
+                         .isMember("limits"));
+}
+
+// N3 of the review: a cut whose ranking is exact kept the uncut discovery's labels, so an
+// explicit seed naming a label it did not keep is refused as the uncut answer refuses it (A, B
+// and D carry the whole query and are kept; C, first met at k-mer 20, is not kept by either)
+TEST(ResolveBoundsRoute, ExplicitSeedsUnderAnExactCut) {
+    const std::string q = random_seq(100, 606);
+    auto anno = build_anno_graph<DBGSuccinct, annot::ColumnCompressed<>>(
+            kK, { q, q, q.substr(20), q, q.substr(50) }, { "A", "B", "C", "D", "E" });
+    Json::Value request;
+    request["sequence"] = q;
+    request["discover"]["max_labels"] = 3;
+    Json::Value seed;
+    seed["kmer_interval"].append(30);
+    seed["kmer_interval"].append(40);
+    seed["labels"].append("A");
+    seed["labels"].append("C");
+    request["select"]["policy"] = "explicit";
+    request["select"]["seeds"].append(seed);
+    cli::ResolveTimeLimits limits;
+    limits.max_discover_labels = 3;
+    Json::Value discover_only = request;
+    discover_only.removeMember("select");
+    const Json::Value cut = cli::process_resolve_request(discover_only, *anno, "r1", 0, nullptr,
+                                                         nullptr, limits);
+    ASSERT_TRUE(cut["labels_capped"]["ranking_exact"].asBool()) << compact(cut);
+    std::string capped_error, uncut_error;
+    try {
+        cli::process_resolve_request(request, *anno, "r1", 0, nullptr, nullptr, limits);
+    } catch (const cli::InvalidRequest &e) {
+        capped_error = e.what();
+    }
+    try {
+        cli::process_resolve_request(request, *anno, "r1", 0, nullptr, nullptr, {});
+    } catch (const cli::InvalidRequest &e) {
+        uncut_error = e.what();
+    }
+    EXPECT_EQ("Explicit seed label was not profiled: 'C'", uncut_error);
+    EXPECT_EQ(uncut_error, capped_error);
+    // a seed on the kept labels is selected as without the cap
+    request["select"]["seeds"][0]["labels"] = Json::Value(Json::arrayValue);
+    request["select"]["seeds"][0]["labels"].append("A");
+    request["select"]["seeds"][0]["labels"].append("D");
+    Json::Value a = cli::process_resolve_request(request, *anno, "r1", 0, nullptr, nullptr, limits);
+    Json::Value b = cli::process_resolve_request(request, *anno, "r1", 0, nullptr, nullptr, {});
+    EXPECT_EQ(compact(b["selection"]), compact(a["selection"]));
 }
 
 // ---- the cap on a request's explicit label lists (--resolve-max-explicit-labels, SPEC §4.1)

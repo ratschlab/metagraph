@@ -1,7 +1,7 @@
 {
  "route": "POST /resolve",
  "status": 200,
- "note": "H2 (SPEC-labeled-traversal-core.md section 4.6): a discovery tracks at most --resolve-max-discover-labels labels per pair (here 2), by the first-met rule: the labels first met at a k-mer are admitted all or none, and the first k-mer whose new labels would pass the cap is the cut k-mer, from which no new label is tracked. labels_capped states the cut where it binds (absent otherwise): max_tracked, tracked, cut_kmer, new_at_cut (the labels first met there), met_at_least (tracked + new_at_cut), untracked_max_kmers (the in-graph k-mers from the cut on: the most an untracked label supports), ranking_exact and remainder_from_bp (= cut_kmer: resolve the sequence from there to discover the untracked labels). Every tracked label is counted over the whole query; ranking_exact is true exactly when the kept list has max_labels entries and its last supports more than untracked_max_kmers (here acc1 and acc2, 210 k-mers each, above 90: the kept list is the uncut top 2; acc3, first met at k-mer 120, is untracked). labels_truncated describes the tracked labels. Merging pairs (section 7): an entry with ranking_exact false makes a merged ranking a lower bound at best. A real run on the integration fixture (three records acc1-acc3) served as both pairs, the server with --resolve-max-discover-labels 2; each entry tagged with its pair and identity. The run was on macOS: timing.page_faults, stated where the platform reads it per thread (Linux), is absent, never 0.",
+ "note": "H2 (SPEC-labeled-traversal-core.md section 4.6): a discovery tracks at most --resolve-max-discover-labels labels per pair (here 2), by the first-met rule: the labels first met at a k-mer are admitted all or none, and the first k-mer whose new labels would pass the cap is the cut k-mer, from which no new label is tracked. labels_capped states the cut where it binds (absent otherwise): max_tracked, tracked, cut_kmer, new_at_cut (the labels first met there), met_at_least (tracked + new_at_cut), untracked_max_kmers (the in-graph k-mers from the cut on: the most an untracked label supports), ranking_exact and remainder_from_bp (= cut_kmer: resolve the sequence from there to discover the untracked labels). Every tracked label is counted over the whole query; ranking_exact is true exactly when the kept list has max_labels entries and its last supports more than untracked_max_kmers (here acc1 and acc2, 210 k-mers each, above 90: the kept list is the uncut top 2; acc3, first met at k-mer 120, is untracked). The cut k-mer holds 3 labels, more than the cap: a discovery of the sequence from base 120 would meet them all at its first k-mer and track nothing, which the message states instead of \"resolve the sequence from base 120\". labels_truncated describes the tracked labels. Merging pairs (section 7): an entry with ranking_exact false makes a merged ranking a lower bound at best. A real run on the integration fixture (three records acc1-acc3) served as both pairs, the server with --resolve-max-discover-labels 2; each entry tagged with its pair and identity. The run was on macOS: timing.page_faults, stated where the platform reads it per thread (Linux), is absent, never 0.",
  "request": {
   "sequence": "CCGTGATGGTGATCGTAAACACGAACTTGGTCTTTCTCACTGAGCTAGCACGGGTTCTTACAACAACCAATCTAGTTGATTCCTTGTGTTTGTACTTAGCTCACTATATCATTAGGTGCTTAGCTCAATTTATGTACTGATTGCTTAAAGGAATATCATCTACGCTGGGATAGATGTTCAACATCGCGCAAAAGTGATGTCGATCGCGCAGTTATGCCACGCCGCATTCGGTACCTCGGT",
   "discover": {
@@ -122,7 +122,7 @@
     "labels_capped": {
      "cut_kmer": 120,
      "max_tracked": 2,
-     "message": "--resolve-max-discover-labels 2: the 1 label first met at k-mer 120 would have made 3 tracked labels; none of them, nor any label first met after it, was tracked. Every tracked label is counted over the whole query; an untracked label supports at most 90 k-mers, so the kept labels above 90 k-mers are exactly the uncut discovery's, and the kept list is its top 2. Resolve the sequence from base 120 to discover the untracked labels",
+     "message": "--resolve-max-discover-labels 2: the 1 label first met at k-mer 120 would have made 3 tracked labels; none of them, nor any label first met after it, was tracked. Every tracked label is counted over the whole query; an untracked label supports at most 90 k-mers, so the kept labels above 90 k-mers are exactly the uncut discovery's, and the kept list is its top 2. A discovery of the sequence from base 120 cannot track them under this cap: its first k-mer alone holds 3 labels, more than 2",
      "met_at_least": 3,
      "new_at_cut": 1,
      "ranking_exact": true,
@@ -136,8 +136,8 @@
     "release": "refseq237",
     "support": "kmer",
     "timing": {
-     "cpu_ms": 0.463708,
-     "elapsed_ms": 0.598792
+     "cpu_ms": 0.596833,
+     "elapsed_ms": 1.022292
     },
     "unknown_labels": [],
     "work": {
@@ -233,7 +233,7 @@
     "labels_capped": {
      "cut_kmer": 120,
      "max_tracked": 2,
-     "message": "--resolve-max-discover-labels 2: the 1 label first met at k-mer 120 would have made 3 tracked labels; none of them, nor any label first met after it, was tracked. Every tracked label is counted over the whole query; an untracked label supports at most 90 k-mers, so the kept labels above 90 k-mers are exactly the uncut discovery's, and the kept list is its top 2. Resolve the sequence from base 120 to discover the untracked labels",
+     "message": "--resolve-max-discover-labels 2: the 1 label first met at k-mer 120 would have made 3 tracked labels; none of them, nor any label first met after it, was tracked. Every tracked label is counted over the whole query; an untracked label supports at most 90 k-mers, so the kept labels above 90 k-mers are exactly the uncut discovery's, and the kept list is its top 2. A discovery of the sequence from base 120 cannot track them under this cap: its first k-mer alone holds 3 labels, more than 2",
      "met_at_least": 3,
      "new_at_cut": 1,
      "ranking_exact": true,
@@ -247,8 +247,8 @@
     "release": "refseq237",
     "support": "kmer",
     "timing": {
-     "cpu_ms": 0.588291,
-     "elapsed_ms": 0.577334
+     "cpu_ms": 0.534334,
+     "elapsed_ms": 1.0226250000000001
     },
     "unknown_labels": [],
     "work": {
@@ -257,7 +257,7 @@
    }
   ],
   "timing": {
-   "elapsed_ms": 0.9694579999999999
+   "elapsed_ms": 1.789167
   },
   "work": {
    "memory_bytes": 29814

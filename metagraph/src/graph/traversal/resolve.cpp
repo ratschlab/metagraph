@@ -624,6 +624,7 @@ SupportProfile resolve_support(LabelOracle &oracle,
     uint64_t resolved = 0;
     ResolveStop::Phase stop_phase = ResolveStop::ROWS;
     ResolveStop::Reason stop_reason = ResolveStop::TIME;
+    bool cannot_progress = false;
     // the loops over the labels after the work: the answer's time, every kResolveCheckLabels
     auto finishing = [&](size_t i) {
         if (options.finish_check && i && i % kResolveCheckLabels == 0)
@@ -670,6 +671,7 @@ SupportProfile resolve_support(LabelOracle &oracle,
         stop.phase = stop_phase;
         stop.reason = stop_reason;
         stop.max_memory = stop_reason == ResolveStop::MEMORY ? options.discover_max_memory : 0;
+        stop.cannot_progress = cannot_progress;
         stop.resolved_kmers = resolved;
         stop.query_kmers = profile.num_kmers;
         stop.query_graph_runs = profile.graph_runs;
@@ -701,7 +703,7 @@ SupportProfile resolve_support(LabelOracle &oracle,
     // A batch's rows, charged to |budget|: by the budget-aware read where the annotation has
     // it (LabelOracle::decode_charged(): every buffer of the decode charged before it is
     // allocated, a read that does not fit refused whole), else by the default read, its rows
-    // then charged as row_copy_bytes counts them (a row can pass the bound while it is
+    // then charged as row_copy_bytes counts them (the batch can pass the bound while it is
     // decoded) and the read refused if they do not fit
     auto decode_rows = [&](const std::vector<node_index> &batch, auto *rows,
                            std::vector<uint64_t> *held) -> DecodeStatus {
@@ -859,18 +861,40 @@ SupportProfile resolve_support(LabelOracle &oracle,
                    + (s.trace_breaks.size() - breaks) * kDiscoverBreakBytes
                    + (chain_heap_bytes(s) - heap);
         };
+        // the scratch a trace chains and maps coordinates in (its growth charged after the k-mer,
+        // within what admit_row checked)
         auto scratch_held = [&]() {
-            return scratch_bytes(scratch) + scratch_bytes(sorted) + scratch_bytes(local);
+            return scratch_bytes(scratch) + scratch_bytes(local);
+        };
+        // The sort scratch, charged before it grows (its new buffer while the old one is still
+        // held, the old one released once freed): false when the growth does not fit (nothing
+        // changed). Only an unsorted column needs it (the row-diff forms' tuples are sorted)
+        uint64_t sorted_charged = 0;
+        auto reserve_sorted = [&](size_t n) {
+            if (sorted.capacity() >= n)
+                return true;
+            if (!budget.charge(annot::matrix::buffer_bytes(n, sizeof(Coord))))
+                return false;
+            sorted.clear();
+            sorted.reserve(n);
+            budget.release(sorted_charged);
+            sorted_charged = annot::matrix::buffer_bytes(n, sizeof(Coord));
+            return true;
         };
         // a column's coordinates, sorted (a trace runs on sorted coordinates, as LabelQuery
         // sorts a hit's, and on sorted coordinates a sequence's are adjacent: the run mapper
-        // maps a sequence's run for one rank/select)
-        auto sorted_coords = [&](const auto &coords) -> const Coord* {
-            if (std::is_sorted(coords.begin(), coords.end()))
-                return coords.data();
+        // maps a sequence's run for one rank/select); false when the sort scratch does not fit
+        auto sorted_coords = [&](const auto &coords, const Coord **data) {
+            if (std::is_sorted(coords.begin(), coords.end())) {
+                *data = coords.data();
+                return true;
+            }
+            if (!reserve_sorted(coords.size()))
+                return false;
             sorted.assign(coords.begin(), coords.end());
             std::sort(sorted.begin(), sorted.end());
-            return sorted.data();
+            *data = sorted.data();
+            return true;
         };
         // The labels of a row not tracked yet and those tracked: lookups only (a column's
         // slot, a sequence's entry), each label once
@@ -881,15 +905,26 @@ SupportProfile resolve_support(LabelOracle &oracle,
             }
             return std::make_pair(fresh, row.size() - fresh);
         };
-        auto count_tuples = [&](const MultiIntMatrix::RowTuples &row) {
+        // (|sort_refused|: the sort scratch of the row's largest unsorted column, |unsorted|,
+        // did not fit: nothing counted. It is grown to that column once, before any column is
+        // sorted into it, so that no smaller growth is held beside it)
+        bool sort_refused = false;
+        auto count_tuples = [&](const MultiIntMatrix::RowTuples &row, size_t unsorted) {
             uint64_t fresh = 0;
             uint64_t known = 0;
+            if (!by_column && !reserve_sorted(unsorted)) {
+                sort_refused = true;
+                return std::make_pair(fresh, known);
+            }
             for (const auto &[c, coords] : row) {
                 if (by_column) {
                     (slot[c] == kNoSlot ? fresh : known)++;
                     continue;
                 }
-                const Coord *data = sorted_coords(coords);
+                const Coord *data = nullptr;
+                const bool sorted_fits = sorted_coords(coords, &data);  // (reserved above)
+                assert(sorted_fits);
+                (void)sorted_fits;
                 LabelOracle::CoordRuns runs = oracle.coord_runs(c, coords.size());
                 uint64_t previous = std::numeric_limits<uint64_t>::max();
                 for (size_t t = 0; t < coords.size(); ++t) {
@@ -903,14 +938,16 @@ SupportProfile resolve_support(LabelOracle &oracle,
             return std::make_pair(fresh, known);
         };
         // Whether the k-mer of present index j, whose row has at most |labels| labels, at most
-        // |fresh_most| of them not tracked yet, and |coords| coordinates, can be accumulated:
-        // false when the most it can add does not fit what |budget| has left (nothing done).
-        // The labels it would make tracked past the cap make it the cut k-mer (none of them
-        // admitted), decided here and taken effect only once the k-mer fits. |count| gives the
-        // row's labels not tracked and tracked (a pass of lookups, and for header labels the
-        // coordinates' mapping), read only where the bounds alone do not decide
-        auto admit_row = [&](size_t j, uint64_t labels, uint64_t fresh_most, uint64_t coords,
-                             const auto &count) {
+        // |fresh_most| of them not tracked yet, can be accumulated: false when the most it can
+        // add does not fit what |budget| has left (nothing done). |coord_bytes|: the most its
+        // coordinates add (under trace the chains and their scratch; nothing under presence),
+        // and |unsorted| its largest unsorted column, whose sort scratch it may grow. The labels
+        // it would make tracked past the cap make it the cut k-mer (none of them admitted),
+        // decided here and taken effect only once the k-mer fits. |count| gives the row's labels
+        // not tracked and tracked (a pass of lookups, and for header labels the coordinates'
+        // mapping), read only where the bounds alone do not decide
+        auto admit_row = [&](size_t j, uint64_t labels, uint64_t fresh_most, uint64_t coord_bytes,
+                             size_t unsorted, const auto &count) {
             // (a flag and a value rather than an optional, whose copy GCC 13 takes for
             // maybe-uninitialized)
             bool is_counted = false;
@@ -922,12 +959,15 @@ SupportProfile resolve_support(LabelOracle &oracle,
                 }
                 return counted;
             };
+            sort_refused = false;
             bool cut_here = false;
             uint64_t fresh_max = 0;
             if (admitting) {
                 fresh_max = fresh_most;
                 if (max_tracked && found.size() + fresh_most > max_tracked) {
                     fresh_max = counts().first;
+                    if (sort_refused)
+                        return false;
                     if (found.size() + fresh_max > max_tracked) {
                         cut_here = true;
                         fresh_max = 0;
@@ -935,17 +975,22 @@ SupportProfile resolve_support(LabelOracle &oracle,
                 }
             }
             if (bounded) {
-                // the new labels, a run and a break per label touched, the coordinates
+                // the new labels, a run and a break per label touched, the coordinates, and the
+                // sort scratch the accumulation grows (charged as it grows)
                 auto most = [&](uint64_t fresh, uint64_t touched) {
+                    const uint64_t sort = sorted.capacity() < unsorted
+                            ? annot::matrix::buffer_bytes(unsorted, sizeof(Coord)) : 0;
                     return fresh * label_bytes
                          + touched * (kDiscoverRunBytes + kDiscoverBreakBytes)
-                         + coords * kDiscoverCoordBytes;
+                         + coord_bytes + sort;
                 };
-                const uint64_t left = budget_left(budget);
-                if (most(fresh_max, std::min<uint64_t>(labels, found.size() + fresh_max)) > left) {
+                if (most(fresh_max, std::min<uint64_t>(labels, found.size() + fresh_max))
+                        > budget_left(budget)) {
                     const auto [fresh, known] = counts();
+                    if (sort_refused)
+                        return false;
                     const uint64_t admitted = (cut_here || !admitting) ? 0 : fresh;
-                    if (most(admitted, known + admitted) > left)
+                    if (most(admitted, known + admitted) > budget_left(budget))
                         return false;
                 }
             }
@@ -954,6 +999,7 @@ SupportProfile resolve_support(LabelOracle &oracle,
                 cut_index = j;
                 cap.cut_kmer = present_pos[j];
                 cap.new_at_cut = counts().first;
+                cap.labels_at_cut = counts().first + counts().second;
                 cap.tracked = found.size();
             }
             return true;
@@ -973,7 +1019,7 @@ SupportProfile resolve_support(LabelOracle &oracle,
                 // a column not tracked yet is one of those the index has left
                 const uint64_t fresh_most = std::min<uint64_t>(
                         row.size(), oracle.num_columns() - found.size());
-                if (!admit_row(j, row.size(), fresh_most, 0, [&]() { return count_bits(row); }))
+                if (!admit_row(j, row.size(), fresh_most, 0, 0, [&]() { return count_bits(row); }))
                     return false;
                 const size_t labels_before = found.size();
                 const uint64_t scratch_before = scratch_held();
@@ -988,28 +1034,53 @@ SupportProfile resolve_support(LabelOracle &oracle,
                 // a column label per column, a sequence label per coordinate at most, and of the
                 // labels not tracked yet at most those the index has left: per column (header
                 // labels: its records not tracked yet), or of all columns
+                const annot::CoordToHeader *cth = oracle.coord_to_header();
                 uint64_t coords_in_row = 0;
                 uint64_t fresh_most = 0;
+                size_t widest = 0;
+                size_t unsorted = 0;
                 for (const auto &[c, coords] : row) {
                     coords_in_row += coords.size();
+                    widest = std::max(widest, coords.size());
+                    if (!std::is_sorted(coords.begin(), coords.end()))
+                        unsorted = std::max(unsorted, coords.size());
                     if (!by_column) {
-                        fresh_most += std::min<uint64_t>(
-                                coords.size(),
-                                oracle.coord_to_header()->num_sequences(c) - tracked_in[c]);
+                        // (a column the record mapping does not have: its coordinates bound it,
+                        // and the mapping refuses them as the base did)
+                        fresh_most += c < cth->num_columns()
+                                ? std::min<uint64_t>(coords.size(),
+                                                     cth->num_sequences(c) - tracked_in[c])
+                                : coords.size();
                     }
                 }
                 if (by_column)
                     fresh_most = std::min<uint64_t>(row.size(), oracle.num_columns() - found.size());
-                // (the scratch's growth counted from before the count, which may sort into it:
-                // it is within the coordinates' charge admit_row checks)
+                // what the coordinates add: under trace each one's place in a chain, and the
+                // scratch they are chained in (and for header labels mapped in) grown to twice
+                // the widest column; under presence nothing (the sort scratch apart)
+                const uint64_t scratch_grows = std::max<uint64_t>(
+                        2 * widest, scratch.capacity()) - scratch.capacity()
+                        + (by_column ? 0 : std::max<uint64_t>(2 * widest, local.capacity())
+                                               - local.capacity());
+                const uint64_t coord_bytes = with_coords
+                        ? coords_in_row * kDiscoverChainBytes + scratch_grows * sizeof(Coord)
+                        : 0;
                 const uint64_t scratch_before = scratch_held();
-                if (!admit_row(j, by_column ? row.size() : coords_in_row, fresh_most,
-                               coords_in_row, [&]() { return count_tuples(row); }))
+                if (!admit_row(j, by_column ? row.size() : coords_in_row, fresh_most, coord_bytes,
+                               unsorted, [&]() { return count_tuples(row, unsorted); }))
                     return false;
+                // the sort scratch at the row's largest unsorted column, once (within what
+                // admit_row checked), so that every column below sorts within it
+                const bool sort_fits = reserve_sorted(unsorted);
+                assert(sort_fits && "within the bound admit_row checked");
+                (void)sort_fits;
                 const size_t labels_before = found.size();
                 const uint64_t i = present_pos[j];
                 for (const auto &[c, coords] : row) {
-                    const Coord *data = sorted_coords(coords);
+                    const Coord *data = nullptr;
+                    const bool sorted_fits = sorted_coords(coords, &data);  // (reserved above)
+                    assert(sorted_fits);
+                    (void)sorted_fits;
                     if (options.discover_kind == LabelKind::COLUMN) {
                         // tuple rows only for a trace (presence reads whole rows)
                         if (LabelSupport *s = of(c, 0))
@@ -1070,6 +1141,10 @@ SupportProfile resolve_support(LabelOracle &oracle,
             stopped = true;
             stop_phase = ResolveStop::ROWS;
             stop_reason = pass_end == PassEnd::MEMORY ? ResolveStop::MEMORY : ResolveStop::TIME;
+            // the memory bound at the query's first k-mer in the graph: the sequence from there
+            // holds the same k-mers in the graph, so the same setup and the same first row, and
+            // a resolve of it stops there again under the same bound
+            cannot_progress = stop_reason == ResolveStop::MEMORY && used == 0;
             resolved = present_pos[used];
             num_present = used;
         }

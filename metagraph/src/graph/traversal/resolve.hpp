@@ -112,11 +112,12 @@ struct ResolveOptions {
 constexpr uint64_t kDiscoverIndexEntryBytes = 112;
 constexpr uint64_t kDiscoverRunBytes = 32;
 constexpr uint64_t kDiscoverBreakBytes = 16;
-// the most a coordinate of a row adds to what a discovery holds beyond its labels, which the
-// check before a k-mer's accumulation counts: a chain's coordinates (8 B, a vector at most twice
-// its size) and the scratch the coordinates are sorted, chained and mapped in (three vectors of
-// 8 B a coordinate, each at most twice its size)
-constexpr uint64_t kDiscoverCoordBytes = 64;
+// Under support "trace", the most a coordinate of a row adds to the chains' coordinates (8 B, a
+// vector at most twice its size), which the check before a k-mer's accumulation counts with the
+// growth of the scratch the coordinates are chained and mapped in (twice the row's largest
+// column, 8 B a coordinate, each buffer). A presence discovery keeps no coordinate: only the
+// sort scratch of an unsorted column (8 B a coordinate, charged before it grows)
+constexpr uint64_t kDiscoverChainBytes = 16;
 
 struct LabelProfile {
     LabelRef label;
@@ -158,6 +159,9 @@ struct LabelCap {
     size_t tracked = 0;
     uint64_t cut_kmer = 0;
     size_t new_at_cut = 0;                   // the labels first met at |cut_kmer|
+    // the labels present at |cut_kmer| (new and tracked): above |max_tracked|, a discovery of
+    // the sequence from |cut_kmer| meets more than the cap at its first k-mer and tracks nothing
+    size_t labels_at_cut = 0;
     uint64_t untracked_max_kmers = 0;
     // the kept labels are the uncut discovery's top discover_max_labels: that many kept, the
     // last one supporting more than |untracked_max_kmers|
@@ -191,6 +195,10 @@ struct ResolveStop {
     enum Reason { TIME, MEMORY };
     Reason reason = TIME;
     uint64_t max_memory = 0;
+    // MEMORY at the query's first k-mer in the graph: the sequence from resolved_kmers has the
+    // same k-mers in the graph, the same setup and the same first row, so a resolve of it stops
+    // there again under the same bound (SPEC-labeled-traversal-core.md §4.6)
+    bool cannot_progress = false;
     uint64_t resolved_kmers = 0;
     uint64_t query_kmers = 0;
     // the runs of the WHOLE query's k-mers present in the graph (SupportProfile::graph_runs

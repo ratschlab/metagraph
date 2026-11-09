@@ -338,8 +338,9 @@ without reading a pair. A seed the bound leaves unstarted is a result of the pai
 `resource_stop.scope: "request"`, phase `not_started`, its `unknown_labels` stated as every result of the pair
 states them); the envelope is the one-entry envelope of a named `/traverse` as with any other result.
 Its `graph_summary` states `headers_unique` (section 9).
-From H2 (train 3) the block also states `resolve_discovery`: `{"max_tracked_labels": n, "max_memory_mb": n}`, the
-bounds of a `/resolve` discovery per pair (`--resolve-max-discover-labels`, `--resolve-max-discover-memory-mb`;
+From H2 (train 3) the block also states `resolve_discovery`: `{"max_tracked_labels": n, "max_memory_mb": n,
+"max_answer_labels": n}`, the bounds of a `/resolve` discovery per pair (`--resolve-max-discover-labels`,
+`--resolve-max-discover-memory-mb`, `--resolve-max-discover-answer-labels`;
 integers, 0 for none; `SPEC-labeled-traversal-core.md` §4.6), as the `resolve` block's `discovery` states them, and
 `resolve_max_explicit_labels` (an integer, 0 = unlimited): the cap on a `/resolve`'s explicit label lists
 (`--resolve-max-explicit-labels`, `SPEC-labeled-traversal-core.md` §4.1), as the `resolve` block's

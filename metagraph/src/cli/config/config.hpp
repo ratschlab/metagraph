@@ -148,6 +148,10 @@ class Config {
     // explicit seed's, checked before anything of the request is copied (a 400 naming the list),
     // as /traverse's --traverse-max-explicit-labels. The CLI applies none
     uint64_t resolve_max_explicit_labels = 10'000;
+    // The most labels a /resolve discovery's answer keeps (0 = none): a larger discover.max_labels
+    // is lowered to it, stated in the answer's limits.clamped. The answer is not charged against
+    // the discovery's memory bound; this bounds it (SPEC-labeled-traversal-core.md §4.6)
+    uint64_t resolve_max_discover_answer_labels = 10'000;
     // A multi-graph server: a POST /search or /pattern request without `graphs` queries every
     // name of the graph list when the list has at most this many names, else it is refused
     // (400). Stated by GET /capabilities (max_graphs_without_selection), so that a client can

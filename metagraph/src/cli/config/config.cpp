@@ -473,6 +473,9 @@ Config::Config(int argc, char *argv[]) {
         } else if (!strcmp(argv[i], "--resolve-max-discover-labels")) {
             exact_ms(argv[i], get_value(i), &resolve_max_discover_labels);
             i++;
+        } else if (!strcmp(argv[i], "--resolve-max-discover-answer-labels")) {
+            exact_ms(argv[i], get_value(i), &resolve_max_discover_answer_labels);
+            i++;
         } else if (!strcmp(argv[i], "--resolve-max-explicit-labels")) {
             exact_ms(argv[i], get_value(i), &resolve_max_explicit_labels);
             i++;
@@ -2050,6 +2053,7 @@ if (advanced) {
             fprintf(stderr, "\t   --traverse-max-seed-labels [INT] \tcap on labels DERIVED from a seed, 0 = unlimited [10000]\n");
             fprintf(stderr, "\t   --resolve-max-query-bp [INT] \t\tcap on the /resolve query length, 0 = unlimited [0]\n");
             fprintf(stderr, "\t   --resolve-max-explicit-labels [INT] \tthe most labels a /resolve request lists in `labels` and in each explicit seed (select.seeds[].labels): a longer list is refused (400); 0 = no cap [10000]\n");
+            fprintf(stderr, "\t   --resolve-max-discover-answer-labels [INT] \tthe most labels a /resolve discovery's answer keeps: a larger discover.max_labels is lowered to it, stated in limits.clamped; 0 = no maximum [10000]\n");
             fprintf(stderr, "\t   --resolve-max-discover-labels [INT] \tthe most labels a /resolve discovery tracks per pair: the labels first met at a k-mer that would pass it, and every later one, are not tracked (labels_capped states the cut); 0 = no cap [1000000]\n");
             fprintf(stderr, "\t   --resolve-max-discover-memory-mb [INT] \tthe memory a /resolve discovery's pass holds per pair, in MiB, charged before it is allocated: the work stops before a k-mer whose row or accumulation does not fit (stop reason memory, the resolve of the prefix); in [0, 1048576], 0 = no bound [1024]\n");
             fprintf(stderr, "\t   --traverse-max-memory-mb [INT] \tmaximum of bounds.max_memory_mb per /traverse seed: a larger one is lowered to it, an omitted one set to it; 0 = off [0]\n");

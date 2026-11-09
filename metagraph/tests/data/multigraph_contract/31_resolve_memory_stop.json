@@ -39,11 +39,11 @@
      {
       "bp_interval": [
        0,
-       47
+       51
       ],
       "kmer_interval": [
        0,
-       17
+       21
       ],
       "labels": [
        "s0000065",
@@ -88,41 +88,41 @@
     "graph_runs": [
      [
       0,
-      17
+      21
      ]
     ],
     "k": 31,
     "labels": [
      {
       "kind": "header",
-      "kmers_supported": 17,
+      "kmers_supported": 21,
       "label": "s0000065",
       "runs": [
        [
         0,
-        17
+        21
        ]
       ]
      },
      {
       "kind": "header",
-      "kmers_supported": 17,
+      "kmers_supported": 21,
       "label": "s0000071",
       "runs": [
        [
         0,
-        17
+        21
        ]
       ]
      },
      {
       "kind": "header",
-      "kmers_supported": 17,
+      "kmers_supported": 21,
       "label": "s0000073",
       "runs": [
        [
         0,
-        17
+        21
        ]
       ]
      }
@@ -130,42 +130,42 @@
     "labels_truncated": {
      "dropped_full_length": 203,
      "kept": 3,
-     "max_dropped_kmers": 17,
-     "min_kept_kmers": 17,
+     "max_dropped_kmers": 21,
+     "min_kept_kmers": 21,
      "tied_at_boundary": 206,
      "tied_kept": 3,
-     "total": 2587
+     "total": 3223
     },
-    "num_kmers": 17,
+    "num_kmers": 21,
     "regime": "basic",
     "release": "refseq237",
     "stop": {
      "max_memory_mb": 1,
-     "message": "--resolve-max-discover-memory-mb 1 ran out while the annotation rows of the query's k-mers were read: this answer is exactly the resolve of the sequence's first 17 of 60 k-mers (a run ending there may continue past it); resolve the rest from base 17",
+     "message": "--resolve-max-discover-memory-mb 1 ran out while the annotation rows of the query's k-mers were read: this answer is exactly the resolve of the sequence's first 21 of 60 k-mers (a run ending there may continue past it); resolve the rest from base 21",
      "phase": "rows",
      "query_bp": 90,
      "query_kmers": 60,
      "reason": "memory",
-     "remainder_from_bp": 17,
-     "resolved_bp": 47,
-     "resolved_kmers": 17
+     "remainder_from_bp": 21,
+     "resolved_bp": 51,
+     "resolved_kmers": 21
     },
     "support": "kmer",
     "timing": {
-     "cpu_ms": 4.123125,
-     "elapsed_ms": 4.117333
+     "cpu_ms": 6.638,
+     "elapsed_ms": 6.684958
     },
     "unknown_labels": [],
     "work": {
-     "memory_bytes": 1090690
+     "memory_bytes": 1202626
     }
    }
   ],
   "timing": {
-   "elapsed_ms": 4.158333
+   "elapsed_ms": 6.743666
   },
   "work": {
-   "memory_bytes": 1090690
+   "memory_bytes": 1202626
   }
  }
 }

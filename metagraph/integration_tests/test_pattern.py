@@ -4499,6 +4499,7 @@ class TestPatternRegression(TestingBase):
                 return caps
             if caps is b:
                 self.assertEqual({'max_tracked_labels': 1000000, 'max_memory_mb': 1024,
+                                  'max_answer_labels': 10000,
                                   'stop_reasons': ['time', 'memory'],
                                   'rule': 'SPEC-labeled-traversal-core.md section 4.6'},
                                  block.get('discovery'))

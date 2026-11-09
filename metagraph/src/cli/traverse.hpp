@@ -475,6 +475,9 @@ struct ResolveTimeLimits {
     uint64_t max_discover_labels = 0;
     uint64_t max_discover_memory_mb = 0;
     uint64_t max_explicit_labels = 0;
+    // the most labels a discovery's answer keeps (--resolve-max-discover-answer-labels; 0: none):
+    // a larger discover.max_labels is lowered to it, stated in limits.clamped
+    uint64_t max_discover_answer_labels = 0;
 };
 
 // A /resolve answer that could not be built and written within its bounds.time_budget_ms (the
