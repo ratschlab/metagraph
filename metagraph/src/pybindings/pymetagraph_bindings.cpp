@@ -212,9 +212,10 @@ class AnnotatedGraph {
           bool labeled,
           std::optional<double> min_exact_match,
           std::optional<size_t> max_alternative_alignments,
-          std::optional<double> max_num_nodes_per_seq_char) const {
+          std::optional<double> max_num_nodes_per_seq_char,
+          std::optional<size_t> min_seed_length) const {
         auto aligner_config = make_aligner_config(min_exact_match, max_alternative_alignments,
-                                                  max_num_nodes_per_seq_char);
+                                                  max_num_nodes_per_seq_char, min_seed_length);
         const auto &encoder = anno_dbg_->get_annotator().get_label_encoder();
         std::shared_lock<std::shared_mutex> lock(num_threads_mutex);
         std::vector<std::vector<GraphAlignment>> results(seqs.size());
@@ -256,8 +257,10 @@ class AnnotatedGraph {
     // gets None.
     std::vector<std::optional<LabelMapping>>
     map(const std::vector<std::string> &seqs,
-        std::optional<double> min_exact_match) const {
-        auto aligner_config = make_aligner_config(min_exact_match, std::nullopt, std::nullopt);
+        std::optional<double> min_exact_match,
+        std::optional<size_t> min_seed_length) const {
+        auto aligner_config = make_aligner_config(min_exact_match, std::nullopt, std::nullopt,
+                                                  min_seed_length);
         const auto &encoder = anno_dbg_->get_annotator().get_label_encoder();
         std::shared_lock<std::shared_mutex> lock(num_threads_mutex);
         std::vector<std::optional<LabelMapping>> results(seqs.size());
@@ -297,7 +300,8 @@ class AnnotatedGraph {
     mtg::graph::align::DBGAlignerConfig
     make_aligner_config(std::optional<double> min_exact_match,
                         std::optional<size_t> max_alternative_alignments,
-                        std::optional<double> max_num_nodes_per_seq_char) const {
+                        std::optional<double> max_num_nodes_per_seq_char,
+                        std::optional<size_t> min_seed_length) const {
         mtg::cli::Config config(*config_);
         if (min_exact_match) {
             if (!std::isfinite(*min_exact_match) || *min_exact_match < 0 || *min_exact_match > 1)
@@ -313,6 +317,11 @@ class AnnotatedGraph {
             if (!(*max_num_nodes_per_seq_char > 0))
                 throw std::invalid_argument("max_num_nodes_per_seq_char must be positive");
             config.alignment_max_nodes_per_seq_char = *max_num_nodes_per_seq_char;
+        }
+        if (min_seed_length) {
+            if (*min_seed_length == 0)
+                throw std::invalid_argument("min_seed_length must be positive");
+            config.alignment_min_seed_length = *min_seed_length;
         }
         return mtg::cli::initialize_aligner_config(config, *aln_graph_);
     }
@@ -393,9 +402,11 @@ PYBIND11_MODULE(_pymetagraph_core, m) {
              py::arg("min_exact_match") = py::none(),
              py::arg("max_alternative_alignments") = py::none(),
              py::arg("max_num_nodes_per_seq_char") = py::none(),
+             py::arg("min_seed_length") = py::none(),
              py::call_guard<py::gil_scoped_release>())
         .def("map", &AnnotatedGraph::map,
              py::arg("seqs"), py::arg("min_exact_match") = py::none(),
+             py::arg("min_seed_length") = py::none(),
              py::call_guard<py::gil_scoped_release>());
 
     // Test hook: a task that throws on a worker thread must surface as a Python
