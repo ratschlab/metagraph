@@ -58,11 +58,6 @@ struct SupportProfile {
     std::vector<KmerInterval> graph_runs;    // runs of k-mers present in the graph
     std::vector<LabelProfile> labels;
     std::optional<LabelTruncation> labels_truncated;
-
-    // base interval of a k-mer interval
-    std::pair<uint64_t, uint64_t> bp_interval(const KmerInterval &iv) const {
-        return { iv.begin, iv.end + k - 1 };
-    }
 };
 
 // Resolve where |query| is supported by which labels. No traversal.
