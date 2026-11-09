@@ -295,4 +295,5 @@ Alignment and seed-only label mapping::
 
 ``align`` takes the options of the server's ``/align`` (``min_exact_match``,
 ``max_alternative_alignments``, ``max_num_nodes_per_seq_char``), and ``map`` takes
-``min_exact_match``. Options left unset keep the defaults of ``metagraph align``.
+``min_exact_match``. Both also take ``min_seed_length`` (``--align-min-seed-length``). Options left
+unset keep the defaults of ``metagraph align``.

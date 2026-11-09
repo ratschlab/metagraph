@@ -272,6 +272,33 @@ def test_map_matches_cli(graph, index, tmp_path, min_exact_match):
                 mapping.num_matches, mapping.query_begin, mapping.query_end) == expected[i]
 
 
+@pytest.mark.parametrize("min_seed_length", [11, 15])
+def test_min_seed_length_matches_cli(graph, index, tmp_path, min_seed_length):
+    queries, fasta = write_align_queries(tmp_path)
+    options = ["--align-min-exact-match", "0.0", "--align-min-seed-length", str(min_seed_length)]
+    expected = cli_align(index, fasta, True, options)
+    result = graph.align(queries, min_exact_match=0.0, min_seed_length=min_seed_length)
+    for i, alignments in enumerate(result):
+        if expected[i] is None:
+            assert alignments == []
+            continue
+        best = alignments[0]
+        assert ("-" if best.orientation else "+", best.score, best.cigar,
+                ";".join(best.labels)) == expected[i]
+    expected = cli_map(index, fasta, options)
+    result = graph.map(queries, min_exact_match=0.0, min_seed_length=min_seed_length)
+    for i, mapping in enumerate(result):
+        if expected[i] is None:
+            assert mapping is None
+            continue
+        assert ("-" if mapping.orientation else "+", ";".join(mapping.labels),
+                mapping.num_matches, mapping.query_begin, mapping.query_end) == expected[i]
+    seq = queries[0]
+    for method in (graph.align, graph.map):
+        with pytest.raises(ValueError):
+            method(seq, min_seed_length=0)
+
+
 def test_map_edge_cases(graph):
     seq = next(iter(read_fasta(DATA).values()))
     mapping = graph.map(seq)

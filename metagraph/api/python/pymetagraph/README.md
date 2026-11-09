@@ -70,8 +70,9 @@ is enough for accept/reject decisions at a fraction of the cost.
 
 `align` takes the options of `/align`: `min_exact_match` (`--align-min-exact-match`),
 `max_alternative_alignments` (`--align-alternative-alignments`) and `max_num_nodes_per_seq_char`
-(`--align-max-nodes-per-seq-char`). `map` takes `min_exact_match`. Options left unset keep the
-defaults of `metagraph align`.
+(`--align-max-nodes-per-seq-char`). `map` takes `min_exact_match`. Both also take
+`min_seed_length` (`--align-min-seed-length`). Options left unset keep the defaults of
+`metagraph align`.
 
 All three methods release the GIL and spread the sequences over `threads` threads.
 
