@@ -3,6 +3,8 @@
 #include <cstdlib>
 #include <span>
 
+#include <fmt/format.h>
+
 #include <tsl/hopscotch_set.h>
 #include <tsl/hopscotch_map.h>
 
@@ -569,8 +571,12 @@ AnnotatedDBG::get_header_results(std::string_view sequence, size_t num_top_label
     const auto *matrix = dynamic_cast<const MultiIntMatrix *>(&annotator_->get_matrix());
     if (!matrix)
         throw std::runtime_error("k-mer coordinates are not indexed in this annotator");
-    if (annotator_->num_labels() != coord_to_header_->num_columns())
-        throw std::runtime_error("Incompatible number of columns in CoordToHeader and annotation matrix");
+    if (annotator_->num_labels() != coord_to_header_->num_columns()) {
+        throw std::runtime_error(fmt::format("Incompatible number of columns in CoordToHeader "
+                                             "and annotation matrix: {} != {}",
+                                             coord_to_header_->num_columns(),
+                                             annotator_->num_labels()));
+    }
     auto tuples = matrix->get_row_tuples(rows);
     coord_to_header_->map_to_local_coords(&tuples);
     std::vector<std::tuple<Label, size_t, Values>> result;
@@ -740,8 +746,12 @@ AnnotatedDBG::get_kmer_coordinates(std::string_view sequence,
     auto rows_tuples = tuple_matrix->get_row_tuples(row_indices);
 
     if (coord_to_header_) {
-        if (annotator_->num_labels() != coord_to_header_->num_columns())
-            throw std::runtime_error("Incompatible number of columns in CoordToHeader and annotation matrix");
+        if (annotator_->num_labels() != coord_to_header_->num_columns()) {
+            throw std::runtime_error(fmt::format("Incompatible number of columns in CoordToHeader "
+                                                 "and annotation matrix: {} != {}",
+                                                 coord_to_header_->num_columns(),
+                                                 annotator_->num_labels()));
+        }
 
         coord_to_header_->map_to_local_coords(&rows_tuples);
         // Now each coord in `rows_tuples` is `coord = local_coord * num_sequences[j] + seq_id`
