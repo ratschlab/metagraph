@@ -84,25 +84,27 @@ std::unique_ptr<std::ifstream> open_ifstream(const std::string &filename, bool m
 }
 
 const std::string& get_filename(std::istream &f) {
-    if (auto *mmap_in = dynamic_cast<sdsl::mmap_ifstream *>(&f))
-        return mmap_in->get_filename();
+    if (auto *mmap_in = dynamic_cast<sdsl::shared_mapper_ifstream *>(&f))
+        return mmap_in->filename();
     if (auto *named_in = dynamic_cast<named_ifstream *>(&f))
         return named_in->get_filename();
     throw std::runtime_error(
-            "get_filename: stream is neither sdsl::mmap_ifstream nor utils::named_ifstream");
+            "get_filename: stream is neither sdsl::shared_mapper_ifstream nor utils::named_ifstream");
 }
 
 void madvise_random_range(std::istream &f, std::streamoff start, std::streamoff length) {
     if (!with_madvise())
         return;
-    auto *mmap_in = dynamic_cast<sdsl::mmap_ifstream *>(&f);
-    if (!mmap_in)
+    auto *mmap_in = dynamic_cast<sdsl::shared_mapper_ifstream *>(&f);
+    if (!mmap_in || !mmap_in->mapper())
         return;
+    const auto &mapping = *mmap_in->mapper();
     if (length < 0)
-        length = mmap_in->get_mmap_context()->file_size_bytes() - start;
+        length = mapping.size() - start;
     const std::streamoff pagesize = sysconf(_SC_PAGESIZE);
     std::streamoff aligned_start = start - start % pagesize;
-    if (madvise(mmap_in->get_mmap_context()->data() + aligned_start,
+    // madvise takes a non-const address but does not write to the mapping.
+    if (madvise(reinterpret_cast<char *>(const_cast<uint64_t *>(mapping.data())) + aligned_start,
                 length + (start - aligned_start),
                 MADV_RANDOM)) {
         logger->warn("madvise(MADV_RANDOM) failed for range [{}, {})", start, start + length);

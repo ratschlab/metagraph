@@ -4,6 +4,7 @@
 #include <string>
 #include <vector>
 
+#include <sdsl/packed_vector_view.hpp>
 #include <sdsl/vlc_vector.hpp>
 
 #include "annotation/binary_matrix/base/binary_matrix.hpp"
@@ -34,7 +35,7 @@ class RowSparse : public RowMajor {
     uint64_t num_relations() const override { return set_bits_.size(); }
 
   private:
-    sdsl::vlc_vector<> set_bits_;
+    sdsl::vlc_vector<sdsl::coder::elias_delta<>, 128, 0, sdsl::packed_vector_view> set_bits_;
     bit_vector_small boundary_;
     uint64_t num_columns_ = 0;
     uint64_t num_rows_ = 0;
