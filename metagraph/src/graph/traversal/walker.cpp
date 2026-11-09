@@ -519,12 +519,7 @@ void Walker::derive_seed_labels(const std::vector<node_index> &keys,
         }
     }
     if (live.size() > strategy_.max_seed_labels) {
-        uint64_t digest = 0xcbf29ce484222325ULL;
-        for (size_t i = strategy_.max_seed_labels; i < live.size(); ++i) {
-            digest = fnv1a64(name_of(live[i]) + "\n", digest);
-        }
         result_.labels_dropped = live.size() - strategy_.max_seed_labels;
-        result_.labels_dropped_digest = hex64(digest);
         live.resize(strategy_.max_seed_labels);
     }
     for (const Key &key : live) {
