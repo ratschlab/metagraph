@@ -306,8 +306,7 @@ AnnotatedSequenceGraph::get_labels(node_index index) const {
 
 // Container `code_counts` must have pairs (index, count)
 template <class Container>
-void top_n_sorted(Container& code_counts, size_t num_top_labels,
-                  AnnotatedDBG::TopLabelCut *cut = nullptr, size_t num_present = 0) {
+void top_n_sorted(Container& code_counts, size_t num_top_labels) {
     assert(num_top_labels <= code_counts.size());
     auto comp = [](const auto &x, const auto &y) {
         return std::make_pair(y.second, x.first)
@@ -317,18 +316,10 @@ void top_n_sorted(Container& code_counts, size_t num_top_labels,
                      code_counts.begin() + num_top_labels,
                      code_counts.end(),
                      comp);
-    if (cut) {
-        for (auto it = code_counts.begin() + num_top_labels; it != code_counts.end(); ++it) {
-            cut->max_dropped = std::max(cut->max_dropped, static_cast<size_t>(it->second));
-            cut->dropped_full += it->second == num_present;
-        }
-    }
     // leave only the first |num_top_labels| top labels
     code_counts.resize(num_top_labels);
     // sort the top labels by counts
     std::sort(code_counts.begin(), code_counts.end(), comp);
-    if (cut && !code_counts.empty())
-        cut->min_kept = code_counts.back().second;
 }
 
 template <class Container>
@@ -423,8 +414,7 @@ HeaderCounts count_header_matches(const std::vector<MultiIntMatrix::RowTuples> &
                                   size_t min_count, size_t num_top_labels,
                                   tsl::hopscotch_map<Header, size_t> *abundances = nullptr,
                                   std::span<const size_t> weights = {},
-                                  AnnotatedDBG::TopLabelCut *cut = nullptr,
-                                  size_t num_present = 0) {
+                                  size_t *num_passed = nullptr) {
     VectorMap<Header, size_t> counts_map;
     tsl::hopscotch_set<Header> matches;
     size_t row_index = 0;
@@ -444,10 +434,10 @@ HeaderCounts count_header_matches(const std::vector<MultiIntMatrix::RowTuples> &
     }
     auto counts = to_vector(std::move(counts_map));
     std::erase_if(counts, [&](const auto &p) { return p.second < min_count; });
-    if (cut)
-        cut->total = counts.size();
+    if (num_passed)
+        *num_passed = counts.size();
     if (counts.size() > num_top_labels)
-        top_n_sorted(counts, num_top_labels, cut, num_present);
+        top_n_sorted(counts, num_top_labels);
     return counts;
 }
 } // namespace
@@ -460,7 +450,7 @@ Result filter_and_aggregate(const RowEnumerator &enumerate_rows,
                             size_t num_top_labels,
                             const std::vector<size_t> &kmer_positions,
                             size_t num_kmers,
-                            AnnotatedDBG::TopLabelCut *cut = nullptr) {
+                            size_t *num_passed = nullptr) {
     static_assert(utils::is_one_of_v<Result,
                     std::vector<std::tuple<Label, size_t, sdsl::bit_vector>>,
                     std::vector<std::tuple<Label, size_t, std::vector<size_t>>>,
@@ -476,10 +466,10 @@ Result filter_and_aggregate(const RowEnumerator &enumerate_rows,
     std::vector<std::pair<Column, size_t>> counts
             = utils::accumulate_counts(call_bits, label_encoder.size(), min_count);
 
-    if (cut)
-        cut->total = counts.size();
+    if (num_passed)
+        *num_passed = counts.size();
     if (counts.size() > num_top_labels)
-        top_n_sorted(counts, num_top_labels, cut, kmer_positions.size());
+        top_n_sorted(counts, num_top_labels);
 
     if (counts.empty())
         return {};
@@ -537,7 +527,7 @@ template <class Values>
 std::vector<std::tuple<Label, size_t, Values>>
 AnnotatedDBG::get_header_results(std::string_view sequence, size_t num_top_labels,
                                  double discovery_fraction, double presence_fraction,
-                                 bool with_kmer_counts, TopLabelCut *cut) const {
+                                 bool with_kmer_counts, size_t *num_passed) const {
     static_assert(utils::is_one_of_v<Values, size_t, std::vector<size_t>, sdsl::bit_vector>);
     const size_t num_kmers = sequence.size() - dbg_.get_k() + 1;
     // Repeated query positions still count separately, but their annotation
@@ -600,7 +590,7 @@ AnnotatedDBG::get_header_results(std::string_view sequence, size_t num_top_label
                                 with_kmer_counts ? abundances.at(h) : count);
     } else {
         auto counts = count_header_matches(tuples, *coord_to_header_, min_count,
-                                           num_top_labels, nullptr, weights, cut, num_present);
+                                           num_top_labels, nullptr, weights, num_passed);
         tsl::hopscotch_map<Header, Values> values;
         values.reserve(counts.size());
         for (const auto &[h, count] : counts)
@@ -828,7 +818,7 @@ AnnotatedDBG::get_top_label_signatures(std::string_view sequence,
                                        size_t num_top_labels,
                                        double discovery_fraction,
                                        double presence_fraction,
-                                       TopLabelCut *cut,
+                                       size_t *num_passed,
                                        bool header_labels) const {
     assert(discovery_fraction >= 0.);
     assert(discovery_fraction <= 1.);
@@ -841,9 +831,9 @@ AnnotatedDBG::get_top_label_signatures(std::string_view sequence,
 
     size_t num_kmers = sequence.size() - dbg_.get_k() + 1;
 
-    // the shortcut ranks with get_top_labels, which reports no cut and ranks headers when
+    // the shortcut ranks with get_top_labels, which reports no count and ranks headers when
     // a CoordToHeader mapping is loaded
-    if (discovery_fraction == 1. && !cut && (header_labels || !coord_to_header_)) {
+    if (discovery_fraction == 1. && !num_passed && (header_labels || !coord_to_header_)) {
         auto label_counts = get_top_labels(sequence, num_top_labels, discovery_fraction, presence_fraction);
         std::vector<std::tuple<Label, size_t, sdsl::bit_vector>> presence_vectors;
         presence_vectors.reserve(label_counts.size());
@@ -860,7 +850,7 @@ AnnotatedDBG::get_top_label_signatures(std::string_view sequence,
     if (coord_to_header_ && header_labels) {
         return get_header_results<sdsl::bit_vector>(sequence, num_top_labels,
                                                    discovery_fraction, presence_fraction,
-                                                   false, cut);
+                                                   false, num_passed);
     }
 
     // kmers in the graph and their positions in the query sequence
@@ -877,7 +867,7 @@ AnnotatedDBG::get_top_label_signatures(std::string_view sequence,
     auto get_results = [&](const auto &enumerate_rows) {
         auto results = filter_and_aggregate<std::vector<std::tuple<std::string, size_t, sdsl::bit_vector>>>(
             enumerate_rows, annotator_->get_label_encoder(), min_count, num_top_labels, kmer_positions, num_kmers,
-            cut);
+            num_passed);
         // get_top_labels ranks headers when a CoordToHeader mapping is loaded
         assert(coord_to_header_ || same_results(results, get_top_labels(sequence, num_top_labels,
                                                                          discovery_fraction, presence_fraction)));

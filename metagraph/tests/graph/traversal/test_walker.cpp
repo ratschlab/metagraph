@@ -823,7 +823,6 @@ TYPED_TEST(WalkerTest, DeriveSeedLabels) {
         EXPECT_EQ(2u, derived.label_dict.size()) << mode;
         EXPECT_EQ(2u, derived.labels_supporting_total);
         EXPECT_EQ(0u, derived.labels_dropped);
-        EXPECT_TRUE(derived.labels_dropped_digest.empty());
         EXPECT_TRUE(derived.dropped_labels.empty());
 
         std::vector<std::string> names;
@@ -852,8 +851,6 @@ TYPED_TEST(WalkerTest, DeriveSeedLabels) {
         EXPECT_TRUE(capped.dropped_labels.empty());   // capped, not unsupported
         EXPECT_EQ(capped.label_dict[0].name, all_three.label_dict[0].name);
         EXPECT_EQ(capped.label_dict[1].name, all_three.label_dict[1].name);
-        const std::string &cut = all_three.label_dict[2].name;
-        EXPECT_EQ(hex64(fnv1a64(cut + "\n")), capped.labels_dropped_digest) << mode;
         st.max_seed_labels = 0;   // a cap of zero would permit nothing
         EXPECT_THROW(run(*anno, f.prefix(), {}, st), std::invalid_argument);
 

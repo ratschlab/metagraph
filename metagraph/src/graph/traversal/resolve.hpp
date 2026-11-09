@@ -46,9 +46,6 @@ struct LabelProfile {
 struct LabelTruncation {
     size_t kept = 0;
     size_t total = 0;
-    uint64_t min_kept_kmers = 0;
-    uint64_t max_dropped_kmers = 0;
-    size_t dropped_full_length = 0;          // dropped labels supporting every in-graph k-mer
 };
 
 struct SupportProfile {
@@ -80,7 +77,6 @@ struct LabelPopulation {
     size_t supporting_total = 0;             // labels supporting the whole interval
     std::vector<std::string> dropped;        // kept only if <= 1000
     size_t dropped_count = 0;
-    std::string dropped_digest;
 };
 
 struct FrozenSeed {
@@ -104,7 +100,7 @@ std::string make_seed_id(std::string_view sequence,
                          std::vector<std::string> labels);
 
 uint64_t fnv1a64(std::string_view data, uint64_t hash = 0xcbf29ce484222325ULL);
-// lower-case 16-digit hex of a 64-bit hash (seed ids, dropped-label digests)
+// lower-case 16-digit hex of a 64-bit hash (seed ids)
 std::string hex64(uint64_t x);
 
 // Run-length encoding of a presence mask ("x<n>o<n>..."), compatible with the

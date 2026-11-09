@@ -133,22 +133,15 @@ class AnnotatedDBG : public AnnotatedSequenceGraph {
                          double discovery_fraction,
                          double presence_fraction) const;
 
-    // How a list of top labels was cut to |num_top_labels|
-    struct TopLabelCut {
-        size_t total = 0;          // the labels that passed the thresholds
-        size_t min_kept = 0;       // the count of the last label kept
-        size_t max_dropped = 0;    // the count of the best label dropped, 0 if none was
-        size_t dropped_full = 0;   // the dropped labels on every matched k-mer
-    };
-
-    // With |cut|, also report how the list was cut. With |header_labels| false, rank
-    // annotation columns even when a CoordToHeader mapping is loaded.
+    // With |num_passed|, also report how many labels passed the thresholds, before the cut
+    // to |num_top_labels|. With |header_labels| false, rank annotation columns even when a
+    // CoordToHeader mapping is loaded.
     std::vector<std::tuple<Label, size_t, sdsl::bit_vector>>
     get_top_label_signatures(std::string_view sequence,
                              size_t num_top_labels,
                              double discovery_fraction = 0.0,
                              double presence_fraction = 0.0,
-                             TopLabelCut *cut = nullptr,
+                             size_t *num_passed = nullptr,
                              bool header_labels = true) const;
 
   private:
@@ -156,7 +149,7 @@ class AnnotatedDBG : public AnnotatedSequenceGraph {
     std::vector<std::tuple<Label, size_t, Values>>
     get_header_results(std::string_view sequence, size_t num_top_labels,
                        double discovery_fraction, double presence_fraction,
-                       bool with_kmer_counts = false, TopLabelCut *cut = nullptr) const;
+                       bool with_kmer_counts = false, size_t *num_passed = nullptr) const;
 
     DeBruijnGraph &dbg_;
     std::unique_ptr<annot::CoordToHeader> coord_to_header_;

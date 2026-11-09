@@ -67,7 +67,7 @@ struct Strategy {
     Direction direction = BOTH;
 
     // Cap on a permitted set DERIVED from the seed: the labels above it (in ascending
-    // (column, seq_id) order) are reported as SeedResult::labels_dropped and its digest.
+    // (column, seq_id) order) are counted in SeedResult::labels_dropped.
     size_t max_seed_labels = 1000;
     // What a derived label denotes. Unset: HEADER when the index has a CoordToHeader (the
     // labels are the indexed sequences), COLUMN otherwise.
@@ -234,12 +234,11 @@ struct SeedResult {
     // the permitted labels; a label id is an index here
     std::vector<LabelRef> label_dict;
     // The labels were derived from the seed. Then |labels_dropped| is how many of them
-    // max_seed_labels cut, with an FNV-1a-64 hex digest of their names.
+    // max_seed_labels cut.
     // |labels_supporting_total| is how many labels carry every seed k-mer.
     bool labels_from_seed = false;
     size_t labels_supporting_total = 0;
     size_t labels_dropped = 0;
-    std::string labels_dropped_digest;
     std::vector<DroppedLabel> dropped_labels;
     std::array<ArmResult, 2> arms;   // indexed by Arm
     double elapsed_seconds = 0;
