@@ -88,7 +88,6 @@ TYPED_TEST(ResolveTest, ThreeStatesAndRuns) {
         EXPECT_EQ(90u, B.kmers_supported);
 
 
-        // several seeds: the shared [100,110) first, then the runs outside it
         // the shared [100,110) carries both labels, so one seed covers them
         SelectionPolicy pol;
         pol.max_seeds = 3;
@@ -179,6 +178,25 @@ TYPED_TEST(ResolveTest, DiscoverTruncation) {
     headers.discover_kind = LabelKind::HEADER;
     EXPECT_THROW(resolve_support(oracle, q, headers), std::invalid_argument);  // no CoordToHeader
     EXPECT_THROW(resolve_support(oracle, q.substr(0, kK - 1), opts), std::invalid_argument);
+}
+
+// discovered labels are sorted by support, whatever their column order
+TYPED_TEST(ResolveTest, DiscoverySortsBySupport) {
+    using Graph = typename TypeParam::first_type;
+    using Annotation = typename TypeParam::second_type;
+    std::string q = random_seq(100, 7);
+    // W, the first column, carries half of the query; X carries all of it
+    auto anno = build_anno_graph<Graph, Annotation>(kK, { q.substr(0, 50), q }, { "W", "X" },
+                                                    DeBruijnGraph::BASIC);
+    const auto &encoder = anno->get_annotator().get_label_encoder();
+    ASSERT_LT(encoder.encode("W"), encoder.encode("X"));
+    LabelOracle oracle(*anno);
+    ResolveOptions opts;
+    opts.discover = true;
+    auto profile = resolve_support(oracle, q, opts);
+    ASSERT_EQ(2u, profile.labels.size());
+    EXPECT_EQ("X", profile.labels[0].label.name);
+    EXPECT_EQ("W", profile.labels[1].label.name);
 }
 
 // max_support at many labels: a synthetic profile whose runs end at jittered positions. The

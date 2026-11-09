@@ -75,7 +75,7 @@ class CoordToHeader {
      *            `local_coord = packed / num_sequences[col]`
      *
      * Entries of columns without sequence records are removed: they have no
-     * header labels.
+     * header labels. A column outside the index throws std::runtime_error.
      *
      * For single-coord lookups prefer `map_single_coord`, which returns
      * the pair directly without packing.

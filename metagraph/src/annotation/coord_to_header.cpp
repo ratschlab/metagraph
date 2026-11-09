@@ -161,9 +161,14 @@ CoordToHeader::CoordToHeader(std::vector<std::vector<std::string>> &&headers,
 void CoordToHeader::map_to_local_coords(std::vector<RowTuples> *rows) const {
     assert(rows);
     for (auto &row : *rows) {
+        for (const auto &[col, coords] : row) {
+            if (col >= num_columns())
+                throw std::runtime_error(fmt::format("Column {} is out of range: CoordToHeader "
+                                                     "has {} columns", col, num_columns()));
+        }
         // a column without sequence records has no header labels
         row.erase(std::remove_if(row.begin(), row.end(), [&](const auto &entry) {
-                      return entry.first >= num_columns() || !num_sequences(entry.first);
+                      return !num_sequences(entry.first);
                   }),
                   row.end());
         for (auto &[col, coords] : row) {
