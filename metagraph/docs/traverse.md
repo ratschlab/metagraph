@@ -61,18 +61,15 @@ The response:
   "labels": [{"label": "NZ_CM008882.1", "kind": "header", "kmers_supported": 783,
               "runs": [[0, 783]]}],
   "labels_truncated": null,
-  "candidates": [{"kmer_interval": [0, 783], "bp_interval": [0, 813],
-                  "labels": ["NZ_CM008882.1"]}],
   "selection": {
     "seeds": [{"seed_id": "4c1f...", "sequence": "ATGG...", "kmer_interval": [0, 783],
                "labels": ["NZ_CM008882.1"],
-               "label_population": {"supporting_total": 1, "included": 1, "dropped_count": 0}}]
+               "label_population": {"supporting_total": 1, "dropped_count": 0}}]
   }
 }
 ```
 
-Intervals are half-open k-mer intervals `[begin, end)`, except `bp_interval`, which is in
-bases. `graph_runs` are the runs of the query's k-mers present in the graph; a label's `runs`
+Intervals are half-open k-mer intervals `[begin, end)`. `graph_runs` are the runs of the query's k-mers present in the graph; a label's `runs`
 are the maximal runs of k-mers it carries. With discovery, `labels_truncated` states how many
 labels there were and where the cut fell. A selected seed is valid `/traverse` input as it
 stands, with its `seed_id`. Seeds are listed in the order they were picked, best first, and never overlap. With `select.min_block_bp` set to the query's length, the one seed is the whole query, carried by the labels on all its k-mers. When no label carries all of them, there is no seed.
