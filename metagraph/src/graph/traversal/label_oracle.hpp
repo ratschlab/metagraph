@@ -47,8 +47,9 @@ class LabelOracle {
         uint64_t keys_mapped = 0;          // oriented nodes mapped to annotation keys
         uint64_t rows_requested = 0;       // annotation rows requested (incl. cache hits)
         uint64_t cache_hits = 0;
-        uint64_t rows_fetched = 0;         // rows reconstructed with get_rows
-        uint64_t tuple_rows_fetched = 0;   // rows reconstructed with get_row_tuples
+        // rows read with get_rows and get_row_tuples, decoded or taken from a RowDiffCache
+        uint64_t rows_fetched = 0;
+        uint64_t tuple_rows_fetched = 0;
         uint64_t coords_mapped = 0;        // coordinates mapped to (sequence, local coord)
         double fetch_seconds = 0;
     };
