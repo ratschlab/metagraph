@@ -293,7 +293,7 @@ Json::Value strategy_to_json(const Strategy &st) {
     return j;
 }
 
-Json::Value arm_to_json(const ArmResult &arm, const Strategy &st) {
+Json::Value arm_to_json(const ArmResult &arm) {
     Json::Value j;
     j["status"] = status_name(arm.status);
     j["complete_to_bp"] = uint_json(arm.complete_to_bp);
@@ -382,7 +382,7 @@ Json::Value arm_to_json(const ArmResult &arm, const Strategy &st) {
     return j;
 }
 
-Json::Value seed_result_to_json(const SeedResult &r, const Strategy &st) {
+Json::Value seed_result_to_json(const SeedResult &r) {
     Json::Value j;
     Json::Value &seed = j["seed"];
     seed["seed_id"] = r.seed_id;
@@ -423,7 +423,7 @@ Json::Value seed_result_to_json(const SeedResult &r, const Strategy &st) {
     for (Arm arm : { Arm::LEFT, Arm::RIGHT }) {
         const ArmResult &a = r.arms[static_cast<size_t>(arm)];
         if (a.requested)
-            arms[to_string(arm)] = arm_to_json(a, st);
+            arms[to_string(arm)] = arm_to_json(a);
     }
     j["arms"] = std::move(arms);
     j["elapsed_ms"] = r.elapsed_seconds * 1000;
@@ -434,7 +434,7 @@ Json::Value failed_seed_to_json(const Seed &seed, const SeedDerivationError &e) 
     Json::Value j;
     j["seed"]["seed_id"] = seed.seed_id;
     j["seed"]["length_bp"] = uint_json(seed.sequence.size());
-    j["seed"]["labels_from_seed"] = true;
+    j["seed"]["labels_from_seed"] = seed.labels.empty();
     j["error"]["cause"] = to_string(e.cause());
     j["error"]["message"] = e.what();
     j["error"]["limit"] = e.limit();
@@ -562,8 +562,7 @@ Json::Value process_traverse_request(const Json::Value &request,
     Json::Value results(Json::arrayValue);
     for (const Seed &seed : req.seeds) {
         try {
-            results.append(seed_result_to_json(traverse_seed(oracle, seed, req.strategy),
-                                               req.strategy));
+            results.append(seed_result_to_json(traverse_seed(oracle, seed, req.strategy)));
         } catch (const SeedDerivationError &e) {
             // a property of the seed and the data: the other seeds are still walked
             results.append(failed_seed_to_json(seed, e));
@@ -616,13 +615,27 @@ int traverse_graph(Config *config) {
     std::stringstream content;
     content << in.rdbuf();
 
+    Json::Value request;
+    TraverseLimits limits;
+    try {
+        // refuse a malformed request before the index loads
+        request = parse_json_string(content.str());
+        limits = traverse_limits(*config);
+        if (config->traverse_resolve) {
+            parse_resolve_request(request);
+        } else {
+            parse_traverse_request(request, limits);
+        }
+    } catch (const std::invalid_argument &e) {
+        logger->error("Invalid request: {}", e.what());
+        return 1;
+    }
+
     Timer timer;
     std::unique_ptr<AnnotatedDBG> anno_graph = initialize_annotated_dbg(*config);
     logger->trace("Annotated graph loaded in {} sec", timer.elapsed());
 
     try {
-        const Json::Value request = parse_json_string(content.str());
-        const TraverseLimits limits = traverse_limits(*config);
         const Json::Value response = config->traverse_resolve
             ? process_resolve_request(request, *anno_graph, limits)
             : process_traverse_request(request, *anno_graph, limits);
@@ -631,6 +644,9 @@ int traverse_graph(Config *config) {
         std::cout << Json::writeString(builder, response) << std::endl;
     } catch (const std::invalid_argument &e) {
         logger->error("Invalid request: {}", e.what());
+        return 1;
+    } catch (const std::exception &e) {
+        logger->error("{}", e.what());
         return 1;
     }
     return 0;
