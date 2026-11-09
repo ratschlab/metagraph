@@ -1598,6 +1598,7 @@ struct Picked {
     KmerInterval kmers;
     std::vector<LabelId> labels;
     std::vector<std::string> labels_not_covering;
+    size_t rank = 0;  // the order in which the policy picked it
 };
 
 } // namespace
@@ -1795,8 +1796,13 @@ SeedSelection select_seeds(const SupportProfile &profile,
         }
     }
 
-    // merge overlapping picks onto their common interval
-    if (policy.merge_overlapping && policy.policy != SelectionPolicy::EXPLICIT) {
+    // Merge overlapping picks onto their common interval, carried by the labels of both.
+    // Only LONGEST_FIRST picks can overlap: MAX_SUPPORT picks outside the earlier ones.
+    // A merged pick keeps the rank of its best member, and the picks stay in rank order.
+    if (policy.merge_overlapping && policy.policy == SelectionPolicy::LONGEST_FIRST) {
+        for (size_t i = 0; i < picked.size(); ++i) {
+            picked[i].rank = i;
+        }
         std::sort(picked.begin(), picked.end(),
                   [](const Picked &a, const Picked &b) { return a.kmers < b.kmers; });
         std::vector<Picked> merged;
@@ -1808,11 +1814,14 @@ SeedSelection select_seeds(const SupportProfile &profile,
                 if (common.size() >= min_kmers) {
                     m.kmers = common;
                     m.labels = covering_labels(profile, common);
+                    m.rank = std::min(m.rank, p.rank);
                     continue;
                 }
             }
             merged.push_back(std::move(p));
         }
+        std::sort(merged.begin(), merged.end(),
+                  [](const Picked &a, const Picked &b) { return a.rank < b.rank; });
         picked.swap(merged);
     }
 

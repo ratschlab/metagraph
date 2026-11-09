@@ -213,8 +213,9 @@ Deterministic, recorded in the output.
   that is empty or ends past the query's k-mers is a 400 `Explicit seed interval out of range`, an end above
   2⁶³ − 1 included (before, such an end was a 400 with the JSON library's own text and no field, and aborted the
   CLI).
-- `merge_overlapping: true` (default): candidates whose intervals overlap are merged onto their common interval
-  with the union of labels; `overlaps_with` lists seeds that still share k-mers.
+- `merge_overlapping: true` (default): `longest_first` picks whose intervals overlap are merged onto their common
+  interval with the union of labels (`max_support` picks never overlap). A merged seed keeps the rank of its best
+  pick, and seeds are listed in rank order; `overlaps_with` lists seeds that still share k-mers.
 - `max_labels_per_seed`: if a candidate has more labels, keep that many in `label_order`: `hash` (default; FNV-1a of
   label + `sample_seed`, unbiased w.r.t. column order), `column_id`, or `kmers_supported`. Dropped labels are
   reported as `labels_dropped: {count, digest, labels (if ≤ 1000)}` so the complementary subset can be run.
