@@ -883,6 +883,7 @@ The command saves the matching of rows as ``moved.rowmap``.
 A repeated run with the same output name reuses this file and skips matching the rows again.
 Before reusing it, the command checks a sample of rows against both graphs and stops if they no longer match.
 Delete the file after changing either graph.
+With ``--mmap``, the row map is read from this file instead of being held in memory while the annotation is moved.
 
 .. _query_index:
 

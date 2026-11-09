@@ -90,8 +90,8 @@ class BRWT : public BinaryMatrix, public GetEntrySupport {
      * The mapping must be injective on the rows it keeps, and new_row must
      * have num_rows() entries, accessed in increasing order at the root.
      * The tree topology and column assignments are preserved.
-     * RowMap is instantiated in brwt.cpp for sdsl::int_vector<> (const or not)
-     * and sdsl::int_vector_buffer<>.
+     * RowMap is instantiated in brwt.cpp for sdsl::int_vector<> (const or not),
+     * sdsl::int_vector_buffer<> and const sdsl::packed_vector_view<>.
      */
     template <class RowMap>
     std::unique_ptr<BRWT> remap_rows(RowMap &new_row, uint64_t num_new_rows,

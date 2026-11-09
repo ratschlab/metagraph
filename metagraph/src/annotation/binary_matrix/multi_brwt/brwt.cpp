@@ -6,6 +6,7 @@
 
 #include <progress_bar.hpp>
 #include <sdsl/int_vector_buffer.hpp>
+#include <sdsl/packed_vector_view.hpp>
 
 #include "common/algorithms.hpp"
 #include "common/serialization.hpp"
@@ -698,6 +699,8 @@ template std::unique_ptr<BRWT>
 BRWT::remap_rows(sdsl::int_vector_buffer<> &, uint64_t, size_t) const;
 template std::unique_ptr<BRWT>
 BRWT::remap_rows(const sdsl::int_vector<> &, uint64_t, size_t) const;
+template std::unique_ptr<BRWT>
+BRWT::remap_rows(const sdsl::packed_vector_view<> &, uint64_t, size_t) const;
 
 } // namespace matrix
 } // namespace annot

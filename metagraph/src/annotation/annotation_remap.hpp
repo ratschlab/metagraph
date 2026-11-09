@@ -5,6 +5,7 @@
 #include <string>
 
 #include <sdsl/int_vector.hpp>
+#include <sdsl/packed_vector_view.hpp>
 
 
 namespace mtg {
@@ -38,7 +39,7 @@ sdsl::int_vector<> map_rows_to_graph(const graph::DeBruijnGraph &source,
  */
 bool check_row_map(const graph::DeBruijnGraph &source,
                    const graph::DeBruijnGraph &target,
-                   const sdsl::int_vector<> &row_map,
+                   const sdsl::packed_vector_view<> &row_map,
                    uint64_t num_samples = 10000);
 
 /**
@@ -50,7 +51,7 @@ bool check_row_map(const graph::DeBruijnGraph &source,
 std::unique_ptr<MultiLabelAnnotation<std::string>>
 remap_annotation_rows(const MultiLabelAnnotation<std::string> &annotation,
                       const graph::DeBruijnGraph &source,
-                      const sdsl::int_vector<> &row_map,
+                      const sdsl::packed_vector_view<> &row_map,
                       uint64_t target_num_rows,
                       size_t num_threads = 1);
 

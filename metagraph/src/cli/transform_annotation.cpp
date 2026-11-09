@@ -337,28 +337,38 @@ int transform_annotation(Config *config) {
             exit(1);
         }
 
-        // The row map is the expensive part, so keep it for a rerun.
+        // The row map is the expensive part, so keep it for a rerun. With --mmap it
+        // is read from that file instead of being held in RAM.
         const std::string row_map_fname = config->outfbase + ".rowmap";
-        sdsl::int_vector<> row_map;
+        sdsl::packed_vector_view<> row_map;
         uint64_t target_num_rows;
 
         auto source = load_critical_dbg(config->remap_graph);
         auto target = load_critical_dbg(config->infbase);
         target_num_rows = target->max_index();
 
+        auto load_row_map = [&]() {
+            try {
+                row_map.load(*utils::open_ifstream(row_map_fname));
+            } catch (const std::exception &e) {
+                logger->error("Cannot load row map from {}: {}", row_map_fname, e.what());
+                exit(1);
+            }
+        };
+
         if (std::filesystem::exists(row_map_fname)) {
             logger->trace("Loading row map from {}", row_map_fname);
-            std::ifstream in(row_map_fname, std::ios::binary);
-            row_map.load(in);
-            if (!in.good() || !check_row_map(*source, *target, row_map)) {
+            load_row_map();
+            if (!check_row_map(*source, *target, row_map)) {
                 logger->error("Row map {} does not match graphs {} and {}. Delete it and run again",
                               row_map_fname, config->remap_graph, config->infbase);
                 exit(1);
             }
         } else {
             logger->trace("Matching rows of {} to {}...", config->remap_graph, config->infbase);
+            sdsl::int_vector<> new_row_map;
             try {
-                row_map = map_rows_to_graph(*source, *target, get_num_threads());
+                new_row_map = map_rows_to_graph(*source, *target, get_num_threads());
             } catch (const std::exception &e) {
                 logger->error("{}", e.what());
                 exit(1);
@@ -366,7 +376,7 @@ int transform_annotation(Config *config) {
 
             const std::string tmp_fname = row_map_fname + ".tmp";
             std::ofstream out(tmp_fname, std::ios::binary);
-            row_map.serialize(out);
+            new_row_map.serialize(out);
             out.close();
             if (!out) {
                 logger->error("Cannot write row map to {}", tmp_fname);
@@ -374,6 +384,13 @@ int transform_annotation(Config *config) {
             }
             std::filesystem::rename(tmp_fname, row_map_fname);
             logger->trace("Row map saved to {} in {} sec", row_map_fname, timer.elapsed());
+
+            if (utils::with_mmap()) {
+                new_row_map = sdsl::int_vector<>();
+                load_row_map();
+            } else {
+                row_map = sdsl::packed_vector_view<>(std::move(new_row_map));
+            }
         }
         target.reset();
 
@@ -393,7 +410,7 @@ int transform_annotation(Config *config) {
             exit(1);
         }
         annotation.reset();
-        row_map = sdsl::int_vector<>();
+        row_map = sdsl::packed_vector_view<>();
         source.reset();
 
         if (!convert) {

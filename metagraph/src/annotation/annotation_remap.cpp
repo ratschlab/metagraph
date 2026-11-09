@@ -89,7 +89,7 @@ sdsl::int_vector<> map_rows_to_graph(const DeBruijnGraph &source,
 
 bool check_row_map(const DeBruijnGraph &source,
                    const DeBruijnGraph &target,
-                   const sdsl::int_vector<> &row_map,
+                   const sdsl::packed_vector_view<> &row_map,
                    uint64_t num_samples) {
     if (row_map.size() != source.max_index())
         return false;
@@ -115,7 +115,7 @@ bool check_row_map(const DeBruijnGraph &source,
 std::unique_ptr<MultiLabelAnnotation<std::string>>
 remap_annotation_rows(const MultiLabelAnnotation<std::string> &annotation,
                       const DeBruijnGraph &source,
-                      const sdsl::int_vector<> &row_map,
+                      const sdsl::packed_vector_view<> &row_map,
                       uint64_t target_num_rows,
                       size_t num_threads) {
     using matrix::BRWT;
