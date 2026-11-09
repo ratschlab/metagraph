@@ -63,8 +63,8 @@ SupportProfile resolve_support(const LabelOracle &oracle,
                                std::string_view query,
                                const ResolveOptions &options);
 
-// Seeds are picked by maximum support: repeatedly, the interval contained in the most label
-// runs, outside the intervals picked before
+// Seeds cover the labels: the first is the interval contained in the most label runs, each
+// next one the interval contained in the most runs of labels that no earlier seed carries
 struct SelectionPolicy {
     size_t max_seeds = 10;
     uint64_t min_block_bp = 0;               // 0: at least k
@@ -87,7 +87,7 @@ struct FrozenSeed {
     LabelPopulation population;
 };
 
-// Picks are listed best first and never overlap
+// Seeds are listed in the order they were picked; they may overlap
 std::vector<FrozenSeed> select_seeds(const SupportProfile &profile,
                                      std::string_view query,
                                      const SelectionPolicy &policy,
@@ -99,13 +99,8 @@ std::string make_seed_id(std::string_view sequence,
                          bool canonical_orientation,
                          std::vector<std::string> labels);
 
-uint64_t fnv1a64(std::string_view data, uint64_t hash = 0xcbf29ce484222325ULL);
-// lower-case 16-digit hex of a 64-bit hash (seed ids)
-std::string hex64(uint64_t x);
-
-// Run-length encoding of a presence mask ("x<n>o<n>..."), compatible with the
-// query output of `with_signature`.
-std::string encode_runs(const std::vector<KmerInterval> &runs, uint64_t num_kmers);
+// |sequence| in the case the graph stores (upper case unless the build is case-sensitive)
+std::string in_graph_case(std::string_view sequence);
 
 // The maximal runs of the positions i in [0, n) where |present|(i) holds, ascending
 template <class Present>

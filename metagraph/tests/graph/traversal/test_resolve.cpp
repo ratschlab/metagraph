@@ -1,5 +1,8 @@
 #include "gtest/gtest.h"
 
+#include <fmt/format.h>
+#include <folly/hash/FnvHash.h>
+
 #include <algorithm>
 #include <map>
 #include <random>
@@ -7,6 +10,7 @@
 
 #include "tests/graph/all/test_dbg_helpers.hpp"
 #include "tests/annotation/test_annotated_dbg_helpers.hpp"
+#include "tests/graph/traversal/traversal_test_helpers.hpp"
 
 #include "graph/traversal/resolve.hpp"
 #include "graph/annotated_dbg.hpp"
@@ -23,15 +27,6 @@ using namespace mtg::graph::traversal;
 using namespace mtg::test;
 
 const size_t kK = 11;
-
-std::string random_seq(size_t len, uint32_t seed) {
-    std::mt19937 gen(seed);
-    std::string s(len, 'A');
-    for (char &c : s) {
-        c = "ACGT"[gen() % 4];
-    }
-    return s;
-}
 
 std::vector<KmerInterval> iv(std::initializer_list<std::pair<uint64_t, uint64_t>> l) {
     std::vector<KmerInterval> out;
@@ -92,28 +87,17 @@ TYPED_TEST(ResolveTest, ThreeStatesAndRuns) {
         EXPECT_EQ(iv({ {100, 190} }), B.runs);
         EXPECT_EQ(90u, B.kmers_supported);
 
-        EXPECT_EQ("x70o25x15o80", encode_runs(A.runs, profile.num_kmers));
 
         // several seeds: the shared [100,110) first, then the runs outside it
+        // the shared [100,110) carries both labels, so one seed covers them
         SelectionPolicy pol;
         pol.max_seeds = 3;
         auto sel = select_seeds(profile, q, pol, canonical);
-        ASSERT_EQ(3u, sel.size());
-        // ties at one label go to the longer interval: B's [110,190), then A's [0,70)
+        ASSERT_EQ(1u, sel.size());
         EXPECT_EQ((KmerInterval{ 100, 110 }), sel[0].kmers);
-        EXPECT_EQ((KmerInterval{ 110, 190 }), sel[1].kmers);
-        EXPECT_EQ((KmerInterval{ 0, 70 }), sel[2].kmers);
         EXPECT_EQ((std::vector<std::string>{ "A", "B" }), sel[0].labels);
-        EXPECT_EQ((std::vector<std::string>{ "B" }), sel[1].labels);
-        EXPECT_EQ((std::vector<std::string>{ "A" }), sel[2].labels);
-        for (size_t i = 0; i < sel.size(); ++i) {
-            const auto &seed = sel[i];
-            EXPECT_EQ(q.substr(seed.kmers.begin, seed.kmers.size() + kK - 1), seed.sequence);
-            EXPECT_EQ(16u, seed.seed_id.size());
-            for (size_t j = 0; j < i; ++j) {
-                EXPECT_NE(sel[j].seed_id, seed.seed_id);
-            }
-        }
+        EXPECT_EQ(q.substr(100, 10 + kK - 1), sel[0].sequence);
+        EXPECT_EQ(16u, sel[0].seed_id.size());
 
         // max_support with overlap: A and B both cover [100,110)
         pol = SelectionPolicy();
@@ -244,32 +228,34 @@ TEST(Resolve, MaxSupportScalesWithManyLabels) {
     }
 }
 
-// Later max_support rounds see the runs CLIPPED by what earlier rounds took: with A on
-// [0,10) and B on [0,5), the first round takes [0,5) (2 labels), the second [5,10)
-TEST(Resolve, MaxSupportClipsRunsBetweenRounds) {
+// Later seeds count only the labels without a seed, and may overlap earlier seeds: with
+// A=[0,10), B=D=[0,6), C=[5,10) and seeds of at least 2 k-mers, [0,6) carries A, B and D,
+// and C then gets [5,10), which overlaps it
+TEST(Resolve, SeedsCoverTheLabels) {
     SupportProfile profile;
     profile.k = kK;
     profile.num_kmers = 10;
-    profile.graph_runs = iv({ {0, 10} });
-    for (auto [name, end] : { std::pair<const char*, uint64_t>{ "A", 10 },
-                              std::pair<const char*, uint64_t>{ "B", 5 } }) {
+    for (auto [name, begin, end] : { std::tuple<const char*, uint64_t, uint64_t>{ "A", 0, 10 },
+                                     std::tuple<const char*, uint64_t, uint64_t>{ "B", 0, 6 },
+                                     std::tuple<const char*, uint64_t, uint64_t>{ "C", 5, 10 },
+                                     std::tuple<const char*, uint64_t, uint64_t>{ "D", 0, 6 } }) {
         LabelProfile lp;
         lp.label.column = static_cast<Column>(profile.labels.size());
         lp.label.name = name;
-        lp.runs = iv({ {0, end} });
-        lp.kmers_supported = end;
+        lp.runs = iv({ { begin, end } });
+        lp.kmers_supported = end - begin;
         profile.labels.push_back(lp);
     }
 
     SelectionPolicy policy;
-    policy.max_seeds = 2;
-    policy.min_block_bp = kK;          // min_kmers == 1
+    policy.max_seeds = 10;
+    policy.min_block_bp = kK + 1;      // min_kmers == 2
     auto sel = select_seeds(profile, std::string(10 + kK - 1, 'A'), policy, false);
-    ASSERT_EQ(2u, sel.size());
-    EXPECT_EQ((KmerInterval{ 0, 5 }), sel[0].kmers);
-    EXPECT_EQ((std::vector<std::string>{ "A", "B" }), sel[0].labels);
+    ASSERT_EQ(2u, sel.size());         // every label has a seed: picking stops
+    EXPECT_EQ((KmerInterval{ 0, 6 }), sel[0].kmers);
+    EXPECT_EQ((std::vector<std::string>{ "A", "B", "D" }), sel[0].labels);
     EXPECT_EQ((KmerInterval{ 5, 10 }), sel[1].kmers);
-    EXPECT_EQ((std::vector<std::string>{ "A" }), sel[1].labels);
+    EXPECT_EQ((std::vector<std::string>{ "A", "C" }), sel[1].labels);
 }
 
 // seed ids: canonical orientation and label order do not change the id
@@ -281,9 +267,9 @@ TEST(Resolve, SeedId) {
     // length-prefixed labels: {"a,b"} != {"a","b"}
     EXPECT_NE(make_seed_id(s, false, { "a,b" }), make_seed_id(s, false, { "a", "b" }));
     // the id of the labeled-traversal prototype for the same seed (no release name)
-    EXPECT_EQ(hex64(fnv1a64("1:a", fnv1a64("\t", fnv1a64(s, fnv1a64("\t"))))),
+    using folly::hash::fnva64;
+    EXPECT_EQ(fmt::format("{:016x}", fnva64("1:a", fnva64("\t", fnva64(s, fnva64("\t"))))),
               make_seed_id(s, false, { "a" }));
-    EXPECT_EQ("x3o2x5", encode_runs(iv({ {0, 3}, {5, 10} }), 10));
 }
 
 
