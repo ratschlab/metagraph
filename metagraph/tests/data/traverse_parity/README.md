@@ -18,3 +18,6 @@ The `selection` of `resolve_select_max_support.json` was rewritten from the reco
 without a new run: the seeds are sorted (v1 keeps them in rank order where the prototype lists
 them by position), and `counts` and each seed's `overlaps_with` were removed with those fields
 (2026-11-09).
+
+The `labels` of the `resolve_*` files are sorted by support, then name (2026-11-09): equally
+supported labels are ranked differently by the prototype and v1.
