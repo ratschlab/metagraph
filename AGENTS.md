@@ -26,7 +26,8 @@ phrase or a fixed word count.
 Before drafting an issue, PR description, review or commit message, read the relevant
 section of [`tools/writing-rules/guides/ENGINEERING.md`](https://github.com/ratschlab/writing-rules/blob/376b4f302cf4696e0b3a7184efc429da8438be1c/guides/ENGINEERING.md).
 Its guidance also covers replies to users and release/migration notes.
-Review findings use that guide's Must, Should and Nit scale. Automated reviewers
+MetaGraph adopts the Must, Should and Nit scale that guide defines for review
+findings. Automated reviewers
 such as cubic keep their own P0–P3 priority and add no second label. Read P0 and
 P1 as Must, P2 as Should and P3 as Nit.
 Before submission, check the receiving project's contribution guidelines,
