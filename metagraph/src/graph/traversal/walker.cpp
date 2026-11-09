@@ -326,8 +326,11 @@ void Walker::validate_seed() {
                 result_.dropped_labels.push_back({ lp.label.name, std::move(lp.runs) });
             }
         }
-        if (result_.label_dict.empty())
-            throw std::invalid_argument("No seed label supports every k-mer of the seed");
+        if (result_.label_dict.empty()) {
+            throw SeedDerivationError(SeedDerivationError::NO_CARRIER,
+                                      "No seed label supports every k-mer of the seed",
+                                      nodes_.size(), nodes_.size());
+        }
         result_.labels_supporting_total = result_.label_dict.size();
     }
 
@@ -1103,8 +1106,8 @@ void Walker::finalize(ArmState &arm) {
 SeedResult Walker::run() {
     if (!strategy_.max_seed_labels)
         throw std::invalid_argument("max_seed_labels must be positive");
-    if (!std::isfinite(strategy_.time_budget_ms))
-        throw std::invalid_argument("time_budget_ms must be finite");
+    if (!std::isfinite(strategy_.time_budget_ms) || strategy_.time_budget_ms < 0)
+        throw std::invalid_argument("time_budget_ms must be finite and not negative");
     if (!strategy_.max_steps || !strategy_.max_live_paths || !strategy_.max_paths
             || !strategy_.max_extension_bp) {
         throw std::invalid_argument("The step, path and extension caps must be positive");

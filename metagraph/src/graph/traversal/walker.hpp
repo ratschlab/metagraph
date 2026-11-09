@@ -115,8 +115,8 @@ class SeedNotInGraph : public std::invalid_argument {
 class SeedDerivationError : public std::invalid_argument {
   public:
     enum Cause {
-        // no label carries every k-mer of the seed: |limit| the seed's k-mers, |observed|
-        // the k-mers read when the intersection became empty
+        // no label, named or derived, carries every k-mer of the seed: |limit| the seed's
+        // k-mers, |observed| the k-mers read when that was known
         NO_CARRIER,
         // the narrowest of the first 64 k-mers has more annotation entries than the
         // derivation materialises: |limit| that bound, |observed| its entries
