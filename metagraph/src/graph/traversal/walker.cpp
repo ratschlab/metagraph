@@ -20,6 +20,28 @@ namespace mtg {
 namespace graph {
 namespace traversal {
 
+const char* to_string(Arm arm) {
+    return arm == Arm::LEFT ? "left" : "right";
+}
+
+const char* to_string(EndReason reason) {
+    switch (reason) {
+        case EndReason::DEAD_END: return "dead_end";
+        case EndReason::LABEL_LOST: return "label_lost";
+        case EndReason::BRANCH: return "branch";
+        case EndReason::EDGE_REUSE: return "edge_reuse";
+        case EndReason::EDGE_REUSE_RC: return "edge_reuse_rc";
+        case EndReason::REACHED_SEED: return "rejoined_seed";
+        case EndReason::MAX_EXTENSION: return "max_extension_bp";
+        case EndReason::MAX_STEPS: return "max_steps";
+        case EndReason::MAX_LIVE_PATHS: return "max_live_paths";
+        case EndReason::MAX_PATHS: return "max_paths";
+        case EndReason::MAX_SPLITS: return "max_splits_per_path";
+        case EndReason::TIME_BUDGET: return "time_budget";
+    }
+    return "unknown";
+}
+
 const char* to_string(SeedDerivationError::Cause cause) {
     switch (cause) {
         case SeedDerivationError::NO_CARRIER: return "no_carrier";
@@ -1145,7 +1167,6 @@ SeedResult Walker::run() {
     }
     result_.arms[static_cast<size_t>(Arm::LEFT)] = std::move(arms_[0].result);
     result_.arms[static_cast<size_t>(Arm::RIGHT)] = std::move(arms_[1].result);
-    result_.annotation_counters = oracle_.counters();
     result_.elapsed_seconds = elapsed_ms() / 1000;
     return std::move(result_);
 }

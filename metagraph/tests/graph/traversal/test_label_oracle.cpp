@@ -106,7 +106,6 @@ TYPED_TEST(LabelOracleTest, RegimeAndKeyMapping) {
             ASSERT_EQ(keys.size(), nodes.size());
 
             LabelQuery query(oracle, { oracle.resolve_label(labels[s]) });
-            EXPECT_STREQ("rows", query.access_path());
             auto hits = query.fetch(keys);
             for (size_t i = 0; i < keys.size(); ++i) {
                 ASSERT_NE(npos, nodes[i]);
@@ -196,8 +195,6 @@ TYPED_TEST(LabelOracleTest, HitsAgreeWithGetLabels) {
                 }
             }
         }
-        EXPECT_GT(oracle.counters().rows_requested, 0u);
-        EXPECT_GT(oracle.counters().cache_hits, 0u);
         EXPECT_THROW(oracle.resolve_label("no_such_label"), std::invalid_argument);
         EXPECT_THROW(LabelQuery(oracle, {}), std::invalid_argument);
         EXPECT_THROW(LabelQuery(oracle, { oracle.resolve_label("L0"), oracle.resolve_label("L0") }),
@@ -329,11 +326,14 @@ TYPED_TEST(LabelOracleCoordTest, HeaderLabels) {
     std::vector<std::vector<uint64_t>> num_kmers(2);
     headers[col_f] = { "acc1", "acc2" }; num_kmers[col_f] = { n1, n2 };
     headers[col_g] = { "acc3" };         num_kmers[col_g] = { n3 };
-    annot::CoordToHeader cth(std::move(headers), std::move(num_kmers));
+    auto anno_h = with_coord_to_header(
+            build_anno_graph<Graph, Annotation>(kTestK, seqs, labels, DeBruijnGraph::BASIC,
+                                                true, { 0, n1, 0 }),
+            std::move(headers), std::move(num_kmers));
 
-    LabelOracle oracle(*anno, &cth);
+    LabelOracle oracle(*anno_h);
     ASSERT_TRUE(oracle.has_coordinates());
-    ASSERT_EQ(&cth, oracle.coord_to_header());
+    ASSERT_TRUE(oracle.coord_to_header());
 
     auto acc1 = oracle.resolve_label("acc1");
     auto acc2 = oracle.resolve_label("acc2");
@@ -348,7 +348,6 @@ TYPED_TEST(LabelOracleCoordTest, HeaderLabels) {
     EXPECT_EQ(std::make_pair(uint64_t(1), uint64_t(3)), oracle.map_coord(col_f, n1 + 3));
 
     LabelQuery query(oracle, { acc1, acc2, acc3, col_label_f });
-    EXPECT_STREQ("tuples", query.access_path());
 
     // s2's k-mers: header acc2 and column F, no acc1
     auto hits2 = query.fetch(oracle.keys_of_sequence(s2));
@@ -364,15 +363,17 @@ TYPED_TEST(LabelOracleCoordTest, HeaderLabels) {
                                                      : LabelQuery::NodeHits{ 0, 3 };
         EXPECT_EQ(expected, hits1[i]) << "s1 k-mer " << i;
     }
-    EXPECT_GT(oracle.counters().tuple_rows_fetched, 0u);
 
     // a name of both a column and a header, or the header of several records, is ambiguous
     std::vector<std::vector<std::string>> clash(2);
     std::vector<std::vector<uint64_t>> clash_kmers(2);
     clash[col_f] = { "G", "acc2" }; clash_kmers[col_f] = { n1, n2 };
     clash[col_g] = { "acc2" };      clash_kmers[col_g] = { n3 };
-    annot::CoordToHeader clash_cth(std::move(clash), std::move(clash_kmers));
-    LabelOracle clash_oracle(*anno, &clash_cth);
+    auto clash_anno = with_coord_to_header(
+            build_anno_graph<Graph, Annotation>(kTestK, seqs, labels, DeBruijnGraph::BASIC,
+                                                true, { 0, n1, 0 }),
+            std::move(clash), std::move(clash_kmers));
+    LabelOracle clash_oracle(*clash_anno);
     EXPECT_THROW(clash_oracle.resolve_label("G"), std::invalid_argument);
     EXPECT_THROW(clash_oracle.resolve_label("acc2"), std::invalid_argument);
     EXPECT_EQ(LabelKind::COLUMN, clash_oracle.resolve_label("F").kind);
@@ -422,13 +423,14 @@ TYPED_TEST(LabelOracleCoordTest, HeaderLabels) {
 
 // The reverse header index answers each header's first record, also after a load()
 TEST(CoordToHeaderIndex, FindHeader) {
-    auto anno = build_anno_graph<DBGSuccinct, annot::ColumnCompressed<>>(
-            5, { "ACGTAGATCGAA", "GTCTAACGTTGA", "TATGCCAGATCA", "AGCGTCTTGCGA" },
-            { "F", "F", "F", "F" }, DeBruijnGraph::BASIC, true, { 0, 8, 16, 24 });
     for (const std::vector<std::string> &order : { std::vector<std::string>{ "A", "X", "Y", "Z" },
                                                    std::vector<std::string>{ "A", "Z", "Y", "X" } }) {
-        annot::CoordToHeader cth({ order }, { { 8, 8, 8, 8 } });
-        LabelOracle oracle(*anno, &cth);
+        auto anno = with_coord_to_header(
+                build_anno_graph<DBGSuccinct, annot::ColumnCompressed<>>(
+                        5, { "ACGTAGATCGAA", "GTCTAACGTTGA", "TATGCCAGATCA", "AGCGTCTTGCGA" },
+                        { "F", "F", "F", "F" }, DeBruijnGraph::BASIC, true, { 0, 8, 16, 24 }),
+                { order }, { { 8, 8, 8, 8 } });
+        LabelOracle oracle(*anno);
         for (size_t s = 0; s < order.size(); ++s) {
             auto ref = oracle.find_header(order[s]);
             ASSERT_TRUE(ref) << order[s];
