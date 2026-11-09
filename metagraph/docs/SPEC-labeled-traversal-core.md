@@ -2729,9 +2729,13 @@ Per-step costs to expect: `basic` DBGSuccinct right step O(σ) rank/select, left
 The reverse header index (header → `(column, seq_id)`, for resolving a header label by name) belongs to the
 `CoordToHeader` itself: built while the index loads (§10.3; feature level 5 — before, on its first lookup, inside
 that request's budget), shared by every request on the loaded index, and freed with it. A copy of a pair loaded
-into RAM for one request (`in_ram`, §10.3) holds the resident pair's `CoordToHeader` — the mapping depends on the
-`.seqs` alone, which both are loaded from — so it reads the index built at start-up and builds none. It is never a process-wide cache keyed by the object's address: an object made later at a freed address
-could be answered from another's index, which no partial fingerprint of the headers can rule out.
+into RAM for one request (`in_ram`, §10.3) holds the resident pair's `CoordToHeader` while the pair's annotation
+on disk is the file loaded at start-up (its stamp unchanged before and after the copy's load, and the copy's labels
+the resident's: `SPEC-multigraph-envelope.md` §10) — the mapping depends on the `.seqs` alone, which both are loaded
+from — so it reads the index built at start-up and builds none; a copy of a replaced annotation loads its own
+`.seqs`, with the load's checks, and builds its own index. It is never a process-wide cache keyed by the object's
+address: an object made later at a freed address could be answered from another's index, which no partial
+fingerprint of the headers can rule out.
 
 **The row-diff path cache** *(efficiency pass; feature level 4)*. On a row-diff annotation every read of a
 `/traverse` request — the default reads and the budget-aware ones (§6.8), a level's fetch, the lookahead, a
@@ -3789,10 +3793,12 @@ search's routes, `POST /pattern` and `GET /pattern/capabilities`, are `SPEC-patt
     refseq33m, a first header-named walk ran 9,947 ms on a 1,000 ms budget, 689 ms of it reading). It holds 16
     bytes per header (the header's 64-bit hash, its column and its record; on refseq33m, 33 M headers, about
     0.53 GB; the hash table before E11 took about 40 bytes per header, on the order of 1-2 GB there), which a
-    server that serves header labels would have built anyway. The CLI builds it once before its requests. A copy of a pair loaded into RAM
-    for one request (`in_ram`, multi-graph mode) shares the resident pair's mapping and so its index: the load
-    neither reads the `.seqs` nor builds (the log holds the one start-up line per pair with a mapping, none per
-    request).
+    server that serves header labels would have built anyway. The CLI builds it once before its requests. A copy
+    of a pair loaded into RAM for one request (`in_ram`, multi-graph mode) shares the resident pair's mapping and so
+    its index while the pair's annotation on disk is the file loaded at start-up (`SPEC-multigraph-envelope.md`
+    §10): the load then neither reads the `.seqs` nor builds (the log holds the one start-up line per pair with a
+    mapping, none per request); a copy of a replaced annotation reads its own `.seqs`, checked, and builds its
+    index for that request.
 
 ## 11. Tests
 

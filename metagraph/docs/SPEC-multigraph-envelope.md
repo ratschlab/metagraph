@@ -540,15 +540,16 @@ a `.seqs` that cannot be loaded or is refused, `--pattern-build-mask`; a multi-g
 its annotations and before it listens, exit as before. A server's per-request load into RAM (`in_ram`: `/traverse`,
 `/resolve`, `/pattern` and, since the review of H4, `/search`) is built with the resident pair's mapping, checked at
 start-up, while the pair's annotation on disk is the file loaded then (its device, inode, size and modification time
-unchanged), so that it reads no `.seqs` again; once the annotation was replaced, the copy reads its `.seqs` from
-disk with the checks above. A load of it that fails (an annotation replaced by one whose `.seqs` is refused; a file
-that cannot be read) throws, and that request alone fails with the route's 400, the loader's message as `error`
-(`/search`: `{"error": "<message>"}`, for instance `The record mapping '<anno-base>.seqs' does not belong to the
-annotation '<annotation>': it has 2 columns, the annotation 3 labels. Rebuild it ...`), while the server runs on
-with its resident indexes. A mapping that passed the load but places a coordinate past the end of its column (an old
-`.seqs` of a `count_only` pair written for the files in another order, or a corrupt one) fails the query that meets
-it: `/search` answers 400 `{"error": "Coordinate <c> for column <j> out of range (CoordToHeader has <n> coordinates
-for that column)"}` and the server runs on (before H4's verification the query's thread pool ended the process), and
+unchanged before the copy's load and after it, and the copy's labels the resident's), so that it reads no `.seqs`
+again; once the annotation was replaced, even during the copy's load, the copy reads its `.seqs` from disk with the
+checks above. A load of it that fails (an annotation replaced by one whose `.seqs` is refused; a file that cannot be
+read) throws, and that request alone fails with the route's 400, the loader's message as `error` (`/search`:
+`{"error": "<message>"}`, for instance `The record mapping '<anno-base>.seqs' does not belong to the annotation
+'<annotation>': it has 2 columns, the annotation 3 labels. Rebuild it ...`), while the server runs on with its
+resident indexes. A mapping that passed the load but places a coordinate past the end of its column (an old `.seqs`
+of a `count_only` pair written for the files in another order, or a corrupt one) fails the query that meets it:
+`/search` answers 400 `{"error": "Coordinate <c> for column <j> out of range (CoordToHeader has <n> coordinates for
+that column)"}` and the server runs on (before H4's verification the query's thread pool ended the process), and
 `metagraph query` exits 1 (`Cannot query '<file>': <message>`); a coordinate within the column maps to another
 record, undetected. The Python bindings (`pymetagraph.AnnotatedGraph`) raise the load's message as a `RuntimeError`.
 The refusal's line: `The record mapping '<anno-base>.seqs' does not belong to the annotation '<annotation>':

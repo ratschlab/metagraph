@@ -741,12 +741,38 @@ int run_server(Config *config) {
     // annotation was replaced (or cannot be stat'ed): the copy then loads its .seqs from disk
     // with the load's checks (H4, the verification's finding 2: a replaced annotation paired
     // with the resident mapping answered other records)
+    auto stamp_unchanged = [&](const GraphPair &pair) {
+        const auto it = annotation_stamps.find(pair);
+        return it != annotation_stamps.end() && it->second && *it->second == file_stamp(pair.second);
+    };
     auto resident_mapping = [&](const GraphPair &pair, const AnnotatedDBG &resident)
             -> std::shared_ptr<const annot::CoordToHeader> {
-        const auto it = annotation_stamps.find(pair);
-        if (it == annotation_stamps.end() || !it->second || *it->second != file_stamp(pair.second))
-            return nullptr;
-        return resident.share_coord_to_header();
+        return stamp_unchanged(pair) ? resident.share_coord_to_header() : nullptr;
+    };
+    // A copy of |pair| loaded into RAM for one request: with the resident pair's mapping while its
+    // annotation is unchanged (resident_mapping), and checked once loaded, since the file may be
+    // replaced between that stamp and the load's open (H4's re-check, N-a: under a 1-ms swap loop
+    // about 1% of the answers came from a new annotation with the resident mapping). The copy
+    // keeps the shared mapping only when the stamp still is the start-up one after the load and
+    // its labels are the resident's (a file swapped in and back during the load has other labels
+    // unless it is a rebuild of the same files in the same order, whose mapping is the resident's);
+    // else it is loaded again with its own .seqs, checked. |load|(mapping) loads it
+    auto load_copy = [&](const GraphPair &pair, const AnnotatedDBG &resident,
+                         const std::function<std::unique_ptr<AnnotatedDBG>(
+                                 std::shared_ptr<const annot::CoordToHeader>)> &load) {
+        auto mapping = resident_mapping(pair, resident);
+        if (!mapping)
+            return load(nullptr);
+        auto copy = load(std::move(mapping));
+        if (stamp_unchanged(pair)
+                && copy->get_annotator().get_label_encoder().get_labels()
+                        == resident.get_annotator().get_label_encoder().get_labels()) {
+            return copy;
+        }
+        logger->warn("[Server] The annotation '{}' was replaced while a copy of it loaded: loaded "
+                     "again with its own record mapping", pair.second);
+        copy.reset();
+        return load(nullptr);
     };
     // a single-graph server's headers_unique and labels_disjoint of GET /capabilities, set before
     // its index is ready
@@ -1176,14 +1202,16 @@ int run_server(Config *config) {
                                             // load's message), never the server (H4 review S2)
                                             const AnnotatedDBG &resident
                                                     = *graphs_cache.at({ graph_fname, anno_fname });
-                                            auto mapping = resident_mapping(
-                                                    { graph_fname, anno_fname }, resident);
                                             config_copy.no_coord_mapping
                                                     = !resident.get_coord_to_header();
                                             PatternPreparation preparation;
                                             preparation.progress = false;
-                                            index_loaded = initialize_annotated_dbg(
-                                                    config_copy, preparation, std::move(mapping));
+                                            index_loaded = load_copy(
+                                                    { graph_fname, anno_fname }, resident,
+                                                    [&](auto mapping) {
+                                                return initialize_annotated_dbg(
+                                                        config_copy, preparation, std::move(mapping));
+                                            });
                                             index = index_loaded.get();
                                         } else {
                                             index = graphs_cache.at({ graph_fname, anno_fname }).get();
@@ -1365,9 +1393,10 @@ int run_server(Config *config) {
             // resident without one (no .seqs beside the annotation, or --no-coord-mapping) has
             // none for its copy either: the .seqs is not looked for again, so the operator's
             // notice of a missing one is logged at start-up, not by every request
-            auto mapping = resident_mapping(pair, resident);
             config_copy.no_coord_mapping = !resident.get_coord_to_header();
-            return initialize_annotated_dbg(config_copy, preparation, std::move(mapping));
+            return load_copy(pair, resident, [&](auto mapping) {
+                return initialize_annotated_dbg(config_copy, preparation, std::move(mapping));
+            });
         }, [&](std::unique_ptr<AnnotatedDBG> &&loaded, LoadReservation &&reservation) {
             const double load_ms = timer.elapsed() * 1000;
             logger->info("[Server] Request {}: ({}, {}) loaded into RAM for it in {:.0f} ms (the "
