@@ -1737,7 +1737,15 @@ TEST(GraphletAttemptRegistry, TheTombstoneHoldBoundsACancelOfAnUnknownId) {
     EXPECT_EQ(86400u, caps["tombstone_max_s"].asUInt64());
     EXPECT_NE(std::string::npos, registry.retention_text().find(
             "a cancel of an unknown id tombstones it at least 900 s, and until the not_after_ms "
-            "it names + 2000 ms, at most 900 s, while fewer than 5 tombstones"));
+            "it names + 2000 ms, at most 900 s, while fewer than 5 tombstones are held (else the "
+            "cancel is refused, 429)"));
+    // one statement of where the held finished attempts are (the verification's nit B: "held
+    // among the tombstones" and "kept apart" in one text)
+    EXPECT_NE(std::string::npos, registry.retention_text().find(
+            "after its latest refused copy (held beside the tombstones, on their clocks, not "
+            "counted with them); a cancel"));
+    EXPECT_EQ(std::string::npos, registry.retention_text().find("among the tombstones"));
+    EXPECT_EQ(std::string::npos, registry.retention_text().find("kept apart"));
 
     // a finished attempt sent with a far not_after_ms keeps the tombstone cap (it ran)
     {

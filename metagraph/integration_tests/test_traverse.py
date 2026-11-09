@@ -6950,8 +6950,10 @@ class TestServerConnectionsAndLabels(TestingBase):
             self.assertEqual(404, cancel.status_code, cancel.text)
             self.assertTrue(cancel.json()['tombstone'])
             self.assertTrue(cancel.json()['covers_admission'])
-            self.assertIn('while fewer than 50 tombstones are held (else the cancel is refused, '
-                          '429; the finished attempts held are kept apart)', cancel.json()['error'])
+            self.assertIn('(held beside the tombstones, on their clocks, not counted with them)',
+                          cancel.json()['error'])
+            self.assertIn('while fewer than 50 tombstones are held (else the cancel is refused, 429)',
+                          cancel.json()['error'])
 
     def test_a_cancel_of_an_unknown_id_is_held_900_s(self):
         """At the defaults (retention 3600 s, tombstone_max_s 86400) a tombstone is held 900 s

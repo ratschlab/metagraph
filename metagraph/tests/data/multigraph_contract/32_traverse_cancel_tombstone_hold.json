@@ -1,21 +1,21 @@
 {
  "route": "POST /traverse/cancel",
  "status": 404,
- "note": "H3 (train 3; lane H3): a cancel of an id this server does not know tombstones it (404, tombstone: true), held at most --traverse-attempt-tombstone-hold-s (900 s by default; attempts.tombstone_hold_s) from its latest cancel or refused copy, at least min(retention_s, it), and to cover the not_after_ms it names + clock_skew_allowance_ms within it. This cancel names a not_after_ms 900 s ahead (within the horizon, attempts.not_after_horizon_ms = 901,000 ms; one an hour ahead is refused 400, sample 33): the tombstone is held 900 s (suppressed_until_ms the cancel's instant + 900,000 ms), and covers_admission is false (beyond_tombstone_max: 900 s + the skew pass the hold): a ledger does not release on it. A cancel naming one 10 s ahead (the search service's are at most about that) is covered (covers_admission: true). Before H3 a tombstone was held at least retention_s (3,600 s) and up to tombstone_max_s (86,400 s), so 10,000 cheap cancels of made-up ids filled the table (429 tombstones_full for real cancels) for 1 to 24 h; now for at most 900 s, and only tombstones count: the finished attempts held past their retention (each up to tombstone_max_s, at most 903 s after its arrival since the horizon) are kept apart, so requests that ran never block a cancel. A real run, its server named SERVER_INSTANCE as every sample's.",
+ "note": "H3 (train 3; lane H3): a cancel of an id this server does not know tombstones it (404, tombstone: true), held at most --traverse-attempt-tombstone-hold-s (900 s by default; attempts.tombstone_hold_s) from its latest cancel or refused copy, at least min(retention_s, it), and to cover the not_after_ms it names + clock_skew_allowance_ms within it. This cancel names a not_after_ms 900 s ahead (within the horizon, attempts.not_after_horizon_ms = 901,000 ms; one an hour ahead is refused 400, sample 33): the tombstone is held 900 s (suppressed_until_ms the cancel's instant + 900,000 ms), and covers_admission is false (beyond_tombstone_max: 900 s + the skew pass the hold): a ledger does not release on it. A cancel naming one 10 s ahead (the search service's are at most about that) is covered (covers_admission: true). Before H3 a tombstone was held at least retention_s (3,600 s) and up to tombstone_max_s (86,400 s), so 10,000 cheap cancels of made-up ids filled the table (429 tombstones_full for real cancels) for 1 to 24 h; now for at most 900 s, and only tombstones count: the finished attempts held past their retention (each up to tombstone_max_s, at most 903 s after its arrival since the horizon) are held beside the tombstones, on their clocks, and not counted with them, so requests that ran never block a cancel. A real run, its server named SERVER_INSTANCE as every sample's.",
  "request": {
   "attempt_id": "svc-trv-h3-32",
-  "not_after_ms": 1794234788474
+  "not_after_ms": 1794237231378
  },
  "body": {
   "attempt_id": "svc-trv-h3-32",
   "cancelled": false,
   "covers_admission": false,
   "covers_admission_reason": "beyond_tombstone_max",
-  "error": "unknown attempt_id 'svc-trv-h3-32': no attempt with it is running on this server and none finished within the retention period (attempts are kept 3600 s after they finish, at most the last 10000 (oldest dropped first), and one sent with not_after_ms until that + 2000 ms, at most 86400 s after it finished or after its latest refused copy (held among the tombstones); a cancel of an unknown id tombstones it at least 900 s, and until the not_after_ms it names + 2000 ms, at most 900 s, while fewer than 10000 tombstones are held (else the cancel is refused, 429; the finished attempts held are kept apart))",
-  "not_after_ms": 1794234788474,
+  "error": "unknown attempt_id 'svc-trv-h3-32': no attempt with it is running on this server and none finished within the retention period (attempts are kept 3600 s after they finish, at most the last 10000 (oldest dropped first), and one sent with not_after_ms until that + 2000 ms, at most 86400 s after it finished or after its latest refused copy (held beside the tombstones, on their clocks, not counted with them); a cancel of an unknown id tombstones it at least 900 s, and until the not_after_ms it names + 2000 ms, at most 900 s, while fewer than 10000 tombstones are held (else the cancel is refused, 429))",
+  "not_after_ms": 1794237231378,
   "server_instance": "7c1e0f3a9b24d6e8",
   "state": "unknown",
-  "suppressed_until_ms": 1794234788475,
+  "suppressed_until_ms": 1794237231379,
   "tombstone": true
  }
 }

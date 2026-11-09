@@ -999,11 +999,10 @@ std::string AttemptRegistry::retention_text() const {
     return fmt::format("attempts are kept {} s after they finish, at most the last {} (oldest "
                        "dropped first), and one sent with not_after_ms until that + {} ms, at "
                        "most {} s after it finished or after its latest refused copy (held "
-                       "among the tombstones); a cancel of an "
-                       "unknown id tombstones it at least {} s, and until the not_after_ms it "
-                       "names + {} ms, at most {} s, while fewer than {} tombstones are held "
-                       "(else the cancel is refused, 429; the finished attempts held are kept "
-                       "apart)",
+                       "beside the tombstones, on their clocks, not counted with them); a "
+                       "cancel of an unknown id tombstones it at least {} s, and until the "
+                       "not_after_ms it names + {} ms, at most {} s, while fewer than {} "
+                       "tombstones are held (else the cancel is refused, 429)",
                        settings_.retention_s, settings_.retention_count, settings_.clock_skew_ms,
                        tombstone_cap_ms() / 1000, tombstone_hold_floor_ms() / 1000,
                        settings_.clock_skew_ms, tombstone_hold_cap_ms() / 1000,
@@ -1105,7 +1104,7 @@ void AttemptRegistry::expire_locked() {
             continue;
         if (hold_live_locked(*old, t, wall_now())) {
             // Its retention ended, by age or by count, while a copy of the request could still
-            // be admitted: the id stays refused, among the tombstones, until its hold ends (a
+            // be admitted: the id stays refused, beside the tombstones, until its hold ends (a
             // ledger releases on the finished state, and a replay after retention_s, or after
             // retention_count later finishes, would run again). Never dropped early: it ran,
             // so it cannot be refused like a cancel

@@ -1361,7 +1361,7 @@ no stated bound, and that an answer of `running` or `stopping` past the instant 
 - **Retention.** Finished attempts stay queryable for `retention_s` (`--traverse-attempt-retention-s`, 3600 by
   default) and at most `retention_count` of them are kept (`--traverse-attempt-retention`, 10,000; oldest dropped
   first). A cancel of an unknown id is tombstoned only while fewer than `retention_count` tombstones are held (the
-  held finished attempts kept apart, not counted: train 3, H3), else refused (429) — never by dropping the oldest. The retention seconds, the count and the
+  held finished attempts, held beside them on their clocks, not counted: train 3, H3), else refused (429) — never by dropping the oldest. The retention seconds, the count and the
   tombstone cap are bounded integers (a year; ten million); any other value refuses to start, naming the option and
   its range.
 - **Holds.** A tombstone is held at least min(`retention_s`, `tombstone_hold_s`) and until the server's clock reads
@@ -1380,7 +1380,7 @@ no stated bound, and that an answer of `running` or `stopping` past the instant 
   `not_after_ms`, never a cancel's (without one: `covers_admission: false`, `no_not_after_ms`).
 - **A finished attempt sent with `not_after_ms` is held like a tombstone**, its id refused, until its `not_after_ms`
   + skew (within `tombstone_max_s` of the finish, extended by a refused copy's later `not_after_ms`), past its
-  retention if need be, among the tombstones and on both clocks. Held attempts are never dropped early, so
+  retention if need be, beside the tombstones (not counted with them) and on both clocks. Held attempts are never dropped early, so
   `retention_count` does not bound them; every refused copy, an identical replay included, extends the hold to
   `tombstone_max_s` from its own arrival, so the finishes and the refused copies within `tombstone_max_s` bound them
   (conservative for replay safety).

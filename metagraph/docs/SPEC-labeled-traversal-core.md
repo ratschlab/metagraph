@@ -3722,8 +3722,8 @@ search's routes, `POST /pattern` and `GET /pattern/capabilities`, are `SPEC-patt
     tombstones are held, and refused beyond that, **429** `{error, attempt_id,
     server_instance, cancelled: false, state: "unknown", tombstone: false, reason: "tombstones_full"}`: the id
     was not tombstoned and nothing is promised (retry the cancel later). *H3 (train 3; review of H3, S1)*: only
-    tombstones count. The finished attempts held past their retention (the release rule, below) are kept apart;
-    before, they counted too, so requests that ran held the table: a malformed `/traverse` with an `attempt_id`
+    tombstones count. The finished attempts held past their retention (the release rule, below) are held beside
+    the tombstones, on their clocks, and not counted with them; before, they counted too, so requests that ran held the table: a malformed `/traverse` with an `attempt_id`
     and a `not_after_ms` far ahead is registered, finishes as an error, and its id is then held until that
     `not_after_ms` (within `tombstone_max_s`, 86,400 s), and 101 of them at `retention_count` 50 made a real
     cancel-before-arrival 429 for 23 h. Now cancels are refused only by other cancels, each held at most
@@ -3760,8 +3760,8 @@ search's routes, `POST /pattern` and `GET /pattern/capabilities`, are `SPEC-patt
     process (and, pinned, anywhere; below): a finished attempt's id stays refused (409, its state) while it is
     retained (`retention_s`, `retention_count`) and, for an attempt sent with `not_after_ms`, until this server's
     clock reads later than `not_after_ms + clock_skew_allowance_ms`, at most `tombstone_max_s` after it finished
-    **or after its latest refused copy** — past its retention if need be, **held** among the tombstones (on both
-    clocks, as a tombstone; a copy refused with its own `not_after_ms`, an identical replay included, extends the
+    **or after its latest refused copy** — past its retention if need be, **held** beside the tombstones, not
+    counted with them (on both clocks, as a tombstone; a copy refused with its own `not_after_ms`, an identical replay included, extends the
     hold to that + `clock_skew_allowance_ms`, at most `tombstone_max_s` from the copy's arrival: *review of
     2026-10-06, C30*, "at most `tombstone_max_s` after it finished" left the refused copies out). *(Review of the pass-5 fixes, finding 1: with `retention_s` 1, or
     `retention_count` 1 and one later finish, a replay of a finished request — same `attempt_id`, `not_after_ms`
