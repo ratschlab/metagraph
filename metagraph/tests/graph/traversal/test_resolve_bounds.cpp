@@ -20,6 +20,7 @@
 #include "tests/annotation/test_annotated_dbg_helpers.hpp"
 
 #include "graph/traversal/resolve.hpp"
+#include "graph/traversal/kept_rows.hpp"
 #include "graph/annotated_dbg.hpp"
 #include "annotation/coord_to_header.hpp"
 #include "annotation/representation/column_compressed/annotate_column_compressed.hpp"
@@ -939,6 +940,63 @@ TEST(ResolveBoundsRoute, ExplicitSeedsUnderTheAnswerClamp) {
     limits.max_discover_answer_labels = 3;
     request["discover"]["max_labels"] = 3;
     EXPECT_EQ("Explicit seed label was not profiled: 'C'", refusal(request, limits));
+}
+
+// ---- the rows a pass keeps (KeptRows, SPEC §4.6; GPT review 6, finding 8)
+
+// The table of kept rows never shrinks while it lives (erase and clear keep its buckets), so
+// what the budget holds for it covers its buckets until the table is freed: a last use releases
+// the row's own charge and keeps its entry's (a high-water count, charged again only past the
+// most entries held at once), and drop() releases everything and frees the buckets. Before,
+// a last use and a drop released the entries' charge while the buckets stayed: 4.5 M entries
+// left 448 MiB of buckets uncharged
+TEST(ResolveBounds, KeptRowsChargeTheirTableUntilItIsFreed) {
+    using annot::matrix::DecodeBudget;
+    using Row = annot::matrix::BinaryMatrix::SetBitPositions;
+    using Kept = KeptRows<Row>;
+    // the table's own bytes: its buckets (a neighbourhood bitmap and the value each, the
+    // overflow buckets of the last neighbourhood beside them)
+    constexpr uint64_t kBucket = sizeof(typename Kept::Table::value_type) + sizeof(uint64_t);
+    auto table_bytes = [&](const Kept &k) {
+        return k.bucket_count() ? (k.bucket_count() + 61) * kBucket : 0;
+    };
+    DecodeBudget budget;
+    Kept kept(budget);
+    constexpr size_t n = 100'000;
+    for (uint64_t key = 0; key < n; ++key) {
+        ASSERT_TRUE(budget.charge(8));   // the row's own charge, which the table takes over
+        ASSERT_TRUE(kept.keep(key, Row { 7 }, 8, 8));
+    }
+    EXPECT_EQ(n * (Kept::kEntryBytes + 8), budget.held());
+    EXPECT_GE(budget.held(), table_bytes(kept));
+    // every row used for the last time: the rows' charges released, the entries' kept while
+    // the buckets are
+    for (uint64_t key = 0; key < n; ++key) {
+        kept.last_use(kept.find(key));
+    }
+    EXPECT_TRUE(kept.empty());
+    EXPECT_TRUE(kept.holds());
+    EXPECT_GT(kept.bucket_count(), n);
+    EXPECT_EQ(n * Kept::kEntryBytes, budget.held());
+    EXPECT_GE(budget.held(), table_bytes(kept));
+    // kept again up to the high water: no entry charged twice; one past it: one more
+    for (uint64_t key = 0; key <= n; ++key) {
+        ASSERT_TRUE(budget.charge(8));
+        ASSERT_TRUE(kept.keep(n + key, Row { 7 }, 8, 8));
+    }
+    EXPECT_EQ((n + 1) * (Kept::kEntryBytes + 8), budget.held());
+    EXPECT_GE(budget.held(), table_bytes(kept));
+    // dropped: everything released and the table freed
+    kept.drop();
+    EXPECT_FALSE(kept.holds());
+    EXPECT_EQ(0u, kept.bucket_count());
+    EXPECT_EQ(0u, budget.held());
+    // an entry whose charge does not fit is not kept, and nothing is charged
+    DecodeBudget small(Kept::kEntryBytes - 1);
+    Kept none(small);
+    EXPECT_FALSE(none.keep(1, Row { 1 }, 8, 0));
+    EXPECT_FALSE(none.holds());
+    EXPECT_EQ(0u, small.held());
 }
 
 // ---- the cap on a request's explicit label lists (--resolve-max-explicit-labels, SPEC §4.1)

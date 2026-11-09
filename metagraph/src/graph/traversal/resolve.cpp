@@ -16,6 +16,7 @@
 #include <tsl/hopscotch_set.h>
 
 #include "graph/annotated_dbg.hpp"
+#include "graph/traversal/kept_rows.hpp"
 #include "annotation/binary_matrix/row_diff/row_diff.hpp"
 #include "annotation/binary_matrix/row_diff/row_diff_cache.hpp"
 #include "common/seq_tools/reverse_complement.hpp"
@@ -278,19 +279,6 @@ enum class PassEnd {
     MEMORY,         // the budget: a k-mer's row read alone, or its use, did not fit
 };
 
-// A row kept for a later occurrence of its key: the row, its bytes as row_copy_bytes counts
-// them (the pass's kept_max), and the bytes the budget holds for it (the decoder's charge and
-// its entry in the map)
-template <class RowT>
-struct KeptRow {
-    RowT row;
-    uint64_t bytes;
-    uint64_t charged;
-};
-
-// The budget's charge for an entry of the kept rows' map beside its row's own (a hash table at
-// most 90% full that doubles: the entry, the empty buckets and the table before the growth)
-constexpr uint64_t kKeptEntryBytes = 192;
 // The budget's charge per key of the pass's setup (the next occurrence of each k-mer, kept for
 // the pass) and of its transient hash table of the keys' last occurrences
 constexpr uint64_t kNextUseBytes = sizeof(size_t);
@@ -318,8 +306,10 @@ uint64_t rows_bytes(const std::vector<RowT> &rows) {
  * setup (the next occurrence of each key, and the transient table that finds them), each batch
  * by |decode(keys, &rows, &held)| — the rows of |keys| into |rows|, OK with the budget holding
  * |held[r]| for row r and IRowDiff::output_bytes<RowT>(keys.size()) for the vectors, or
- * REFUSED with nothing held and nothing returned — and each row kept with its entry, released
- * when it is dropped. |use(j, row)| returns false when the use of the row of keys[j] does not
+ * REFUSED with nothing held and nothing returned — and each row kept with its entry (KeptRows:
+ * a row's charge released at its last use, the entries' charge held as the most entries kept
+ * at once while the table's buckets are, both released with the table when the rows are
+ * dropped). |use(j, row)| returns false when the use of the row of keys[j] does not
  * fit beside what is held (nothing of it done; true: done, its own growth charged by it). A
  * charge that does not fit is met, in this order, by decoding the batch in halves, by giving
  * up the rows kept (decoded again when needed) and by reading the next row alone; the pass ends
@@ -360,19 +350,13 @@ size_t for_each_row(const std::vector<node_index> &keys, BatchSizer sizer, uint6
         }
     }
     budget.release(setup_bytes);
-    tsl::hopscotch_map<node_index, KeptRow<RowT>> kept;
-    uint64_t kept_bytes = 0;
-    auto drop_kept = [&]() {
-        for (const auto &[key, k] : kept) {
-            budget.release(k.charged);
-        }
-        kept.clear();
-        kept_bytes = 0;
-    };
+    // the rows kept for a later occurrence of their key (GPT review 6, #8: the table's buckets
+    // outlive an entry's last use, so their charge is held until kept.drop() frees them)
+    KeptRows<RowT, node_index> kept(budget);
     // the pass ends here, before keys[begin]: what it holds is released
     auto finish = [&](PassEnd cause) {
         *end_cause = cause;
-        drop_kept();
+        kept.drop();
         budget.release(next_use_bytes);
     };
     tsl::hopscotch_map<node_index, size_t> in_batch;
@@ -386,7 +370,7 @@ size_t for_each_row(const std::vector<node_index> &keys, BatchSizer sizer, uint6
         batch_keys.clear();
         size_t end = begin;
         for ( ; end < keys.size(); ++end) {
-            if (kept.count(keys[end]) || in_batch.count(keys[end]))
+            if (kept.contains(keys[end]) || in_batch.count(keys[end]))
                 continue;
             if (batch_keys.size() == sizer.next)
                 break;
@@ -403,8 +387,10 @@ size_t for_each_row(const std::vector<node_index> &keys, BatchSizer sizer, uint6
                 // first of the batch: with no row kept, keys[begin] is batch_keys[0])
                 if (batch_keys.size() > 1) {
                     sizer.next = batch_keys.size() / 2;
-                } else if (!kept.empty()) {
-                    drop_kept();
+                } else if (kept.holds()) {
+                    // (also a table whose rows were all used for the last time: its entries'
+                    // charge is released with it, so that the stop does not depend on them)
+                    kept.drop();
                 } else {
                     finish(PassEnd::MEMORY);
                     return begin;
@@ -420,7 +406,7 @@ size_t for_each_row(const std::vector<node_index> &keys, BatchSizer sizer, uint6
             sizer.done(batch);   // before any row is moved to |kept|
             // what the request holds now: this batch of rows and the rows kept
             if (rows_held_peak)
-                *rows_held_peak = std::max(*rows_held_peak, kept_bytes + rows_bytes(batch));
+                *rows_held_peak = std::max(*rows_held_peak, kept.bytes() + rows_bytes(batch));
         }
         moved.assign(batch.size(), false);
         // the batch's rows not moved to |kept|, and its vectors
@@ -437,11 +423,8 @@ size_t for_each_row(const std::vector<node_index> &keys, BatchSizer sizer, uint6
             if (kit != kept.end()) {
                 if (!use(j, kit->second.row))
                     break;
-                if (next_use[j] == kNever) {
-                    kept_bytes -= kit->second.bytes;
-                    budget.release(kit->second.charged);
-                    kept.erase(kit);
-                }
+                if (next_use[j] == kNever)
+                    kept.last_use(kit);
                 continue;
             }
             const size_t r = in_batch.find(keys[j])->second;
@@ -451,10 +434,8 @@ size_t for_each_row(const std::vector<node_index> &keys, BatchSizer sizer, uint6
             // occurring again after this batch (none of its k-mers after j has the key)
             if (next_use[j] != kNever && next_use[j] >= end) {
                 const uint64_t bytes = annot::matrix::row_copy_bytes(row);
-                if (kept_bytes + bytes <= kept_max && budget.charge(kKeptEntryBytes)) {
-                    kept_bytes += bytes;
-                    kept.emplace(keys[j], KeptRow<RowT> { std::move(row), bytes,
-                                                          held[r] + kKeptEntryBytes });
+                if (kept.bytes() + bytes <= kept_max
+                        && kept.keep(keys[j], std::move(row), bytes, held[r])) {
                     moved[r] = true;
                 }
             }
@@ -464,8 +445,8 @@ size_t for_each_row(const std::vector<node_index> &keys, BatchSizer sizer, uint6
             // the use of k-mer j did not fit: again from it without the rows kept, then with
             // its row alone; if neither leaves room, the pass ends before it
             begin = j;
-            if (!kept.empty()) {
-                drop_kept();
+            if (kept.holds()) {
+                kept.drop();
             } else if (batch_keys.size() > 1) {
                 sizer.next = 1;
             } else {
