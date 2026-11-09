@@ -44,6 +44,13 @@ class TupleRowDiff : public IRowDiff, public BinaryMatrix, public MultiIntMatrix
                                           size_t num_threads = 1) const override;
     std::vector<RowTuples> get_row_tuples(std::span<const Row> rows,
                                           size_t num_threads = 1) const override;
+    bool get_row_tuples_cached(std::span<const Row> rows, RowDiffCache<RowTuples> &cache,
+                               std::vector<RowTuples> *out) const override {
+        *out = decode_rows_cached(rows, cache,
+            [this](std::span<const Row> rd_ids) { return diffs_.get_row_tuples(rd_ids, 1); },
+            add_diff, decode_diffs);
+        return true;
+    }
 
     uint64_t num_columns() const override { return diffs_.num_columns(); }
     uint64_t num_relations() const override { return diffs_.num_relations(); }
