@@ -4,8 +4,8 @@
 
 From a plain clone, run `git submodule update --init -- tools/writing-rules`.
 Before changing documentation or user-facing text, read
-[`tools/writing-rules/PRINCIPLES.md`](https://github.com/ratschlab/writing-rules/blob/fe9defad9a3552bce895c3720243adc61178d6ce/PRINCIPLES.md). The accompanying
-[`tools/writing-rules/SOURCES.md`](https://github.com/ratschlab/writing-rules/blob/fe9defad9a3552bce895c3720243adc61178d6ce/SOURCES.md) explains the basis and limitations of the guidance. The submodule pins the guide and checker together.
+[`tools/writing-rules/guides/PRINCIPLES.md`](https://github.com/ratschlab/writing-rules/blob/7e477ce0c6c33094e401c1cefca884af4746fe14/guides/PRINCIPLES.md). The accompanying
+[`tools/writing-rules/sources/README.md`](https://github.com/ratschlab/writing-rules/blob/7e477ce0c6c33094e401c1cefca884af4746fe14/sources/README.md) explains the basis and limitations of the guidance. The submodule pins the guide and checker together.
 
 Write for the reader's task. Preserve facts, uncertainty and necessary technical
 detail. Check defaults, flags, file names and guarantees against their owning
@@ -24,7 +24,7 @@ evidence concisely; report material review findings without a mandatory verdict
 phrase or a fixed word count.
 
 Before drafting an issue, PR description, review or commit message, read the relevant
-section of [`tools/writing-rules/ENGINEERING.md`](https://github.com/ratschlab/writing-rules/blob/fe9defad9a3552bce895c3720243adc61178d6ce/ENGINEERING.md).
+section of [`tools/writing-rules/guides/ENGINEERING.md`](https://github.com/ratschlab/writing-rules/blob/7e477ce0c6c33094e401c1cefca884af4746fe14/guides/ENGINEERING.md).
 Its guidance also covers replies to users and release/migration notes.
 Before submission, check the receiving project's contribution guidelines,
 templates and required disclosures.
@@ -39,6 +39,6 @@ not establish factual correctness or complete extraction coverage.
 
 Before adding a feature, option, flag, endpoint or API field, or reviewing a
 change that adds one, read
-[`tools/writing-rules/STEWARDSHIP.md`](https://github.com/ratschlab/writing-rules/blob/fe9defad9a3552bce895c3720243adc61178d6ce/STEWARDSHIP.md).
+[`tools/writing-rules/guides/STEWARDSHIP.md`](https://github.com/ratschlab/writing-rules/blob/7e477ce0c6c33094e401c1cefca884af4746fe14/guides/STEWARDSHIP.md).
 Name who needs it, what happens without it and the smallest version that serves
 the need. Record the decision in the PR.
