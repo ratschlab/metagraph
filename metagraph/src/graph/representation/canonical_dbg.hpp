@@ -4,9 +4,7 @@
 #include <cassert>
 #include <array>
 
-#include <cache.hpp>
-#include <lru_cache_policy.hpp>
-
+#include "common/shared_cache.hpp"
 #include "common/vector.hpp"
 #include "graph/representation/base/dbg_wrapper.hpp"
 #include "graph/graph_extensions/node_first_cache.hpp"
@@ -128,8 +126,7 @@ class CanonicalDBG : public DBGWrapper<DeBruijnGraph> {
     const size_t cache_size_;
 
     // cache whether a given node is a palindrome (it's equal to its reverse complement)
-    mutable caches::fixed_sized_cache<node_index, bool,
-                                      caches::LRUCachePolicy<node_index>> is_palindrome_cache_;
+    mutable common::SharedCache<node_index, bool> is_palindrome_cache_;
 
     const size_t offset_;
     const bool k_odd_;
