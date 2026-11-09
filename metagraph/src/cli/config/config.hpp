@@ -161,6 +161,7 @@ class Config {
     std::string outfbase;
     std::string infbase;
     std::string rename_instructions_file;
+    std::string remap_graph;
     std::string refpath;
     std::string suffix;
     std::string fasta_header_delimiter;

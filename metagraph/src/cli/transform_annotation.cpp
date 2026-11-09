@@ -1,5 +1,7 @@
 #include "transform_annotation.hpp"
 
+#include <filesystem>
+
 #include <progress_bar.hpp>
 
 #include "common/logger.hpp"
@@ -11,6 +13,8 @@
 #include "annotation/representation/annotation_matrix/static_annotators_def.hpp"
 #include "annotation/binary_matrix/multi_brwt/clustering.hpp"
 #include "annotation/annotation_converters.hpp"
+#include "annotation/annotation_remap.hpp"
+#include "load/load_graph.hpp"
 #include "config/config.hpp"
 #include "load/load_annotation.hpp"
 
@@ -310,6 +314,101 @@ int transform_annotation(Config *config) {
     }
 
     Timer timer;
+
+    /********************************************************/
+    /************** move rows to another graph **************/
+    /********************************************************/
+
+    if (config->remap_graph.size()) {
+        if (input_anno_type != Config::BRWT && input_anno_type != Config::RowDiffBRWT) {
+            logger->error("--remap-graph supports only {} and {} annotations",
+                          Config::annotype_to_string(Config::BRWT),
+                          Config::annotype_to_string(Config::RowDiffBRWT));
+            exit(1);
+        }
+
+        // Without --anno-type the input format is kept (checked in Config).
+        const bool convert = config->anno_type == Config::RowDiffRowFlat
+                                || config->anno_type == Config::RowDiffDisk;
+        if (convert && input_anno_type != Config::RowDiffBRWT) {
+            logger->error("--remap-graph can convert only {} annotations to {}",
+                          Config::annotype_to_string(Config::RowDiffBRWT),
+                          Config::annotype_to_string(config->anno_type));
+            exit(1);
+        }
+
+        // The row map is the expensive part, so keep it for a rerun.
+        const std::string row_map_fname = config->outfbase + ".rowmap";
+        sdsl::int_vector<> row_map;
+        uint64_t target_num_rows;
+
+        auto source = load_critical_dbg(config->remap_graph);
+        auto target = load_critical_dbg(config->infbase);
+        target_num_rows = target->max_index();
+
+        if (std::filesystem::exists(row_map_fname)) {
+            logger->trace("Loading row map from {}", row_map_fname);
+            std::ifstream in(row_map_fname, std::ios::binary);
+            row_map.load(in);
+            if (!in.good() || !check_row_map(*source, *target, row_map)) {
+                logger->error("Row map {} does not match graphs {} and {}. Delete it and run again",
+                              row_map_fname, config->remap_graph, config->infbase);
+                exit(1);
+            }
+        } else {
+            logger->trace("Matching rows of {} to {}...", config->remap_graph, config->infbase);
+            try {
+                row_map = map_rows_to_graph(*source, *target, get_num_threads());
+            } catch (const std::exception &e) {
+                logger->error("{}", e.what());
+                exit(1);
+            }
+
+            const std::string tmp_fname = row_map_fname + ".tmp";
+            std::ofstream out(tmp_fname, std::ios::binary);
+            row_map.serialize(out);
+            out.close();
+            if (!out) {
+                logger->error("Cannot write row map to {}", tmp_fname);
+                exit(1);
+            }
+            std::filesystem::rename(tmp_fname, row_map_fname);
+            logger->trace("Row map saved to {} in {} sec", row_map_fname, timer.elapsed());
+        }
+        target.reset();
+
+        auto annotation = initialize_annotation(files.at(0), *config);
+        if (!annotation->load(files.at(0))) {
+            logger->error("Cannot load annotation from {}", files.at(0));
+            exit(1);
+        }
+        logger->trace("Annotation loaded in {} sec", timer.elapsed());
+
+        std::unique_ptr<MultiLabelAnnotation<std::string>> remapped;
+        try {
+            remapped = remap_annotation_rows(*annotation, *source, row_map,
+                                             target_num_rows, get_num_threads());
+        } catch (const std::exception &e) {
+            logger->error("{}", e.what());
+            exit(1);
+        }
+        annotation.reset();
+        row_map = sdsl::int_vector<>();
+        source.reset();
+
+        if (!convert) {
+            remapped->serialize(config->outfbase);
+        } else if (config->anno_type == Config::RowDiffRowFlat) {
+            convert_to_row_diff<RowDiffRowFlatAnnotator>(
+                    dynamic_cast<const RowDiffBRWTAnnotator &>(*remapped), config->outfbase);
+        } else {
+            convert_to_row_diff<RowDiffDiskAnnotator>(
+                    dynamic_cast<const RowDiffBRWTAnnotator &>(*remapped), config->outfbase);
+        }
+        logger->trace("Remapped annotation serialized to {} in {} sec",
+                      config->outfbase, timer.elapsed());
+        return 0;
+    }
 
     /********************************************************/
     /***************** dump labels to text ******************/

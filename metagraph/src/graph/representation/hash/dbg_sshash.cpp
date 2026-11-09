@@ -834,9 +834,11 @@ bool DBGSSHash::load(std::istream& in) {
 
     if (num_nodes_) {
         // Enable zero-copy mmap if the stream is backed by an mmap'd file
-        if (auto *mmap_stream = dynamic_cast<sdsl::mmap_ifstream*>(&in)) {
-            auto ctx = mmap_stream->get_mmap_context();
-            loader.set_mmap(ctx->data(), ctx->file_size_bytes(), ctx);
+        auto *mmap_stream = dynamic_cast<sdsl::shared_mapper_ifstream*>(&in);
+        if (mmap_stream && mmap_stream->mapper()) {
+            const auto &mapping = mmap_stream->mapper();
+            loader.set_mmap(reinterpret_cast<const uint8_t *>(mapping->data()),
+                            mapping->size(), mapping);
         }
         std::visit([&](auto& d) { d.visit(loader); }, dict_);
         succ_is_next_.load(in);
