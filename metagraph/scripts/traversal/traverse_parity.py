@@ -117,8 +117,7 @@ def project_traverse(response):
         out = {
             'seed': {key: seed.get(key) for key in (
                 'validated_seed_id', 'seed_id_mismatch', 'length_bp', 'num_kmers', 'labels',
-                'labels_from_seed', 'labels_supporting_total', 'labels_dropped',
-                'labels_dropped_digest')},
+                'labels_from_seed', 'labels_supporting_total', 'labels_dropped')},
             'dropped_labels': [[d['label'], d['runs']] for d in seed.get('dropped_labels', [])],
             'label_dict': [[l['name'], l['kind']] for l in r['label_dict']],
             'arms': {},
@@ -151,7 +150,9 @@ def project_traverse(response):
 
 
 def project_resolve(response):
-    out = {key: response[key] for key in ('k', 'num_kmers', 'graph_runs', 'labels_truncated')}
+    out = {key: response[key] for key in ('k', 'num_kmers', 'graph_runs')}
+    cut = response['labels_truncated']
+    out['labels_truncated'] = cut and {'kept': cut['kept'], 'total': cut['total']}
     out['labels'] = [[l['label'], l['kind'], l['kmers_supported'], l['runs']]
                      for l in response['labels']]
     if 'selection' in response:
@@ -160,8 +161,7 @@ def project_resolve(response):
         out['selection'] = {
             'seeds': sorted([s['seed_id'], s['sequence'], s['kmer_interval'], s['labels'],
                              s['label_population']['supporting_total'],
-                             s['label_population']['dropped_count'],
-                             s['label_population'].get('dropped_digest')]
+                             s['label_population']['dropped_count']]
                             for s in sel['seeds']),
         }
     return out

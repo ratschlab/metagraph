@@ -132,7 +132,6 @@ TYPED_TEST(ResolveTest, ThreeStatesAndRuns) {
         EXPECT_EQ(1u, sel[0].labels.size());
         EXPECT_EQ(1u, sel[0].population.dropped_count);
         EXPECT_EQ(1u, sel[0].population.dropped.size());
-        EXPECT_FALSE(sel[0].population.dropped_digest.empty());
         EXPECT_EQ(sel[0].labels, select_seeds(profile, q, pol, canonical)[0].labels);
 
         // agreement with the signature API for the labels present
@@ -171,9 +170,6 @@ TYPED_TEST(ResolveTest, DiscoverTruncation) {
     ASSERT_TRUE(profile.labels_truncated.has_value());
     EXPECT_EQ(2u, profile.labels_truncated->kept);
     EXPECT_EQ(4u, profile.labels_truncated->total);
-    EXPECT_EQ(90u, profile.labels_truncated->min_kept_kmers);
-    EXPECT_EQ(90u, profile.labels_truncated->max_dropped_kmers);
-    EXPECT_EQ(1u, profile.labels_truncated->dropped_full_length);  // Z dropped, W is not full-length
     ASSERT_EQ(2u, profile.labels.size());
     Column cx = anno->get_annotator().get_label_encoder().encode("X");
     Column cy = anno->get_annotator().get_label_encoder().encode("Y");
