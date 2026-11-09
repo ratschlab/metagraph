@@ -1,6 +1,9 @@
 #include "annotation_remap.hpp"
 
 #include <atomic>
+#include <cstring>
+#include <filesystem>
+#include <fstream>
 #include <mutex>
 #include <stdexcept>
 
@@ -24,9 +27,13 @@ static uint64_t width_for(uint64_t max_value) {
     return max_value ? sdsl::bits::hi(max_value) + 1 : 1;
 }
 
-sdsl::int_vector<> map_rows_to_graph(const DeBruijnGraph &source,
-                                     const DeBruijnGraph &target,
-                                     size_t num_threads) {
+// Walk `source`, look every k-mer up in `target`, and pass each matched pair to
+// store(source_row, target_node). Throws if the graphs have different k-mers.
+template <class Store>
+static void match_rows(const DeBruijnGraph &source,
+                       const DeBruijnGraph &target,
+                       size_t num_threads,
+                       const Store &store) {
     if (source.get_mode() != DeBruijnGraph::BASIC
             || target.get_mode() != DeBruijnGraph::BASIC)
         throw std::invalid_argument("Row remapping supports only graphs in basic mode");
@@ -34,15 +41,7 @@ sdsl::int_vector<> map_rows_to_graph(const DeBruijnGraph &source,
     if (source.get_k() != target.get_k())
         throw std::invalid_argument("Row remapping needs graphs with the same k");
 
-    const uint64_t num_target_rows = target.max_index();
-    sdsl::int_vector<> row_map(source.max_index(), 0, width_for(num_target_rows));
-    sdsl::bit_vector found(num_target_rows, false);
-
-    // Entries of row_map are packed, so concurrent writes are guarded by a lock
-    // per block. A block of 2^12 entries spans a whole number of 64-bit words.
-    constexpr uint64_t kBlockBits = 12;
-    constexpr uint64_t kNumLocks = 1 << 12;
-    std::unique_ptr<std::mutex[]> locks(new std::mutex[kNumLocks]);
+    sdsl::bit_vector found(target.max_index(), false);
 
     std::atomic<uint64_t> num_mapped(0);
     std::atomic<uint64_t> num_missing(0);
@@ -64,9 +63,7 @@ sdsl::int_vector<> map_rows_to_graph(const DeBruijnGraph &source,
                 ++repeated;
                 return;
             }
-            uint64_t row = source_node - 1;
-            std::lock_guard<std::mutex> lock(locks[(row >> kBlockBits) % kNumLocks]);
-            row_map[row] = target_node;
+            store(source_node - 1, target_node);
             ++mapped;
         });
         num_mapped += mapped;
@@ -84,7 +81,132 @@ sdsl::int_vector<> map_rows_to_graph(const DeBruijnGraph &source,
 
     logger->trace("Matched {} of {} source rows to target rows",
                   num_mapped.load(), source.max_index());
+}
+
+sdsl::int_vector<> map_rows_to_graph(const DeBruijnGraph &source,
+                                     const DeBruijnGraph &target,
+                                     size_t num_threads) {
+    sdsl::int_vector<> row_map(source.max_index(), 0, width_for(target.max_index()));
+
+    // Entries of row_map are packed, so concurrent writes are guarded by a lock
+    // per block. A block of 2^12 entries spans a whole number of 64-bit words.
+    constexpr uint64_t kBlockBits = 12;
+    constexpr uint64_t kNumLocks = 1 << 12;
+    std::unique_ptr<std::mutex[]> locks(new std::mutex[kNumLocks]);
+
+    match_rows(source, target, num_threads, [&](uint64_t row, node_index target_node) {
+        std::lock_guard<std::mutex> lock(locks[(row >> kBlockBits) % kNumLocks]);
+        row_map[row] = target_node;
+    });
+
     return row_map;
+}
+
+void map_rows_to_graph(const DeBruijnGraph &source,
+                       const DeBruijnGraph &target,
+                       const std::string &filename,
+                       size_t num_threads) {
+    const uint64_t num_rows = source.max_index();
+    const uint64_t width = width_for(target.max_index());
+
+    // The walk visits source rows in no particular order. Each pair is appended to
+    // the file of its bucket, a range of 2^bucket_bits source rows, so that every
+    // bucket can then be placed in memory on its own. A bucket spans a whole
+    // number of 64-bit words of the row map.
+    constexpr uint64_t kMaxBuckets = 256;
+    constexpr size_t kBufferSize = 1 << 16;
+    uint64_t bucket_bits = 6;
+    while (((num_rows + (1ull << bucket_bits) - 1) >> bucket_bits) > kMaxBuckets) {
+        ++bucket_bits;
+    }
+    const uint64_t num_buckets = (num_rows + (1ull << bucket_bits) - 1) >> bucket_bits;
+    const size_t record_size = (bucket_bits + width + 7) / 8;
+
+    struct Bucket {
+        std::mutex mutex;
+        std::string filename;
+        std::ofstream out;
+        std::vector<char> buffer;
+    };
+    std::vector<Bucket> buckets(num_buckets);
+
+    auto remove_buckets = [&]() {
+        for (auto &bucket : buckets) {
+            bucket.out.close();
+            std::error_code ec;
+            std::filesystem::remove(bucket.filename, ec);
+        }
+    };
+
+    try {
+        for (uint64_t b = 0; b < num_buckets; ++b) {
+            buckets[b].filename = fmt::format("{}.bucket.{}", filename, b);
+            buckets[b].out.open(buckets[b].filename, std::ios::binary);
+            buckets[b].buffer.reserve(kBufferSize + record_size);
+        }
+
+        match_rows(source, target, num_threads, [&](uint64_t row, node_index target_node) {
+            unsigned __int128 record = row & ((1ull << bucket_bits) - 1);
+            record = (record << width) | target_node;
+            Bucket &bucket = buckets[row >> bucket_bits];
+            std::lock_guard<std::mutex> lock(bucket.mutex);
+            const char *bytes = reinterpret_cast<const char *>(&record);
+            bucket.buffer.insert(bucket.buffer.end(), bytes, bytes + record_size);
+            if (bucket.buffer.size() >= kBufferSize) {
+                bucket.out.write(bucket.buffer.data(), bucket.buffer.size());
+                bucket.buffer.clear();
+            }
+        });
+
+        for (auto &bucket : buckets) {
+            bucket.out.write(bucket.buffer.data(), bucket.buffer.size());
+            bucket.buffer = {};
+            bucket.out.close();
+            if (!bucket.out)
+                throw std::runtime_error("Cannot write to " + bucket.filename);
+        }
+
+        {
+            std::ofstream out(filename, std::ios::binary);
+            sdsl::int_vector<>::write_header(num_rows * width, width, out);
+            if (!out)
+                throw std::runtime_error("Cannot write to " + filename);
+        }
+        const uint64_t header_size = std::filesystem::file_size(filename);
+        std::filesystem::resize_file(filename, header_size + ((num_rows * width + 63) / 64) * 8);
+
+        // Each thread holds one bucket of the row map in memory.
+        std::atomic<bool> failed(false);
+        #pragma omp parallel for num_threads(std::min<size_t>(std::max<size_t>(1, num_threads), 16)) schedule(dynamic)
+        for (uint64_t b = 0; b < num_buckets; ++b) {
+            const uint64_t begin = b << bucket_bits;
+            sdsl::int_vector<> rows(std::min<uint64_t>(num_rows - begin, 1ull << bucket_bits), 0, width);
+
+            std::ifstream in(buckets[b].filename, std::ios::binary);
+            std::vector<char> buffer(record_size * (kBufferSize / record_size));
+            while (in.read(buffer.data(), buffer.size()) || in.gcount()) {
+                for (std::streamsize i = 0; i + record_size <= static_cast<size_t>(in.gcount()); i += record_size) {
+                    unsigned __int128 record = 0;
+                    std::memcpy(&record, buffer.data() + i, record_size);
+                    rows[static_cast<uint64_t>(record >> width)]
+                        = static_cast<uint64_t>(record) & sdsl::bits::lo_set[width];
+                }
+            }
+
+            std::fstream out(filename, std::ios::binary | std::ios::in | std::ios::out);
+            out.seekp(header_size + (begin * width) / 8);
+            out.write(reinterpret_cast<const char *>(rows.data()), ((rows.size() * width + 63) / 64) * 8);
+            out.close();
+            if (!out || in.bad())
+                failed = true;
+        }
+        if (failed)
+            throw std::runtime_error("Cannot write row map to " + filename);
+    } catch (...) {
+        remove_buckets();
+        throw;
+    }
+    remove_buckets();
 }
 
 bool check_row_map(const DeBruijnGraph &source,
@@ -158,31 +280,44 @@ remap_annotation_rows(const MultiLabelAnnotation<std::string> &annotation,
     // node index, so the bitmap has one extra entry.
     sdsl::bit_vector new_anchor(target_num_rows, false);
     sdsl::bit_vector new_succ(target_num_rows + 1, false);
+    // Mark the successors by source row first. The row map is then read only in
+    // row order, which matters when it is mapped from a file.
+    sdsl::bit_vector is_succ(row_map.size(), false);
     std::atomic<uint64_t> num_lost_successors(0);
-
     #pragma omp parallel for num_threads(std::max<size_t>(1, num_threads)) schedule(static, 1 << 20)
     for (uint64_t row = 0; row < row_map.size(); ++row) {
-        uint64_t target_row = row_map[row];
-        if (!target_row)
+        if (!row_map[row])
             continue;
 
         if (anchor[row]) {
-            set_bit(new_anchor.data(), target_row - 1, true, std::memory_order_relaxed);
+            set_bit(new_anchor.data(), row_map[row] - 1, true, std::memory_order_relaxed);
             continue;
         }
 
         node_index succ = row_diff_successor(source, row + 1, fork_succ);
-        uint64_t target_succ = succ && succ <= row_map.size() ? row_map[succ - 1] : 0;
-        if (!target_succ) {
+        if (!succ || succ > row_map.size()) {
             ++num_lost_successors;
             continue;
         }
-        set_bit(new_succ.data(), target_succ, true, std::memory_order_relaxed);
+        set_bit(is_succ.data(), succ - 1, true, std::memory_order_relaxed);
     }
+
+    #pragma omp parallel for num_threads(std::max<size_t>(1, num_threads)) schedule(static, 1 << 20)
+    for (uint64_t row = 0; row < row_map.size(); ++row) {
+        if (!is_succ[row])
+            continue;
+
+        if (uint64_t target_row = row_map[row]) {
+            set_bit(new_succ.data(), target_row, true, std::memory_order_relaxed);
+        } else {
+            ++num_lost_successors;
+        }
+    }
+    is_succ = sdsl::bit_vector();
 
     if (num_lost_successors) {
         throw std::runtime_error(fmt::format(
-            "{} rows that are not anchors have a dropped row-diff successor",
+            "{} row-diff successors of kept rows are dropped",
             num_lost_successors.load()));
     }
 

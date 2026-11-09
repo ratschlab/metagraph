@@ -3,6 +3,7 @@ from parameterized import parameterized
 import subprocess
 from subprocess import PIPE
 from tempfile import TemporaryDirectory
+import glob
 import os
 from base import PROTEIN_MODE, TestingBase, METAGRAPH, MMAP_FLAG
 
@@ -118,14 +119,19 @@ class TestRemapAnnotation(TestingBase):
         self.assertEqual(res.returncode, 0, res.stderr.decode())
         with open(prefix + '_owned' + anno_file_extension[anno_repr], 'rb') as f:
             expected = f.read()
+        with open(prefix + '_owned.rowmap', 'rb') as f:
+            expected_row_map = f.read()
 
-        # The first run builds the row map, the second one reuses it from the mapped file.
+        # The first run builds the row map on disk, the second one reuses it from the mapped file.
         out = prefix + '_mapped'
         for _ in range(2):
             res = self._remap(anno, out, self.target, mmap=True)
             self.assertEqual(res.returncode, 0, res.stderr.decode())
             with open(out + anno_file_extension[anno_repr], 'rb') as f:
                 self.assertEqual(expected, f.read())
+            with open(out + '.rowmap', 'rb') as f:
+                self.assertEqual(expected_row_map, f.read())
+            self.assertEqual(glob.glob(out + '.rowmap.*'), [])
 
     @parameterized.expand(['row_diff_flat', 'row_diff_disk'])
     def test_remap_and_convert(self, anno_type):

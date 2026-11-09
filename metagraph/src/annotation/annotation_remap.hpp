@@ -33,6 +33,16 @@ sdsl::int_vector<> map_rows_to_graph(const graph::DeBruijnGraph &source,
                                      size_t num_threads = 1);
 
 /**
+ * Same, but writes the vector to `filename` in the sdsl::int_vector<> format
+ * without holding it in memory. Uses temporary files `filename`.bucket.* of
+ * about the same total size as the result.
+ */
+void map_rows_to_graph(const graph::DeBruijnGraph &source,
+                       const graph::DeBruijnGraph &target,
+                       const std::string &filename,
+                       size_t num_threads = 1);
+
+/**
  * Check a saved row map against both graphs. Returns false if the row counts
  * differ, or if a kept row maps to another target row than its k-mer. The
  * k-mer check covers num_samples evenly spaced rows and skips dropped ones.

@@ -338,7 +338,7 @@ int transform_annotation(Config *config) {
         }
 
         // The row map is the expensive part, so keep it for a rerun. With --mmap it
-        // is read from that file instead of being held in RAM.
+        // is built in and read from that file instead of being held in RAM.
         const std::string row_map_fname = config->outfbase + ".rowmap";
         sdsl::packed_vector_view<> row_map;
         uint64_t target_num_rows;
@@ -366,27 +366,28 @@ int transform_annotation(Config *config) {
             }
         } else {
             logger->trace("Matching rows of {} to {}...", config->remap_graph, config->infbase);
+            // With --mmap, the row map is built on disk and never held in RAM.
+            const std::string tmp_fname = row_map_fname + ".tmp";
             sdsl::int_vector<> new_row_map;
             try {
-                new_row_map = map_rows_to_graph(*source, *target, get_num_threads());
+                if (utils::with_mmap()) {
+                    map_rows_to_graph(*source, *target, tmp_fname, get_num_threads());
+                } else {
+                    new_row_map = map_rows_to_graph(*source, *target, get_num_threads());
+                    std::ofstream out(tmp_fname, std::ios::binary);
+                    new_row_map.serialize(out);
+                    out.close();
+                    if (!out)
+                        throw std::runtime_error("Cannot write row map to " + tmp_fname);
+                }
             } catch (const std::exception &e) {
                 logger->error("{}", e.what());
-                exit(1);
-            }
-
-            const std::string tmp_fname = row_map_fname + ".tmp";
-            std::ofstream out(tmp_fname, std::ios::binary);
-            new_row_map.serialize(out);
-            out.close();
-            if (!out) {
-                logger->error("Cannot write row map to {}", tmp_fname);
                 exit(1);
             }
             std::filesystem::rename(tmp_fname, row_map_fname);
             logger->trace("Row map saved to {} in {} sec", row_map_fname, timer.elapsed());
 
             if (utils::with_mmap()) {
-                new_row_map = sdsl::int_vector<>();
                 load_row_map();
             } else {
                 row_map = sdsl::packed_vector_view<>(std::move(new_row_map));
