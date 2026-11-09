@@ -28,16 +28,6 @@ using namespace mtg::graph;
 using namespace mtg::graph::traversal;
 using namespace mtg::test;
 
-std::vector<DeBruijnGraph::Mode> all_modes() {
-    return {
-        DeBruijnGraph::BASIC,
-#if ! _PROTEIN_GRAPH
-        DeBruijnGraph::CANONICAL,
-        DeBruijnGraph::PRIMARY,
-#endif
-    };
-}
-
 std::vector<DeBruijnGraph::Mode> canonical_modes() {
     return {
 #if ! _PROTEIN_GRAPH
@@ -787,7 +777,7 @@ TYPED_TEST(WalkerTest, SeedValidation) {
         ASSERT_EQ(1u, res.dropped_labels.size());
         EXPECT_EQ("A", res.dropped_labels[0].name);
         uint64_t supported = f.R.size() + f.X.size() - kK + 1;
-        EXPECT_EQ((std::vector<std::pair<uint64_t, uint64_t>>{ { 0, supported } }),
+        EXPECT_EQ((std::vector<KmerInterval>{ { 0, supported } }),
                   res.dropped_labels[0].runs);
         ASSERT_EQ(1u, res.label_dict.size());
         EXPECT_EQ("B", res.label_dict[0].name);

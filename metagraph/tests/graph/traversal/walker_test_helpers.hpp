@@ -8,6 +8,7 @@
 #include <vector>
 
 #include "graph/traversal/walker.hpp"
+#include "tests/graph/traversal/traversal_test_helpers.hpp"
 #include "common/seq_tools/reverse_complement.hpp"
 
 
@@ -17,20 +18,6 @@ namespace test {
 constexpr size_t kK = 11;
 constexpr size_t kLeft = static_cast<size_t>(graph::traversal::Arm::LEFT);
 constexpr size_t kRight = static_cast<size_t>(graph::traversal::Arm::RIGHT);
-
-inline std::string rc(std::string s) {
-    ::reverse_complement(s);
-    return s;
-}
-
-inline std::string random_seq(size_t len, uint32_t seed) {
-    std::mt19937 gen(seed);
-    std::string s(len, 'A');
-    for (char &c : s) {
-        c = "ACGT"[gen() % 4];
-    }
-    return s;
-}
 
 // No repeated (k-1)-mer or k-mer in either orientation and no reverse-complement
 // palindromes of length k-1 or k+1: every k-mer is one node with one successor in every
