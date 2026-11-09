@@ -4,6 +4,8 @@ Open a pull request against `master`. The developer notes in the README cover Do
 
 For documentation and user-facing text, follow the [writing principles](https://github.com/ratschlab/writing-rules/blob/376b4f302cf4696e0b3a7184efc429da8438be1c/guides/PRINCIPLES.md) and run the [text check](docs/writing/README.md). Verify factual claims, defaults and examples against the implementation.
 
+For design notes and other text that explains a concept or algorithm, also see the [guide to explanatory writing](https://github.com/ratschlab/writing-rules/blob/376b4f302cf4696e0b3a7184efc429da8438be1c/guides/TEACHING.md).
+
 For pull requests, reviews and commit messages, see the [engineering communication guide](https://github.com/ratschlab/writing-rules/blob/376b4f302cf4696e0b3a7184efc429da8438be1c/guides/ENGINEERING.md).
 
 Before proposing a new feature, option, flag, endpoint or API field, check it against the [stewardship principles](https://github.com/ratschlab/writing-rules/blob/376b4f302cf4696e0b3a7184efc429da8438be1c/guides/STEWARDSHIP.md).

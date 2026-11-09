@@ -6,6 +6,9 @@ From a plain clone, run `git submodule update --init -- tools/writing-rules`.
 Before changing documentation or user-facing text, read
 [`tools/writing-rules/guides/PRINCIPLES.md`](https://github.com/ratschlab/writing-rules/blob/376b4f302cf4696e0b3a7184efc429da8438be1c/guides/PRINCIPLES.md). The accompanying
 [`tools/writing-rules/sources/README.md`](https://github.com/ratschlab/writing-rules/blob/376b4f302cf4696e0b3a7184efc429da8438be1c/sources/README.md) explains the basis and limitations of the guidance. The submodule pins the guide and checker together.
+For text that explains a concept or algorithm, such as a design note or a
+conceptual tutorial, also read
+[`tools/writing-rules/guides/TEACHING.md`](https://github.com/ratschlab/writing-rules/blob/376b4f302cf4696e0b3a7184efc429da8438be1c/guides/TEACHING.md).
 
 Write for the reader's task. Preserve facts, uncertainty and necessary technical
 detail. Check defaults, flags, file names and guarantees against their owning
