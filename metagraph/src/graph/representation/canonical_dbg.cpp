@@ -212,7 +212,7 @@ void CanonicalDBG::call_outgoing_kmers(node_index node,
 
         if (children[s] != npos && c != boss::BOSS::kSentinel) {
             // `next` must be a palindrome
-            is_palindrome_cache_.Put(next, true);
+            is_palindrome_cache_.insert(next, true);
             if (k_odd_) { // palindromes exist only for even k
                 logger->error(
                     "Forward traversal: Primary graph contains both forward and reverse complement: {} {} -> {} {}\t{} {}",
@@ -224,7 +224,7 @@ void CanonicalDBG::call_outgoing_kmers(node_index node,
             return;
         }
 
-        is_palindrome_cache_.Put(next, false);
+        is_palindrome_cache_.insert(next, false);
 
         // transform `next` to the adj strand
         next = reverse_complement(next);
@@ -302,7 +302,7 @@ void CanonicalDBG::call_incoming_kmers(node_index node,
 
         if (parents[s] != npos && c != boss::BOSS::kSentinel) {
             // `prev` must be a palindrome
-            is_palindrome_cache_.Put(prev, true);
+            is_palindrome_cache_.insert(prev, true);
             if (k_odd_) {
                 logger->error(
                     "Backward traversal: Primary graph contains both forward and reverse complement: {} {} <- {} {}\t{} {}",
@@ -314,7 +314,7 @@ void CanonicalDBG::call_incoming_kmers(node_index node,
             return;
         }
 
-        is_palindrome_cache_.Put(prev, false);
+        is_palindrome_cache_.insert(prev, false);
 
         // transform `prev` to the adj strand
         prev = reverse_complement(prev);
@@ -528,7 +528,7 @@ DeBruijnGraph::node_index CanonicalDBG::reverse_complement(node_index node) cons
         // we know that this node is definitely not present in the base graph
 
         if (!k_odd_)
-            is_palindrome_cache_.Put(node - offset_, false);
+            is_palindrome_cache_.insert(node - offset_, false);
 
         return node - offset_;
 
@@ -541,7 +541,7 @@ DeBruijnGraph::node_index CanonicalDBG::reverse_complement(node_index node) cons
 
     assert(!k_odd_ && node <= offset_);
 
-    if (auto fetch = is_palindrome_cache_.TryGet(node))
+    if (auto fetch = is_palindrome_cache_.find(node))
         return *fetch ? node : node + offset_;
 
     std::string seq = get_node_sequence(node);
@@ -551,7 +551,7 @@ DeBruijnGraph::node_index CanonicalDBG::reverse_complement(node_index node) cons
 
     assert(palindrome || graph_->kmer_to_node(rev_seq) == npos);
 
-    is_palindrome_cache_.Put(node, palindrome);
+    is_palindrome_cache_.insert(node, palindrome);
 
     return palindrome ? node : node + offset_;
 }
