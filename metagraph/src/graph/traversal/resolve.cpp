@@ -149,18 +149,11 @@ SupportProfile resolve_support(const LabelOracle &oracle,
         // the ranking of /search with signatures, so that both report the same labels,
         // counts and runs
         const bool headers = options.discover_kind == LabelKind::HEADER;
-        AnnotatedDBG::TopLabelCut cut;
+        size_t total = 0;
         auto top = oracle.anno_graph().get_top_label_signatures(
-                query, options.discover_max_labels, 0.0, 0.0, &cut, headers);
-        if (cut.total > options.discover_max_labels) {
-            LabelTruncation trunc;
-            trunc.total = cut.total;
-            trunc.kept = options.discover_max_labels;
-            trunc.min_kept_kmers = cut.min_kept;
-            trunc.max_dropped_kmers = cut.max_dropped;
-            trunc.dropped_full_length = cut.dropped_full;
-            profile.labels_truncated = trunc;
-        }
+                query, options.discover_max_labels, 0.0, 0.0, &total, headers);
+        if (total > options.discover_max_labels)
+            profile.labels_truncated = LabelTruncation { options.discover_max_labels, total };
         for (const auto &[name, count, presence] : top) {
             // a header of several records is ambiguous, as when it is named explicitly
             if (headers && oracle.coord_to_header()->is_repeated_header(name))
@@ -390,19 +383,15 @@ std::vector<FrozenSeed> select_seeds(const SupportProfile &profile,
         std::sort(ordered.begin(), ordered.end());
 
         seed.population.supporting_total = ordered.size();
-        uint64_t digest = 0xcbf29ce484222325ULL;
         for (size_t i = 0; i < ordered.size(); ++i) {
             if (i < policy.max_labels_per_seed) {
                 seed.labels.push_back(ordered[i].second);
             } else {
                 seed.population.dropped_count++;
-                digest = fnv1a64(ordered[i].second + "\n", digest);
                 if (ordered.size() - policy.max_labels_per_seed <= 1000)
                     seed.population.dropped.push_back(ordered[i].second);
             }
         }
-        if (seed.population.dropped_count)
-            seed.population.dropped_digest = hex64(digest);
         std::sort(seed.labels.begin(), seed.labels.end());
         seed.seed_id = make_seed_id(seed.sequence, canonical_orientation, seed.labels);
         seeds.push_back(std::move(seed));
