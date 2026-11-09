@@ -927,6 +927,33 @@ TEST(MultiGraphLabelsDisjoint, ExamplesAreTheSmallestNamesAndBounded) {
 }
 
 
+// A file's stamp (H4): equal while the file is the same, different once it is rewritten or
+// renamed over, none for a file that does not exist
+TEST(MultiGraphInRam, FileStampTellsAReplacedFile) {
+    const std::string dir = test_dump_dir();
+    const std::string path = dir + "/stamped.annodbg";
+    auto write = [](const std::string &file, const std::string &text) {
+        std::ofstream out(file, std::ios::binary | std::ios::trunc);
+        out << text;
+    };
+    write(path, "annotation 1");
+    const auto first = file_stamp(path);
+    ASSERT_TRUE(first);
+    EXPECT_EQ(first, file_stamp(path));
+    EXPECT_EQ(12u, first->size);
+    // another file of the same size renamed over it
+    write(path + ".new", "annotation 2");
+    fs::rename(path + ".new", path);
+    const auto renamed = file_stamp(path);
+    ASSERT_TRUE(renamed);
+    EXPECT_NE(*first, *renamed);
+    // rewritten in place with other bytes, longer
+    write(path, "annotation 3 rebuilt");
+    EXPECT_NE(renamed, file_stamp(path));
+    EXPECT_FALSE(file_stamp(dir + "/no_such_file.annodbg"));
+}
+
+
 // ---------------------------------------------------------------- the mask's sampled check
 
 namespace {

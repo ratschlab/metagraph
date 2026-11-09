@@ -384,6 +384,19 @@ TEST(CoordToHeader, LoadRefusesATruncatedFile) {
     }
 }
 
+// An empty file fails its load, also when the stream maps it (--mmap: mapping an empty file
+// throws, which ended the process before its load could name the file)
+TEST(CoordToHeader, AnEmptyFileFailsItsLoad) {
+    const std::string base = test_dump_dir() + "/cth_empty";
+    { std::ofstream out(base + CoordToHeader::kExtension, std::ios::binary | std::ios::trunc); }
+    CoordToHeader cth;
+    EXPECT_FALSE(cth.load(base));
+    const bool mmap = utils::with_mmap();
+    utils::set_mmap(true);
+    EXPECT_FALSE(cth.load(base));
+    utils::set_mmap(mmap);
+}
+
 // The load's check of a record mapping against its annotation (cli::check_record_mapping): the
 // count, the stated labels, and the coordinates of a column against its k-mers where the
 // annotation states them per column (column_coord, brwt_coord); the row-diff form only by count

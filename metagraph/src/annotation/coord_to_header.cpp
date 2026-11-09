@@ -533,8 +533,17 @@ uint64_t CoordToHeader::num_kmers_in_sequence(Column col, size_t seq_id) const {
 
 bool CoordToHeader::load(const std::string &filename_base) {
     const std::string path = utils::make_suffix(filename_base, kExtension);
-    std::unique_ptr<std::ifstream> in = utils::open_ifstream(path);
-    if (!in->good()) {
+    std::unique_ptr<std::ifstream> in;
+    try {
+        // (with --mmap the stream maps the file, which throws on an empty one: a copy cut
+        // before its first byte must fail its load, naming the file, not end the process)
+        in = utils::open_ifstream(path);
+    } catch (const std::exception &e) {
+        logger->error("Cannot load CoordToHeader from '{}': {} (caught: {})", path,
+                      utils::file_read_failure_detail(path), e.what());
+        return false;
+    }
+    if (!in || !in->good()) {
         logger->error("Cannot open CoordToHeader file '{}': {}", path,
                       utils::file_read_failure_detail(path));
         return false;

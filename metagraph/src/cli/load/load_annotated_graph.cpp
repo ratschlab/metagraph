@@ -51,6 +51,19 @@ namespace {
     std::_Exit(1);
 }
 
+// An annotation file whose extension no annotation type has fails as |on_failure| says, before
+// initialize_annotation would exit on it: thrown (the Python bindings raise it, a server's
+// request fails), or logged and ended through exit_at_load
+void check_annotation_extension(const std::string &file, LoadFailure on_failure) {
+    if (try_parse_annotation_type(file))
+        return;
+    const std::string message = fmt::format("Unknown annotation format in '{}'", file);
+    if (on_failure == LoadFailure::THROW)
+        throw std::runtime_error(message);
+    logger->error("{}", message);
+    exit_at_load();
+}
+
 // The graphs whose mask build_mask_at_load built. Weak references: a graph freed and another
 // allocated at its address must not pass for it (the unit tests load many graphs).
 std::mutex built_masks_mutex;
@@ -265,7 +278,18 @@ std::shared_future<std::shared_ptr<DeBruijnGraph>>
 load_dbg_async(const std::string &path, const PatternPreparation &prep, LoadFailure on_failure) {
     return std::async(std::launch::async,
                       [path, prep, on_failure]() -> std::shared_ptr<DeBruijnGraph> {
-        auto graph = load_critical_dbg(path, on_failure);
+        std::shared_ptr<DeBruijnGraph> graph;
+        if (on_failure == LoadFailure::THROW) {
+            graph = load_critical_dbg(path, LoadFailure::THROW);
+        } else {
+            // logged and ended through exit_at_load: this is a loading thread
+            try {
+                graph = load_critical_dbg(path, LoadFailure::THROW);
+            } catch (const std::exception &e) {
+                logger->error("{}", e.what());
+                exit_at_load();
+            }
+        }
         // here, in the loading thread: while the annotation loads, and before the graph is
         // shared with anyone, so that nothing ever sees it without the mask
         prepare_pattern_graph(graph, path, prep);
@@ -436,6 +460,7 @@ void check_annotation_files_open(const Config &config, bool loads_mapping) {
         return;
     }
     // an empty annotator of the annotation's type: its file extension and matrix type
+    check_annotation_extension(config.infbase_annotators.at(0), LoadFailure::THROW);
     const auto annotation = initialize_annotation(config.infbase_annotators.at(0), config);
     const std::string extension = annotation->file_extension();
     const bool merged
@@ -489,6 +514,7 @@ build_annotated_dbg(std::shared_future<std::shared_ptr<DeBruijnGraph>> graph_fut
         annotation = initialize_annotation(config.anno_type, config,
                                            graph->max_index(), max_chunks_open);
     } else {
+        check_annotation_extension(config.infbase_annotators.at(0), on_failure);
         annotation = initialize_annotation(config.infbase_annotators.at(0),
                                            config, 0, max_chunks_open);
 
@@ -536,8 +562,11 @@ build_annotated_dbg(std::shared_future<std::shared_ptr<DeBruijnGraph>> graph_fut
                 const std::string anchor = config.infbase + kRowDiffAnchorExt;
                 const std::string fork_succ = config.infbase + kRowDiffForkSuccExt;
                 if (on_failure == LoadFailure::EXIT) {
-                    row_diff_column->load_anchor(anchor);
-                    row_diff_column->load_fork_succ(fork_succ);
+                    // (each logs its failure)
+                    if (!row_diff_column->try_load_anchor(anchor)
+                            || !row_diff_column->try_load_fork_succ(fork_succ)) {
+                        exit_at_load();
+                    }
                 } else if (!row_diff_column->try_load_anchor(anchor)) {
                     throw std::runtime_error(load_failure("anchor", anchor));
                 } else if (!row_diff_column->try_load_fork_succ(fork_succ)) {

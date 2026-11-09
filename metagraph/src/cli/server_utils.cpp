@@ -21,6 +21,7 @@
 #include <netinet/tcp_fsm.h>
 #endif
 #include <sys/socket.h>
+#include <sys/stat.h>
 #include <zlib.h>
 #include <json/json.h>
 #include <server_http.hpp>
@@ -1234,6 +1235,23 @@ Json::Value labels_disjoint_json(const std::vector<HeaderPair> &pairs, size_t nu
     result["collisions"] = Json::Value(static_cast<Json::UInt64>(collisions));
     result["examples"] = std::move(examples);
     return result;
+}
+
+std::optional<FileStamp> file_stamp(const std::string &path) {
+    struct stat st;
+    if (::stat(path.c_str(), &st))
+        return std::nullopt;
+    std::error_code error;
+    const auto mtime = std::filesystem::last_write_time(path, error);
+    if (error)
+        return std::nullopt;
+    FileStamp stamp;
+    stamp.device = static_cast<uint64_t>(st.st_dev);
+    stamp.inode = static_cast<uint64_t>(st.st_ino);
+    stamp.size = static_cast<uint64_t>(st.st_size);
+    stamp.mtime_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(
+            mtime.time_since_epoch()).count();
+    return stamp;
 }
 
 } // namespace cli

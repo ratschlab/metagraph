@@ -286,7 +286,8 @@ class RequestRegistry {
         mutable std::mutex mutex;
         std::map<std::string, std::shared_ptr<RequestEntry>> entries;
         // an ended entry: when it ended, its id, and the entry itself (weakly: the map holds
-        // it), so that its expiry finds it in O(1) and never drops a newer entry of the id
+        // it), so that its expiry finds it with one map lookup (O(log n)) and never drops a newer
+        // entry of the id
         struct Ended {
             SteadyClock::time_point at;
             std::string id;

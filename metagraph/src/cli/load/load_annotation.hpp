@@ -1,6 +1,7 @@
 #ifndef __LOAD_ANNOTATION_HPP__
 #define __LOAD_ANNOTATION_HPP__
 
+#include <optional>
 #include <string>
 
 #include "annotation/representation/base/annotation.hpp"
@@ -10,7 +11,10 @@
 namespace mtg {
 namespace cli {
 
+// The annotation type of |filename|'s extension; one no type has is logged and exits
 Config::AnnotationType parse_annotation_type(const std::string &filename);
+// The same, nullopt for an extension no type has (a loader that throws on it)
+std::optional<Config::AnnotationType> try_parse_annotation_type(const std::string &filename);
 
 std::unique_ptr<annot::MultiLabelAnnotation<std::string>>
 initialize_annotation(Config::AnnotationType anno_type,

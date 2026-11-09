@@ -1,5 +1,6 @@
 #include "query.hpp"
 
+#include <exception>
 #include <mutex>
 #include <sstream>
 
@@ -1211,7 +1212,14 @@ int query_graph(Config *config) {
                                               config->verbose_output, k) + "\n";
             }
         };
-        size_t num_bp = query_fasta(file, query_callback, *config, *anno_graph, aligner_config.get());
+        size_t num_bp;
+        try {
+            num_bp = query_fasta(file, query_callback, *config, *anno_graph,
+                                 aligner_config.get());
+        } catch (const std::exception &e) {
+            logger->error("Cannot query '{}': {}", file, e.what());
+            return 1;
+        }
         auto time = curr_timer.elapsed();
         logger->trace("File '{}' with {} base pairs was processed in {:.3f} sec, throughput: {:.1f} bp/s",
                       file, num_bp, time, (double)num_bp / time);
@@ -1337,17 +1345,33 @@ size_t query_fasta(const std::string &file,
     size_t seq_count = 0;
     size_t num_bp = 0;
 
+    // A task that throws on a worker ends the process (ThreadPool), so each task keeps the
+    // first exception, which is rethrown here once every task has finished: a server's request
+    // then fails with its route's answer to an error and the server runs on, and the CLI exits
+    // with the message (a record mapping whose columns are in another order, which a .seqs
+    // written before H4 can be on a row-diff form, maps a coordinate out of its column's range:
+    // one /search aborted the server, GPT review 5 #7, H4's verification)
+    std::mutex error_mutex;
+    std::exception_ptr error;
     ThreadPool thread_pool(get_num_threads(), 1000);
     for (const seq_io::kseq_t &kseq : fasta_parser) {
         thread_pool.enqueue([&](QuerySequence &sequence) {
-            // Callback with the SeqSearchResult
-            callback(query_sequence(std::move(sequence), anno_graph,
-                                    config, aligner_config));
+            try {
+                // Callback with the SeqSearchResult
+                callback(query_sequence(std::move(sequence), anno_graph,
+                                        config, aligner_config));
+            } catch (...) {
+                std::lock_guard<std::mutex> lock(error_mutex);
+                if (!error)
+                    error = std::current_exception();
+            }
         }, QuerySequence { seq_count++, std::string(kseq.name.s), std::string(kseq.seq.s) });
         num_bp += kseq.seq.l;
     }
     // wait while all threads finish processing the current file
     thread_pool.join();
+    if (error)
+        std::rethrow_exception(error);
 
     return num_bp;
 }

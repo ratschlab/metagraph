@@ -354,7 +354,7 @@ listens:
 | `graph_representation` | string | the graph's type as `--graph` names it: `succinct`, `hash` (an ordered hash graph, packed or not: one file extension), `hashstr`, `hashfast`, `sshash` or `bitmap`; of a PRIMARY graph (wrapped in `CanonicalDBG`) the wrapped graph's |
 | `annotation_form` | string | the annotation's type as `--anno-type` names it: the class the loader constructed from the file's extension, e.g. `row_diff_brwt_coord` (RefSeq r237, AllTheBacteria, UniParc), `row_diff_int_brwt` (Logan's `*_RNA` chunks), `row_diff_disk`, `column` |
 | `decode_charged` | bool | whether a traversal under a memory budget charges the pair's annotation reads before they are held (`SPEC-labeled-traversal-core.md` §6.8): the traversal oracle's own predicate on the matrix. True on the row-diff forms over an index matrix with a single-row read (`row_diff`, `row_diff_coord`, `row_diff_brwt`, `row_diff_brwt_coord`, `row_diff_disk`, `row_diff_sparse`, `row_diff_flat`, `row_diff_int_brwt`) and on plain `brwt` and `column`; false on `column_coord`, `brwt_coord`, `int_brwt`, `row_diff_int_disk`, `row_diff_disk_coord`, `flat`, `row_sparse`, `row`, `bin_rel_wt`, `rbfish` and `rb_brwt`. Plain `brwt` and `column` stay `annotation: "unbudgeted"` on `/pattern` (budgeted there is a row-diff form only): the two fields together state that nuance |
-| `seqs_order` | string or null | what the load verified of the order of the pair's record mapping (`.seqs`) columns (H4, sections 9.1 and 10): `"verified"`, its stated column labels equalled the annotation's; `"count_only"`, it states none (written before H4) and its column count alone was checked, its order not; null, no `.seqs` loaded (`traversal.has_coord_to_header` false) |
+| `seqs_order` | string or null | what the load verified of the order of the pair's record mapping (`.seqs`) columns (H4, sections 9.1 and 10): `"verified"`, its stated column labels equalled the annotation's; `"count_only"`, it states none (written before H4): its column count was checked and its order not certified (on `column_coord` and `brwt_coord` its columns' coordinates were also bounded, section 10, which certifies no order); null, no `.seqs` loaded (`traversal.has_coord_to_header` false) |
 | `traversal.counts` | string or null | `"presence_only"` on a count annotation (`row_diff_int_brwt`, `int_brwt`, `row_diff_int_disk`: walks read presence, `SPEC-labeled-traversal-core.md` §10.3), null on the others, so that a client without a graph sees it per pair |
 | `support_fp` | string | FNV-1a-64, 16 lowercase hex digits, over the pair's capability fields (below) |
 
@@ -502,7 +502,7 @@ name selects the column where one has it`).
 
 | Value | Guarantee |
 | --- | --- |
-| `"verified"` | the `.seqs` states its column labels (written by `annotate --index-header-coords` since H4) and each equalled the annotation's label of its column. Written without `-a`, the labels are the files' names as passed, so the guarantee rests on those names: the files were passed in the annotation's column order under the names it gave them. Written with `-a`, the labels are the annotation's own, copied once each file passed the probe of section 10 (its column holds the coordinates of the file's first and last k-mers, the last fixing the file's k-mer count), so the guarantee rests on that probe, not on names. Either way the records a header label selects are those of the files the columns were made from |
+| `"verified"` | the `.seqs` states its column labels (written by `annotate --index-header-coords` since H4) and each equalled the annotation's label of its column. Written without `-a`, the labels are the files' names as passed, so the guarantee rests on those names: the files were passed in the annotation's column order under the names it gave them. Written with `-a`, the labels are the annotation's own, copied once each file passed the probe of section 10 (its column holds the coordinates of the file's first and last k-mers, the last bounding the file's k-mer count from below), so the guarantee rests on that probe, not on names. Either way the records a header label selects are those of the files the columns were made from |
 | `"count_only"` | the `.seqs` states no labels (written before H4): its number of columns equalled the annotation's, its order was not verified. On `column_coord` and `brwt_coord` each column's coordinates were also checked against its k-mers, which refuses some permutations but certifies none. A header-label answer on such a pair rests on a column order the load did not check: a `.seqs` written for the files in another order maps coordinates to other records |
 | null | no `.seqs` loaded: the pair's labels are columns only |
 
@@ -533,23 +533,33 @@ before the index is built:
 
 A failed check is a start-up failure, never a request's: `server_query` logs one error line and exits with status 1
 before it is ready (a single-graph server before `ready` turns true, a multi-graph server before `Ready to serve
-queries`; the process ends at once after the line is written, as the server's shutdown does, and so does every other
-load failure of the loader at start-up), and a CLI command exits 1 at its load. A server's per-request load into RAM
-(`in_ram`: `/traverse`, `/resolve`, `/pattern` and, since the review of H4, `/search`) is built with the resident
-pair's mapping, checked at start-up, so it reads no `.seqs` again; a load of it that fails (an annotation replaced
-on disk by one of another column count, whose `.seqs` is then read and refused; a file that cannot be read) throws,
-and that request alone fails with the route's 400, the loader's message as `error` (`/search`: `{"error":
-"<message>"}`, for instance `The record mapping '<anno-base>.seqs' does not belong to the annotation '<annotation>':
-it has 2 columns, the annotation 3 labels. Rebuild it ...`), while the server runs on with its resident indexes. The
-Python bindings (`pymetagraph.AnnotatedGraph`) raise the load's message as a `RuntimeError`. The line: `The record
-mapping '<anno-base>.seqs' does not belong to the annotation '<annotation>': <reason>. Rebuild it against this
-annotation with every input file in column order (metagraph stats --print-col-names lists them): metagraph annotate
---anno-filename --index-header-coords -i <graph> -a <annotation> -o <anno-base> <files>; or load the annotation
-without it (--no-coord-mapping)`, the reason one of `it has <n> columns, the annotation <m> labels`, `its column <i>
-is '<label>', the annotation's column <i> '<label>' (the files were passed in another order or under other names)`
-and `column <i> ('<label>') of the annotation holds <c> coordinates, more than the <n> k-mers the mapping states for
-it (the files were passed in another order)`. An index is never built with a mapping of another column count, so no
-query checks it (before H4 a query exited the process on it).
+queries`), and a CLI command exits 1 at its load. The index loader ends the process at once after its line is
+written, as the server's shutdown does, on every failure it meets at start-up: a single-graph server's graph, an
+annotation that cannot be loaded or whose format is unknown, a `row_diff` annotation's anchors and fork successors,
+a `.seqs` that cannot be loaded or is refused, `--pattern-build-mask`; a multi-graph server's graphs, loaded before
+its annotations and before it listens, exit as before. A server's per-request load into RAM (`in_ram`: `/traverse`,
+`/resolve`, `/pattern` and, since the review of H4, `/search`) is built with the resident pair's mapping, checked at
+start-up, while the pair's annotation on disk is the file loaded then (its device, inode, size and modification time
+unchanged), so that it reads no `.seqs` again; once the annotation was replaced, the copy reads its `.seqs` from
+disk with the checks above. A load of it that fails (an annotation replaced by one whose `.seqs` is refused; a file
+that cannot be read) throws, and that request alone fails with the route's 400, the loader's message as `error`
+(`/search`: `{"error": "<message>"}`, for instance `The record mapping '<anno-base>.seqs' does not belong to the
+annotation '<annotation>': it has 2 columns, the annotation 3 labels. Rebuild it ...`), while the server runs on
+with its resident indexes. A mapping that passed the load but places a coordinate past the end of its column (an old
+`.seqs` of a `count_only` pair written for the files in another order, or a corrupt one) fails the query that meets
+it: `/search` answers 400 `{"error": "Coordinate <c> for column <j> out of range (CoordToHeader has <n> coordinates
+for that column)"}` and the server runs on (before H4's verification the query's thread pool ended the process), and
+`metagraph query` exits 1 (`Cannot query '<file>': <message>`); a coordinate within the column maps to another
+record, undetected. The Python bindings (`pymetagraph.AnnotatedGraph`) raise the load's message as a `RuntimeError`.
+The refusal's line: `The record mapping '<anno-base>.seqs' does not belong to the annotation '<annotation>':
+<reason>. Rebuild it against this annotation with every input file in column order (metagraph stats
+--print-col-names lists them): metagraph annotate --anno-filename --index-header-coords -i <graph> -a <annotation>
+-o <anno-base> <files>; or load the annotation without it (--no-coord-mapping)`, the reason one of `it has <n>
+columns, the annotation <m> labels`, `its column <i> is '<label>', the annotation's column <i> '<label>' (the files
+were passed in another order or under other names)` and `column <i> ('<label>') of the annotation holds <c>
+coordinates, more than the <n> k-mers the mapping states for it (the files were passed in another order)`. An index
+is never built with a mapping of another column count, so no query checks it (before H4 a query exited the process
+on it).
 
 **The stated labels.** `annotate --index-header-coords` writes, after the columns, the number `0x6d74672d636f6c73`
 (the bytes `mtg-cols`, 8 bytes big-endian as every number of the file), then the column labels (their number, equal
@@ -581,6 +591,8 @@ The new file then replaces it (renamed over it: a running server keeps its own; 
 and the pair states `seqs_order: "verified"`. `annotate -a` loads the graph and the whole annotation: on the shared
 host (mex) rebuild one pair at a time, with `--mmap`.
 
-A `.seqs` cut anywhere fails its load (a column whose coordinate offsets do not read whole, or whose record ends are
-not one per record, is refused, and data after the columns must be the labels' trailer whole): a cut file never loads
-as one written before the trailer.
+A `.seqs` cut inside its columns or its trailer fails its load (a column whose coordinate offsets do not read whole,
+or whose record ends are not one per record, is refused, and data after the columns must be the labels' trailer
+whole), and so does an empty one, with `--mmap` too, naming the file. A labelled file cut exactly at the end of its
+columns, its whole trailer gone, cannot be told from one written before the trailer: it loads as such
+(`count_only`, the same answers).

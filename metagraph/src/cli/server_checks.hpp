@@ -596,6 +596,21 @@ Json::Value headers_unique_json(const std::vector<HeaderPair> &pairs, size_t num
 Json::Value labels_disjoint_json(const std::vector<HeaderPair> &pairs, size_t num_threads = 0,
                                  size_t max_examples = 10, size_t max_listed = 10);
 
+// The identity of a file on disk at one moment: its device, inode, size and modification time
+// (ns, the clock of std::filesystem::last_write_time). A file renamed over, rewritten or rebuilt
+// differs in one of them at least. A server compares an annotation's stamp with the one taken
+// at start-up before it loads the pair into RAM with the resident pair's record mapping (H4)
+struct FileStamp {
+    uint64_t device = 0;
+    uint64_t inode = 0;
+    uint64_t size = 0;
+    int64_t mtime_ns = 0;
+
+    bool operator==(const FileStamp &other) const = default;
+};
+// |path|'s stamp now, nullopt when it cannot be read (no such file, no permission)
+std::optional<FileStamp> file_stamp(const std::string &path);
+
 } // namespace cli
 } // namespace mtg
 

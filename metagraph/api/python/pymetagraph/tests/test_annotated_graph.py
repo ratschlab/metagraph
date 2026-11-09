@@ -166,3 +166,12 @@ def test_record_mapping_of_another_annotation_raises(tmp_path):
     run("annotate", "-i", "graph.dbg", "--anno-filename", "--index-header-coords", "-o",
         "anno", "data.fa")
     assert pymetagraph.AnnotatedGraph(graph_path, anno_path).labels == ["data.fa"]
+
+
+def test_annotation_of_unknown_format_raises(index, tmp_path):
+    # an existing annotation file whose extension no annotation type has: RuntimeError, never
+    # the end of the Python process
+    unknown = tmp_path / "graph.unknown.annodbg"
+    shutil.copyfile(index[1], unknown)
+    with pytest.raises(RuntimeError, match="Unknown annotation format"):
+        pymetagraph.AnnotatedGraph(index[0], unknown)

@@ -731,6 +731,23 @@ int run_server(Config *config) {
     Json::Value graph_summary;
     // and the identity of the indexes it serves together (GET /capabilities' composite_fp)
     Json::Value composite_fp;
+    // the stamp of each pair's annotation file when its load began (a multi-graph server): a
+    // copy of the pair loaded into RAM for one request shares the resident pair's record mapping
+    // only while the annotation on disk is still that file (resident_mapping)
+    std::map<GraphPair, std::optional<FileStamp>> annotation_stamps;
+    // The record mapping a copy of |pair| loaded into RAM for one request is built with: the
+    // resident index's, checked at start-up, while the pair's annotation on disk is the file
+    // loaded then (its stamp unchanged), so that no request reads its .seqs again; null when the
+    // annotation was replaced (or cannot be stat'ed): the copy then loads its .seqs from disk
+    // with the load's checks (H4, the verification's finding 2: a replaced annotation paired
+    // with the resident mapping answered other records)
+    auto resident_mapping = [&](const GraphPair &pair, const AnnotatedDBG &resident)
+            -> std::shared_ptr<const annot::CoordToHeader> {
+        const auto it = annotation_stamps.find(pair);
+        if (it == annotation_stamps.end() || !it->second || *it->second != file_stamp(pair.second))
+            return nullptr;
+        return resident.share_coord_to_header();
+    };
     // a single-graph server's headers_unique and labels_disjoint of GET /capabilities, set before
     // its index is ready
     Json::Value single_headers_unique;
@@ -904,6 +921,10 @@ int run_server(Config *config) {
             prepare_pattern_graph(loaded_graphs[i], unique_graph_paths[i], list_preparation);
         }
 
+        // each annotation's stamp before it is read (resident_mapping)
+        for (const auto &[pair, index] : graphs_cache) {
+            annotation_stamps[pair] = file_stamp(pair.second);
+        }
         logger->info("[Server] Loading {} annotation(s)...", graphs_cache.size());
         #pragma omp parallel for num_threads(get_num_threads() * num_server_threads) schedule(dynamic)
         for (size_t i = 0; i < graphs_cache.size(); ++i) {
@@ -1148,15 +1169,17 @@ int run_server(Config *config) {
                                             config_copy.infbase = graph_fname;
                                             config_copy.infbase_annotators = { anno_fname };
                                             // as /traverse, /resolve and /pattern load a pair
-                                            // into RAM: with the resident pair's mapping,
-                                            // checked at start-up (its .seqs is not read
-                                            // again), and a load that fails throws, so that
-                                            // it fails this request alone (the route's 400
-                                            // with the load's message), never the server
-                                            // (H4 review S2)
-                                            auto mapping = graphs_cache.at({ graph_fname, anno_fname })
-                                                                   ->share_coord_to_header();
-                                            config_copy.no_coord_mapping = !mapping;
+                                            // into RAM: with the resident pair's mapping while
+                                            // its annotation is unchanged (resident_mapping),
+                                            // and a load that fails throws, so that it fails
+                                            // this request alone (the route's 400 with the
+                                            // load's message), never the server (H4 review S2)
+                                            const AnnotatedDBG &resident
+                                                    = *graphs_cache.at({ graph_fname, anno_fname });
+                                            auto mapping = resident_mapping(
+                                                    { graph_fname, anno_fname }, resident);
+                                            config_copy.no_coord_mapping
+                                                    = !resident.get_coord_to_header();
                                             PatternPreparation preparation;
                                             preparation.progress = false;
                                             index_loaded = initialize_annotated_dbg(
@@ -1337,12 +1360,13 @@ int run_server(Config *config) {
             preparation.progress = false;
             // the resident index of this very pair (graphs_cache's key is the pair, its
             // annotation path the one loaded here), so its mapping is this annotation's
-            // .seqs, and a resident without one (no .seqs beside the annotation, or
-            // --no-coord-mapping) has none for its copy either: the .seqs is not looked for
-            // again, so the operator's notice of a missing one is logged at start-up, not
-            // by every request
-            auto mapping = resident.share_coord_to_header();
-            config_copy.no_coord_mapping = !mapping;
+            // .seqs while the annotation on disk is the file loaded at start-up
+            // (resident_mapping; else the copy loads its .seqs, with the load's checks), and a
+            // resident without one (no .seqs beside the annotation, or --no-coord-mapping) has
+            // none for its copy either: the .seqs is not looked for again, so the operator's
+            // notice of a missing one is logged at start-up, not by every request
+            auto mapping = resident_mapping(pair, resident);
+            config_copy.no_coord_mapping = !resident.get_coord_to_header();
             return initialize_annotated_dbg(config_copy, preparation, std::move(mapping));
         }, [&](std::unique_ptr<AnnotatedDBG> &&loaded, LoadReservation &&reservation) {
             const double load_ms = timer.elapsed() * 1000;

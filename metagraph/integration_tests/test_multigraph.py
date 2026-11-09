@@ -3500,6 +3500,14 @@ class TestRecordMappingAtLoad(TestingBase):
              '--coordinates', '-o', 'three', 'big.fa', 'small.fa', 'third.fa'])
         run(['transform_anno', '-p', '1', '--anno-type', 'column_coord', '--coordinates',
              '-o', 'three', 'three.column.annodbg'])
+        # a rebuild of the same files in the other order, with its own .seqs: consistent, and
+        # of the same column count as the annotation it replaces under a running server
+        run(['annotate', '-p', '1', '--anno-filename', '-i', 'graph.dbg', '--anno-type', 'column',
+             '--coordinates', '-o', 'rev', 'small.fa', 'big.fa'])
+        run(['transform_anno', '-p', '1', '--anno-type', 'column_coord', '--coordinates',
+             '-o', 'rev', 'rev.column.annodbg'])
+        run(['annotate', '-p', '1', '-i', 'graph.dbg', '--anno-filename', '--index-header-coords',
+             '-o', 'rev', 'small.fa', 'big.fa'])
         # the mappings: of the files in column order, in the other order, and of one file
         for name, files in (('right', ['big.fa', 'small.fa']), ('swapped', ['small.fa', 'big.fa']),
                             ('subset', ['big.fa'])):
@@ -3660,10 +3668,11 @@ class TestRecordMappingAtLoad(TestingBase):
 
     def test_a_search_load_into_ram_never_exits_the_server(self):
         # /search with in_ram on a --mmap server loads the pair with the resident pair's
-        # mapping, checked at start-up, as /traverse, /resolve and /pattern do: a .seqs
-        # replaced on disk is not read again. A load that fails (here the annotation replaced by
-        # one of three columns, which the resident's mapping of two is not, and the .seqs on
-        # disk of two columns refused) fails that request alone, the route's 400 with the load's
+        # mapping, checked at start-up, as /traverse, /resolve and /pattern do, while the
+        # annotation on disk is the file loaded then: a .seqs replaced alone is not read again;
+        # an annotation replaced has its .seqs read and checked. A load that fails (here the
+        # annotation replaced by one of three columns, and the .seqs on disk of two columns
+        # refused) fails that request alone, the route's 400 with the load's
         # message as error (as /traverse, /resolve and /pattern answer a load that fails), and
         # the server runs on (H4 review S2: it exited)
         out = os.path.join(self.d, 'live')
@@ -3696,6 +3705,16 @@ class TestRecordMappingAtLoad(TestingBase):
             replace(os.path.join(self.d, 'swapped.seqs'), seqs)
             loaded = server.post('search', dict(query, in_ram=True))
             self.assertEqual((200, resident.json()), (loaded.status_code, loaded.json()))
+            # the annotation and its .seqs replaced by a rebuild of the files in the other
+            # order (the same column count): the annotation is not the one loaded at start-up,
+            # so the copy loads its .seqs from disk with the load's checks, and answers the
+            # same records (with the resident's mapping it answered big.fa's for small.fa's:
+            # H4's verification, finding 2)
+            replace(os.path.join(self.d, 'rev.column_coord.annodbg'), anno)
+            replace(os.path.join(self.d, 'rev.seqs'), seqs)
+            loaded = server.post('search', dict(query, in_ram=True))
+            self.assertEqual((200, resident.json()), (loaded.status_code, loaded.json()))
+            self.assertEqual(['s1'], [r['sample'] for r in loaded.json()[0]['results']])
             # the annotation replaced: the request fails, the route's 400 with the load's message
             replace(os.path.join(self.d, 'three.column_coord.annodbg'), anno)
             failed = server.post('search', dict(query, in_ram=True))
@@ -3710,18 +3729,43 @@ class TestRecordMappingAtLoad(TestingBase):
             self.assertEqual((200, resident.json()), (again.status_code, again.json()))
         finally:
             server.stop()
-        self.assertIn("The record mapping offered for " + anno, server.text())
+        # a replaced annotation is never offered the resident's mapping: its own .seqs is read
+        self.assertNotIn("The record mapping offered for " + anno, server.text())
 
     def test_the_row_diff_form_checks_an_old_mapping_by_its_count_only(self):
         # the documented limit: the row-diff forms state no coordinates per column, so an old
         # .seqs of the right count but swapped columns is served, its order stated unverified
         graph, anno = self.pair('row_diff_brwt_coord', 'swapped', False)
+        # a query of b2's tail: its k-mers sit at coordinates 510-539 of big.fa's column, which
+        # the swapped mapping states 30 k-mers for (small.fa's), so mapping them to records
+        # throws. The request fails with the route's 400 naming the coordinate, and the server
+        # runs on (it aborted: the query's pool ended the process on a task that threw, H4's
+        # verification, finding 1); the CLI exits 1 with the message
+        records = dict(named_records_of([os.path.join(self.d, 'big.fa')]))
+        tail = records['b2'][-60:]
         server = Server(['-i', graph, '-a', anno], os.path.join(self.d, 'rd_swapped.log'))
         try:
             caps = server.get('capabilities').json()
+            for query in ({'FASTA': f'>q\n{tail}'},
+                          {'FASTA': f'>q\n{tail}', 'query_coords': True}):
+                with self.subTest(query=query):
+                    ret = server.post('search', query)
+                    self.assertEqual(400, ret.status_code, ret.text)
+                    self.assertIn('Coordinate', ret.json()['error'])
+                    self.assertIn('out of range', ret.json()['error'])
+                    self.assertIsNone(server.process.poll())
+            self.assertEqual(200, server.get('capabilities').status_code)
         finally:
             server.stop()
         self.assertEqual('count_only', caps['pair_summary']['seqs_order'])
+        tail_fa = os.path.join(self.d, 'tail.fa')
+        with open(tail_fa, 'w') as f:
+            f.write(f'>q\n{tail}\n')
+        res = subprocess.run(shlex.split(METAGRAPH) + ['query', '--query-mode', 'coords', '-i', graph,
+                                                       '-a', anno, tail_fa],
+                             stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        self.assertEqual(1, res.returncode, res.stderr.decode())
+        self.assertIn(f"Cannot query '{tail_fa}': Coordinate", res.stderr.decode())
 
 
 @unittest.skipIf(PROTEIN_MODE, "the fixture is DNA")

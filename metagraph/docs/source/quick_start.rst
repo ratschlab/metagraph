@@ -567,10 +567,10 @@ the check at load::
                        -a annotation.row_diff_brwt_coord.annodbg -o annotation <files in column order>
 
 A ``.seqs`` written by an earlier version states no labels: its number of columns is checked, and its column order
-only by the coordinate check on ``column_coord`` and ``brwt_coord``. A ``.seqs`` that was cut short is refused. To
-certify an earlier file, build the mapping again with the current version (with ``-a``) and check that the new file
-starts with the old file's bytes and that the labels' marker ``mtg-cols`` follows exactly where the old file ends
-(the commands work with GNU and macOS tools)::
+only by the coordinate check on ``column_coord`` and ``brwt_coord``. A ``.seqs`` cut short inside its columns or its
+labels is refused. To certify an earlier file, build the mapping again with the current version (with ``-a``) and
+check that the new file starts with the old file's bytes and that the labels' marker ``mtg-cols`` follows exactly
+where the old file ends (the commands work with GNU and macOS tools)::
 
     n=$(wc -c < old.seqs)
     head -c "$n" new.seqs | cmp -s - old.seqs \
