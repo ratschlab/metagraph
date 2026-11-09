@@ -194,7 +194,7 @@ bitmap_vector::bitmap_vector(std::initializer_list<bool> init)
 
 bitmap_vector::bitmap_vector(sdsl::bit_vector&& vector)
       : num_set_bits_(sdsl::util::cnt_one_bits(vector)),
-        bit_vector_(vector.is_mapped() ? sdsl::bit_vector(vector) : std::move(vector)) {}
+        bit_vector_(std::move(vector)) {}
 
 void bitmap_vector::set(uint64_t id, bool val) {
     if (bit_vector_[id] == val)

@@ -44,7 +44,7 @@ class Rainbow : public RainbowMatrix {
     uint64_t num_relations_ = 0;
 
     // TODO: try out sdsl::dac_vector<> or other compression methods
-    sdsl::bit_vector row_codes_;
+    sdsl::packed_vector_view<1> row_codes_;
     bit_vector_rrr<> row_code_delimiters_;
     MatrixType reduced_matrix_;
 

@@ -3,6 +3,8 @@
 
 #include <vector>
 
+#include <sdsl/packed_vector_view.hpp>
+
 #include "annotation/int_matrix/base/int_matrix.hpp"
 #include "common/logger.hpp"
 
@@ -19,7 +21,7 @@ namespace matrix {
  * on binary columns of the indexing matrix.
  */
 template <class BaseMatrix,
-          class Values = sdsl::int_vector<>,
+          class Values = sdsl::packed_vector_view<0>,
           class Delims = bit_vector_smart>
 class TupleCSCMatrix : public BinaryMatrix, public MultiIntMatrix, public GetEntrySupport {
   public:
@@ -34,6 +36,20 @@ class TupleCSCMatrix : public BinaryMatrix, public MultiIntMatrix, public GetEnt
       : binary_matrix_(std::move(index_matrix)),
         delimiters_(std::move(delimiters)),
         column_values_(std::move(column_values)) {}
+
+    // Take owned column values, e.g. sdsl::int_vector<>, into Values.
+    template <class OwnedValues>
+        requires (!std::is_same_v<OwnedValues, Values>)
+    TupleCSCMatrix(BaseMatrix&& index_matrix,
+                   std::vector<Delims>&& delimiters,
+                   std::vector<OwnedValues>&& column_values)
+      : binary_matrix_(std::move(index_matrix)),
+        delimiters_(std::move(delimiters)) {
+        column_values_.reserve(column_values.size());
+        for (auto &values : column_values) {
+            column_values_.emplace_back(std::move(values));
+        }
+    }
 
     // return tuple sizes (if not zero) at each entry
     std::vector<RowValues> get_row_values(std::span<const Row> rows,

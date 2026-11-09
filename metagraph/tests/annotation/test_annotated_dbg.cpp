@@ -1892,7 +1892,7 @@ TYPED_TEST(AnnotatedDBGNoNTest, get_top_labels) {
 }
 #endif
 
-// `RowDiff<RowDisk>` can load via either `sdsl::mmap_ifstream` or
+// `RowDiff<RowDisk>` can load via either `sdsl::shared_mapper_ifstream` or
 // `utils::named_ifstream`. Verify both paths produce the same query results.
 TEST(RowDiffDiskAnnotatorTest, LoadConsistentAcrossMmapSettings) {
     const std::vector<std::string> sequences {

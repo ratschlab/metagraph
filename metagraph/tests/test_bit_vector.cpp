@@ -516,7 +516,7 @@ TYPED_TEST(BitVectorTest, LoadWithMMAP) {
 
         vector.reset(new TypeParam());
         ASSERT_TRUE(vector);
-        sdsl::mmap_ifstream instream(test_dump_basename, std::ios::binary);
+        sdsl::shared_mapper_ifstream instream(test_dump_basename, std::ios::binary);
         ASSERT_TRUE(vector->load(instream));
         vector.reset(new TypeParam());
         ASSERT_TRUE(vector->load(instream));
@@ -985,8 +985,8 @@ TYPED_TEST(BitVectorTest, operator_neq) {
 template <uint16_t BlockSize>
 void check_rrr_storage_roundtrip() {
     using Owned = sdsl::rrr_vector<BlockSize>;
-    using View = sdsl::rrr_vector<BlockSize, detail::annotation_vector_io<0>, 32,
-                                  detail::annotation_vector_io>;
+    using View = sdsl::rrr_vector<BlockSize, sdsl::packed_vector_view<0>, 32,
+                                  sdsl::packed_vector_view>;
     for (uint64_t size : {0, 1, 15, 63, 64, 65, 2048, 10003}) {
         sdsl::bit_vector bits(size, 0);
         for (uint64_t i = 0; i < size; ++i)

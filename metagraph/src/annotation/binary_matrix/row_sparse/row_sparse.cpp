@@ -33,7 +33,7 @@ RowSparse::RowSparse(const std::function<void(const RowCallback &)> &call_rows,
     assert(set_bits.size() == num_relations);
 
     boundary_ = bit_vector_small(boundary);
-    set_bits_ = sdsl::vlc_vector<>(set_bits);
+    set_bits_ = decltype(set_bits_)(set_bits);
     utils::remove_temp_dir(tmp_dir);
 }
 
