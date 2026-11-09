@@ -77,21 +77,21 @@ auto NodeFirstCache::get_parent_pair(edge_index edge, edge_index child_hint) con
     if (boss.get_k() == 1)
         return std::make_pair(boss.bwd(edge), edge);
 
-    if (auto fetch = first_cache_.TryGet(edge)) {
-        assert(fetch->first == boss.bwd(edge));
-        return *fetch;
+    if (auto fetch = first_cache_.find(edge)) {
+        assert((*fetch)[0] == boss.bwd(edge));
+        return std::make_pair((*fetch)[0], (*fetch)[1]);
     }
 
     // if a child of edge has been cached already, check if we can compute
     // get_parent_pair with only two bwd calls
     if (child_hint) {
-        if (auto fetch = first_cache_.TryGet(child_hint)) {
+        if (auto fetch = first_cache_.find(child_hint)) {
             const auto &[cur, first] = *fetch;
             if (cur == edge) {
                 auto ret_val = std::make_pair(boss.bwd(edge), boss.bwd(first));
                 assert(boss.get_node_last_value(ret_val.second)
                     == boss.get_minus_k_value(edge, boss.get_k() - 1).first);
-                first_cache_.Put(edge, ret_val);
+                first_cache_.insert(edge, { ret_val.first, ret_val.second });
                 return ret_val;
             }
         }
@@ -108,14 +108,14 @@ auto NodeFirstCache::get_parent_pair(edge_index edge, edge_index child_hint) con
     assert(std::make_pair(boss.get_node_last_value(i), boss.bwd(i))
         == boss.get_minus_k_value(edge, boss.get_k() - 1));
     auto ret_val = std::make_pair(parent, i);
-    first_cache_.Put(edge, ret_val);
+    first_cache_.insert(edge, { parent, i });
 
     return ret_val;
 }
 
 auto NodeFirstCache
 ::get_prefix_rc(edge_index edge, const std::string &spelling) const -> edge_index {
-    if (auto fetch = prefix_rc_cache_.TryGet(edge))
+    if (auto fetch = prefix_rc_cache_.find(edge))
         return *fetch;
 
     const BOSS &boss = dbg_succ_.get_boss();
@@ -125,7 +125,7 @@ auto NodeFirstCache
     rev_seq.pop_back();
 
     if (rev_seq[0] == BOSS::kSentinel) {
-        prefix_rc_cache_.Put(edge, 0);
+        prefix_rc_cache_.insert(edge, 0);
         return 0;
     }
 
@@ -134,17 +134,17 @@ auto NodeFirstCache
     auto [rc_edge_1, rc_edge_2, end] = boss.index_range(encoded.begin(), encoded.end());
 
     if (end != encoded.end()) {
-        prefix_rc_cache_.Put(edge, 0);
+        prefix_rc_cache_.insert(edge, 0);
         return 0;
     }
 
-    prefix_rc_cache_.Put(edge, rc_edge_2);
+    prefix_rc_cache_.insert(edge, rc_edge_2);
     return rc_edge_2;
 }
 
 auto NodeFirstCache
 ::get_suffix_rc(edge_index edge, const std::string &spelling) const -> edge_index {
-    if (auto fetch = suffix_rc_cache_.TryGet(edge))
+    if (auto fetch = suffix_rc_cache_.find(edge))
         return *fetch;
 
     const BOSS &boss = dbg_succ_.get_boss();
@@ -153,7 +153,7 @@ auto NodeFirstCache
     std::string rev_seq = spelling.substr(1);
 
     if (rev_seq[0] == BOSS::kSentinel) {
-        suffix_rc_cache_.Put(edge, 0);
+        suffix_rc_cache_.insert(edge, 0);
         return 0;
     }
 
@@ -162,11 +162,11 @@ auto NodeFirstCache
     auto [rc_edge_1, rc_edge_2, end] = boss.index_range(encoded.begin(), encoded.end());
 
     if (end != encoded.end()) {
-        suffix_rc_cache_.Put(edge, 0);
+        suffix_rc_cache_.insert(edge, 0);
         return 0;
     }
 
-    suffix_rc_cache_.Put(edge, rc_edge_1);
+    suffix_rc_cache_.insert(edge, rc_edge_1);
     return rc_edge_1;
 }
 
