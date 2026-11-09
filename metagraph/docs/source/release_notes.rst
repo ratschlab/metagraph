@@ -14,8 +14,11 @@ loads. A mapping with a different number of columns is refused at load, and
 that used the mapping stopped the process. ``annotate --index-header-coords``
 now stores the label of each column in the ``.seqs`` file, and a load refuses a
 mapping whose labels differ from the annotation's labels. With ``-a``, the
-command checks each input file against its annotation column first. Earlier
-versions ignore the stored labels.
+command spot-checks each input file against its annotation column first: the
+column must hold the file's first and last k-mers in the graph, and a file with
+no k-mer of the graph is refused. The check cannot tell a file of the same
+sequences under other headers, so the records still rest on passing the files
+the annotation was built from. Earlier versions ignore the stored labels.
 
 Case-sensitive DNA packed reverse complements now preserve case, matching
 string reverse complements: ``ACG`` becomes ``CGT``, and ``acg`` becomes ``cgt``.

@@ -4448,7 +4448,7 @@ two thousand chunks (a name over many chunks repeats each chunk's entry); a clie
 | `graph_representation` | string | the graph's type as `--graph` names it (`succinct`, `hash`, `hashstr`, `hashfast`, `sshash`, `bitmap`) |
 | `annotation_form` | string | the annotation's type as `--anno-type` names it (e.g. `row_diff_brwt_coord`) |
 | `decode_charged` | boolean | a traversal under a memory budget charges its annotation reads before they are held |
-| `seqs_order` | string \| null | what the load verified of the order of its record mapping's (`.seqs`) columns: `"verified"` (its stated column labels matched the annotation's), `"count_only"` (it states none: its column count was checked, its order not certified), null without a `.seqs` (H4, SPEC-multigraph-envelope.md §9.1) |
+| `seqs_order` | string \| null | what the load verified of the order of its record mapping's (`.seqs`) columns: `"verified"` (its stated column labels matched the annotation's, in order: the column order, the records resting on the build's provenance), `"count_only"` (it states none: its column count was checked, its order not certified), null without a `.seqs` (H4, SPEC-multigraph-envelope.md §9.1) |
 | `support_fp` | string | FNV-1a-64 (16 hex) over its capability fields, not its identity or size: SPEC-multigraph-envelope.md §8.1 states the fields and the text |
 
 <!-- schema: graph_summary_traversal -->

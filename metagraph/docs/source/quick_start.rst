@@ -558,10 +558,13 @@ annotation and refuses to load the index (``query``, ``align`` and ``server_quer
 files) when the number of columns differs, when a stated label differs from the annotation's label of that column
 (the files were passed in another order, or under another spelling of their paths: pass them as
 ``metagraph stats --print-col-names`` prints them), or, on ``column_coord`` and ``brwt_coord`` annotations, when a
-column holds more coordinates than the ``.seqs`` states k-mers for it. Pass the annotation with ``-a`` to check
-the files against it while the mapping is built: each file's column must hold the coordinates of the file's first
-and last k-mers, and the annotation's labels are stated, so that files at another path or renamed columns pass
-the check at load::
+column holds more coordinates than the ``.seqs`` states k-mers for it. Pass the annotation with ``-a`` to
+spot-check the files against it while the mapping is built: each file's column must hold the coordinates of the
+file's first and last k-mers that the graph has (gaps of ``N`` are passed over, and a file with k-mers none of which
+the graph has is refused), and the annotation's labels are stated, so that files at another path or renamed columns
+pass the check at load. The spot check refuses files passed in another order or from another file set, but a file
+of the same sequences under other headers passes: that the records are those the annotation was made from rests on
+passing the files it was built from::
 
     metagraph annotate --anno-filename --index-header-coords -i graph.dbg \
                        -a annotation.row_diff_brwt_coord.annodbg -o annotation <files in column order>

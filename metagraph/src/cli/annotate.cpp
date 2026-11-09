@@ -2,6 +2,8 @@
 
 #include <algorithm>
 #include <filesystem>
+#include <optional>
+#include <string_view>
 
 #include <omp.h>
 
@@ -288,18 +290,47 @@ void check_header_labels(const std::vector<std::string> &files,
     }
 }
 
-// A stretch of a file's sequences, for the check of a record mapping against an annotation
-// (annotate --index-header-coords -a): |sequence| (at most kProbeLength characters) and the
-// coordinate of its first k-mer in the file's column
+// A stretch of a file's sequences, for the spot check of a record mapping against an annotation
+// (annotate --index-header-coords -a): |sequence| (at most kProbeLength characters, holding a
+// k-mer the graph has; empty: none found) and the coordinate of its first k-mer in the file's
+// column
 struct CoordinateProbe {
     std::string sequence;
     uint64_t first = 0;
 };
 constexpr size_t kProbeLength = 1000;
+// the end of each record kept for its file's tail probe, looked for in it from its end: an
+// assembly's gap of Ns (10 kbp at a GRCh38 chromosome's end) has no k-mer of the graph
+constexpr size_t kTailSearch = 1 << 16;
+
+// The probe of |sequence|, whose first k-mer is at |coordinate|: the first stretch of
+// kProbeLength characters holding a k-mer the graph has, from its start or (|from_end|) from its
+// end, the stretches overlapping by k - 1 characters so that each k-mer is in one; none when the
+// graph has none of its k-mers (characters it cannot hold, a gap of Ns, are passed over so)
+std::optional<CoordinateProbe> find_probe(const graph::DeBruijnGraph &dbg,
+                                          std::string_view sequence, uint64_t coordinate,
+                                          bool from_end) {
+    const size_t k = dbg.get_k();
+    if (sequence.size() < k)
+        return std::nullopt;
+    const size_t num_kmers = sequence.size() - k + 1;
+    const size_t step = std::max(kProbeLength, k) - k + 1;
+    for (size_t done = 0; done < num_kmers; done += step) {
+        // the k-mers [begin, end) of this stretch
+        const size_t begin = from_end ? num_kmers - std::min(num_kmers, done + step) : done;
+        const size_t end = from_end ? num_kmers - done : std::min(num_kmers, done + step);
+        const std::string_view stretch = sequence.substr(begin, end - begin + k - 1);
+        bool found = false;
+        dbg.map_to_nodes(stretch, [&](auto node) { found |= node != graph::DeBruijnGraph::npos; });
+        if (found)
+            return CoordinateProbe { std::string(stretch), coordinate + begin };
+    }
+    return std::nullopt;
+}
 
 // Whether column |column| of |anno_graph|'s coordinate annotation (|matrix|) holds the coordinate
-// of the first and of the last k-mer of |probe| that the graph has, at their nodes (none such:
-// nothing to check): -1 when it does, else the coordinate it lacks
+// of the first and of the last k-mer of |probe| that the graph has, at their nodes (an empty
+// probe: nothing to check): -1 when it does, else the coordinate it lacks
 int64_t check_probe(const graph::AnnotatedDBG &anno_graph,
                     const annot::matrix::MultiIntMatrix &matrix, uint64_t column,
                     const CoordinateProbe &probe) {
@@ -348,15 +379,21 @@ void annotate_data(std::shared_ptr<graph::DeBruijnGraph> graph,
         // Collect sequence headers and compute k-mer counts
         std::vector<std::vector<std::string>> headers(files.size());
         std::vector<std::vector<uint64_t>> num_kmers(files.size());
-        // with -a, the head of each file's first sequence and the tail of its last one, whose
-        // coordinates the annotation's column of the file must hold
+        // with -a, each file's first stretch with a k-mer the graph has (find_probe), and the
+        // last such stretch in the end of its last record, whose coordinates the annotation's
+        // column of the file must hold
         const bool probe = !config.infbase_annotators.empty();
+        const graph::DeBruijnGraph &probed_graph = anno_graph->get_graph();
         std::vector<CoordinateProbe> heads(files.size());
         std::vector<CoordinateProbe> tails(files.size());
         #pragma omp parallel for num_threads(get_num_threads()) default(shared) schedule(dynamic)
         for (size_t i = 0; i < files.size(); ++i) {
             size_t last_record = 0;
             uint64_t coordinate = 0;
+            // the end of the last record so far (at most kTailSearch characters), from
+            // |tail_coordinate| on
+            std::string tail;
+            uint64_t tail_coordinate = 0;
             // the header of every record, those too short to have k-mers too: a record
             // without k-mers is not in the record mapping, but a repeat of its header is
             // refused all the same, so that a file is accepted or refused by its headers alone
@@ -407,17 +444,25 @@ void annotate_data(std::shared_ptr<graph::DeBruijnGraph> graph,
                         num_kmers[i].push_back(0);
                     }
                     if (probe) {
-                        if (heads[i].sequence.empty())
-                            heads[i] = { sequence.substr(0, kProbeLength), coordinate };
-                        const size_t tail = std::min(sequence.size(), kProbeLength);
-                        tails[i] = { sequence.substr(sequence.size() - tail),
-                                     coordinate + (sequence.size() - tail) };
+                        // looked for in each record until found: a file with no k-mer of the
+                        // graph is mapped whole, and refused below
+                        if (heads[i].sequence.empty()) {
+                            if (auto head = find_probe(probed_graph, sequence, coordinate, false))
+                                heads[i] = std::move(*head);
+                        }
+                        const size_t kept = std::min(sequence.size(), kTailSearch);
+                        tail.assign(sequence, sequence.size() - kept, kept);
+                        tail_coordinate = coordinate + (sequence.size() - kept);
                     }
                     coordinate += sequence.size() - k + 1;
                     num_kmers[i].back() += sequence.size() - k + 1;
                     last_record = record;
                 }
             );
+            if (probe) {
+                if (auto last = find_probe(probed_graph, tail, tail_coordinate, true))
+                    tails[i] = std::move(*last);
+            }
             if (!config.allow_unchecked_headers) {
                 // find_header() answers a header with its first record only
                 assert(record_headers.size() >= headers[i].size());
@@ -439,9 +484,11 @@ void annotate_data(std::shared_ptr<graph::DeBruijnGraph> graph,
         // each column's label, stated in the .seqs: a load compares them with the annotation's
         // labels, so that files passed in another order are refused there. Without -a, the label
         // --anno-filename gives the file the column was made from (its name as passed); with -a,
-        // the annotation's own, once each file is found to be its column: the column holds the
-        // coordinates of the file's first and last k-mers (a renamed column, or files at
-        // another path, then pass the load's check)
+        // the annotation's own, once each file passed the spot check against its column: the
+        // column holds the coordinates of the file's probes (a renamed column, or files at
+        // another path, then pass the load's check). A spot check: a file of the same sequences
+        // under other headers, or with other records between its probes, passes it (what the
+        // records are rests on the files passed being those the annotation was made from)
         std::vector<std::string> column_labels(files.begin(), files.end());
         if (probe) {
             const std::string &anno_file = config.infbase_annotators.at(0);
@@ -462,6 +509,21 @@ void annotate_data(std::shared_ptr<graph::DeBruijnGraph> graph,
                 exit(1);
             }
             for (size_t i = 0; i < files.size(); ++i) {
+                // a file with k-mers none of which the graph has (before GPT review 6 it passed,
+                // nothing checked); one without k-mers has no records in the mapping to bind
+                if (heads[i].sequence.empty() && !headers[i].empty()) {
+                    logger->error("The file '{}' has no k-mer of the graph: it cannot be checked "
+                                  "against column {} ('{}') of the annotation '{}'. Pass the files "
+                                  "the annotation was made from, in its column order (metagraph "
+                                  "stats --print-col-names lists the columns)", files[i], i,
+                                  labels[i], anno_file);
+                    exit(1);
+                }
+                if (!heads[i].sequence.empty() && tails[i].sequence.empty()) {
+                    logger->warn("The last record of '{}' has no k-mer of the graph in its last {} "
+                                 "characters: the file is checked by its first k-mers alone",
+                                 files[i], kTailSearch);
+                }
                 for (const CoordinateProbe *p : { &heads[i], &tails[i] }) {
                     if (const int64_t lacking = check_probe(*anno_graph, *matrix, i, *p);
                             lacking >= 0) {
@@ -474,8 +536,9 @@ void annotate_data(std::shared_ptr<graph::DeBruijnGraph> graph,
                     }
                 }
             }
-            logger->trace("Each of the {} files is its column of the annotation '{}': its labels "
-                          "are stated in the record mapping", files.size(), anno_file);
+            logger->trace("Each of the {} files passed the spot check against its column of the "
+                          "annotation '{}': its labels are stated in the record mapping",
+                          files.size(), anno_file);
             column_labels = labels;
         }
         annot::CoordToHeader headers_map(std::move(headers), std::move(num_kmers));

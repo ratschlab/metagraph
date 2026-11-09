@@ -468,8 +468,9 @@ class TestTraverseProtein(TestingBase):
     def test_the_record_mapping_is_checked_at_load(self):
         """The load's check of the .seqs (SPEC-multigraph-envelope.md section 10, H4) on a protein
         coordinate index, as UniParc's: the fixture's mapping states its labels (verified), one
-        written for the files in the other order is refused at load, and annotate -a checks the
-        files against the annotation's columns (the coordinates of their first and last k-mers)."""
+        written for the files in the other order is refused at load, and annotate -a spot-checks
+        the files against the annotation's columns (the coordinates of their first and last k-mers
+        in the graph; a file with none is refused)."""
         caps = self.session.get(f'{self.url}/capabilities', timeout=30).json()
         self.assertEqual('verified', caps['pair_summary']['seqs_order'])
         self.assertEqual({'value': True, 'collisions': 0, 'examples': []}, caps['labels_disjoint'])
@@ -508,6 +509,19 @@ class TestTraverseProtein(TestingBase):
         self.assertEqual(0, res.returncode, res.stderr.decode())
         res = query()
         self.assertEqual(0, res.returncode, res.stderr.decode())
+        # a file with k-mers none of which the graph has is refused, nothing written (GPT review
+        # 6, finding 12: it passed, nothing checked)
+        foreign = os.path.join(d, 'foreign.fa')
+        rng = random.Random(20261109)
+        with open(foreign, 'w') as f:
+            f.write('>f1\n' + ''.join(rng.choice('ACDEFGHIKLMNPQRSTVWY') for _ in range(300)) + '\n')
+        os.remove(os.path.join(d, 'annotation.seqs'))
+        res = annotate('-a', anno, foreign, *self.columns[1:])
+        self.assertEqual(1, res.returncode, res.stderr.decode())
+        self.assertIn(f"The file '{foreign}' has no k-mer of the graph: it cannot be checked "
+                      f"against column 0 ('{self.columns[0]}') of the annotation '{anno}'",
+                      res.stderr.decode())
+        self.assertFalse(os.path.exists(os.path.join(d, 'annotation.seqs')))
 
 
 if __name__ == '__main__':

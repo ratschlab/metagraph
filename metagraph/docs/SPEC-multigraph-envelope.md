@@ -354,7 +354,7 @@ listens:
 | `graph_representation` | string | the graph's type as `--graph` names it: `succinct`, `hash` (an ordered hash graph, packed or not: one file extension), `hashstr`, `hashfast`, `sshash` or `bitmap`; of a PRIMARY graph (wrapped in `CanonicalDBG`) the wrapped graph's |
 | `annotation_form` | string | the annotation's type as `--anno-type` names it: the class the loader constructed from the file's extension, e.g. `row_diff_brwt_coord` (RefSeq r237, AllTheBacteria, UniParc), `row_diff_int_brwt` (Logan's `*_RNA` chunks), `row_diff_disk`, `column` |
 | `decode_charged` | bool | whether a traversal under a memory budget charges the pair's annotation reads before they are held (`SPEC-labeled-traversal-core.md` §6.8): the traversal oracle's own predicate on the matrix. True on the row-diff forms over an index matrix with a single-row read (`row_diff`, `row_diff_coord`, `row_diff_brwt`, `row_diff_brwt_coord`, `row_diff_disk`, `row_diff_sparse`, `row_diff_flat`, `row_diff_int_brwt`) and on plain `brwt` and `column`; false on `column_coord`, `brwt_coord`, `int_brwt`, `row_diff_int_disk`, `row_diff_disk_coord`, `flat`, `row_sparse`, `row`, `bin_rel_wt`, `rbfish` and `rb_brwt`. Plain `brwt` and `column` stay `annotation: "unbudgeted"` on `/pattern` (budgeted there is a row-diff form only): the two fields together state that nuance |
-| `seqs_order` | string or null | what the load verified of the order of the pair's record mapping (`.seqs`) columns (H4, sections 9.1 and 10): `"verified"`, its stated column labels equalled the annotation's; `"count_only"`, it states none (written before H4): its column count was checked and its order not certified (on `column_coord` and `brwt_coord` its columns' coordinates were also bounded, section 10, which certifies no order); null, no `.seqs` loaded (`traversal.has_coord_to_header` false) |
+| `seqs_order` | string or null | what the load verified of the order of the pair's record mapping (`.seqs`) columns (H4, sections 9.1 and 10): `"verified"`, its stated column labels equalled the annotation's, in order (the column order: the records rest on the build's provenance, section 9.1); `"count_only"`, it states none (written before H4): its column count was checked and its order not certified (on `column_coord` and `brwt_coord` its columns' coordinates were also bounded, section 10, which certifies no order); null, no `.seqs` loaded (`traversal.has_coord_to_header` false) |
 | `traversal.counts` | string or null | `"presence_only"` on a count annotation (`row_diff_int_brwt`, `int_brwt`, `row_diff_int_disk`: walks read presence, `SPEC-labeled-traversal-core.md` §10.3), null on the others, so that a client without a graph sees it per pair |
 | `support_fp` | string | FNV-1a-64, 16 lowercase hex digits, over the pair's capability fields (below) |
 
@@ -502,13 +502,14 @@ name selects the column where one has it`).
 
 | Value | Guarantee |
 | --- | --- |
-| `"verified"` | the `.seqs` states its column labels (written by `annotate --index-header-coords` since H4) and each equalled the annotation's label of its column. Written without `-a`, the labels are the files' names as passed, so the guarantee rests on those names: the files were passed in the annotation's column order under the names it gave them. Written with `-a`, the labels are the annotation's own, copied once each file passed the probe of section 10 (its column holds the coordinates of the file's first and last k-mers, the last bounding the file's k-mer count from below), so the guarantee rests on that probe, not on names. Either way the records a header label selects are those of the files the columns were made from |
+| `"verified"` | the `.seqs` states its column labels (written by `annotate --index-header-coords` since H4) and they equal the annotation's column labels, in order. Written without `-a`, the labels are the files' names as passed: the files were passed in the annotation's column order under the names it gave them. Written with `-a`, the labels are the annotation's own, copied once each file passed the spot check of section 10: its column holds the coordinates of the file's probed k-mers (its first and last k-mers that the graph has), and a file with k-mers none of which the graph has is refused. Neither establishes that the records are those the columns were made from: that rests on the build's provenance (the files passed are those the annotation was made from). A file of the same sequences under other headers passes either way, and with `-a` so does one whose records between its probes differ |
 | `"count_only"` | the `.seqs` states no labels (written before H4): its number of columns equalled the annotation's, its order was not verified. On `column_coord` and `brwt_coord` each column's coordinates were also checked against its k-mers, which refuses some permutations but certifies none. A header-label answer on such a pair rests on a column order the load did not check: a `.seqs` written for the files in another order maps coordinates to other records |
 | null | no `.seqs` loaded: the pair's labels are columns only |
 
-A client that needs record identity requires `"verified"` on every pair whose header-label answers it merges, beside
-`headers_unique` and `labels_disjoint` true. Every r237 pair states `"count_only"` until its `.seqs` is rebuilt and
-certified (section 10).
+A client that merges header-label answers requires `"verified"` on every pair it merges, beside `headers_unique` and
+`labels_disjoint` true: the column order is then checked, and the records rest on the build's provenance, which no
+value of the load certifies. Every r237 pair states `"count_only"` until its `.seqs` is rebuilt and certified
+(section 10).
 
 Reference instances: sample 12 (`graph_summary.labels_disjoint` true beside `headers_unique` false: the certificates
 are independent; each pair `seqs_order: "count_only"`, r237's), sample 27 (a real run: `labels_disjoint` false, a
@@ -567,16 +568,32 @@ on it).
 to the columns', then each label, as the file's string vectors are written): for its i-th input file the label
 `--anno-filename` gives that file, its name exactly as passed. The check passes when the files are passed under the
 names the annotation's columns carry, in that order; a file passed under another spelling of its path is refused.
-With `-a <annotation>` the command checks each file against that annotation instead: the file's column must hold the
-coordinates of the file's first and last k-mers (of its first sequence and of its last) at their nodes, else it
-exits 1 naming the file, the column and the coordinate, and writes nothing; it then states the annotation's labels.
-That is how a mapping is written for an annotation whose columns were renamed, or whose files have moved.
+With `-a <annotation>` the command spot-checks each file against that annotation instead. The file's head probe is
+its first stretch of 1000 characters holding a k-mer the graph has, its tail probe the last such stretch in the last
+65536 characters of its last record (stretches without one, an assembly's gap of Ns, are passed over); the file's
+column must hold the coordinates of the first and last k-mer of each probe that the graph has, at their nodes, else
+it exits 1 naming the file, the column and the coordinate (`The file '<file>' is not column <i> ('<label>') of the
+annotation '<annotation>': the column lacks the file's k-mer at coordinate <c>. ...`), and writes nothing. A file
+with k-mers none of which the graph has is refused the same way, nothing written: `The file '<file>' has no k-mer of
+the graph: it cannot be checked against column <i> ('<label>') of the annotation '<annotation>'. Pass the files the
+annotation was made from, in its column order (metagraph stats --print-col-names lists the columns)` (before GPT
+review 6 it passed, nothing checked). A file whose last record has no k-mer of the graph in those 65536 characters is
+checked by its head probe alone, with a warning (`The last record of '<file>' has no k-mer of the graph in its last
+65536 characters: the file is checked by its first k-mers alone`); a file without k-mers (every record shorter than
+k) has no records in the mapping and nothing to check. The command then states the annotation's labels. That is how a
+mapping is written for an annotation whose columns were renamed, or whose files have moved. It is a spot check: it
+refuses files passed in another order and files of another file set whose probed k-mers the graph or the column
+lacks, but a file of the same sequences under other headers passes, and so does one whose records between its probes
+differ. What records a column's labels select rests on the build's provenance: the files passed are those the
+annotation was made from (section 9.1, `seqs_order`).
 Binaries before H4 read the columns and stop, so a `.seqs` with labels serves on them unchanged; an H4 binary reads a
 file that ends after its columns as one without labels, and fails the load of one with any other data after them.
 `metagraph stats <base>.seqs` states which it is (`column labels: stated` or `column labels: none`).
 
 **Certifying an existing `.seqs`.** The bytes before the labels are those an older binary writes for the same
-inputs. Rebuild the mapping with an H4 binary from the files (with `-a`, the checked way, wherever they are now). The
+inputs. Rebuild the mapping with an H4 binary from the files (with `-a`, the spot-checked way, wherever they are now:
+the files the annotation was made from, since the certificate below shows that the old file is the mapping of the
+files passed, in that order, and no more). The
 old file is the mapping of those files in that order when it is exactly the new one's columns: the new file starts with
 the old file's bytes AND the labels' marker `mtg-cols` starts exactly where the old file ends (a prefix alone is not
 enough: a truncated old file is a prefix too; since H4's review its load fails, see above). Portable (POSIX `wc`,

@@ -3615,9 +3615,10 @@ class TestRecordMappingAtLoad(TestingBase):
                 self.assertEqual(0, res.returncode, res.stderr.decode())
 
     def test_annotate_with_the_annotation_checks_the_files(self):
-        # -a: each file is checked to be its column of the annotation (the column holds the
-        # coordinates of its first and last k-mers), and the annotation's labels are stated, so
-        # that files at another path pass the load's check; without -a they are refused there
+        # -a: each file is spot-checked against its column of the annotation (the column holds
+        # the coordinates of its first and last k-mers in the graph), and the annotation's labels
+        # are stated, so that files at another path pass the load's check; without -a they are
+        # refused there
         def annotate(out, *args):
             return subprocess.run(shlex.split(METAGRAPH) + [
                     'annotate', '-p', '1', '-i', 'graph.dbg', '--anno-filename',
@@ -3665,6 +3666,81 @@ class TestRecordMappingAtLoad(TestingBase):
                                   os.path.join(self.d, 'moved_refused.log'))
         self.assertEqual(1, status, log)
         self.assertIn(f"its column 0 is '{absolute[0]}', the annotation's column 0 'big.fa'", log)
+
+    def test_annotate_with_the_annotation_is_a_spot_check(self):
+        # -a's check is a spot check (SPEC-multigraph-envelope.md sections 9.1 and 10; GPT review
+        # 6, finding 12): a file's probes are its first stretch with a k-mer the graph has and its
+        # last one in the end of its last record, past a gap of Ns longer than a probe. A file
+        # with k-mers none of which the graph has is refused, nothing written (before, nothing was
+        # checked and the pair was served "verified"). The same sequences under other headers
+        # pass: what the records are rests on the files passed, which no spot check can tell
+        d = os.path.join(self.d, 'spot')
+        os.makedirs(d)
+        rng = random.Random(20261109)
+        seq = lambda n: ''.join(rng.choice('ACGT') for _ in range(n))
+        gap = 'N' * 2500
+        g1, g2, p1 = seq(300), seq(300), seq(300)
+        files = {
+            'gapped.fa': [('g1', gap + g1), ('g2', g2 + gap)],
+            'plain.fa': [('p1', p1)],
+            # the gaps, and plain.fa's record between them: in the graph, not in column 0
+            'other.fa': [('o1', gap + p1), ('o2', p1 + gap)],
+            'foreign.fa': [('f1', seq(300)), ('f2', seq(300))],
+            'renamed.fa': [('r1', gap + g1), ('r2', g2 + gap)],
+            # gapped.fa's records and one of Ns alone, longer than the end the tail is looked in
+            'trailing.fa': [('g1', gap + g1), ('g2', g2 + gap), ('g3', 'N' * 70000)],
+        }
+        for fname, recs in files.items():
+            with open(os.path.join(d, fname), 'w') as f:
+                f.writelines(f'>{h}\n{s}\n' for h, s in recs)
+
+        def run(*cmd):
+            return subprocess.run(shlex.split(METAGRAPH) + list(cmd), cwd=d,
+                                  stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        for cmd in (['build', '-p', '1', '--mode', 'basic', '--graph', 'succinct', '-k', '31',
+                     '-o', 'graph', 'gapped.fa', 'plain.fa'],
+                    ['annotate', '-p', '1', '--anno-filename', '-i', 'graph.dbg', '--anno-type',
+                     'column', '--coordinates', '-o', 'anno', 'gapped.fa', 'plain.fa'],
+                    ['transform_anno', '-p', '1', '--anno-type', 'column_coord', '--coordinates',
+                     '-o', 'anno', 'anno.column.annodbg']):
+            res = run(*cmd)
+            self.assertEqual(0, res.returncode, res.stderr.decode()[-3000:])
+        anno = 'anno.column_coord.annodbg'
+
+        def annotate(out, *inputs):
+            return run('annotate', '-p', '1', '-i', 'graph.dbg', '--anno-filename',
+                       '--index-header-coords', '-a', anno, '-o', out, *inputs)
+        seqs = lambda out: os.path.join(d, f'{out}.seqs')
+        # the probes pass over the gaps, and are checked
+        res = annotate('gapped', 'gapped.fa', 'plain.fa')
+        self.assertEqual(0, res.returncode, res.stderr.decode())
+        self.assertNotIn('has no k-mer of the graph', res.stderr.decode())
+        res = annotate('other', 'other.fa', 'plain.fa')
+        self.assertEqual(1, res.returncode, res.stderr.decode())
+        self.assertIn(f"The file 'other.fa' is not column 0 ('gapped.fa') of the annotation "
+                      f"'{anno}': the column lacks the file's k-mer at coordinate 2500",
+                      res.stderr.decode())
+        self.assertFalse(os.path.exists(seqs('other')))
+        # no k-mer of the graph: refused
+        res = annotate('foreign', 'gapped.fa', 'foreign.fa')
+        self.assertEqual(1, res.returncode, res.stderr.decode())
+        self.assertIn(f"The file 'foreign.fa' has no k-mer of the graph: it cannot be checked "
+                      f"against column 1 ('plain.fa') of the annotation '{anno}'. Pass the files "
+                      f"the annotation was made from, in its column order", res.stderr.decode())
+        self.assertFalse(os.path.exists(seqs('foreign')))
+        # a last record without a k-mer of the graph in its end: the head alone, with a warning
+        res = annotate('trailing', 'trailing.fa', 'plain.fa')
+        self.assertEqual(0, res.returncode, res.stderr.decode())
+        self.assertIn("The last record of 'trailing.fa' has no k-mer of the graph in its last "
+                      "65536 characters: the file is checked by its first k-mers alone",
+                      res.stderr.decode())
+        # the limit: the same sequences under other headers pass, the mapping naming r1 and r2
+        res = annotate('renamed', 'renamed.fa', 'plain.fa')
+        self.assertEqual(0, res.returncode, res.stderr.decode())
+        with open(seqs('renamed'), 'rb') as f:
+            data = f.read()
+        self.assertIn(b'r1', data)
+        self.assertNotIn(b'g1', data)
 
     def test_a_search_load_into_ram_never_exits_the_server(self):
         # /search with in_ram on a --mmap server loads the pair with the resident pair's
