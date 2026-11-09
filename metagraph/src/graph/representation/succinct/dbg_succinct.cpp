@@ -304,6 +304,41 @@ void DBGSuccinct::map_to_nodes_sequentially(std::string_view sequence,
     );
 }
 
+namespace {
+
+class DBGSuccinctNodeStream final : public NodeStream {
+  public:
+    DBGSuccinctNodeStream(const DBGSuccinct &graph, std::string_view sequence,
+                          std::function<bool()> skip)
+          : graph_(graph), edges_(graph.get_boss(), sequence, std::move(skip)) {}
+
+    size_t next(std::span<node_index> out) override {
+        size_t n = 0;
+        for (; n < out.size() && !edges_.done(); ++n) {
+            out[n] = graph_.validate_edge(edges_.next());
+        }
+        return n;
+    }
+
+  private:
+    const DBGSuccinct &graph_;
+    BOSS::EdgeStream edges_;
+};
+
+} // namespace
+
+std::unique_ptr<NodeStream>
+DBGSuccinct::node_stream(std::string_view sequence, bool sequential) const {
+    if (mode_ == CANONICAL && !sequential)
+        return DeBruijnGraph::node_stream(sequence, sequential);
+
+    std::function<bool()> skip;
+    if (bloom_filter_ && sequence.size() >= get_k())
+        skip = get_missing_kmer_skipper(bloom_filter_.get(), sequence);
+
+    return std::make_unique<DBGSuccinctNodeStream>(*this, sequence, std::move(skip));
+}
+
 void DBGSuccinct
 ::call_nodes_with_suffix_matching_longest_prefix(
             std::string_view str,

@@ -538,6 +538,14 @@ size_t incoming_edge_rank(const SequenceGraph &graph,
     return edge_rank;
 }
 
+std::unique_ptr<NodeStream>
+SequenceGraph::node_stream(std::string_view sequence, bool sequential) const {
+    return std::make_unique<BufferedNodeStream>(
+        sequential ? graph::map_to_nodes_sequentially(*this, sequence)
+                   : graph::map_to_nodes(*this, sequence)
+    );
+}
+
 std::vector<SequenceGraph::node_index>
 map_to_nodes_sequentially(const SequenceGraph &graph, std::string_view sequence) {
     std::vector<SequenceGraph::node_index> nodes;

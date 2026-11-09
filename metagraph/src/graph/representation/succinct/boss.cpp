@@ -1045,6 +1045,29 @@ void BOSS::map_to_edges(const std::vector<TAlphabet> &seq_encoded,
     }
 }
 
+BOSS::EdgeStream::EdgeStream(const BOSS &boss, std::string_view sequence,
+                             std::function<bool()> skip)
+      : boss_(&boss), seq_(boss.encode(sequence)), skip_(std::move(skip)) {
+    if (seq_.size() > boss.k_)
+        invalid_ = utils::drag_and_mark_segments(seq_, boss.alph_size, boss.k_ + 1);
+}
+
+edge_index BOSS::EdgeStream::next() {
+    assert(!done());
+    const size_t i = i_++;
+    const size_t k = boss_->k_;
+
+    if ((skip_ && skip_()) || invalid_[i + k])
+        return edge_ = npos;
+
+    if (edge_) {
+        edge_ = boss_->fwd(edge_, seq_[i + k - 1]);
+        return edge_ = boss_->pick_edge(edge_, seq_[i + k]);
+    }
+
+    return edge_ = boss_->map_to_edge(seq_.data() + i, seq_.data() + i + k + 1);
+}
+
 std::vector<edge_index>
 BOSS::map_to_edges(const std::vector<TAlphabet> &seq_encoded) const {
     std::vector<edge_index> indices;

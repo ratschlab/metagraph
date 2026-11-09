@@ -1,6 +1,7 @@
 #include "dbg_sshash.hpp"
 
 #include <memory>
+#include <optional>
 #include <type_traits>
 
 #include <sdsl/memory_management.hpp>
@@ -371,6 +372,100 @@ template void
 DBGSSHash::map_to_nodes_with_rc<false>(std::string_view,
                                        const std::function<void(node_index, bool)>&,
                                        const std::function<bool()>&) const;
+
+namespace {
+
+// Streaming form of map_to_nodes_with_rc_impl. With |oriented|, k-mers matched
+// in reverse-complement orientation map to their reverse-complement nodes.
+template <bool with_rc, class Dict>
+class SSHashNodeStream final : public NodeStream {
+    using kmer_t = typename Dict::kmer_type;
+
+  public:
+    SSHashNodeStream(const DBGSSHash &graph, const Dict &dict,
+                     std::string_view sequence, bool oriented)
+          : graph_(graph), dict_(dict), seq_(sequence), k_(graph.get_k()),
+            end_(sequence.size() >= k_ ? sequence.size() - k_ + 1 : 0),
+            oriented_(oriented) {
+        if constexpr (with_rc) {
+            parser_.emplace(&dict);
+        } else {
+            std::vector<bool> invalid_char(seq_.size());
+            for (size_t i = 0; i < seq_.size(); ++i) {
+                invalid_char[i] = !kmer_t::is_valid(seq_[i]);
+            }
+            invalid_kmer_ = utils::drag_and_mark_segments(invalid_char, true, k_);
+        }
+    }
+
+    size_t next(std::span<node_index> out) override {
+        size_t n = std::min(out.size(), end_ - i_);
+        if (!dict_.num_kmers()) {
+            std::fill(out.begin(), out.begin() + n, DeBruijnGraph::npos);
+        } else {
+            for (size_t j = 0; j < n; ++j) {
+                out[j] = lookup(i_ + j);
+            }
+        }
+        i_ += n;
+        return n;
+    }
+
+  private:
+    const DBGSSHash &graph_;
+    const Dict &dict_;
+    std::string_view seq_;
+    size_t k_;
+    size_t end_;
+    bool oriented_;
+    size_t i_ = 0;
+    std::optional<sshash::streaming_query<Dict>> parser_;
+    std::vector<bool> invalid_kmer_;
+    kmer_t uint_kmer_;
+    bool begin_ = true;
+
+    node_index lookup(size_t i) {
+        sshash::lookup_result res;
+        if constexpr (with_rc) {
+            res = parser_->lookup(seq_.data() + i);
+            // Direct dictionary lookup assumes a valid alphabet. Streaming
+            // lookup also accepts ambiguous bases and returns no match.
+            assert(!sshash::util::is_valid<kmer_t>(seq_.data() + i, k_)
+                   || sshash::equal_lookup_result(res, dict_.lookup(seq_.data() + i, true)));
+        } else {
+            if (invalid_kmer_[i + k_ - 1]) {
+                begin_ = true;
+                return DeBruijnGraph::npos;
+            }
+            if (begin_) {
+                begin_ = false;
+                uint_kmer_ = sshash::util::string_to_uint_kmer<kmer_t>(seq_.data() + i, k_);
+            } else {
+                uint_kmer_.drop_char();
+                uint_kmer_.set(k_ - 1, kmer_t::char_to_uint(seq_[i + k_ - 1]));
+            }
+            res = dict_.lookup(uint_kmer_, false);
+            assert(sshash::equal_lookup_result(res, dict_.lookup(seq_.data() + i, false)));
+        }
+        node_index node = sshash_to_graph_index(res.kmer_id);
+        assert(!node || graph_.in_graph(node));
+        return oriented_ && node && res.kmer_orientation < 0
+                ? graph_.reverse_complement(node)
+                : node;
+    }
+};
+
+} // namespace
+
+std::unique_ptr<NodeStream>
+DBGSSHash::node_stream(std::string_view sequence, bool sequential) const {
+    return std::visit([&](const auto &dict) -> std::unique_ptr<NodeStream> {
+        using Dict = std::decay_t<decltype(dict)>;
+        if (mode_ == BASIC)
+            return std::make_unique<SSHashNodeStream<false, Dict>>(*this, dict, sequence, false);
+        return std::make_unique<SSHashNodeStream<true, Dict>>(*this, dict, sequence, sequential);
+    }, dict_);
+}
 
 void DBGSSHash::map_to_nodes(std::string_view sequence,
                              const std::function<void(node_index)>& callback,

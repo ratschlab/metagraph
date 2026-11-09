@@ -73,6 +73,13 @@ class DBGHashFastImpl : public DBGHashFast::DBGHashFastInterface {
                                    const std::function<void(node_index)> &callback,
                                    const std::function<bool()> &terminate) const override final;
 
+    std::unique_ptr<NodeStream> node_stream(std::string_view sequence,
+                                            bool sequential) const override final {
+        return std::make_unique<HashNodeStream>(
+            *this, sequence_to_kmers(sequence, !sequential && mode_ == CANONICAL)
+        );
+    }
+
     void call_outgoing_kmers(node_index node,
                              const OutgoingEdgeCallback &callback) const override final;
 
@@ -181,6 +188,27 @@ class DBGHashFastImpl : public DBGHashFast::DBGHashFastInterface {
     node_index bucket_to_node(size_t bucket) const { return bucket * kAlphabetSize + 1; }
 
     node_index get_node_index(const Kmer &kmer) const;
+
+    class HashNodeStream final : public NodeStream {
+      public:
+        HashNodeStream(const DBGHashFastImpl &graph, Vector<std::pair<Kmer, bool>>&& kmers)
+              : graph_(graph), kmers_(std::move(kmers)) {}
+
+        size_t next(std::span<node_index> out) override {
+            size_t n = std::min(out.size(), kmers_.size() - i_);
+            for (size_t j = 0; j < n; ++j, ++i_) {
+                const auto &[kmer, valid] = kmers_[i_];
+                out[j] = valid ? graph_.get_node_index(kmer) : npos;
+                assert(!out[j] || kmer == graph_.get_kmer(out[j]));
+            }
+            return n;
+        }
+
+      private:
+        const DBGHashFastImpl &graph_;
+        Vector<std::pair<Kmer, bool>> kmers_;
+        size_t i_ = 0;
+    };
 
     const Kmer get_kmer(node_index node) const {
         assert(in_graph(node));

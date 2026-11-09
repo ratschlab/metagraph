@@ -99,6 +99,26 @@ class BOSS {
     std::vector<edge_index>
     map_to_edges(const std::vector<TAlphabet> &seq_encoded) const;
 
+    // Pull-based form of map_to_edges: each next() returns the edge of the next
+    // (k+1)-mer of |sequence|, or npos if it is missing, invalid, or skipped.
+    // |sequence| must outlive the stream.
+    class EdgeStream {
+      public:
+        EdgeStream(const BOSS &boss, std::string_view sequence,
+                   std::function<bool()> skip = {});
+
+        bool done() const { return i_ + boss_->k_ + 1 > seq_.size(); }
+        edge_index next();
+
+      private:
+        const BOSS *boss_;
+        std::vector<TAlphabet> seq_;
+        std::vector<bool> invalid_;
+        std::function<bool()> skip_;
+        size_t i_ = 0;
+        edge_index edge_ = 0;
+    };
+
     template <class... T>
     using Call = typename std::function<void(T...)>;
 
