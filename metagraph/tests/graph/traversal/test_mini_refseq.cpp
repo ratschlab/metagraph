@@ -136,8 +136,8 @@ class MiniRefSeq : public ::testing::Test {
         policy.min_block_bp = query_.size();
         policy.max_seeds = 1;
         auto selection = select_seeds(discover_headers(query_), query_, policy, false);
-        EXPECT_FALSE(selection.seeds.empty());
-        return selection.seeds.empty() ? FrozenSeed() : selection.seeds[0];
+        EXPECT_FALSE(selection.empty());
+        return selection.empty() ? FrozenSeed() : selection[0];
     }
 
     std::unique_ptr<AnnotatedDBG> anno_graph_;
@@ -272,15 +272,15 @@ TEST_F(MiniRefSeq, SelectFullLengthSeed) {
     SelectionPolicy policy;
     policy.max_seeds = 1;
     auto by_support = select_seeds(profile, query_, policy, false);
-    ASSERT_EQ(1u, by_support.seeds.size());
-    EXPECT_EQ((KmerInterval{ 0, 231 }), by_support.seeds[0].kmers);
-    EXPECT_EQ(25u, by_support.seeds[0].labels.size());
+    ASSERT_EQ(1u, by_support.size());
+    EXPECT_EQ((KmerInterval{ 0, 231 }), by_support[0].kmers);
+    EXPECT_EQ(25u, by_support[0].labels.size());
 
     // with the gene's length as the shortest seed, the whole gene: fewer carriers
     policy.min_block_bp = query_.size();
     auto selection = select_seeds(profile, query_, policy, false);
-    ASSERT_FALSE(selection.seeds.empty());
-    const auto &seed = selection.seeds[0];
+    ASSERT_FALSE(selection.empty());
+    const auto &seed = selection[0];
     EXPECT_EQ((KmerInterval{ 0, 783 }), seed.kmers);
     EXPECT_EQ(query_, seed.sequence);
     EXPECT_EQ(19u, seed.labels.size());
@@ -288,10 +288,10 @@ TEST_F(MiniRefSeq, SelectFullLengthSeed) {
 
     policy.max_labels_per_seed = 5;
     auto capped = select_seeds(profile, query_, policy, false);
-    ASSERT_FALSE(capped.seeds.empty());
-    EXPECT_EQ(5u, capped.seeds[0].labels.size());
-    EXPECT_EQ(14u, capped.seeds[0].population.dropped_count);
-    EXPECT_FALSE(capped.seeds[0].population.dropped_digest.empty());
+    ASSERT_FALSE(capped.empty());
+    EXPECT_EQ(5u, capped[0].labels.size());
+    EXPECT_EQ(14u, capped[0].population.dropped_count);
+    EXPECT_FALSE(capped[0].population.dropped_digest.empty());
 }
 
 // the labels derived from the gene are its 19 carriers: the selected seed's labels, with its id

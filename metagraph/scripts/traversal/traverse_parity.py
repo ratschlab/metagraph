@@ -154,7 +154,6 @@ def project_resolve(response):
     out = {key: response[key] for key in ('k', 'num_kmers', 'graph_runs', 'labels_truncated')}
     out['labels'] = [[l['label'], l['kind'], l['kmers_supported'], l['runs']]
                      for l in response['labels']]
-    out['candidates'] = [[c['kmer_interval'], c['labels']] for c in response['candidates']]
     if 'selection' in response:
         sel = response['selection']
         # The seeds as a set: v1 keeps them in rank order, the prototype by position.
