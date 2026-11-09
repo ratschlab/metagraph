@@ -20,9 +20,7 @@ using annot::matrix::BinaryMatrix;
 using annot::matrix::MultiIntMatrix;
 
 
-LabelOracle::LabelOracle(const AnnotatedDBG &anno_graph,
-                         const annot::CoordToHeader *coord_to_header_override)
-      : anno_graph_(anno_graph) {
+LabelOracle::LabelOracle(const AnnotatedDBG &anno_graph) : anno_graph_(anno_graph) {
     const DeBruijnGraph &loaded = anno_graph_.get_graph();
 
     // A CanonicalDBG wrapper means a PRIMARY index. Otherwise the mode tells native
@@ -47,8 +45,7 @@ LabelOracle::LabelOracle(const AnnotatedDBG &anno_graph,
     matrix_ = &anno_graph_.get_annotator().get_matrix();
     tuples_ = dynamic_cast<const MultiIntMatrix*>(matrix_);
     row_diff_ = dynamic_cast<const annot::matrix::IRowDiff*>(matrix_);
-    coord_to_header_ = coord_to_header_override ? coord_to_header_override
-                                                : anno_graph_.get_coord_to_header();
+    coord_to_header_ = anno_graph_.get_coord_to_header();
     if (coord_to_header_ && !tuples_) {
         logger->warn("CoordToHeader present but the annotation has no coordinates; "
                      "header labels are unavailable");
@@ -72,12 +69,10 @@ std::vector<node_index> LabelOracle::keys_of_sequence(std::string_view sequence)
     // Every graph calls them in query order, although the base class promises that only
     // for map_to_nodes_sequentially; RegimeAndKeyMapping checks it per k-mer.
     graph_->map_to_nodes(sequence, [&](node_index key) { keys.push_back(key); });
-    counters_.keys_mapped += keys.size();
     return keys;
 }
 
 node_index LabelOracle::key_of(node_index node, std::string_view kmer) const {
-    counters_.keys_mapped++;
     return node == npos ? npos : key_mapper_->key(node, kmer);
 }
 
@@ -118,7 +113,6 @@ bool LabelOracle::has_header_records(Column column) const {
 
 std::pair<uint64_t, uint64_t> LabelOracle::map_coord(Column column, uint64_t coord) const {
     assert(coord_to_header_);
-    counters_.coords_mapped++;
     return coord_to_header_->map_single_coord(column, coord);
 }
 
@@ -156,12 +150,9 @@ LabelRef LabelOracle::resolve_label(const std::string &name) const {
 std::vector<BinaryMatrix::SetBitPositions>
 LabelOracle::get_rows(const std::vector<Row> &rows,
                       annot::matrix::RowDiffCache<BinaryMatrix::SetBitPositions> *cache) const {
-    Timer timer;
     std::vector<BinaryMatrix::SetBitPositions> result;
     if (!cache || !row_diff_ || !row_diff_->get_rows_cached(rows, *cache, &result))
         result = matrix_->get_rows(rows);
-    counters_.rows_fetched += rows.size();
-    counters_.fetch_seconds += timer.elapsed();
     return result;
 }
 
@@ -170,12 +161,9 @@ LabelOracle::get_row_tuples(const std::vector<Row> &rows,
                             annot::matrix::RowDiffCache<MultiIntMatrix::RowTuples> *cache) const {
     if (!tuples_)
         throw std::logic_error("The annotation has no coordinates");
-    Timer timer;
     std::vector<MultiIntMatrix::RowTuples> result;
     if (!cache || !row_diff_ || !row_diff_->get_row_tuples_cached(rows, *cache, &result))
         result = tuples_->get_row_tuples(rows);
-    counters_.tuple_rows_fetched += rows.size();
-    counters_.fetch_seconds += timer.elapsed();
     return result;
 }
 
@@ -264,23 +252,14 @@ void LabelQuery::read_hits(const std::vector<node_index> &keys,
 }
 
 std::vector<LabelQuery::NodeHits> LabelQuery::fetch(const std::vector<node_index> &keys) {
-    auto &counters = oracle_.counters();
     std::vector<node_index> missing;
     tsl::hopscotch_set<node_index> requested;
-    size_t cache_hits = 0;
     for (node_index key : keys) {
-        if (key == npos)
-            continue;
-        counters.rows_requested++;
-        if (cache_.count(key)) {
-            cache_hits++;
-        } else if (requested.insert(key).second) {
+        if (key != npos && !cache_.count(key) && requested.insert(key).second)
             missing.push_back(key);
-        }
     }
     // when the new keys do not fit, clear the cache and read every key of this batch
     if (cache_.size() + missing.size() > max_cache_size_) {
-        cache_hits = 0;
         cache_.clear();
         missing.clear();
         requested.clear();
@@ -289,7 +268,6 @@ std::vector<LabelQuery::NodeHits> LabelQuery::fetch(const std::vector<node_index
                 missing.push_back(key);
         }
     }
-    counters.cache_hits += cache_hits;
 
     // a batch larger than the cache is answered without caching it
     tsl::hopscotch_map<node_index, NodeHits> uncached;
