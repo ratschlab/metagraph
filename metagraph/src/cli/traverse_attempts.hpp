@@ -131,8 +131,9 @@ struct AttemptSettings {
     double hard_cap_ms = 899'000;
     // finished attempts are kept this long, and at most this many (oldest dropped first) —
     // one sent with not_after_ms is held longer, until not_after_ms + clock_skew_ms (within
-    // the cap), among the tombstones —; a cancel of an unknown id tombstones it at least
-    // retention_s, at most retention_count tombstones at once. 0: nothing is kept (no
+    // the cap), beside the tombstones —; a cancel of an unknown id tombstones it at least
+    // min(retention_s, tombstone_hold_s), within tombstone_hold_s (H3), at most retention_count
+    // tombstones at once (the held finished attempts not counted). 0: nothing is kept (no
     // tombstone: such a cancel is refused, 429; no finished attempt is held)
     uint64_t retention_s = 3600;
     size_t retention_count = 10'000;
@@ -744,10 +745,15 @@ class AttemptRegistry {
     // tombstone early and the cancelled id would run); one whose steady expiry passed while its
     // wall-clock one has not (the wall clock stepped back)
     // is re-keyed to the time its wall clock still needs. A held finished attempt is never
-    // dropped early, so the table can exceed retention_count by them (a cancel of an unknown id
-    // is refused, 429, while it holds that many): what it holds is bounded by the attempts
-    // that finish within the cap
+    // dropped early, so the table can exceed retention_count by them: what it holds is bounded
+    // by the attempts that finish within tombstone_max_s (a cancel of an unknown id is refused,
+    // 429, by the tombstones alone: tombstones_)
     std::set<std::pair<Attempt::Clock::time_point, std::string>> tomb_expiry_;
+    // the tombstones in |attempts_| (the cancels of unknown ids, until their hold ends): what a
+    // cancel of an unknown id is refused 429 tombstones_full by, at retention_count (H3, S1:
+    // the held finished attempts in |tomb_expiry_| are not counted, so that requests that ran
+    // never block a cancel)
+    size_t tombstones_ = 0;
     // the observed pieces (microseconds, rounded up) over observed_window_s
     WindowedMaximum observed_;
     mutable std::mutex rates_mutex_;

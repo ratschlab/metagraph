@@ -517,11 +517,12 @@ TEST(ServerEnvelope, CompositeRule) {
 }
 
 // The multigraph block and routes.requests are sample 12's (its server: --max-request-body-mb
-// 256, --max-request-json-values and --max-column-labels-bytes at their defaults,
-// --max-connections 256)
+// 256, --max-request-json-values, --max-column-labels-bytes and --max-connections at their
+// defaults, as staging's)
 TEST(ServerEnvelope, Sample12MultigraphBlock) {
     const Json::Value body = sample("12_capabilities_multigraph.json")["body"];
-    const Json::Value intake = request_intake_json(256, 262144, 256);
+    const Json::Value intake = request_intake_json(256, 262144, 0);
+    EXPECT_TRUE(body["multigraph"]["request_intake"]["max_connections"].isNull());
     // GET /column_labels (H3): the cap at its default, the list of the sample's pairs
     const Json::Value &labels_total = body["multigraph"]["column_labels"]["total"];
     ASSERT_TRUE(labels_total.isUInt64());

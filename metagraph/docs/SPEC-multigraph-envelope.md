@@ -358,7 +358,7 @@ single-graph server states at the top level of `GET /capabilities`:
   "max_request_json_values": 262144,
   "json_values_routes": ["/pattern", "/resolve", "/traverse", "/traverse/cancel"],
   "too_many_json_values": {"status": 400, "code": "too_many_json_values", "members": ["code", "error", "max_request_json_values"]},
-  "max_connections": 256
+  "max_connections": null
 }
 ```
 
@@ -370,8 +370,9 @@ body members as a set (sorted); the body itself writes them `error` first, then 
 before it is read; the 400 a body of a listed route with more values, before it is parsed. Its presence is the
 marker: an engine without it closes the connection on an over-limit body and counts no values.
 From H3 (train 3) `request_intake` also states `max_connections`: `--max-connections`, the most TCP connections the
-server holds open at once (`null` without a cap, the default; at it a further connection waits in the listen
-queue until one closes, never refused; `SPEC-labeled-traversal-core.md` §10.3, Connections). Its presence is the
+server holds open at once (`null` without a cap, the default and staging's, as in the example; an integer when
+the operator sets one; at it a further connection waits in the listen queue until one closes, never refused;
+`SPEC-labeled-traversal-core.md` §10.3, Connections). Its presence is the
 marker: an engine without it never stops accepting. The block also states `column_labels`, what `GET
 /column_labels` answers, the same object a single-graph server states at the top level of `GET /capabilities`:
 

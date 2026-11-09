@@ -6810,7 +6810,8 @@ class TestServerConnectionsAndLabels(TestingBase):
         the server refuses to start, naming it"""
         for flags, words in ((['-p', '2', '--max-connections', '2'],
                               '--max-connections must be 0 (no cap) or above the handler '
-                              'threads, 2'),
+                              'threads, 2 (-p\'s value: --http-threads not given); got 2. '
+                              'Necessary, not sufficient, for the light routes'),
                              (['--http-threads', '4', '--max-connections', '4'],
                               '--max-connections must be 0 (no cap) or above the handler '
                               'threads, 4 (--http-threads)'),
@@ -6884,14 +6885,10 @@ class TestServerConnectionsAndLabels(TestingBase):
                              requests.get(server.url + '/column_labels?offset=0').json())
             caps = requests.get(server.url + '/capabilities').json()['column_labels']
             self.assertEqual(cap, caps['max_column_labels_bytes'])
-            # the Python client reads a refused list page by page (when pandas is there)
-            try:
-                from metagraph.client import GraphClient
-            except ImportError:
-                GraphClient = None
-            if GraphClient is not None:
-                self.assertEqual(labels,
-                                 GraphClient('127.0.0.1', server.port, 'h3').column_labels())
+            # the Python client reads a refused list page by page (CI's venv installs api/python
+            # with pandas: a missing client fails here rather than skipping the check)
+            from metagraph.client import GraphClient
+            self.assertEqual(labels, GraphClient('127.0.0.1', server.port, 'h3').column_labels())
         # a cap below one label: one label a page
         with self._Server(self, '--max-column-labels-bytes', '1') as server:
             pages, offset = [], 0
@@ -6900,6 +6897,31 @@ class TestServerConnectionsAndLabels(TestingBase):
                 pages.append(page['labels'])
                 offset = page['next_offset']
             self.assertEqual([[l] for l in labels], pages)
+
+    def test_held_finished_attempts_never_block_a_cancel(self):
+        """H3, the review's S1 (e23/H3-review/exp_tomb_fill.py): with --traverse-attempt-retention
+        50, 101 malformed /traverse with an attempt_id and a not_after_ms 23 h ahead are registered,
+        refused 400, and their ids held past their retention (the first 51 by count, until that
+        not_after_ms); a real cancel-before-arrival after them is still tombstoned (404, covers
+        admission), not refused 429 tombstones_full: only tombstones count."""
+        with self._Server(self, '--traverse-attempt-retention', '50') as server:
+            now = int(time.time() * 1000)
+            statuses = {}
+            for i in range(101):
+                ret = server.post('traverse', {'attempt_id': f'h3-fill-{i}',
+                                               'not_after_ms': now + 23 * 3600 * 1000})
+                statuses[ret.status_code] = statuses.get(ret.status_code, 0) + 1
+            self.assertEqual({400: 101}, statuses)
+            held = server.state('h3-fill-0')
+            self.assertEqual(200, held.status_code, held.text)
+            self.assertEqual('finished', held.json()['state'])
+            cancel = server.post('traverse/cancel', {'attempt_id': 'h3-real-cancel',
+                                                     'not_after_ms': now + 10000})
+            self.assertEqual(404, cancel.status_code, cancel.text)
+            self.assertTrue(cancel.json()['tombstone'])
+            self.assertTrue(cancel.json()['covers_admission'])
+            self.assertIn('while fewer than 50 tombstones are held (else the cancel is refused, '
+                          '429; the finished attempts held are kept apart)', cancel.json()['error'])
 
     def test_a_cancel_of_an_unknown_id_is_held_900_s(self):
         """At the defaults (retention 3600 s, tombstone_max_s 86400) a tombstone is held 900 s

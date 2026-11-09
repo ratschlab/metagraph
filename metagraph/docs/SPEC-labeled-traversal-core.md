@@ -3670,7 +3670,8 @@ search's routes, `POST /pattern` and `GET /pattern/capabilities`, are `SPEC-patt
     `tombstone_hold_s`) bounds it: at the defaults every tombstone is held exactly 900 s from its latest cancel or
     refused copy, it covers a `not_after_ms` up to 898 s ahead (the search service sends one at most about 10 s
     ahead, 265 s with its off-by-default flags), and a burst of cancels holds the table at most 900 s; keeping it
-    full needs a sustained `retention_count` / 900 s (11.1 cancels per second at the defaults), which a proxy's
+    full needs a sustained `retention_count` / 900 s (11.1 cancels per second at the defaults; nothing else fills
+    it: the held finished attempts are not counted, below), which a proxy's
     per-client limits and the log (a line per cancel) see. No rate limit is added: one shared by every client is
     spent by a flood at its own rate, which would make the denial of real cancels cheaper, not dearer; per-client
     limits need the caller's address, which the proxy has (making `POST /traverse/cancel`, `GET
@@ -3700,9 +3701,18 @@ search's routes, `POST /pattern` and `GET /pattern/capabilities`, are `SPEC-patt
     `covers_admission_reason` (`no_not_after_ms` | `beyond_tombstone_max`). Tombstones are kept apart from the
     finished attempts and expire by their hold only, so later finishes never evict one early (review of the
     stage-4 backend, F6); a cancel of an unknown id is tombstoned only while fewer than `retention_count`
-    tombstones and held finished attempts (below) are held, and refused beyond that, **429** `{error, attempt_id,
+    tombstones are held, and refused beyond that, **429** `{error, attempt_id,
     server_instance, cancelled: false, state: "unknown", tombstone: false, reason: "tombstones_full"}`: the id
-    was not tombstoned and nothing is promised (retry the cancel later). With `retention_s` 0 (finding 4) the
+    was not tombstoned and nothing is promised (retry the cancel later). *H3 (train 3; review of H3, S1)*: only
+    tombstones count. The finished attempts held past their retention (the release rule, below) are kept apart;
+    before, they counted too, so requests that ran held the table: a malformed `/traverse` with an `attempt_id`
+    and a `not_after_ms` far ahead is registered, finishes as an error, and its id is then held until that
+    `not_after_ms` (within `tombstone_max_s`, 86,400 s), and 101 of them at `retention_count` 50 made a real
+    cancel-before-arrival 429 for 23 h. Now cancels are refused only by other cancels, each held at most
+    `tombstone_hold_s`. What still holds the attempt table beside the tombstones: the held finished attempts, each
+    at most `tombstone_max_s` after its finish or its latest refused copy, never dropped early and not bounded by
+    `retention_count` (by the attempts that finish within `tombstone_max_s`); they hold memory, not the cancels'
+    count. With `retention_s` 0 (finding 4) the
     server keeps **no tombstones**: such a cancel is refused, **429** with `reason: "no_suppression"`, and a request
     with the id arriving later runs (the capabilities' `suppression` says so). 400 for a bad body. Not refused
     while the index loads. What a clock step can do: a backward step of this server's wall clock by more than
@@ -3819,7 +3829,8 @@ search's routes, `POST /pattern` and `GET /pattern/capabilities`, are `SPEC-patt
     min(`retention_s`, `tombstone_hold_s`) and, for a `not_after_ms` a cancel or a refused copy names, until it +
     the skew allowance within min(`tombstone_max_s`, `tombstone_hold_s`) (above; H3); a cancel of an unknown id is
     tombstoned only while fewer than
-    `retention_count` tombstones and held attempts are held. Every attempt is logged when it is
+    `retention_count` tombstones are held (the held finished attempts not counted: H3, above). Every attempt is
+    logged when it is
     registered, cancelled and finished (`[Server] Attempt <id> (request <n>) finished (<reason>): walk stopped at
     <instant> (<d> ms after the stop was requested by <who>), <s> of <n> seed(s) walked[ (<a> abandoned in its
     walk)], bound <b> ms; response
@@ -3906,7 +3917,10 @@ search's routes, `POST /pattern` and `GET /pattern/capabilities`, are `SPEC-patt
     cap, and none worth the name without a small byte cap). Each connection carries at most one answer pending (the next request
     is read only after it), each bounded by its route's own rules (`/search` and `/align` answers are not).
   - The cap must be 0 or above the handler threads (else the server refuses to start, naming both), so that a
-    connection is left beyond the threads for the light routes. Stated as `request_intake.max_connections`
+    connection can be left beyond the threads for the light routes. The rule is necessary, not sufficient, as E19's
+    rule for the threads: the connections beyond the threads can be held too -- by idle keep-alives (up to 30 s),
+    slow uploads (up to the 900 s content deadline) and 413 drains (up to 30 s) -- and a cancel on a new
+    connection then waits until one closes; a cap well above the calls in flight is what leaves room. Stated as `request_intake.max_connections`
     (`null` without a cap; `SPEC-multigraph-envelope.md` §8). Logged at start-up (`[Server] Maximum
     connections: N (--max-connections; a further connection waits in the listen queue until one closes)`, or
     `unlimited (--max-connections 0)`), and when the server stops accepting (`[Server] N connections open

@@ -1111,14 +1111,19 @@ Config::Config(int argc, char *argv[]) {
             print_usage_and_exit = true;
         }
         // a connection cap leaves a connection beyond the handler threads (H3): at the cap,
-        // the light routes (the cancel, the states, the capabilities) need one to be read
+        // the light routes (the cancel, the states, the capabilities) need one to be read.
+        // Necessary, not sufficient: idle keep-alives, slow uploads and 413 drains hold
+        // connections beyond the threads too (SPEC §10.3, Connections)
         if (max_connections && max_connections <= threads) {
             std::cerr << "Error: --max-connections must be 0 (no cap) or above the handler "
                          "threads, " << threads
                       << (http_threads ? " (--http-threads)" : " (-p's value: --http-threads "
                                                                "not given)")
-                      << ", for the light routes to find a connection beside the requests "
-                         "that hold the threads; got " << max_connections << std::endl;
+                      << "; got " << max_connections << ". Necessary, not sufficient, for the "
+                         "light routes to find a connection beside the requests that hold the "
+                         "threads: idle keep-alives (up to 30 s), slow uploads (up to the 900 s "
+                         "content deadline) and 413 drains (up to 30 s) hold connections too"
+                      << std::endl;
             print_usage_and_exit = true;
         }
     }
@@ -2083,7 +2088,7 @@ if (advanced) {
             fprintf(stderr, "\t   --traverse-max-request-memory-mb [INT] \trequest-wide memory bound of a /traverse, in MiB: a seed after the first is not started (failed per seed, resource_stop scope request) when the results of the seeds before it and its memory budget would pass it; needs --traverse-max-memory-mb in [1, this]; in [0, 1048576], 0 = off [0]\n");
             fprintf(stderr, "\t   --traverse-attempt-allowance-ms [INT] \tadded to seeds x time budget in the bound enforced on a /traverse with attempt_id [10000]\n");
             fprintf(stderr, "\t   --traverse-attempt-retention-s [INT] \tfinished attempts stay queryable this long (and their ids refused; one sent with not_after_ms is held until not_after_ms + the clock skew allowance, within the tombstone cap), and a cancel of an unknown id tombstones it at least this long (at most --traverse-attempt-tombstone-hold-s), in [0, 31536000]; 0 = nothing kept, no tombstones (such a cancel is refused, 429) [3600]\n");
-            fprintf(stderr, "\t   --traverse-attempt-retention [INT] \tat most this many finished attempts are kept (oldest dropped first; one sent with not_after_ms stays held, its id refused, as --traverse-attempt-retention-s says), and a cancel of an unknown id is tombstoned only while fewer than this many tombstones and held attempts are held (else it is refused, 429), in [0, 10000000] [10000]\n");
+            fprintf(stderr, "\t   --traverse-attempt-retention [INT] \tat most this many finished attempts are kept (oldest dropped first; one sent with not_after_ms stays held, its id refused, as --traverse-attempt-retention-s says), and a cancel of an unknown id is tombstoned only while fewer than this many tombstones are held (the held finished attempts not counted; else it is refused, 429), in [0, 10000000] [10000]\n");
             fprintf(stderr, "\t   --request-retention-s [INT] \tended /resolve and /pattern requests with a request_id stay queryable (GET /requests/{request_id}) this long, their ids refused (409), in [0, 31536000]; 0 = nothing kept [3600]\n");
             fprintf(stderr, "\t   --request-retention [INT] \tat most this many ended requests are kept (oldest dropped first), in [0, 10000000] [10000]\n");
             fprintf(stderr, "\t   --traverse-attempt-tombstone-max-s [INT] \tthe longest a finished attempt's id, or a tombstone (within --traverse-attempt-tombstone-hold-s), is held to cover a not_after_ms (+ the clock skew allowance), from the latest cancel, finish or refused copy of the request, in [0, 31536000]; never less than --traverse-attempt-retention-s [86400]\n");

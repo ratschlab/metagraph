@@ -1,6 +1,8 @@
 #include "gtest/gtest.h"
 
+#include <cerrno>
 #include <chrono>
+#include <cstring>
 #include <cstdint>
 #include <future>
 #include <memory>
@@ -59,17 +61,33 @@ std::vector<std::string> visited(const ColumnLabelList &list, uint64_t from) {
 class RawClient {
   public:
     explicit RawClient(unsigned short port) {
-        fd_ = ::socket(AF_INET, SOCK_STREAM, 0);
         sockaddr_in addr {};
         addr.sin_family = AF_INET;
         addr.sin_port = htons(port);
         addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+        // a transient failure of the host (no local port free for a moment, an interrupted call)
+        // is retried, so that a busy machine does not fail the test; the last errno is kept
+        for (int attempt = 0; attempt < 50 && !connected_; ++attempt) {
+            if (fd_ >= 0)
+                ::close(fd_);
+            fd_ = ::socket(AF_INET, SOCK_STREAM, 0);
 #ifdef SO_NOSIGPIPE
-        int one = 1;
-        ::setsockopt(fd_, SOL_SOCKET, SO_NOSIGPIPE, &one, sizeof(one));
+            int one = 1;
+            ::setsockopt(fd_, SOL_SOCKET, SO_NOSIGPIPE, &one, sizeof(one));
 #endif
-        connected_ = ::connect(fd_, reinterpret_cast<sockaddr *>(&addr), sizeof(addr)) == 0;
+            connected_ = fd_ >= 0
+                    && ::connect(fd_, reinterpret_cast<sockaddr *>(&addr), sizeof(addr)) == 0;
+            if (connected_)
+                break;
+            error_ = errno;
+            if (error_ != EADDRNOTAVAIL && error_ != EAGAIN && error_ != EINTR
+                    && error_ != EMFILE && error_ != ENFILE && error_ != ENOBUFS)
+                break;
+            std::this_thread::sleep_for(std::chrono::milliseconds(50));
+        }
     }
+    // why it did not connect (errno), for the test's message
+    std::string error() const { return connected_ ? std::string() : std::strerror(error_); }
     ~RawClient() { close(); }
     RawClient(const RawClient &) = delete;
     RawClient& operator=(const RawClient &) = delete;
@@ -79,6 +97,35 @@ class RawClient {
         if (fd_ >= 0)
             ::close(fd_);
         fd_ = -1;
+    }
+    // closes with a reset (SO_LINGER 0)
+    void reset() {
+        linger l { 1, 0 };
+        ::setsockopt(fd_, SOL_SOCKET, SO_LINGER, &l, sizeof(l));
+        close();
+    }
+    bool send_raw(const std::string &bytes) {
+#ifdef MSG_NOSIGNAL
+        const int flags = MSG_NOSIGNAL;
+#else
+        const int flags = 0;
+#endif
+        return ::send(fd_, bytes.data(), bytes.size(), flags) == static_cast<ssize_t>(bytes.size());
+    }
+    // whether the server closed the connection within |wait| (the end of the stream, or a reset),
+    // whatever it sent before
+    bool closed_by_peer(std::chrono::milliseconds wait) {
+        const auto until = std::chrono::steady_clock::now() + wait;
+        while (std::chrono::steady_clock::now() < until) {
+            pollfd p { fd_, POLLIN, 0 };
+            if (::poll(&p, 1, 50) <= 0)
+                continue;
+            char buf[4096];
+            const ssize_t n = ::recv(fd_, buf, sizeof(buf), 0);
+            if (n <= 0)
+                return true;
+        }
+        return false;
     }
     bool send_get(const std::string &path) {
         const std::string req = "GET " + path + " HTTP/1.1\r\nHost: x\r\n\r\n";
@@ -120,17 +167,31 @@ class RawClient {
   private:
     int fd_ = -1;
     bool connected_ = false;
+    int error_ = 0;
 };
 
 // A CappedHttpServer on 127.0.0.1 (an ephemeral port), with GET /ping answering "pong", run on
 // |threads| handler threads in its own thread
 class TestServer {
   public:
-    TestServer(size_t max_connections, size_t threads = 2) {
+    // |timeout_request|: the header timeout (s); |max_body_mb|: the body cap, answered 413 as
+    // the server answers it (refuse_body_too_large), 0: none
+    TestServer(size_t max_connections, size_t threads = 2, long timeout_request = 30,
+               uint64_t max_body_mb = 0) {
         server_.config.address = "127.0.0.1";
         server_.config.port = 0;
         server_.config.thread_pool_size = threads;
-        server_.config.timeout_request = 30;
+        server_.config.timeout_request = timeout_request;
+        if (max_body_mb) {
+            server_.config.max_request_streambuf_size = static_cast<size_t>(max_body_mb) << 20;
+            server_.on_error = [max_body_mb](std::shared_ptr<HttpServer::Request> request,
+                                             const SimpleWeb::error_code &ec) {
+                if (ec == SimpleWeb::make_error_code::make_error_code(
+                            SimpleWeb::errc::message_size)) {
+                    refuse_body_too_large(request, max_body_mb);
+                }
+            };
+        }
         server_.set_max_connections(max_connections);
         server_.resource["^/ping$"]["GET"] = [](std::shared_ptr<HttpServer::Response> response,
                                                std::shared_ptr<HttpServer::Request>) {
@@ -185,7 +246,8 @@ bool eventually(Pred pred, std::chrono::milliseconds wait = 5000ms) {
 TEST(ServerCapacityConnections, AtTheCapAFurtherConnectionWaitsUntilOneCloses) {
     TestServer t(/* max_connections */ 3, /* threads */ 2);
     RawClient a(t.port()), b(t.port()), c(t.port());
-    ASSERT_TRUE(a.connected() && b.connected() && c.connected());
+    ASSERT_TRUE(a.connected() && b.connected() && c.connected())
+            << a.error() << " " << b.error() << " " << c.error();
     // a, b and c are open (kept alive after their answers)
     for (RawClient *x : { &a, &b, &c }) {
         ASSERT_TRUE(x->send_get("/ping"));
@@ -195,7 +257,7 @@ TEST(ServerCapacityConnections, AtTheCapAFurtherConnectionWaitsUntilOneCloses) {
     EXPECT_EQ(3u, t.server().open_connections());
     // the fourth connects (the kernel's listen queue) but is not answered
     RawClient d(t.port());
-    ASSERT_TRUE(d.connected());
+    ASSERT_TRUE(d.connected()) << d.error();
     ASSERT_TRUE(d.send_get("/ping"));
     EXPECT_EQ("", d.read_answer(400ms));
     // a request on an open connection is answered at once
@@ -213,7 +275,7 @@ TEST(ServerCapacityConnections, NoCapAcceptsEveryConnection) {
     std::vector<std::unique_ptr<RawClient>> clients;
     for (int i = 0; i < 20; ++i) {
         clients.push_back(std::make_unique<RawClient>(t.port()));
-        ASSERT_TRUE(clients.back()->connected());
+        ASSERT_TRUE(clients.back()->connected()) << clients.back()->error();
         ASSERT_TRUE(clients.back()->send_get("/ping"));
         EXPECT_TRUE(answered(clients.back()->read_answer(5000ms))) << i;
     }
@@ -229,14 +291,71 @@ TEST(ServerCapacityConnections, NoCapAcceptsEveryConnection) {
 TEST(ServerCapacityConnections, StopWhilePausedAtTheCap) {
     auto t = std::make_unique<TestServer>(/* max_connections */ 2, /* threads */ 1);
     RawClient a(t->port()), b(t->port());
+    ASSERT_TRUE(a.connected() && b.connected()) << a.error() << " " << b.error();
     for (RawClient *x : { &a, &b }) {
         ASSERT_TRUE(x->send_get("/ping"));
         EXPECT_TRUE(answered(x->read_answer(5000ms)));
     }
     EXPECT_TRUE(eventually([&]() { return t->server().pauses() >= 1; }));
+    const auto start = std::chrono::steady_clock::now();
     t.reset();
+    // the stop returned at once, and closed both connections (the end of their streams)
+    EXPECT_LT(std::chrono::steady_clock::now() - start, 5s);
+    EXPECT_TRUE(a.closed_by_peer(2000ms));
+    EXPECT_TRUE(b.closed_by_peer(2000ms));
     a.close();
     b.close();
+}
+
+// A connection that ends on an error path gives its place back as a normal close does: a reset
+// by the client, the header timeout, the 413 of a body over the cap (its drain ends when the
+// client closes); after each the count is the pending accept alone, and the cap holds its N
+// connections again (the review of H3, N4)
+TEST(ServerCapacityConnections, ErrorPathsGiveTheirPlaceBack) {
+    // a header timeout of 3 s: well above what the last part takes with its connections idle
+    TestServer t(/* max_connections */ 3, /* threads */ 2, /* timeout_request */ 3,
+                 /* max_body_mb */ 1);
+    auto settled = [&]() {
+        return eventually([&]() { return t.server().open_connections() == 1; });
+    };
+    // a reset after a request was answered on the connection
+    {
+        RawClient r(t.port());
+        ASSERT_TRUE(r.connected()) << r.error();
+        ASSERT_TRUE(r.send_get("/ping"));
+        EXPECT_TRUE(answered(r.read_answer(5000ms)));
+        r.reset();
+    }
+    EXPECT_TRUE(settled());
+    // a header that never ends: the server closes it at the header timeout (3 s)
+    {
+        RawClient h(t.port());
+        ASSERT_TRUE(h.connected()) << h.error();
+        ASSERT_TRUE(h.send_raw("GET /ping HTTP/1.1\r\nHost: x\r\n"));
+        EXPECT_TRUE(h.closed_by_peer(10000ms));
+    }
+    EXPECT_TRUE(settled());
+    // a body over the cap: the 413, the drain, the client's close
+    {
+        RawClient d(t.port());
+        ASSERT_TRUE(d.connected()) << d.error();
+        ASSERT_TRUE(d.send_raw("POST /ping HTTP/1.1\r\nHost: x\r\nContent-Length: 2097152\r\n\r\n"));
+        const std::string got = d.read_answer(5000ms);
+        EXPECT_EQ(0u, got.rfind("HTTP/1.1 413", 0)) << got.substr(0, 200);
+        d.close();
+    }
+    EXPECT_TRUE(settled());
+    // the cap holds its N again: three kept-alive connections answered, the fourth waits
+    RawClient a(t.port()), b(t.port()), c(t.port());
+    for (RawClient *x : { &a, &b, &c }) {
+        ASSERT_TRUE(x->send_get("/ping"));
+        EXPECT_TRUE(answered(x->read_answer(5000ms)));
+    }
+    RawClient w(t.port());
+    ASSERT_TRUE(w.send_get("/ping"));
+    EXPECT_EQ("", w.read_answer(400ms));
+    a.close();
+    EXPECT_TRUE(answered(w.read_answer(5000ms)));
 }
 
 

@@ -1001,8 +1001,9 @@ std::string AttemptRegistry::retention_text() const {
                        "most {} s after it finished or after its latest refused copy (held "
                        "among the tombstones); a cancel of an "
                        "unknown id tombstones it at least {} s, and until the not_after_ms it "
-                       "names + {} ms, at most {} s, while fewer than {} tombstones and held "
-                       "attempts are held (else the cancel is refused, 429)",
+                       "names + {} ms, at most {} s, while fewer than {} tombstones are held "
+                       "(else the cancel is refused, 429; the finished attempts held are kept "
+                       "apart)",
                        settings_.retention_s, settings_.retention_count, settings_.clock_skew_ms,
                        tombstone_cap_ms() / 1000, tombstone_hold_floor_ms() / 1000,
                        settings_.clock_skew_ms, tombstone_hold_cap_ms() / 1000,
@@ -1133,6 +1134,8 @@ void AttemptRegistry::expire_locked() {
             tomb_expiry_.emplace(held.tomb_steady_until_, id);
             continue;
         }
+        if (held.tombstone())
+            --tombstones_;
         attempts_.erase(it);
     }
 }
@@ -1343,15 +1346,20 @@ std::pair<int, Json::Value> AttemptRegistry::cancel(const std::string &id, uint6
                     "keeps no tombstones (--traverse-attempt-retention-s 0), so a request with it "
                     "that arrives later may still run here", "no_suppression") };
             }
-            if (tomb_expiry_.size() >= settings_.retention_count) {
+            // Tombstones alone are counted (H3, the review's S1): the finished attempts held past
+            // their retention are kept apart, so that requests that ran -- malformed ones with a
+            // far not_after_ms included, which register and finish as errors -- never block a
+            // cancel; a tombstone is held at most tombstone_hold_s, so cancels hold this count
+            // that long at most
+            if (tombstones_ >= settings_.retention_count) {
                 // No tombstone can be kept for its whole hold without evicting another one
                 // early, which would break that one's promise: nothing is promised for this
                 // id, said so, and the cancel can be retried
                 return { 429, not_tombstoned_json(unknown_json(id),
                     "unknown attempt_id '" + id + "', and it was NOT tombstoned: "
-                    + std::to_string(tomb_expiry_.size()) + " cancels of unknown ids are held "
-                    "already (" + retention_text() + "), so a request with it that arrives later "
-                    "may still run here; retry the cancel later", "tombstones_full") };
+                    + std::to_string(tombstones_) + " tombstones (cancels of unknown ids) are "
+                    "held already (" + retention_text() + "), so a request with it that arrives "
+                    "later may still run here; retry the cancel later", "tombstones_full") };
             }
             // A cancel can overtake its request (still queued, or on the wire, its body half
             // uploaded): the id is tombstoned, so a request that arrives later is refused
@@ -1362,6 +1370,7 @@ std::pair<int, Json::Value> AttemptRegistry::cancel(const std::string &id, uint6
             // 1 s alone, a half-uploaded request completing at 1.18 s would run)
             auto tomb = Attempt::make_tombstone(id, settings_, instance_);
             attempts_.emplace(id, tomb);
+            ++tombstones_;
             hold_locked(*tomb, not_after_ms);
             Json::Value j = unknown_json(id);
             j["cancelled"] = false;

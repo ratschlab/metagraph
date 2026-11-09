@@ -1785,6 +1785,52 @@ TEST(GraphletAttemptRegistry, TheTombstoneHoldBoundsACancelOfAnUnknownId) {
     }
 }
 
+// H3, the review's S1 (e23/H3-review/exp_tomb_fill.py): finished attempts sent with a far
+// not_after_ms -- malformed requests that registered and finished as errors -- are held past
+// their retention, for up to tombstone_max_s, but never count against the cancels: a real
+// cancel-before-arrival is tombstoned, however many of them are held; only tombstones fill the
+// count, and each holds it at most tombstone_hold_s
+TEST(GraphletAttemptRegistry, HeldFinishedAttemptsNeverBlockACancel) {
+    FakeClock clock;
+    AttemptSettings settings = settings_with(&clock, 3600, 50);
+    settings.clock_skew_ms = 2000;
+    AttemptRegistry registry(settings);
+    const uint64_t far = clock.wall_ms() + 23ull * 3600 * 1000;
+    for (int i = 0; i < 101; ++i) {
+        auto a = attempt_of(registry, "fill-" + std::to_string(i));
+        AttemptIds ids = a->ids();
+        ids.not_after_ms = far;
+        a->set_ids(ids);
+        ASSERT_FALSE(registry.start(a));
+        registry.finish(a, "error", 400, 100);
+    }
+    // the first 51 left the retention by count and are held until far + skew: refused
+    auto replay = attempt_of(registry, "fill-0");
+    AttemptIds ids = replay->ids();
+    ids.not_after_ms = far;
+    replay->set_ids(ids);
+    auto refused = registry.start(replay);
+    ASSERT_TRUE(refused);
+    EXPECT_EQ("finished", refused->body["state"].asString());
+    // a cancel-before-arrival is tombstoned (before H3's S1 fix: 429 tombstones_full)
+    auto [status, body] = registry.cancel("real-cancel", 0, clock.wall_ms() + 10'000);
+    EXPECT_EQ(404, status) << body["error"].asString();
+    EXPECT_TRUE(body["tombstone"].asBool());
+    EXPECT_TRUE(body["covers_admission"].asBool());
+    // tombstones alone fill the count: 49 more, then the 51st cancel is refused
+    for (int i = 0; i < 49; ++i) {
+        ASSERT_EQ(404, registry.cancel("c-" + std::to_string(i), 0).first) << i;
+    }
+    auto [full, refusal] = registry.cancel("c-49", 0);
+    EXPECT_EQ(429, full);
+    EXPECT_NE(std::string::npos, refusal["error"].asString().find(
+            "50 tombstones (cancels of unknown ids) are held already"));
+    // after the tombstones' hold (900 s) the cancels pass again, the held attempts still held
+    clock.ms = 900'001;
+    EXPECT_EQ(404, registry.cancel("c-49", 0).first);
+    EXPECT_TRUE(registry.start(replay));
+}
+
 // A copy of a cancelled request refused at dispatch (409) extends the tombstone to its own
 // not_after_ms + clock_skew_ms and states the suppression against it, so that every later copy
 // (a proxy's replay carries the same not_after_ms) is refused while it could still be admitted
@@ -1978,11 +2024,15 @@ TEST(GraphletAttemptRegistry, FinishedAttemptsAreHeldThroughTheirNotAfterMs) {
         ASSERT_TRUE(replay);
         EXPECT_FALSE(replay->expired);
         EXPECT_EQ("finished", replay->body["state"].asString());
-        // held among the tombstones: the table (retention_count 1) is full, so a cancel of an
-        // unknown id promises nothing
-        auto [full, refused] = registry.cancel("unknown-1", 0);
+        // held beside the tombstones, and not counted by the cancels' 429 (H3, the review's S1):
+        // a cancel of an unknown id is tombstoned; a second fills retention_count 1 with
+        // tombstones alone, and is refused, promising nothing
+        EXPECT_EQ(404, registry.cancel("unknown-1", 0).first);
+        auto [full, refused] = registry.cancel("unknown-2", 0);
         EXPECT_EQ(429, full);
         EXPECT_EQ("tombstones_full", refused["reason"].asString());
+        EXPECT_NE(std::string::npos, refused["error"].asString().find(
+                "1 tombstones (cancels of unknown ids) are held already"));
         // one without not_after_ms is dropped by count: a replay of it runs
         auto bare = sent(registry, "ev-3", std::nullopt);
         ASSERT_FALSE(registry.start(bare));
@@ -1996,7 +2046,10 @@ TEST(GraphletAttemptRegistry, FinishedAttemptsAreHeldThroughTheirNotAfterMs) {
         EXPECT_TRUE(registry.start(sent(registry, "ev-1", not_after)));
         clock.ms = 62'001;
         EXPECT_TRUE(registry.start(sent(registry, "ev-1", not_after))->expired);
-        EXPECT_EQ(404, registry.cancel("unknown-2", 0).first);
+        // the tombstone of unknown-1 holds the cancels' count until its hold ends (900 s)
+        EXPECT_EQ(429, registry.cancel("unknown-3", 0).first);
+        clock.ms = 900'001;
+        EXPECT_EQ(404, registry.cancel("unknown-3", 0).first);
     }
     {
         // the cap: held at most tombstone_max_s after the finish (stated: a not_after_ms
