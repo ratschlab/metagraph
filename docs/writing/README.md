@@ -1,6 +1,6 @@
 # Writing guidance and text checks
 
-Use the [writing principles](https://github.com/ratschlab/writing-rules/blob/1e2060df768d8aa2e7c88f65f48217b8b409a234/guides/PRINCIPLES.md) for documentation and interface text, and the [engineering communication guide](https://github.com/ratschlab/writing-rules/blob/1e2060df768d8aa2e7c88f65f48217b8b409a234/guides/ENGINEERING.md) for pull requests, reviews and commit messages.
+Use the [writing principles](https://github.com/ratschlab/writing-rules/blob/376b4f302cf4696e0b3a7184efc429da8438be1c/guides/PRINCIPLES.md) for documentation and interface text, and the [engineering communication guide](https://github.com/ratschlab/writing-rules/blob/376b4f302cf4696e0b3a7184efc429da8438be1c/guides/ENGINEERING.md) for pull requests, reviews and commit messages.
 The `tools/writing-rules` submodule pins these guides and the checker together.
 
 ## Run the check
