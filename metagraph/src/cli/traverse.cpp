@@ -395,7 +395,6 @@ Json::Value seed_result_to_json(const SeedResult &r, const Strategy &st) {
     seed["labels_from_seed"] = r.labels_from_seed;
     seed["labels_supporting_total"] = uint_json(r.labels_supporting_total);
     seed["labels_dropped"] = uint_json(r.labels_dropped);
-    seed["labels_dropped_digest"] = r.labels_dropped_digest;
     Json::Value dropped(Json::arrayValue);
     for (const DroppedLabel &d : r.dropped_labels) {
         Json::Value dj;
@@ -513,9 +512,6 @@ Json::Value profile_to_json(const SupportProfile &p, const std::vector<FrozenSee
         Json::Value &t = j["labels_truncated"];
         t["kept"] = uint_json(p.labels_truncated->kept);
         t["total"] = uint_json(p.labels_truncated->total);
-        t["min_kept_kmers"] = uint_json(p.labels_truncated->min_kept_kmers);
-        t["max_dropped_kmers"] = uint_json(p.labels_truncated->max_dropped_kmers);
-        t["dropped_full_length"] = uint_json(p.labels_truncated->dropped_full_length);
     } else {
         j["labels_truncated"] = Json::Value::null;
     }
@@ -536,7 +532,6 @@ Json::Value profile_to_json(const SupportProfile &p, const std::vector<FrozenSee
             pop["supporting_total"] = uint_json(seed.population.supporting_total);
             pop["dropped_count"] = uint_json(seed.population.dropped_count);
             if (seed.population.dropped_count) {
-                pop["dropped_digest"] = seed.population.dropped_digest;
                 Json::Value dl(Json::arrayValue);
                 for (const std::string &d : seed.population.dropped) {
                     dl.append(d);

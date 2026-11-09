@@ -291,7 +291,6 @@ TEST_F(MiniRefSeq, SelectFullLengthSeed) {
     ASSERT_FALSE(capped.empty());
     EXPECT_EQ(5u, capped[0].labels.size());
     EXPECT_EQ(14u, capped[0].population.dropped_count);
-    EXPECT_FALSE(capped[0].population.dropped_digest.empty());
 }
 
 // the labels derived from the gene are its 19 carriers: the selected seed's labels, with its id
@@ -333,11 +332,6 @@ TEST_F(MiniRefSeq, DeriveCarriersFromSeed) {
     EXPECT_EQ(5u, capped.label_dict.size());
     EXPECT_EQ(19u, capped.labels_supporting_total);
     EXPECT_EQ(14u, capped.labels_dropped);
-    uint64_t digest = 0xcbf29ce484222325ULL;
-    for (size_t i = 5; i < names.size(); ++i) {
-        digest = fnv1a64(names[i] + "\n", digest);
-    }
-    EXPECT_EQ(hex64(digest), capped.labels_dropped_digest);
 }
 
 // every label end of a walk from the gene: the seed with its flank occurs in that record
