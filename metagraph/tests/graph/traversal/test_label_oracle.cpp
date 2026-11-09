@@ -347,14 +347,27 @@ TYPED_TEST(LabelOracleCoordTest, HeaderLabels) {
                                                 true, { 0, n1, 0 }),
             std::move(clash), std::move(clash_kmers));
     LabelOracle clash_oracle(*clash_anno);
+    EXPECT_TRUE(clash_oracle.is_ambiguous("G"));
+    EXPECT_TRUE(clash_oracle.is_ambiguous("acc2"));
+    EXPECT_FALSE(clash_oracle.is_ambiguous("F"));
+    EXPECT_FALSE(clash_oracle.is_ambiguous("nope"));
     EXPECT_THROW(clash_oracle.resolve_label("G"), std::invalid_argument);
     EXPECT_THROW(clash_oracle.resolve_label("acc2"), std::invalid_argument);
+    EXPECT_THROW(clash_oracle.resolve_label("nope"), std::invalid_argument);
     EXPECT_EQ(LabelKind::COLUMN, clash_oracle.resolve_label("F").kind);
     // discovery leaves those names out, so that every discovered label can be resubmitted
     ResolveOptions discover_clash;
     discover_clash.discover = true;
     discover_clash.discover_kind = LabelKind::HEADER;
     EXPECT_TRUE(resolve_support(clash_oracle, s1, discover_clash).labels.empty());
+    // a cut list counts only the labels returned: here none
+    discover_clash.discover_max_labels = 1;
+    auto cut = resolve_support(clash_oracle, s1, discover_clash);
+    EXPECT_TRUE(cut.labels.empty());
+    ASSERT_TRUE(cut.labels_truncated.has_value());
+    EXPECT_EQ(0u, cut.labels_truncated->kept);
+    EXPECT_EQ(2u, cut.labels_truncated->total);
+    discover_clash.discover_max_labels = ResolveOptions().discover_max_labels;
     discover_clash.discover_kind = LabelKind::COLUMN;
     auto columns = resolve_support(clash_oracle, s1, discover_clash).labels;
     ASSERT_EQ(1u, columns.size());

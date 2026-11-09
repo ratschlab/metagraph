@@ -99,17 +99,19 @@ std::pair<uint64_t, uint64_t> LabelOracle::map_coord(Column column, uint64_t coo
 }
 
 
+bool LabelOracle::is_ambiguous(const std::string &name) const {
+    return find_header(name)
+        && (find_column(name) || coord_to_header_->is_repeated_header(name));
+}
+
 LabelRef LabelOracle::resolve_label(const std::string &name) const {
     auto column = find_column(name);
+    if (is_ambiguous(name)) {
+        throw std::invalid_argument("Label '" + name + "' is ambiguous: " + (column
+                ? "it names both an annotation column and a sequence header"
+                : "several sequence records have this header"));
+    }
     auto header = find_header(name);
-    if (column && header) {
-        throw std::invalid_argument("Label '" + name + "' is ambiguous: it names both an "
-                                    "annotation column and a sequence header");
-    }
-    if (header && coord_to_header_->is_repeated_header(name)) {
-        throw std::invalid_argument("Label '" + name + "' is ambiguous: several sequence "
-                                    "records have this header");
-    }
     if (column) {
         LabelRef ref;
         ref.kind = LabelKind::COLUMN;
