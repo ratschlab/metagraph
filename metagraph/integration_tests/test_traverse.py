@@ -1777,16 +1777,21 @@ class TestTraverseAPI(TestTraverseBase):
     @classmethod
     def tearDownClass(cls):
         cls.server_process.kill()
+        cls.server_process.wait()
+        cls.server_log.close()
         super().tearDownClass()
 
     @classmethod
     def _start_server(cls, graph, annotation, host, port):
-        # with the index identity, which every graphlet and capabilities response carries
+        # with the index identity, which every graphlet and capabilities response carries.
+        # Its log goes to a file: a pipe nobody reads fills (64 KiB on Linux) after enough
+        # requests of the class, and the server then blocks writing its next log line.
         command = (f'{METAGRAPH} server_query -i {graph} -a {annotation} '
                    f'--port {port} --address {host} -p 2 '
                    f'--index-name tiny --index-manifest {cls.manifest}')
+        cls.server_log = open(f'{cls.tempdir.name}/server-{port}.log', 'w')
         return subprocess.Popen(shlex.split(command), shell=False,
-                                stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+                                stdout=cls.server_log, stderr=subprocess.STDOUT)
 
     def _post(self, route, payload):
         return requests.post(url=f'http://{self.host}:{self.port}/{route}',
