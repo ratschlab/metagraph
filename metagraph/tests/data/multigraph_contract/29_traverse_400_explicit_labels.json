@@ -38,7 +38,7 @@
     "timing": true
    }
   },
-  "not_after_ms": 1794137469125
+  "not_after_ms": 1794263125025
  },
  "body": {
   "error": "request.seeds[0].labels: at most 4 labels per seed (--traverse-max-explicit-labels)",
@@ -53,17 +53,17 @@
     "walk_until_ms": 894000
    },
    "bound_ms": 899000,
-   "elapsed_ms": 1,
+   "elapsed_ms": 2,
    "memory": {
     "held_bound_bytes": null,
     "peak_admitted_bytes": 0,
     "soft_excess_bytes": null
    },
-   "not_after_ms": 1794137469125,
+   "not_after_ms": 1794263125025,
    "observed_max_uninterruptible_ms": 0,
    "per_seed": [],
    "reason": "error",
-   "received_at": "2026-11-08T11:30:09.125Z",
+   "received_at": "2026-11-09T22:24:25.026Z",
    "seeds": {
     "abandoned": 0,
     "finished": 0,
@@ -73,7 +73,7 @@
    "server_instance": "7c1e0f3a9b24d6e8",
    "stopped_at": null,
    "timing": {
-    "cpu_ms": 0.467625
+    "cpu_ms": 0.480834
    },
    "work_units": 0
   }

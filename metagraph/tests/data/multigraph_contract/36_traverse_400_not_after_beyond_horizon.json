@@ -11,13 +11,13 @@
   ],
   "attempt_id": "svc-trv-h3-33",
   "budget_id": "svc-budget-0033",
-  "not_after_ms": 1794237488477
+  "not_after_ms": 1794266667885
  },
  "body": {
-  "error": "request.not_after_ms: 1794237488477 lies 3599999 ms after this server's clock (1794233888478), beyond the 901000 ms it accepts (attempts.not_after_horizon_ms: hard_cap_ms, which no request outlasts, + clock_skew_allowance_ms): a request starts within the content timeout of its header or never, so a later not_after_ms adds nothing but the time its id is held. Nothing was run or registered; send one at most that far ahead",
+  "error": "request.not_after_ms: 1794266667885 lies 3599999 ms after this server's clock (1794263067886), beyond the 901000 ms it accepts (attempts.not_after_horizon_ms: hard_cap_ms, which no request outlasts, + clock_skew_allowance_ms): a request starts within the content timeout of its header or never, so a later not_after_ms adds nothing but the time its id is held. Nothing was run or registered; send one at most that far ahead",
   "code": "not_after_beyond_horizon",
   "not_after_horizon_ms": 901000,
-  "not_after_ms": 1794237488477,
-  "server_time_ms": 1794233888478
+  "not_after_ms": 1794266667885,
+  "server_time_ms": 1794263067886
  }
 }
