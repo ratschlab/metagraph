@@ -377,6 +377,15 @@ TYPED_TEST(LabelOracleCoordTest, HeaderLabels) {
     EXPECT_THROW(clash_oracle.resolve_label("G"), std::invalid_argument);
     EXPECT_THROW(clash_oracle.resolve_label("acc2"), std::invalid_argument);
     EXPECT_EQ(LabelKind::COLUMN, clash_oracle.resolve_label("F").kind);
+    // discovery leaves those names out, so that every discovered label can be resubmitted
+    ResolveOptions discover_clash;
+    discover_clash.discover = true;
+    discover_clash.discover_kind = LabelKind::HEADER;
+    EXPECT_TRUE(resolve_support(clash_oracle, s1, discover_clash).labels.empty());
+    discover_clash.discover_kind = LabelKind::COLUMN;
+    auto columns = resolve_support(clash_oracle, s1, discover_clash).labels;
+    ASSERT_EQ(1u, columns.size());
+    EXPECT_EQ("F", columns[0].label.name);
 
     // a column without sequence records has no header labels: header discovery skips it
     std::vector<std::vector<std::string>> partial(2);

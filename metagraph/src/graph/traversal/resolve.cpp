@@ -155,25 +155,21 @@ SupportProfile resolve_support(const LabelOracle &oracle,
         if (total > options.discover_max_labels)
             profile.labels_truncated = LabelTruncation { options.discover_max_labels, total };
         for (const auto &[name, count, presence] : top) {
-            // a header of several records is ambiguous, as when it is named explicitly
-            if (headers && oracle.coord_to_header()->is_repeated_header(name))
+            // a name /traverse would refuse as ambiguous (a column and a header, or the
+            // header of several records) is left out, so that every label can be resubmitted
+            LabelRef ref;
+            try {
+                ref = oracle.resolve_label(name);
+            } catch (const std::invalid_argument &) {
                 continue;
-            std::optional<LabelRef> ref;
-            if (headers) {
-                ref = oracle.find_header(name);
-            } else if (auto column = oracle.find_column(name)) {
-                ref = LabelRef();
-                ref->kind = LabelKind::COLUMN;
-                ref->column = *column;
-                ref->name = name;
             }
-            assert(ref);
+            assert(ref.kind == options.discover_kind);
             LabelSupport found;
             for (uint64_t i = 0; i < presence.size(); ++i) {
                 if (presence[i])
                     found.add(i);
             }
-            refs.push_back(std::move(*ref));
+            refs.push_back(std::move(ref));
             support.push_back(std::move(found));
         }
     }
