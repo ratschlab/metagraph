@@ -127,14 +127,11 @@ SupportProfile resolve_support(const LabelOracle &oracle,
         auto top = oracle.anno_graph().get_top_label_signatures(
                 query, options.discover_max_labels, 0.0, 0.0, &total, headers);
         for (const auto &[name, count, presence] : top) {
-            // a name /traverse would refuse as ambiguous (a column and a header, or the
-            // header of several records) is left out, so that every label can be resubmitted
-            LabelRef ref;
-            try {
-                ref = oracle.resolve_label(name);
-            } catch (const std::invalid_argument &) {
+            // a name /traverse would refuse as ambiguous is left out, so that every label
+            // can be resubmitted
+            if (oracle.is_ambiguous(name))
                 continue;
-            }
+            LabelRef ref = oracle.resolve_label(name);
             assert(ref.kind == options.discover_kind);
             LabelSupport found;
             for (uint64_t i = 0; i < presence.size(); ++i) {

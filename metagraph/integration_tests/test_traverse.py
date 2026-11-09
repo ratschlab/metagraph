@@ -24,6 +24,10 @@ class TraverseFixture(TestingBase):
     """Two records sharing a 100 bp prefix X: A = X + P, B = X + Q (P, Q start differently)."""
 
     @classmethod
+    def _records(cls):
+        return f'>A\n{cls.X + cls.P}\n>B\n{cls.X + cls.Q}\n'
+
+    @classmethod
     def setUpClass(cls):
         super().setUpClass()
         rng = random.Random(42)
@@ -35,7 +39,7 @@ class TraverseFixture(TestingBase):
             cls.Q = random_seq(60, rng, alphabet)
         fasta = cls.tempdir.name + '/records.fa'
         with open(fasta, 'w') as f:
-            f.write(f'>A\n{cls.X + cls.P}\n>B\n{cls.X + cls.Q}\n')
+            f.write(cls._records())
         cls.graph = cls.tempdir.name + '/graph.dbg'
         anno_base = cls.tempdir.name + '/annotation'
         cls.annotation = anno_base + '.column.annodbg'
@@ -43,8 +47,7 @@ class TraverseFixture(TestingBase):
         cls._annotate_graph(fasta, cls.graph, anno_base, 'column')
 
 
-@parameterized_class(('mode',), input_values=[(mode,) for mode in GRAPH_MODES])
-class TestTraverseCLI(TraverseFixture):
+class TraverseCLI:
     def _run(self, request, *flags):
         path = self.tempdir.name + '/request.json'
         with open(path, 'w') as f:
@@ -58,6 +61,9 @@ class TestTraverseCLI(TraverseFixture):
         self.assertEqual(res.returncode, 0, res.stderr.decode())
         return json.loads(res.stdout.decode())
 
+
+@parameterized_class(('mode',), input_values=[(mode,) for mode in GRAPH_MODES])
+class TestTraverseCLI(TraverseCLI, TraverseFixture):
     def test_fork(self):
         out = self._traverse({'seeds': [{'seed_id': 'x', 'sequence': self.X, 'labels': ['A', 'B']}]})
         self.assertEqual(1, out['schema_version'])
@@ -104,16 +110,6 @@ class TestTraverseCLI(TraverseFixture):
             flank = ''.join(right['segments'][s]['sequence'] for s in path['segments'])
             self.assertEqual(10, len(flank))
 
-    def test_branch_limit(self):
-        # A and B diverge after the seed: with or without a branch allowance, each label
-        # follows its own record
-        for branches in [0, 2, 'unlimited']:
-            out = self._traverse({'seeds': [{'sequence': self.X}],
-                                  'strategy': {'branching': {'max_label_branches': branches}}})
-            right = out['results'][0]['arms']['right']
-            self.assertEqual(2, len(right['paths']), branches)
-            self.assertEqual(0, sum(e['branches'] for p in right['paths'] for e in p['end_labels']))
-
     def test_resolve(self):
         out = self._traverse({'sequence': self.X + self.P, 'discover': {},
                               'select': {'min_block_bp': len(self.X + self.P), 'max_seeds': 1}},
@@ -149,6 +145,31 @@ class TestTraverseCLI(TraverseFixture):
             self.assertNotEqual(res.returncode, 0, request)
         self.assertNotEqual(0, self._run({'seeds': [{'sequence': self.X}]},
                                          '--traverse-max-seed-bp', '50').returncode)
+
+
+@parameterized_class(('mode',), input_values=[(mode,) for mode in GRAPH_MODES])
+class TestTraverseBranchLimit(TraverseCLI, TraverseFixture):
+    """One label C on both records, so that it reaches the fork after X."""
+
+    @classmethod
+    def _records(cls):
+        return f'>C\n{cls.X + cls.P}\n>C\n{cls.X + cls.Q}\n'
+
+    def test_branch_limit(self):
+        # C is on both records, so it reaches the fork after X: without a branch allowance
+        # it ends there, with one it follows both records
+        out = self._traverse({'seeds': [{'sequence': self.X, 'labels': ['C']}],
+                              'strategy': {'branching': {'max_label_branches': 0}}})
+        right = out['results'][0]['arms']['right']
+        self.assertEqual(1, len(right['paths']))
+        self.assertEqual(['branch'], [e['reason'] for e in right['paths'][0]['end_labels']])
+        for branches in [2, 'unlimited']:
+            out = self._traverse({'seeds': [{'sequence': self.X, 'labels': ['C']}],
+                                  'strategy': {'branching': {'max_label_branches': branches}}})
+            right = out['results'][0]['arms']['right']
+            flanks = {''.join(right['segments'][s]['sequence'] for s in p['segments'])
+                      for p in right['paths']}
+            self.assertEqual({self.P, self.Q}, flanks, branches)
 
 
 class TestTraverseServer(TraverseFixture):
@@ -198,8 +219,11 @@ class TestTraverseServer(TraverseFixture):
         self.assertEqual(2, len(res.json()['labels']))
 
     def test_invalid_request(self):
-        res = requests.post(self._url('traverse'), data=json.dumps({'seeds': [], 'graph': 'x'}))
-        self.assertEqual(400, res.status_code)
+        # an unknown field is refused even in an otherwise valid request
+        request = {'seeds': [{'sequence': self.X}]}
+        self.assertEqual(200, requests.post(self._url('traverse'), data=json.dumps(request)).status_code)
+        request['graph'] = 'x'
+        self.assertEqual(400, requests.post(self._url('traverse'), data=json.dumps(request)).status_code)
 
     def test_python_client(self):
         client = GraphClient(self.host, self.servers[True][1])

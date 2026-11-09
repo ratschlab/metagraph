@@ -71,9 +71,10 @@ class LabelOracle {
     bool has_header_records(Column column) const;
     // (seq_id, local coordinate) of a column coordinate. Requires a CoordToHeader.
     std::pair<uint64_t, uint64_t> map_coord(Column column, uint64_t coord) const;
+    // Whether |name| is both a column and a header, or the header of several records
+    bool is_ambiguous(const std::string &name) const;
     // A column name or a header. Throws std::invalid_argument naming the label if neither
-    // exists, or if it is ambiguous: both a column and a header, or the header of several
-    // records.
+    // exists, or if it is ambiguous.
     LabelRef resolve_label(const std::string &name) const;
 
     // Batched row access (rows = annotation key - 1). On a row-diff
