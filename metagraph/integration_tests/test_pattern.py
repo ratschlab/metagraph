@@ -4501,6 +4501,30 @@ class TestPatternRegression(TestingBase):
             caps['attempts'].pop('not_after_horizon_ms', None)
             return caps
 
+        def without_resolve_discovery(caps):
+            # the `resolve` block's `discovery`, `max_explicit_labels` and `seed_order` members
+            # (H2, train 3: the server's bounds of a /resolve discovery, SPEC-labeled-traversal-
+            # core.md §4.6, the cap on its explicit label lists, §4.1, and the seed order, §4.2),
+            # gains over every base:
+            # checked as stated here at the defaults, the rest of the block compared as before
+            block = caps.get('resolve')
+            if block is None:
+                return caps
+            if caps is b:
+                self.assertEqual({'max_tracked_labels': 1000000, 'max_memory_mb': 1024,
+                                  'max_answer_labels': 10000,
+                                  'stop_reasons': ['time', 'memory'],
+                                  'rule': 'SPEC-labeled-traversal-core.md section 4.6'},
+                                 block.get('discovery'))
+                # and the cap on a request's explicit label lists (the H2 addendum)
+                self.assertEqual(10000, block.get('max_explicit_labels'))
+                # and the order of a selection's seeds (addendum 3, §4.2: since 01c05323b)
+                self.assertEqual('rank', block.get('seed_order'))
+            block.pop('discovery', None)
+            block.pop('max_explicit_labels', None)
+            block.pop('seed_order', None)
+            return caps
+
         def only_gains(base, new, allowed, what):
             # every member of |base| is in |new|, and what |new| adds is documented
             self.assertLessEqual(set(base), set(new), what)
@@ -4514,6 +4538,8 @@ class TestPatternRegression(TestingBase):
         without_reserve_defaults(b)
         without_tombstone_hold(a)
         without_tombstone_hold(b)
+        without_resolve_discovery(a)
+        without_resolve_discovery(b)
         # The documented gains, compared as sets: routes.requests (GET /requests/{request_id},
         # release 10, on every server); against a base before the pattern search also the
         # feature `pattern` with its routes and its blocks -- `pattern`, `resolve` (the block of
@@ -4581,7 +4607,9 @@ class TestPatternRegression(TestingBase):
         without_reserve_defaults(b)
         without_tombstone_hold(a)
         without_tombstone_hold(b)
-        new_caps = self.new.get('capabilities').json()
+        without_resolve_discovery(a)
+        without_resolve_discovery(b)
+        new_caps = without_resolve_discovery(self.new.get('capabilities').json())
         gains = {'discovery_trace_scale', 'max_request_memory_mb', 'max_concurrent',
                  'max_explicit_labels', 'max_extra_labels', 'max_cost_entries'} | (
             set() if base_pattern else {'pattern', 'resolve', 'in_ram'})

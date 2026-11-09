@@ -57,6 +57,7 @@ constexpr char kCoordinatesRule[]
 constexpr char kCoordinatesOutputBound[]
         = "SPEC-labeled-traversal-core.md section 7.1, record coordinates: what bounds the block";
 constexpr char kResolveTimeBudgetRule[] = "SPEC-labeled-traversal-core.md section 4.5";
+constexpr char kResolveDiscoveryRule[] = "SPEC-labeled-traversal-core.md section 4.6";
 
 // ---------------------------------------------------------------- the attempt's delivery check
 
@@ -534,7 +535,37 @@ TraverseRequest parse_traverse_request(const Json::Value &json, const TraverseLi
     return req;
 }
 
-ResolveRequest parse_resolve_request(const Json::Value &json) {
+// The request's explicit label lists under the server's cap, before anything of |json| is copied
+// or looked up (as /traverse's counts): the request's `labels`, then each explicit seed's, in
+// order; a list of another type is left to the parse that follows, which refuses it in its words
+static void check_resolve_counts(const Json::Value &json, uint64_t max_explicit_labels) {
+    if (!max_explicit_labels)
+        return;
+    // (indexing a const Value that is no object or null would throw jsoncpp's LogicError)
+    auto member = [](const Json::Value &object, const char *key) -> const Json::Value& {
+        static const Json::Value kNone;
+        return object.isObject() ? object[key] : kNone;
+    };
+    const Json::Value &labels = member(json, "labels");
+    if (labels.isArray() && labels.size() > max_explicit_labels) {
+        throw InvalidRequest("request.labels: at most " + std::to_string(max_explicit_labels)
+                             + " labels (--resolve-max-explicit-labels)");
+    }
+    const Json::Value &seeds = member(member(json, "select"), "seeds");
+    if (!seeds.isArray())
+        return;
+    for (Json::ArrayIndex i = 0; i < seeds.size(); ++i) {
+        const Json::Value &seed_labels = member(seeds[i], "labels");
+        if (seed_labels.isArray() && seed_labels.size() > max_explicit_labels) {
+            throw InvalidRequest("request.select.seeds[" + std::to_string(i) + "].labels: at most "
+                                 + std::to_string(max_explicit_labels)
+                                 + " labels per seed (--resolve-max-explicit-labels)");
+        }
+    }
+}
+
+ResolveRequest parse_resolve_request(const Json::Value &json, uint64_t max_explicit_labels) {
+    check_resolve_counts(json, max_explicit_labels);
     ResolveRequest req;
     Strict s(json, "request");
     // see parse_traverse_request: routing fields and in_ram are handled by the server
@@ -2264,6 +2295,60 @@ static Json::Value interval_json(const KmerInterval &iv) {
     return j;
 }
 
+// The labels_capped member (SPEC-labeled-traversal-core.md §4.6): where a discovery's label cap
+// cut it, what it met, and what its ranking then covers
+static Json::Value labels_capped_json(const SupportProfile &p) {
+    const LabelCap &cap = *p.labels_capped;
+    Json::Value c;
+    c["max_tracked"] = uint_json(cap.max_tracked);
+    c["tracked"] = uint_json(cap.tracked);
+    c["cut_kmer"] = uint_json(cap.cut_kmer);
+    c["new_at_cut"] = uint_json(cap.new_at_cut);
+    c["met_at_least"] = uint_json(cap.met_at_least());
+    c["untracked_max_kmers"] = uint_json(cap.untracked_max_kmers);
+    c["ranking_exact"] = cap.ranking_exact;
+    // the sequence from this base holds every k-mer an untracked label is present at
+    c["remainder_from_bp"] = uint_json(cap.cut_kmer);
+    const std::string u = std::to_string(cap.untracked_max_kmers);
+    std::string m = "--resolve-max-discover-labels " + std::to_string(cap.max_tracked) + ": the "
+        + std::to_string(cap.new_at_cut) + (cap.new_at_cut == 1 ? " label" : " labels")
+        + " first met at k-mer "
+        + std::to_string(cap.cut_kmer) + " would have made "
+        + std::to_string(cap.met_at_least()) + " tracked labels; none of them, nor any label "
+        + "first met after it, was tracked. ";
+    if (!cap.tracked) {
+        m += "No label was tracked (the first k-mer in the graph met more labels than the cap)";
+    } else {
+        m += std::string("Every tracked label is counted over the whole ")
+            + (p.stop ? "resolved prefix" : "query") + "; an untracked label supports at most "
+            + u + " k-mers, so the kept labels above " + u + " k-mers are exactly the uncut "
+            + "discovery's";
+        if (cap.ranking_exact) {
+            m += ", and the kept list is its top " + std::to_string(cap.max_labels);
+        } else if (cap.kept < cap.max_labels) {
+            m += "; the kept list may not be its top " + std::to_string(cap.max_labels)
+                + ": fewer than max_labels labels were tracked";
+        } else {
+            m += "; the kept list may not be its top " + std::to_string(cap.max_labels)
+                + ": the last kept label supports " + std::to_string(cap.min_kept_kmers)
+                + " <= " + u + " k-mers";
+        }
+    }
+    if (cap.labels_at_cut > cap.max_tracked) {
+        // the labels present at the cut k-mer are all new to a discovery of the sequence from
+        // there: more than the cap, so it cuts at its first k-mer and tracks nothing
+        m += ". A discovery of the sequence from base " + std::to_string(cap.cut_kmer)
+            + " cannot track them under this cap: its first k-mer alone holds "
+            + std::to_string(cap.labels_at_cut) + " labels, more than "
+            + std::to_string(cap.max_tracked);
+    } else {
+        m += ". Resolve the sequence from base " + std::to_string(cap.cut_kmer)
+            + " to discover the untracked labels";
+    }
+    c["message"] = std::move(m);
+    return c;
+}
+
 Json::Value profile_to_json(const SupportProfile &p, const SeedSelection *sel, const std::string &run_format,
                             const std::function<void()> &check) {
     // the answer's deadline, read every kResolveCheckLabels objects (labels, candidates, seeds)
@@ -2316,6 +2401,10 @@ Json::Value profile_to_json(const SupportProfile &p, const SeedSelection *sel, c
     } else {
         j["labels_truncated"] = Json::Value::null;
     }
+    // the cut by the discovery's label cap (SPEC-labeled-traversal-core.md §4.6): only where it
+    // bound, so that every other answer keeps its bytes
+    if (p.labels_capped)
+        j["labels_capped"] = labels_capped_json(p);
     Json::Value cands(Json::arrayValue);
     for (const auto &c : p.candidates) {
         built();
@@ -5701,13 +5790,36 @@ Json::Value resolve_capabilities_json(const ResolveTimeLimits &limits) {
     t["rule"] = kResolveTimeBudgetRule;
     Json::Value r;
     r["time_budget"] = std::move(t);
+    r["discovery"] = resolve_discovery_json(limits);
+    // the cap on a request's explicit label lists (--resolve-max-explicit-labels; 0: none):
+    // the request's `labels` and each explicit seed's, a 400 above it
+    r["max_explicit_labels"] = uint_json(limits.max_explicit_labels);
+    // the order of a selection's seeds (§4.2): a client need not infer it from the build
+    r["seed_order"] = kSeedOrder;
     return r;
+}
+
+Json::Value resolve_discovery_json(const ResolveTimeLimits &limits) {
+    Json::Value d;
+    // the most labels a discovery tracks and the memory its pass holds (MiB; 0: none), and
+    // the reasons a stop states (time: bounds.time_budget_ms; memory: the bound); the rule
+    // (the cut, what the ranking then covers, what is charged, where the pass stops) is §4.6
+    d["max_tracked_labels"] = uint_json(limits.max_discover_labels);
+    d["max_memory_mb"] = uint_json(limits.max_discover_memory_mb);
+    // the most labels an answer keeps (discover.max_labels lowered to it, limits.clamped)
+    d["max_answer_labels"] = uint_json(limits.max_discover_answer_labels);
+    d["stop_reasons"] = strings_json({ "time", "memory" });
+    d["rule"] = kResolveDiscoveryRule;
+    return d;
 }
 
 // Under a stop, why an explicit selection cannot be made from the prefix (empty: it can, and
 // is the prefix's): an interval ending past the k-mers resolved, or, on a discovery, a label
 // the prefix did not discover — whether either holds on the whole query is unknown, so the
 // selection is not made rather than refused (a 400 would blame the request for the deadline).
+// Likewise under a discovery's label cap (SPEC-labeled-traversal-core.md §4.6), with or without
+// a stop: a seed naming a label the capped discovery did not keep (whether the uncut one would
+// have kept it is unknown).
 // What is known whatever the stop is refused as without one, every seed checked first, in
 // select_seeds' order: an interval empty or out of range, an
 // interval not fully in the graph (the whole query's k-mers are mapped before the deadline is
@@ -5715,20 +5827,28 @@ Json::Value resolve_capabilities_json(const ResolveTimeLimits &limits) {
 // label that is not one of them
 static std::string explicit_selection_blocked(const SupportProfile &profile,
                                               const SelectionPolicy &policy, bool discover) {
+    // the whole query's k-mers and graph runs (the stop keeps them; without one, the profile's)
+    const uint64_t query_kmers = profile.stop ? profile.stop->query_kmers : profile.num_kmers;
+    const std::vector<KmerInterval> &query_graph_runs
+            = profile.stop ? profile.stop->query_graph_runs : profile.graph_runs;
     // a label the pair does not hold (unknown_labels, a multi-graph server's pair,
     // SPEC-multigraph-envelope.md section 2) covers nothing of a seed, under a stop as without
     // one (select_seeds lists it in labels_not_covering): it is neither unprofiled nor
-    // undiscovered
-    auto absent = [&](const std::string &name) {
-        return std::find(profile.unknown_labels.begin(), profile.unknown_labels.end(), name)
-                != profile.unknown_labels.end();
-    };
+    // undiscovered. The names are looked up in one set of those and one of the profiled labels'
+    // (a linear search per name cost N^2 comparisons for seeds naming N labels, review 5 #6)
+    const std::unordered_set<std::string_view> unknown(profile.unknown_labels.begin(),
+                                                       profile.unknown_labels.end());
+    std::unordered_set<std::string_view> profiled_names;
+    profiled_names.reserve(profile.labels.size());
+    for (const LabelProfile &lp : profile.labels) {
+        profiled_names.insert(lp.label.name);
+    }
+    auto absent = [&](const std::string &name) { return unknown.count(name) > 0; };
     for (size_t i = 0; i < policy.explicit_seeds.size(); ++i) {
         const ExplicitSeed &ex = policy.explicit_seeds[i];
-        if (ex.kmers.begin >= ex.kmers.end || ex.kmers.end > profile.stop->query_kmers)
+        if (ex.kmers.begin >= ex.kmers.end || ex.kmers.end > query_kmers)
             throw InvalidRequest("Explicit seed interval out of range");
-        const bool in_one_run = std::any_of(profile.stop->query_graph_runs.begin(),
-                                            profile.stop->query_graph_runs.end(),
+        const bool in_one_run = std::any_of(query_graph_runs.begin(), query_graph_runs.end(),
             [&](const KmerInterval &run) {
                 return run.begin <= ex.kmers.begin && run.end >= ex.kmers.end;
             });
@@ -5737,8 +5857,7 @@ static std::string explicit_selection_blocked(const SupportProfile &profile,
         if (discover)
             continue;
         for (const std::string &name : ex.labels) {
-            const bool profiled = std::any_of(profile.labels.begin(), profile.labels.end(),
-                [&](const LabelProfile &lp) { return lp.label.name == name; });
+            const bool profiled = profiled_names.count(name) > 0;
             if (!profiled && !absent(name))
                 throw InvalidRequest("Explicit seed label was not profiled: '" + ::utils::clip_for_message(name) + "'");
         }
@@ -5751,10 +5870,11 @@ static std::string explicit_selection_blocked(const SupportProfile &profile,
                     + std::to_string(ex.kmers.end) + ") ends past the k-mers resolved";
         }
         for (const std::string &name : ex.labels) {
-            const bool profiled = std::any_of(profile.labels.begin(), profile.labels.end(),
-                [&](const LabelProfile &lp) { return lp.label.name == name; });
-            if (!profiled && !absent(name))
-                return seed + " names a label the resolved prefix did not discover";
+            const bool profiled = profiled_names.count(name) > 0;
+            if (!profiled && !absent(name)) {
+                return seed + (profile.stop ? " names a label the resolved prefix did not discover"
+                                            : " names a label the capped discovery did not keep");
+            }
         }
     }
     return "";
@@ -5764,7 +5884,11 @@ static Json::Value resolve_stop_json(const ResolveStop &stop, size_t k, double b
                                       double reserve_ms, const std::string &not_made) {
     Json::Value s;
     s["phase"] = stop.phase == ResolveStop::ROWS ? "rows" : "support";
-    s["reason"] = "time";
+    const bool memory = stop.reason == ResolveStop::MEMORY;
+    s["reason"] = memory ? "memory" : "time";
+    // the bound that stopped a discovery's pass (--resolve-max-discover-memory-mb, §4.6)
+    if (memory)
+        s["max_memory_mb"] = uint_json(stop.max_memory >> 20);
     s["resolved_kmers"] = uint_json(stop.resolved_kmers);
     s["query_kmers"] = uint_json(stop.query_kmers);
     // the bases the resolved k-mers cover (none for none), and where the rest starts: k-mer i
@@ -5772,15 +5896,25 @@ static Json::Value resolve_stop_json(const ResolveStop &stop, size_t k, double b
     s["resolved_bp"] = uint_json(stop.resolved_kmers ? stop.resolved_kmers + k - 1 : 0);
     s["query_bp"] = uint_json(stop.query_kmers + k - 1);
     s["remainder_from_bp"] = uint_json(stop.resolved_kmers);
-    std::string message = "bounds.time_budget_ms " + ms_text(budget_ms)
-        + " ms less the finalisation reserve of " + ms_text(reserve_ms) + " ms ran out while "
+    std::string message = (memory
+            ? "--resolve-max-discover-memory-mb " + std::to_string(stop.max_memory >> 20)
+              + " ran out while "
+            : "bounds.time_budget_ms " + ms_text(budget_ms) + " ms less the finalisation reserve of "
+              + ms_text(reserve_ms) + " ms ran out while ")
         + (stop.phase == ResolveStop::ROWS ? "the annotation rows of the query's k-mers were read"
                                            : "the explicit labels' hits were read")
         + ": this answer is exactly the resolve of the sequence's first "
         + std::to_string(stop.resolved_kmers) + " of " + std::to_string(stop.query_kmers)
         + " k-mers" + (stop.resolved_kmers ? " (a run ending there may continue past it)" : "")
-        + "; resolve the rest from base " + std::to_string(stop.resolved_kmers)
-        + ", or raise bounds.time_budget_ms";
+        + (stop.cannot_progress
+            // the query's first k-mer in the graph did not fit: its remainder has the same k-mers
+            // in the graph, setup and first row (§4.6)
+            ? "; it cannot be resolved past base " + std::to_string(stop.resolved_kmers)
+              + " under this bound: its first k-mer in the graph does not fit beside the query's "
+              + "own setup, and a resolve of the sequence from base "
+              + std::to_string(stop.resolved_kmers) + " stops there again"
+            : "; resolve the rest from base " + std::to_string(stop.resolved_kmers)
+              + (memory ? "" : ", or raise bounds.time_budget_ms"));
     if (!not_made.empty())
         message += "; the explicit selection was not made (selection null): " + not_made;
     s["message"] = std::move(message);
@@ -5827,8 +5961,19 @@ Json::Value process_resolve_request(
             && json["bounds"].isMember("time_budget_ms")) {
         start = now();
     }
-    ResolveRequest req = parse_resolve_request(json);
+    // the explicit label lists first, before anything of the body is copied
+    ResolveRequest req = parse_resolve_request(json, time.max_explicit_labels);
     req.options.drop_labels_not_in_graph = labels_not_in_graph_dropped;
+    // the bounds of a discovery (§4.6; 0: none)
+    req.options.discover_max_tracked = time.max_discover_labels;
+    req.options.discover_max_memory = time.max_discover_memory_mb << 20;
+    // the labels a discovery's answer keeps (discover.max_labels), lowered to the server's
+    // maximum (§4.6) and stated in limits.clamped below
+    const bool max_labels_clamped = req.options.discover && time.max_discover_answer_labels
+            && req.options.discover_max_labels > time.max_discover_answer_labels;
+    const uint64_t max_labels_requested = req.options.discover_max_labels;
+    if (max_labels_clamped)
+        req.options.discover_max_labels = time.max_discover_answer_labels;
     // a client that is gone is not answered: the request is abandoned at the next phase
     auto abandon = []() {
         throw AttemptAborted("the client closed its connection: the resolve request was abandoned");
@@ -5844,6 +5989,10 @@ Json::Value process_resolve_request(
     // always gave
     std::optional<Deadline> deadline;
     Json::Value clamped(Json::arrayValue);
+    if (max_labels_clamped) {
+        note_clamped(&clamped, "discover.max_labels", uint_json(max_labels_requested),
+                     uint_json(req.options.discover_max_labels));
+    }
     std::string late;
     // the budget an answer whose work did not stop by time states (the request's, under the
     // server's cap and finish_by_ms), and a pooled pair's budget cut at the work cutoff
@@ -5951,23 +6100,49 @@ Json::Value process_resolve_request(
         if (req.select) {
             req.policy.release_id = release;
             // under a stop the selection is the prefix's, made from it unless an
-            // explicit seed reaches beyond what the prefix can tell
-            if (profile.stop && req.policy.policy == SelectionPolicy::EXPLICIT)
+            // explicit seed reaches beyond what the prefix can tell; under a discovery's label
+            // cap, unless a seed names a label it did not keep (§4.6)
+            // (a cut whose ranking is exact kept the uncut discovery's labels: its seeds are
+            // judged as the uncut answer judges them, a label not kept refused as there)
+            if ((profile.stop || (profile.labels_capped && !profile.labels_capped->ranking_exact))
+                    && req.policy.policy == SelectionPolicy::EXPLICIT)
                 not_made = explicit_selection_blocked(profile, req.policy,
                                                       req.options.discover);
             if (not_made.empty())
                 selection = select_seeds(profile, req.sequence, req.policy, oracle.regime() != Regime::BASIC);
         }
     } catch (const std::invalid_argument &e) {
-        throw InvalidRequest(e.what());
+        std::string message = e.what();
+        // a seed's label that the answer-labels clamp may have left out: the discovery ranked
+        // more labels than the clamp kept, so the request's own max_labels might have kept it
+        // (§4.6); the refusal names the clamp (where it dropped nothing, the 400 is as before)
+        if (max_labels_clamped && profile.labels_truncated
+                && message.rfind(kSeedLabelNotProfiled, 0) == 0) {
+            const std::string effective = std::to_string(req.options.discover_max_labels);
+            message += "; discover.max_labels was lowered from "
+                + std::to_string(max_labels_requested) + " to " + effective
+                + " (--resolve-max-discover-answer-labels), and the discovery kept " + effective
+                + " of the " + std::to_string(profile.labels_truncated->total)
+                + " labels it ranked: the label may be one ranked past " + effective
+                + ". Ask for at most " + effective
+                + " labels and choose the seeds among them, or resolve with the seed's label "
+                  "named in labels";
+        }
+        throw InvalidRequest(message);
     }
     // the selection is not polled: read once it is done
     if (req.options.finish_check)
         req.options.finish_check();
     Json::Value out = profile_to_json(profile, selection ? &*selection : nullptr, req.run_format,
                                       req.options.finish_check);
-    if (!not_made.empty())
+    if (!not_made.empty()) {
         out["selection"] = Json::Value();
+        // a stop states it in its message (below); a cut by the label cap alone in its own
+        if (!profile.stop) {
+            out["labels_capped"]["message"] = out["labels_capped"]["message"].asString()
+                + "; the explicit selection was not made (selection null): " + not_made;
+        }
+    }
     // the labels this pair does not hold (a multi-graph server's): its answer is that of the
     // others, and none of these is in it
     if (labels_not_in_graph_dropped)
@@ -5976,10 +6151,11 @@ Json::Value process_resolve_request(
     out["capabilities"] = capabilities_to_json(oracle, release, identity);
     if (deadline) {
         // the budget the work ran under, stated whether or not it stopped the work; a pooled
-        // pair's cut at the work cutoff only when it stopped the work (the stop is by time:
-        // the deadline is what ends a resolve's work), stated as a clamp of the budget, else
-        // the request's own: the pair's single-graph answer
-        const bool cut_bound = cut && profile.stop.has_value();
+        // pair's cut at the work cutoff only when it stopped the work (a stop by time: a
+        // discovery's memory bound is the pair's own, §4.6), stated as a clamp of the budget,
+        // else the request's own: the pair's single-graph answer
+        const bool cut_bound = cut && profile.stop.has_value()
+                               && profile.stop->reason == ResolveStop::TIME;
         if (cut_bound) {
             note_clamped(&clamped, "bounds.time_budget_ms",
                          req.time_budget_ms ? req.time_budget_given : Json::Value(),
@@ -5994,6 +6170,17 @@ Json::Value process_resolve_request(
             ? resolve_stop_json(*profile.stop, profile.k, deadline->time_budget_ms(),
                                 deadline->finalize_reserve_ms(), not_made)
             : Json::Value();
+    } else if (profile.stop) {
+        // a discovery's memory bound stops the work with or without a deadline (§4.6): its
+        // stop block is stated whatever the request asked
+        assert(profile.stop->reason == ResolveStop::MEMORY);
+        out["stop"] = resolve_stop_json(*profile.stop, profile.k, 0, 0, not_made);
+    }
+    if (!deadline && !clamped.empty()) {
+        // a clamp without a deadline (discover.max_labels): `limits` holds it alone
+        Json::Value l;
+        l["clamped"] = std::move(clamped);
+        out["limits"] = std::move(l);
     }
     // the request's modelled memory at its largest (SPEC §4.4, §7.2.2): the work's peak, or
     // the profile with the selection made from it, whichever is larger (the answer's tree and

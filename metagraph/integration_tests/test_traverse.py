@@ -3973,6 +3973,275 @@ class TestTraverseResolveRegression(TestTraverseBase):
 
 
 @unittest.skipUnless(_supports_traverse(), "`metagraph traverse` is not available in this build")
+class TestResolveDiscoveryBounds(TestingBase):
+    """The server's bounds of a /resolve discovery (SPEC-labeled-traversal-core.md §4.6; GPT review
+    5, finding 3), end to end on a fixture of many records: 6,000 records in three files (columns,
+    k = 31, row_diff_brwt_coord with its .seqs), each holding the query's CORE from a start of its
+    own (0 to 199) between flanks of its own, so that a header discovery of CORE meets every record,
+    record i first at k-mer start_i (or a little before, where its flank ends as CORE does), and
+    supports the k-mers from it on. Servers with the default
+    bounds (which bind on nothing here), with a label cap of 500 and with a memory bound of 1 MiB;
+    the CLI, which applies no bound, gives the uncut answers."""
+
+    CORE_BP = 300
+    RECORDS = 6000
+
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        rng = random.Random(20261108)
+
+        def seq(n):
+            return ''.join(rng.choice('ACGT') for _ in range(n))
+
+        cls.core = seq(cls.CORE_BP)
+        cls.starts = {}
+        files = []
+        for f in range(3):
+            path = f'{cls.tempdir.name}/part{f}.fa'
+            with open(path, 'w') as out:
+                for i in range(f, cls.RECORDS, 3):
+                    start = rng.randrange(200)
+                    cls.starts[f's{i:05d}'] = start
+                    out.write(f'>s{i:05d}\n{seq(30 + rng.randrange(30))}{cls.core[start:]}'
+                              f'{seq(30 + rng.randrange(30))}\n')
+            files.append(path)
+        cls.graph = cls.tempdir.name + '/graph.dbg'
+        cls.anno_base = cls.tempdir.name + '/annotation'
+        cls.anno = cls.anno_base + '.row_diff_brwt_coord.annodbg'
+        cls._build_graph(' '.join(files), cls.graph, K, 'succinct', mode='basic')
+        # one thread: the columns in the order of the files, as the .seqs written after them
+        # (several threads annotate the files in any order)
+        cls._annotate_graph(files, cls.graph, cls.anno_base, 'row_diff_brwt_coord',
+                            anno_type='filename', num_threads=1)
+        cls._run_command(f'{METAGRAPH} annotate -i {cls.graph} --anno-filename '
+                         f'--index-header-coords -o {cls.anno_base} {" ".join(files)}',
+                         'index-header-coords')
+        cls.servers = {}
+        for name, flags in (('default', []), ('cap', ['--resolve-max-discover-labels', '500']),
+                            ('memory', ['--resolve-max-discover-memory-mb', '1'])):
+            port = _free_port()
+            log = open(f'{cls.tempdir.name}/server-{name}.log', 'w')
+            process = subprocess.Popen(
+                shlex.split(METAGRAPH) + ['server_query', '-i', cls.graph, '-a', cls.anno,
+                                          '--port', str(port), '--address', '127.0.0.1',
+                                          '-p', '2'] + flags,
+                stdout=log, stderr=subprocess.STDOUT)
+            url = f'http://127.0.0.1:{port}'
+            for _ in range(600):
+                try:
+                    if requests.get(url + '/traverse/capabilities', timeout=2).ok:
+                        break
+                except requests.exceptions.RequestException:
+                    pass
+                time.sleep(0.1)
+            cls.servers[name] = (url, process, log)
+
+    @classmethod
+    def tearDownClass(cls):
+        for _, process, log in cls.servers.values():
+            process.kill()
+            process.wait()
+            log.close()
+        super().tearDownClass()
+
+    def _post(self, server, request):
+        ret = requests.post(self.servers[server][0] + '/resolve', data=json.dumps(request),
+                            timeout=600)
+        self.assertEqual(200, ret.status_code, ret.text[:2000])
+        return ret.json()
+
+    def _cli(self, request):
+        path = self.tempdir.name + '/request.json'
+        with open(path, 'w') as f:
+            json.dump(request, f)
+        res = subprocess.run(shlex.split(METAGRAPH) + ['traverse', '--resolve', '--json', '-i',
+                                                       self.graph, '-a', self.anno, path],
+                             stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        self.assertEqual(0, res.returncode, res.stderr.decode()[-2000:])
+        return json.loads(res.stdout.decode())
+
+    @staticmethod
+    def _untimed(answer):
+        return json.dumps({k: v for k, v in answer.items() if k != 'timing'}, sort_keys=True)
+
+    def _discovery(self, sequence, max_labels, support='kmer'):
+        return {'sequence': sequence, 'discover': {'kind': 'header', 'max_labels': max_labels},
+                'support': support}
+
+    def test_the_capabilities_state_the_bounds(self):
+        for name, (labels, memory) in (('default', (1000000, 1024)), ('cap', (500, 1024)),
+                                       ('memory', (1000000, 1))):
+            with self.subTest(server=name):
+                url = self.servers[name][0]
+                for route in ('/capabilities', '/traverse/capabilities'):
+                    d = requests.get(url + route).json()['resolve']['discovery']
+                    self.assertEqual({'max_tracked_labels': labels, 'max_memory_mb': memory,
+                                      'max_answer_labels': 10000,
+                                      'stop_reasons': ['time', 'memory'],
+                                      'rule': 'SPEC-labeled-traversal-core.md section 4.6'}, d)
+                    # the cap on a request's explicit label lists (its default)
+                    self.assertEqual(10000, requests.get(url + route).json()['resolve'][
+                        'max_explicit_labels'])
+                    # the order of a selection's seeds (§4.2, since 01c05323b)
+                    self.assertEqual('rank', requests.get(url + route).json()['resolve'][
+                        'seed_order'])
+
+    def test_the_answers_labels_are_clamped(self):
+        """--resolve-max-discover-answer-labels (10,000 by default): a larger discover.max_labels
+        is lowered to it, stated in limits.clamped (here without a deadline: limits holds the clamp
+        alone), the answer that of the effective value"""
+        out = self._post('default', self._discovery(self.core, 20000))
+        self.assertEqual({'clamped': [{'field': 'discover.max_labels', 'requested': 20000,
+                                       'effective': 10000}]}, out['limits'])
+        self.assertEqual(self.RECORDS, len(out['labels']))
+        plain = self._post('default', self._discovery(self.core, 10000))
+        self.assertNotIn('limits', plain)
+        self.assertEqual(self._untimed(plain),
+                         self._untimed({k: v for k, v in out.items() if k != 'limits'}))
+
+    def test_the_explicit_labels_cap(self):
+        """--resolve-max-explicit-labels (10,000 by default): a request's `labels` or an explicit
+        seed's longer than it is refused 400 naming the list, the cap and the flag, before the
+        request's other fields are read; at the cap the request goes on (here to the 400 of a
+        label the index does not hold); the CLI applies no cap"""
+        url = self.servers['default'][0]
+        names = [f'x{i}' for i in range(10001)]
+
+        def refusal(body):
+            ret = requests.post(url + '/resolve', data=json.dumps(body), timeout=600)
+            self.assertEqual(400, ret.status_code, ret.text[:500])
+            return ret.json()['error']
+
+        self.assertEqual('request.labels: at most 10000 labels (--resolve-max-explicit-labels)',
+                         refusal({'sequence': self.core, 'labels': names}))
+        # with an unknown field beside it: the count's words
+        self.assertEqual('request.labels: at most 10000 labels (--resolve-max-explicit-labels)',
+                         refusal({'sequence': self.core, 'labels': names, 'bogus': 1}))
+        self.assertNotIn('--resolve-max-explicit-labels',
+                         refusal({'sequence': self.core, 'labels': names[:10000]}))
+        seeds = [{'kmer_interval': [0, 10], 'labels': ['s00000']},
+                 {'kmer_interval': [0, 10], 'labels': names}]
+        self.assertEqual('request.select.seeds[1].labels: at most 10000 labels per seed '
+                         '(--resolve-max-explicit-labels)',
+                         refusal({'sequence': self.core, 'labels': ['s00000'],
+                                  'select': {'policy': 'explicit', 'seeds': seeds}}))
+        path = self.tempdir.name + '/request-labels.json'
+        with open(path, 'w') as f:
+            json.dump({'sequence': self.core, 'labels': names}, f)
+        res = subprocess.run(shlex.split(METAGRAPH) + ['traverse', '--resolve', '--json', '-i',
+                                                       self.graph, '-a', self.anno, path],
+                             stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        self.assertNotIn('--resolve-max-explicit-labels', res.stdout.decode())
+
+    def test_the_default_bounds_change_nothing(self):
+        """With the default bounds every record is tracked and the pass fits: the server's
+        answers are the CLI's (no bounds), timing apart, with no labels_capped and no stop"""
+        for request in (self._discovery(self.core, 1000), self._discovery(self.core, 10),
+                        self._discovery(self.core, 10, 'trace'),
+                        {'sequence': self.core, 'discover': {'max_labels': 10}}):
+            with self.subTest(request={k: v for k, v in request.items() if k != 'sequence'}):
+                served = self._post('default', request)
+                self.assertNotIn('labels_capped', served)
+                self.assertNotIn('stop', served)
+                self.assertEqual(self._untimed(self._cli(request)), self._untimed(served))
+        full = self._post('default', self._discovery(self.core, 10))
+        self.assertEqual(self.RECORDS, full['labels_truncated']['total'])
+
+    def test_the_cap_states_its_cut(self):
+        """--resolve-max-discover-labels 500: the records first met before the cut k-mer are
+        tracked, each with its uncut support; the cut, the labels met and the bound of the
+        untracked ones are stated; ranking_exact holds exactly as the answer shows it"""
+        n = self.CORE_BP - K + 1
+        for max_labels in (10, 1000):
+            for support in ('kmer', 'trace'):
+                with self.subTest(max_labels=max_labels, support=support):
+                    request = self._discovery(self.core, max_labels, support)
+                    out = self._post('cap', request)
+                    uncut = self._cli(dict(request, discover={'kind': 'header',
+                                                              'max_labels': self.RECORDS}))
+                    support_of = {l['label']: l['kmers_supported'] for l in uncut['labels']}
+                    # the k-mer each record is first met at (its CORE start, or before it where
+                    # its flank ends as CORE does before it)
+                    first = {l['label']: l['runs'][0][0] for l in uncut['labels']}
+                    self.assertEqual(self.RECORDS, len(first))
+                    self.assertTrue(all(first[name] <= s for name, s in self.starts.items()))
+                    starts = sorted(first.values())
+                    c = out['labels_capped']
+                    cut = c['cut_kmer']
+                    tracked = sum(1 for s in starts if s < cut)
+                    self.assertEqual((500, tracked, sum(1 for s in starts if s == cut)),
+                                     (c['max_tracked'], c['tracked'], c['new_at_cut']))
+                    self.assertLessEqual(tracked, 500)
+                    self.assertGreater(tracked + c['new_at_cut'], 500)
+                    self.assertEqual(tracked + c['new_at_cut'], c['met_at_least'])
+                    self.assertEqual(n - cut, c['untracked_max_kmers'])
+                    self.assertEqual(cut, c['remainder_from_bp'])
+                    self.assertEqual(n, out['num_kmers'])
+                    for label in out['labels']:
+                        self.assertLess(first[label['label']], cut)
+                        self.assertEqual(support_of[label['label']], label['kmers_supported'])
+                    # checkable from the answer alone
+                    kept = out['labels']
+                    self.assertEqual(len(kept) == max_labels
+                                     and kept[-1]['kmers_supported'] > c['untracked_max_kmers'],
+                                     c['ranking_exact'])
+                    if c['ranking_exact']:
+                        self.assertEqual([l['label'] for l in uncut['labels'][:max_labels]],
+                                         [l['label'] for l in kept])
+                    self.assertEqual(min(tracked, max_labels), len(kept))
+                    # the records present at the cut k-mer (tracked and new): more than the cap,
+                    # and a discovery of the sequence from there meets them all at its first
+                    # k-mer, so it tracks nothing, which the message states
+                    present = self._cli(self._discovery(self.core, self.RECORDS, 'kmer'))
+                    at_cut = sum(1 for l in present['labels']
+                                 if any(a <= cut < b for a, b in l['runs']))
+                    again = self._post('cap', self._discovery(self.core[cut:], max_labels,
+                                                              support))['labels_capped']
+                    if at_cut > 500:
+                        self.assertIn('. A discovery of the sequence from base %d cannot track '
+                                      'them under this cap: its first k-mer alone holds %d '
+                                      'labels, more than 500' % (cut, at_cut), c['message'])
+                        self.assertEqual((0, 0, at_cut),
+                                         (again['cut_kmer'], again['tracked'],
+                                          again['new_at_cut']))
+                    else:
+                        self.assertIn('. Resolve the sequence from base %d to discover the '
+                                      'untracked labels' % cut, c['message'])
+                        self.assertGreater(again['tracked'], 0)
+                    # the remainder holds every untracked record
+                    rest = self._cli(self._discovery(self.core[cut:], self.RECORDS, support))
+                    found = {l['label'] for l in rest['labels']}
+                    self.assertTrue(all(name in found for name, s in first.items()
+                                        if s >= cut))
+
+    def test_the_memory_bound_answers_a_prefix(self):
+        """--resolve-max-discover-memory-mb 1: the pass stops at a k-mer (stop reason memory,
+        phase rows, no deadline) and the answer is the CLI's resolve of the prefix before it"""
+        for support in ('kmer', 'trace'):
+            with self.subTest(support=support):
+                out = self._post('memory', self._discovery(self.core, 10, support))
+                stop = out['stop']
+                x = stop['resolved_kmers']
+                self.assertEqual(('rows', 'memory', 1), (stop['phase'], stop['reason'],
+                                                         stop['max_memory_mb']))
+                # past the first k-mer in the graph: the rest can progress, and the message
+                # says to resolve it
+                self.assertIn('; resolve the rest from base %d' % stop['resolved_kmers'],
+                              stop['message'])
+                self.assertEqual((x, self.CORE_BP - K + 1, x),
+                                 (out['num_kmers'], stop['query_kmers'],
+                                  stop['remainder_from_bp']))
+                self.assertGreater(x, 0)
+                self.assertLess(x, self.CORE_BP - K + 1)
+                self.assertNotIn('limits', out)
+                self.assertIn('--resolve-max-discover-memory-mb 1 ran out', stop['message'])
+                prefix = self._cli(self._discovery(self.core[:x + K - 1], 10, support))
+                for key in ('graph_runs', 'labels', 'labels_truncated', 'candidates'):
+                    self.assertEqual(prefix[key], out[key], key)
+
+
+@unittest.skipUnless(_supports_traverse(), "`metagraph traverse` is not available in this build")
 class TestTraverseMultiGraph(TestTraverseBase):
     """Per-graph identity on a multi-graph server. The graph list has two optional columns,
     manifest_path and index_ns, each manifest checked at start-up against the files its pair

@@ -276,6 +276,18 @@
  "regime": "basic",
  "release": "fixtures-mini_refseq",
  "resolve": {
+  "discovery": {
+   "max_answer_labels": 10000,
+   "max_memory_mb": 1024,
+   "max_tracked_labels": 1000000,
+   "rule": "SPEC-labeled-traversal-core.md section 4.6",
+   "stop_reasons": [
+    "time",
+    "memory"
+   ]
+  },
+  "max_explicit_labels": 10000,
+  "seed_order": "rank",
   "time_budget": {
    "accepted": true,
    "check_kmers": 4096,

@@ -323,9 +323,10 @@ class TestTraverseRowDiffForms(RowDiffFixture, FormsBase):
                               stop['message'])
 
     def test_resolve_on_every_form_is_the_controls(self):
-        """/resolve reads the default decode on every form (it has no memory budget: a
-        bounds.max_memory_mb is refused as an unknown field): the label profiles and the
-        discovery of every form are the control's"""
+        """/resolve's explicit labels read the default decode on every form, and a discovery
+        the budget-aware decode under the server's bound (SPEC-labeled-traversal-core.md §4.6;
+        a request has no memory budget: a bounds.max_memory_mb is refused as an unknown
+        field): the label profiles and the discovery of every form are the control's"""
         requests_ = [{'sequence': self.long[16000:17500], 'labels': ['long', 'tail', 'head']},
                      {'sequence': self.long[16000:17500],
                       'discover': {'max_labels': 10, 'kind': 'column'}},

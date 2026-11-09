@@ -1,0 +1,23 @@
+{
+ "route": "POST /resolve",
+ "status": 400,
+ "note": "H2 addendum (SPEC-labeled-traversal-core.md section 4.1): a /resolve's explicit label lists are capped by --resolve-max-explicit-labels (10,000 by default; 4 on the recording server, so that the sample stays short; 0 = unlimited), as /traverse's by --traverse-max-explicit-labels: the request's `labels` and each explicit seed's (select.seeds[i].labels: \"request.select.seeds[3].labels: at most 10000 labels per seed (--resolve-max-explicit-labels)\"), each list on its own, checked at the start of the parse before anything of the request is copied or looked up: `labels` first, then the seeds in order, before every other fault of the request's fields. The existing /resolve 400 {\"error\"}; on a multi-graph server request-level, before any pair, nothing admitted (GET /requests/svc-res-h2-32 then answered 404). Stated as the resolve block's max_explicit_labels and the multigraph block's resolve_max_explicit_labels (sample 12). A real run on the pairs of sample 30.",
+ "request": {
+  "sequence": "CCGTGATGGTGATCGTAAACACGAACTTGGTCTTTCTCACTGAGCTAGCACGGGTTCTTACAACAACCAATCTAGTTGATTCCTTGTGTTTGTACTTAGCTCACTATATCATTAGGTGCTTAGCTCAATTTATGTACTGATTGCTTAAAGGAATATCATCTACGCTGGGATAGATGTTCAACATCGCGCAAAAGTGATGTCGATCGCGCAGTTATGCCACGCCGCATTCGGTACCTCGGT",
+  "labels": [
+   "acc1",
+   "acc2",
+   "acc3",
+   "acc4",
+   "acc5"
+  ],
+  "graphs": [
+   "bact_other",
+   "bact_pseudomonadota"
+  ],
+  "request_id": "svc-res-h2-32"
+ },
+ "body": {
+  "error": "request.labels: at most 4 labels (--resolve-max-explicit-labels)"
+ }
+}

@@ -116,15 +116,30 @@ Json::Value composite_fp_json(std::vector<std::string> index_fps);
  * finish_by_ms, request_id and expect_server_instance, the registry's route (requests_route),
  * the flags
  * unknown_labels (section 2), search_cuts (section 3) and resolve_boundary_ties (section 7),
- * discovery_trace_scale, |max_request_memory_mb| (the server's request-wide memory bound of
- * /traverse, --traverse-max-request-memory-mb; 0 = off) and |caps| (max_concurrent, E19), which
- * every /traverse capabilities probe states too: a graph-less probe sees them without reading a
- * pair; |request_intake| (H1: request_intake_json, server_checks.hpp) and |column_labels| (H3:
- * column_labels_capabilities_json), which a single-graph server states at the top level
+ * resolve_seed_order (the order of a /resolve selection's seeds,
+ * SPEC-labeled-traversal-core.md §4.2), discovery_trace_scale, |max_request_memory_mb| (the
+ * server's request-wide memory bound of /traverse, --traverse-max-request-memory-mb; 0 = off)
+ * and |caps| (max_concurrent, E19), which every /traverse capabilities probe states too: a
+ * graph-less probe sees them without reading a pair; |request_intake| (H1: request_intake_json,
+ * server_checks.hpp) and |column_labels| (H3: column_labels_capabilities_json), which a
+ * single-graph server states at the top level; and |discovery| (resolve_discovery: the bounds
+ * of a /resolve discovery per pair, as the `resolve` block's `discovery` states them,
+ * SPEC-labeled-traversal-core.md §4.6)
  */
+struct ResolveDiscoveryBounds {
+    uint64_t max_tracked_labels = 0;     // --resolve-max-discover-labels (0: none)
+    uint64_t max_memory_mb = 0;          // --resolve-max-discover-memory-mb (0: none)
+    // and resolve_max_explicit_labels: the cap on a request's explicit label lists
+    // (--resolve-max-explicit-labels, 0: none), as the `resolve` block's max_explicit_labels
+    uint64_t max_explicit_labels = 0;
+    // resolve_discovery.max_answer_labels: the most labels a discovery's answer keeps
+    // (--resolve-max-discover-answer-labels, 0: none)
+    uint64_t max_answer_labels = 0;
+};
 Json::Value multigraph_capabilities_json(uint64_t max_request_memory_mb, const RouteCaps &caps,
                                          const Json::Value &request_intake,
-                                         const Json::Value &column_labels = Json::Value());
+                                         const Json::Value &column_labels = Json::Value(),
+                                         const ResolveDiscoveryBounds &discovery = {});
 
 /**
  * max_concurrent (E19; SPEC-multigraph-envelope.md section 8): the caps on the requests of each

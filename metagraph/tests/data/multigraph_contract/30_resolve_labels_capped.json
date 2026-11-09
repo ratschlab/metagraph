@@ -1,0 +1,266 @@
+{
+ "route": "POST /resolve",
+ "status": 200,
+ "note": "H2 (SPEC-labeled-traversal-core.md section 4.6): a discovery tracks at most --resolve-max-discover-labels labels per pair (here 2), by the first-met rule: the labels first met at a k-mer are admitted all or none, and the first k-mer whose new labels would pass the cap is the cut k-mer, from which no new label is tracked. labels_capped states the cut where it binds (absent otherwise): max_tracked, tracked, cut_kmer, new_at_cut (the labels first met there), met_at_least (tracked + new_at_cut), untracked_max_kmers (the in-graph k-mers from the cut on: the most an untracked label supports), ranking_exact and remainder_from_bp (= cut_kmer: resolve the sequence from there to discover the untracked labels). Every tracked label is counted over the whole query; ranking_exact is true exactly when the kept list has max_labels entries and its last supports more than untracked_max_kmers (here acc1 and acc2, 210 k-mers each, above 90: the kept list is the uncut top 2; acc3, first met at k-mer 120, is untracked). The cut k-mer holds 3 labels, more than the cap: a discovery of the sequence from base 120 would meet them all at its first k-mer and track nothing, which the message states instead of \"resolve the sequence from base 120\". labels_truncated describes the tracked labels. Merging pairs (section 7): an entry with ranking_exact false makes a merged ranking a lower bound at best. A real run on the integration fixture (three records acc1-acc3) served as both pairs, the server with --resolve-max-discover-labels 2; each entry tagged with its pair and identity. The run was on macOS: timing.page_faults, stated where the platform reads it per thread (Linux), is absent, never 0.",
+ "request": {
+  "sequence": "CCGTGATGGTGATCGTAAACACGAACTTGGTCTTTCTCACTGAGCTAGCACGGGTTCTTACAACAACCAATCTAGTTGATTCCTTGTGTTTGTACTTAGCTCACTATATCATTAGGTGCTTAGCTCAATTTATGTACTGATTGCTTAAAGGAATATCATCTACGCTGGGATAGATGTTCAACATCGCGCAAAAGTGATGTCGATCGCGCAGTTATGCCACGCCGCATTCGGTACCTCGGT",
+  "discover": {
+   "kind": "header",
+   "max_labels": 2
+  },
+  "graphs": [
+   "bact_other",
+   "bact_pseudomonadota"
+  ]
+ },
+ "body": {
+  "envelope_version": 1,
+  "route": "/resolve",
+  "graphs": [
+   "bact_other",
+   "bact_pseudomonadota"
+  ],
+  "answered": 2,
+  "refused": 0,
+  "not_reached": [],
+  "unfinished": [],
+  "request_id": null,
+  "server_instance": "7c1e0f3a9b24d6e8",
+  "deadline": {
+   "not_after_ms": null,
+   "finish_by_ms": null,
+   "effective_deadline_at": null,
+   "cutoff_at": null
+  },
+  "answers": [
+   {
+    "graph": "bact_other",
+    "graph_path": "/scratch/nvme8/refseq_r237/bact_other/graph.dbg",
+    "annotation_path": "/scratch/nvme8/refseq_r237/bact_other/annotation.row_diff_brwt_coord.annodbg",
+    "index_fp": "7bab0c8c0ce6d061cf5787419f9219e698cbb084f5de3935254bcd503149be7a",
+    "outcome": "answered",
+    "candidates": [
+     {
+      "bp_interval": [
+       0,
+       240
+      ],
+      "kmer_interval": [
+       0,
+       210
+      ],
+      "labels": [
+       "acc1",
+       "acc2"
+      ]
+     }
+    ],
+    "capabilities": {
+     "alphabet": "$ACGT",
+     "cost_models_available": [
+      "forbid",
+      "constant",
+      "table"
+     ],
+     "detail_levels": [
+      "summary",
+      "tree",
+      "full",
+      "graphlet"
+     ],
+     "direct_access": false,
+     "discovery_trace_scale": "traced",
+     "feature_level": 6,
+     "graphlet_format": 1,
+     "has_coord_to_header": true,
+     "has_coordinates": true,
+     "index_fp": "7bab0c8c0ce6d061cf5787419f9219e698cbb084f5de3935254bcd503149be7a",
+     "index_meta_fp": "a8c8bc34fa483400",
+     "index_ns": "refseq-r237-bact_other",
+     "k": 31,
+     "label_modes": [
+      "constrain",
+      "annotate"
+     ],
+     "num_labels": 95,
+     "regime": "basic",
+     "release": "refseq237",
+     "schema_version": 1,
+     "supports_trace": true
+    },
+    "graph_runs": [
+     [
+      0,
+      210
+     ]
+    ],
+    "k": 31,
+    "labels": [
+     {
+      "kind": "header",
+      "kmers_supported": 210,
+      "label": "acc1",
+      "runs": [
+       [
+        0,
+        210
+       ]
+      ]
+     },
+     {
+      "kind": "header",
+      "kmers_supported": 210,
+      "label": "acc2",
+      "runs": [
+       [
+        0,
+        210
+       ]
+      ]
+     }
+    ],
+    "labels_capped": {
+     "cut_kmer": 120,
+     "max_tracked": 2,
+     "message": "--resolve-max-discover-labels 2: the 1 label first met at k-mer 120 would have made 3 tracked labels; none of them, nor any label first met after it, was tracked. Every tracked label is counted over the whole query; an untracked label supports at most 90 k-mers, so the kept labels above 90 k-mers are exactly the uncut discovery's, and the kept list is its top 2. A discovery of the sequence from base 120 cannot track them under this cap: its first k-mer alone holds 3 labels, more than 2",
+     "met_at_least": 3,
+     "new_at_cut": 1,
+     "ranking_exact": true,
+     "remainder_from_bp": 120,
+     "tracked": 2,
+     "untracked_max_kmers": 90
+    },
+    "labels_truncated": null,
+    "num_kmers": 210,
+    "regime": "basic",
+    "release": "refseq237",
+    "support": "kmer",
+    "timing": {
+     "cpu_ms": 0.596833,
+     "elapsed_ms": 1.022292
+    },
+    "unknown_labels": [],
+    "work": {
+     "memory_bytes": 14907
+    }
+   },
+   {
+    "graph": "bact_pseudomonadota",
+    "graph_path": "/scratch/nvme10/refseq_r237/bact_pseudomonadota/graph.dbg",
+    "annotation_path": "/scratch/nvme10/refseq_r237/bact_pseudomonadota/annotation.row_diff_brwt_coord.annodbg",
+    "index_fp": "c9a9c34fa17d947caa08350e41652ee3506ff27f4141ff1717eb959bbb5064dc",
+    "outcome": "answered",
+    "candidates": [
+     {
+      "bp_interval": [
+       0,
+       240
+      ],
+      "kmer_interval": [
+       0,
+       210
+      ],
+      "labels": [
+       "acc1",
+       "acc2"
+      ]
+     }
+    ],
+    "capabilities": {
+     "alphabet": "$ACGT",
+     "cost_models_available": [
+      "forbid",
+      "constant",
+      "table"
+     ],
+     "detail_levels": [
+      "summary",
+      "tree",
+      "full",
+      "graphlet"
+     ],
+     "direct_access": false,
+     "discovery_trace_scale": "traced",
+     "feature_level": 6,
+     "graphlet_format": 1,
+     "has_coord_to_header": true,
+     "has_coordinates": true,
+     "index_fp": "c9a9c34fa17d947caa08350e41652ee3506ff27f4141ff1717eb959bbb5064dc",
+     "index_meta_fp": "a8c8bc34fa483400",
+     "index_ns": "refseq-r237-bact_pseudomonadota",
+     "k": 31,
+     "label_modes": [
+      "constrain",
+      "annotate"
+     ],
+     "num_labels": 142,
+     "regime": "basic",
+     "release": "refseq237",
+     "schema_version": 1,
+     "supports_trace": true
+    },
+    "graph_runs": [
+     [
+      0,
+      210
+     ]
+    ],
+    "k": 31,
+    "labels": [
+     {
+      "kind": "header",
+      "kmers_supported": 210,
+      "label": "acc1",
+      "runs": [
+       [
+        0,
+        210
+       ]
+      ]
+     },
+     {
+      "kind": "header",
+      "kmers_supported": 210,
+      "label": "acc2",
+      "runs": [
+       [
+        0,
+        210
+       ]
+      ]
+     }
+    ],
+    "labels_capped": {
+     "cut_kmer": 120,
+     "max_tracked": 2,
+     "message": "--resolve-max-discover-labels 2: the 1 label first met at k-mer 120 would have made 3 tracked labels; none of them, nor any label first met after it, was tracked. Every tracked label is counted over the whole query; an untracked label supports at most 90 k-mers, so the kept labels above 90 k-mers are exactly the uncut discovery's, and the kept list is its top 2. A discovery of the sequence from base 120 cannot track them under this cap: its first k-mer alone holds 3 labels, more than 2",
+     "met_at_least": 3,
+     "new_at_cut": 1,
+     "ranking_exact": true,
+     "remainder_from_bp": 120,
+     "tracked": 2,
+     "untracked_max_kmers": 90
+    },
+    "labels_truncated": null,
+    "num_kmers": 210,
+    "regime": "basic",
+    "release": "refseq237",
+    "support": "kmer",
+    "timing": {
+     "cpu_ms": 0.534334,
+     "elapsed_ms": 1.0226250000000001
+    },
+    "unknown_labels": [],
+    "work": {
+     "memory_bytes": 14907
+    }
+   }
+  ],
+  "timing": {
+   "elapsed_ms": 1.789167
+  },
+  "work": {
+   "memory_bytes": 29814
+  }
+ }
+}

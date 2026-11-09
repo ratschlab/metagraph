@@ -528,11 +528,31 @@ TEST(ServerEnvelope, Sample12MultigraphBlock) {
     ASSERT_TRUE(labels_total.isUInt64());
     const Json::Value column_labels
             = column_labels_capabilities_json(16 << 20, labels_total.asUInt64());
+    // the sample's server ran with the default bounds of a /resolve discovery (H2,
+    // SPEC-labeled-traversal-core.md §4.6), which the block states as resolve_discovery, as
+    // the `resolve` block's `discovery` states them
+    const ResolveDiscoveryBounds defaults { 1'000'000, 1024, 10'000, 10'000 };
     EXPECT_EQ(text(body["multigraph"]),
-              text(multigraph_capabilities_json(0, {}, intake, column_labels)));
+              text(multigraph_capabilities_json(0, {}, intake, column_labels, defaults)));
     // request_intake (H1): the byte cap as the top-level member states it
     EXPECT_EQ(text(body["max_request_body_mb"]),
               text(body["multigraph"]["request_intake"]["max_request_body_mb"]));
+    EXPECT_EQ("{\"max_answer_labels\":10000,\"max_memory_mb\":1024,\"max_tracked_labels\":1000000}",
+              text(body["multigraph"]["resolve_discovery"]));
+    EXPECT_EQ(text(body["resolve"]["discovery"]["max_answer_labels"]),
+              text(body["multigraph"]["resolve_discovery"]["max_answer_labels"]));
+    EXPECT_EQ(text(body["resolve"]["discovery"]["max_tracked_labels"]),
+              text(body["multigraph"]["resolve_discovery"]["max_tracked_labels"]));
+    EXPECT_EQ(text(body["resolve"]["discovery"]["max_memory_mb"]),
+              text(body["multigraph"]["resolve_discovery"]["max_memory_mb"]));
+    // the cap on a /resolve's explicit label lists (H2 addendum), as the resolve block states it
+    EXPECT_EQ("10000", text(body["multigraph"]["resolve_max_explicit_labels"]));
+    EXPECT_EQ(text(body["resolve"]["max_explicit_labels"]),
+              text(body["multigraph"]["resolve_max_explicit_labels"]));
+    // the order of a /resolve selection's seeds (addendum 3, SPEC-labeled-traversal-core.md
+    // §4.2), as the resolve block states it
+    EXPECT_EQ("\"rank\"", text(body["multigraph"]["resolve_seed_order"]));
+    EXPECT_EQ(text(body["resolve"]["seed_order"]), text(body["multigraph"]["resolve_seed_order"]));
     EXPECT_EQ(body["routes"]["requests"].asString(), std::string(kRequestsRoute));
     EXPECT_EQ(body["multigraph"]["requests_route"].asString(), std::string(kRequestsRoute));
     // the request-wide memory bound of /traverse (E5b): 0 when off, as the sample's server,
@@ -545,6 +565,11 @@ TEST(ServerEnvelope, Sample12MultigraphBlock) {
     Json::Value rest = set;
     rest["max_request_memory_mb"] = 0;
     EXPECT_EQ(text(multigraph_capabilities_json(0, {}, intake, column_labels)), text(rest));
+    // without |discovery|: no bound (0) stated
+    const Json::Value unbounded = multigraph_capabilities_json(0, {}, intake, column_labels);
+    EXPECT_EQ("{\"max_answer_labels\":0,\"max_memory_mb\":0,\"max_tracked_labels\":0}",
+              text(unbounded["resolve_discovery"]));
+    EXPECT_EQ("0", text(unbounded["resolve_max_explicit_labels"]));
 }
 
 // Sample 10: every /traverse capabilities probe states the request-wide memory bound beside

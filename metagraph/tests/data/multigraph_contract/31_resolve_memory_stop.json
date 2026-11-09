@@ -1,0 +1,171 @@
+{
+ "route": "POST /resolve",
+ "status": 200,
+ "note": "H2 (SPEC-labeled-traversal-core.md section 4.6): a discovery's pass holds at most --resolve-max-discover-memory-mb per pair (here 1 MiB), charged before it is allocated (the rows by the budget-aware reads, the rows kept, the label index and the accumulators). Only a k-mer whose row read alone, or whose accumulation, does not fit beside what the k-mers before it hold ends the work, there: the answer is exactly the resolve of the query's first stop.resolved_kmers k-mers (num_kmers), with the stop block of a time stop (the same members and meaning: resolved_kmers carries x, remainder_from_bp the base the rest starts at) and reason \"memory\" with max_memory_mb, stated without bounds.time_budget_ms (no limits). A real run on a fixture of 6000 records sharing a stretch from starts of their own, served as bact_other, the server with --resolve-max-discover-memory-mb 1; the entry tagged with that pair and identity. The run was on macOS: timing.page_faults, stated where the platform reads it per thread (Linux), is absent, never 0.",
+ "request": {
+  "sequence": "GTCGTATATAAGGTTAGGTATGCTTTCATTATTTATAAGAGTCAGTAGTCAAGACGTGCTGATTACCCTGTGACAGTGTGACCACCTATA",
+  "discover": {
+   "kind": "header",
+   "max_labels": 3
+  },
+  "graph": "bact_other"
+ },
+ "body": {
+  "envelope_version": 1,
+  "route": "/resolve",
+  "graphs": [
+   "bact_other"
+  ],
+  "answered": 1,
+  "refused": 0,
+  "not_reached": [],
+  "unfinished": [],
+  "request_id": null,
+  "server_instance": "7c1e0f3a9b24d6e8",
+  "deadline": {
+   "not_after_ms": null,
+   "finish_by_ms": null,
+   "effective_deadline_at": null,
+   "cutoff_at": null
+  },
+  "answers": [
+   {
+    "graph": "bact_other",
+    "graph_path": "/scratch/nvme8/refseq_r237/bact_other/graph.dbg",
+    "annotation_path": "/scratch/nvme8/refseq_r237/bact_other/annotation.row_diff_brwt_coord.annodbg",
+    "index_fp": "7bab0c8c0ce6d061cf5787419f9219e698cbb084f5de3935254bcd503149be7a",
+    "outcome": "answered",
+    "candidates": [
+     {
+      "bp_interval": [
+       0,
+       51
+      ],
+      "kmer_interval": [
+       0,
+       21
+      ],
+      "labels": [
+       "s0000065",
+       "s0000071",
+       "s0000073"
+      ]
+     }
+    ],
+    "capabilities": {
+     "alphabet": "$ACGT",
+     "cost_models_available": [
+      "forbid",
+      "constant",
+      "table"
+     ],
+     "detail_levels": [
+      "summary",
+      "tree",
+      "full",
+      "graphlet"
+     ],
+     "direct_access": false,
+     "discovery_trace_scale": "traced",
+     "feature_level": 6,
+     "graphlet_format": 1,
+     "has_coord_to_header": true,
+     "has_coordinates": true,
+     "index_fp": "7bab0c8c0ce6d061cf5787419f9219e698cbb084f5de3935254bcd503149be7a",
+     "index_meta_fp": "c0c34ac4b28db26c",
+     "index_ns": "refseq-r237-bact_other",
+     "k": 31,
+     "label_modes": [
+      "constrain",
+      "annotate"
+     ],
+     "num_labels": 95,
+     "regime": "basic",
+     "release": "refseq237",
+     "schema_version": 1,
+     "supports_trace": true
+    },
+    "graph_runs": [
+     [
+      0,
+      21
+     ]
+    ],
+    "k": 31,
+    "labels": [
+     {
+      "kind": "header",
+      "kmers_supported": 21,
+      "label": "s0000065",
+      "runs": [
+       [
+        0,
+        21
+       ]
+      ]
+     },
+     {
+      "kind": "header",
+      "kmers_supported": 21,
+      "label": "s0000071",
+      "runs": [
+       [
+        0,
+        21
+       ]
+      ]
+     },
+     {
+      "kind": "header",
+      "kmers_supported": 21,
+      "label": "s0000073",
+      "runs": [
+       [
+        0,
+        21
+       ]
+      ]
+     }
+    ],
+    "labels_truncated": {
+     "dropped_full_length": 203,
+     "kept": 3,
+     "max_dropped_kmers": 21,
+     "min_kept_kmers": 21,
+     "tied_at_boundary": 206,
+     "tied_kept": 3,
+     "total": 3223
+    },
+    "num_kmers": 21,
+    "regime": "basic",
+    "release": "refseq237",
+    "stop": {
+     "max_memory_mb": 1,
+     "message": "--resolve-max-discover-memory-mb 1 ran out while the annotation rows of the query's k-mers were read: this answer is exactly the resolve of the sequence's first 21 of 60 k-mers (a run ending there may continue past it); resolve the rest from base 21",
+     "phase": "rows",
+     "query_bp": 90,
+     "query_kmers": 60,
+     "reason": "memory",
+     "remainder_from_bp": 21,
+     "resolved_bp": 51,
+     "resolved_kmers": 21
+    },
+    "support": "kmer",
+    "timing": {
+     "cpu_ms": 6.638,
+     "elapsed_ms": 6.684958
+    },
+    "unknown_labels": [],
+    "work": {
+     "memory_bytes": 1202626
+    }
+   }
+  ],
+  "timing": {
+   "elapsed_ms": 6.743666
+  },
+  "work": {
+   "memory_bytes": 1202626
+  }
+ }
+}

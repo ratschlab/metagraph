@@ -143,6 +143,23 @@ class Config {
     uint64_t traverse_max_extra_labels = 10'000;
     uint64_t traverse_max_cost_entries = 10'000;
     uint64_t resolve_max_query_bp = 0;
+    // The bounds of a /resolve discovery (SPEC-labeled-traversal-core.md §4.6; 0 = none): the
+    // most labels (columns or records) it tracks — a k-mer whose new labels would pass it is
+    // the cut k-mer, stated in the answer's labels_capped — and the memory its pass holds, in
+    // MiB, charged before it is allocated (a k-mer whose row or accumulation does not fit ends
+    // the work: the resolve of the prefix before it, stop reason "memory"). Non-zero by
+    // default: a short common query on an index of many records met millions of labels, all
+    // held, before discover.max_labels cut them. Per pair; the CLI applies neither
+    uint64_t resolve_max_discover_labels = 1'000'000;
+    uint64_t resolve_max_discover_memory_mb = 1024;
+    // The cap on a /resolve's explicit label lists (0 = none): the request's `labels` and each
+    // explicit seed's, checked before anything of the request is copied (a 400 naming the list),
+    // as /traverse's --traverse-max-explicit-labels. The CLI applies none
+    uint64_t resolve_max_explicit_labels = 10'000;
+    // The most labels a /resolve discovery's answer keeps (0 = none): a larger discover.max_labels
+    // is lowered to it, stated in the answer's limits.clamped. The answer is not charged against
+    // the discovery's memory bound; this bounds it (SPEC-labeled-traversal-core.md §4.6)
+    uint64_t resolve_max_discover_answer_labels = 10'000;
     // A multi-graph server: a POST /search or /pattern request without `graphs` queries every
     // name of the graph list when the list has at most this many names, else it is refused
     // (400). Stated by GET /capabilities (max_graphs_without_selection), so that a client can

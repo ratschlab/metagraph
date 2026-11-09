@@ -78,6 +78,21 @@ SUBSTANCE = {
         'the answer is built within the reserve', 'not polled',
         "the mapping of the query's k-mers", 'select_seeds',
     ],
+    'resolve.discovery.rule': [
+        '--resolve-max-discover-labels', '--resolve-max-discover-memory-mb',
+        'the first-met rule', 'that k-mer is the cut k-mer',
+        "every tracked label's kmers_supported, runs and trace breaks are those of the uncut "
+        'discovery',
+        'ranking_exact is checkable from the answer alone', 'untracked_max_kmers',
+        'an answer in which the two disagree is a defect', 'remainder_from_bp',
+        'decoding the batch in halves', 'by giving up the rows kept',
+        'does not fit beside what the k-mers before it hold',
+        "exactly the resolve of the query's first x k-mers", 'resolved_kmers carries x',
+        "one vector's growth in flight is not counted", 'reason: "memory"',
+        '--resolve-max-discover-answer-labels', 'a presence discovery keeps nothing per coordinate',
+        'cannot be resolved past base x under this bound',
+        'either progresses or is told that it cannot',
+    ],
     'attempts.bound': [
         "which starts when the server read the request's header",
         'bound_ms - max(allowance_ms / 2, reserve_ms)',

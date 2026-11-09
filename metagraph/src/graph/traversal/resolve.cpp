@@ -3,16 +3,21 @@
 #include <algorithm>
 #include <iterator>
 #include <cctype>
+#include <deque>
 #include <map>
 #include <numeric>
 #include <optional>
 #include <string_view>
 #include <tuple>
+#include <unordered_map>
+#include <unordered_set>
 
 #include <tsl/hopscotch_map.h>
 #include <tsl/hopscotch_set.h>
 
 #include "graph/annotated_dbg.hpp"
+#include "graph/traversal/kept_rows.hpp"
+#include "annotation/binary_matrix/row_diff/row_diff.hpp"
 #include "annotation/binary_matrix/row_diff/row_diff_cache.hpp"
 #include "common/seq_tools/reverse_complement.hpp"
 #include "common/logger.hpp"
@@ -26,6 +31,8 @@ namespace traversal {
 using mtg::common::logger;
 using annot::matrix::BinaryMatrix;
 using annot::matrix::MultiIntMatrix;
+using annot::matrix::DecodeBudget;
+using annot::matrix::DecodeStatus;
 
 uint64_t fnv1a64(std::string_view data, uint64_t hash) {
     for (unsigned char c : data) {
@@ -242,13 +249,41 @@ uint64_t support_bytes(const LabelSupport &s) {
          + s.trace_breaks.size() * sizeof(uint64_t);
 }
 
-uint64_t supports_bytes(const std::vector<LabelSupport> &supports) {
+template <class Supports>
+uint64_t supports_bytes(const Supports &supports) {
     uint64_t bytes = 0;
     for (const LabelSupport &s : supports) {
         bytes += support_bytes(s);
     }
     return bytes;
 }
+
+// The heap of a chain's coordinates beyond those held in place (the discovery's charge)
+uint64_t chain_heap_bytes(const LabelSupport &s) {
+    const size_t capacity = s.live.capacity();
+    return capacity > 4 ? capacity * sizeof(Coord) : 0;
+}
+
+uint64_t scratch_bytes(const std::vector<Coord> &scratch) {
+    return scratch.capacity() * sizeof(Coord);
+}
+
+// What the budget has left (DecodeBudget::max_bytes() less what it holds)
+uint64_t budget_left(const DecodeBudget &budget) {
+    return budget.max_bytes() - budget.held();
+}
+
+// How a pass over the rows (for_each_row) ended
+enum class PassEnd {
+    COMPLETE,       // every key used
+    CHECKPOINT,     // the checkpoint ended it between two batches (a deadline)
+    MEMORY,         // the budget: a k-mer's row read alone, or its use, did not fit
+};
+
+// The budget's charge per key of the pass's setup (the next occurrence of each k-mer, kept for
+// the pass) and of its transient hash table of the keys' last occurrences
+constexpr uint64_t kNextUseBytes = sizeof(size_t);
+constexpr uint64_t kLastOccurrenceBytes = 80;
 
 template <class RowT>
 uint64_t rows_bytes(const std::vector<RowT> &rows) {
@@ -261,23 +296,49 @@ uint64_t rows_bytes(const std::vector<RowT> &rows) {
 
 /**
  * Calls |use(j, row)| for every j of |keys| (the present k-mers' keys, in k-mer order) in
- * order, with the row of keys[j] decoded by |decode| (a vector of keys to their rows) in
- * batches (BatchSizer: a batch is the next rows to decode, not its k-mers). A key's row is
- * decoded once per batch, and a row whose key occurs again after its batch is kept for that
- * occurrence while the rows kept take at most |kept_max| bytes (row_copy_bytes), dropped at its
- * last occurrence; beyond that bound a repeated row is decoded again. |checkpoint| runs between
- * batches; true from it ends the pass there (a deadline). What the request holds is one batch
- * of rows and the rows kept. Returns how many of |keys| were used: all of them, or those before
- * the batch the pass ended at — a prefix, since the keys are used in order. |rows_held_peak|,
- * when given, is raised to the most row bytes held at once (a batch and the rows kept,
- * row_copy_bytes each: SupportProfile::memory_peak)
+ * order, with the row of keys[j] decoded by |decode| in batches (BatchSizer: a batch is the
+ * next rows to decode, not its k-mers). A key's row is decoded once per batch, and a row whose
+ * key occurs again after its batch is kept for that occurrence while the rows kept take at
+ * most |kept_max| bytes (row_copy_bytes), dropped at its last occurrence; beyond that bound a
+ * repeated row is decoded again. |checkpoint| runs between batches; true from it ends the pass
+ * there (a deadline). What the request holds is one batch of rows and the rows kept.
+ *
+ * Every byte the pass holds is charged to |budget| (SPEC-labeled-traversal-core.md §4.6): its
+ * setup (the next occurrence of each key, and the transient table that finds them), each batch
+ * by |decode(keys, &rows, &held)| — the rows of |keys| into |rows|, OK with the budget holding
+ * |held[r]| for row r and IRowDiff::output_bytes<RowT>(keys.size()) for the vectors, or
+ * REFUSED with nothing held and nothing returned — and each row kept with its entry (KeptRows:
+ * a row's charge released at its last use, the entries' charge held as the most entries kept
+ * at once while the table's buckets are, both released with the table when the rows are
+ * dropped). |use(j, row)| returns false when the use of the row of keys[j] does not
+ * fit beside what is held (nothing of it done; true: done, its own growth charged by it). A
+ * charge that does not fit is met, in this order, by decoding the batch in halves, by giving
+ * up the rows kept (decoded again when needed) and by reading the next row alone; the pass ends
+ * (PassEnd::MEMORY) only at a k-mer whose row read alone, or whose use, does not fit beside what
+ * the uses of the k-mers before it hold: that k-mer does not depend on the batches, the rows
+ * kept or the time. With an unbounded budget nothing is refused and the pass is the one it was.
+ *
+ * Returns how many of |keys| were used: all of them, or those before the batch the pass ended
+ * at (a checkpoint) or the k-mer it stopped at (the budget) — a prefix, since the keys are used
+ * in order —, and sets |*end| to why. |rows_held_peak|, when given, is raised to the most row
+ * bytes held at once (a batch and the rows kept, row_copy_bytes each:
+ * SupportProfile::memory_peak)
  */
 template <class RowT, class Decode, class Use, class Checkpoint>
 size_t for_each_row(const std::vector<node_index> &keys, BatchSizer sizer, uint64_t kept_max,
-                    const Decode &decode, const Use &use, const Checkpoint &checkpoint,
+                    DecodeBudget &budget, const Decode &decode, const Use &use,
+                    const Checkpoint &checkpoint, PassEnd *end_cause,
                     uint64_t *rows_held_peak = nullptr) {
     constexpr size_t kNever = std::numeric_limits<size_t>::max();
-    // the next occurrence of each k-mer's key (kNever: none)
+    *end_cause = PassEnd::COMPLETE;
+    // the next occurrence of each k-mer's key (kNever: none), held for the pass; the table of
+    // the keys' last occurrences that builds it, held while it does
+    const uint64_t next_use_bytes = annot::matrix::buffer_bytes(keys.size(), kNextUseBytes);
+    const uint64_t setup_bytes = keys.size() * kLastOccurrenceBytes;
+    if (!budget.charge(next_use_bytes + setup_bytes)) {
+        *end_cause = PassEnd::MEMORY;
+        return 0;
+    }
     std::vector<size_t> next_use(keys.size(), kNever);
     {
         tsl::hopscotch_map<node_index, size_t> later;
@@ -289,57 +350,124 @@ size_t for_each_row(const std::vector<node_index> &keys, BatchSizer sizer, uint6
             }
         }
     }
-    tsl::hopscotch_map<node_index, std::pair<RowT, uint64_t>> kept;
-    uint64_t kept_bytes = 0;
+    budget.release(setup_bytes);
+    // the rows kept for a later occurrence of their key (GPT review 6, #8: the table's buckets
+    // outlive an entry's last use, so their charge is held until kept.drop() frees them)
+    KeptRows<RowT, node_index> kept(budget);
+    // the pass ends here, before keys[begin]: what it holds is released
+    auto finish = [&](PassEnd cause) {
+        *end_cause = cause;
+        kept.drop();
+        budget.release(next_use_bytes);
+    };
     tsl::hopscotch_map<node_index, size_t> in_batch;
     std::vector<node_index> batch_keys;
+    std::vector<RowT> batch;
+    std::vector<uint64_t> held;
+    std::vector<bool> moved;
     for (size_t begin = 0; begin < keys.size(); ) {
         // the k-mers whose rows are kept or among the next |sizer.next| rows to decode
         in_batch.clear();
         batch_keys.clear();
         size_t end = begin;
         for ( ; end < keys.size(); ++end) {
-            if (kept.count(keys[end]) || in_batch.count(keys[end]))
+            if (kept.contains(keys[end]) || in_batch.count(keys[end]))
                 continue;
             if (batch_keys.size() == sizer.next)
                 break;
             in_batch.emplace(keys[end], batch_keys.size());
             batch_keys.push_back(keys[end]);
         }
-        std::vector<RowT> batch;
+        batch.clear();
+        held.clear();
+        uint64_t containers = 0;
         if (!batch_keys.empty()) {
-            batch = decode(batch_keys);
-            sizer.done(batch);   // before any row is moved to |kept|
-            // what the request holds now: this batch of rows and the rows kept
-            if (rows_held_peak)
-                *rows_held_peak = std::max(*rows_held_peak, kept_bytes + rows_bytes(batch));
-        }
-        for (size_t j = begin; j < end; ++j) {
-            auto kit = kept.find(keys[j]);
-            if (kit != kept.end()) {
-                use(j, kit->second.first);
-                if (next_use[j] == kNever) {
-                    kept_bytes -= kit->second.second;
-                    kept.erase(kit);
+            if (decode(batch_keys, &batch, &held) != DecodeStatus::OK) {
+                // the batch did not fit beside what is held: read it in halves; then without
+                // the rows kept; a row that does not fit alone ends the pass at its k-mer (the
+                // first of the batch: with no row kept, keys[begin] is batch_keys[0])
+                if (batch_keys.size() > 1) {
+                    sizer.next = batch_keys.size() / 2;
+                } else if (kept.holds()) {
+                    // (also a table whose rows were all used for the last time: its entries'
+                    // charge is released with it, so that the stop does not depend on them)
+                    kept.drop();
+                } else {
+                    finish(PassEnd::MEMORY);
+                    return begin;
+                }
+                // a refused read took time too: the checkpoint is read before the next
+                if (checkpoint()) {
+                    finish(PassEnd::CHECKPOINT);
+                    return begin;
                 }
                 continue;
             }
-            RowT &row = batch[in_batch.find(keys[j])->second];
-            use(j, row);
+            containers = annot::matrix::IRowDiff::output_bytes<RowT>(batch_keys.size());
+            sizer.done(batch);   // before any row is moved to |kept|
+            // what the request holds now: this batch of rows and the rows kept
+            if (rows_held_peak)
+                *rows_held_peak = std::max(*rows_held_peak, kept.bytes() + rows_bytes(batch));
+        }
+        moved.assign(batch.size(), false);
+        // the batch's rows not moved to |kept|, and its vectors
+        auto release_batch = [&]() {
+            for (size_t r = 0; r < batch.size(); ++r) {
+                if (!moved[r])
+                    budget.release(held[r]);
+            }
+            budget.release(containers);
+        };
+        size_t j = begin;
+        for ( ; j < end; ++j) {
+            auto kit = kept.find(keys[j]);
+            if (kit != kept.end()) {
+                if (!use(j, kit->second.row))
+                    break;
+                if (next_use[j] == kNever)
+                    kept.last_use(kit);
+                continue;
+            }
+            const size_t r = in_batch.find(keys[j])->second;
+            RowT &row = batch[r];
+            if (!use(j, row))
+                break;
             // occurring again after this batch (none of its k-mers after j has the key)
             if (next_use[j] != kNever && next_use[j] >= end) {
                 const uint64_t bytes = annot::matrix::row_copy_bytes(row);
-                if (kept_bytes + bytes <= kept_max) {
-                    kept_bytes += bytes;
-                    kept.emplace(keys[j], std::make_pair(std::move(row), bytes));
+                if (kept.bytes() + bytes <= kept_max
+                        && kept.keep(keys[j], std::move(row), bytes, held[r])) {
+                    moved[r] = true;
                 }
             }
         }
+        release_batch();
+        if (j < end) {
+            // the use of k-mer j did not fit: again from it without the rows kept, then with
+            // its row alone; if neither leaves room, the pass ends before it
+            begin = j;
+            if (kept.holds()) {
+                kept.drop();
+            } else if (batch_keys.size() > 1) {
+                sizer.next = 1;
+            } else {
+                finish(PassEnd::MEMORY);
+                return begin;
+            }
+            if (checkpoint()) {
+                finish(PassEnd::CHECKPOINT);
+                return begin;
+            }
+            continue;
+        }
         begin = end;
         // after the last batch the pass is complete whatever the checkpoint says
-        if (checkpoint() && begin < keys.size())
+        if (checkpoint() && begin < keys.size()) {
+            finish(PassEnd::CHECKPOINT);
             return begin;
+        }
     }
+    finish(PassEnd::COMPLETE);
     return keys.size();
 }
 
@@ -400,15 +528,18 @@ void check_explicit_seeds(const LabelOracle &oracle,
     // pair covers nothing rather than being refused: a seed's labels are then decided by the
     // work, and select_seeds checks them before any later seed
     const bool labels_after_work = options.discover || options.drop_labels_not_in_graph;
-    // a seed's label that is no label of the request (explicit labels are all profiled)
+    // a seed's label that is no label of the request (explicit labels are all profiled): the
+    // request's labels in one set, each seed's names looked up in it (a linear search per name
+    // made a request of N labels and seeds naming them cost N^2 comparisons, review 5 #6)
+    std::unordered_set<std::string_view> listed;
+    if (!labels_after_work && !seeds.empty())
+        listed.insert(options.labels.begin(), options.labels.end());
     auto unlisted = [&](const ExplicitSeed &ex) -> const std::string* {
         if (labels_after_work)
             return nullptr;
         for (const std::string &name : ex.labels) {
-            if (std::find(options.labels.begin(), options.labels.end(), name)
-                    == options.labels.end()) {
+            if (!listed.count(name))
                 return &name;
-            }
         }
         return nullptr;
     };
@@ -441,7 +572,7 @@ void check_explicit_seeds(const LabelOracle &oracle,
     }
     if (range)
         throw std::invalid_argument("Explicit seed interval out of range");
-    throw std::invalid_argument("Explicit seed label was not profiled: '"
+    throw std::invalid_argument(kSeedLabelNotProfiled
                                 + ::utils::clip_for_message(*unlisted(seeds[faulty])) + "'");
 }
 
@@ -474,6 +605,8 @@ SupportProfile resolve_support(LabelOracle &oracle,
     bool stopped = false;
     uint64_t resolved = 0;
     ResolveStop::Phase stop_phase = ResolveStop::ROWS;
+    ResolveStop::Reason stop_reason = ResolveStop::TIME;
+    bool cannot_progress = false;
     // the loops over the labels after the work: the answer's time, every kResolveCheckLabels
     auto finishing = [&](size_t i) {
         if (options.finish_check && i && i % kResolveCheckLabels == 0)
@@ -516,8 +649,15 @@ SupportProfile resolve_support(LabelOracle &oracle,
     auto apply_stop = [&]() {
         if (!stopped || profile.stop)
             return;
-        profile.stop = ResolveStop { stop_phase, resolved, profile.num_kmers,
-                                     profile.graph_runs };
+        ResolveStop stop;
+        stop.phase = stop_phase;
+        stop.reason = stop_reason;
+        stop.max_memory = stop_reason == ResolveStop::MEMORY ? options.discover_max_memory : 0;
+        stop.cannot_progress = cannot_progress;
+        stop.resolved_kmers = resolved;
+        stop.query_kmers = profile.num_kmers;
+        stop.query_graph_runs = profile.graph_runs;
+        profile.stop = std::move(stop);
         profile.num_kmers = resolved;
         std::vector<KmerInterval> cut;
         for (const KmerInterval &run : profile.graph_runs) {
@@ -532,23 +672,63 @@ SupportProfile resolve_support(LabelOracle &oracle,
     // second pass would hold about all of them, or decode them twice). |use(j, row)| gets the
     // row of present_keys[j], j ascending: tuple rows with |tuple_rows|, else whole rows
     // (for_each_row: a repeated key's row is kept for its later occurrences within
-    // kept_bytes). Returns how many present k-mers were used: all, or under a deadline those
-    // before the batch it ended at (none when it had passed before the first: |rows_expired|)
+    // kept_bytes), and answers false when its accumulation does not fit |budget|. Returns how
+    // many present k-mers were used: all, or under a deadline those before the batch it ended
+    // at (none when it had passed before the first: |rows_expired|), or those before the k-mer
+    // the memory bound stopped it at (|pass_end|)
     bool rows_expired = false;
+    // A discovery's pass charges what it holds to one budget (ResolveOptions::
+    // discover_max_memory, §4.6): unbounded without it, every read still the budget-aware one
+    DecodeBudget budget(options.discover_max_memory ? options.discover_max_memory
+                                                    : std::numeric_limits<uint64_t>::max());
+    PassEnd pass_end = PassEnd::COMPLETE;
+    // A batch's rows, charged to |budget|: by the budget-aware read where the annotation has
+    // it (LabelOracle::decode_charged(): every buffer of the decode charged before it is
+    // allocated, a read that does not fit refused whole), else by the default read, its rows
+    // then charged as row_copy_bytes counts them (the batch can pass the bound while it is
+    // decoded) and the read refused if they do not fit
+    auto decode_rows = [&](const std::vector<node_index> &batch, auto *rows,
+                           std::vector<uint64_t> *held) -> DecodeStatus {
+        using RowT = typename std::decay_t<decltype(*rows)>::value_type;
+        constexpr bool kTuples = std::is_same_v<RowT, MultiIntMatrix::RowTuples>;
+        const std::vector<Row> anno = anno_rows(batch);
+        std::vector<annot::matrix::RowCost> costs;
+        DecodeStatus status;
+        if constexpr (kTuples) {
+            status = oracle.get_row_tuples(anno, budget, rows, &costs, held);
+        } else {
+            status = oracle.get_rows(anno, budget, rows, &costs, held);
+        }
+        if (status != DecodeStatus::UNSUPPORTED)
+            return status;
+        if constexpr (kTuples) {
+            *rows = oracle.get_row_tuples(anno);
+        } else {
+            *rows = oracle.get_rows(anno);
+        }
+        held->resize(rows->size());
+        uint64_t total = annot::matrix::IRowDiff::output_bytes<RowT>(rows->size());
+        for (size_t r = 0; r < rows->size(); ++r) {
+            (*held)[r] = annot::matrix::row_copy_bytes((*rows)[r]);
+            total += (*held)[r];
+        }
+        if (!budget.charge(total)) {
+            rows->clear();
+            held->clear();
+            return DecodeStatus::REFUSED;
+        }
+        return DecodeStatus::OK;
+    };
     auto each_row = [&](bool tuple_rows, const auto &use_rows, const auto &use_tuples) -> size_t {
         if (rows_expired)
             return 0;
         const BatchSizer sizer(options.batch_rows, options.batch_bytes);
         if (tuple_rows) {
             return for_each_row<MultiIntMatrix::RowTuples>(present_keys, sizer, options.kept_bytes,
-                [&](const std::vector<node_index> &batch) {
-                    return oracle.get_row_tuples(anno_rows(batch));
-                }, use_tuples, poll, &rows_held);
+                budget, decode_rows, use_tuples, poll, &pass_end, &rows_held);
         } else {
-            return for_each_row<BinaryMatrix::SetBitPositions>(present_keys, sizer, options.kept_bytes,
-                [&](const std::vector<node_index> &batch) {
-                    return oracle.get_rows(anno_rows(batch));
-                }, use_rows, poll, &rows_held);
+            return for_each_row<BinaryMatrix::SetBitPositions>(present_keys, sizer,
+                options.kept_bytes, budget, decode_rows, use_rows, poll, &pass_end, &rows_held);
         }
     };
 
@@ -590,52 +770,303 @@ SupportProfile resolve_support(LabelOracle &oracle,
         // pair, 1.83 s for a header discover on 23S, refseq33m)
         const bool by_column = options.discover_kind == LabelKind::COLUMN;
         constexpr uint32_t kNoSlot = std::numeric_limits<uint32_t>::max();
-        std::vector<uint32_t> slot(by_column ? oracle.num_columns() : 0, kNoSlot);
+        // The bounds (§4.6): what the labels' index and accumulators add is charged to
+        // |budget| beside the rows — the slots once, per label tracked |label_bytes| (its
+        // accumulator and id in deques, which never relocate, and a header label's entry in
+        // the index), per run and trace break, and the heap of the chains' coordinates and of
+        // the scratch as it grows. Before a k-mer's labels are accumulated, the most they can
+        // add is checked against what is left (admit_row), so a charge after it always fits
+        const bool bounded = options.discover_max_memory != 0;
+        // a header discovery also counts the records it tracks per column, so that a k-mer's
+        // new labels are bounded by those its columns have left (8 B a column)
+        const uint64_t slot_bytes = annot::matrix::buffer_bytes(oracle.num_columns(),
+                by_column ? sizeof(uint32_t) : sizeof(uint64_t));
+        const bool index_fits = budget.charge(slot_bytes);
+        std::vector<uint32_t> slot(by_column && index_fits ? oracle.num_columns() : 0, kNoSlot);
+        std::vector<uint64_t> tracked_in(!by_column && index_fits ? oracle.num_columns() : 0, 0);
         tsl::hopscotch_map<std::pair<Column, uint64_t>, uint64_t, LabelKeyHash> index;
-        std::vector<LabelSupport> found;
-        std::vector<std::pair<Column, uint64_t>> found_ids;
-        auto of = [&](Column c, uint64_t seq_id) -> LabelSupport& {
+        std::deque<LabelSupport> found;
+        std::deque<std::pair<Column, uint64_t>> found_ids;
+        const uint64_t label_bytes = sizeof(LabelSupport) + sizeof(std::pair<Column, uint64_t>)
+                                   + sizeof(void*) + (by_column ? 0 : kDiscoverIndexEntryBytes);
+        // The label cap (ResolveOptions::discover_max_tracked): once a k-mer's new labels would
+        // pass it, no label first met there or later is admitted (|admitting| false); the
+        // labels tracked keep being counted
+        const size_t max_tracked = options.discover_max_tracked;
+        bool admitting = true;
+        LabelCap cap;
+        size_t cut_index = 0;                // the cut k-mer's index among the present ones
+        // a label's accumulator: created when it is met first while labels are admitted; null
+        // for a label that is not tracked
+        auto of = [&](Column c, uint64_t seq_id) -> LabelSupport* {
             if (by_column) {
                 uint32_t &at = slot[c];
                 if (at == kNoSlot) {
+                    if (!admitting)
+                        return nullptr;
                     at = static_cast<uint32_t>(found.size());
                     found.emplace_back();
                     found_ids.emplace_back(c, 0);
                 }
-                return found[at];
+                return &found[at];
+            }
+            if (!admitting) {
+                auto it = index.find({ c, seq_id });
+                return it != index.end() ? &found[it->second] : nullptr;
             }
             auto [it, inserted] = index.try_emplace({ c, seq_id }, found.size());
             if (inserted) {
                 found.emplace_back();
                 found_ids.emplace_back(c, seq_id);
+                tracked_in[c]++;
             }
-            return found[it->second];
+            return &found[it->second];
         };
         std::vector<Coord> scratch;
         const bool tuple_rows = with_coords || options.discover_kind == LabelKind::HEADER;
         std::vector<Coord> sorted;
         std::vector<Coord> local;
-        const size_t used = each_row(tuple_rows,
-            [&](size_t j, const BinaryMatrix::SetBitPositions &row) {
-                for (Column c : row) {
-                    of(c, 0).add(present_pos[j]);
+        // what the current k-mer's accumulation added to the runs, the trace breaks and the
+        // chains' heap (charged after it, with its new labels and the scratch's growth)
+        uint64_t grown = 0;
+        auto add = [&](LabelSupport &s, uint64_t i) {
+            const size_t runs = s.runs.size();
+            s.add(i);
+            grown += (s.runs.size() - runs) * kDiscoverRunBytes;
+        };
+        auto add_trace = [&](LabelSupport &s, uint64_t i, const Coord *coords, size_t n) {
+            const size_t runs = s.runs.size();
+            const size_t breaks = s.trace_breaks.size();
+            const uint64_t heap = chain_heap_bytes(s);
+            s.add_trace(i, coords, n, scratch);
+            grown += (s.runs.size() - runs) * kDiscoverRunBytes
+                   + (s.trace_breaks.size() - breaks) * kDiscoverBreakBytes
+                   + (chain_heap_bytes(s) - heap);
+        };
+        // the scratch a trace chains and maps coordinates in (its growth charged after the k-mer,
+        // within what admit_row checked)
+        auto scratch_held = [&]() {
+            return scratch_bytes(scratch) + scratch_bytes(local);
+        };
+        // The sort scratch, charged before it grows (its new buffer while the old one is still
+        // held, the old one released once freed): false when the growth does not fit (nothing
+        // changed). Only an unsorted column needs it (the row-diff forms' tuples are sorted)
+        uint64_t sorted_charged = 0;
+        auto reserve_sorted = [&](size_t n) {
+            if (sorted.capacity() >= n)
+                return true;
+            if (!budget.charge(annot::matrix::buffer_bytes(n, sizeof(Coord))))
+                return false;
+            sorted.clear();
+            sorted.reserve(n);
+            budget.release(sorted_charged);
+            sorted_charged = annot::matrix::buffer_bytes(n, sizeof(Coord));
+            return true;
+        };
+        // a column's coordinates, sorted (a trace runs on sorted coordinates, as LabelQuery
+        // sorts a hit's, and on sorted coordinates a sequence's are adjacent: the run mapper
+        // maps a sequence's run for one rank/select); false when the sort scratch does not fit
+        auto sorted_coords = [&](const auto &coords, const Coord **data) {
+            if (std::is_sorted(coords.begin(), coords.end())) {
+                *data = coords.data();
+                return true;
+            }
+            if (!reserve_sorted(coords.size()))
+                return false;
+            sorted.assign(coords.begin(), coords.end());
+            std::sort(sorted.begin(), sorted.end());
+            *data = sorted.data();
+            return true;
+        };
+        // The labels of a row not tracked yet and those tracked: lookups only (a column's
+        // slot, a sequence's entry), each label once
+        auto count_bits = [&](const BinaryMatrix::SetBitPositions &row) {
+            uint64_t fresh = 0;
+            for (Column c : row) {
+                fresh += slot[c] == kNoSlot;
+            }
+            return std::make_pair(fresh, row.size() - fresh);
+        };
+        // (|sort_refused|: the sort scratch of the row's largest unsorted column, |unsorted|,
+        // did not fit: nothing counted. It is grown to that column once, before any column is
+        // sorted into it, so that no smaller growth is held beside it)
+        bool sort_refused = false;
+        auto count_tuples = [&](const MultiIntMatrix::RowTuples &row, size_t unsorted) {
+            uint64_t fresh = 0;
+            uint64_t known = 0;
+            if (!by_column && !reserve_sorted(unsorted)) {
+                sort_refused = true;
+                return std::make_pair(fresh, known);
+            }
+            for (const auto &[c, coords] : row) {
+                if (by_column) {
+                    (slot[c] == kNoSlot ? fresh : known)++;
+                    continue;
                 }
+                const Coord *data = nullptr;
+                const bool sorted_fits = sorted_coords(coords, &data);  // (reserved above)
+                assert(sorted_fits);
+                (void)sorted_fits;
+                LabelOracle::CoordRuns runs = oracle.coord_runs(c, coords.size());
+                uint64_t previous = std::numeric_limits<uint64_t>::max();
+                for (size_t t = 0; t < coords.size(); ++t) {
+                    const uint64_t seq_id = runs.map(data[t]).first;
+                    if (seq_id == previous)
+                        continue;
+                    previous = seq_id;
+                    (index.count({ c, seq_id }) ? known : fresh)++;
+                }
+            }
+            return std::make_pair(fresh, known);
+        };
+        // Whether the k-mer of present index j, whose row has at most |labels| labels, at most
+        // |fresh_most| of them not tracked yet, can be accumulated: false when the most it can
+        // add does not fit what |budget| has left (nothing done). |coord_bytes|: the most its
+        // coordinates add (under trace the chains and their scratch; nothing under presence),
+        // and |unsorted| its largest unsorted column, whose sort scratch it may grow. The labels
+        // it would make tracked past the cap make it the cut k-mer (none of them admitted),
+        // decided here and taken effect only once the k-mer fits. |count| gives the row's labels
+        // not tracked and tracked (a pass of lookups, and for header labels the coordinates'
+        // mapping), read only where the bounds alone do not decide
+        auto admit_row = [&](size_t j, uint64_t labels, uint64_t fresh_most, uint64_t coord_bytes,
+                             size_t unsorted, const auto &count) {
+            // (a flag and a value rather than an optional, whose copy GCC 13 takes for
+            // maybe-uninitialized)
+            bool is_counted = false;
+            std::pair<uint64_t, uint64_t> counted { 0, 0 };
+            auto counts = [&]() {
+                if (!is_counted) {
+                    counted = count();
+                    is_counted = true;
+                }
+                return counted;
+            };
+            sort_refused = false;
+            bool cut_here = false;
+            uint64_t fresh_max = 0;
+            if (admitting) {
+                fresh_max = fresh_most;
+                if (max_tracked && found.size() + fresh_most > max_tracked) {
+                    fresh_max = counts().first;
+                    if (sort_refused)
+                        return false;
+                    if (found.size() + fresh_max > max_tracked) {
+                        cut_here = true;
+                        fresh_max = 0;
+                    }
+                }
+            }
+            if (bounded) {
+                // the new labels, a run and a break per label touched, the coordinates, and the
+                // sort scratch the accumulation grows (charged as it grows)
+                auto most = [&](uint64_t fresh, uint64_t touched) {
+                    const uint64_t sort = sorted.capacity() < unsorted
+                            ? annot::matrix::buffer_bytes(unsorted, sizeof(Coord)) : 0;
+                    return fresh * label_bytes
+                         + touched * (kDiscoverRunBytes + kDiscoverBreakBytes)
+                         + coord_bytes + sort;
+                };
+                if (most(fresh_max, std::min<uint64_t>(labels, found.size() + fresh_max))
+                        > budget_left(budget)) {
+                    const auto [fresh, known] = counts();
+                    if (sort_refused)
+                        return false;
+                    const uint64_t admitted = (cut_here || !admitting) ? 0 : fresh;
+                    if (most(admitted, known + admitted) > budget_left(budget))
+                        return false;
+                }
+            }
+            if (cut_here) {
+                admitting = false;
+                cut_index = j;
+                cap.cut_kmer = present_pos[j];
+                cap.new_at_cut = counts().first;
+                cap.labels_at_cut = counts().first + counts().second;
+                cap.tracked = found.size();
+            }
+            return true;
+        };
+        // after a k-mer's accumulation: its new labels and growth, within what admit_row saw
+        // left (so the charge fits)
+        auto charge_row = [&](size_t labels_before, uint64_t scratch_before) {
+            const uint64_t bytes = (found.size() - labels_before) * label_bytes + grown
+                                 + (scratch_held() - scratch_before);
+            grown = 0;
+            const bool charged = budget.charge(bytes);
+            assert(charged && "within the bound admit_row checked");
+            (void)charged;
+        };
+        const size_t used = !index_fits ? 0 : each_row(tuple_rows,
+            [&](size_t j, const BinaryMatrix::SetBitPositions &row) {
+                // a column not tracked yet is one of those the index has left
+                const uint64_t fresh_most = std::min<uint64_t>(
+                        row.size(), oracle.num_columns() - found.size());
+                if (!admit_row(j, row.size(), fresh_most, 0, 0, [&]() { return count_bits(row); }))
+                    return false;
+                const size_t labels_before = found.size();
+                const uint64_t scratch_before = scratch_held();
+                for (Column c : row) {
+                    if (LabelSupport *s = of(c, 0))
+                        add(*s, present_pos[j]);
+                }
+                charge_row(labels_before, scratch_before);
+                return true;
             },
             [&](size_t j, const MultiIntMatrix::RowTuples &row) {
+                // a column label per column, a sequence label per coordinate at most, and of the
+                // labels not tracked yet at most those the index has left: per column (header
+                // labels: its records not tracked yet), or of all columns
+                const annot::CoordToHeader *cth = oracle.coord_to_header();
+                uint64_t coords_in_row = 0;
+                uint64_t fresh_most = 0;
+                size_t widest = 0;
+                size_t unsorted = 0;
+                for (const auto &[c, coords] : row) {
+                    coords_in_row += coords.size();
+                    widest = std::max(widest, coords.size());
+                    if (!std::is_sorted(coords.begin(), coords.end()))
+                        unsorted = std::max(unsorted, coords.size());
+                    if (!by_column) {
+                        // (a column the record mapping does not have: its coordinates bound it,
+                        // and the mapping refuses them as the base did)
+                        fresh_most += c < cth->num_columns()
+                                ? std::min<uint64_t>(coords.size(),
+                                                     cth->num_sequences(c) - tracked_in[c])
+                                : coords.size();
+                    }
+                }
+                if (by_column)
+                    fresh_most = std::min<uint64_t>(row.size(), oracle.num_columns() - found.size());
+                // what the coordinates add: under trace each one's place in a chain, and the
+                // scratch they are chained in (and for header labels mapped in) grown to twice
+                // the widest column; under presence nothing (the sort scratch apart)
+                const uint64_t scratch_grows = std::max<uint64_t>(
+                        2 * widest, scratch.capacity()) - scratch.capacity()
+                        + (by_column ? 0 : std::max<uint64_t>(2 * widest, local.capacity())
+                                               - local.capacity());
+                const uint64_t coord_bytes = with_coords
+                        ? coords_in_row * kDiscoverChainBytes + scratch_grows * sizeof(Coord)
+                        : 0;
+                const uint64_t scratch_before = scratch_held();
+                if (!admit_row(j, by_column ? row.size() : coords_in_row, fresh_most, coord_bytes,
+                               unsorted, [&]() { return count_tuples(row, unsorted); }))
+                    return false;
+                // the sort scratch at the row's largest unsorted column, once (within what
+                // admit_row checked), so that every column below sorts within it
+                const bool sort_fits = reserve_sorted(unsorted);
+                assert(sort_fits && "within the bound admit_row checked");
+                (void)sort_fits;
+                const size_t labels_before = found.size();
                 const uint64_t i = present_pos[j];
                 for (const auto &[c, coords] : row) {
-                    // a trace runs on sorted coordinates (LabelQuery sorts a hit's), and on
-                    // sorted coordinates a sequence's are adjacent: the run mapper
-                    // (LabelOracle::map_coords) maps a sequence's run for one rank/select
-                    const Coord *data = coords.data();
-                    if (!std::is_sorted(coords.begin(), coords.end())) {
-                        sorted.assign(coords.begin(), coords.end());
-                        std::sort(sorted.begin(), sorted.end());
-                        data = sorted.data();
-                    }
+                    const Coord *data = nullptr;
+                    const bool sorted_fits = sorted_coords(coords, &data);  // (reserved above)
+                    assert(sorted_fits);
+                    (void)sorted_fits;
                     if (options.discover_kind == LabelKind::COLUMN) {
                         // tuple rows only for a trace (presence reads whole rows)
-                        of(c, 0).add_trace(i, data, coords.size(), scratch);
+                        if (LabelSupport *s = of(c, 0))
+                            add_trace(*s, i, data, coords.size());
                         continue;
                     }
                     uint64_t previous = std::numeric_limits<uint64_t>::max();
@@ -643,28 +1074,37 @@ SupportProfile resolve_support(LabelOracle &oracle,
                         // each sequence of the column counted once per k-mer
                         oracle.map_coords(c, data, coords.size(),
                                           [&, column = c](Coord, uint64_t seq_id, Coord) {
-                            if (seq_id != previous)
-                                of(column, seq_id).add(i);
+                            if (seq_id != previous) {
+                                if (LabelSupport *s = of(column, seq_id))
+                                    add(*s, i);
+                            }
                             previous = seq_id;
                         });
                         continue;
                     }
                     // each sequence's local coordinates, in order (sorted)
                     local.clear();
+                    auto trace = [&](Column column, uint64_t seq_id) {
+                        if (LabelSupport *s = of(column, seq_id))
+                            add_trace(*s, i, local.data(), local.size());
+                    };
                     oracle.map_coords(c, data, coords.size(),
                                       [&, column = c](Coord, uint64_t seq_id, Coord at) {
                         if (seq_id != previous && !local.empty()) {
-                            of(column, previous).add_trace(i, local.data(), local.size(),
-                                                           scratch);
+                            trace(column, previous);
                             local.clear();
                         }
                         previous = seq_id;
                         local.push_back(at);
                     });
                     if (!local.empty())
-                        of(c, previous).add_trace(i, local.data(), local.size(), scratch);
+                        trace(c, previous);
                 }
+                charge_row(labels_before, scratch_before);
+                return true;
             });
+        if (!index_fits)
+            pass_end = PassEnd::MEMORY;
         // the pass at its largest: the next occurrence of every present k-mer, the rows held,
         // and the accumulators (taken at their end, where they are largest) with the labels'
         // slots or ids
@@ -674,12 +1114,19 @@ SupportProfile resolve_support(LabelOracle &oracle,
                                  : index.size() * (sizeof(std::pair<Column, uint64_t>)
                                                    + 2 * sizeof(uint64_t))));
         if (used < num_present) {
-            // The deadline ended the pass: the rows of the first |used| present k-mers were
-            // read, so the k-mers before the next present one are resolved (those between are
-            // absent from the graph, which the mapping told). The labels met are those of that
-            // prefix, each with its support in it: what a discovery on the prefix accumulates
+            // The deadline or the memory bound ended the pass: the rows of the first |used|
+            // present k-mers were read, so the k-mers before the next present one are resolved
+            // (those between are absent from the graph, which the mapping told). The labels met
+            // are those of that prefix, each with its support in it: what a discovery on the
+            // prefix accumulates (under the cap: the labels first met before the cut k-mer, a
+            // k-mer of the prefix)
             stopped = true;
             stop_phase = ResolveStop::ROWS;
+            stop_reason = pass_end == PassEnd::MEMORY ? ResolveStop::MEMORY : ResolveStop::TIME;
+            // the memory bound at the query's first k-mer in the graph: the sequence from there
+            // holds the same k-mers in the graph, so the same setup and the same first row, and
+            // a resolve of it stops there again under the same bound
+            cannot_progress = stop_reason == ResolveStop::MEMORY && used == 0;
             resolved = present_pos[used];
             num_present = used;
         }
@@ -768,9 +1215,26 @@ SupportProfile resolve_support(LabelOracle &oracle,
             }
             trunc.tied_at_boundary = named - boundary;
             trunc.tied_kept = kept - boundary;
-            ranked.resize(kept);
             profile.labels_truncated = trunc;
         }
+        if (!admitting) {
+            // The cap bound: the labels tracked are those first met before the cut k-mer, each
+            // counted over the whole query (of the prefix, under a stop); an untracked label is
+            // present only at the in-graph k-mers from the cut k-mer on, so it supports at most
+            // that many. The kept list is the uncut discovery's top max_labels when that many
+            // were kept and the last of them supports more (an untracked label cannot then
+            // reach it, nor tie with it)
+            cap.max_tracked = max_tracked;
+            assert(cap.tracked == found.size());
+            cap.untracked_max_kmers = num_present - cut_index;
+            cap.max_labels = options.discover_max_labels;
+            cap.kept = kept;
+            cap.min_kept_kmers = kept ? ranked[kept - 1].kmers : 0;
+            cap.ranking_exact = kept == options.discover_max_labels
+                                && cap.min_kept_kmers > cap.untracked_max_kmers;
+            profile.labels_capped = cap;
+        }
+        ranked.resize(kept);
         discovered.reserve(ranked.size());
         for (const Ranked &label : ranked) {
             finishing(refs.size());
@@ -1267,6 +1731,17 @@ SeedSelection select_seeds(const SupportProfile &profile,
             break;
         }
         case SelectionPolicy::EXPLICIT: {
+            // The seeds' names looked up in one map of the profiled labels (a name's FIRST
+            // label, as a scan in profile order finds it) and one set of the labels the pair
+            // does not hold: a linear search per name made seeds naming N labels of a profile of
+            // N cost N^2 comparisons (review 5 #6)
+            std::unordered_map<std::string_view, size_t> profiled;
+            profiled.reserve(profile.labels.size());
+            for (size_t l = 0; l < profile.labels.size(); ++l) {
+                profiled.emplace(profile.labels[l].label.name, l);
+            }
+            const std::unordered_set<std::string_view> absent(profile.unknown_labels.begin(),
+                                                              profile.unknown_labels.end());
             for (const auto &ex : policy.explicit_seeds) {
                 if (ex.kmers.end > profile.num_kmers || ex.kmers.begin >= ex.kmers.end)
                     throw std::invalid_argument("Explicit seed interval out of range");
@@ -1280,20 +1755,19 @@ SeedSelection select_seeds(const SupportProfile &profile,
                 Picked p;
                 p.kmers = ex.kmers;
                 for (const auto &name : ex.labels) {
-                    auto it = std::find_if(profile.labels.begin(), profile.labels.end(),
-                                           [&](const LabelProfile &lp) { return lp.label.name == name; });
-                    if (it == profile.labels.end()) {
+                    const auto it = profiled.find(name);
+                    if (it == profiled.end()) {
                         // a label this pair does not hold (unknown_labels, a multi-graph
                         // server's) covers nothing of the seed here
-                        if (std::find(profile.unknown_labels.begin(), profile.unknown_labels.end(),
-                                      name) != profile.unknown_labels.end()) {
+                        if (absent.count(name)) {
                             p.labels_not_covering.push_back(name);
                             continue;
                         }
-                        throw std::invalid_argument("Explicit seed label was not profiled: '" + ::utils::clip_for_message(name) + "'");
+                        throw std::invalid_argument(kSeedLabelNotProfiled
+                                                    + ::utils::clip_for_message(name) + "'");
                     }
-                    if (covers(*it, ex.kmers)) {
-                        p.labels.push_back(it - profile.labels.begin());
+                    if (covers(profile.labels[it->second], ex.kmers)) {
+                        p.labels.push_back(it->second);
                     } else {
                         p.labels_not_covering.push_back(name);
                     }
