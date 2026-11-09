@@ -674,8 +674,10 @@ int run_server(Config *config) {
             return [&, process](shared_ptr<HttpServer::Response> response,
                                 shared_ptr<HttpServer::Request> request) {
                 process_request(response, request, num_requests++, [&](const std::string &content) {
+                    // a server still loading answers 503 before the body is parsed
+                    const AnnotatedDBG &index = traverse_index();
                     return Json::writeString(Json::StreamWriterBuilder(),
-                        process(parse_json_string(content), traverse_index(), traverse_bounds));
+                        process(parse_json_string(content), index, traverse_bounds));
                 });
             };
         };

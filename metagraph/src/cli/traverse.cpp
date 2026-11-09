@@ -253,11 +253,14 @@ TraverseRequest parse_traverse_request(const Json::Value &json, const TraverseLi
         }
         if (t.has("branching")) {
             Strict b(t.raw("branching"), "request.strategy.branching");
-            const Json::Value &v = b.raw("max_label_branches");
-            if (v.isString() && v.asString() == "unlimited") {
-                st.max_label_branches = Strategy::kUnlimited;
-            } else if (!v.isNull()) {
-                st.max_label_branches = b.uint("max_label_branches", 0, 0, 1'000'000);
+            if (b.has("max_label_branches")) {
+                const Json::Value &v = b.raw("max_label_branches");
+                if (v.isString() && v.asString() == "unlimited") {
+                    st.max_label_branches = Strategy::kUnlimited;
+                } else {
+                    // anything else, null included, must be a number in range
+                    st.max_label_branches = b.uint("max_label_branches", 0, 0, 1'000'000);
+                }
             }
             b.done();
         }

@@ -14,8 +14,8 @@ the prototype's projections are committed as golden files (tests/data/traverse_p
     traverse_parity.py --metagraph <d5d26baa>/build/metagraph --index build/mini_refseq --record
 
 The prototype is sent each request translated into its schema with the knobs v1 fixes stated
-explicitly: no reconvergence merging (paths are kept apart), hairpins skipped, change cost
-forbid, 64 splits per path, no continuation sequences, detail full.
+explicitly: no reconvergence merging (paths are kept apart), hairpins skipped, 64 splits per
+path, no continuation sequences, detail full.
 """
 import argparse
 import json
@@ -176,7 +176,7 @@ def run(metagraph, index, kind, request, prototype):
             '--traverse-max-time-ms', str(TIME_BUDGET_MS),
             '-i', os.path.join(index, GRAPH), '-a', os.path.join(index, ANNOTATION), path]
         res = subprocess.run(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
-                             timeout=600)
+                             timeout=TIME_BUDGET_MS / 1000 + 60)
         if res.returncode:
             sys.exit(f'{" ".join(command)} failed:\n{res.stderr}')
         response = json.loads(res.stdout)
