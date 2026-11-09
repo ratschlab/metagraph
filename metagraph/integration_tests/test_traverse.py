@@ -9,7 +9,7 @@ import unittest
 import requests
 from parameterized import parameterized_class
 
-from base import PROTEIN_MODE, TestingBase, METAGRAPH
+from base import PROTEIN_MODE, TestingBase, METAGRAPH, start_server
 
 GRAPH_MODES = ['basic'] if PROTEIN_MODE else ['basic', 'canonical', 'primary']
 K = 31
@@ -161,19 +161,9 @@ class TestTraverseServer(TraverseFixture):
         cls.servers = {}
         port = 4567
         for gated in [True, False]:
-            for _ in range(100):
-                flag = '--experimental-traverse' if gated else ''
-                command = f'{METAGRAPH} server_query -i {cls.graph} -a {cls.annotation} \
-                            --port {port} --address {cls.host} -p 2 {flag}'
-                process = subprocess.Popen(shlex.split(command), stdout=subprocess.PIPE,
-                                           stderr=subprocess.PIPE)
-                try:
-                    process.wait(timeout=1)
-                    port += 1
-                except subprocess.TimeoutExpired:
-                    cls.servers[gated] = (process, port)
-                    port += 1
-                    break
+            flag = '--experimental-traverse' if gated else ''
+            cls.servers[gated] = start_server(cls.graph, cls.annotation, cls.host, port, flag)
+            port = cls.servers[gated][1] + 1
         time.sleep(1)
 
     @classmethod

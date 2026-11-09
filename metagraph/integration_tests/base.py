@@ -1,4 +1,5 @@
 import os
+import shlex
 import subprocess
 import unittest
 from subprocess import PIPE
@@ -38,6 +39,21 @@ NUM_THREADS = 4
 
 MEMORY_MAPPING = True
 MMAP_FLAG = ' --mmap' if MEMORY_MAPPING else ''
+
+
+def start_server(graph, annotation, host, port, extra_args=''):
+    """Start `server_query` on the first free port from |port|: (process, port)."""
+    for _ in range(100):
+        command = f'{METAGRAPH} server_query -i {graph} -a {annotation} ' \
+                  f'--port {port} --address {host} -p 2 {extra_args}'
+        process = subprocess.Popen(shlex.split(command), shell=False,
+                                   stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        try:
+            process.wait(timeout=1)
+        except subprocess.TimeoutExpired:
+            return process, port
+        port += 1
+    raise RuntimeError("Couldn't start server")
 
 
 class TestingBase(unittest.TestCase):

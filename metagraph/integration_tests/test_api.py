@@ -16,7 +16,7 @@ from concurrent.futures import Future
 from parameterized import parameterized, parameterized_class
 from itertools import product
 
-from base import PROTEIN_MODE, TestingBase, METAGRAPH, TEST_DATA_DIR
+from base import PROTEIN_MODE, TestingBase, METAGRAPH, TEST_DATA_DIR, start_server
 
 GRAPH_MODES = ['basic'] if PROTEIN_MODE else ['basic', 'canonical', 'primary']
 
@@ -35,18 +35,7 @@ class TestAPIBase(TestingBase):
 
         cls.host = '127.0.0.1'
         os.environ['NO_PROXY'] = cls.host
-        cls.port = 3456
-        num_retries = 100
-        while num_retries > 0:
-            cls.server_process = cls._start_server(cls, graph_path, annotation_path)
-            try:
-                cls.server_process.wait(timeout=1)
-            except subprocess.TimeoutExpired:
-                break
-            cls.port += 1
-            num_retries -= 1
-        if num_retries == 0:
-            raise "Couldn't start server"
+        cls.server_process, cls.port = start_server(graph_path, annotation_path, cls.host, 3456)
 
         wait_time_sec = 1
         print("Waiting {} sec for the server (PID {}) to start up".format(
@@ -56,13 +45,6 @@ class TestAPIBase(TestingBase):
     @classmethod
     def tearDownClass(cls):
         cls.server_process.kill()
-
-    def _start_server(self, graph, annotation):
-        construct_command = f'{METAGRAPH} server_query -i {graph} -a {annotation} \
-                                            --port {self.port} --address {self.host} -p 2'
-
-        return subprocess.Popen(shlex.split(construct_command),
-                                shell=False, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
 
 
 class TestAPIInitializing(TestingBase):
