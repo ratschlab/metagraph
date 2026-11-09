@@ -390,16 +390,13 @@ SeedSelection select_seeds(const SupportProfile &profile,
                            const SelectionPolicy &policy_in,
                            bool canonical_orientation) {
     SeedSelection selection;
-    selection.policy = policy_in;
-    SelectionPolicy &policy = selection.policy;
+    SelectionPolicy policy = policy_in;
     if (policy.min_block_bp < profile.k)
         policy.min_block_bp = profile.k;
     const uint64_t min_kmers = policy.min_block_bp - profile.k + 1;
-    selection.num_candidates = profile.candidates.size();
 
-    // max_support picks never overlap: each is outside the earlier ones
+    // the picks never overlap: each is outside the earlier ones
     const std::vector<Picked> picked = pick_max_support(profile, min_kmers, policy.max_seeds);
-    selection.num_eligible = picked.size();
 
     // freeze
     for (auto &p : picked) {
@@ -433,14 +430,6 @@ SeedSelection select_seeds(const SupportProfile &profile,
         std::sort(seed.labels.begin(), seed.labels.end());
         seed.seed_id = make_seed_id(seed.sequence, canonical_orientation, seed.labels);
         selection.seeds.push_back(std::move(seed));
-    }
-
-    for (size_t i = 0; i < selection.seeds.size(); ++i) {
-        for (size_t j = 0; j < selection.seeds.size(); ++j) {
-            const auto &a = selection.seeds[i].kmers, &b = selection.seeds[j].kmers;
-            if (i != j && a.begin < b.end && b.begin < a.end)
-                selection.seeds[i].overlaps_with.push_back(j);
-        }
     }
     return selection;
 }

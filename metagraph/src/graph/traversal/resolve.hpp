@@ -104,13 +104,9 @@ struct FrozenSeed {
     KmerInterval kmers;
     std::vector<std::string> labels;         // bytewise sorted
     LabelPopulation population;
-    std::vector<size_t> overlaps_with;       // indices of other seeds sharing k-mers
 };
 
 struct SeedSelection {
-    SelectionPolicy policy;
-    size_t num_candidates = 0;
-    size_t num_eligible = 0;
     std::vector<FrozenSeed> seeds;
 };
 
