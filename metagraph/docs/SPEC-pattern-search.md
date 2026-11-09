@@ -126,8 +126,11 @@ What this build serves (milestone 1, and increment 3 where marked), against the 
 
 - `POST /pattern` with a JSON body: one RFC 8259 JSON text, with unique member names in every object, nothing
   after it (no second value, no comment, no trailing comma), no raw control character inside a string (H1: RFC
-  8259 asks it escaped; `request: not JSON: a control character (byte 0x01) inside a string at byte N: ...`) and
-  nested at most 1,000 deep; anything else is 400 `invalid_request` (§5). An error text quotes a client's string
+  8259 asks it escaped; `request: not JSON: a control character (byte 0x01) inside a string at byte N: ...`),
+  every string well-formed UTF-8 with no unpaired surrogate escape (GPT review 6, finding 2: `request: not JSON:
+  invalid UTF-8 (byte 0xff) inside a string at byte N: RFC 8259 requires UTF-8`, `request: not JSON: an unpaired
+  surrogate escape (\udc00) inside a string at byte N: ...`; SPEC-labeled-traversal-core.md §5) and nested at most
+  1,000 deep; anything else is 400 `invalid_request` (§5). An error text quotes a client's string
   (a member name, a predicate name or operator, a graph name) whole up to 1,024 bytes, longer ones as their first
   1,024 bytes and `... (N bytes)` (SPEC-labeled-traversal-core.md §5, strict validation). `/resolve`, `/traverse` and `POST /traverse/cancel` read their body alike, with their
   own error body (SPEC-labeled-traversal-core.md §5). Before it is parsed the body's JSON values are counted (H1:
@@ -377,8 +380,9 @@ refused 413 `body_too_large` before any of it, by the HTTP layer, before the bod
 2. the single index still loading: 503, no `code` (§6);
 3. the body holds more JSON values than `--max-request-json-values` (§3, H1; counted before it is parsed): 400
    `too_many_json_values`; it is not one RFC 8259 JSON text (§3: a comment, a raw control character inside a
-   string, a trailing comma, anything after the value, a duplicated member name, nesting deeper than 1,000): 400
-   `invalid_request` (the pre-scan refuses the first of a comment, a control character and the value past the
+   string, invalid UTF-8 or an unpaired surrogate escape inside a string, a trailing comma, anything after the
+   value, a duplicated member name, nesting deeper than 1,000): 400 `invalid_request` (the pre-scan refuses the
+   first of a comment, a control character, invalid UTF-8, an unpaired surrogate escape and the value past the
    count that it meets; a text that is no JSON and holds too many values may get either);
 4. the graph (`PatternSearch::support`): 400 with the graph's reason (`mask_invalid`, `alphabet_untested`,
    `representation_unsupported`, …, §6), whatever the body asks; a graph without its mask passes (§7.4);
@@ -435,7 +439,7 @@ answered; the refusals that no pair decides (the body, `graphs`, `in_ram`, the r
 
 | status | `code` | when | what a client does |
 |---|---|---|---|
-| 400 | `invalid_request` | not JSON (§3: a comment, a raw control character inside a string, a trailing comma, content after the value, a duplicated member name, nesting deeper than 1,000), not an object, a wrong type or value, an unknown field, an empty or too long `patterns` list, `max_steps` < 1, `time_budget_ms` ≤ the reserve, `max_labels_per_anchor`, `max_annotation_work` or `max_memory_mb` < 1, `output.occurrences: true` without `output.labels: "all"`; increments 4 and 5: a `long_search` or `require_support` value not listed (§4.1), `require_support: "record_verified"` with `output.occurrences: false`, a `genetic_code` that is not an integer, none or more than one of `dna` / `iupac` / `protein`; increment 5b: a predicate that breaks a rule of §19.3 (the message names the path of the first fault, `request.predicate.and[1].none[0]`; a name that is a number names the fix, "write a taxid as \"562\""), `max_predicate_contexts` < 0, `max_predicate_work` < 1, a `predicate_strands` value not listed, `output.labels: "predicate_only"` without a predicate, a predicate with `long_search: "paths"`; increment 5s: a `supported_paths_level` value not listed, `"label_intersection"` with `require_support: "record_verified"` under `long_search: "supported_paths"`; §25: a `predicate_scope` value not listed, `"motif"` without a predicate; §21: a `max_mismatches` that is not an integer from 0 to 3 (`null` included) | fix the request |
+| 400 | `invalid_request` | not JSON (§3: a comment, a raw control character inside a string, invalid UTF-8 or an unpaired surrogate escape inside a string, a trailing comma, content after the value, a duplicated member name, nesting deeper than 1,000), not an object, a wrong type or value, an unknown field, an empty or too long `patterns` list, `max_steps` < 1, `time_budget_ms` ≤ the reserve, `max_labels_per_anchor`, `max_annotation_work` or `max_memory_mb` < 1, `output.occurrences: true` without `output.labels: "all"`; increments 4 and 5: a `long_search` or `require_support` value not listed (§4.1), `require_support: "record_verified"` with `output.occurrences: false`, a `genetic_code` that is not an integer, none or more than one of `dna` / `iupac` / `protein`; increment 5b: a predicate that breaks a rule of §19.3 (the message names the path of the first fault, `request.predicate.and[1].none[0]`; a name that is a number names the fix, "write a taxid as \"562\""), `max_predicate_contexts` < 0, `max_predicate_work` < 1, a `predicate_strands` value not listed, `output.labels: "predicate_only"` without a predicate, a predicate with `long_search: "paths"`; increment 5s: a `supported_paths_level` value not listed, `"label_intersection"` with `require_support: "record_verified"` under `long_search: "supported_paths"`; §25: a `predicate_scope` value not listed, `"motif"` without a predicate; §21: a `max_mismatches` that is not an integer from 0 to 3 (`null` included) | fix the request |
 | 400 | `too_many_json_values` | H1: the body holds more JSON values than `--max-request-json-values` (262,144 by default; the root, each array element, each member's value), counted before it is parsed: `{"error", "code", "max_request_json_values"}`; nothing ran, a `request_id` is not held. The same on `/traverse`, `/resolve` and `POST /traverse/cancel` | send fewer values: split the request |
 | 400 | `later_increment` | a field of §4.4 (`budget_split`); §21.16: `max_mismatches` above 0 with `output.labels` `"all"` or `"predicate_only"`, a predicate or `long_search: "supported_paths"` (the capabilities' `mismatches.later_increment`) | wait for the increment the capabilities will announce |
 | 400 | `predicate_too_large` | increment 5b: the predicate's lists name more than `caps.max_predicate_labels` names (10,000 by default; a name in two lists counted twice); the message names the count and the cap (§19.3) | send at most `caps.max_predicate_labels` names; split the cohort |
@@ -2928,8 +2932,9 @@ In mode `count` no projection is built (note `projection_not_read` when one was 
 
 - a predicate is a JSON object with **exactly one** member, one of the seven operators;
 - a name is a **non-empty JSON string of valid UTF-8** (a JSON text is UTF-8; jsoncpp passes the bytes of a
-  string through, so a string holding other bytes is refused here, with its path: no column whose name the
-  answer cannot carry, §8.9, can be named), an annotation column label as stored (case-sensitive, not trimmed;
+  string through, so a string holding other bytes is refused: since GPT review 6 by the body's pre-scan, §3, as
+  not JSON; the check here, with its path, stays behind it: no column whose name the answer cannot carry, §8.9,
+  can be named), an annotation column label as stored (case-sensitive, not trimmed;
   on refseq33m a taxid written as a string, `"562"`); a number is refused with the fix (P7: `write a taxid as
   "562"`, fixture `predicate_invalid`); a record header is not a predicate term in version 1 (P20: unknown,
   §19.4);

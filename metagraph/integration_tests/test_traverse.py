@@ -3273,6 +3273,64 @@ class TestTraverseAPI(TestTraverseBase):
             self.assertIn(quote, ret.json()['error'])
             self.assertLess(len(ret.content), 4096)
 
+    def test_api_strings_are_utf8(self):
+        """RFC 8259 §8.1 (GPT review 6, finding 2): a string of a strict-JSON body, member names
+        included, is well-formed UTF-8, and a \\u escape of a surrogate is half of a pair. The
+        pre-scan refuses the first byte that begins no well-formed sequence and the first
+        unpaired surrogate escape with the route's JSON fault ("Bad json received: " on
+        /traverse, /resolve and /traverse/cancel; /pattern's invalid_request): jsoncpp kept any
+        byte and wrote 0xF8-0xFF as \\ufffd, 6 bytes for 1, and distinct names echoed alike.
+        Valid 2-, 3- and 4-byte UTF-8 and valid pairs are read as before."""
+        url = f'http://{self.host}:{self.port}'
+        seq = self.element.encode()
+        strategy = (b'"strategy": {"direction": "right", "bounds": {"max_extension_bp": 10}, '
+                    b'"output": {"detail": "summary", "timing": false}}')
+        routes = (('traverse', b'{"seeds": [{"sequence": "' + seq + b'", "labels": ["',
+                   b'"]}], ' + strategy + b'}', 'Bad json received: '),
+                  ('resolve', b'{"sequence": "' + seq + b'", "labels": ["', b'"]}',
+                   'Bad json received: '),
+                  ('traverse/cancel', b'{"attempt_id": "', b'"}', 'Bad json received: '),
+                  ('pattern', b'{"patterns": [{"dna": "ACGT", "id": "', b'"}]}',
+                   'request: not JSON: '))
+        # each class: no lead byte, a continuation byte alone, overlong, a surrogate in bytes,
+        # past U+10FFFF, cut by the closing quote, a lead byte before a character
+        invalid = ((b'\xff', 0xff), (b'\xfe', 0xfe), (b'\x80', 0x80), (b'\xc0\xaf', 0xc0),
+                   (b'\xe0\x80\xaf', 0xe0), (b'\xed\xa0\x80', 0xed), (b'\xf4\x90\x80\x80', 0xf4),
+                   (b'\xe2\x82', 0xe2), (b'Caf\xe9 au', 0xe9))
+        for route, head, tail, prefix in routes:
+            for bad, lead in invalid:
+                ret = requests.post(f'{url}/{route}', data=head + bad + tail)
+                self.assertEqual(400, ret.status_code, (route, bad))
+                at = len(head) + (3 if bad.startswith(b'Caf') else 0)
+                self.assertEqual(prefix + 'invalid UTF-8 (byte 0x%02x) inside a string at byte %d: '
+                                 'RFC 8259 requires UTF-8' % (lead, at),
+                                 ret.json()['error'], (route, bad))
+                if route == 'pattern':
+                    self.assertEqual('invalid_request', ret.json()['code'])
+                self.assertLess(len(ret.content), 1024, (route, bad))
+            for escape, quoted in ((b'\\udc00', 'dc00'), (b'\\ud800A', 'd800'),
+                                   (b'\\uD800\\u0041', 'D800'), (b'\\ud800', 'd800')):
+                ret = requests.post(f'{url}/{route}', data=head + escape + tail)
+                self.assertEqual(400, ret.status_code, (route, escape))
+                self.assertEqual(prefix + 'an unpaired surrogate escape (\\u%s) inside a string at '
+                                 'byte %d: a code point above U+FFFF is written as a high surrogate '
+                                 'escape (\\ud800-\\udbff) followed by a low one (\\udc00-\\udfff)'
+                                 % (quoted, len(head)), ret.json()['error'], (route, escape))
+        # in a member name too
+        ret = requests.post(url + '/resolve', data=b'{"sequence": "' + seq + b'", "\xff": 1}')
+        self.assertEqual('Bad json received: invalid UTF-8 (byte 0xff) inside a string at byte '
+                         '%d: RFC 8259 requires UTF-8' % (len(seq) + 18), ret.json()['error'])
+        # valid UTF-8, raw and escaped (json.dumps writes U+1F600 as a surrogate pair): read as
+        # sent, so the index's refusal of the unknown label quotes it unchanged
+        for name in ('caf\u00e9', '\u20ac', '\U0001f600', '\U0010ffff', 'x\ufffd'):
+            for data in (json.dumps({'sequence': self.element, 'labels': [name]}),
+                         json.dumps({'sequence': self.element, 'labels': [name]},
+                                    ensure_ascii=False).encode()):
+                ret = requests.post(url + '/resolve', data=data)
+                self.assertEqual(400, ret.status_code, ret.text[:500])
+                self.assertEqual("Label not found in the annotation: '%s'" % name,
+                                 ret.json()['error'])
+
     def test_api_traverse_count_caps(self):
         """/traverse's counts, checked before anything of the request is copied (H1; SPEC
         §10.3): a seed's explicit labels (--traverse-max-explicit-labels), strategy.labels.extra
@@ -4513,6 +4571,53 @@ class TestTraverseMultiGraph(TestTraverseBase):
                                            f'spans several graphs); GET /capabilities lists the '
                                            f'graphs'}, ret.json())
                 self._entry(requests.get(f'{server.url}/{route}?graph=A'), 'A', '/' + route)
+        finally:
+            server.close()
+
+    def test_multi_invalid_utf8_on_eleven_pairs(self):
+        """GPT review 6, finding 2, verification B's case: one /resolve label of raw 0xFF bytes
+        filling a 2 MiB body, unknown to each of 11 pairs, was answered 200 with every pair's
+        unknown_labels echoing it as \\ufffd, 6 bytes per byte (a 132 MiB answer, 337 MiB held
+        against a stated 252). Now it is refused by the pre-scan before any pair runs: the
+        unwrapped 400 "Bad json received: invalid UTF-8 ...", no envelope, a small answer; two
+        distinct invalid labels ("\\xff", "\\xfe") no longer echo alike. The same body in valid
+        2-byte UTF-8 is answered by all 11 pairs, each echoing the label as sent."""
+        d = self.tempdir.name
+        lines = []
+        for i in range(1, 12):
+            pair = f'{d}/eleven/t{i}'
+            os.makedirs(pair, exist_ok=True)
+            for name in os.listdir(d):
+                if (name.startswith('graph_k31.dbg') or name.startswith('annotation.')) \
+                        and not os.path.exists(f'{pair}/{name}'):
+                    os.symlink(f'{d}/{name}', f'{pair}/{name}')
+            lines.append(f't{i},{pair}/graph_k31.dbg,'
+                         f'{pair}/annotation.row_diff_brwt_coord.annodbg')
+        csv = f'{d}/eleven.csv'
+        with open(csv, 'w') as f:
+            f.write('\n'.join(lines) + '\n')
+        server = self._Server(self, csv, flags=('--max-request-body-mb', '2',
+                                                '--max-graphs-without-selection', '20'))
+        try:
+            self.assertTrue(server.ready, server.text()[-2000:])
+            head = b'{"sequence": "' + self.element.encode() + b'", "labels": ["'
+            fill = (2 << 20) - len(head) - 3
+            ret = requests.post(server.url + '/resolve', data=head + b'\xff' * fill + b'"]}')
+            self.assertEqual(400, ret.status_code)
+            self.assertEqual({'error': 'Bad json received: invalid UTF-8 (byte 0xff) inside a '
+                                       'string at byte %d: RFC 8259 requires UTF-8' % len(head)},
+                             ret.json())
+            self.assertLess(len(ret.content), 512)
+            ret = requests.post(server.url + '/resolve', data=head + b'\xff", "\xfe"]}')
+            self.assertEqual(400, ret.status_code)
+            # valid UTF-8 of the same size: every pair answers, echoing the label as sent
+            label = '\u00e9' * (fill // 2)
+            ret = requests.post(server.url + '/resolve', data=head + label.encode() + b'"]}')
+            self.assertEqual(200, ret.status_code, ret.text[:500])
+            out = ret.json()
+            self.assertEqual((11, 11, 0), (len(out['answers']), out['answered'], out['refused']))
+            for answer in out['answers']:
+                self.assertEqual([label], answer['unknown_labels'])
         finally:
             server.close()
 

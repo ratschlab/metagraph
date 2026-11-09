@@ -118,8 +118,9 @@ inline std::string clip_reader_quotes(std::string errors) {
  * none) —, counted in the scan below before anything is parsed: one more throws
  * TooManyJsonValues at the value that passes it. Exact for every JSON text; a text that is
  * not JSON may be refused by either check. The scan refuses at the first fault it meets: a
- * comment, a raw control character inside a string (RFC 8259 asks it escaped), or the value
- * past the count.
+ * comment, a raw control character inside a string (RFC 8259 asks it escaped), a string that
+ * is not well-formed UTF-8 (::utils::utf8_sequence_at), a \u escape of a surrogate that is not
+ * half of a pair, or the value past the count.
  */
 template <class Refusal>
 Json::Value parse_strict_json(std::string_view content, const std::string &prefix,
@@ -138,21 +139,74 @@ Json::Value parse_strict_json(std::string_view content, const std::string &prefi
     // an array or object was just opened: its first value is counted at the next character
     // that is not whitespace, unless that character closes it
     bool opened = false;
+    static constexpr char kHex[] = "0123456789abcdef";
+    auto hex_of = [](unsigned char c) { return std::string { kHex[c >> 4], kHex[c & 0xF] }; };
+    // the code unit of the four hex digits at |at|, -1 when there are not four
+    auto code_unit_at = [&](size_t at) {
+        if (at + 4 > content.size())
+            return -1;
+        int unit = 0;
+        for (size_t j = at; j < at + 4; ++j) {
+            const char d = content[j];
+            const int v = d >= '0' && d <= '9' ? d - '0'
+                        : d >= 'a' && d <= 'f' ? d - 'a' + 10
+                        : d >= 'A' && d <= 'F' ? d - 'A' + 10 : -1;
+            if (v < 0)
+                return -1;
+            unit = unit * 16 + v;
+        }
+        return unit;
+    };
     for (size_t i = 0; i < content.size(); ++i) {
         const char c = content[i];
         if (in_string) {
             if (c == '\\') {
-                ++i;
+                // a \u escape of a surrogate is half of a pair: a high one (D800-DBFF) followed
+                // at once by a low one (DC00-DFFF). jsoncpp refuses a lone high one, but decodes
+                // a lone low one to bytes that are no UTF-8 and joins a high one with whatever
+                // escape follows ("\ud800\u0041" becomes U+10041). A \u without four hex digits
+                // is jsoncpp's to refuse
+                const int unit = i + 1 < content.size() && content[i + 1] == 'u'
+                        ? code_unit_at(i + 2) : -1;
+                if (unit >= 0xD800 && unit <= 0xDFFF) {
+                    const int low = unit <= 0xDBFF && i + 7 < content.size()
+                                        && content[i + 6] == '\\' && content[i + 7] == 'u'
+                            ? code_unit_at(i + 8) : -1;
+                    if (low < 0xDC00 || low > 0xDFFF) {
+                        throw Refusal()(prefix + "an unpaired surrogate escape (\\u"
+                                        + std::string(content.substr(i + 2, 4))
+                                        + ") inside a string at byte " + std::to_string(i)
+                                        + ": a code point above U+FFFF is written as a high "
+                                          "surrogate escape (\\ud800-\\udbff) followed by a "
+                                          "low one (\\udc00-\\udfff)");
+                    }
+                    i += 11;    // both escapes
+                } else if (unit >= 0) {
+                    i += 5;     // the escape and its four digits
+                } else {
+                    ++i;        // the escaped character
+                }
             } else if (c == '"') {
                 in_string = false;
             } else if (static_cast<unsigned char>(c) < 0x20) {
                 // RFC 8259 §7: a control character inside a string is escaped. jsoncpp keeps a
                 // raw one, and an answer quoting the string writes it as \u00XX: 6 bytes for 1
-                static constexpr char kHex[] = "0123456789abcdef";
-                const std::string hex { kHex[(c >> 4) & 0xF], kHex[c & 0xF] };
+                const std::string hex = hex_of(static_cast<unsigned char>(c));
                 throw Refusal()(prefix + "a control character (byte 0x" + hex
                                 + ") inside a string at byte " + std::to_string(i)
                                 + ": RFC 8259 requires it escaped (\\u00" + hex + ")");
+            } else if (static_cast<unsigned char>(c) >= 0x80) {
+                // RFC 8259 §8.1: the text is UTF-8. jsoncpp keeps any byte, and its writer turns
+                // one that begins no well-formed sequence into U+FFFD (6 bytes for 1 at 0xF8 to
+                // 0xFF) or swallows up to three bytes after it, so that distinct names echo alike
+                const size_t n = ::utils::utf8_sequence_at(content, i);
+                if (!n) {
+                    throw Refusal()(prefix + "invalid UTF-8 (byte 0x"
+                                    + hex_of(static_cast<unsigned char>(c))
+                                    + ") inside a string at byte " + std::to_string(i)
+                                    + ": RFC 8259 requires UTF-8");
+                }
+                i += n - 1;
             }
             continue;
         }

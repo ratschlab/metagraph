@@ -15,6 +15,12 @@ namespace utils {
 // string may carry; a label name (a FASTA header, a file name) need not be one
 bool valid_utf8(std::string_view s);
 
+// The length in bytes of the well-formed UTF-8 sequence that begins at s[i] (1 for an ASCII
+// byte, 2 to 4 for a multi-byte one), 0 when none does: a byte that is no lead byte (80-BF, C0,
+// C1, F5-FF), a missing or wrong continuation byte, an overlong form, a surrogate (U+D800 to
+// U+DFFF), a code point above U+10FFFF. valid_utf8's rule, one sequence at a time; i < s.size()
+size_t utf8_sequence_at(std::string_view s, size_t i);
+
 // the bytes of |s| as lowercase hex, two digits each: how a name that is not valid UTF-8 is
 // reported, since its raw bytes could not be shown as text
 std::string to_hex(std::string_view s);

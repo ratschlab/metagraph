@@ -382,9 +382,21 @@ deadline. `src/cli/traverse.cpp` `process_resolve_request`, `src/graph/traversal
   inside a string, which RFC 8259 §7 requires escaped: the body's JSON fault, `Bad json received: a control
   character (byte 0x01) inside a string at byte 123: RFC 8259 requires it escaped (\u0001)` (on `/pattern` its
   `invalid_request`, `request: not JSON: ...`). jsoncpp kept such a byte, and an answer quoting the string wrote
-  it as `\u00XX`, 6 bytes for 1. The scan refuses at the first fault it meets in the text: a comment, a control
-  character, or the value past the count. An escaped control character (`\u0001`, `\n`) and raw bytes from 0x20
-  up (UTF-8 included) are read as before.
+  it as `\u00XX`, 6 bytes for 1. *GPT review 6, finding 2:* the scan also requires every string, member names
+  included, to be **well-formed UTF-8** (RFC 8259 §8.1, RFC 3629: a lead byte C2-DF, E0-EF or F0-F4 with its
+  continuation bytes, no overlong form, no surrogate, nothing above U+10FFFF, no sequence cut short) and every
+  `\u` escape of a surrogate to be half of a pair (`\ud800`-`\udbff` followed at once by `\udc00`-`\udfff`):
+  `Bad json received: invalid UTF-8 (byte 0xff) inside a string at byte 123: RFC 8259 requires UTF-8`, the first
+  byte of the sequence and its offset, and `Bad json received: an unpaired surrogate escape (\udc00) inside a
+  string at byte 123: a code point above U+FFFF is written as a high surrogate escape (\ud800-\udbff) followed by
+  a low one (\udc00-\udfff)`, the escape as the client wrote it (a lone high surrogate, which jsoncpp refused in
+  its own words, gets this text too). jsoncpp kept any byte, and its writer wrote a byte 0xF8-0xFF or a lead byte
+  cut by the string's end as `\ufffd`, 6 bytes for 1, and let other invalid lead bytes swallow up to three bytes,
+  so that distinct names echoed alike; it decoded a lone low surrogate escape to bytes that are no UTF-8 and read
+  `\ud800\u0041` as U+10041. The scan refuses at the first fault it meets in the text: a comment, a control
+  character, invalid UTF-8, an unpaired surrogate escape, or the value past the count. An escaped control
+  character (`\u0001`, `\n`), raw bytes from 0x20 to 0x7F, valid UTF-8 and every other `\u` escape (valid pairs
+  included) are read as before.
 - **Strict validation.** Unknown keys, wrong types, out-of-range values and unsupported `schema_version` are
   rejected with a message naming the field; nothing is silently weakened. *H1:* every error text that quotes a
   client's string (a label, a member name, a graph name or path, a parameter, a predicate name, `release`,
@@ -516,15 +528,19 @@ deadline. `src/cli/traverse.cpp` `process_resolve_request`, `src/graph/traversal
   - **`/resolve` and `/pattern`** on P pairs (P = 1 on a single-graph server): **8 × B + 256 bytes × V + 16 MiB
     + P × (10 × B + 320 bytes × V)**. On a multi-graph server each pair's job holds its own copy of the parsed
     request, and each pair's answer echoes the names it was sent (`/resolve` lists every label that pair does not
-    hold, `/pattern` its predicate), which the writer escapes: up to 3 bytes for each byte of a name (a 2-byte
-    UTF-8 character is written `\u00e9`, a 4-byte one as a surrogate pair; a raw control byte is refused, above),
-    and the text and the transport's copy of it are held at once, so a request's memory grows with its pairs, by
-    up to about 8 × B each. Measured *(verification of H1)* at B = 2 MiB on 1, 4 and 11 pairs, names of letters
+    hold, `/pattern` its predicate), which the writer escapes: up to 3 bytes for each byte of a name the scan
+    accepts, which is valid UTF-8 (a 2-byte character is written `\u00e9`, a 4-byte one as a surrogate pair; a raw
+    control byte, invalid UTF-8 and an unpaired surrogate escape are refused, above; `json_escaped_size` prices a
+    byte that begins no UTF-8 sequence at 6, which only an index's own names can hold), and the text and the
+    transport's copy of it are held at once, so a request's memory grows with its pairs, by up to about 8 × B
+    each. Measured *(verification of H1)* at B = 2 MiB on 1, 4 and 11 pairs, names of letters
     and of 2-byte UTF-8: a `/resolve` of 262,141 labels 120, 322 and 787 MiB (190,640 UTF-8 labels: 89, 261 and
     620 MiB), one name of 2 MiB in UTF-8 31, 74 and 202 MiB (`/pattern`: 33, 76 and 200 MiB); at B = 256 MiB on
     1 and 4 pairs: up to 3,028 and 8,851 MiB (`/resolve`, UTF-8 labels) and 2,575 and 6,424 MiB (`/pattern`, a
     UTF-8 name); at most 0.80 of the bound (the 2 MiB UTF-8 name on 11 pairs). On r237's 11 pairs at B = 2 MiB
-    that is at most 1.2 GiB for a body at the value count, about 290 MiB for one of at most 10,000 values.
+    that is at most 1.2 GiB for a body at the value count, about 290 MiB for one of at most 10,000 values. A
+    name of bytes that are no UTF-8 was written at 6 bytes per byte (GPT review 6, verification B: a 2 MiB name
+    of 0xFF on 11 pairs held 337 MiB, 1.34 of the bound); the scan refuses it now (above).
   Two requests at once hold about twice one, so each route's concurrent requests (its slots) multiply it.
   `/search` and `/align` read their body without a count (the owner's decision): their parse holds about 51
   times the body (zeros), bounded by `--max-request-body-mb` alone.

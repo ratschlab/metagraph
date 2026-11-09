@@ -439,7 +439,8 @@ TEST(ServerRequestIntake, MakeCostIsLinear) {
 
 // RFC 8259 §7: a raw control character inside a string is the body's JSON fault, refused by the
 // pre-scan with the route's prefix (jsoncpp kept it, and an answer quoting it wrote it as
-// \u00XX, 6 bytes for 1); an escaped one, a raw byte from 0x20 up and UTF-8 are read as before
+// \u00XX, 6 bytes for 1); an escaped one, a raw byte from 0x20 up and valid UTF-8 are read as
+// before
 TEST(ServerRequestIntake, ARawControlCharacterInAStringIsRefused) {
     auto refusal = [](const std::string &text) {
         return refusal_of([&] { parse_strict_json<RefuseRequest>(text, "Bad json received: "); });
@@ -473,6 +474,138 @@ TEST(ServerRequestIntake, ARawControlCharacterInAStringIsRefused) {
     } catch (const InvalidRequest &e) {
         EXPECT_EQ(0u, std::string(e.what()).find("request: not JSON: a control character (byte "
                                                  "0x02)"));
+    }
+}
+
+// RFC 8259 §8.1 (GPT review 6, finding 2): a string, member names included, is well-formed UTF-8
+// (RFC 3629). jsoncpp kept any byte, and its writer wrote a byte 0xF8 to 0xFF, or a lead byte cut
+// by the string's end, as \ufffd (6 bytes for 1), and let other invalid lead bytes swallow the
+// next bytes, so that distinct names echoed alike. The pre-scan refuses the first byte that
+// begins no well-formed sequence, naming it and its offset; valid 2-, 3- and 4-byte sequences are
+// read as before
+TEST(ServerRequestIntake, AStringThatIsNotUtf8IsRefused) {
+    auto refusal = [](const std::string &text) {
+        return refusal_of([&] { parse_strict_json<RefuseRequest>(text, "Bad json received: "); });
+    };
+    auto invalid_at = [](const std::string &byte, size_t at) {
+        return "Bad json received: invalid UTF-8 (byte 0x" + byte + ") inside a string at byte "
+                + std::to_string(at) + ": RFC 8259 requires UTF-8";
+    };
+    // each class: a continuation byte without a lead, C0 and C1 (overlong only), F5 to FF (no
+    // lead byte), a sequence cut by the closing quote or by the end of the body, a lead byte
+    // followed by something other than a continuation byte, the overlong forms of E0 and F0,
+    // the surrogates ED A0 to ED BF, past U+10FFFF (F4 90)
+    const std::vector<std::pair<std::string, std::string>> invalid = {
+        { "\x80", "80" }, { "\xbf", "bf" }, { "\xc0\xaf", "c0" }, { "\xc1\xbf", "c1" },
+        { "\xf5\x80\x80\x80", "f5" }, { "\xf8\x88\x80\x80\x80", "f8" }, { "\xfe", "fe" },
+        { "\xff", "ff" }, { "\xc3", "c3" }, { "\xe2\x82", "e2" }, { "\xf0\x9f\x98", "f0" },
+        { "\xc3" "A", "c3" }, { "\xe9 au", "e9" }, { "\xe2\x82" "A", "e2" },
+        { "\xe0\x80\x80", "e0" }, { "\xe0\x9f\xbf", "e0" }, { "\xed\xa0\x80", "ed" },
+        { "\xed\xbf\xbf", "ed" }, { "\xf0\x80\x80\x80", "f0" }, { "\xf0\x8f\xbf\xbf", "f0" },
+        { "\xf4\x90\x80\x80", "f4" }, { "\xf4\xbf\xbf\xbf", "f4" },
+    };
+    for (const auto &[bytes, lead] : invalid) {
+        EXPECT_EQ(invalid_at(lead, 2), refusal("[\"" + bytes + "\"]")) << lead;
+        // in a member name, after other characters and after valid UTF-8
+        EXPECT_EQ(invalid_at(lead, 2), refusal("{\"" + bytes + "\": 0}")) << lead;
+        EXPECT_EQ(invalid_at(lead, 7), refusal("[\"Caf\xc3\xa9" + bytes + "x\"]")) << lead;
+    }
+    // cut by the end of the body (no closing quote)
+    EXPECT_EQ(invalid_at("e2", 2), refusal("[\"\xe2\x82"));
+    // the boundaries of each length, and the largest code points of each: read, unchanged
+    for (const std::string &valid : {
+            std::string("\xc2\x80"), std::string("\xdf\xbf"), std::string("\xe0\xa0\x80"),
+            std::string("\xed\x9f\xbf"), std::string("\xee\x80\x80"), std::string("\xef\xbf\xbd"),
+            std::string("\xef\xbf\xbf"), std::string("\xf0\x90\x80\x80"),
+            std::string("\xf0\x9f\x98\x80"), std::string("\xf4\x8f\xbf\xbf"),
+            std::string("Caf\xc3\xa9 \xe2\x82\xac \xf0\x9f\x98\x80 x") }) {
+        EXPECT_EQ(valid, parse("[\"" + valid + "\"]")[0].asString());
+        EXPECT_EQ(1, parse("{\"" + valid + "\": 1}")[valid].asInt());
+    }
+    // a byte from 0x80 up outside a string is jsoncpp's syntax error, with the prefix
+    const std::string outside = refusal("[\xff]");
+    EXPECT_EQ(0u, outside.find("Bad json received: "));
+    EXPECT_EQ(std::string::npos, outside.find("invalid UTF-8"));
+    // the first fault the scan meets: a comment before the byte, the byte before a comment or a
+    // control character, the value past the count before the byte
+    EXPECT_EQ("Bad json received: a comment (or a '/' outside a string) at byte 1",
+              refusal("[/\"\xff\"]"));
+    EXPECT_EQ(invalid_at("ff", 2), refusal("[\"\xff\", /]"));
+    EXPECT_EQ(invalid_at("ff", 2), refusal(std::string("[\"\xff\x01\"]")));
+    EXPECT_FALSE(fits("[0, 0, \"\xff\"]", 2));
+    // /pattern's prefix: its invalid_request
+    try {
+        parse_strict_json<RefuseRequest>(std::string("{\"a\": \"\xfe\"}"), "request: not JSON: ");
+        FAIL();
+    } catch (const InvalidRequest &e) {
+        EXPECT_EQ("request: not JSON: invalid UTF-8 (byte 0xfe) inside a string at byte 7: "
+                  "RFC 8259 requires UTF-8", std::string(e.what()));
+    }
+    // one rule with valid_utf8 (label names, MGT strings)
+    for (const auto &[bytes, lead] : invalid) {
+        EXPECT_FALSE(::utils::valid_utf8(bytes)) << lead;
+        EXPECT_EQ(0u, ::utils::utf8_sequence_at(bytes, 0)) << lead;
+    }
+    EXPECT_EQ(1u, ::utils::utf8_sequence_at("a", 0));
+    EXPECT_EQ(2u, ::utils::utf8_sequence_at("\xc2\x80", 0));
+    EXPECT_EQ(3u, ::utils::utf8_sequence_at("\xef\xbf\xbf", 0));
+    EXPECT_EQ(4u, ::utils::utf8_sequence_at("\xf4\x8f\xbf\xbf", 0));
+    EXPECT_TRUE(::utils::valid_utf8("Caf\xc3\xa9 \xe2\x82\xac \xf0\x9f\x98\x80"));
+}
+
+// A \u escape of a surrogate is half of a pair: a high one (D800-DBFF) followed at once by a low
+// one (DC00-DFFF), either case of hex digit. jsoncpp refused a lone high one, decoded a lone low
+// one to bytes that are no UTF-8, and joined a high one with any escape after it ("\ud800\u0041"
+// read as U+10041). The pre-scan refuses each, quoting the escape as written; a pair and every
+// other escape are read as before
+TEST(ServerRequestIntake, AnUnpairedSurrogateEscapeIsRefused) {
+    auto refusal = [](const std::string &text) {
+        return refusal_of([&] { parse_strict_json<RefuseRequest>(text, "Bad json received: "); });
+    };
+    auto unpaired_at = [](const std::string &escape, size_t at) {
+        return "Bad json received: an unpaired surrogate escape (\\u" + escape + ") inside a "
+               "string at byte " + std::to_string(at) + ": a code point above U+FFFF is written as "
+               "a high surrogate escape (\\ud800-\\udbff) followed by a low one (\\udc00-\\udfff)";
+    };
+    // a lone low one, a lone high one (at the string's end, before a character, before an
+    // escape that is no low surrogate, before another high one, before an escaped character)
+    EXPECT_EQ(unpaired_at("dc00", 2), refusal("[\"\\udc00\"]"));
+    EXPECT_EQ(unpaired_at("DFFF", 2), refusal("[\"\\uDFFF\"]"));
+    EXPECT_EQ(unpaired_at("d800", 2), refusal("[\"\\ud800\"]"));
+    EXPECT_EQ(unpaired_at("d800", 2), refusal("[\"\\ud800A\"]"));
+    EXPECT_EQ(unpaired_at("d800", 2), refusal("[\"\\ud800\\u0041\"]"));
+    EXPECT_EQ(unpaired_at("d800", 2), refusal("[\"\\ud800\\ud800\"]"));
+    EXPECT_EQ(unpaired_at("DBFF", 2), refusal("[\"\\uDBFF\\n\"]"));
+    EXPECT_EQ(unpaired_at("d800", 2), refusal("[\"\\ud800"));
+    // after a valid pair, after other text, in a member name
+    EXPECT_EQ(unpaired_at("dc00", 14), refusal("[\"\\ud83d\\ude00\\udc00\"]"));
+    EXPECT_EQ(unpaired_at("dc00", 4), refusal("[\"ab\\udc00\"]"));
+    EXPECT_EQ(unpaired_at("dc00", 2), refusal("{\"\\udc00\": 0}"));
+    // pairs, either case: read as their code point
+    EXPECT_EQ("\xf0\x9f\x98\x80", parse("[\"\\ud83d\\ude00\"]")[0].asString());
+    EXPECT_EQ("\xf0\x9f\x98\x80", parse("[\"\\uD83D\\uDE00\"]")[0].asString());
+    EXPECT_EQ("\xf0\x90\x80\x80", parse("[\"\\ud800\\udc00\"]")[0].asString());
+    EXPECT_EQ("\xf4\x8f\xbf\xbf", parse("[\"\\udbff\\udfff\"]")[0].asString());
+    EXPECT_EQ("a\xf0\x9f\x98\x80" "b\xf0\x9f\x98\x80",
+              parse("[\"a\\ud83d\\ude00b\\ud83d\\ude00\"]")[0].asString());
+    // other escapes: read as before, \u0000 and the code units around the surrogates included
+    EXPECT_EQ(std::string("\0", 1), parse("[\"\\u0000\"]")[0].asString());
+    EXPECT_EQ("\xed\x9f\xbf\xee\x80\x80\xef\xbf\xbf\xc3\xa9",
+              parse("[\"\\ud7ff\\ue000\\uffff\\u00E9\"]")[0].asString());
+    // an escaped backslash before "udc00" is no escape of a surrogate
+    EXPECT_EQ("\\udc00", parse("[\"\\\\udc00\"]")[0].asString());
+    // a \u without four hex digits is jsoncpp's to refuse, with the prefix
+    const std::string short_escape = refusal("[\"\\u12\"]");
+    EXPECT_EQ(0u, short_escape.find("Bad json received: "));
+    EXPECT_EQ(std::string::npos, short_escape.find("surrogate escape"));
+    // /pattern's prefix: its invalid_request
+    try {
+        parse_strict_json<RefuseRequest>(std::string("{\"a\": \"\\udc00\"}"),
+                                         "request: not JSON: ");
+        FAIL();
+    } catch (const InvalidRequest &e) {
+        EXPECT_EQ(0u, std::string(e.what()).find("request: not JSON: an unpaired surrogate escape "
+                                                 "(\\udc00) inside a string at byte 7"));
     }
 }
 
