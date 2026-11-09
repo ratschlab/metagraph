@@ -53,6 +53,9 @@ class IRowDiff {
 
     const fork_succ_bv_type& fork_succ() const { return fork_succ_; }
 
+    void set_anchor(anchor_bv_type&& anchor) { anchor_ = std::move(anchor); }
+    void set_fork_succ(fork_succ_bv_type&& fork_succ) { fork_succ_ = std::move(fork_succ); }
+
   protected:
     template <std::derived_from<BinaryMatrix> Matrix>
     std::vector<BinaryMatrix::Row>
