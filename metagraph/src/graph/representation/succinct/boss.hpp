@@ -2,6 +2,7 @@
 #define __BOSS_HPP__
 
 #include <memory>
+#include <span>
 #include <type_traits>
 
 #include "common/vectors/bit_vector.hpp"
@@ -82,6 +83,7 @@ class BOSS {
     // Traverse graph mapping k-mers from sequence to the graph edges
     // and run callback for each edge until the termination condition is satisfied
     // Invokes #callback with npos if a k-mer can't be mapped to the graph edges
+    // or if #skip returns true for it (#skip is called once per k-mer)
     void map_to_edges(std::string_view sequence,
                       const std::function<void(edge_index)> &callback,
                       const std::function<bool()> &terminate = ALWAYS_FALSE,
@@ -98,6 +100,35 @@ class BOSS {
     // |seq_encoded| must have no sentinels (zeros)
     std::vector<edge_index>
     map_to_edges(const std::vector<TAlphabet> &seq_encoded) const;
+
+    // Pull-based form of map_to_edges: each next() returns the edge of the next
+    // (k+1)-mer of |sequence|, or npos if it is missing, invalid, or skipped.
+    class EdgeStream {
+      public:
+        EdgeStream(const BOSS &boss, std::string_view sequence,
+                   std::function<bool()> skip = {});
+        // |seq_encoded| must have no sentinels (zeros) and outlive the stream
+        EdgeStream(const BOSS &boss, std::span<const TAlphabet> seq_encoded,
+                   std::function<bool()> skip = {});
+
+        EdgeStream(const EdgeStream&) = delete;
+        EdgeStream& operator=(const EdgeStream&) = delete;
+
+        bool done() const { return i_ + boss_->k_ + 1 > seq_.size(); }
+        edge_index next();
+
+      private:
+        EdgeStream(const BOSS &boss, std::vector<TAlphabet>&& seq_encoded,
+                   std::function<bool()> skip);
+
+        const BOSS *boss_;
+        std::vector<TAlphabet> owned_seq_;
+        std::span<const TAlphabet> seq_;
+        std::vector<bool> invalid_;
+        std::function<bool()> skip_;
+        size_t i_ = 0;
+        edge_index edge_ = 0;
+    };
 
     template <class... T>
     using Call = typename std::function<void(T...)>;

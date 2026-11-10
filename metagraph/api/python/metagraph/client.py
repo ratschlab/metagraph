@@ -22,9 +22,10 @@ JsonStrList = List[str]
 
 class GraphClientJson:
     """
-    Relatively low level version of the client API. Client returning results
-    from the server as json objects. If there was an error,
-    returning error message in the second element of the tuple returned.
+    Low-level client that returns the server's JSON responses.
+
+    Raises RuntimeError if the server returns an error or a response that is
+    not JSON.
     """
 
     def __init__(self, host: str, port: int, name: str = None, api_path: str = None):
@@ -46,7 +47,7 @@ class GraphClientJson:
                query_coords: bool = False,
                graphs: Union[None, List[str]] = None,
                align: bool = False,
-               **align_params) -> Tuple[JsonDict, str]:
+               **align_params) -> List[JsonDict]:
         """See parameters for alignment `align_params` in align()"""
 
         if discovery_fraction < 0.0 or discovery_fraction > 1.0:
@@ -100,7 +101,7 @@ class GraphClientJson:
     def align(self, sequence: Union[str, Iterable[str]],
               min_exact_match: float = DEFAULT_DISCOVERY_FRACTION,
               max_alternative_alignments: int = 1,
-              max_num_nodes_per_seq_char: float = DEFAULT_NUM_NODES_PER_SEQ_CHAR) -> Tuple[JsonDict, str]:
+              max_num_nodes_per_seq_char: float = DEFAULT_NUM_NODES_PER_SEQ_CHAR) -> List[JsonDict]:
         if min_exact_match < 0.0 or min_exact_match > 1.0:
             raise ValueError(
                 f"min_exact_match should be between 0 and 1 inclusive. Got {min_exact_match}")
@@ -115,7 +116,7 @@ class GraphClientJson:
         return self._json_seq_query(sequence, params, "align")
 
     def _json_seq_query(self, sequence: Union[str, Iterable[str]], param_dict,
-                        endpoint: str) -> Tuple[JsonDict, str]:
+                        endpoint: str) -> List[JsonDict]:
         if isinstance(sequence, str):
             sequence = [sequence]
 
@@ -128,13 +129,17 @@ class GraphClientJson:
 
         return self._do_request(endpoint, payload)
 
-    def _do_request(self, endpoint, payload, post_req=True, timeout=None) -> Tuple[JsonDict, str]:
+    def _do_request(self, endpoint, payload, post_req=True, timeout=None) -> Any:
         url = f'{self.server}/{endpoint}'
         if post_req:
             ret = requests.post(url=url, json=payload, timeout=timeout)
         else:
             ret = requests.get(url=url, timeout=timeout)
 
+        return self._parse_response(ret)
+
+    @staticmethod
+    def _parse_response(ret: requests.Response) -> Any:
         try:
             json_obj = ret.json()
         except:
@@ -149,24 +154,23 @@ class GraphClientJson:
         return json_obj
 
     # noinspection PyTypeChecker
-    def column_labels(self) -> Tuple[JsonStrList, str]:
+    def column_labels(self) -> JsonStrList:
         """
         :returns:   All column labels
         :rtype:     JSON list
         """
         return self._do_request("column_labels", {}, post_req=False)
 
-    def stats(self, timeout=None) -> Tuple[dict, str]:
+    def stats(self, timeout=None) -> JsonDict:
         return self._do_request("stats", {}, post_req=False, timeout=timeout)
 
-    def ready(self) -> bool:
-        try:
-            self.stats()
-            return True
-        except RuntimeError as e:
-            if "503: Server is currently initializing" in str(e):
-                return False
-            raise e
+    def ready(self, timeout=None) -> bool:
+        ret = requests.get(url=f'{self.server}/stats', timeout=timeout)
+        # The server answers 503 Service Unavailable while it loads the index.
+        if ret.status_code == 503:
+            return False
+        self._parse_response(ret)
+        return True
 
 
 class GraphClient:
@@ -245,8 +249,8 @@ class GraphClient:
     def column_labels(self) -> List[str]:
         return self._json_client.column_labels()
 
-    def ready(self) -> bool:
-        return self._json_client.ready()
+    def ready(self, timeout=None) -> bool:
+        return self._json_client.ready(timeout=timeout)
 
 
 class MultiGraphClient:

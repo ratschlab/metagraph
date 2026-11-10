@@ -187,8 +187,6 @@ Config::Config(int argc, char *argv[]) {
             fasta_anno_comment_delim = std::string(get_value(i++));
         } else if (!strcmp(argv[i], "--anno-label")) {
             anno_labels.emplace_back(get_value(i++));
-        } else if (!strcmp(argv[i], "--coord-binsize")) {
-            genome_binsize_anno = atoi(get_value(i++));
         } else if (!strcmp(argv[i], "--suppress-unlabeled")) {
             suppress_unlabeled = true;
         } else if (!strcmp(argv[i], "--sparse")) {
@@ -316,10 +314,6 @@ Config::Config(int argc, char *argv[]) {
             max_hull_forks = atoi(get_value(i++));
         } else if (!strcmp(argv[i], "--align-max-ram")) {
             alignment_max_ram = std::stof(get_value(i++));
-        } else if (!strcmp(argv[i], "-f") || !strcmp(argv[i], "--frequency")) {
-            frequency = atoi(get_value(i++));
-        } else if (!strcmp(argv[i], "-d") || !strcmp(argv[i], "--distance")) {
-            distance = atoi(get_value(i++));
         } else if (!strcmp(argv[i], "-o") || !strcmp(argv[i], "--outfile-base")) {
             outfbase = std::string(get_value(i++));
         } else if (!strcmp(argv[i], "--reference")) {
@@ -1468,7 +1462,6 @@ if (advanced) {
             fprintf(stderr, "\t   --labels-delimiter [STR]\tdelimiter for annotation labels [\":\"]\n");
             fprintf(stderr, "\t   --suppress-unlabeled \tdo not show results for sequences missing in graph [off]\n");
 }
-            // fprintf(stderr, "\t-d --distance [INT] \tmax allowed alignment distance [0]\n");
             fprintf(stderr, "\n");
             fprintf(stderr, "\t-p --parallel [INT] \tuse multiple threads for computation [1]\n");
             // fprintf(stderr, "\t   --cache-size [INT] \tnumber of uncompressed rows to store in the cache [0]\n");
@@ -1530,7 +1523,6 @@ if (advanced) {
             fprintf(stderr, "\t   --sparse \t\tuse the row-major sparse matrix to annotate graph [off]\n");
 }
             // fprintf(stderr, "\t-o --outfile-base [STR] \tbasename of output file []\n");
-            // fprintf(stderr, "\t-d --distance [INT] \tmax allowed alignment distance [0]\n");
             fprintf(stderr, "\t-p --parallel [INT] \tmaximum number of parallel connections [1]\n");
             fprintf(stderr, "\t   --threads-each [INT] \tnumber of threads per graph [1]\n");
             fprintf(stderr, "\t   --one-pass-brwt \tuse one-pass parallel BRWT traversal for queries [off]\n");
