@@ -437,6 +437,47 @@ TYPED_TEST(DeBruijnGraphTest, get_node_sequence) {
     EXPECT_EQ(query, mapped_query);
 }
 
+TYPED_TEST(DeBruijnGraphTest, NodeRange) {
+    size_t k = 5;
+    // longer than NodeRange::kChunkSize, with missing k-mers and an invalid character
+    std::string reference = "AGCTTCGAGGCCAATTGCATGCATCGATCGATCGGGATCCTAGCTAGCTTTAGGACCATGACGTACG"
+                            "TTGACCAGTCAGGTCAAGCTAGGCTA";
+    std::string query = reference.substr(0, 40) + "TTTTTNTTTTT" + reference.substr(20)
+                            + "ACGTACGTTTTTTTT";
+
+#if _PROTEIN_GRAPH
+    std::vector<DeBruijnGraph::Mode> modes { DeBruijnGraph::BASIC };
+#else
+    std::vector<DeBruijnGraph::Mode> modes { DeBruijnGraph::BASIC, DeBruijnGraph::CANONICAL,
+                                             DeBruijnGraph::PRIMARY };
+#endif
+    for (auto mode : modes) {
+        auto graph = build_graph<TypeParam>(k, { reference }, mode);
+        for (std::string_view seq : { std::string_view(query), std::string_view(query).substr(0, k - 1) }) {
+            for (bool sequential : { false, true }) {
+                std::vector<DeBruijnGraph::node_index> nodes;
+                for (auto node : graph->node_range(seq, sequential)) {
+                    nodes.push_back(node);
+                }
+                EXPECT_EQ(sequential ? map_to_nodes_sequentially(*graph, seq)
+                                     : map_to_nodes(*graph, seq), nodes)
+                    << "mode " << mode << ", sequential " << sequential;
+                if (!sequential)
+                    continue;
+                ASSERT_EQ(seq.size() >= k ? seq.size() - k + 1 : 0, nodes.size());
+                for (size_t i = 0; i < nodes.size(); ++i) {
+                    // some graphs require valid characters in kmer_to_node
+                    if (seq.substr(i, k).find('N') != std::string_view::npos)
+                        continue;
+
+                    EXPECT_EQ(graph->kmer_to_node(seq.substr(i, k)), nodes[i])
+                        << "mode " << mode << ", position " << i;
+                }
+            }
+        }
+    }
+}
+
 TYPED_TEST(DeBruijnGraphTest, CallStartNodes) {
     {
         std::vector<std::string> sequences = { "AAACACTAG",

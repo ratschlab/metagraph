@@ -21,7 +21,7 @@ std::string TaxonomyBase::get_accession_version_from_label(const std::string &la
             return utils::split_string(label, "|")[3];
     }
 
-    logger->error("Error: Could not get the accession version for label {}", label);
+    logger->error("Could not get the accession version for label {}", label);
     exit(1);
 }
 
@@ -30,7 +30,7 @@ void TaxonomyBase::read_accversion_to_taxid_map(const std::string &filepath,
                                                 const graph::AnnotatedDBG *anno_matrix) {
     std::ifstream f(filepath);
     if (!f.good()) {
-        logger->error("Error: Failed to open accession to taxid map table {}. \n"
+        logger->error("Failed to open accession to taxid map table {}. \n"
                       "In the cases when the taxid is not specified in the label string, "
                       "the acc_version to taxid lookup table filepath must be given as a flag.", filepath);
         exit(1);
@@ -39,7 +39,7 @@ void TaxonomyBase::read_accversion_to_taxid_map(const std::string &filepath,
     std::string line;
     getline(f, line);
     if (!line.starts_with("accession\taccession.version\ttaxid\t")) {
-        logger->error("Error: The accession to taxid map table is not in the standard (*.accession2taxid) format {}",
+        logger->error("The accession to taxid map table is not in the standard (*.accession2taxid) format {}",
                       filepath);
         exit(1);
     }
@@ -53,13 +53,13 @@ void TaxonomyBase::read_accversion_to_taxid_map(const std::string &filepath,
 
     while (getline(f, line)) {
         if (line == "") {
-            logger->error("Error: The accession to taxid map table contains empty lines. "
+            logger->error("The accession to taxid map table contains empty lines. "
                           "Please make sure that this file was not manually modified {}", filepath);
             exit(1);
         }
         std::vector<std::string> parts = utils::split_string(line, "\t");
         if (parts.size() <= 2) {
-            logger->error("Error: The accession to taxid map table contains incomplete lines. "
+            logger->error("The accession to taxid map table contains incomplete lines. "
                           "Please make sure that this file was not manually modified {}", filepath);
             exit(1);
         }
@@ -82,7 +82,7 @@ TaxonomyClsAnno::TaxonomyClsAnno(const graph::AnnotatedDBG &anno,
              : TaxonomyBase(lca_coverage_rate, kmers_discovery_rate),
                anno_matrix_(&anno) {
     if (!std::filesystem::exists(tax_tree_filepath)) {
-        logger->error("Error: Can't open taxonomic tree file {}", tax_tree_filepath);
+        logger->error("Cannot open taxonomic tree file {}", tax_tree_filepath);
         exit(1);
     }
 
@@ -96,7 +96,7 @@ TaxonomyClsAnno::TaxonomyClsAnno(const graph::AnnotatedDBG &anno,
         // e.g.   >kraken:taxid|2016032|NC_047834.1 Alteromonas virus vB_AspP-H4/4, complete genome
         label_type_ = TAXID;
     } else {
-        logger->error("Error: Can't determine the type of the given label {}. "
+        logger->error("Cannot determine the type of the given label {}. "
                       "Make sure the labels are in a recognized format.", sample_label);
         exit(1);
     }
@@ -129,21 +129,21 @@ TaxonomyClsAnno::TaxonomyClsAnno(const graph::AnnotatedDBG &anno,
 void TaxonomyClsAnno::read_tree(const std::string &tax_tree_filepath, ChildrenList *tree) {
     std::ifstream f(tax_tree_filepath);
     if (!f.good()) {
-        logger->error("Error: Failed to open Taxonomic Tree file {}", tax_tree_filepath);
+        logger->error("Failed to open Taxonomic Tree file {}", tax_tree_filepath);
         exit(1);
     }
 
     std::string line;
     while (getline(f, line)) {
         if (line == "") {
-            logger->error("Error: The Taxonomic Tree file contains empty lines. "
+            logger->error("The Taxonomic Tree file contains empty lines. "
                           "Please make sure that this file was not manually modified: {}",
                           tax_tree_filepath);
             exit(1);
         }
         std::vector<std::string> parts = utils::split_string(line, "\t");
         if (parts.size() <= 2) {
-            logger->error("Error: The Taxonomic tree filepath contains incomplete lines. "
+            logger->error("The Taxonomic Tree file contains incomplete lines. "
                           "Please make sure that this file was not manually modified: {}",
                           tax_tree_filepath);
             exit(1);

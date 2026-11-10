@@ -2,6 +2,7 @@
   "include": [
     "README.md",
     "metagraph/docs/source/*.rst",
+    "metagraph/docs/*.md",
     "metagraph/api/python/README*",
     "metagraph/src/cli/*.cpp",
     "metagraph/src/cli/config/*.cpp",

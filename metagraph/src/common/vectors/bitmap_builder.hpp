@@ -4,6 +4,9 @@
 #include <cassert>
 #include <functional>
 #include <filesystem>
+#include <memory>
+#include <shared_mutex>
+#include <string>
 
 #include "common/sorted_sets/sorted_set.hpp"
 #include "common/sorted_sets/sorted_set_disk.hpp"
@@ -85,6 +88,9 @@ class bitmap_builder_set : public bitmap_builder {
  * A class for building a bitmap from positions of its set bits (ones).
  * The positions may be not distinct and can be passed in arbitrary order.
  * Keeps a buffer of a fixed size and writes temporary data to disk.
+ * The temporary directory and the disk-backed set are created only when
+ * the buffer is full and its distinct positions take more than half of it,
+ * or leave no room for the next batch. Small bitmaps never touch the disk.
  */
 class bitmap_builder_set_disk : public bitmap_builder {
   public:
@@ -95,19 +101,28 @@ class bitmap_builder_set_disk : public bitmap_builder {
 
     ~bitmap_builder_set_disk();
 
-    virtual void add_one(uint64_t pos) { set_bit_positions_.insert(&pos, &pos + 1); }
-    virtual void add_ones(const uint64_t *begin, const uint64_t *end) {
-        set_bit_positions_.insert(begin, end);
-    }
+    virtual void add_one(uint64_t pos) { add_ones(&pos, &pos + 1); }
+    virtual void add_ones(const uint64_t *begin, const uint64_t *end);
 
     // Can only be called once. The returned InitializationData becomes
     // invalid after the bitmap_builder_set_disk object is destroyed.
     virtual InitializationData get_initialization_data();
 
   private:
+    // moves the in-memory positions to a disk-backed set
+    void spill();
+
     const uint64_t size_;
-    const std::filesystem::path tmp_dir_;
-    mtg::common::SortedSetDisk<uint64_t> set_bit_positions_;
+    const size_t num_threads_;
+    const uint64_t buffer_size_;
+    const std::string swap_dir_;
+    // guards the switch from |in_memory_| to |on_disk_|
+    std::shared_mutex mutex_;
+    // number of positions in |in_memory_|, possibly with duplicates
+    uint64_t num_in_memory_ = 0;
+    mtg::common::SortedSet<uint64_t> in_memory_;
+    std::filesystem::path tmp_dir_;
+    std::unique_ptr<mtg::common::SortedSetDisk<uint64_t>> on_disk_;
     bool merged_ = false;
 };
 
