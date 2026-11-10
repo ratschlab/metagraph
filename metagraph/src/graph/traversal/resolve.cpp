@@ -16,6 +16,7 @@
 #include <tsl/hopscotch_set.h>
 
 #include "graph/annotated_dbg.hpp"
+#include "graph/traversal/charged_table.hpp"
 #include "graph/traversal/kept_rows.hpp"
 #include "graph/traversal/seeded_hash.hpp"
 #include "annotation/binary_matrix/row_diff/row_diff.hpp"
@@ -275,9 +276,10 @@ uint64_t scratch_bytes(const std::vector<Coord> &scratch) {
     return scratch.capacity() * sizeof(Coord);
 }
 
-// What the budget has left (DecodeBudget::max_bytes() less what it holds)
+// What the budget has left (DecodeBudget::max_bytes() less what it holds; none once a table's
+// growth that could not be refused took it past its maximum: DecodeBudget::charge_beyond)
 uint64_t budget_left(const DecodeBudget &budget) {
-    return budget.max_bytes() - budget.held();
+    return budget.held() < budget.max_bytes() ? budget.max_bytes() - budget.held() : 0;
 }
 
 // How a pass over the rows (for_each_row) ended
@@ -290,14 +292,20 @@ enum class PassEnd {
 // The budget's charge per key of the pass's setup (the next occurrence of each k-mer, kept for
 // the pass) and of its transient hash table of the keys' last occurrences (seeded, 90 B a key:
 // hopscotch_entry_bytes; T3 review R2, F1 and N1: 80 B, a table at most 90% full, was short of
-// the 81.4 B a natural key set reached, and crafted node indices grew it to 604 B a key)
+// the 81.4 B a natural key set reached, and crafted node indices grew it to 604 B a key). The
+// setup's table is charged beyond that model as it is allocated (its TableAccount; GPT review 7,
+// finding 7); the batch's (in_batch) has no account (a null allocator: not charged)
 constexpr uint64_t kNextUseBytes = sizeof(size_t);
-using KeyPositions = tsl::hopscotch_map<node_index, size_t, SeededHash>;
+using KeyPositions = tsl::hopscotch_map<node_index, size_t, SeededHash, std::equal_to<node_index>,
+                                        ChargedAllocator<std::pair<node_index, size_t>>>;
 constexpr uint64_t kLastOccurrenceBytes
         = hopscotch_entry_bytes(sizeof(KeyPositions::value_type));
 // a discovery's index of the records it tracks (header labels): the record, its accumulator's
-// position (kDiscoverIndexEntryBytes an entry)
-using RecordIndex = tsl::hopscotch_map<std::pair<Column, uint64_t>, uint64_t, SeededPairHash>;
+// position (kDiscoverIndexEntryBytes an entry, and what its allocations hold beyond that, charged
+// through its TableAccount)
+using RecordKey = std::pair<Column, uint64_t>;
+using RecordIndex = tsl::hopscotch_map<RecordKey, uint64_t, SeededPairHash, std::equal_to<RecordKey>,
+                                       ChargedAllocator<std::pair<RecordKey, uint64_t>>>;
 
 template <class RowT>
 uint64_t rows_bytes(const std::vector<RowT> &rows) {
@@ -318,7 +326,9 @@ uint64_t rows_bytes(const std::vector<RowT> &rows) {
  * there (a deadline). What the request holds is one batch of rows and the rows kept.
  *
  * Every byte the pass holds is charged to |budget| (SPEC-labeled-traversal-core.md §4.6): its
- * setup (the next occurrence of each key, and the transient table that finds them), each batch
+ * setup (the next occurrence of each key, and the transient table that finds them: its model,
+ * and what its allocations hold beyond it, a growth that does not fit ending the pass before its
+ * first k-mer as the setup's own charge does), each batch
  * by |decode(keys, &rows, &held)| — the rows of |keys| into |rows|, OK with the budget holding
  * |held[r]| for row r and IRowDiff::output_bytes<RowT>(keys.size()) for the vectors, or
  * REFUSED with nothing held and nothing returned — and each row kept with its entry (KeptRows:
@@ -355,16 +365,32 @@ size_t for_each_row(const std::vector<node_index> &keys, BatchSizer sizer, uint6
     }
     std::vector<size_t> next_use(keys.size(), kNever);
     {
-        KeyPositions later;
-        for (size_t j = keys.size(); j-- > 0; ) {
-            auto [it, inserted] = later.try_emplace(keys[j], j);
-            if (!inserted) {
-                next_use[j] = it->second;
-                it.value() = j;
+        // the table's model, charged above, and its allocations beyond it (GPT review 7, finding
+        // 7: tsl's tail of a small table, a growth at a low load that keys chosen for a known
+        // seed reach), refused before they are made. The account releases what it holds once
+        // the table, in the inner scope, is freed
+        TableAccount setup(budget, /* refuse */ true);
+        setup.adopt(setup_bytes);
+        bool refused = false;
+        try {
+            KeyPositions later(0, SeededHash(), std::equal_to<node_index>(),
+                               ChargedAllocator<std::pair<node_index, size_t>>(&setup));
+            for (size_t j = keys.size(); j-- > 0; ) {
+                auto [it, inserted] = later.try_emplace(keys[j], j);
+                if (!inserted) {
+                    next_use[j] = it->second;
+                    it.value() = j;
+                }
             }
+        } catch (const TableGrowthRefused &) {
+            refused = true;
+        }
+        if (refused) {
+            budget.release(next_use_bytes);
+            *end_cause = PassEnd::MEMORY;
+            return 0;
         }
     }
-    budget.release(setup_bytes);
     // the rows kept for a later occurrence of their key (GPT review 6, #8: the table's buckets
     // outlive an entry's last use, so their charge is held until kept.drop() frees them)
     KeptRows<RowT, node_index> kept(budget);
@@ -375,7 +401,9 @@ size_t for_each_row(const std::vector<node_index> &keys, BatchSizer sizer, uint6
         budget.release(next_use_bytes);
     };
     // the batch's keys (not charged, SPEC §4.6: at most 4,096 keys, 0.3 MiB at its growth, the
-    // batch's vectors 0.16 MiB beside it; seeded, so that no key set grows it past that)
+    // batch's vectors 0.16 MiB beside it; seeded, so that no key set chosen without the seed
+    // grows it past that, and tsl doubles on a full neighbourhood only at 10% load or above, so
+    // whatever the keys it holds at most 2^16 buckets, 2.3 MiB at that growth with the old ones)
     KeyPositions in_batch;
     std::vector<node_index> batch_keys;
     std::vector<RowT> batch;
@@ -452,7 +480,7 @@ size_t for_each_row(const std::vector<node_index> &keys, BatchSizer sizer, uint6
             if (next_use[j] != kNever && next_use[j] >= end) {
                 const uint64_t bytes = annot::matrix::row_copy_bytes(row);
                 if (kept.bytes() + bytes <= kept_max
-                        && kept.keep(keys[j], std::move(row), bytes, held[r])) {
+                        && kept.keep(keys[j], row, bytes, held[r])) {
                     moved[r] = true;
                 }
             }
@@ -801,8 +829,14 @@ SupportProfile resolve_support(LabelOracle &oracle,
         std::vector<uint32_t> slot(by_column && index_fits ? oracle.num_columns() : 0, kNoSlot);
         std::vector<uint64_t> tracked_in(!by_column && index_fits ? oracle.num_columns() : 0, 0);
         // seeded (SeededPairHash): the records a query meets could otherwise be chosen to grow
-        // the table past its charge (kDiscoverIndexEntryBytes; T3 review R2, F1)
-        RecordIndex index;
+        // the table past its charge (kDiscoverIndexEntryBytes; T3 review R2, F1). Its model is
+        // charged with each label tracked (label_bytes, charge_row); what its allocations hold
+        // beyond it is charged as they are made (GPT review 7, finding 7), without refusal: the
+        // table grows inside a k-mer's accumulation, where no refusal is clean, so a growth
+        // that does not fit is charged past the maximum and the next k-mer does not fit
+        TableAccount index_account(budget, /* refuse */ false);
+        RecordIndex index(0, SeededPairHash(), std::equal_to<RecordKey>(),
+                          ChargedAllocator<std::pair<RecordKey, uint64_t>>(&index_account));
         static_assert(kDiscoverIndexEntryBytes
                       == hopscotch_entry_bytes(sizeof(RecordIndex::value_type)));
         std::deque<LabelSupport> found;
@@ -1007,14 +1041,21 @@ SupportProfile resolve_support(LabelOracle &oracle,
             return true;
         };
         // after a k-mer's accumulation: its new labels and growth, within what admit_row saw
-        // left (so the charge fits)
+        // left (so the charge fits), the index's model through its account (which then holds
+        // only what the index's allocations hold beyond the model). Only where they passed the
+        // model (a small table's tail, keys chosen for a known seed) can the rest not fit: it is
+        // then charged past the maximum, and the next k-mer stops the pass
         auto charge_row = [&](size_t labels_before, uint64_t scratch_before) {
-            const uint64_t bytes = (found.size() - labels_before) * label_bytes + grown
-                                 + (scratch_held() - scratch_before);
+            const uint64_t index_model = by_column
+                    ? 0 : (found.size() - labels_before) * kDiscoverIndexEntryBytes;
+            const uint64_t bytes = (found.size() - labels_before) * label_bytes - index_model
+                                 + grown + (scratch_held() - scratch_before);
             grown = 0;
-            const bool charged = budget.charge(bytes);
-            assert(charged && "within the bound admit_row checked");
-            (void)charged;
+            index_account.cover_beyond(index_model);
+            if (!budget.charge(bytes)) {
+                assert(index_account.extra() && "within the bound admit_row checked");
+                budget.charge_beyond(bytes);
+            }
         };
         const size_t used = !index_fits ? 0 : each_row(tuple_rows,
             [&](size_t j, const BinaryMatrix::SetBitPositions &row) {
@@ -1170,7 +1211,8 @@ SupportProfile resolve_support(LabelOracle &oracle,
             ranked.push_back({ with_coords ? found[at].traced : found[at].kmers, at, nullptr });
         }
         std::vector<uint32_t>().swap(slot);
-        RecordIndex().swap(index);
+        RecordIndex(0, SeededPairHash(), std::equal_to<RecordKey>(),
+                    ChargedAllocator<std::pair<RecordKey, uint64_t>>(&index_account)).swap(index);
         // More k-mers supported first, ties by the name the answer states (bytes: the column's name, or
         // the sequence's header), then by (column, seq_id) for a header that two columns hold.
         // A tie by column id let the index's numbering of its columns decide which of the

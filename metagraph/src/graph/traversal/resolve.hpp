@@ -177,7 +177,8 @@ struct ResolveOptions {
 // (held in deques: no relocation), and of a header label its entry in the label index (a hash
 // table of 32 B buckets, seeded, taken to double at 80% load or above: its entry, the empty
 // buckets and the table before the growth while it is moved, hopscotch_entry_bytes in
-// seeded_hash.hpp; 112 B, a table at most 90% full, was short of what random records reach);
+// seeded_hash.hpp; 112 B, a table at most 90% full, was short of what random records reach; what
+// its allocations hold beyond that model is charged as they are made, GPT review 7, finding 7);
 // per run and per trace break twice the element (a vector at most twice its size); per chain
 // coordinate beyond those held inline its heap (charged as the vector's capacity grows). A model
 // of the heap, never a measurement

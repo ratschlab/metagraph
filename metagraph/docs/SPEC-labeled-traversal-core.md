@@ -544,14 +544,32 @@ load factor or earlier, when a key's neighbourhood (62 buckets) has no empty buc
 buckets meet below 90%: over 3,600 growths of seeded tables of 2^11-2^22 buckets the lowest load at a growth was
 0.833 (the median 0.90), over 280 growths of 2^20-2^26 buckets 0.822 (the median 0.87; `e23/H2/t3fix/grow.cpp`). The
 charges before (a table at most 90% full: 192 B a kept row of either kind, 80 B a setup key, 112 B a record) were
-passed by such early growths but for a row of set bits (81.4 B a setup key measured, T3 review R2, N1). The model
-holds whatever the keys because the tables hash them seeded once per process (T3 review R2, F1; the batch's key
-table and the selection's distinct keys likewise): a key's bucket is the hash's low bits, and a table doubles down
-to 10% load, so under the identity hash of a node index a query whose k-mers' node indices are chosen (63 sharing
-their low bits at each size; the graph gives them) grew a table far past its charge, 1 M kept rows to 1,344 MiB
-against 183 MiB charged and the setup's table to 576 against 76, about 5 GiB a pair at the 1,024 MiB default.
-Seeded, the same keys grow a table as random ones do (168 MiB for the 1 M kept rows, 72 MiB for the setup's). The
-tables are looked up, never iterated for an answer, so no answer depends on the seed.
+passed by such early growths but for a row of set bits (81.4 B a setup key measured, T3 review R2, N1). The tables
+hash their keys seeded once per process (T3 review R2, F1; the batch's key table and the selection's distinct keys
+likewise): a key's bucket is the hash's low bits, and a table doubles down to 10% load, so under the identity hash of
+a node index a query whose k-mers' node indices are chosen (63 sharing their low bits at each size; the graph gives
+them) grew a table far past its charge, 1 M kept rows to 1,344 MiB against 183 MiB charged and the setup's table to
+576 against 76, about 5 GiB a pair at the 1,024 MiB default. Seeded, the same keys grow a table as random ones do
+(168 MiB for the 1 M kept rows, 72 MiB for the setup's). The tables are looked up, never iterated for an answer, so
+no answer depends on the seed.
+
+The model is not a bound whatever the keys *(GPT review 7, finding 7; train 4, T4-L1)*: tsl's tail of 61 buckets
+past a table's own passes it below a few hundred entries, and keys chosen for a known seed (the seed is drawn once
+per process and never stated, but the hash is no secret function) double a table down to 10% load, up to 8 times
+the model at a growth (V7-B, `e23/G7-verify/V7-B/f7/`). So the three tables are charged **as allocated beyond the
+model**: each table's allocator reports every allocation before it is made and every deallocation after it (its
+buckets with the tail, at a growth the old and the new ones, its overflow list's nodes, at jemalloc's size classes),
+and the budget holds max(the model, what the table's allocations hold) at every moment. A growth of the kept rows'
+table or of the setup's that does not fit is refused before anything is allocated (tsl builds the grown table aside
+and leaves the table as it was): the row is then not kept, or the pass stops before its first k-mer as when the
+setup's own charge does not fit. The record index grows inside a k-mer's accumulation, where no refusal is clean: its
+excess is charged as it is allocated, past M if need be, and the next k-mer does not fit (the budget refuses every
+charge past M), so the bound is passed by at most that one growth. With keys the seed does not favour nothing beyond
+the model is charged but a small table's tail (a few KB), so a memory stop moves only where the tables are small or
+the keys chosen; a stop can then depend on the process's seed, an answer cannot. The batch's key table (at most
+4,096 keys a batch) is not charged: tsl doubles a table on a full neighbourhood only at 10% load or above, so whatever
+the keys it holds at most 2^16 buckets (1.5 MiB; 2.3 MiB at that growth with the old ones) and at most its keys in its
+overflow list.
 
 **The answer's labels.** `discover.max_labels` above `--resolve-max-discover-answer-labels` is lowered to it and stated in `limits.clamped` as every clamp is,
 `{"field": "discover.max_labels", "requested": …, "effective": …}`, the answer then being that of the effective
@@ -4583,7 +4601,12 @@ with `rle` and a larger `min_block_kmers`, under 1 MiB), `.AnExplicitLabelsMemor
 explicit labels on the route); integration `TestResolveDiscoveryBounds.test_explicit_labels_stop_under_the_memory_bound`
 (the stop end to end, the default bound answering as the CLI) and `.test_an_answer_past_the_memory_bound_is_refused`
 (the 400's body, a multi-graph server's refused pair with the same body, 100 labels answered, the CLI and the default
-bound answering every label);
+bound answering every label); (GPT review 7, finding 7, the tables' charge): `ResolveBounds.
+ChosenKeysCannotGrowTheKeptRowsPastTheirAccount` (V7-B's keys chosen for a known seed: at every step the budget holds
+at least the kept rows' buckets with tsl's tail and its overflow nodes, at every growth the old and the new buckets,
+where the model alone was passed more than 3 times; under 4 KiB, 64 KiB and 1 MiB a growth that does not fit is
+refused before it is made, the row left to the caller, the bound never passed), `.AnUnrefusedGrowthIsChargedPastTheMaximum`
+(a table that cannot refuse is charged past the maximum, every charge then refused, freeing it releases all);
 `ResolveBoundsRoute.TheExplicitLabelsCap` (the two texts, N passes and N + 1 is refused, `labels` before the seeds
 and before every other fault, a list of another type left to the parse, 0 no cap, the route's limit) and
 `.ExplicitSeedNamesAreLookedUpByHash` (100,000 names a pair does not hold in an explicit seed: the selection, the

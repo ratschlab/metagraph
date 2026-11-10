@@ -21,6 +21,7 @@
 #include "tests/annotation/test_annotated_dbg_helpers.hpp"
 
 #include "graph/traversal/resolve.hpp"
+#include "graph/traversal/charged_table.hpp"
 #include "graph/traversal/kept_rows.hpp"
 #include "graph/traversal/seeded_hash.hpp"
 #include "graph/annotated_dbg.hpp"
@@ -1087,6 +1088,167 @@ TEST(ResolveBounds, ChosenNodeIndicesDoNotGrowTheTablesPastTheirCharge) {
     // what is held covers the table at its last growth: its buckets and half as many before
     EXPECT_GE(budget.held(), kept.bucket_count() * sizeof(KeptBucket) * 3 / 2);
     kept.drop();
+}
+
+// ---- the tables' account (TableAccount, charged_table.hpp; SPEC §4.6; GPT review 7, finding 7)
+
+// A hash whose seed is known (0): keys can be chosen for it by inverting mix64 (V7-B's crafting)
+struct KnownSeedHash {
+    size_t operator()(uint64_t key) const { return static_cast<size_t>(mix64(key)); }
+};
+
+uint64_t inverse_odd(uint64_t a) {
+    uint64_t x = a;
+    for (int i = 0; i < 6; ++i) {
+        x *= 2 - a * x;
+    }
+    return x;
+}
+
+// the key KnownSeedHash maps to |h|
+uint64_t unmix64(uint64_t h) {
+    static const uint64_t i1 = inverse_odd(0xFF51AFD7ED558CCDULL);
+    static const uint64_t i2 = inverse_odd(0xC4CEB9FE1A85EC53ULL);
+    h ^= h >> 33;
+    h *= i2;
+    h ^= h >> 33;
+    h *= i1;
+    h ^= h >> 33;
+    return h;
+}
+
+// Keys chosen for a known seed (V7-B): random keys to just past 10% of the buckets, then groups
+// of 63 whose hashes agree modulo the bucket count but differ in its next bit, so that tsl grows
+// the table on a full neighbourhood at a tenth of its load. |insert(key)| false ends the stream
+template <class Insert, class Buckets>
+void chosen_keys(size_t max_buckets, uint64_t seed, const Buckets &buckets, const Insert &insert) {
+    std::mt19937_64 rng(seed);
+    uint64_t group = 0;
+    while (buckets() < max_buckets) {
+        const size_t n = std::max<size_t>(buckets(), 1);
+        for (size_t i = 0; i < n / 10 + 2; ++i) {
+            if (!insert(rng()))
+                return;
+        }
+        const uint64_t low = rng() & (n - 1);
+        const size_t before = buckets();
+        for (uint64_t i = 0; i < 63 && buckets() == before; ++i) {
+            if (!insert(unmix64(low | ((i & 1) * n) | ((++group) << 40))))
+                return;
+        }
+    }
+}
+
+// The kept rows' table is charged as allocated beyond its model, whatever the keys: keys chosen
+// for the hash's seed double it at a tenth of its load, its buckets passing the model's
+// kEntryBytes an entry several times (V7-B: up to 8 times at a growth), and the budget holds
+// them all the same — at every step at least the table's buckets (with tsl's tail of 61) and its
+// overflow nodes, at every growth the old and the new buckets at once. Under a bound a growth
+// that does not fit is refused before it is made: the row is not kept (it stays with the
+// caller) and the budget never passes the bound. Before, the model alone was charged
+TEST(ResolveBounds, ChosenKeysCannotGrowTheKeptRowsPastTheirAccount) {
+    using annot::matrix::DecodeBudget;
+    using annot::matrix::alloc_bytes;
+    using Row = annot::matrix::BinaryMatrix::SetBitPositions;
+    using Kept = KeptRows<Row, uint64_t, KnownSeedHash>;
+    namespace hop = tsl::detail_hopscotch_hash;
+    constexpr uint64_t kBucket = sizeof(hop::hopscotch_bucket<Kept::Table::value_type, 62, false>);
+    auto table_bytes = [&](size_t buckets, size_t overflow) {
+        return (buckets ? alloc_bytes((buckets + 61) * kBucket) : 0)
+             + overflow * alloc_bytes(sizeof(Kept::Table::value_type) + 2 * sizeof(void*));
+    };
+    DecodeBudget budget;
+    double most_over_model = 0;
+    {
+        Kept kept(budget);
+        chosen_keys(1 << 16, 7, [&]() { return kept.bucket_count(); }, [&](uint64_t key) {
+            const size_t before = kept.bucket_count();
+            if (kept.contains(key))
+                return true;
+            Row row { 7 };
+            EXPECT_TRUE(kept.keep(key, row, 8, 0));
+            const uint64_t held = table_bytes(kept.bucket_count(), kept.overflow_size());
+            EXPECT_GE(budget.held(), held) << kept.size();
+            EXPECT_EQ(held, kept.account().held()) << kept.size();
+            if (kept.bucket_count() != before && before) {
+                // the growth: the old buckets and the new ones held at once
+                EXPECT_GE(budget.peak(), table_bytes(before, 0)
+                                         + table_bytes(kept.bucket_count(), 0)) << kept.size();
+                most_over_model = std::max(most_over_model,
+                        double(table_bytes(before, 0) + table_bytes(kept.bucket_count(), 0))
+                            / (kept.size() * Kept::kEntryBytes));
+            }
+            return true;
+        });
+        EXPECT_GE(kept.bucket_count(), size_t(1) << 16);
+        kept.drop();
+        EXPECT_EQ(0u, budget.held());
+    }
+    // the model alone was passed several times over
+    EXPECT_GT(most_over_model, 3.0);
+
+    // under a bound: a growth that does not fit is refused before it is made
+    for (uint64_t bound : { uint64_t(4) << 10, uint64_t(64) << 10, uint64_t(1) << 20 }) {
+        DecodeBudget small(bound);
+        Kept kept(small);
+        size_t refused = 0;
+        chosen_keys(1 << 20, 11, [&]() { return kept.bucket_count(); }, [&](uint64_t key) {
+            if (kept.contains(key))
+                return true;
+            Row row { 7 };
+            const size_t size = kept.size(), buckets = kept.bucket_count();
+            if (!kept.keep(key, row, 8, 0)) {
+                // nothing kept, the table as it was, the row still the caller's
+                EXPECT_EQ(size, kept.size());
+                EXPECT_EQ(buckets, kept.bucket_count());
+                EXPECT_EQ(Row { 7 }, row);
+                return ++refused < 3;
+            }
+            EXPECT_LE(small.held(), bound);
+            EXPECT_GE(small.held(), table_bytes(kept.bucket_count(), kept.overflow_size()));
+            return true;
+        });
+        EXPECT_GT(refused, 0u) << bound;
+        EXPECT_LE(small.peak(), bound) << bound;
+    }
+    // the smallest bound an entry's model fits in: its table's first buckets (63) do not
+    DecodeBudget one(Kept::kEntryBytes);
+    Kept first(one);
+    Row row { 1 };
+    EXPECT_FALSE(first.keep(1, row, 8, 0));
+    EXPECT_EQ(0u, first.size());
+    EXPECT_EQ(Kept::kEntryBytes, one.held());
+}
+
+// A table whose growth cannot be refused where it happens (the record index, inside a k-mer's
+// accumulation) is charged as allocated past the budget's maximum; the budget then refuses
+// every charge, so the next check stops, and freeing the table releases it all
+TEST(ResolveBounds, AnUnrefusedGrowthIsChargedPastTheMaximum) {
+    using annot::matrix::DecodeBudget;
+    using Table = tsl::hopscotch_map<uint64_t, uint64_t, KnownSeedHash, std::equal_to<uint64_t>,
+                                     ChargedAllocator<std::pair<uint64_t, uint64_t>>>;
+    DecodeBudget budget(64 << 10);
+    {
+        TableAccount account(budget, /* refuse */ false);
+        Table table(0, KnownSeedHash(), std::equal_to<uint64_t>(),
+                    ChargedAllocator<std::pair<uint64_t, uint64_t>>(&account));
+        uint64_t key = 0;
+        while (budget.held() <= budget.max_bytes()) {
+            table.emplace(key++, 0);
+        }
+        EXPECT_GT(budget.held(), budget.max_bytes());
+        EXPECT_EQ(account.held(), budget.held());
+        EXPECT_FALSE(budget.charge(1));
+        // the model covering the entries: what passed it is released, the rest held
+        account.cover_beyond(table.size() * hopscotch_entry_bytes(sizeof(Table::value_type)));
+        EXPECT_EQ(account.charged(), budget.held());
+        EXPECT_EQ(std::max(account.held(), account.covered()), account.charged());
+        Table(0, KnownSeedHash(), std::equal_to<uint64_t>(),
+              ChargedAllocator<std::pair<uint64_t, uint64_t>>(&account)).swap(table);
+        EXPECT_EQ(0u, account.held());
+    }
+    EXPECT_EQ(0u, budget.held());
+    EXPECT_TRUE(budget.charge(1));
 }
 
 // ---- the cap on a request's explicit label lists (--resolve-max-explicit-labels, SPEC §4.1)
