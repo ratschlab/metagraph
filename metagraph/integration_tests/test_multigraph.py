@@ -3564,6 +3564,41 @@ class TestRecordMappingAtLoad(TestingBase):
                     self.assertTrue(caps['ready'])
                     self.assertEqual(order, caps['pair_summary']['seqs_order'])
 
+    def test_corrupt_coordinate_offsets_are_refused_at_load(self):
+        # a .seqs whose first column's offsets state a length past their encoding is refused at
+        # load, naming the file: a server exits 1 before it is ready, the CLI exits 1 (2^20 and
+        # more segfaulted, exit 139, before the train-3 verification, V2-S3)
+        graph, anno = self.pair('row_diff_brwt_coord', 'right', True)
+        with open(anno[:-len('.row_diff_brwt_coord.annodbg')] + '.seqs', 'rb') as f:
+            data = bytearray(f.read())
+        # the number of columns, big.fa's headers b1 and b2, then its offsets' length
+        at = 8 + 8 + sum(1 + len(h) for h in ('b1', 'b2'))
+        self.assertEqual(2 * (300 - 31 + 1), int.from_bytes(data[at:at + 8], 'little'))
+        out = os.path.join(self.d, 'corrupt_length')
+        os.makedirs(out)
+        corrupt = os.path.join(out, 'anno.row_diff_brwt_coord.annodbg')
+        shutil.copyfile(anno, corrupt)
+        seqs = os.path.join(out, 'anno.seqs')
+        for length in (1 << 20, (1 << 64) - 1):
+            data[at:at + 8] = length.to_bytes(8, 'little')
+            with open(seqs, 'wb') as f:
+                f.write(data)
+            line = (f"Cannot load CoordToHeader from '{seqs}': could not read contents (possibly "
+                    f"corrupted or incompatible) (caught: the coordinate offsets of column 0 state "
+                    f"a length of {length}, more than their encoding holds")
+            with self.subTest(length=length):
+                status, log = run_to_exit(['-i', graph, '-a', corrupt],
+                                          os.path.join(self.d, f'corrupt_length_{length}.log'))
+                self.assertEqual(1, status, log)
+                self.assertIn(line, log)
+                self.assertNotIn('Annotated graph loaded', log)
+                res = subprocess.run(shlex.split(METAGRAPH) + [
+                        'query', '--query-mode', 'coords', '-i', graph, '-a', corrupt,
+                        os.path.join(self.d, 'small.fa')],
+                        stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+                self.assertEqual(1, res.returncode, res.stderr.decode())
+                self.assertIn(line, res.stderr.decode())
+
     def test_another_mapping_is_refused_at_start_up(self):
         cases = [
             ('column_coord', 'subset', True, "it has 1 columns, the annotation 2 labels"),

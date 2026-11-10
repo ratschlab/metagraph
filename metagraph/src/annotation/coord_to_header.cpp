@@ -538,6 +538,78 @@ static uint64_t bytes_left(std::istream &in, uint64_t size) {
     return at < 0 || static_cast<uint64_t>(at) > size ? 0 : size - static_cast<uint64_t>(at);
 }
 
+// The coordinate offsets of column |column| (a bit_vector_sd: an sdsl sd_vector, then its
+// inversion flag), read for their layout before sdsl loads them: each stated size is checked
+// against the bytes left in the file, and the sizes against one another as sd_vector builds
+// them, so that sdsl allocates nothing from a corrupt size (a select support takes 48 bytes per
+// 4096 stated bits, touched) and no rank selects past the encoded length (it segfaulted on a
+// stated length of 2^20). |in| is returned to where it was (train-3 verification V2, S2, S3)
+static void check_offsets_layout(std::istream &in, uint64_t file_size, uint64_t column) {
+    const std::streampos start = in.tellg();
+    auto fail = [&](const std::string &why) {
+        throw std::runtime_error(fmt::format("the coordinate offsets of column {} {}", column, why));
+    };
+    auto number = [&]() {
+        uint64_t n = 0;
+        if (!in.read(reinterpret_cast<char *>(&n), sizeof(n)))
+            fail("end inside their sizes");
+        return n;
+    };
+    auto byte = [&]() {
+        const int c = in.get();
+        if (c == std::char_traits<char>::eof())
+            fail("end inside their sizes");
+        return static_cast<uint8_t>(c);
+    };
+    // an sdsl int_vector: its size in bits, its width (unless fixed), then its 64-bit words
+    auto int_vector = [&](uint8_t *width) {
+        const uint64_t bits = number();
+        if (width)
+            *width = byte();
+        const uint64_t bytes = (bits / 64 + (bits % 64 != 0)) * 8;
+        if (const uint64_t left = bytes_left(in, file_size); bytes > left)
+            fail(fmt::format("state {} bytes of data, more than the {} bytes left", bytes, left));
+        in.seekg(static_cast<std::streamoff>(bytes), std::ios_base::cur);
+        return bits;
+    };
+    // an sdsl select_support_mcl over the |expected| set (or unset) bits of the high part: their
+    // count, the superblocks, the mini-or-long flags, then a block per 4096 of them
+    auto select_support = [&](uint64_t expected, const char *what) {
+        const uint64_t count = number();
+        if (count != expected) {
+            fail(fmt::format("state a select support over {} {} bits, for the {} of their high part",
+                             count, what, expected));
+        }
+        if (!count)
+            return;
+        uint8_t width = 0;
+        int_vector(&width);
+        int_vector(nullptr);
+        for (uint64_t i = 0; i < count / 4096 + (count % 4096 != 0); ++i)
+            int_vector(&width);
+    };
+    const uint64_t length = number();
+    const uint8_t low_bits_per_position = byte();
+    uint8_t low_width = 0;
+    const uint64_t low_bits = int_vector(&low_width);
+    const uint64_t high_bits = int_vector(nullptr);
+    if (low_bits_per_position >= 64 || !low_width || low_width > 64 || low_bits % low_width)
+        fail("state an invalid width");
+    const uint64_t ones = low_bits / low_width;
+    if (ones > high_bits)
+        fail(fmt::format("state {} positions in a high part of {} bits", ones, high_bits));
+    // a position's high part indexes the zeros of the high part, one bucket each
+    const uint64_t buckets = high_bits - ones;
+    if (length && (length >> low_bits_per_position) >= buckets) {
+        fail(fmt::format("state a length of {}, more than their encoding holds ({} buckets of {})",
+                         length, buckets, uint64_t(1) << low_bits_per_position));
+    }
+    select_support(ones, "set");
+    select_support(buckets, "unset");
+    byte();
+    in.seekg(start);
+}
+
 bool CoordToHeader::load(const std::string &filename_base) {
     const std::string path = utils::make_suffix(filename_base, kExtension);
     std::unique_ptr<std::ifstream> in;
@@ -581,29 +653,37 @@ bool CoordToHeader::load(const std::string &filename_base) {
         coord_offsets_.reserve(num_columns);
 
         for (uint64_t i = 0; i < num_columns; ++i) {
-            // the headers as load_string_vector reads them, their number bounded first
+            // the headers as load_string_vector reads them, their number and each length
+            // bounded first by the bytes left
             const uint64_t num_headers = load_number(*in);
-            if (num_headers > bytes_left(*in, file_size)) {
+            const uint64_t left = bytes_left(*in, file_size);
+            if (num_headers > left) {
                 throw std::runtime_error(fmt::format(
                         "column {}: {} headers stated, more than its last bytes hold", i,
                         num_headers));
             }
             std::vector<std::string> headers(num_headers);
             for (std::string &header : headers) {
-                if (!load_string(*in, &header))
+                if (!load_string(*in, &header, left))
                     throw std::runtime_error(fmt::format("the headers of column {}", i));
             }
             // every column read whole: a file cut inside its last column would otherwise
             // reach the test below in a failed state, where peek() answers EOF as at the end
             // of a file written before the trailer
+            check_offsets_layout(*in, file_size, i);
             bit_vector_sd offsets;
             if (!offsets.load(*in) || in->fail())
                 throw std::runtime_error(fmt::format("the coordinate offsets of column {}", i));
-            // one set bit per record, the last coordinate of each
+            // one set bit per record, the last coordinate of each, the column's last k-mer last
             if (offsets.num_set_bits() != headers.size()) {
                 throw std::runtime_error(fmt::format(
                         "column {}: {} records, {} record ends in its coordinate offsets", i,
                         headers.size(), offsets.num_set_bits()));
+            }
+            if (!headers.empty() && !offsets[offsets.size() - 1]) {
+                throw std::runtime_error(fmt::format(
+                        "column {}: its coordinate offsets state {} k-mers, past its last record's "
+                        "end", i, offsets.size()));
             }
             headers_.push_back(std::move(headers));
             coord_offsets_.push_back(std::move(offsets));
@@ -619,8 +699,9 @@ bool CoordToHeader::load(const std::string &filename_base) {
                                                      num_labels, num_columns));
             }
             std::vector<std::string> labels(num_labels);
+            const uint64_t left = bytes_left(*in, file_size);
             for (std::string &label : labels) {
-                if (!load_string(*in, &label))
+                if (!load_string(*in, &label, left))
                     throw std::runtime_error("the column labels");
             }
             if (in->peek() != std::char_traits<char>::eof())

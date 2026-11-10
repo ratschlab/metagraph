@@ -1,6 +1,7 @@
 #include <gtest/gtest.h>
 
 #include <atomic>
+#include <cstring>
 #include <fstream>
 #include <iterator>
 #include <map>
@@ -429,6 +430,74 @@ TEST(CoordToHeader, LoadBoundsItsCountsByTheFileSize) {
         EXPECT_EQ(3u, cth.num_columns());
     }
     utils::set_mmap(with_mmap);
+}
+
+// The sizes a column's coordinate offsets state (an sdsl sd_vector) are checked against the
+// bytes left and against one another before sdsl loads them, and a header's or label's length
+// against the bytes left (train-3 verification V2, S2 and S3: a stated length of 2^20 or more
+// segfaulted, a select count of 2^36 took 805 MiB, a label length of 2^30 1 GiB)
+TEST(CoordToHeader, LoadRefusesCorruptStatedSizes) {
+    const std::string base = test_dump_dir() + "/cth_sizes";
+    const std::string path = base + CoordToHeader::kExtension;
+    const std::vector<std::string> headers { "head", "mid", "tail" };
+    CoordToHeader one({ headers }, { { 3, 1, 5 } });
+    one.set_column_labels({ "x.fa" });
+    one.serialize(base);
+    const std::string whole = file_bytes(path);
+    std::ostringstream serialized_headers;
+    serialize_string_vector(serialized_headers, headers);
+    // the offsets: length, low bits per position, low part (bits, width, words), high part
+    // (bits, words), the select supports over its set and its unset bits, the inversion flag
+    const size_t at = 8 + serialized_headers.str().size();
+    auto get = [&](size_t pos) {
+        uint64_t n;
+        std::memcpy(&n, whole.data() + pos, sizeof(n));
+        return n;
+    };
+    auto words = [](uint64_t bits) { return (bits + 63) / 64 * 8; };
+    const size_t high_at = at + 18 + words(get(at + 9));
+    const size_t select_at = high_at + 8 + words(get(high_at));
+    ASSERT_EQ(9u, get(at));
+    ASSERT_EQ(3u, get(select_at));
+    auto patched = [&](size_t pos, const std::string &bytes) {
+        std::string data = whole;
+        data.replace(pos, bytes.size(), bytes);
+        return data;
+    };
+    auto number = [](uint64_t n) { return std::string(reinterpret_cast<const char *>(&n), 8); };
+    auto write = [&](const std::string &bytes) {
+        std::ofstream out(path, std::ios::binary | std::ios::trunc);
+        out << bytes;
+    };
+    const bool with_mmap = utils::with_mmap();
+    for (bool mmap : { false, true }) {
+        utils::set_mmap(mmap);
+        CoordToHeader cth;
+        write(whole);
+        ASSERT_TRUE(cth.load(base)) << (mmap ? "mmap" : "");
+        // lengths past the encoding (a segfault before), one within it past the last record end
+        for (uint64_t length : { uint64_t(1) << 20, uint64_t(1) << 40, ~uint64_t(0),
+                                 uint64_t(12) }) {
+            write(patched(at, number(length)));
+            EXPECT_FALSE(cth.load(base)) << length << (mmap ? " mmap" : "");
+        }
+        // a select support over more set bits than the high part has
+        write(patched(select_at, number(uint64_t(1) << 36)));
+        EXPECT_FALSE(cth.load(base)) << (mmap ? "mmap" : "");
+        // a label stating 2^30 bytes (UTF-8-like: FD 80 80 80 80 80) where 4 are left
+        const size_t label_at = whole.size() - 5;
+        ASSERT_EQ('\x04', whole[label_at]);
+        write(whole.substr(0, label_at) + "\xFD\x80\x80\x80\x80\x80" + "x.fa");
+        EXPECT_FALSE(cth.load(base)) << (mmap ? "mmap" : "");
+    }
+    utils::set_mmap(with_mmap);
+    // an empty column still loads
+    CoordToHeader empty({ { "a" }, {} }, { { 5 }, {} });
+    empty.serialize(base);
+    CoordToHeader cth;
+    ASSERT_TRUE(cth.load(base));
+    EXPECT_EQ(2u, cth.num_columns());
+    EXPECT_EQ(0u, cth.num_kmers(1));
 }
 
 // The load's check of a record mapping against its annotation (cli::check_record_mapping): the
