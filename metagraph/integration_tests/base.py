@@ -249,3 +249,36 @@ class TestingBase(unittest.TestCase):
         if final_anno.endswith('brwt') or final_anno.endswith('brwt_coord'):
             command = f'{METAGRAPH} relax_brwt -o {output} -p {num_threads} {output}.{final_anno}.annodbg' + MMAP_FLAG
             TestingBase._run_command(command, "Relax_brwt command", shell=True)
+
+
+# How long a test's HTTP request may wait for a server's answer: a stuck server (a full log
+# pipe, a deadlock) then fails the test with a timeout instead of holding CI until the job's
+# limit. Every request of these tests is answered in seconds
+REQUEST_TIMEOUT = 120
+
+
+def requests_time_out(seconds=REQUEST_TIMEOUT):
+    """A patch (start() and stop() it, as a class's setUpClass and tearDownClass do) that gives
+    every request of the requests package made while it is active, the test's own and the
+    metagraph client's (which names none), a timeout of |seconds| where the request names none."""
+    import requests
+    from unittest import mock
+
+    send = requests.Session.request
+
+    def request(self, method, url, **kwargs):
+        if kwargs.get('timeout') is None:
+            kwargs['timeout'] = seconds
+        return send(self, method, url, **kwargs)
+
+    return mock.patch.object(requests.Session, 'request', request)
+
+
+def log_tail(path, size=4000):
+    """The last |size| bytes of the log at |path|, to show with a failure."""
+    try:
+        with open(path, 'rb') as f:
+            f.seek(max(0, os.path.getsize(path) - size))
+            return f.read().decode(errors='replace')
+    except OSError as e:
+        return f'(no log: {e})'

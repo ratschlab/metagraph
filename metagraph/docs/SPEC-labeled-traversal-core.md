@@ -625,12 +625,17 @@ runs.
   `Bad json received: invalid UTF-8 (byte 0xff) inside a string at byte 123: RFC 8259 requires UTF-8`, the first
   byte of the sequence and its offset, and `Bad json received: an unpaired surrogate escape (\udc00) inside a
   string at byte 123: a code point above U+FFFF is written as a high surrogate escape (\ud800-\udbff) followed by
-  a low one (\udc00-\udfff)`, the escape as the client wrote it (a lone high surrogate, which jsoncpp refused in
-  its own words, gets this text too). jsoncpp kept any byte, and its writer wrote a byte 0xF8-0xFF or a lead byte
-  cut by the string's end as `\ufffd`, 6 bytes for 1, and let other invalid lead bytes swallow up to three bytes,
-  so that distinct names echoed alike; it decoded a lone low surrogate escape to bytes that are no UTF-8 and read
-  `\ud800\u0041` as U+10041. The scan refuses at the first fault it meets in the text: a comment, a control
-  character, invalid UTF-8, an unpaired surrogate escape, or the value past the count. An escaped control
+  a low one (\udc00-\udfff)`, the escape as the client wrote it and the offset of its backslash (a lone high
+  surrogate, which jsoncpp refused in its own words, gets this text too). jsoncpp kept any byte, and its writer
+  wrote a byte 0xF8-0xFF or a lead byte cut by the string's end as `\ufffd`, 6 bytes for 1, and let other
+  invalid lead bytes swallow up to three bytes, so that distinct names echoed alike; it decoded a lone low
+  surrogate escape to bytes that are no UTF-8 and read `\ud800\u0041` as U+10041. The scan refuses at the first
+  fault it meets in the text: a comment, a control character, invalid UTF-8, an unpaired surrogate escape, or
+  the value past the count. A backslash that begins no JSON escape (`\"`, `\\`, `\/`, `\b`, `\f`, `\n`, `\r`,
+  `\t`, or `\u` with four hex digits) ends the scan: jsoncpp refuses the text there, in its own words ("Bad
+  escape sequence in string", "Bad unicode escape sequence in string: ..."), or at a fault of its own before
+  it, so a backslash before a UTF-8 character or a short `\u` is named as such, not as a fault after it
+  *(train 3 review R1, N1)*. An escaped control
   character (`\u0001`, `\n`), raw bytes from 0x20 to 0x7F, valid UTF-8 and every other `\u` escape (valid pairs
   included) are read as before.
 - **Strict validation.** Unknown keys, wrong types, out-of-range values and unsupported `schema_version` are
@@ -779,7 +784,10 @@ runs.
     of 0xFF on 11 pairs held 337 MiB, 1.34 of the bound); the scan refuses it now (above).
   Two requests at once hold about twice one, so each route's concurrent requests (its slots) multiply it.
   `/search` and `/align` read their body without a count (the owner's decision): their parse holds about 51
-  times the body (zeros), bounded by `--max-request-body-mb` alone.
+  times the body (zeros), bounded by `--max-request-body-mb` alone. Nor do they get the pre-scan's checks
+  (control bytes, UTF-8, surrogate escapes, above): they echo each FASTA header in `seq_description`, one
+  that is not UTF-8 at up to 6 bytes per byte (jsoncpp's `\ufffd`); `/search` writes it once per header,
+  not once per pair *(train 3 review R1, N4: 6.0 bytes per byte on one pair, 6.15 on 11)*.
   **The connections** *(H3, train 3)*: before its handler starts, a connection holds its header and its body,
   each up to B and in a buffer of up to 2B; with `--max-connections` N (§10.3, Connections; 0, no cap, by default)
   the connections not yet admitted hold at most N × (4B + 64 KiB): at N = 256, 2.0 GiB with B = 2 MiB and 256 GiB

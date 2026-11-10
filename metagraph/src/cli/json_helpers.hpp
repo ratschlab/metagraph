@@ -120,7 +120,8 @@ inline std::string clip_reader_quotes(std::string errors) {
  * not JSON may be refused by either check. The scan refuses at the first fault it meets: a
  * comment, a raw control character inside a string (RFC 8259 asks it escaped), a string that
  * is not well-formed UTF-8 (::utils::utf8_sequence_at), a \u escape of a surrogate that is not
- * half of a pair, or the value past the count.
+ * half of a pair, or the value past the count. A backslash that begins no JSON escape ends the
+ * scan: jsoncpp refuses the text at that escape, or at a fault of its own before it.
  */
 template <class Refusal>
 Json::Value parse_strict_json(std::string_view content, const std::string &prefix,
@@ -164,10 +165,9 @@ Json::Value parse_strict_json(std::string_view content, const std::string &prefi
                 // a \u escape of a surrogate is half of a pair: a high one (D800-DBFF) followed
                 // at once by a low one (DC00-DFFF). jsoncpp refuses a lone high one, but decodes
                 // a lone low one to bytes that are no UTF-8 and joins a high one with whatever
-                // escape follows ("\ud800\u0041" becomes U+10041). A \u without four hex digits
-                // is jsoncpp's to refuse
-                const int unit = i + 1 < content.size() && content[i + 1] == 'u'
-                        ? code_unit_at(i + 2) : -1;
+                // escape follows ("\ud800\u0041" becomes U+10041)
+                const char escaped = i + 1 < content.size() ? content[i + 1] : '\0';
+                const int unit = escaped == 'u' ? code_unit_at(i + 2) : -1;
                 if (unit >= 0xD800 && unit <= 0xDFFF) {
                     const int low = unit <= 0xDBFF && i + 7 < content.size()
                                         && content[i + 6] == '\\' && content[i + 7] == 'u'
@@ -183,8 +183,19 @@ Json::Value parse_strict_json(std::string_view content, const std::string &prefi
                     i += 11;    // both escapes
                 } else if (unit >= 0) {
                     i += 5;     // the escape and its four digits
-                } else {
+                } else if (escaped == '"' || escaped == '\\' || escaped == '/' || escaped == 'b'
+                            || escaped == 'f' || escaped == 'n' || escaped == 'r'
+                            || escaped == 't') {
                     ++i;        // the escaped character
+                } else {
+                    // no JSON escape (jsoncpp reads these and \u with four hex digits, nothing
+                    // else): the text is no JSON from here on. The scan ends and leaves it to
+                    // jsoncpp, which refuses it at this escape ("Bad escape sequence in string",
+                    // "Bad unicode escape sequence in string: ...") or at a fault of its own
+                    // before it, so that no later fault's text, or a byte the escape was meant
+                    // to take, is named instead. jsoncpp builds no value past the escape: every
+                    // value it builds was counted above
+                    break;
                 }
             } else if (c == '"') {
                 in_string = false;

@@ -16,7 +16,7 @@ from concurrent.futures import Future
 from parameterized import parameterized, parameterized_class
 from itertools import product
 
-from base import PROTEIN_MODE, TestingBase, METAGRAPH, TEST_DATA_DIR
+from base import PROTEIN_MODE, TestingBase, METAGRAPH, TEST_DATA_DIR, requests_time_out
 
 GRAPH_MODES = ['basic'] if PROTEIN_MODE else ['basic', 'canonical', 'primary']
 
@@ -72,10 +72,31 @@ def c5_top_n(rows, n, counts=False):
     return top, cut
 
 
+def _time_out_requests(cls):
+    """|cls|'s requests, the client's included, time out (base.requests_time_out) from its
+    setUpClass until its tearDownClass, or until its setUpClass fails"""
+    patch = requests_time_out()
+    patch.start()
+    cls.addClassCleanup(patch.stop)
+
+
+def _popen_logged(cls, command):
+    """server_query |command| for |cls|, its stdout and stderr in |cls|.server_log (a file in
+    its tempdir, named by its port): a pipe nobody reads fills (64 KiB on Linux) after enough
+    requests, and the server then blocks writing its next log line. A failed start's log is
+    closed before the next"""
+    if getattr(cls, 'server_log', None):
+        cls.server_log.close()
+    cls.server_log = open(f'{cls.tempdir.name}/server-{cls.port}.log', 'w')
+    return subprocess.Popen(shlex.split(command), shell=False,
+                            stdout=cls.server_log, stderr=subprocess.STDOUT)
+
+
 class TestAPIBase(TestingBase):
     @classmethod
     def setUpClass(cls, fasta_path, mode='basic', anno_repr='column'):
         super().setUpClass()
+        _time_out_requests(cls)
 
         graph_path = cls.tempdir.name + '/graph.dbg'
         annotation_path_base = cls.tempdir.name + '/annotation'
@@ -107,13 +128,14 @@ class TestAPIBase(TestingBase):
     @classmethod
     def tearDownClass(cls):
         cls.server_process.kill()
+        cls.server_process.wait()
+        cls.server_log.close()
 
     def _start_server(self, graph, annotation):
         construct_command = f'{METAGRAPH} server_query -i {graph} -a {annotation} \
                                             --port {self.port} --address {self.host} -p 2'
 
-        return subprocess.Popen(shlex.split(construct_command),
-                                shell=False, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        return _popen_logged(self, construct_command)
 
 
 class TestAPIInitializing(TestingBase):
@@ -515,6 +537,7 @@ class TestAPIClientMultiple(TestingBase):
         anno_repr='column',
     ):
         super().setUpClass()
+        _time_out_requests(cls)
 
         graph_paths = [
             cls.tempdir.name + '/graph_1.dbg',
@@ -560,10 +583,9 @@ class TestAPIClientMultiple(TestingBase):
         cls.port = 3456
         num_retries = 100
         while num_retries > 0:
-            cls.server_process = subprocess.Popen(shlex.split(
+            cls.server_process = _popen_logged(cls,
                 f'{METAGRAPH} server_query {graphs_file} \
-                --port {cls.port} --address {cls.host} -p 2 --threads-each {cls.threads_each}'
-            ), shell=False, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+                --port {cls.port} --address {cls.host} -p 2 --threads-each {cls.threads_each}')
             try:
                 cls.server_process.wait(timeout=1)
             except subprocess.TimeoutExpired:
@@ -598,6 +620,8 @@ class TestAPIClientMultiple(TestingBase):
     @classmethod
     def tearDownClass(cls):
         cls.server_process.kill()
+        cls.server_process.wait()
+        cls.server_log.close()
 
     def test_api_cache_does_not_bypass_in_ram_validation(self):
         url = f'http://{self.host}:{self.port}/search'
