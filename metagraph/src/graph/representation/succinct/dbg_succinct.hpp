@@ -66,6 +66,11 @@ class DBGSuccinct : public DeBruijnGraph {
                                            const std::function<void(node_index)> &callback,
                                            const std::function<bool()> &terminate = [](){ return false; }) const override final;
 
+    // Streams the BOSS edges, except for map_to_nodes in canonical mode,
+    // which is buffered
+    virtual std::unique_ptr<NodeStream> node_stream(std::string_view sequence,
+                                                    bool sequential) const override;
+
     virtual void call_sequences(const CallPath &callback,
                                 size_t num_threads = 1,
                                 bool kmers_in_single_form = false,
