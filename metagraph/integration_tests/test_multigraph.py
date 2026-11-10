@@ -1332,6 +1332,16 @@ class TestMultiGraphServer(TestingBase):
         self.post('pattern', dict(request, graphs=['kleb']))
         return max(1000, int(3000 * (time.time() - started)))
 
+    def _pair_times(self, server, request):
+        """The time (s) a one-pair /resolve of |request| takes on |server| now: on b_big (its
+        whole work, which also warms its pages) and then on a_kleb"""
+        times = {}
+        for graph in ('b_big', 'a_kleb'):
+            started = time.time()
+            self.post_to(server, 'resolve', dict(request, graphs=[graph]))
+            times[graph] = time.time() - started
+        return times['a_kleb'], times['b_big']
+
     def _wait_ended(self, server, request_id, timeout=120):
         """GET /requests/{request_id} until it states the request ended"""
         deadline = time.time() + timeout
@@ -1515,38 +1525,67 @@ class TestMultiGraphServer(TestingBase):
     def test_finish_by_ms_cuts_a_pair_and_the_registry_states_its_end(self):
         """finish_by_ms (E20) on /resolve without a budget: the effective deadline is
         finish_by_ms less the clock skew allowance (--traverse-clock-skew-ms 500), the cutoff
-        250 ms (the reserve) before it (finish_by_ms 1600 ms after the request on an idle
-        machine, scaled with the load: _cutoff_ms); the deadline block states all four, and a pair's
+        250 ms (the reserve) before it; the deadline block states all four, and a pair's
         deadline is the minimum of its own (the server's maximum), finish_by_ms - the skew and,
         pooled, the cutoff. On one pool thread a_kleb, from which the query is absent, completes
         first, under the finish_by_ms clamp alone, as a single-graph request with that
-        finish_by_ms; b_big resolves the query (about a second of work) after it: it stops by
-        time before the cutoff and answers the resolve of a prefix, both caps stated as clamps of
-        its budget (finish_by_ms's, then the cutoff's, the budget it ran under). The request's
-        request_id (E4): GET /requests/{request_id} states it ended, each pair with its state,
-        outcome and final usage, the response written (status, bytes); a repeat of the id
-        starts no work (409, the entry with an error); an id never sent, or past the retention
-        count (--request-retention 1), is 404."""
+        finish_by_ms; b_big resolves the query (about a second of work on an idle machine)
+        after it: it stops by time before the cutoff and answers the resolve of a prefix, both
+        caps stated as clamps of its budget (finish_by_ms's, then the cutoff's, the budget it ran
+        under). The request's request_id (E4): GET /requests/{request_id} states it ended, each
+        pair with its state, outcome and final usage, the response written (status, bytes); a
+        repeat of the id starts no work (409, the entry with an error); an id never sent, or
+        past the retention count (--request-retention 1), is 404.
+
+        The window is measured on this server just before (_pair_times): b_big maps every k-mer
+        of the query before its first time poll (a fifth of its work, about as long as a_kleb's
+        whole request), so a cutoff from a_kleb's time alone (at 3 x a_kleb's time on the class
+        server, b_big got about twice that minus a_kleb's actual time) let b_big's first poll
+        come after its budget whenever a_kleb ran slower than measured or the mapping met a
+        burst of load: b_big refused (the CI flake of 2026-11-09/10). The cutoff now comes at
+        twice a_kleb's time plus a third of b_big's work: b_big gets about a third of its work,
+        well past its mapping and short of its end. A request whose b_big still ends by a
+        timing outcome (refused, or answered complete) is sent once more, under a new
+        request_id, with the window scaled; the outcomes are stated if the last one fails."""
         server = self._cutoff_server('finish', '--traverse-clock-skew-ms', '500',
                                      '--request-retention', '1')
         try:
             # effective = finish_by - 500 (skew), the cutoff 250 ms (reserve) before it
             request = self._slow_resolve()
-            window_ms = self._cutoff_ms(request) + 750
-            finish_by = int(time.time() * 1000) + window_ms
-            body = dict(request, graphs=['a_kleb', 'b_big'], finish_by_ms=finish_by,
-                        request_id='it-finish-1')
-            started = time.time()
-            ret = server.post('resolve', body)
-            took = time.time() - started
-            self.assertEqual(200, ret.status_code, ret.text[:2000])
-            out = ret.json()
+            kleb_s, big_s = self._pair_times(server, request)
+            cutoff_ms = max(750, int(1000 * (2 * kleb_s + big_s / 3)))
+            tries = []
+            for attempt in range(3):
+                rid = f'it-finish-a{attempt + 1}'
+                window_ms = cutoff_ms + 750
+                finish_by = int(time.time() * 1000) + window_ms
+                body = dict(request, graphs=['a_kleb', 'b_big'], finish_by_ms=finish_by,
+                            request_id=rid)
+                started = time.time()
+                ret = server.post('resolve', body)
+                took = time.time() - started
+                self.assertEqual(200, ret.status_code, ret.text[:2000])
+                out = ret.json()
+                outcomes = [(a['graph'], a['outcome'],
+                             a.get('refusal', {}).get('code'),
+                             a.get('refusal', {}).get('error', '')[:200],
+                             (a.get('stop') or {}).get('reason')) for a in out['answers']]
+                tries.append((cutoff_ms, round(took, 3), outcomes))
+                big = out['answers'][1] if len(out['answers']) == 2 else {}
+                # the request ends (b_big's worker stops) before the next one starts
+                self._wait_ended(server, rid)
+                if big.get('outcome') == 'answered' and (big.get('stop') or {}).get('reason'):
+                    break
+                # b_big refused (its first poll past its budget, or a_kleb past the cutoff):
+                # more time; b_big answered complete (its work done before the cutoff): less
+                cutoff_ms = int(cutoff_ms * (1.6 if big.get('outcome') != 'answered' else 0.6))
+            where = f'measured a_kleb {kleb_s:.3f} s, b_big {big_s:.3f} s; tries {tries}'
             # by the effective deadline (the writer refuses a later envelope, 503), not after
             # b_big's whole work
-            self.assertLess(took, (window_ms - 500) / 1000 + 1.9)
-            self.assertEqual(('/resolve', 'it-finish-1'), (out['route'], out['request_id']))
+            self.assertLess(took, (window_ms - 500) / 1000 + 1.9, where)
+            self.assertEqual(('/resolve', rid), (out['route'], out['request_id']))
             self.assertEqual([('a_kleb', 'answered'), ('b_big', 'answered')],
-                             [(a['graph'], a['outcome']) for a in out['answers']])
+                             [(a['graph'], a['outcome']) for a in out['answers']], where)
             self.assertEqual(([], []), (out['not_reached'], out['unfinished']))
             kleb, big = out['answers']
             # a_kleb: finish_by_ms - the skew caps its deadline (none requested: the server's
@@ -1560,7 +1599,7 @@ class TestMultiGraphServer(TestingBase):
             self.assertIsNone(kleb['stop'])
             # b_big: stopped by time before the cutoff, the resolve of a prefix; both caps
             # stated, the cutoff's last (the budget it ran under)
-            self.assertEqual('time', big['stop']['reason'])
+            self.assertEqual('time', big['stop']['reason'], where)
             self.assertLess(big['stop']['resolved_kmers'], big['stop']['query_kmers'])
             clamped = big['limits']['clamped']
             self.assertEqual(['bounds.time_budget_ms'] * 2, [c['field'] for c in clamped])
@@ -1574,8 +1613,8 @@ class TestMultiGraphServer(TestingBase):
                               'effective_deadline_at': iso(finish_by - 500),
                               'cutoff_at': iso(finish_by - 750)}, out['deadline'])
             # the registry: the request ended once its workers ended
-            entry = self._wait_ended(server, 'it-finish-1')
-            self.assertEqual(('it-finish-1', '/resolve', 'ended', 'answered'),
+            entry = self._wait_ended(server, rid)
+            self.assertEqual((rid, '/resolve', 'ended', 'answered'),
                              (entry['request_id'], entry['route'], entry['state'],
                               entry['reason']))
             self.assertEqual(out['server_instance'], entry['server_instance'])
@@ -1593,9 +1632,9 @@ class TestMultiGraphServer(TestingBase):
             ret = server.post('resolve', body)
             self.assertEqual(409, ret.status_code, ret.text[:2000])
             repeat = ret.json()
-            self.assertIn("request_id 'it-finish-1' is running, or retained", repeat['error'])
+            self.assertIn(f"request_id '{rid}' is running, or retained", repeat['error'])
             self.assertEqual(entry, {k: v for k, v in repeat.items() if k != 'error'})
-            self.assertEqual(1, server.text().count('graph name(s), request_id it-finish-1'))
+            self.assertEqual(1, server.text().count(f'graph name(s), request_id {rid}\n'))
             # an id never sent (F3: with the server's clock, an integer)
             before = int(time.time() * 1000)
             ret = server.get('requests/it-never-sent')
@@ -1619,7 +1658,7 @@ class TestMultiGraphServer(TestingBase):
             self.assertIsNone(clamped['bounds.time_budget_ms']['requested'])
             self.assertLess(clamped['bounds.time_budget_ms']['effective'], 9500)
             self.assertEqual('ended', self._wait_ended(server, 'it-finish-2')['state'])
-            ret = server.get('requests/it-finish-1')
+            ret = server.get(f'requests/{rid}')
             self.assertEqual(404, ret.status_code, ret.text[:2000])
             self.assertIn('at most 1', ret.json()['error'])
             # a malformed request_id is the request's 400 (nothing registered)
