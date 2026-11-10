@@ -405,7 +405,8 @@ marker: an engine without it never stops accepting. The block also states `colum
 ```
 
 `max_column_labels_bytes` is `--max-column-labels-bytes` (`null` when unlimited): the most bytes of the labels' JSON
-strings one answer holds; the unpaged list above it is refused 400 `column_labels_too_large` (`members` as for
+strings one answer holds (a page holds at least one label, so a label whose JSON string is longer is answered
+alone); the unpaged list above it is refused 400 `column_labels_too_large` (`members` as for
 `request_intake`'s refusals; the body writes `error` first). `paging` names the query parameters of a page
 (`?offset=&limit=`, which answers `{"labels", "next_offset", "offset", "total"}`), `total` the length of the list
 (`null` while a single index loads). On a multi-graph server the list holds each distinct (graph, annotation) pair

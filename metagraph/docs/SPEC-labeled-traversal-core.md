@@ -4268,10 +4268,13 @@ search's routes, `POST /pattern` and `GET /pattern/capabilities`, are `SPEC-patt
   - The 503 while a single index loads comes first, as before. The list is written as text from the label
     vectors, without a copy of them and without a JSON tree (a label's escapes written in place, as jsoncpp
     writes them, byte for byte): an answer holds at most 2.5 M + 64 bytes of text (M the cap; at least 2 bytes
-    a label; a page of one label longer than M, that label's JSON string + 64), at most three copies of it at
-    once (the text, a compressed copy, the
-    transport's), so at most 120 MiB at the default; the time is that of finding the offset's pair (a binary
-    search) and writing the page.
+    a label), or, for a page of one label whose JSON string passes M, that string + 64, and at most three copies
+    of it at once (the text, a compressed copy, the transport's). So it holds at most 3 × (max(2.5 M, L) + 64)
+    bytes, L the longest label's JSON string: 120 MiB at the default while no label's passes 2.5 M (40 MiB), up
+    to three times that label past it. The labels are the index's, so its builder sets L, not a client *(train 3
+    review R3, S1: the sentence stated 120 MiB without the condition; a page of one label of 16 MiB of control
+    bytes, its JSON string 96 MiB, held 204.5 MiB above idle)*. The time is that of finding the offset's pair (a
+    binary search) and writing the page.
   - Stated by `GET /capabilities` as `column_labels: {"max_column_labels_bytes", "paging": ["limit", "offset"],
     "too_large": {"status": 400, "code": "column_labels_too_large", "members": [...]}, "total"}`, in the
     `multigraph` block on a multi-graph server and at the top level on a single-graph one, as `request_intake`
