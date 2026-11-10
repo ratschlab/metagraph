@@ -232,7 +232,7 @@ void serialize_string(std::ostream &out, const std::string_view &str) {
         throw std::ostream::failure("Bad stream");
 }
 
-bool load_string(std::istream &in, std::string *str) {
+bool load_string(std::istream &in, std::string *str, uint64_t max_length) {
     assert(str);
 
     if (!in.good()) {
@@ -242,6 +242,8 @@ bool load_string(std::istream &in, std::string *str) {
 
     try {
         uint64_t const u = decode_utf8(in);
+        if (u > max_length)
+            return false;
         str->resize(u);
         in.read(str->data(), u);
 

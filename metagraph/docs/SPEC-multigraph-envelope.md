@@ -578,7 +578,7 @@ name selects the column where one has it`).
 
 | Value | Guarantee |
 | --- | --- |
-| `"verified"` | the `.seqs` states its column labels (written by `annotate --index-header-coords` since H4) and they equal the annotation's column labels, in order. Written without `-a`, the labels are the files' names as passed: the files were passed in the annotation's column order under the names it gave them. Written with `-a`, the labels are the annotation's own, copied once each file passed the spot check of section 10: its column holds the coordinates of the file's probed k-mers (its first and last k-mers that the graph has), and a file with no k-mer of the graph (none at all, as an empty file, or none the graph has) is refused. Neither establishes that the records are those the columns were made from: that rests on the build's provenance (the files passed are those the annotation was made from). A file of the same sequences under other headers passes either way, and with `-a` so does one whose records between its probes differ, and so does a copy cut short: the tail probe bounds the file's k-mers from below only, so a copy that ends after it passes. `column_coord` and `brwt_coord` refuse it at load when its column then holds more coordinates than the copy states k-mers, as a cut of sequence does (section 10). On the row-diff forms the pair is served, and its column answers 400 for any of its k-mers past the cut. An existing `.seqs` is certified against its old bytes instead (section 10) |
+| `"verified"` | the `.seqs` states its column labels (written by `annotate --index-header-coords` since H4) and they equal the annotation's column labels, in order. Written without `-a`, the labels are the files' names as passed: the files were passed in the annotation's column order under the names it gave them. Written with `-a`, the labels are the annotation's own, copied once each file passed the spot check of section 10: its column holds the coordinates of the file's probed k-mers (its first and last k-mers that the graph has), and a file with no k-mer of the graph (none at all, as an empty file, or none the graph has) is refused. Neither establishes that the records are those the columns were made from: that rests on the build's provenance (the files passed are those the annotation was made from). A file of the same sequences under other headers passes either way, and with `-a` so does one whose records between its probes differ, and so does a copy cut short: the tail probe bounds the file's k-mers from below only, so a copy that ends after it passes. `column_coord` and `brwt_coord` refuse it at load only when the cut removes more k-mers than the file has k-mers with an N (the column's coordinates count the graph's k-mers, the copy's stated count every position): a cut of a file without gaps is refused there, one no longer than the file's gaps of Ns passes (section 10). A pair served with such a copy, on any form, answers 400 for any k-mer of its column past the cut. An existing `.seqs` is certified against its old bytes instead (section 10) |
 | `"count_only"` | the `.seqs` states no labels (written before H4): its number of columns equalled the annotation's, its order was not verified. On `column_coord` and `brwt_coord` each column's coordinates were also checked against its k-mers, which refuses some permutations but certifies none. A header-label answer on such a pair rests on a column order the load did not check: a `.seqs` written for the files in another order maps coordinates to other records |
 | null | no `.seqs` loaded: the pair's labels are columns only |
 
@@ -668,10 +668,12 @@ The command then states the annotation's labels. That is how a mapping is writte
 were renamed, or whose files have moved. It is a spot check: it refuses files passed in another order and files of
 another file set whose probed k-mers the graph or the column lacks, but a file of the same sequences under other
 headers passes, and so does one whose records between its probes differ. The tail probe bounds the file's k-mers from
-below only, so a copy cut short after it passes too. `column_coord` and `brwt_coord` refuse its `.seqs` at load when
-the column then holds more coordinates than the copy states k-mers, as a cut of sequence does (a cut inside a final
-gap of Ns removes no coordinates). On the row-diff forms the pair is served, and its column answers 400 for any of
-its k-mers past the cut. What records a column's labels select rests on the build's
+below only, so a copy cut short after it passes too. `column_coord` and `brwt_coord` refuse its `.seqs` at load only
+when the cut removes more k-mers than the file has k-mers with an N: the load compares the column's coordinates,
+which count the graph's k-mers, with the k-mers the copy states, which count every position. A cut of a file without
+gaps is refused there; a cut no longer than the file's gaps of Ns passes (measured: a 2,000-N gap and a 300-bp cut
+pass both forms). A pair served with such a copy, on any form, answers 400 for any k-mer of its column past the
+cut. What records a column's labels select rests on the build's
 provenance: the files passed are those the annotation was made from (section 9.1, `seqs_order`); an existing `.seqs`
 is certified against its old bytes (below).
 Binaries before H4 read the columns and stop, so a `.seqs` with labels serves on them unchanged; an H4 binary reads a
@@ -702,3 +704,21 @@ or whose record ends are not one per record, is refused, and data after the colu
 whole), and so does an empty one, with `--mmap` too, naming the file. A labelled file cut exactly at the end of its
 columns, its whole trailer gone, cannot be told from one written before the trailer: it loads as such
 (`count_only`, the same answers).
+
+A `.seqs` whose stated sizes are corrupt fails its load the same way (`Cannot load CoordToHeader from '<file>': ...
+(caught: <reason>)`; a server exits 1 before it is ready, a CLI command exits 1, a per-request copy is the request's
+400), and each size is checked before anything is allocated for it: the number of columns and each column's number of
+headers against the bytes left in the file; each header's and label's length against the bytes left at its column's
+(or the labels') start; and, before sdsl loads a column's coordinate offsets (an sd_vector), each size they state.
+For the offsets that is the data of their low part, their high part and their two select supports against the bytes
+left, then the sizes against one another as sd_vector builds them: a valid low width, no more set bits than the high
+part has, each select support over exactly the high part's set (or unset) bits, and a length within what the high
+part encodes (`the coordinate offsets of column <j> state a length of <n>, more than their encoding holds (<b>
+buckets of <w>)`). Then the column's last position must be its last record's end. Before the train-3 verification a
+stated length of 2^20 or more ended the process with a segfault (any of `stats`, `query`, `server_query`, and a
+per-request copy), a select support over 2^36 bits took 805 MiB and a header's or label's length of 2^30 took
+1 GiB before the refusal. What a load still does not check: the values inside the offsets that keep every size
+consistent (the select supports' stored superblocks and blocks, and the low part's values, are taken as stored: only
+rebuilding the supports, at a cost linear in each column, would check them, so a corrupt entry there can still give a
+wrong record or make a lookup read outside the column), and a header's text (taken as written). One header's or
+label's stated length can still be allocated up to the bytes left in the file before its read fails.

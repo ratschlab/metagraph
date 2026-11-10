@@ -3,6 +3,7 @@
 
 #include <cstdint>
 #include <fstream>
+#include <limits>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -33,7 +34,10 @@ bool load_number_vector(std::istream &in, std::vector<T> *vector);
 
 
 void serialize_string(std::ostream &out, const std::string_view &str);
-bool load_string(std::istream &in, std::string *str);
+// |max_length| bounds the stated length before anything is allocated for it (a corrupt one
+// reached 4 GiB, zero-filled): a longer one fails the load
+bool load_string(std::istream &in, std::string *str,
+                 uint64_t max_length = std::numeric_limits<uint64_t>::max());
 
 void serialize_string_vector(std::ostream &out, const std::vector<std::string> &vector);
 bool load_string_vector(std::istream &in, std::vector<std::string> *vector);
