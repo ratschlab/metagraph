@@ -23,6 +23,7 @@ import unittest
 import requests
 
 from base import NUM_THREADS, PROTEIN_MODE, TestingBase, METAGRAPH
+from base import REQUEST_TIMEOUT, log_tail, requests_time_out
 
 # The graphlet library (api/python, metagraph.traverse) reads what the writer produces
 # (DESIGN-traverse-graphlet.md §9, T37-T40). The test venv installs api/python editable;
@@ -1759,6 +1760,11 @@ class TestTraverseAPI(TestTraverseBase):
     @classmethod
     def setUpClass(cls):
         super().setUpClass()
+        # every request of the class, _post's and the tests' own, times out: a stuck server
+        # fails the test instead of holding CI
+        timeout = requests_time_out()
+        timeout.start()
+        cls.addClassCleanup(timeout.stop)
         cls.host = '127.0.0.1'
         os.environ['NO_PROXY'] = cls.host
         cls.port = 3601
@@ -1772,31 +1778,42 @@ class TestTraverseAPI(TestTraverseBase):
             cls.port += 1
             num_retries -= 1
         if num_retries == 0:
-            raise AssertionError("Couldn't start server")
+            cls.server_log.close()
+            raise AssertionError("Couldn't start server; its log ends:\n"
+                                 + log_tail(cls.server_log.name))
         time.sleep(1)
 
     @classmethod
     def tearDownClass(cls):
+        # a server that exited before the class ended is a failure of the class, shown with
+        # its log (the tempdir that holds the log goes with the process)
+        exited = cls.server_process.poll()
         cls.server_process.kill()
         cls.server_process.wait()
         cls.server_log.close()
         super().tearDownClass()
+        if exited is not None:
+            raise AssertionError(f'the class server exited (code {exited}) before the class '
+                                 f'ended; its log ends:\n{log_tail(cls.server_log.name)}')
 
     @classmethod
     def _start_server(cls, graph, annotation, host, port):
         # with the index identity, which every graphlet and capabilities response carries.
         # Its log goes to a file: a pipe nobody reads fills (64 KiB on Linux) after enough
-        # requests of the class, and the server then blocks writing its next log line.
+        # requests of the class, and the server then blocks writing its next log line. A
+        # failed start's log is closed before the next
         command = (f'{METAGRAPH} server_query -i {graph} -a {annotation} '
                    f'--port {port} --address {host} -p 2 '
                    f'--index-name tiny --index-manifest {cls.manifest}')
+        if getattr(cls, 'server_log', None):
+            cls.server_log.close()
         cls.server_log = open(f'{cls.tempdir.name}/server-{port}.log', 'w')
         return subprocess.Popen(shlex.split(command), shell=False,
                                 stdout=cls.server_log, stderr=subprocess.STDOUT)
 
     def _post(self, route, payload):
         return requests.post(url=f'http://{self.host}:{self.port}/{route}',
-                             data=json.dumps(payload))
+                             data=json.dumps(payload), timeout=REQUEST_TIMEOUT)
 
     def _thread_figures(self, timing, where):
         """The per-task figures of a timing block (SPEC §7.2.1): cpu_ms > 0, and page_faults
