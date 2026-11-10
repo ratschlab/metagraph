@@ -7972,10 +7972,66 @@ TEST(ResolveDeadline, RequestErrorsAre400WhateverTheStop) {
     ASSERT_FALSE(out["stop"].isNull());
     EXPECT_TRUE(out["selection"].isNull());
     EXPECT_NE(std::string::npos, out["stop"]["message"].asString().find(
-            "select.seeds[0] names a label the resolved prefix did not discover"));
+            "select.seeds[0] names a label the resolved prefix did not keep"));
     // the same without a deadline: the discovery met every label, 'nope' among none: 400
     r["bounds"].removeMember("time_budget_ms");
     EXPECT_THROW(f.resolve(r, nullptr), InvalidRequest);
+
+    // a label the prefix met that the answer-labels clamp left out (T3 review R2, N3): not made,
+    // the reason naming the clamp as the 400 of such a label does (SPEC §4.5, §4.6); without the
+    // clamp's lowering the plain reason
+    ResolveTimeLimits clamp;
+    clamp.max_discover_answer_labels = 3;
+    size_t named = 0;
+    for (double work_ms : { 1.0, 2.0, 3.0, 5.0, 8.0, 13.0 }) {
+        // the prefix's kept labels at this budget, without a selection
+        Json::Value plain = request(f.q, true, {});
+        plain.removeMember("select");
+        plain["bounds"]["time_budget_ms"] = kResolveFinalizeMs + work_ms;
+        SteppingClock first;
+        const Json::Value prefix = f.resolve(plain, &first, clamp);
+        if (prefix["stop"].isNull() || prefix["labels_truncated"].isNull())
+            continue;
+        // L0, L3, L5 and L7 are present from k-mer 100 on: met by a prefix past it
+        const uint64_t x = prefix["stop"]["resolved_kmers"].asUInt64();
+        if (x <= 100)
+            continue;
+        std::string dropped;
+        for (const char *label : { "L0", "L3", "L5", "L7" }) {
+            bool kept = false;
+            for (const Json::Value &l : prefix["labels"]) {
+                kept |= l["label"].asString() == label;
+            }
+            if (!kept) {
+                dropped = label;
+                break;
+            }
+        }
+        ASSERT_FALSE(dropped.empty()) << compact(prefix["labels"]);
+        Json::Value select = request(f.q, true, { seed(100, 101, dropped) });
+        select["bounds"]["time_budget_ms"] = kResolveFinalizeMs + work_ms;
+        SteppingClock second;
+        const Json::Value got = f.resolve(select, &second, clamp);
+        ASSERT_EQ(x, got["stop"]["resolved_kmers"].asUInt64()) << work_ms;
+        EXPECT_TRUE(got["selection"].isNull());
+        const std::string total = std::to_string(prefix["labels_truncated"]["total"].asUInt64());
+        EXPECT_NE(std::string::npos, got["stop"]["message"].asString().find(
+                "; the explicit selection was not made (selection null): select.seeds[0] names a "
+                "label the resolved prefix did not keep; discover.max_labels was lowered from 8 to "
+                "3 (--resolve-max-discover-answer-labels), and the discovery kept 3 of the " + total
+                + " labels it ranked: the label may be one ranked past 3"))
+            << got["stop"]["message"].asString();
+        // max_labels 3 asked for (the clamp lowers nothing): the plain reason
+        select["discover"]["max_labels"] = 3;
+        SteppingClock third;
+        const std::string plain_reason
+                = f.resolve(select, &third, clamp)["stop"]["message"].asString();
+        EXPECT_NE(std::string::npos, plain_reason.find(
+                "select.seeds[0] names a label the resolved prefix did not keep")) << plain_reason;
+        EXPECT_EQ(std::string::npos, plain_reason.find("lowered")) << plain_reason;
+        ++named;
+    }
+    EXPECT_GE(named, 1u);
 }
 
 // An explicit seed's kmer_interval is two non-negative integers, tested as every other

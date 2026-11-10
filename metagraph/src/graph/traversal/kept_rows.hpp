@@ -7,6 +7,7 @@
 #include <tsl/hopscotch_map.h>
 
 #include "annotation/binary_matrix/base/decode_budget.hpp"
+#include "graph/traversal/seeded_hash.hpp"
 
 
 namespace mtg {
@@ -17,8 +18,9 @@ namespace traversal {
  * The rows a discovery's pass keeps for a later occurrence of their k-mer
  * (SPEC-labeled-traversal-core.md §4.6), with what |budget| holds for them: each row's own
  * charge (the decoder's, passed in), released when the row is dropped, and kEntryBytes per
- * entry of the table, charged before the table can grow (a hash table at most 90% full that
- * doubles: the entry, the empty buckets and the table before the growth). The table never
+ * entry of the table, charged before the table can grow (hopscotch_entry_bytes: a table doubling
+ * at 80% load or above, which its seeded hash makes the case whatever the keys, T3 review R2
+ * F1: the entry, the empty buckets and the table before the growth). The table never
  * shrinks while it lives (erasing an entry keeps its bucket), so the entries' charge is a
  * high-water count: an entry freed by a last use is charged again only past the most entries
  * held at once, and the whole count is released only by drop(), which frees the table.
@@ -26,14 +28,16 @@ namespace traversal {
 template <class RowT, class Key = uint64_t>
 class KeptRows {
   public:
-    static constexpr uint64_t kEntryBytes = 192;
-
     struct Kept {
         RowT row;
         uint64_t bytes;     // as row_copy_bytes counts them (the pass's kept_max)
         uint64_t charged;   // the row's own charge the budget holds
     };
-    using Table = tsl::hopscotch_map<Key, Kept>;
+    using Table = tsl::hopscotch_map<Key, Kept, SeededHash>;
+
+    // 180 B for a row of set bits (a value of 40 B), 210 B for a row of tuples (48 B)
+    static constexpr uint64_t kEntryBytes
+            = hopscotch_entry_bytes(sizeof(typename Table::value_type));
 
     explicit KeptRows(annot::matrix::DecodeBudget &budget) : budget_(budget) {}
     KeptRows(const KeptRows &) = delete;

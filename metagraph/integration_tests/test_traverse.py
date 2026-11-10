@@ -4117,7 +4117,7 @@ class TestResolveDiscoveryBounds(TestingBase):
                     # the cap on a request's explicit label lists (its default)
                     self.assertEqual(10000, requests.get(url + route).json()['resolve'][
                         'max_explicit_labels'])
-                    # the order of a selection's seeds (§4.2, since 01c05323b)
+                    # the order of a selection's seeds (§4.3, since 01c05323b)
                     self.assertEqual('rank', requests.get(url + route).json()['resolve'][
                         'seed_order'])
 

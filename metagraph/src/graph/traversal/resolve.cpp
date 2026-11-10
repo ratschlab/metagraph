@@ -17,6 +17,7 @@
 
 #include "graph/annotated_dbg.hpp"
 #include "graph/traversal/kept_rows.hpp"
+#include "graph/traversal/seeded_hash.hpp"
 #include "annotation/binary_matrix/row_diff/row_diff.hpp"
 #include "annotation/binary_matrix/row_diff/row_diff_cache.hpp"
 #include "common/seq_tools/reverse_complement.hpp"
@@ -281,9 +282,16 @@ enum class PassEnd {
 };
 
 // The budget's charge per key of the pass's setup (the next occurrence of each k-mer, kept for
-// the pass) and of its transient hash table of the keys' last occurrences
+// the pass) and of its transient hash table of the keys' last occurrences (seeded, 90 B a key:
+// hopscotch_entry_bytes; T3 review R2, F1 and N1: 80 B, a table at most 90% full, was short of
+// the 81.4 B a natural key set reached, and crafted node indices grew it to 604 B a key)
 constexpr uint64_t kNextUseBytes = sizeof(size_t);
-constexpr uint64_t kLastOccurrenceBytes = 80;
+using KeyPositions = tsl::hopscotch_map<node_index, size_t, SeededHash>;
+constexpr uint64_t kLastOccurrenceBytes
+        = hopscotch_entry_bytes(sizeof(KeyPositions::value_type));
+// a discovery's index of the records it tracks (header labels): the record, its accumulator's
+// position (kDiscoverIndexEntryBytes an entry)
+using RecordIndex = tsl::hopscotch_map<std::pair<Column, uint64_t>, uint64_t, SeededPairHash>;
 
 template <class RowT>
 uint64_t rows_bytes(const std::vector<RowT> &rows) {
@@ -341,7 +349,7 @@ size_t for_each_row(const std::vector<node_index> &keys, BatchSizer sizer, uint6
     }
     std::vector<size_t> next_use(keys.size(), kNever);
     {
-        tsl::hopscotch_map<node_index, size_t> later;
+        KeyPositions later;
         for (size_t j = keys.size(); j-- > 0; ) {
             auto [it, inserted] = later.try_emplace(keys[j], j);
             if (!inserted) {
@@ -360,7 +368,9 @@ size_t for_each_row(const std::vector<node_index> &keys, BatchSizer sizer, uint6
         kept.drop();
         budget.release(next_use_bytes);
     };
-    tsl::hopscotch_map<node_index, size_t> in_batch;
+    // the batch's keys (not charged, SPEC §4.6: at most 4,096 keys, 0.3 MiB at its growth, the
+    // batch's vectors 0.16 MiB beside it; seeded, so that no key set grows it past that)
+    KeyPositions in_batch;
     std::vector<node_index> batch_keys;
     std::vector<RowT> batch;
     std::vector<uint64_t> held;
@@ -784,7 +794,11 @@ SupportProfile resolve_support(LabelOracle &oracle,
         const bool index_fits = budget.charge(slot_bytes);
         std::vector<uint32_t> slot(by_column && index_fits ? oracle.num_columns() : 0, kNoSlot);
         std::vector<uint64_t> tracked_in(!by_column && index_fits ? oracle.num_columns() : 0, 0);
-        tsl::hopscotch_map<std::pair<Column, uint64_t>, uint64_t, LabelKeyHash> index;
+        // seeded (SeededPairHash): the records a query meets could otherwise be chosen to grow
+        // the table past its charge (kDiscoverIndexEntryBytes; T3 review R2, F1)
+        RecordIndex index;
+        static_assert(kDiscoverIndexEntryBytes
+                      == hopscotch_entry_bytes(sizeof(RecordIndex::value_type)));
         std::deque<LabelSupport> found;
         std::deque<std::pair<Column, uint64_t>> found_ids;
         const uint64_t label_bytes = sizeof(LabelSupport) + sizeof(std::pair<Column, uint64_t>)
@@ -1150,7 +1164,7 @@ SupportProfile resolve_support(LabelOracle &oracle,
             ranked.push_back({ with_coords ? found[at].traced : found[at].kmers, at, nullptr });
         }
         std::vector<uint32_t>().swap(slot);
-        tsl::hopscotch_map<std::pair<Column, uint64_t>, uint64_t, LabelKeyHash>().swap(index);
+        RecordIndex().swap(index);
         // More k-mers supported first, ties by the name the answer states (bytes: the column's name, or
         // the sequence's header), then by (column, seq_id) for a header that two columns hold.
         // A tie by column id let the index's numbering of its columns decide which of the
@@ -1346,7 +1360,7 @@ SupportProfile resolve_support(LabelOracle &oracle,
             // before distinct_at[P] (a key occurring before it occurred first before it)
             std::vector<uint64_t> distinct_at;
             {
-                tsl::hopscotch_set<node_index> seen;
+                tsl::hopscotch_set<node_index, SeededHash> seen;
                 for (size_t j = 0; j < present_keys.size(); ++j) {
                     if (seen.insert(present_keys[j]).second) {
                         distinct.push_back(present_keys[j]);

@@ -105,11 +105,13 @@ struct ResolveOptions {
 // What a discovery charges against ResolveOptions::discover_max_memory for its accumulators
 // (§4.6; the rows are charged by the decoder): per label tracked its accumulator and its id
 // (held in deques: no relocation), and of a header label its entry in the label index (a hash
-// table at most 90% full, which doubles: its entry, the empty buckets and the table before
-// the growth while it is moved); per run and per trace break twice the element (a vector at
-// most twice its size); per chain coordinate beyond those held inline its heap (charged as
-// the vector's capacity grows). A model of the heap, never a measurement
-constexpr uint64_t kDiscoverIndexEntryBytes = 112;
+// table of 32 B buckets, seeded, taken to double at 80% load or above: its entry, the empty
+// buckets and the table before the growth while it is moved, hopscotch_entry_bytes in
+// seeded_hash.hpp; 112 B, a table at most 90% full, was short of what random records reach);
+// per run and per trace break twice the element (a vector at most twice its size); per chain
+// coordinate beyond those held inline its heap (charged as the vector's capacity grows). A model
+// of the heap, never a measurement
+constexpr uint64_t kDiscoverIndexEntryBytes = 120;
 constexpr uint64_t kDiscoverRunBytes = 32;
 constexpr uint64_t kDiscoverBreakBytes = 16;
 // Under support "trace", the most a coordinate of a row adds to the chains' coordinates (8 B, a
@@ -321,7 +323,7 @@ uint64_t selection_bytes(const SeedSelection &selection);
 
 // The order select_seeds lists the seeds in, as the capabilities state it (the `resolve`
 // block's seed_order, the multigraph block's resolve_seed_order; SPEC-labeled-traversal-core.md
-// §4.2): "rank" since 01c05323b -- longest_first picks merged where they overlap, a merged seed
+// §4.3): "rank" since 01c05323b -- longest_first picks merged where they overlap, a merged seed
 // with the rank of its best member, the seeds in rank order; max_support picks in pick order;
 // explicit seeds in the request's order
 constexpr char kSeedOrder[] = "rank";
