@@ -1240,8 +1240,9 @@ TEST(CoordToHeaderLayout, EveryShapeLoadsAsBuilt) {
             }
         }
         // the shapes are what they stand for
-        if (name == "FC")
+        if (name == "FC") {
             EXPECT_EQ(1u, seqs_value(bytes, fields.at("c0.inverted")));
+        }
         if (name == "FE" || name == "LONG") {
             const char *s = name == "FE" ? "c0.sd.sel1" : "c0.sd.sel0";
             ASSERT_TRUE(fields.count(std::string(s) + ".miniblock.data")) << name;
@@ -1252,8 +1253,9 @@ TEST(CoordToHeaderLayout, EveryShapeLoadsAsBuilt) {
             ASSERT_GT(num_flags, 1u) << name;
             EXPECT_FALSE((bytes[flags.offset + long_one / 8] >> (long_one % 8)) & 1) << name;
         }
-        if (name == "FF14")
+        if (name == "FF14") {
             EXPECT_EQ(32768u, seqs_value(bytes, fields.at("c0.sd.sel0.arg_cnt")));
+        }
     }
 }
 
