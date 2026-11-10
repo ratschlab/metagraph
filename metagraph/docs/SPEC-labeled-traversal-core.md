@@ -809,9 +809,11 @@ runs.
   Two requests at once hold about twice one, so each route's concurrent requests (its slots) multiply it.
   `/search` and `/align` read their body without a count (the owner's decision): their parse holds about 51
   times the body (zeros), bounded by `--max-request-body-mb` alone. Nor do they get the pre-scan's checks
-  (control bytes, UTF-8, surrogate escapes, above): they echo each FASTA header in `seq_description`, one
-  that is not UTF-8 at up to 6 bytes per byte (jsoncpp's `\ufffd`); `/search` writes it once per header,
-  not once per pair *(train 3 review R1, N4: 6.0 bytes per byte on one pair, 6.15 on 11)*.
+  (control bytes, UTF-8, surrogate escapes, above): they echo each FASTA header in `seq_description`, its raw
+  control bytes and its bytes that are not UTF-8 at up to 6 bytes per byte (`\u00XX`, `\ufffd`), and
+  `/search` writes it once per header, not once per pair *(train 3 review R1, N4, and its verification V2,
+  N1: the echo is 6.0 bytes per header byte of 0xFF or of 0x01, on `/search` and `/align` on one pair and on
+  `/search` on 11)*.
   **The connections** *(H3, train 3)*: before its handler starts, a connection holds its header and its body,
   each up to B and in a buffer of up to 2B; with `--max-connections` N (§10.3, Connections; 0, no cap, by default)
   the connections not yet admitted hold at most N × (4B + 64 KiB): at N = 256, 2.0 GiB with B = 2 MiB and 256 GiB
@@ -4299,14 +4301,16 @@ search's routes, `POST /pattern` and `GET /pattern/capabilities`, are `SPEC-patt
     quoted clipped, as every error text quotes a client's string).
   - The 503 while a single index loads comes first, as before. The list is written as text from the label
     vectors, without a copy of them and without a JSON tree (a label's escapes written in place, as jsoncpp
-    writes them, byte for byte): an answer holds at most 2.5 M + 64 bytes of text (M the cap; at least 2 bytes
-    a label), or, for a page of one label whose JSON string passes M, that string + 64, and at most three copies
-    of it at once (the text, a compressed copy, the transport's). So it holds at most 3 × (max(2.5 M, L) + 64)
-    bytes, L the longest label's JSON string: 120 MiB at the default while no label's passes 2.5 M (40 MiB), up
-    to three times that label past it. The labels are the index's, so its builder sets L, not a client *(train 3
-    review R3, S1: the sentence stated 120 MiB without the condition; a page of one label of 16 MiB of control
-    bytes, its JSON string 96 MiB, held 204.5 MiB above idle)*. The time is that of finding the offset's pair (a
-    binary search) and writing the page.
+    writes them, byte for byte): an answer holds at most 2.5 M + 95 bytes of text (M the cap; at least 2 bytes a
+    label; a page adds at most 95 bytes to its labels and their commas, 47 and the digits of `next_offset`,
+    `offset` and `total`, 16 each at most), or, for a page of one label whose JSON string passes M, that string +
+    95, and at most three copies of it at once (the text, a compressed copy, the transport's). So it holds at most
+    3 × (max(2.5 M, L) + 95) bytes, L the longest label's JSON string: 120 MiB at the default while no label's
+    passes 2.5 M (40 MiB), up to three times that label past it. The labels are the index's, so its builder sets
+    L, not a client *(train 3 review R3, S1: the sentence stated 120 MiB without the condition; a page of one
+    label of 16 MiB of control bytes, its JSON string 96 MiB, held 204.5 MiB above idle; V2, N2: the constant was
+    64, which a page's own members pass by up to 31 bytes when its numbers have 16 digits)*. The time is that of
+    finding the offset's pair (a binary search) and writing the page.
   - Stated by `GET /capabilities` as `column_labels: {"max_column_labels_bytes", "paging": ["limit", "offset"],
     "too_large": {"status": 400, "code": "column_labels_too_large", "members": [...]}, "total"}`, in the
     `multigraph` block on a multi-graph server and at the top level on a single-graph one, as `request_intake`
