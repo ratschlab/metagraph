@@ -1,6 +1,7 @@
 #include "annotation/coord_to_header.hpp"
 
 #include <algorithm>
+#include <filesystem>
 #include <limits>
 #include <memory>
 #include <stdexcept>
@@ -531,6 +532,12 @@ uint64_t CoordToHeader::num_kmers_in_sequence(Column col, size_t seq_id) const {
     return end - start + 1;
 }
 
+// The bytes of |in|, a file of |size| bytes, after its read position
+static uint64_t bytes_left(std::istream &in, uint64_t size) {
+    const std::streamoff at = in.tellg();
+    return at < 0 || static_cast<uint64_t>(at) > size ? 0 : size - static_cast<uint64_t>(at);
+}
+
 bool CoordToHeader::load(const std::string &filename_base) {
     const std::string path = utils::make_suffix(filename_base, kExtension);
     std::unique_ptr<std::ifstream> in;
@@ -556,25 +563,50 @@ bool CoordToHeader::load(const std::string &filename_base) {
 
     column_labels_.reset();
     column_order_verified_ = false;
+    headers_.clear();
+    coord_offsets_.clear();
     try {
-        uint64_t num_columns = load_number(*in);
-        headers_.resize(num_columns);
-        coord_offsets_.resize(num_columns);
+        // each count is checked against the bytes left in the file before anything is
+        // allocated for it (train-3 review R4, N3: 16 bytes stating 2^22 columns reached
+        // 3.6 GB before they failed): a column takes at least 16 bytes (its number of headers
+        // and its offsets' length), a header at least one (its length)
+        const uint64_t file_size = std::filesystem::file_size(path);
+        const uint64_t num_columns = load_number(*in);
+        if (num_columns > bytes_left(*in, file_size) / 16) {
+            throw std::runtime_error(fmt::format("{} columns stated, more than its {} bytes hold",
+                                                 num_columns, file_size));
+        }
+        // (reserved, not built: each column is added once read whole)
+        headers_.reserve(num_columns);
+        coord_offsets_.reserve(num_columns);
 
         for (uint64_t i = 0; i < num_columns; ++i) {
-            if (!load_string_vector(*in, &headers_[i]))
-                throw std::runtime_error(fmt::format("the headers of column {}", i));
+            // the headers as load_string_vector reads them, their number bounded first
+            const uint64_t num_headers = load_number(*in);
+            if (num_headers > bytes_left(*in, file_size)) {
+                throw std::runtime_error(fmt::format(
+                        "column {}: {} headers stated, more than its last bytes hold", i,
+                        num_headers));
+            }
+            std::vector<std::string> headers(num_headers);
+            for (std::string &header : headers) {
+                if (!load_string(*in, &header))
+                    throw std::runtime_error(fmt::format("the headers of column {}", i));
+            }
             // every column read whole: a file cut inside its last column would otherwise
             // reach the test below in a failed state, where peek() answers EOF as at the end
             // of a file written before the trailer
-            if (!coord_offsets_[i].load(*in) || in->fail())
+            bit_vector_sd offsets;
+            if (!offsets.load(*in) || in->fail())
                 throw std::runtime_error(fmt::format("the coordinate offsets of column {}", i));
             // one set bit per record, the last coordinate of each
-            if (coord_offsets_[i].num_set_bits() != headers_[i].size()) {
+            if (offsets.num_set_bits() != headers.size()) {
                 throw std::runtime_error(fmt::format(
                         "column {}: {} records, {} record ends in its coordinate offsets", i,
-                        headers_[i].size(), coord_offsets_[i].num_set_bits()));
+                        headers.size(), offsets.num_set_bits()));
             }
+            headers_.push_back(std::move(headers));
+            coord_offsets_.push_back(std::move(offsets));
         }
         // the trailer of column labels, if any (a file written before it ends here)
         if (in->peek() != std::char_traits<char>::eof()) {

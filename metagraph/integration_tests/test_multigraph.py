@@ -3671,9 +3671,12 @@ class TestRecordMappingAtLoad(TestingBase):
         # -a's check is a spot check (SPEC-multigraph-envelope.md sections 9.1 and 10; GPT review
         # 6, finding 12): a file's probes are its first stretch with a k-mer the graph has and its
         # last one in the end of its last record, past a gap of Ns longer than a probe. A file
-        # with k-mers none of which the graph has is refused, nothing written (before, nothing was
-        # checked and the pair was served "verified"). The same sequences under other headers
-        # pass: what the records are rests on the files passed, which no spot check can tell
+        # without a k-mer of the graph is refused, nothing written: one with k-mers none of which
+        # the graph has (before GPT review 6 nothing was checked and the pair was served
+        # "verified"), and one without k-mers, empty or of records shorter than k (so too before
+        # the train-3 review, R4 S1), which no column is made from. The same sequences under
+        # other headers pass: what the records are rests on the files passed, which no spot
+        # check can tell
         d = os.path.join(self.d, 'spot')
         os.makedirs(d)
         rng = random.Random(20261109)
@@ -3689,6 +3692,9 @@ class TestRecordMappingAtLoad(TestingBase):
             'renamed.fa': [('r1', gap + g1), ('r2', g2 + gap)],
             # gapped.fa's records and one of Ns alone, longer than the end the tail is looked in
             'trailing.fa': [('g1', gap + g1), ('g2', g2 + gap), ('g3', 'N' * 70000)],
+            # no k-mers: an empty file (an interrupted copy), records shorter than k
+            'empty.fa': [],
+            'short.fa': [('s1', seq(20)), ('s2', seq(25))],
         }
         for fname, recs in files.items():
             with open(os.path.join(d, fname), 'w') as f:
@@ -3721,6 +3727,24 @@ class TestRecordMappingAtLoad(TestingBase):
                       f"'{anno}': the column lacks the file's k-mer at coordinate 2500",
                       res.stderr.decode())
         self.assertFalse(os.path.exists(seqs('other')))
+        # no k-mers: no column is made from such a file (each column holds a k-mer of its file),
+        # so refusing it refuses no legitimate file
+        res = run('annotate', '-p', '1', '--anno-filename', '-i', 'graph.dbg', '--anno-type',
+                  'column', '--coordinates', '-o', 'four', 'gapped.fa', 'empty.fa', 'short.fa',
+                  'plain.fa')
+        self.assertEqual(0, res.returncode, res.stderr.decode()[-3000:])
+        res = run('stats', '-a', 'four.column.annodbg', '--print-col-names')
+        self.assertIn('Number of columns: 2\ngapped.fa\nplain.fa\n', res.stdout.decode())
+        for name in ('empty.fa', 'short.fa'):
+            out = name[:-len('.fa')]
+            res = annotate(out, 'gapped.fa', name)
+            self.assertEqual(1, res.returncode, res.stderr.decode())
+            self.assertIn(f"The file '{name}' has no k-mers (it is empty, or each of its records is "
+                          f"shorter than k = 31): no annotation column is made from such a file, so "
+                          f"it cannot be column 1 ('plain.fa') of the annotation '{anno}'. Pass the "
+                          f"files the annotation was made from, in its column order",
+                          res.stderr.decode())
+            self.assertFalse(os.path.exists(seqs(out)))
         # no k-mer of the graph: refused
         res = annotate('foreign', 'gapped.fa', 'foreign.fa')
         self.assertEqual(1, res.returncode, res.stderr.decode())

@@ -16,9 +16,10 @@ now stores the label of each column in the ``.seqs`` file, and a load refuses a
 mapping whose labels differ from the annotation's labels. With ``-a``, the
 command spot-checks each input file against its annotation column first: the
 column must hold the file's first and last k-mers in the graph, and a file with
-no k-mer of the graph is refused. The check cannot tell a file of the same
-sequences under other headers, so the records still rest on passing the files
-the annotation was built from. Earlier versions ignore the stored labels.
+no k-mer of the graph is refused, an empty file included. The check cannot tell
+a file of the same sequences under other headers, or a copy cut short after its
+last probed k-mer, so the records still rest on passing the files the annotation
+was built from. Earlier versions ignore the stored labels.
 
 Case-sensitive DNA packed reverse complements now preserve case, matching
 string reverse complements: ``ACG`` becomes ``CGT``, and ``acg`` becomes ``cgt``.

@@ -806,9 +806,10 @@ int run_server(Config *config) {
     // replaced between that stamp and the load's open (H4's re-check, N-a: under a 1-ms swap loop
     // about 1% of the answers came from a new annotation with the resident mapping). The copy
     // keeps the shared mapping only when the stamp still is the start-up one after the load and
-    // its labels are the resident's (a file swapped in and back during the load has other labels
-    // unless it is a rebuild of the same files in the same order, whose mapping is the resident's);
-    // else it is loaded again with its own .seqs, checked. |load|(mapping) loads it
+    // its labels are the resident's; else it is loaded again with its own .seqs, checked. The
+    // residual: a file swapped in and back within one load whose labels equal the resident's, in
+    // order, keeps the resident mapping, and equal labels do not make equal records (a newer
+    // build under the same file names has other records). |load|(mapping) loads it
     auto load_copy = [&](const GraphPair &pair, const AnnotatedDBG &resident,
                          const std::function<std::unique_ptr<AnnotatedDBG>(
                                  std::shared_ptr<const annot::CoordToHeader>)> &load) {
