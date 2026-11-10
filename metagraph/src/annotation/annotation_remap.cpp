@@ -7,6 +7,8 @@
 #include <mutex>
 #include <stdexcept>
 
+#include <sdsl/int_vector_buffer.hpp>
+
 #include "annotation/binary_matrix/multi_brwt/brwt.hpp"
 #include "annotation/binary_matrix/row_diff/row_diff.hpp"
 #include "annotation/representation/annotation_matrix/static_annotators_def.hpp"
@@ -210,47 +212,95 @@ void map_rows_to_graph(const DeBruijnGraph &source,
     remove_buckets();
 }
 
-bool check_row_map(const DeBruijnGraph &source,
-                   const DeBruijnGraph &target,
-                   const sdsl::packed_vector_view<> &row_map,
-                   uint64_t num_samples) {
+// A row map held in memory. Every thread reads the same vector.
+struct RowMapInMemory {
+    const sdsl::int_vector<> &row_map;
+
+    uint64_t size() const { return row_map.size(); }
+    const sdsl::int_vector<>& open() const { return row_map; }
+};
+
+// A row map in a file. Every thread opens its own buffered reader, so the map
+// is never held in memory. Reading it through mmap is slow on network file systems.
+struct RowMapInFile {
+    explicit RowMapInFile(const std::string &filename)
+          : filename(filename), num_rows(open().size()) {}
+
+    uint64_t size() const { return num_rows; }
+    sdsl::int_vector_buffer<> open() const { return sdsl::int_vector_buffer<>(filename); }
+
+    std::string filename;
+    uint64_t num_rows;
+};
+
+template <class RowMap>
+static bool check_row_map(const DeBruijnGraph &source,
+                          const DeBruijnGraph &target,
+                          const RowMap &row_map,
+                          uint64_t num_samples) {
     if (row_map.size() != source.max_index())
         return false;
 
+    const uint64_t step = std::max<uint64_t>(1, row_map.size() / std::max<uint64_t>(1, num_samples));
     uint64_t num_kept = 0;
     uint64_t max_target_row = 0;
-    #pragma omp parallel for num_threads(get_num_threads()) reduction(+:num_kept) reduction(max:max_target_row)
-    for (uint64_t row = 0; row < row_map.size(); ++row) {
-        num_kept += row_map[row] != 0;
-        max_target_row = std::max<uint64_t>(max_target_row, row_map[row]);
-    }
-    if (num_kept != target.num_nodes() || max_target_row > target.max_index())
-        return false;
+    bool matches = true;
+    #pragma omp parallel num_threads(get_num_threads()) reduction(+:num_kept) reduction(max:max_target_row) reduction(&&:matches)
+    {
+        auto &&rows = row_map.open();
+        #pragma omp for schedule(static, 1 << 20)
+        for (uint64_t row = 0; row < row_map.size(); ++row) {
+            uint64_t target_row = rows[row];
+            if (!target_row)
+                continue;
 
-    const uint64_t step = std::max<uint64_t>(1, row_map.size() / std::max<uint64_t>(1, num_samples));
-    for (uint64_t row = 0; row < row_map.size(); row += step) {
-        if (row_map[row] && target.kmer_to_node(source.get_node_sequence(row + 1)) != row_map[row])
-            return false;
+            ++num_kept;
+            max_target_row = std::max(max_target_row, target_row);
+            if (row % step == 0
+                    && target.kmer_to_node(source.get_node_sequence(row + 1)) != target_row)
+                matches = false;
+        }
     }
-    return true;
+    return matches && num_kept == target.num_nodes() && max_target_row <= target.max_index();
 }
 
-std::unique_ptr<MultiLabelAnnotation<std::string>>
+bool check_row_map(const DeBruijnGraph &source,
+                   const DeBruijnGraph &target,
+                   const sdsl::int_vector<> &row_map,
+                   uint64_t num_samples) {
+    return check_row_map(source, target, RowMapInMemory { row_map }, num_samples);
+}
+
+bool check_row_map(const DeBruijnGraph &source,
+                   const DeBruijnGraph &target,
+                   const std::string &row_map_filename,
+                   uint64_t num_samples) {
+    return check_row_map(source, target, RowMapInFile(row_map_filename), num_samples);
+}
+
+template <class RowMap>
+static std::unique_ptr<MultiLabelAnnotation<std::string>>
 remap_annotation_rows(const MultiLabelAnnotation<std::string> &annotation,
                       const DeBruijnGraph &source,
-                      const sdsl::packed_vector_view<> &row_map,
+                      const RowMap &row_map,
                       uint64_t target_num_rows,
                       size_t num_threads) {
     using matrix::BRWT;
     using matrix::RowDiff;
 
+    num_threads = std::max<size_t>(1, num_threads);
+
     if (annotation.get_matrix().num_rows() != row_map.size())
         throw std::invalid_argument("The row map does not match the annotation's rows");
 
     uint64_t max_target_row = 0;
-    #pragma omp parallel for num_threads(std::max<size_t>(1, num_threads)) reduction(max:max_target_row)
-    for (uint64_t row = 0; row < row_map.size(); ++row) {
-        max_target_row = std::max<uint64_t>(max_target_row, row_map[row]);
+    #pragma omp parallel num_threads(num_threads) reduction(max:max_target_row)
+    {
+        auto &&rows = row_map.open();
+        #pragma omp for schedule(static, 1 << 20)
+        for (uint64_t row = 0; row < row_map.size(); ++row) {
+            max_target_row = std::max<uint64_t>(max_target_row, rows[row]);
+        }
     }
     if (max_target_row > target_num_rows)
         throw std::invalid_argument("The row map points past the end of the target graph");
@@ -258,7 +308,8 @@ remap_annotation_rows(const MultiLabelAnnotation<std::string> &annotation,
     const auto &label_encoder = annotation.get_label_encoder();
 
     if (const auto *brwt = dynamic_cast<const MultiBRWTAnnotator *>(&annotation)) {
-        auto matrix = brwt->get_matrix().remap_rows(row_map, target_num_rows, num_threads);
+        auto &&rows = row_map.open();
+        auto matrix = brwt->get_matrix().remap_rows(rows, target_num_rows, num_threads);
         return std::make_unique<MultiBRWTAnnotator>(std::move(matrix), label_encoder);
     }
 
@@ -281,37 +332,42 @@ remap_annotation_rows(const MultiLabelAnnotation<std::string> &annotation,
     // node index, so the bitmap has one extra entry.
     sdsl::bit_vector new_anchor(target_num_rows, false);
     sdsl::bit_vector new_succ(target_num_rows + 1, false);
-    // Mark the successors by source row first. The row map is then read only in
-    // row order, which matters when it is mapped from a file.
+    // Mark the successors by source row first, so that the row map is read only
+    // in row order.
     sdsl::bit_vector is_succ(row_map.size(), false);
     std::atomic<uint64_t> num_lost_successors(0);
-    #pragma omp parallel for num_threads(std::max<size_t>(1, num_threads)) schedule(static, 1 << 20)
-    for (uint64_t row = 0; row < row_map.size(); ++row) {
-        if (!row_map[row])
-            continue;
+    #pragma omp parallel num_threads(num_threads)
+    {
+        auto &&rows = row_map.open();
+        #pragma omp for schedule(static, 1 << 20)
+        for (uint64_t row = 0; row < row_map.size(); ++row) {
+            uint64_t target_row = rows[row];
+            if (!target_row)
+                continue;
 
-        if (anchor[row]) {
-            set_bit(new_anchor.data(), row_map[row] - 1, true, std::memory_order_relaxed);
-            continue;
+            if (anchor[row]) {
+                set_bit(new_anchor.data(), target_row - 1, true, std::memory_order_relaxed);
+                continue;
+            }
+
+            node_index succ = row_diff_successor(source, row + 1, fork_succ);
+            if (!succ || succ > row_map.size()) {
+                ++num_lost_successors;
+                continue;
+            }
+            set_bit(is_succ.data(), succ - 1, true, std::memory_order_relaxed);
         }
 
-        node_index succ = row_diff_successor(source, row + 1, fork_succ);
-        if (!succ || succ > row_map.size()) {
-            ++num_lost_successors;
-            continue;
-        }
-        set_bit(is_succ.data(), succ - 1, true, std::memory_order_relaxed);
-    }
+        #pragma omp for schedule(static, 1 << 20)
+        for (uint64_t row = 0; row < row_map.size(); ++row) {
+            if (!is_succ[row])
+                continue;
 
-    #pragma omp parallel for num_threads(std::max<size_t>(1, num_threads)) schedule(static, 1 << 20)
-    for (uint64_t row = 0; row < row_map.size(); ++row) {
-        if (!is_succ[row])
-            continue;
-
-        if (uint64_t target_row = row_map[row]) {
-            set_bit(new_succ.data(), target_row, true, std::memory_order_relaxed);
-        } else {
-            ++num_lost_successors;
+            if (uint64_t target_row = rows[row]) {
+                set_bit(new_succ.data(), target_row, true, std::memory_order_relaxed);
+            } else {
+                ++num_lost_successors;
+            }
         }
     }
     is_succ = sdsl::bit_vector();
@@ -322,7 +378,10 @@ remap_annotation_rows(const MultiLabelAnnotation<std::string> &annotation,
             num_lost_successors.load()));
     }
 
-    auto diffs = matrix.diffs().remap_rows(row_map, target_num_rows, num_threads);
+    logger->trace("Remapped anchors and successors");
+
+    auto &&rows = row_map.open();
+    auto diffs = matrix.diffs().remap_rows(rows, target_num_rows, num_threads);
     logger->trace("Remapped row-diff matrix: {} of {} relations kept",
                   diffs->num_relations(), matrix.diffs().num_relations());
 
@@ -331,6 +390,26 @@ remap_annotation_rows(const MultiLabelAnnotation<std::string> &annotation,
     result->set_fork_succ(matrix::IRowDiff::fork_succ_bv_type(std::move(new_succ)));
 
     return std::make_unique<RowDiffBRWTAnnotator>(std::move(result), label_encoder);
+}
+
+std::unique_ptr<MultiLabelAnnotation<std::string>>
+remap_annotation_rows(const MultiLabelAnnotation<std::string> &annotation,
+                      const DeBruijnGraph &source,
+                      const sdsl::int_vector<> &row_map,
+                      uint64_t target_num_rows,
+                      size_t num_threads) {
+    return remap_annotation_rows(annotation, source, RowMapInMemory { row_map },
+                                 target_num_rows, num_threads);
+}
+
+std::unique_ptr<MultiLabelAnnotation<std::string>>
+remap_annotation_rows(const MultiLabelAnnotation<std::string> &annotation,
+                      const DeBruijnGraph &source,
+                      const std::string &row_map_filename,
+                      uint64_t target_num_rows,
+                      size_t num_threads) {
+    return remap_annotation_rows(annotation, source, RowMapInFile(row_map_filename),
+                                 target_num_rows, num_threads);
 }
 
 } // namespace annot

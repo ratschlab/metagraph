@@ -341,35 +341,32 @@ int transform_annotation(Config *config) {
         // it is built in and read from that file instead of being held in RAM.
         const bool on_disk = !config->tmp_dir.empty();
         const std::string row_map_fname = config->outfbase + ".rowmap";
-        sdsl::packed_vector_view<> row_map;
+        sdsl::int_vector<> row_map;
         uint64_t target_num_rows;
 
         auto source = load_critical_dbg(config->remap_graph);
         auto target = load_critical_dbg(config->infbase);
         target_num_rows = target->max_index();
 
-        auto load_row_map = [&]() {
-            try {
-                row_map.load(*utils::open_ifstream(row_map_fname, on_disk || utils::with_mmap()));
-            } catch (const std::exception &e) {
-                logger->error("Cannot load row map from {}: {}", row_map_fname, e.what());
-                exit(1);
-            }
-        };
-
-        if (std::filesystem::exists(row_map_fname)) {
-            logger->trace("Loading row map from {}", row_map_fname);
-            load_row_map();
-            if (!check_row_map(*source, *target, row_map)) {
-                logger->error("Row map {} does not match graphs {} and {}. Delete it and run again",
-                              row_map_fname, config->remap_graph, config->infbase);
-                exit(1);
-            }
-        } else {
-            logger->trace("Matching rows of {} to {}...", config->remap_graph, config->infbase);
-            const std::string tmp_fname = row_map_fname + ".tmp";
-            sdsl::int_vector<> new_row_map;
-            try {
+        try {
+            if (std::filesystem::exists(row_map_fname)) {
+                logger->trace("Loading row map from {}", row_map_fname);
+                bool matches;
+                if (on_disk) {
+                    matches = check_row_map(*source, *target, row_map_fname);
+                } else {
+                    std::ifstream in(row_map_fname, std::ios::binary);
+                    row_map.load(in);
+                    matches = in.good() && check_row_map(*source, *target, row_map);
+                }
+                if (!matches) {
+                    throw std::runtime_error(fmt::format(
+                        "Row map {} does not match graphs {} and {}. Delete it and run again",
+                        row_map_fname, config->remap_graph, config->infbase));
+                }
+            } else {
+                logger->trace("Matching rows of {} to {}...", config->remap_graph, config->infbase);
+                const std::string tmp_fname = row_map_fname + ".tmp";
                 if (on_disk) {
                     auto tmp_dir = utils::create_temp_dir(config->tmp_dir, "rowmap");
                     try {
@@ -380,25 +377,19 @@ int transform_annotation(Config *config) {
                     }
                     utils::remove_temp_dir(tmp_dir);
                 } else {
-                    new_row_map = map_rows_to_graph(*source, *target, get_num_threads());
+                    row_map = map_rows_to_graph(*source, *target, get_num_threads());
                     std::ofstream out(tmp_fname, std::ios::binary);
-                    new_row_map.serialize(out);
+                    row_map.serialize(out);
                     out.close();
                     if (!out)
                         throw std::runtime_error("Cannot write row map to " + tmp_fname);
                 }
-            } catch (const std::exception &e) {
-                logger->error("{}", e.what());
-                exit(1);
+                std::filesystem::rename(tmp_fname, row_map_fname);
+                logger->trace("Row map saved to {} in {} sec", row_map_fname, timer.elapsed());
             }
-            std::filesystem::rename(tmp_fname, row_map_fname);
-            logger->trace("Row map saved to {} in {} sec", row_map_fname, timer.elapsed());
-
-            if (on_disk) {
-                load_row_map();
-            } else {
-                row_map = sdsl::packed_vector_view<>(std::move(new_row_map));
-            }
+        } catch (const std::exception &e) {
+            logger->error("{}", e.what());
+            exit(1);
         }
         target.reset();
 
@@ -411,14 +402,17 @@ int transform_annotation(Config *config) {
 
         std::unique_ptr<MultiLabelAnnotation<std::string>> remapped;
         try {
-            remapped = remap_annotation_rows(*annotation, *source, row_map,
-                                             target_num_rows, get_num_threads());
+            remapped = on_disk
+                ? remap_annotation_rows(*annotation, *source, row_map_fname,
+                                        target_num_rows, get_num_threads())
+                : remap_annotation_rows(*annotation, *source, row_map,
+                                        target_num_rows, get_num_threads());
         } catch (const std::exception &e) {
             logger->error("{}", e.what());
             exit(1);
         }
         annotation.reset();
-        row_map = sdsl::packed_vector_view<>();
+        row_map = sdsl::int_vector<>();
         source.reset();
 
         if (!convert) {

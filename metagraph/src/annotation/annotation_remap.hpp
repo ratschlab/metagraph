@@ -6,7 +6,6 @@
 #include <string>
 
 #include <sdsl/int_vector.hpp>
-#include <sdsl/packed_vector_view.hpp>
 
 
 namespace mtg {
@@ -51,7 +50,15 @@ void map_rows_to_graph(const graph::DeBruijnGraph &source,
  */
 bool check_row_map(const graph::DeBruijnGraph &source,
                    const graph::DeBruijnGraph &target,
-                   const sdsl::packed_vector_view<> &row_map,
+                   const sdsl::int_vector<> &row_map,
+                   uint64_t num_samples = 10000);
+
+/**
+ * Same, but reads the row map from a file without holding it in memory.
+ */
+bool check_row_map(const graph::DeBruijnGraph &source,
+                   const graph::DeBruijnGraph &target,
+                   const std::string &row_map_filename,
                    uint64_t num_samples = 10000);
 
 /**
@@ -63,7 +70,17 @@ bool check_row_map(const graph::DeBruijnGraph &source,
 std::unique_ptr<MultiLabelAnnotation<std::string>>
 remap_annotation_rows(const MultiLabelAnnotation<std::string> &annotation,
                       const graph::DeBruijnGraph &source,
-                      const sdsl::packed_vector_view<> &row_map,
+                      const sdsl::int_vector<> &row_map,
+                      uint64_t target_num_rows,
+                      size_t num_threads = 1);
+
+/**
+ * Same, but reads the row map from a file without holding it in memory.
+ */
+std::unique_ptr<MultiLabelAnnotation<std::string>>
+remap_annotation_rows(const MultiLabelAnnotation<std::string> &annotation,
+                      const graph::DeBruijnGraph &source,
+                      const std::string &row_map_filename,
                       uint64_t target_num_rows,
                       size_t num_threads = 1);
 
