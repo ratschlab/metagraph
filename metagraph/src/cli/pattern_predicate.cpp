@@ -122,10 +122,11 @@ void Parser::names(const Json::Value &list, const std::string &path, Predicate::
         const char *end = nullptr;
         if (!name.getString(&begin, &end) || begin == end)
             throw invalid(item_path(path, i) + ": expected a non-empty string (a column label)");
-        // a JSON text is UTF-8, and jsoncpp passes the bytes of a string through: a name that
-        // is not valid UTF-8 is refused here, so that no column whose name the answer cannot
-        // carry (SPEC §8.9, unrepresentable_label_name) is ever named by a predicate, and so
-        // never selected
+        // a JSON text is UTF-8, and jsoncpp passes the bytes of a string through: a request's
+        // pre-scan (parse_strict_json) refuses a name that is not valid UTF-8 first, as not
+        // JSON. This check is a backstop behind it, for a value that did not come through
+        // the scan, so that no column whose name the answer cannot carry (SPEC §8.9,
+        // unrepresentable_label_name) is ever named by a predicate, and so never selected
         if (!utils::valid_utf8(std::string_view(begin, end - begin))) {
             throw invalid(item_path(path, i) + ": a column label must be valid UTF-8 (JSON "
                           "text is UTF-8; no column of an index can be named by other bytes)");

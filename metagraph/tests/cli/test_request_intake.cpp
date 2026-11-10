@@ -612,6 +612,79 @@ TEST(ServerRequestIntake, AnUnpairedSurrogateEscapeIsRefused) {
     }
 }
 
+// A backslash that begins no JSON escape (jsoncpp reads \" \\ \/ \b \f \n \r \t and \u with four
+// hex digits, nothing else) ends the pre-scan: jsoncpp refuses the text at that escape, in its own
+// words, so that neither a byte the escape was meant to take (a backslash before a UTF-8
+// character was "invalid UTF-8" at its continuation byte) nor a later fault (a short \u before an
+// unpaired surrogate escape) is named instead (train 3 review R1, N1). Past every valid escape
+// the scan goes on
+TEST(ServerRequestIntake, ABackslashThatBeginsNoEscapeEndsTheScan) {
+    auto refusal = [](const std::string &text, uint64_t max_values = 0) {
+        return refusal_of([&] {
+            parse_strict_json<RefuseRequest>(text, "Bad json received: ", max_values);
+        });
+    };
+    auto names = [](const std::string &refused, const std::string &fault) {
+        return refused.find("Bad json received: ") == 0 && refused.find(fault) != std::string::npos;
+    };
+    const std::string bad_escape = "Bad escape sequence in string";
+    const std::string bad_unicode = "Bad unicode escape sequence in string";
+    // a backslash before a 2-, 3- or 4-byte character, before a byte that begins none, before a
+    // letter, a digit, a space or a control character
+    for (const std::string &after : { std::string("\xc3\xa9"), std::string("\xe2\x82\xac"),
+                                      std::string("\xf0\x9f\x98\x80"), std::string("\xff"),
+                                      std::string("q"), std::string("0"), std::string(" "),
+                                      std::string("\x01") }) {
+        for (const std::string &body : { "[\"\\" + after + "\"]", "{\"\\" + after + "\": 0}" }) {
+            const std::string refused = refusal(body);
+            EXPECT_TRUE(names(refused, bad_escape)) << refused;
+            EXPECT_EQ(std::string::npos, refused.find("invalid UTF-8")) << refused;
+            EXPECT_EQ(std::string::npos, refused.find("control character")) << refused;
+        }
+    }
+    // a \u without four hex digits: jsoncpp's text, not that of a fault after it
+    for (const std::string &later : { std::string("\\udc00"), std::string("\\ud800"),
+                                      std::string("\xff"), std::string("\x01") }) {
+        const std::string refused = refusal("[\"\\u12" + later + "\"]");
+        EXPECT_TRUE(names(refused, bad_unicode)) << refused;
+        EXPECT_EQ(std::string::npos, refused.find("surrogate escape (")) << refused;
+        EXPECT_EQ(std::string::npos, refused.find("invalid UTF-8")) << refused;
+        EXPECT_EQ(std::string::npos, refused.find("control character")) << refused;
+    }
+    // a bad escape before a later fault of the scan's: the escape's (an unpaired surrogate
+    // escape, a comment, the value past the count)
+    EXPECT_TRUE(names(refusal("[\"\\q\", \"\\udc00\"]"), bad_escape));
+    const std::string comment = refusal("[\"\\q\"] /");
+    EXPECT_TRUE(names(comment, bad_escape)) << comment;
+    EXPECT_EQ(std::string::npos, comment.find("a comment")) << comment;
+    EXPECT_TRUE(names(refusal("[\"\\q\", 0, 0, 0]", 2), bad_escape));
+    // a fault before the bad escape is still named first
+    EXPECT_EQ("Bad json received: invalid UTF-8 (byte 0xff) inside a string at byte 2: RFC 8259 "
+              "requires UTF-8", refusal("[\"\xff\\q\"]"));
+    EXPECT_EQ("Bad json received: a comment (or a '/' outside a string) at byte 1",
+              refusal("[/\"\\q\"]"));
+    EXPECT_FALSE(fits("[0, 0, \"\\q\"]", 2));
+    // past every valid escape the scan goes on: a fault after one is the scan's, at its offset
+    for (const std::string &escape : { std::string("\\\""), std::string("\\\\"),
+                                       std::string("\\/"), std::string("\\b"),
+                                       std::string("\\f"), std::string("\\n"),
+                                       std::string("\\r"), std::string("\\t"),
+                                       std::string("\\u0041"), std::string("\\ud83d\\ude00") }) {
+        EXPECT_EQ("Bad json received: invalid UTF-8 (byte 0xff) inside a string at byte "
+                  + std::to_string(2 + escape.size()) + ": RFC 8259 requires UTF-8",
+                  refusal("[\"" + escape + "\xff\"]")) << escape;
+    }
+    // /pattern's prefix: its invalid_request
+    try {
+        parse_strict_json<RefuseRequest>(std::string("{\"a\": \"\\\xc3\xa9\"}"),
+                                         "request: not JSON: ");
+        FAIL();
+    } catch (const InvalidRequest &e) {
+        EXPECT_EQ(0u, std::string(e.what()).find("request: not JSON: "));
+        EXPECT_NE(std::string::npos, std::string(e.what()).find(bad_escape));
+    }
+}
+
 // An error text quotes a client's string whole up to 1 KiB, else its first 1 KiB (never inside
 // a UTF-8 sequence), "..." and its size
 TEST(ServerRequestIntake, QuotedClientStringsAreClipped) {

@@ -3371,6 +3371,20 @@ class TestTraverseAPI(TestTraverseBase):
                 self.assertEqual(400, ret.status_code, ret.text[:500])
                 self.assertEqual("Label not found in the annotation: '%s'" % name,
                                  ret.json()['error'])
+        # a backslash that begins no JSON escape ends the scan (train 3 review R1, N1): the reader
+        # names the escape, not the continuation byte the escape took nor a fault after it
+        for route, head, tail, prefix in routes:
+            for bad, fault in ((b'\\\xc3\xa9', 'Bad escape sequence in string'),
+                               (b'\\\xf0\x9f\x98\x80', 'Bad escape sequence in string'),
+                               (b'\\u12\\udc00', 'Bad unicode escape sequence in string: '
+                                                 'hexadecimal digit expected.')):
+                ret = requests.post(f'{url}/{route}', data=head + bad + tail)
+                self.assertEqual(400, ret.status_code, (route, bad))
+                error = ret.json()['error']
+                self.assertTrue(error.startswith(prefix), (route, bad, error))
+                self.assertIn(fault, error, (route, bad))
+                self.assertNotIn('invalid UTF-8', error, (route, bad))
+                self.assertNotIn('surrogate escape (', error, (route, bad))
 
     def test_api_traverse_count_caps(self):
         """/traverse's counts, checked before anything of the request is copied (H1; SPEC

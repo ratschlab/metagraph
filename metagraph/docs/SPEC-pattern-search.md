@@ -383,7 +383,9 @@ refused 413 `body_too_large` before any of it, by the HTTP layer, before the bod
    string, invalid UTF-8 or an unpaired surrogate escape inside a string, a trailing comma, anything after the
    value, a duplicated member name, nesting deeper than 1,000): 400 `invalid_request` (the pre-scan refuses the
    first of a comment, a control character, invalid UTF-8, an unpaired surrogate escape and the value past the
-   count that it meets; a text that is no JSON and holds too many values may get either);
+   count that it meets, and ends at a backslash that begins no JSON escape, which jsoncpp then names in its
+   own words, SPEC-labeled-traversal-core.md §5; a text that is no JSON and holds too many values may get
+   either);
 4. the graph (`PatternSearch::support`): 400 with the graph's reason (`mask_invalid`, `alphabet_untested`,
    `representation_unsupported`, …, §6), whatever the body asks; a graph without its mask passes (§7.4);
 5. the body is not an object: 400 `invalid_request`;
