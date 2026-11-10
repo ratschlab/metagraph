@@ -137,9 +137,11 @@ struct AttemptSettings {
     // tombstone: such a cancel is refused, 429; no finished attempt is held)
     uint64_t retention_s = 3600;
     size_t retention_count = 10'000;
-    // the longest a tombstone is held to cover a not_after_ms (+ clock_skew_ms) named by a
-    // cancel or by a refused copy of the request, and a finished attempt's id from its finish
-    // (s; never less than retention_s)
+    // the longest a finished attempt's id is held past its retention to cover the not_after_ms
+    // (+ clock_skew_ms) it was sent with or a refused copy of the request names, from its finish
+    // or its latest refused copy (s; applied as max(it, retention_s): tombstone_cap_ms). A
+    // tombstone reaches it only through min(max(it, retention_s), tombstone_hold_s), below
+    // (tombstone_hold_cap_ms)
     uint64_t tombstone_max_s = 86'400;
     // the longest a tombstone (the cancel of an id this server does not know) is held from its
     // latest cancel or refused copy (s; H3, review 5 #14): at least min(retention_s, it), and to

@@ -213,9 +213,9 @@ class Config {
     // The longest a finished attempt's id is held past its retention to cover the not_after_ms
     // it was sent with (or a refused copy of the request names), plus the clock skew allowance,
     // from its finish or its latest refused copy (s; applied as max(it, retention_s)). A
-    // tombstone (a cancel of an unknown id) reaches it only through min(it, tombstone_hold_s),
-    // below: since H3 tombstone_hold_s bounds what a cancel holds, and a tombstone is held at
-    // least min(retention_s, tombstone_hold_s)
+    // tombstone (a cancel of an unknown id) reaches it only through
+    // min(max(it, retention_s), tombstone_hold_s), below: since H3 tombstone_hold_s bounds what
+    // a cancel holds, and a tombstone is held at least min(retention_s, tombstone_hold_s)
     uint64_t traverse_attempt_tombstone_max_s = 86'400;
     // The longest a tombstone (the cancel of an id this server does not know) is held, from
     // its latest cancel or refused copy (s, at least 1; H3, review 5 #14): it is held at least
