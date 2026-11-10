@@ -75,14 +75,17 @@ def run_test_parallel(test_info, filter_pattern="*"):
     duration = time.time() - start_time
     output_text = output_stream.getvalue()
 
-    # Handle expected failures
-    has_expected_failures = "expected failures=" in output_text and "OK" in output_text
-    success = result.wasSuccessful() or has_expected_failures
+    # unittest's own verdict: expected failures pass, failures, errors and unexpected successes
+    # fail. (The output holds "OK" on every passing test's line, so a test of the text for
+    # "expected failures=" and "OK" passed every chunk that had an expected failure, whatever
+    # else failed in it.)
+    success = result.wasSuccessful()
 
     # Per-test IDs so the final summary can enumerate them; the TestCase
     # objects themselves don't round-trip through ProcessPoolExecutor pickle.
     failed_ids = [str(t) for t, _ in result.failures]
     error_ids = [str(t) for t, _ in result.errors]
+    unexpected_ids = [str(t) for t in result.unexpectedSuccesses]
 
     return {
         'test': test_name,
@@ -92,6 +95,7 @@ def run_test_parallel(test_info, filter_pattern="*"):
         'output': output_text,
         'failed_ids': failed_ids,
         'error_ids': error_ids,
+        'unexpected_ids': unexpected_ids,
     }
 
 def run_tests_parallel(max_workers, test_files, filter_pattern="*", chunk_size = 20):
@@ -190,6 +194,7 @@ def run_tests_parallel(max_workers, test_files, filter_pattern="*", chunk_size =
         # Colours match helpers.TimeLoggingTestResult (the per-chunk format).
         failed_ids = [tid for r in results for tid in r.get('failed_ids', [])]
         error_ids = [tid for r in results for tid in r.get('error_ids', [])]
+        unexpected_ids = [tid for r in results for tid in r.get('unexpected_ids', [])]
         if failed_ids:
             print("\033[0;31;40m[  FAILED  ]\033[0m {} test(s), listed below:".format(len(failed_ids)))
             for tid in failed_ids:
@@ -198,12 +203,17 @@ def run_tests_parallel(max_workers, test_files, filter_pattern="*", chunk_size =
             print("\033[0;31;40m[  ERRORS  ]\033[0m {} test(s), listed below:".format(len(error_ids)))
             for tid in error_ids:
                 print("\033[0;31;40m[  ERRORS  ]\033[0m {}".format(tid))
+        if unexpected_ids:
+            print("\033[0;31;40m[  FAILED  ]\033[0m {} unexpected success(es), listed below:".format(
+                len(unexpected_ids)))
+            for tid in unexpected_ids:
+                print("\033[0;31;40m[  FAILED  ]\033[0m {} (unexpected success)".format(tid))
         # Chunks that failed without any per-test failure/error — e.g. the
         # worker itself threw. Reported with the same [  FAILED  ] banner for
         # consistency with gtest's end-of-run format; the chunk label makes
         # clear it's a worker-level failure rather than a single test.
-        crashed = [r for r in results if not r['success']
-                   and not r.get('failed_ids') and not r.get('error_ids')]
+        crashed = [r for r in results if not r['success'] and not r.get('failed_ids')
+                   and not r.get('error_ids') and not r.get('unexpected_ids')]
         if crashed:
             print("\033[0;31;40m[  FAILED  ]\033[0m {} chunk(s) crashed, listed below:".format(len(crashed)))
             for r in crashed:
