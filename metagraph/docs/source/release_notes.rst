@@ -4,6 +4,13 @@ Release notes
 Unreleased
 ----------
 
+Annotations now load correctly with any build. Earlier versions saved the hash
+table of label names as the writing build made it, and that hash differs between
+C++ standard libraries (for example, libstdc++ on Linux and libc++ on macOS).
+Label lookups then failed when a build with another standard library loaded the
+annotation. This version rebuilds the table on load, which takes about 0.1
+seconds per million labels. The file format is unchanged.
+
 The HTTP ``/align`` endpoint now rejects invalid ``max_alternative_alignments``
 values with status 400. Use a positive integer. Zero previously selected one
 alignment; negative values could become very large unsigned counts.

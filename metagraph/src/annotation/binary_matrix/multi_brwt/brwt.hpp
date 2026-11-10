@@ -98,6 +98,21 @@ class BRWT : public BinaryMatrix, public GetEntrySupport {
                      ThreadPool *thread_pool = nullptr,
                      bool adaptive_chunk_size = true) const;
 
+  public:
+    /**
+     * Return a copy of this matrix with its rows moved to new positions.
+     * Row i moves to row new_row[i] - 1, or is dropped if new_row[i] == 0.
+     * The mapping must be injective on the rows it keeps, and new_row must
+     * have num_rows() entries, accessed in increasing order at the root.
+     * The tree topology and column assignments are preserved.
+     * RowMap is instantiated in brwt.cpp for sdsl::int_vector<> (const or not)
+     * and sdsl::int_vector_buffer<>.
+     */
+    template <class RowMap>
+    std::unique_ptr<BRWT> remap_rows(RowMap &new_row, uint64_t num_new_rows,
+                                     size_t num_threads = 1) const;
+
+  private:
     // assigns columns to the child nodes
     RangePartition assignments_;
     std::unique_ptr<bit_vector> nonzero_rows_;

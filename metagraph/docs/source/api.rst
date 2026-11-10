@@ -251,8 +251,9 @@ In-process queries with pymetagraph
 .. attention:: pymetagraph is experimental. Its interface may still change.
 
 ``pymetagraph`` loads an annotated index into the Python process and runs the same label query as
-``metagraph query``, without a ``metagraph server_query`` process. It is built from source together
-with MetaGraph.
+``metagraph query``, without a ``metagraph server_query`` process. It also aligns sequences as
+``metagraph align`` does and maps them to labels as ``metagraph align --align-map-only`` does. It is
+built from source together with MetaGraph.
 
 Install it from a clone with initialized submodules::
 
@@ -290,6 +291,21 @@ pymetagraph               ``metagraph query``                default
 ========================  =================================  =========
 
 For indexes with coordinates and a ``.seqs`` file, labels are mapped to sequence headers, as in
-``metagraph query``. Only this label query is available: strand options (``--fwd-and-reverse``),
-alignment (``--align``), and the ``labels``, ``counts-sum``, ``signature``, ``counts`` and ``coords``
-query modes are not exposed. Use the command line tool or the server API above for those.
+``metagraph query``. Strand options (``--fwd-and-reverse``), query with alignment
+(``metagraph query --align``), and the ``labels``, ``counts-sum``, ``signature``, ``counts`` and
+``coords`` query modes are not exposed. Use the command line tool or the server API above for those.
+
+Alignment and seed-only label mapping::
+
+    graph.align(["ACGT...", "TTGA..."], min_exact_match=0.3)
+    # one list of GraphAlignment (labels, score, max_score, cigar, orientation,
+    # query_begin, query_end) per sequence, best first
+    graph.align(["ACGT..."], labeled=False)   # no labels, as the server's /align
+    graph.map(["ACGT...", "TTGA..."])
+    # one LabelMapping (labels, num_matches, orientation, query_begin, query_end) or None
+    # per sequence
+
+``align`` takes the options of the server's ``/align`` (``min_exact_match``,
+``max_alternative_alignments``, ``max_num_nodes_per_seq_char``), and ``map`` takes
+``min_exact_match``. Both also take ``min_seed_length`` (``--align-min-seed-length``). Options left
+unset keep the defaults of ``metagraph align``.

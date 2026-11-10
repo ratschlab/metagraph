@@ -88,7 +88,7 @@ class bitmap_vector : public bitmap_dyn {
     explicit bitmap_vector(uint64_t size = 0, bool value = 0);
 
     explicit bitmap_vector(const sdsl::bit_vector &vector);
-    bitmap_vector(sdsl::bit_vector&& vector) noexcept;
+    bitmap_vector(sdsl::bit_vector&& vector);
     bitmap_vector(std::initializer_list<bool> bitmap);
 
     void set(uint64_t id, bool val) override;
@@ -120,7 +120,7 @@ class bitmap_adaptive : public bitmap_dyn {
     explicit bitmap_adaptive(uint64_t size = 0, bool value = 0);
 
     explicit bitmap_adaptive(const sdsl::bit_vector &vector);
-    bitmap_adaptive(sdsl::bit_vector&& vector) noexcept;
+    bitmap_adaptive(sdsl::bit_vector&& vector);
     bitmap_adaptive(std::initializer_list<bool> bitmap);
 
     bitmap_adaptive(uint64_t size, const std::set<uint64_t> &bits);

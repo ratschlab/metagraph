@@ -35,7 +35,7 @@ Vector bit_vector::convert_to() {
         sdsl::bit_vector bv;
         if (auto *bv_stat = dynamic_cast<bit_vector_stat*>(this)) {
             // stat -> anything else
-            bv = std::move(bv_stat->vector_);
+            bv = bv_stat->take_owned();
         } else {
             // anything -> anything (slower: with full reconstruction)
             bv = to_vector();
@@ -91,7 +91,7 @@ Vector bit_vector::copy_to() const {
         sdsl::bit_vector bv;
         if (auto *bv_stat = dynamic_cast<const bit_vector_stat*>(this)) {
             // copy stat -> anything else
-            bv = bv_stat->vector_;
+            bv = bv_stat->to_vector();
         } else {
             // anything -> anything (slower: with full reconstruction)
             bv = to_vector();

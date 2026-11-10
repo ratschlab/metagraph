@@ -519,7 +519,7 @@ TYPED_TEST(BitVectorTest, LoadWithMMAP) {
 
         vector.reset(new TypeParam());
         ASSERT_TRUE(vector);
-        sdsl::mmap_ifstream instream(test_dump_basename, std::ios::binary);
+        sdsl::shared_mapper_ifstream instream(test_dump_basename, std::ios::binary);
         ASSERT_TRUE(vector->load(instream));
         vector.reset(new TypeParam());
         ASSERT_TRUE(vector->load(instream));
@@ -1064,6 +1064,184 @@ TYPED_TEST(BitVectorTest, operator_neq) {
             EXPECT_NE(bit_vector, bit_vector_smart(size, value));
         }
     }
+}
+
+
+template <uint16_t BlockSize>
+void check_rrr_storage_roundtrip() {
+    using Owned = sdsl::rrr_vector<BlockSize>;
+    using View = sdsl::rrr_vector<BlockSize, sdsl::packed_vector_view<0>, 32,
+                                  sdsl::packed_vector_view>;
+    for (uint64_t size : {0, 1, 15, 63, 64, 65, 2048, 10003}) {
+        sdsl::bit_vector bits(size, 0);
+        for (uint64_t i = 0; i < size; ++i)
+            bits[i] = i % 101 < 43;
+        Owned owned(bits);
+        View constructed(bits);
+        std::ostringstream expected, actual;
+        owned.serialize(expected);
+        constructed.serialize(actual);
+        ASSERT_EQ(expected.str(), actual.str());
+        auto retained = constructed;
+        constructed = View();
+        typename View::rank_1_type retained_rank(&retained);
+        typename View::select_1_type retained_select(&retained);
+        uint64_t retained_ones = 0;
+        for (uint64_t i = 0; i < size; ++i) {
+            ASSERT_EQ(bits[i], retained[i]);
+            ASSERT_EQ(retained_ones, retained_rank(i));
+            if (bits[i]) {
+                ASSERT_EQ(i, retained_select(++retained_ones));
+            }
+        }
+        ASSERT_EQ(retained_ones, retained_rank(size));
+        for (unsigned offset = 0; offset < 8; ++offset) {
+            const auto filename = test_dump_basename + "_rrr_storage";
+            {
+                std::ofstream out(filename, std::ios::binary);
+                out << std::string(offset, 'x') << expected.str();
+            }
+            View loaded;
+            {
+                sdsl::shared_mapper_ifstream in(filename);
+                in.seekg(offset);
+                loaded.load(static_cast<std::istream &>(in));
+            }
+            auto alias = loaded;
+            View moved(std::move(loaded));
+            typename View::rank_1_type rank(&moved);
+            typename View::select_1_type select(&alias);
+            uint64_t ones = 0;
+            for (uint64_t i = 0; i < size; ++i) {
+                ASSERT_EQ(bits[i], moved[i]);
+                ASSERT_EQ(ones, rank(i));
+                if (bits[i]) {
+                    ASSERT_EQ(i, select(++ones));
+                }
+            }
+            ASSERT_EQ(ones, rank(size));
+            std::stringstream serialized;
+            moved.serialize(serialized);
+            ASSERT_EQ(expected.str(), serialized.str());
+            Owned restored;
+            restored.load(static_cast<std::istream &>(serialized));
+            ASSERT_EQ(owned, restored);
+        }
+    }
+}
+
+TEST(RRRStorage, MappedAndOwnedUseTheSameFormat) {
+    check_rrr_storage_roundtrip<3>();
+    check_rrr_storage_roundtrip<15>();
+    check_rrr_storage_roundtrip<63>();
+    check_rrr_storage_roundtrip<127>();
+    check_rrr_storage_roundtrip<255>();
+}
+
+TEST(SDStorage, MappedOwnedCompatibility) {
+    using View = detail::sd_storage;
+    for (uint64_t size : {0, 1, 63, 64, 65, 8192, 100003}) {
+        for (unsigned pattern = 0; pattern < 4; ++pattern) {
+            std::vector<uint64_t> positions;
+            for (uint64_t i = 0; i < size; ++i) {
+                if (pattern == 1 || (pattern == 2 && i % 17 < 3)
+                    || (pattern == 3 && i % 509 == 0))
+                    positions.push_back(i);
+            }
+            sdsl::sd_vector_builder old_builder(size, positions.size());
+            sdsl::sd_vector_builder new_builder(size, positions.size());
+            for (auto pos : positions) {
+                old_builder.set(pos);
+                new_builder.set(pos);
+            }
+            sdsl::sd_vector<> old(old_builder);
+            View built(new_builder);
+            std::ostringstream expected, actual;
+            old.serialize(expected);
+            built.serialize(actual);
+            ASSERT_EQ(expected.str(), actual.str());
+            auto retained = built;
+            built = View();
+            auto check = [&](const View &value) {
+                typename View::rank_1_type rank(&value);
+                typename View::select_1_type select(&value);
+                for (uint64_t i = 0; i < size; i += std::max<uint64_t>(1, size / 1024)) {
+                    ASSERT_EQ(std::binary_search(positions.begin(), positions.end(), i), value[i]);
+                    ASSERT_EQ(std::lower_bound(positions.begin(), positions.end(), i) - positions.begin(), rank(i));
+                }
+                ASSERT_EQ(positions.size(), rank(size));
+                for (size_t i = 0; i < positions.size(); ++i)
+                    ASSERT_EQ(positions[i], select(i + 1));
+            };
+            check(retained);
+            for (unsigned offset = 0; offset < 8; ++offset) {
+                const auto filename = test_dump_basename + "_sd_storage";
+                {
+                    std::ofstream out(filename, std::ios::binary);
+                    out << std::string(offset, 'x') << expected.str();
+                }
+                View loaded;
+                {
+                    sdsl::shared_mapper_ifstream in(filename);
+                    in.seekg(offset);
+                    loaded.load(static_cast<std::istream &>(in));
+                }
+                auto copy = loaded;
+                loaded = View();
+                check(copy);
+                std::stringstream serialized;
+                copy.serialize(serialized);
+                ASSERT_EQ(expected.str(), serialized.str());
+                sdsl::sd_vector<> restored;
+                restored.load(static_cast<std::istream &>(serialized));
+                ASSERT_EQ(old, restored);
+            }
+        }
+    }
+}
+
+TEST(SDStorage, LongSelectBlocks) {
+    using View = detail::sd_storage;
+    const uint64_t size = 1ULL << 44;
+    sdsl::sd_vector_builder a(size, 500000), b(size, 500000);
+    for (uint64_t i = 0; i < 250000; ++i) { a.set(i); b.set(i); }
+    for (uint64_t i = size - 250000; i < size; ++i) { a.set(i); b.set(i); }
+    sdsl::sd_vector<> expected(a);
+    View actual(b);
+    auto has_long_blocks = [](const auto &support) {
+        std::stringstream stream;
+        support.serialize(stream);
+        uint64_t count;
+        stream.read(reinterpret_cast<char *>(&count), sizeof(count));
+        sdsl::int_vector<> superblocks;
+        sdsl::bit_vector flags;
+        superblocks.load(static_cast<std::istream &>(stream));
+        flags.load(static_cast<std::istream &>(stream));
+        return flags.size() && sdsl::util::cnt_one_bits(flags) < flags.size();
+    };
+    ASSERT_TRUE(has_long_blocks(expected.high_1_select));
+    ASSERT_TRUE(has_long_blocks(expected.high_0_select));
+    const auto filename = test_dump_basename + "_sd_long_blocks";
+    {
+        std::ofstream out(filename, std::ios::binary);
+        expected.serialize(out);
+    }
+    {
+        sdsl::shared_mapper_ifstream in(filename);
+        actual.load(static_cast<std::istream &>(in));
+    }
+    typename View::select_1_type select1(&actual);
+    typename View::select_0_type select0(&actual);
+    sdsl::sd_vector<>::select_1_type old1(&expected);
+    sdsl::sd_vector<>::select_0_type old0(&expected);
+    for (uint64_t i = 1; i <= 500000; i += 127)
+        ASSERT_EQ(old1(i), select1(i));
+    for (uint64_t i = 1; i <= size - 500000; i += (size - 500000) / 4096)
+        ASSERT_EQ(old0(i), select0(i));
+    std::ostringstream old_bytes, new_bytes;
+    expected.serialize(old_bytes);
+    actual.serialize(new_bytes);
+    ASSERT_EQ(old_bytes.str(), new_bytes.str());
 }
 
 } // namespace

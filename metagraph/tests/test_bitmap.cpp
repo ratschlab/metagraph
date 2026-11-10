@@ -1018,4 +1018,233 @@ TEST(sdsl_bit_vector, count_ones_every_third_zero) {
     }
 }
 
+TEST(BitmapVector, MoveKeepsOwnedStorage) {
+    sdsl::bit_vector bits(1024, 0);
+    const auto *data = bits.data();
+    bitmap_vector editable(std::move(bits));
+    EXPECT_EQ(data, editable.data().data());
+    editable.set(17, true);
+    EXPECT_TRUE(editable[17]);
+}
+
+TEST(BitmapVector, MoveLoadedFromMappedStreamIsWritable) {
+    const auto filename = test_dump_basename + "_mapped_move";
+    sdsl::bit_vector original(1024, 0);
+    original[7] = true;
+    {
+        std::ofstream out(filename, std::ios::binary);
+        original.serialize(out);
+    }
+    for (bool adaptive : { false, true }) {
+        // An owned vector copies its payload even from a mapped stream.
+        sdsl::shared_mapper_ifstream in(filename, std::ios::binary);
+        sdsl::bit_vector mapped;
+        mapped.load(in);
+        // Keep a mapped view alive to check that edits do not reach the file.
+        sdsl::shared_mapper_ifstream check_in(filename, std::ios::binary);
+        sdsl::packed_vector_view<1> view;
+        view.load(check_in);
+        // The view refers to the mapping, after the 8-byte size header.
+        ASSERT_EQ(reinterpret_cast<const std::byte *>(check_in.mapper()->data()) + 8,
+                  view.bytes().data());
+        std::unique_ptr<bitmap_dyn> editable;
+        if (adaptive)
+            editable = std::make_unique<bitmap_adaptive>(std::move(mapped));
+        else
+            editable = std::make_unique<bitmap_vector>(std::move(mapped));
+        editable->set(7, false);
+        editable->set(17, true);
+        bitmap_vector added(1024, false);
+        added.set(31, true);
+        *editable |= added;
+        EXPECT_FALSE((*editable)[7]);
+        EXPECT_TRUE((*editable)[17]);
+        EXPECT_TRUE((*editable)[31]);
+        EXPECT_EQ(2u, editable->num_set_bits());
+        EXPECT_EQ(original, view.to_owned());
+    }
+    std::ifstream in(filename, std::ios::binary);
+    sdsl::bit_vector restored;
+    restored.load(in);
+    EXPECT_EQ(original, restored);
+}
+
+TEST(BitmapVector, SharedMappedViewOwnsMutationSeparately) {
+    for (size_t offset = 0; offset < 8; ++offset) {
+        const auto filename = test_dump_basename + "_shared_view";
+        sdsl::bit_vector expected(4096, 0);
+        expected[7] = 1;
+        bit_vector_stat original(expected);
+        {
+            std::ofstream out(filename, std::ios::binary);
+            out << std::string(offset, 'x');
+            original.serialize(out);
+        }
+        bit_vector_stat view;
+        {
+            sdsl::shared_mapper_ifstream in(filename);
+            in.seekg(offset);
+            ASSERT_TRUE(view.load(in));
+        }
+        bit_vector_stat alias(view);
+        reference_based_test(alias, expected);
+        bit_vector_stat moved(std::move(alias));
+        reference_based_test(moved, expected);
+        alias = moved;
+        reference_based_test(alias, expected);
+        // Immutable copies share storage, while mutable conversion has its own buffer.
+        EXPECT_EQ(view.data().data(), alias.data().data());
+        auto owned = view.convert_to<sdsl::bit_vector>();
+        ASSERT_NE(static_cast<const void *>(owned.data()),
+                  static_cast<const void *>(alias.data().bytes().data()));
+        owned[7] = 0;
+        owned[17] = 1;
+        EXPECT_TRUE(alias[7]);
+        EXPECT_FALSE(alias[17]);
+        EXPECT_EQ(1u, alias.rank1(4095));
+        EXPECT_EQ(7u, alias.select1(1));
+        owned.resize(8192);
+        EXPECT_TRUE(owned[17]);
+        sdsl::shared_mapper_ifstream in(filename);
+        bit_vector_stat restored;
+        in.seekg(offset);
+        ASSERT_TRUE(restored.load(in));
+        EXPECT_EQ(expected, restored.to_vector());
+    }
+}
+
+
+TEST(BitmapVector, SharedMappedDenseUnionBoundaries) {
+    const auto filename = test_dump_basename + "_mapped_union";
+    for (uint64_t size : {0, 1, 63, 64, 65, 257, 4097}) {
+        sdsl::bit_vector source_bits(size, 0), target_bits(size, 0);
+        for (uint64_t i = 0; i < size; ++i) {
+            source_bits[i] = i % 3 == 0;
+            target_bits[i] = i % 5 == 0;
+        }
+        if (size) {
+            source_bits[size - 1] = 1;
+            target_bits[size - 1] = 0;
+        }
+        auto expected = target_bits;
+        expected |= source_bits;
+        for (size_t offset = 0; offset < 8; ++offset) {
+            {
+                std::ofstream out(filename, std::ios::binary);
+                out << std::string(offset, 'x');
+                bit_vector_stat(source_bits).serialize(out);
+            }
+            auto file_bytes = [&] {
+                std::ifstream in(filename, std::ios::binary);
+                return std::string(std::istreambuf_iterator<char>(in), {});
+            };
+            const auto before = file_bytes();
+            bit_vector_stat source;
+            {
+                sdsl::shared_mapper_ifstream in(filename);
+                in.seekg(offset);
+                ASSERT_TRUE(source.load(in));
+            }
+            auto target = target_bits;
+            source.add_to(&target);
+            EXPECT_EQ(expected, target);
+            bitmap_vector accumulator(target_bits);
+            accumulator |= source;
+            accumulator |= source;
+            reference_based_test(accumulator, expected);
+            EXPECT_EQ(source_bits, source.to_vector());
+            EXPECT_EQ(before, file_bytes());
+        }
+    }
+}
+
+
+TEST(BitmapVector, SharedOwnedViewDetachesOnlyWhenAliased) {
+    using sdsl::packed_vector_view;
+    sdsl::bit_vector source(65, 0);
+    source[64] = 1;
+    const auto *allocation = source.data();
+    packed_vector_view<1> unique(std::move(source));
+    auto moved = std::move(unique).into_owned();
+    EXPECT_EQ(allocation, moved.data());
+    packed_vector_view<1> view(std::move(moved));
+    auto alias = view;
+    auto detached = std::move(view).into_owned();
+    EXPECT_NE(allocation, detached.data());
+    detached[64] = 0;
+    EXPECT_EQ(1u, alias[64]);
+    detached.resize(129);
+    EXPECT_EQ(65u, alias.size());
+    EXPECT_EQ(1u, alias[64]);
+}
+
+TEST(BitmapVector, SharedViewSequentialLoadAndFailedLoad) {
+    using sdsl::packed_vector_view;
+    const auto filename = test_dump_basename + "_sequential_views";
+    const auto bad_file = test_dump_basename + "_truncated_view";
+    for (size_t offset = 0; offset < 8; ++offset) {
+        sdsl::bit_vector a(65, 0), b(257, 1);
+        a[64] = 1;
+        {
+            std::ofstream out(filename, std::ios::binary);
+            out << std::string(offset, 'x');
+            a.serialize(out);
+            b.serialize(out);
+            out.put('!');
+        }
+        packed_vector_view<1> first, second;
+        {
+            sdsl::shared_mapper_ifstream in(filename);
+            in.seekg(offset);
+            first.load(in);
+            second.load(in);
+            EXPECT_EQ('!', in.get());
+        }
+        EXPECT_EQ(a, first.to_owned());
+        EXPECT_EQ(b, second.to_owned());
+        auto alias = first;
+        auto moved = std::move(alias);
+        EXPECT_EQ(a, moved.to_owned());
+        EXPECT_EQ(0u, alias.size());
+        {
+            std::ofstream out(bad_file, std::ios::binary);
+            const uint64_t size = 4096;
+            out.write(reinterpret_cast<const char *>(&size), sizeof(size));
+        }
+        sdsl::shared_mapper_ifstream bad(bad_file);
+        EXPECT_THROW(first.load(bad), std::exception);
+        EXPECT_EQ(a, first.to_owned());
+        std::stringstream owned;
+        a.serialize(owned);
+        b.serialize(owned);
+        first.load(owned);
+        second.load(owned);
+        EXPECT_EQ(a, first.to_owned());
+        const void *allocation = first.bytes().data();
+        auto editable = std::move(first).into_owned();
+        EXPECT_EQ(allocation, static_cast<const void *>(editable.data()));
+        EXPECT_EQ(a, editable);
+        EXPECT_TRUE(first.empty());
+        EXPECT_EQ(b, second.to_owned());
+        EXPECT_EQ(a, moved.to_owned());
+    }
+}
+
+
+TEST(BitmapVector, SharedMappedColumnRejectsTruncatedSupport) {
+    const auto filename = test_dump_basename + "_truncated_column";
+    bit_vector_stat original(4096, true);
+    std::stringstream serialized;
+    original.serialize(serialized);
+    const auto bytes = serialized.str();
+    for (size_t length : {size_t(7), bytes.size() / 2, bytes.size() - 1}) {
+        std::ofstream out(filename, std::ios::binary);
+        out.write(bytes.data(), length);
+        out.close();
+        sdsl::shared_mapper_ifstream in(filename);
+        bit_vector_stat loaded;
+        EXPECT_FALSE(loaded.load(in));
+    }
+}
+
 } // namespace

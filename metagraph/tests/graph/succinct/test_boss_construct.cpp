@@ -25,7 +25,7 @@
 namespace mtg::graph::boss {
 
 struct BOSSConstructTestAccess {
-    static const sdsl::sd_vector<>& ranges(const BOSS &graph) {
+    static const auto& ranges(const BOSS &graph) {
         return graph.indexed_suffix_ranges_;
     }
     static uint64_t range(const BOSS &graph, uint64_t i) {
@@ -688,7 +688,7 @@ TEST(BOSSConstruct, SuffixRangesSingleKmer) {
 void reindex_ranges_and_compare(BOSS &constructed) {
     // save suffix ranges
     size_t suffix_length = constructed.get_indexed_suffix_length();
-    sdsl::sd_vector<> indexed_suffix_ranges = BOSSConstructTestAccess::ranges(constructed);
+    auto indexed_suffix_ranges = BOSSConstructTestAccess::ranges(constructed);
 
     const size_t num_ranges = utils::ipow(constructed.alph_size - 1, suffix_length);
     std::vector<uint64_t> onthefly_ranges(suffix_length ? 2 * num_ranges : 0);

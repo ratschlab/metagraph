@@ -530,12 +530,12 @@ class BOSS {
 
     size_t indexed_suffix_length_ = 0;
     // Range (begin[i], end[i]) is represented as (select[2i+1]-2i, select[2i+2]-2i-1)
-    // Use sdsl::sd_vector<> instead of bit_vector_sd to ensure it's not inverted
+    // Use mtg::detail::sd_storage instead of bit_vector_sd to ensure it's not inverted
     // even if dense, so the select queries are fast.
-    sdsl::sd_vector<> indexed_suffix_ranges_;
-    sdsl::sd_vector<>::rank_1_type indexed_suffix_ranges_rk1_;
-    sdsl::sd_vector<>::select_1_type indexed_suffix_ranges_slct1_;
-    sdsl::sd_vector<>::select_0_type indexed_suffix_ranges_slct0_;
+    mtg::detail::sd_storage indexed_suffix_ranges_;
+    mtg::detail::sd_storage::rank_1_type indexed_suffix_ranges_rk1_;
+    mtg::detail::sd_storage::select_1_type indexed_suffix_ranges_slct1_;
+    mtg::detail::sd_storage::select_0_type indexed_suffix_ranges_slct0_;
 
     inline uint64_t get_suffix_range(uint64_t i) const { return indexed_suffix_ranges_slct1_(i + 1) - i; }
 
@@ -629,7 +629,7 @@ class BOSS {
      * Make suffix ranges strictly increasing and build a compressed sd_vector, where
      * select queries can be used to recover the original range values via get_suffix_range().
      */
-    static sdsl::sd_vector<> build_suffix_ranges_sd(std::vector<edge_index>&& ranges,
+    static mtg::detail::sd_storage build_suffix_ranges_sd(std::vector<edge_index>&& ranges,
                                                     uint64_t num_edges);
 
   public:

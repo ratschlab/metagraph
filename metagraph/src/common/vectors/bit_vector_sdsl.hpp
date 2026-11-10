@@ -13,6 +13,7 @@
 #include "common/serialization.hpp"
 #include "vector_algorithm.hpp"
 #include "bit_vector.hpp"
+#include <sdsl/packed_vector_view.hpp>
 
 
 template <class bv_type, class rank_1_type, class select_1_type, class select_0_type>
@@ -21,11 +22,16 @@ class bit_vector_sdsl : public bit_vector {
 
     template <typename>
     struct is_rrr : std::false_type {};
-    template <uint16_t t_bs, class t_rac, uint16_t t_k>
-    struct is_rrr<sdsl::rrr_vector<t_bs, t_rac, t_k>> : std::true_type {};
+    template <uint16_t t_bs, class t_rac, uint16_t t_k, template <uint8_t> class Storage>
+    struct is_rrr<sdsl::rrr_vector<t_bs, t_rac, t_k, Storage>> : std::true_type {};
 
     template <typename>
     struct bv_traits;
+
+    // Plain bit vectors are read word by word.
+    // Compressed ones go through rank and select instead.
+    static constexpr bool is_packed_bits
+        = std::is_base_of_v<sdsl::packed_vector_view<1>, bv_type>;
 
   public:
     explicit bit_vector_sdsl(uint64_t size = 0, bool value = false)
@@ -87,6 +93,10 @@ class bit_vector_sdsl : public bit_vector {
     }
 
   private:
+    sdsl::bit_vector take_owned() {
+        if constexpr(is_packed_bits) return std::move(vector_).into_owned();
+        else return to_vector();
+    }
     bv_type vector_;
     rank_1_type rk1_;
     select_1_type slct1_;
@@ -186,7 +196,7 @@ bit_vector_sdsl<bv_type, rank_1_type, select_1_type, select_0_type>
 ::next1(uint64_t id) const {
     assert(id < size());
 
-    if constexpr(std::is_same_v<bv_type, sdsl::bit_vector>) {
+    if constexpr(is_packed_bits) {
         auto next = next_bit(vector_, id, bv_traits<bv_type>::MAX_ITER_BIT_VECTOR);
         if (next < vector_.size())
             return next;
@@ -207,7 +217,7 @@ bit_vector_sdsl<bv_type, rank_1_type, select_1_type, select_0_type>
 ::prev1(uint64_t id) const {
     assert(id < size());
 
-    if constexpr(std::is_same_v<bv_type, sdsl::bit_vector>) {
+    if constexpr(is_packed_bits) {
         auto prev = prev_bit(vector_, id, bv_traits<bv_type>::MAX_ITER_BIT_VECTOR);
         if (prev <= id)
             return prev;
@@ -247,7 +257,7 @@ bit_vector_sdsl<bv_type, rank_1_type, select_1_type, select_0_type>
 
     try {
         vector_.load(in);
-        if constexpr(std::is_same_v<bv_type, sdsl::bit_vector>) {
+        if constexpr(is_packed_bits) {
             load_number(in);
         }
         rk1_.load(in, &vector_);
@@ -275,7 +285,7 @@ void
 bit_vector_sdsl<bv_type, rank_1_type, select_1_type, select_0_type>
 ::serialize(std::ostream &out) const {
     vector_.serialize(out);
-    if constexpr(std::is_same_v<bv_type, sdsl::bit_vector>) {
+    if constexpr(is_packed_bits) {
         serialize_number(out, num_set_bits_);
     }
     rk1_.serialize(out);
@@ -290,8 +300,8 @@ template <class bv_type, class rank_1_type, class select_1_type, class select_0_
 sdsl::bit_vector
 bit_vector_sdsl<bv_type, rank_1_type, select_1_type, select_0_type>
 ::to_vector() const {
-    if constexpr(std::is_same_v<bv_type, sdsl::bit_vector>) {
-        return vector_;
+    if constexpr(is_packed_bits) {
+        return vector_.to_owned();
     } else {
         return bit_vector::to_vector_adaptive(
             bv_traits<bv_type>::SEQ_BITWISE_WORD_ACCESS_VS_SELECT_FACTOR
@@ -307,7 +317,7 @@ bit_vector_sdsl<bv_type, rank_1_type, select_1_type, select_0_type>
     assert(begin <= end);
     assert(end <= size());
 
-    if constexpr(std::is_same_v<bv_type, sdsl::bit_vector>) {
+    if constexpr(is_packed_bits) {
         ::call_ones(vector_, begin, end, callback);
     } else {
         bit_vector::call_ones_adaptive(begin, end, callback,
@@ -323,8 +333,11 @@ bit_vector_sdsl<bv_type, rank_1_type, select_1_type, select_0_type>
     assert(other);
     assert(other->size() == size());
 
-    if constexpr(std::is_same_v<bv_type, sdsl::bit_vector>) {
-        *other |= vector_;
+    if constexpr(is_packed_bits) {
+        auto words = vector_.data();
+        const uint64_t num_words = (size() + 63) / 64;
+        for (uint64_t i = 0; i < num_words; ++i)
+            other->data()[i] |= words[i];
     } else {
         bit_vector::add_to_adaptive(other,
             bv_traits<bv_type>::SEQ_BITWISE_WORD_ACCESS_VS_SELECT_FACTOR
@@ -357,9 +370,9 @@ struct bit_vector_sdsl<bv_type, rank_1_type, select_1_type, select_0_type>
 };
 
 template <class bv_type, class rank_1_type, class select_1_type, class select_0_type>
-template <uint32_t t_bs>
+template <uint32_t t_bs, template <uint8_t> class Storage>
 struct bit_vector_sdsl<bv_type, rank_1_type, select_1_type, select_0_type>
-::bv_traits<sdsl::bit_vector_il<t_bs>> {
+::bv_traits<sdsl::bit_vector_il<t_bs, Storage>> {
     static constexpr size_t MAX_ITER_BIT_VECTOR = 1000;
     static constexpr size_t SEQ_BITWISE_WORD_ACCESS_VS_SELECT_FACTOR = 1000;
 
@@ -374,9 +387,9 @@ struct bit_vector_sdsl<bv_type, rank_1_type, select_1_type, select_0_type>
 };
 
 template <class bv_type, class rank_1_type, class select_1_type, class select_0_type>
-template <uint16_t t_bs, class t_rac, uint16_t t_k>
+template <uint16_t t_bs, class t_rac, uint16_t t_k, template <uint8_t> class Storage>
 struct bit_vector_sdsl<bv_type, rank_1_type, select_1_type, select_0_type>
-::bv_traits<sdsl::rrr_vector<t_bs, t_rac, t_k>> {
+::bv_traits<sdsl::rrr_vector<t_bs, t_rac, t_k, Storage>> {
     static constexpr size_t MAX_ITER_BIT_VECTOR = 1;
     static constexpr size_t SEQ_BITWISE_WORD_ACCESS_VS_SELECT_FACTOR = 2;
 
@@ -402,7 +415,7 @@ struct bit_vector_sdsl<bv_type, rank_1_type, select_1_type, select_0_type>
 template <class bv_type, class rank_1_type, class select_1_type, class select_0_type>
 template <uint8_t t_width>
 struct bit_vector_sdsl<bv_type, rank_1_type, select_1_type, select_0_type>
-::bv_traits<sdsl::int_vector<t_width>> {
+::bv_traits<sdsl::packed_vector_view<t_width>> {
     static constexpr size_t MAX_ITER_BIT_VECTOR = 1000;
     static constexpr size_t SEQ_BITWISE_WORD_ACCESS_VS_SELECT_FACTOR = 1000;
 
@@ -412,25 +425,24 @@ struct bit_vector_sdsl<bv_type, rank_1_type, select_1_type, select_0_type>
 };
 
 template <class bv_type, class rank_1_type, class select_1_type, class select_0_type>
-template <uint8_t t_b, uint8_t t_pat_len>
-struct bit_vector_sdsl<bv_type, rank_1_type, select_1_type, select_0_type>
-::bv_traits<sdsl::rank_support_v5<t_b, t_pat_len>> {
+template <uint8_t t_b, uint8_t t_pat_len, class Vector, template <uint8_t> class Storage>
+struct bit_vector_sdsl<bv_type, rank_1_type, select_1_type,
+                       select_0_type>::bv_traits<sdsl::rank_support_v5<t_b, t_pat_len, Vector, Storage>> {
     static inline uint64_t predict_size(uint64_t size, uint64_t /*num_set_bits*/) {
-        return sizeof(sdsl::rank_support_v5<t_b, t_pat_len>) * 8
-            + footprint_rank_support_v5(size);
+        return sizeof(sdsl::rank_support_v5<t_b, t_pat_len, Vector, Storage>) * 8 +
+               footprint_rank_support_v5(size);
     }
 };
 
 template <class bv_type, class rank_1_type, class select_1_type, class select_0_type>
-template <uint8_t t_b, uint8_t t_pat_len>
-struct bit_vector_sdsl<bv_type, rank_1_type, select_1_type, select_0_type>
-::bv_traits<sdsl::select_support_mcl<t_b, t_pat_len>> {
+template <uint8_t t_b, uint8_t t_pat_len, class Vector, template <uint8_t> class Storage>
+struct bit_vector_sdsl<bv_type, rank_1_type, select_1_type,
+                       select_0_type>::bv_traits<sdsl::select_support_mcl<t_b, t_pat_len, Vector, Storage>> {
     static inline uint64_t predict_size(uint64_t size, uint64_t num_set_bits) {
-        return sizeof(sdsl::select_support_mcl<t_b, t_pat_len>) * 8
-            + footprint_select_support_mcl(size, num_set_bits);
+        return sizeof(sdsl::select_support_mcl<t_b, t_pat_len, Vector, Storage>) * 8 +
+               footprint_select_support_mcl(size, num_set_bits);
     }
 };
-
 
 template <uint32_t k_sblock_rate = 16>
 using bit_vector_hyb
@@ -441,22 +453,28 @@ using bit_vector_hyb
 
 template <uint32_t block_size = 512>
 using bit_vector_il
-    = bit_vector_sdsl<sdsl::bit_vector_il<block_size>,
-                      typename sdsl::bit_vector_il<block_size>::rank_1_type,
-                      typename sdsl::bit_vector_il<block_size>::select_1_type,
-                      typename sdsl::bit_vector_il<block_size>::select_0_type>;
+    = bit_vector_sdsl<sdsl::bit_vector_il<block_size, sdsl::packed_vector_view>,
+                      typename sdsl::bit_vector_il<block_size, sdsl::packed_vector_view>::rank_1_type,
+                      typename sdsl::bit_vector_il<block_size, sdsl::packed_vector_view>::select_1_type,
+                      typename sdsl::bit_vector_il<block_size, sdsl::packed_vector_view>::select_0_type>;
+
+namespace mtg::detail {
+template <uint32_t BlockSize = 63>
+using rrr_storage = sdsl::rrr_vector<BlockSize, sdsl::packed_vector_view<0>, 32,
+                                     sdsl::packed_vector_view>;
+}
 
 template <uint32_t block_size = 63>
 using bit_vector_rrr
-    = bit_vector_sdsl<sdsl::rrr_vector<block_size>,
-                      typename sdsl::rrr_vector<block_size>::rank_1_type,
-                      typename sdsl::rrr_vector<block_size>::select_1_type,
-                      typename sdsl::rrr_vector<block_size>::select_0_type>;
+    = bit_vector_sdsl<mtg::detail::rrr_storage<block_size>,
+                      typename mtg::detail::rrr_storage<block_size>::rank_1_type,
+                      typename mtg::detail::rrr_storage<block_size>::select_1_type,
+                      typename mtg::detail::rrr_storage<block_size>::select_0_type>;
 
-using bit_vector_stat
-    = bit_vector_sdsl<sdsl::bit_vector,
-                      sdsl::rank_support_v5<1>,
-                      sdsl::select_support_mcl<1>,
-                      sdsl::select_support_scan<0>>;
+using bit_vector_stat =
+    bit_vector_sdsl<sdsl::packed_vector_view<1>,
+                    sdsl::rank_support_v5<1, 1, sdsl::packed_vector_view<1>, sdsl::packed_vector_view>,
+                    sdsl::select_support_mcl<1, 1, sdsl::packed_vector_view<1>, sdsl::packed_vector_view>,
+                    sdsl::select_support_scan<0, 1, sdsl::packed_vector_view<1>>>;
 
 #endif // __BIT_VECTOR_SDSL_HPP__

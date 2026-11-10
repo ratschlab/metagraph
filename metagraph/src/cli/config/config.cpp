@@ -134,6 +134,7 @@ Config::Config(int argc, char *argv[]) {
     };
 
     bool print_usage_and_exit = false;
+    bool anno_type_given = false;
     bool xdrop_override = false;
     // An integer (ms) the traversal capabilities state: non-negative and exactly representable
     // as a double, so that a JSON client reads it as written and a ledger can add to it (atoll
@@ -257,8 +258,6 @@ Config::Config(int argc, char *argv[]) {
             fasta_anno_comment_delim = std::string(get_value(i++));
         } else if (!strcmp(argv[i], "--anno-label")) {
             anno_labels.emplace_back(get_value(i++));
-        } else if (!strcmp(argv[i], "--coord-binsize")) {
-            genome_binsize_anno = atoi(get_value(i++));
         } else if (!strcmp(argv[i], "--suppress-unlabeled")) {
             suppress_unlabeled = true;
         } else if (!strcmp(argv[i], "--sparse")) {
@@ -386,10 +385,6 @@ Config::Config(int argc, char *argv[]) {
             max_hull_forks = atoi(get_value(i++));
         } else if (!strcmp(argv[i], "--align-max-ram")) {
             alignment_max_ram = std::stof(get_value(i++));
-        } else if (!strcmp(argv[i], "-f") || !strcmp(argv[i], "--frequency")) {
-            frequency = atoi(get_value(i++));
-        } else if (!strcmp(argv[i], "-d") || !strcmp(argv[i], "--distance")) {
-            distance = atoi(get_value(i++));
         } else if (!strcmp(argv[i], "-o") || !strcmp(argv[i], "--outfile-base")) {
             outfbase = std::string(get_value(i++));
         } else if (!strcmp(argv[i], "--reference")) {
@@ -423,10 +418,13 @@ Config::Config(int argc, char *argv[]) {
 
         } else if (!strcmp(argv[i], "--anno-type")) {
             anno_type = string_to_annotype(get_value(i++));
+            anno_type_given = true;
         } else if (!strcmp(argv[i], "--graph")) {
             graph_type = string_to_graphtype(get_value(i++));
         } else if (!strcmp(argv[i], "--rename-cols")) {
             rename_instructions_file = std::string(get_value(i++));
+        } else if (!strcmp(argv[i], "--remap-graph")) {
+            remap_graph = std::string(get_value(i++));
         } else if (!strcmp(argv[i], "-a") || !strcmp(argv[i], "--annotator")) {
             infbase_annotators.emplace_back(get_value(i++));
         } else if (!strcmp(argv[i], "-i") || !strcmp(argv[i], "--infile-base")) {
@@ -1171,7 +1169,19 @@ Config::Config(int argc, char *argv[]) {
                     && outfbase.empty())
         print_usage_and_exit = true;
 
-    if (identity == TRANSFORM_ANNOTATION) {
+    if (identity == TRANSFORM_ANNOTATION && remap_graph.size()) {
+        if (infbase.empty() || fnames.size() != 1) {
+            std::cerr << "--remap-graph needs one annotation and the target graph"
+                         " passed with '-i <GRAPH>'" << std::endl;
+            print_usage_and_exit = true;
+        }
+        if (anno_type_given && anno_type != RowDiffRowFlat && anno_type != RowDiffDisk) {
+            std::cerr << "With --remap-graph, --anno-type can only be "
+                      << annotype_to_string(RowDiffRowFlat) << " or "
+                      << annotype_to_string(RowDiffDisk) << std::endl;
+            print_usage_and_exit = true;
+        }
+    } else if (identity == TRANSFORM_ANNOTATION) {
         const bool to_row_diff = anno_type == RowDiff
                                     || anno_type == RowDiffBRWT
                                     || anno_type == RowDiffDisk
@@ -1874,6 +1884,11 @@ if (advanced) {
             fprintf(stderr, "\t                       \t          L_2 L_2_renamed\n");
             fprintf(stderr, "\t                       \t          L_2 L_2_renamed\n");
             fprintf(stderr, "\t                       \t          ... ...........'\n");
+            fprintf(stderr, "\t   --remap-graph [STR] \tmove the rows of a brwt or row_diff_brwt annotation built for this graph\n");
+            fprintf(stderr, "\t                       \tto the graph given with -i, matching nodes by k-mer. Both graphs must be\n");
+            fprintf(stderr, "\t                       \tin basic mode and have the same k-mers. The row map is saved as\n");
+            fprintf(stderr, "\t                       \t<OUT>.rowmap and reused if present. A row_diff_brwt annotation can be\n");
+            fprintf(stderr, "\t                       \tconverted in the same run with --anno-type row_diff_flat or row_diff_disk []\n");
             fprintf(stderr, "\t   --anno-type [STR] \ttarget annotation format [column]\n");
             fprintf(stderr, "%s\n", annotation_list);
             fprintf(stderr, "\t   --arity \t\tarity in the brwt tree [2]\n");
@@ -1951,7 +1966,6 @@ if (advanced) {
             fprintf(stderr, "\t   --labels-delimiter [STR]\tdelimiter for annotation labels [\":\"]\n");
             fprintf(stderr, "\t   --suppress-unlabeled \tdo not show results for sequences missing in graph [off]\n");
 }
-            // fprintf(stderr, "\t-d --distance [INT] \tmax allowed alignment distance [0]\n");
             fprintf(stderr, "\n");
             fprintf(stderr, "\t-p --parallel [INT] \tuse multiple threads for computation [1]\n");
             // fprintf(stderr, "\t   --cache-size [INT] \tnumber of uncompressed rows to store in the cache [0]\n");
@@ -2072,7 +2086,6 @@ if (advanced) {
             fprintf(stderr, "\t   --sparse \t\tuse the row-major sparse matrix to annotate graph [off]\n");
 }
             // fprintf(stderr, "\t-o --outfile-base [STR] \tbasename of output file []\n");
-            // fprintf(stderr, "\t-d --distance [INT] \tmax allowed alignment distance [0]\n");
             fprintf(stderr, "\t-p --parallel [INT] \tthe HTTP handler threads (the requests handled at once), and the threads of the graphs' pool (multi-graph fan-outs, /search's graphs) and of loading a graph list; with --http-threads given, only the latter two (--max-connections caps the connections) [1]\n");
             fprintf(stderr, "\t   --threads-each [INT] \tnumber of threads per graph [1]\n");
             fprintf(stderr, "\t   --http-threads [INT] \tthe HTTP handler threads, on which every request runs (-p then sizes only the graphs' pool and the loading); for the capabilities, state and cancel routes to answer beside long calls, above the caps' sum plus the uncapped long calls run at once (/search, /align, routes without a cap, cancels with wait_ms); in [0, 4096], 0 = -p's value [0]\n");

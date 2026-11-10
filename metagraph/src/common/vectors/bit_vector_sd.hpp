@@ -5,10 +5,19 @@
 
 #include <sdsl/sd_vector.hpp>
 
+#include <sdsl/packed_vector_view.hpp>
 #include "sd_vector_builder_disk.hpp"
 #include "vector_algorithm.hpp"
 #include "bit_vector.hpp"
 #include "common/threads/threading.hpp"
+
+
+namespace mtg::detail {
+using sd_storage = sdsl::sd_vector<sdsl::packed_vector_view<1>,
+    sdsl::select_support_mcl<1, 1, sdsl::packed_vector_view<1>, sdsl::packed_vector_view>,
+    sdsl::select_support_mcl<0, 1, sdsl::packed_vector_view<1>, sdsl::packed_vector_view>,
+    sdsl::packed_vector_view<0>>;
+}
 
 
 class bit_vector_sd : public bit_vector {
@@ -60,7 +69,7 @@ class bit_vector_sd : public bit_vector {
 
     inline sdsl::bit_vector to_vector() const override;
 
-    inline const sdsl::sd_vector<>& data() const { return vector_; }
+    inline const mtg::detail::sd_storage& data() const { return vector_; }
 
     /**
      * Predict space taken by the vector with given its parameters in bits.
@@ -72,10 +81,10 @@ class bit_vector_sd : public bit_vector {
 
   private:
     bool inverted_;
-    sdsl::sd_vector<> vector_;
-    sdsl::sd_vector<>::rank_1_type rk1_;
-    sdsl::sd_vector<>::select_1_type slct1_;
-    sdsl::sd_vector<>::select_0_type slct0_;
+    mtg::detail::sd_storage vector_;
+    mtg::detail::sd_storage::rank_1_type rk1_;
+    mtg::detail::sd_storage::select_1_type slct1_;
+    mtg::detail::sd_storage::select_0_type slct0_;
 };
 
 
@@ -97,13 +106,13 @@ bit_vector_sd::bit_vector_sd(const sdsl::bit_vector &vector, uint64_t num_set_bi
     // check if it needs to be inverted
     if (num_set_bits <= vector.size() / 2) {
         // vector is sparse, no need to invert
-        vector_ = sdsl::sd_vector<>(vector);
+        vector_ = mtg::detail::sd_storage(vector);
         inverted_ = false;
     } else {
         // invert
         sdsl::sd_vector_builder builder(vector.size(), vector.size() - num_set_bits);
         ::call_zeros(vector, [&builder](uint64_t i) { builder.set(i); });
-        vector_ = sdsl::sd_vector<>(builder);
+        vector_ = mtg::detail::sd_storage(builder);
         inverted_ = true;
     }
     slct0_ = decltype(slct0_)(&vector_);
@@ -144,7 +153,7 @@ bit_vector_sd
 
     assert(builder.items() == builder.capacity());
 
-    vector_ = sdsl::sd_vector<>(builder);
+    vector_ = mtg::detail::sd_storage(builder);
     slct0_ = decltype(slct0_)(&vector_);
     slct1_ = decltype(slct1_)(&vector_);
     rk1_ = decltype(rk1_)(&vector_);

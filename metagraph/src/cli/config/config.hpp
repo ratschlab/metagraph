@@ -87,14 +87,12 @@ class Config {
     // In general, the default value is: log_{|Sigma|}(2^24)
     static const size_t kDefaultIndexSuffixLen;
     unsigned int node_suffix_length = kDefaultIndexSuffixLen;
-    unsigned int distance = 0;
     unsigned int parallel_each = 1;
     unsigned int parallel_nodes = -1;  // if not set, redefined by |parallel|
     unsigned int num_bins_per_thread = 1;
     unsigned int parts_total = 1;
     unsigned int part_idx = 0;
     unsigned int suffix_len = 0;
-    unsigned int frequency = 1;
     unsigned int alignment_length = 0;
     double memory_available = 1;
     unsigned int min_count = 1;
@@ -102,7 +100,6 @@ class Config {
     unsigned int min_value = 1;
     unsigned int max_value = std::numeric_limits<unsigned int>::max();
     unsigned int num_top_labels = -1;
-    unsigned int genome_binsize_anno = 1000;
     unsigned int arity_brwt = 2;
     unsigned int relax_arity_brwt = 10;
     unsigned long long RA_ivbuffer_size = 16'384; // in B
@@ -421,6 +418,7 @@ class Config {
     std::string outfbase;
     std::string infbase;
     std::string rename_instructions_file;
+    std::string remap_graph;
     std::string refpath;
     std::string suffix;
     std::string fasta_header_delimiter;
