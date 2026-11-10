@@ -297,7 +297,9 @@ class SSHashNodeStream final : public NodeStream {
             end_(sequence.size() >= k_ ? sequence.size() - k_ + 1 : 0),
             oriented_(oriented) {
         if constexpr (with_rc) {
-            parser_.emplace(&dict);
+            // an empty dictionary has no valid parameters for a query
+            if (dict.num_kmers())
+                parser_.emplace(&dict);
         } else {
             std::vector<bool> invalid_char(seq_.size());
             for (size_t i = 0; i < seq_.size(); ++i) {
