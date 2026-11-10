@@ -404,7 +404,8 @@ TEST(ServerRequestIntake, MakeCostIsTheLinearTable) {
                                       "n" + std::to_string(rng() % 35),
                                       static_cast<double>(rng() % 7));
         }
-        const LabelChangeCost fast = make_cost(spec, dict);
+        const LabelChangeCost fast
+                = make_cost(spec, std::vector<std::string_view>(dict.begin(), dict.end()));
         const LabelChangeCost slow = linear_cost(spec, dict);
         EXPECT_EQ(LabelChangeCost::TABLE, fast.model());
         EXPECT_EQ(slow.table(), fast.table()) << round;
@@ -432,7 +433,8 @@ TEST(ServerRequestIntake, MakeCostIsLinear) {
         spec.entries.emplace_back("absent", "absent", 1.0);
     }
     const auto start = std::chrono::steady_clock::now();
-    const LabelChangeCost cost = make_cost(spec, dict);
+    const LabelChangeCost cost
+            = make_cost(spec, std::vector<std::string_view>(dict.begin(), dict.end()));
     const double ms = std::chrono::duration<double, std::milli>(
             std::chrono::steady_clock::now() - start).count();
     EXPECT_TRUE(cost.table().empty());

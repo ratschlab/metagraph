@@ -774,7 +774,7 @@ class AgainstTheBase:
             == 'memory_bound_soft'
         if soft and memory and path.endswith('.effect'):
             effect = answer['results'][0]['limitations'][int(m.group(1))]['effect']
-            if CHARGED in effect and "at most twice the seed's labels x the longest" in effect:
+            if CHARGED in effect and "hits, label names, dictionary" in effect:
                 return True
         charged = newly and (memory or (work and row_diff))
         if not charged:

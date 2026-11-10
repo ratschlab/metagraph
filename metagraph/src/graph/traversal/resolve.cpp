@@ -56,7 +56,7 @@ std::string hex64(uint64_t x) {
 std::string make_seed_id(const std::string &release_id,
                          std::string_view sequence,
                          bool canonical_orientation,
-                         std::vector<std::string> labels) {
+                         std::vector<std::string_view> labels) {
     // defined over the sequence after the build's case mapping (§4.3 / §6.1), so a
     // seed resubmitted in another case keeps its id
     std::string seq(sequence);
@@ -76,8 +76,11 @@ std::string make_seed_id(const std::string &release_id,
     h = fnv1a64("\t", h);
     h = fnv1a64(seq, h);
     h = fnv1a64("\t", h);
-    for (const auto &l : labels) {
-        h = fnv1a64(std::to_string(l.size()) + ":" + l, h);
+    // the length prefix and the name hashed apart: FNV-1a is a stream of bytes, so this is the
+    // hash of their concatenation without building it
+    for (std::string_view l : labels) {
+        h = fnv1a64(std::to_string(l.size()) + ":", h);
+        h = fnv1a64(l, h);
     }
     return hex64(h);
 }
@@ -1893,7 +1896,9 @@ SeedSelection select_seeds(const SupportProfile &profile,
         if (seed.population.dropped_count)
             seed.population.dropped_digest = hex64(digest);
         std::sort(seed.labels.begin(), seed.labels.end());
-        seed.seed_id = make_seed_id(policy.release_id, seed.sequence, canonical_orientation, seed.labels);
+        seed.seed_id = make_seed_id(policy.release_id, seed.sequence, canonical_orientation,
+                                    std::vector<std::string_view>(seed.labels.begin(),
+                                                                  seed.labels.end()));
         selection.seeds.push_back(std::move(seed));
     }
 

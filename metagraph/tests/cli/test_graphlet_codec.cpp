@@ -4305,9 +4305,11 @@ TEST(Stage2ReviewRound3, WorkStopsStateTheirLargestCharge) {
     }
 }
 
-// The depth-0 state builds its label dictionary (names in each LabelRef and again in the
-// query) before its admission, so what the dictionary holds is observed first: otherwise a seed
-// the admission failed would report memory_bound_soft 0 with twelve names of 1 MB under 1 MiB.
+// The depth-0 state builds its label dictionary (names in each LabelRef, and in annotate mode
+// again in the recorder) before its admission, so what the dictionary holds is observed first:
+// otherwise a seed the admission failed would report memory_bound_soft 0 with twelve names of
+// 1 MB under 1 MiB. A constrain seed's query (the names' second copy) is built only once the
+// depth-0 state is admitted (T4-L2, GPT review 7 F3): a seed the admission fails held them once.
 TEST(Stage2ReviewRound3, FailedAdmissionStatesTheDictionaryItHeld) {
     std::vector<std::pair<std::string, std::string>> records;
     for (size_t i = 0; i < 6; ++i) {
@@ -4329,9 +4331,20 @@ TEST(Stage2ReviewRound3, FailedAdmissionStatesTheDictionaryItHeld) {
             FAIL() << to_string(mode) << ": six names of 200 KB fit 1 MiB";
         } catch (const SeedBudgetError &e) {
             EXPECT_EQ(ResourceStop::MEMORY, e.stop().resource) << to_string(mode);
-            // the names alone, held twice (the LabelRef and the query's or recorder's copy)
-            EXPECT_GE(e.account().soft_overshoot, 2 * 6 * 200'000u - (uint64_t(1) << 20))
-                << to_string(mode);
+            if (mode == LabelMode::ANNOTATE) {
+                // the names alone, held twice (the recorder's and the dictionary's)
+                EXPECT_GE(e.account().soft_overshoot, 2 * 6 * 200'000u - (uint64_t(1) << 20))
+                    << to_string(mode);
+            } else {
+                // once: the walk's query is not built for a seed its budget does not admit
+                EXPECT_GE(e.account().soft_overshoot, 6 * 200'000u - (uint64_t(1) << 20))
+                    << to_string(mode);
+                EXPECT_LT(e.account().soft_overshoot, 2 * 6 * 200'000u - (uint64_t(1) << 20))
+                    << to_string(mode);
+            }
+            // the account prices both copies whatever was built: the same demand in both modes'
+            // statement of what the depth-0 state needs
+            EXPECT_GT(e.stop().demand, 2 * 6 * 200'000.0) << to_string(mode);
         }
     }
 }
@@ -8149,4 +8162,100 @@ TEST(ResolveDeadline, CapabilitiesBlock) {
     EXPECT_EQ("SPEC-labeled-traversal-core.md section 4.5", t["rule"].asString());
     EXPECT_EQ(0u, resolve_capabilities_json({ 0, kResolveFinalizeMs })["time_budget"]
                           ["max_time_ms"].asUInt64());
+}
+
+
+/*************** the seed phase's label names in the held bound (T4-L2, GPT review 7 F3) ********/
+
+// make_seed_id reads views of the kept labels' names (the seed phase held them once more as its
+// by-value copy, and once more per name as the length-prefixed concatenation it hashed): every
+// seed id is the one the by-value form gave
+TEST(GraphletHeldBound, SeedIdsReadViewsOfTheNames) {
+    auto by_value = [](const std::string &release, std::string seq, bool canonical,
+                       std::vector<std::string> labels) {
+        // make_seed_id before T4-L2, for an upper-case sequence
+        if (canonical) {
+            std::string rc(seq);
+            ::reverse_complement(rc);
+            if (rc < seq)
+                seq = rc;
+        }
+        std::sort(labels.begin(), labels.end());
+        uint64_t h = fnv1a64(release);
+        h = fnv1a64("\t", h);
+        h = fnv1a64(seq, h);
+        h = fnv1a64("\t", h);
+        for (const auto &l : labels) {
+            h = fnv1a64(std::to_string(l.size()) + ":" + l, h);
+        }
+        return hex64(h);
+    };
+    std::mt19937 rng(20261110);
+    for (size_t round = 0; round < 60; ++round) {
+        std::vector<std::string> labels;
+        const size_t n = rng() % 12;
+        for (size_t i = 0; i < n; ++i) {
+            std::string name(rng() % 3 ? rng() % 40 : 3000 + rng() % 9000, 'a');
+            for (char &c : name) {
+                c = "ACGT:,\t\n_xy9"[rng() % 12];
+            }
+            labels.push_back(std::move(name));
+        }
+        if (n > 1 && round % 5 == 0)
+            labels.push_back(labels[0]);
+        const std::string seq = random_seq(20 + rng() % 40, 9000 + round);
+        const std::string release = round % 3 ? "r" + std::to_string(round) : "";
+        for (bool canonical : { false, true }) {
+            const std::vector<std::string_view> views(labels.begin(), labels.end());
+            EXPECT_EQ(by_value(release, seq, canonical, labels),
+                      make_seed_id(release, seq, canonical, views)) << round;
+        }
+    }
+    // the pinned values of test_resolve.cpp's and test_walker.cpp's checks still hold
+    EXPECT_EQ(make_seed_id("r1", "ACGTT", true, { "b", "a" }),
+              make_seed_id("r1", "AACGT", true, { "a", "b" }));
+    EXPECT_NE(make_seed_id("", "ACGTT", false, { "a,b" }),
+              make_seed_id("", "ACGTT", false, { "a", "b" }));
+}
+
+// The seed phase observes its label references' names from when they exist: an explicit list's
+// from its resolution, before the validation's first read, so a seed stopped there states them in
+// its excess (at the base the excess counted only the validation's hits and the names were held
+// twice, the validation query's copy beside the references)
+TEST(GraphletHeldBound, SeedPhaseObservesItsResolvedNames) {
+    std::vector<std::pair<std::string, std::string>> records;
+    std::vector<std::string> names;
+    for (size_t i = 0; i < 6; ++i) {
+        names.push_back("N" + std::to_string(i) + std::string(200'000, 'x'));
+        records.emplace_back(names.back(), "AAAC");
+    }
+    const HeaderIndexCase idx = header_index(3, records);
+    LabelOracle oracle(*idx.anno, idx.cth.get());
+    Strategy st;
+    st.direction = Strategy::RIGHT;
+    st.max_extension_bp = 1;
+    st.max_memory_bytes = uint64_t(1) << 20;
+    st.delivery = delivery_costs("graphlet", true);
+    // without a stop the seed fails at depth 0, its dictionary (the six names) not admitted
+    try {
+        traverse_seed(oracle, seed_of("AAA", names), st, LabelChangeCost::forbid());
+        FAIL() << "six names of 200 KB fit 1 MiB";
+    } catch (const SeedBudgetError &e) {
+        EXPECT_EQ(ResourceStop::MEMORY, e.stop().resource);
+        EXPECT_GE(e.account().soft_overshoot, 6 * 200'000u - (uint64_t(1) << 20));
+    }
+    // stopped at the seed phase's first poll (the validation's first charge, after its read)
+    InjectedStop inject(0, ExternalStop::CANCELLED);
+    try {
+        traverse_seed(oracle, seed_of("AAA", names), st, LabelChangeCost::forbid(), "",
+                      nullptr, &inject.control);
+        FAIL() << "a cancel at the first poll lets no seed phase end";
+    } catch (const SeedBudgetError &e) {
+        EXPECT_EQ(ResourceStop::CANCELLED, e.stop().resource);
+        EXPECT_EQ(1u, inject.calls);
+        // the six names once (their references), beside the seed and the validation's hits
+        EXPECT_GE(e.account().soft_overshoot, 6 * 200'000u - (uint64_t(1) << 20));
+        EXPECT_LT(e.account().soft_overshoot, 2 * 6 * 200'000u - (uint64_t(1) << 20));
+        EXPECT_EQ(e.account().soft_overshoot, inject.meter.soft_excess);
+    }
 }

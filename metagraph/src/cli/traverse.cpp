@@ -1781,26 +1781,25 @@ static Json::Value memory_bound_soft(const Strategy &st, const ResourceAccount &
                       uint_json((account.soft_overshoot + (1 << 20) - 1) >> 20),
                       account.decode_charged
                       // (at most 640 bytes, kEffect: every limitation's effect is priced at
-                      // that width; 634 here.) Not observed beside the header lookup and the
-                      // dictionary's first table: the seed phase's two further copies of its
-                      // label names (its resolved references and the names kept for the result;
-                      // the dictionary's two are observed), bounded by twice the seed's labels x
-                      // the longest name, not by the budget: a derived set has at most
-                      // max_seed_labels labels, an explicit list as many as the request body
-                      // holds (E5b's sweep: 121 MiB beyond the account and the observed excess for
-                      // 4,096 names of 12,000 B under 64 MiB). The seed's cost dictionary below
-                      // (dict) copies an explicit list once more, outside the account like the
-                      // parsed request: bounded by the request body (SPEC §5)
+                      // that width.) The seed phase's label names are observed: its references
+                      // (resolved or derived, one copy of each name, moved into the dictionary
+                      // or a dropped label) from when they exist, and the dictionary in the
+                      // copies it holds, its walk's query (the second) built only once the
+                      // depth-0 state is admitted (Walker::seed_phase; E5b's sweep had measured
+                      // 121 MiB beyond the account and the observed excess for 4,096 names of
+                      // 12,000 B under 64 MiB, from two copies nothing observed). Not observed:
+                      // the header lookup and the dictionary's first table. The request's own
+                      // names (the parsed request, and the seed's cost dictionary's views of
+                      // them) are outside the account, bounded by the request body (SPEC §5)
                       ? "the memory budget is enforced on the walker's modelled state, this "
                         "response's output and the annotation reads (rows and coordinates are "
                         "charged before they are held; a read not fitting is refused whole); "
                         "held beyond the admitted account, able to exceed the budget: a level's "
                         "keys and rows until its heads are done, the seed phase's intersection, "
-                        "hits, dictionary, a failed result's echo of seed_id (observed: the "
-                        "largest excess, MiB, rounded up) and, not observed, an index-wide header "
-                        "lookup, two more copies of the label names (at most twice the seed's "
-                        "labels x the longest) and the dictionary's first table and "
-                        "growth copy (1.5 KB)"
+                        "hits, label names, dictionary, a failed result's echo of seed_id "
+                        "(observed: the largest excess, MiB, rounded up) and, not observed, an "
+                        "index-wide header lookup and the dictionary's first table and growth "
+                        "copy (1.5 KB)"
                       : "the memory budget is enforced on the walker's modelled state and on "
                         "this response's output, admitted per head; the annotation rows the "
                         "seed phase and each level decode (with an annotate dictionary's "
@@ -4405,8 +4404,9 @@ DeliveryCosts delivery_costs(const std::string &detail, bool sequences, uint64_t
 // up in one hash map built per seed, O(|dict| + |entries|) (two linear scans of |dict| per entry
 // made a table of E entries over D names cost 2 E D string comparisons, review 5 #6); with the
 // server's caps (max_explicit_labels, max_extra_labels, max_cost_entries) a seed's
-// preprocessing is a few milliseconds at most, and a stop is seen between seeds and in the walk
-LabelChangeCost make_cost(const CostSpec &spec, const std::vector<std::string> &dict) {
+// preprocessing is a few milliseconds at most, and a stop is seen between seeds and in the walk.
+// |dict| views the request's names (a per-seed copy of an explicit list held every name once more)
+LabelChangeCost make_cost(const CostSpec &spec, const std::vector<std::string_view> &dict) {
     switch (spec.model) {
         case CostSpec::FORBID:
             return LabelChangeCost::forbid();
@@ -5567,7 +5567,8 @@ Json::Value process_traverse_request(const Json::Value &json,
             if (attempt)
                 attempt->seed_delivered(i, outcome, seed_timer.elapsed() * 1000);
         };
-        std::vector<std::string> dict = seed.labels;
+        // the seed's dictionary as the cost table names it: views of the request's names
+        std::vector<std::string_view> dict(seed.labels.begin(), seed.labels.end());
         dict.insert(dict.end(), req.strategy.extra.begin(), req.strategy.extra.end());
         LabelChangeCost cost = make_cost(req.cost, dict);
         // the output's floats are priced at the widest the seed's costs and the time budgets

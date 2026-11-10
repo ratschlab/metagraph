@@ -290,7 +290,7 @@ Json::Value capabilities_to_json(const graph::traversal::LabelOracle &oracle,
 // strategy.labels.extra): a table's entries by label id, a name's id its first position in
 // |dict|, an entry naming a label outside it dropped; linear in |dict| and the entries
 graph::traversal::LabelChangeCost make_cost(const CostSpec &spec,
-                                            const std::vector<std::string> &dict);
+                                            const std::vector<std::string_view> &dict);
 
 // The width at which the delivery model prices an MGT float when nothing makes it wider.
 constexpr uint64_t kMgtFloatWidth = 24;
