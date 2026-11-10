@@ -2,12 +2,14 @@
 // IRowDiff::decode_rows / decode_row_tuples against the default decode, the costs it
 // states per row, its refusals, and its byte model against the allocator.
 #include <fstream>
+#include <functional>
 #include <map>
 #include <memory>
 #include <numeric>
 #include <optional>
 #include <random>
 #include <sstream>
+#include <type_traits>
 
 #include <gtest/gtest.h>
 
@@ -30,6 +32,7 @@
 #include "common/vectors/bit_vector_sd.hpp"
 #include "graph/annotated_dbg.hpp"
 #include "graph/representation/succinct/dbg_succinct.hpp"
+#include "graph/traversal/seeded_hash.hpp"
 
 #if USE_JEMALLOC
 extern "C" int mallctl(const char *name, void *oldp, size_t *oldlenp, void *newp, size_t newlen);
@@ -1313,49 +1316,69 @@ TEST(RowDiffPathCache, BudgetedCostsDoNotDependOnTheCache) {
     }
 }
 
-// The cache's own bookkeeping: two generations within the bound, a hit in the older one moves
-// the row to the current one, a row larger than half the bound is not kept, the aggregates are
-// added to a row cached without them, trim() and clear()
+// The cache's own bookkeeping: two generations within the bound, its rows and its tables
+// counted as they are (bytes() = the rows' stored bytes + table_bytes()), an insert made only
+// with room for its table's doubling; a hit in the older generation moves the row to the
+// current one; a row larger than half the bound is not kept; the aggregates are added to a
+// row cached without them; trim() and clear()
 TEST(RowDiffPathCache, Generations) {
     using Cache = RowDiffCache<SetBits>;
+    using Layout = graph::traversal::HopscotchLayout<Cache::Table>;
     Cache cache;
     EXPECT_FALSE(cache.enabled());
     cache.insert(1, SetBits{ 1, 2, 3 });
     EXPECT_EQ(0u, cache.size());     // off: nothing kept
-    const uint64_t entry = Cache::kEntryBytes + row_copy_bytes(SetBits{ 1, 2, 3 });
-    cache.set_bound(8 * entry);
-    for (Row r = 0; r < 4; ++r) {
-        cache.insert(r, SetBits{ 1, 2, 3 });
+    SetBits row(1000);
+    std::iota(row.begin(), row.end(), 0);
+    const uint64_t r = row_copy_bytes(row);
+    // what the rows and the tables hold, as the cache counts them
+    auto counted = [&]() { return cache.size() * r + cache.table_bytes(); };
+    // tsl doubles a table at 90% load: 2 buckets for one entry, 4 for two or three, 8 for
+    // four to seven. A generation fits half the bound with three rows and room for the fourth
+    // (its doubling from 4 to 8 buckets beside the table), not with four and room for a fifth
+    const uint64_t half = 4 * r + Layout::array_bytes(4) + Layout::array_bytes(8)
+                        + Layout::node_bytes();
+    const uint64_t bound = 2 * half;
+    cache.set_bound(bound);
+    for (Row i = 0; i < 4; ++i) {
+        cache.insert(i, row);
+        EXPECT_EQ(counted(), cache.bytes());
     }
     EXPECT_EQ(4u, cache.size());
-    EXPECT_EQ(4 * entry, cache.bytes());
-    cache.insert(4, SetBits{ 1, 2, 3 });     // the current generation is full: rotated
+    EXPECT_EQ(Layout::array_bytes(8), cache.table_bytes());
+    EXPECT_EQ(4 * r + Layout::array_bytes(8), cache.bytes());
+    cache.insert(4, row);     // the current generation is full: rotated
     EXPECT_EQ(5u, cache.size());
     // the counts move with their tables (a rotation that dropped the current generation's
     // count with the older table would count 1 entry of the 5 held)
-    EXPECT_EQ(5 * entry, cache.bytes());
+    EXPECT_EQ(5 * r + Layout::array_bytes(8) + Layout::array_bytes(2), cache.bytes());
     ASSERT_TRUE(cache.find(0, false));       // moved to the current generation
-    EXPECT_EQ(5 * entry, cache.bytes());
-    for (Row r = 5; r < 8; ++r) {
-        cache.insert(r, SetBits{ 1, 2, 3 });
+    // the row's bytes moved; the current table doubled for it, the older one kept its buckets
+    EXPECT_EQ(5 * r + Layout::array_bytes(8) + Layout::array_bytes(4), cache.bytes());
+    EXPECT_EQ(counted(), cache.bytes());
+    for (Row i = 5; i < 8; ++i) {
+        cache.insert(i, row);
+        EXPECT_EQ(counted(), cache.bytes());
+        EXPECT_LE(cache.bytes(), bound);
     }
-    EXPECT_LE(cache.bytes(), 8 * entry);
-    EXPECT_EQ(cache.size() * entry, cache.bytes());
     EXPECT_TRUE(cache.find(0, false));       // kept by the move
     EXPECT_FALSE(cache.find(1, false));      // dropped with the older generation
     EXPECT_FALSE(cache.find(0, true));       // no aggregates
     PathAggregates agg;
     agg.length = 3;
-    cache.insert(0, SetBits{ 1, 2, 3 }, 0, &agg);
+    cache.insert(0, row, 0, &agg);
     ASSERT_TRUE(cache.find(0, true));
     EXPECT_EQ(3u, cache.find(0, true)->path.length);
-    SetBits wide(4 * entry / sizeof(Column));
+    EXPECT_LE(cache.peak_bytes, bound);
+    EXPECT_GE(cache.peak_bytes, cache.bytes());
+    SetBits wide(bound / 2 / sizeof(Column));
     std::iota(wide.begin(), wide.end(), 0);
     cache.insert(100, wide);
     EXPECT_FALSE(cache.find(100, false));    // more than half the bound
-    cache.trim(entry);
-    EXPECT_LE(cache.bytes(), entry);
-    EXPECT_EQ(cache.size() * entry, cache.bytes());
+    EXPECT_EQ(1u, cache.rows_refused);
+    cache.trim(half);
+    EXPECT_LE(cache.bytes(), half);
+    EXPECT_EQ(counted(), cache.bytes());
     cache.clear();
     EXPECT_EQ(0u, cache.size());
     EXPECT_EQ(0u, cache.bytes());
@@ -1363,39 +1386,149 @@ TEST(RowDiffPathCache, Generations) {
     // A shared bound that shrinks (LabelOracle::make_room trims to it) keeps what both
     // generations hold within it: with the older generation's count lost at its rotation, the
     // trim saw 3 of the 7 entries held and kept all 7 beside a label cache that had grown
-    uint64_t room = 8 * entry;
-    cache.set_bound(8 * entry, [&room]() { return room; });
-    for (Row r = 0; r < 7; ++r) {
-        cache.insert(r, SetBits{ 1, 2, 3 });
+    uint64_t room = bound;
+    cache.set_bound(bound, [&room]() { return room; });
+    for (Row i = 0; i < 7; ++i) {
+        cache.insert(i, row);
+        EXPECT_LE(cache.bytes(), bound);
     }
     EXPECT_EQ(7u, cache.size());
-    EXPECT_EQ(7 * entry, cache.bytes());
-    room = 4 * entry;
+    EXPECT_EQ(counted(), cache.bytes());
+    room = half;
     cache.trim(cache.limit());
-    EXPECT_LE(cache.size() * entry, 4 * entry);
-    EXPECT_EQ(cache.size() * entry, cache.bytes());
-    cache.insert(7, SetBits{ 1, 2, 3 });
-    EXPECT_LE(cache.size() * entry, 4 * entry);
-    EXPECT_EQ(cache.size() * entry, cache.bytes());
+    EXPECT_LE(cache.bytes(), half);
+    EXPECT_EQ(counted(), cache.bytes());
+    cache.insert(7, row);
+    EXPECT_LE(cache.bytes(), half);
+    EXPECT_EQ(counted(), cache.bytes());
+    // a move that has no room for the current table's doubling is not made: the row is
+    // found where it is
+    room = cache.bytes();
+    const size_t held = cache.size();
+    for (Row i = 0; i < 8; ++i) {
+        cache.find(i, false);
+        EXPECT_LE(cache.bytes(), room);
+    }
+    EXPECT_EQ(held, cache.size());
+}
+
+// The bound holds whatever the rows' ids (GPT review 7, finding 8). Rows hashed by their id
+// (std::hash: the identity) take a table's bucket from the id's low bits. Ids bit-reversed (the
+// row i is bitreverse_20(i)) share their low bits within any run of consecutive i, so tsl finds
+// a neighbourhood full and doubles a table down to 10% load: the tables held far more than the
+// old per-entry charge (640 B, the share at 40% load) allowed for. Ids that share their low 20
+// bits all fall on one bucket, which no doubling separates: they go to the overflow list.
+// Counted as they are, with room for a doubling before each insert, the cache holds at most its
+// bound after every insert, with the identity hash as with the seeded one. Its peak stays within
+// the bound with the seeded hash; with the identity hash the bit-reversed ids, which still share
+// a neighbourhood after a doubling, make one insert double a table twice, which passes the
+// bound while it runs (the residual SPEC-labeled-traversal-core.md section 8.4 states). The
+// seeded tables stay at the occupancy of random ids (their buckets within 3 per entry / 0.8,
+// the padding aside), so the bound is spent on rows
+uint64_t bitreverse_20(uint64_t i) {
+    uint64_t r = 0;
+    for (int b = 0; b < 20; ++b) {
+        r |= ((i >> b) & 1) << (19 - b);
+    }
+    return r;
+}
+
+template <class Hash>
+void check_bound_whatever_the_ids(const char *name) {
+    using Cache = RowDiffCache<SetBits, Hash>;
+    using Layout = graph::traversal::HopscotchLayout<typename Cache::Table>;
+    const bool seeded = std::is_same<Hash, graph::traversal::SeededHash>::value;
+    const uint64_t padding = 2 * Layout::array_bytes(1);
+    struct Ids {
+        const char *pattern;
+        std::function<Row(Row)> id;
+        Row rows;
+        std::vector<uint64_t> bounds;
+    };
+    // (the overflow lists are searched linearly: fewer rows for them)
+    const std::vector<Ids> patterns = {
+        { "bit-reversed", [](Row i) { return bitreverse_20(i); }, 200000,
+          { uint64_t(1) << 20, uint64_t(8) << 20 } },
+        { "i << 20", [](Row i) { return i << 20; }, 30000, { uint64_t(1) << 20 } },
+    };
+    for (const Ids &ids : patterns) {
+        const std::string pattern = ids.pattern;
+        // the most the tables held per entry beyond their padding, under any of the bounds
+        double most_per_entry = 0;
+        for (uint64_t bound : ids.bounds) {
+            Cache cache;
+            cache.set_bound(bound);
+            uint64_t most = 0;
+            double most_here = 0;
+            for (Row i = 0; i < ids.rows; ++i) {
+                cache.insert(ids.id(i), SetBits{ 1 });
+                most = std::max(most, cache.bytes());
+                ASSERT_LE(cache.bytes(), bound) << name << ", " << pattern << ", row " << i;
+                ASSERT_EQ(cache.size() * row_copy_bytes(SetBits{ 1 }) + cache.table_bytes(),
+                          cache.bytes()) << name << ", " << pattern;
+                if (cache.size() >= 200 && cache.table_bytes() > padding) {
+                    most_here = std::max(most_here,
+                            double(cache.table_bytes() - padding) / cache.size());
+                }
+            }
+            most_per_entry = std::max(most_per_entry, most_here);
+            EXPECT_GE(cache.peak_bytes, most) << name << ", " << pattern;
+            EXPECT_GT(cache.size(), 0u) << name << ", " << pattern;
+            if (seeded) {
+                EXPECT_LE(cache.peak_bytes, bound) << name << ", " << pattern;
+                EXPECT_LE(cache.table_bytes(),
+                          cache.size() * 3 * Layout::kBucketBytes * 5 / 4 + padding)
+                    << name << ", " << pattern << ": " << cache.bucket_count()
+                    << " buckets for " << cache.size();
+                // the rows the old charge kept, about: the bound spent on rows, not buckets
+                EXPECT_GT(cache.size() * 4, bound / (Layout::kBucketBytes * 3 * 5 / 4 + 8))
+                    << name << ", " << pattern;
+                EXPECT_LT(most_here, 640) << name << ", " << pattern;
+            } else if (pattern == "i << 20") {
+                // one bucket's neighbourhood holds 62 of them: the tables stop at 128 buckets
+                // (90% load of the 62), the other rows in the overflow lists
+                EXPECT_LE(cache.bucket_count(), 2u * 128) << name << ", " << pattern;
+                EXPECT_GT(cache.size(), 1000u) << name << ", " << pattern;
+            }
+            std::cerr << name << ", ids " << pattern << " under " << (bound >> 20) << " MiB: "
+                      << cache.size() << " rows held, tables " << cache.table_bytes() << " B ("
+                      << cache.bucket_count() << " buckets), at most " << int(most_here)
+                      << " B of table per entry, peak " << cache.peak_bytes << " B" << std::endl;
+        }
+        if (!seeded && pattern == "bit-reversed") {
+            // what the identity hash made of them (under the smaller bound, where a table
+            // holds a short run of rows): more than the old charge
+            EXPECT_GT(most_per_entry, 640) << name << ", " << pattern;
+        }
+    }
+}
+
+TEST(RowDiffPathCache, TheBoundHoldsWhateverTheRowIds) {
+    check_bound_whatever_the_ids<std::hash<Row>>("identity hash");
+    check_bound_whatever_the_ids<graph::traversal::SeededHash>("seeded hash");
 }
 
 // A generation dropped releases its table. A cleared hopscotch map keeps its bucket array,
 // sized for the most entries it held, so after many narrow rows a few wide ones would hold the
 // narrow phase's arrays beside their bound (74.7 MiB of heap for 63.9 MiB accounted at a
-// 64 MiB bound); the tables hold no more than the share of the entries the bound counts
-// (kEntryBytes), and trim() and clear() free them
+// 64 MiB bound); the tables are counted as they are (table_bytes(), within the bound), and
+// trim() and clear() free them
 TEST(RowDiffPathCache, DroppedGenerationsReleaseTheirTables) {
     using Cache = RowDiffCache<SetBits>;
-    // a bucket: its key and entry, and the neighbourhood bitmap
-    const uint64_t bucket = sizeof(std::pair<Row, Cache::Entry>) + sizeof(uint64_t);
+    using Layout = graph::traversal::HopscotchLayout<Cache::Table>;
     Cache cache;
-    cache.set_bound(uint64_t(4) << 20);
+    const uint64_t bound = uint64_t(4) << 20;
+    cache.set_bound(bound);
     // narrow rows: thousands of entries a generation, rotated many times
     for (Row r = 0; r < 100000; ++r) {
         cache.insert(r, SetBits{ 1 });
     }
     const size_t narrow = cache.bucket_count();
-    EXPECT_LE(narrow * bucket, cache.size() * Cache::kEntryBytes);
+    EXPECT_EQ(Layout::array_bytes(cache.bucket_count()) > 0, cache.table_bytes() > 0);
+    EXPECT_LE(cache.bytes(), bound);
+    // the seeded tables hold about what random ids take: 3 buckets / 0.8 per entry at most
+    EXPECT_LE(cache.table_bytes(), cache.size() * 3 * Layout::kBucketBytes * 5 / 4
+                                       + 2 * Layout::array_bytes(1));
     // wide rows: a few hundred a generation
     SetBits wide(1000);
     std::iota(wide.begin(), wide.end(), 0);
@@ -1403,12 +1536,12 @@ TEST(RowDiffPathCache, DroppedGenerationsReleaseTheirTables) {
         cache.insert(r, wide);
     }
     EXPECT_GT(cache.size(), 100u);
-    EXPECT_LE(cache.bytes(), uint64_t(4) << 20);
-    EXPECT_LE(cache.bucket_count() * bucket, cache.size() * Cache::kEntryBytes)
-        << cache.bucket_count() << " buckets for " << cache.size() << " entries";
+    EXPECT_LE(cache.bytes(), bound);
+    EXPECT_EQ(cache.size() * row_copy_bytes(wide) + cache.table_bytes(), cache.bytes());
     EXPECT_LT(cache.bucket_count() * 4, narrow);
     cache.trim(0);
     EXPECT_EQ(0u, cache.bucket_count());
+    EXPECT_EQ(0u, cache.table_bytes());
     cache.insert(1, SetBits{ 1 });
     EXPECT_GT(cache.bucket_count(), 0u);
     cache.clear();
@@ -1618,7 +1751,11 @@ TEST(RowDiffPathCache, FlatTupleRowsRoundTrip) {
     ASSERT_TRUE(entry);
     EXPECT_EQ(row_copy_bytes(row), entry->copy_bytes);
     EXPECT_EQ(3u, entry->depth);
-    EXPECT_EQ(stored.bytes() + RowDiffCache<RowTuples>::kEntryBytes, cache.bytes());
+    EXPECT_EQ(stored.bytes() + cache.table_bytes(), cache.bytes());
+    // a tuple row's bucket: its key and entry, and the neighbourhood bitmap (176 B), and the
+    // one-entry table's array: 2 buckets and the padding of a neighbourhood
+    EXPECT_EQ(graph::traversal::HopscotchLayout<RowDiffCache<RowTuples>::Table>::array_bytes(2),
+              cache.table_bytes());
     EXPECT_EQ(1u, cache.rows_inserted);
     EXPECT_EQ(stored.bytes(), cache.bytes_inserted);
     RowTuples empty;
@@ -1729,14 +1866,17 @@ TEST(RowDiffPathCache, AKeptRowIsCopiedWithinTheBound) {
     const uint64_t bound = uint64_t(4) << 20;
     SetBits wide(((uint64_t(3) << 19) - 64) / sizeof(Column));
     std::iota(wide.begin(), wide.end(), 0);
-    const uint64_t b = RowDiffCache<SetBits>::kEntryBytes + row_copy_bytes(wide);
-    ASSERT_LE(2 * b, bound);
+    const uint64_t b = row_copy_bytes(wide);
+    // each generation's table: one entry, 2 buckets and the padding
+    const uint64_t table = graph::traversal::HopscotchLayout<
+            RowDiffCache<SetBits>::Table>::array_bytes(2);
+    ASSERT_LE(2 * (b + table), bound);
     ASSERT_GT(3 * b, bound);
     RowDiffCache<SetBits> cache;
     cache.set_bound(bound);
     cache.insert(1, wide);
     cache.insert(2, wide);
-    EXPECT_EQ(2 * b, cache.bytes());
+    EXPECT_EQ(2 * (b + table), cache.bytes());
 #if USE_JEMALLOC
     size_t sz = sizeof(uint64_t);
     const bool peak_known = !mallctl("thread.peak.reset", nullptr, nullptr, nullptr, 0);
@@ -1751,11 +1891,11 @@ TEST(RowDiffPathCache, AKeptRowIsCopiedWithinTheBound) {
     if (peak_known)
         mallctl("thread.peak.read", &peak, &sz, nullptr, 0);
 #endif
-    EXPECT_EQ(2 * b, cache.bytes());
+    EXPECT_EQ(2 * (b + table), cache.bytes());
     EXPECT_FALSE(cache.find(1, false));
     EXPECT_EQ(3u, cache.rows_inserted);
     EXPECT_EQ(0u, cache.rows_refused);
-    EXPECT_EQ(2 * b, cache.peak_bytes);
+    EXPECT_EQ(2 * (b + table), cache.peak_bytes);
     EXPECT_LE(cache.peak_bytes, bound);
     if (peak_known && thread_allocated()) {
         // what the cache held before the insert, and the most the insert added to it

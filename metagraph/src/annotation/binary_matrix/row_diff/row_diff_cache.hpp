@@ -14,6 +14,7 @@
 #include "annotation/binary_matrix/base/binary_matrix.hpp"
 #include "annotation/binary_matrix/base/decode_budget.hpp"
 #include "annotation/int_matrix/base/int_matrix.hpp"
+#include "graph/traversal/seeded_hash.hpp"
 
 
 namespace mtg {
@@ -163,17 +164,26 @@ struct StoredRow<MultiIntMatrix::RowTuples> {
  * read in one call. A row's content does not depend on how it was reached, so what a read
  * returns never depends on the cache; only the decoding work does.
  *
- * Bounded in bytes (StoredRow::bytes plus kEntryBytes per entry, an estimate of the table's
- * share), in two generations: inserts go to the current one, which becomes the older one
- * when it reaches half the bound (the older one is dropped then); a hit in the older one
- * moves the row to the current one. A walk moves forward, so the rows of the last few levels
- * are the ones its next paths meet. A generation dropped releases its table: a cleared
- * hopscotch map keeps its bucket array, sized for the most entries it ever held, so after
- * many narrow rows a few wide ones would hold that array beside their bound (74.7 MiB of
- * heap for 63.9 MiB accounted at a 64 MiB bound). Single-threaded, as the request that owns
- * it.
+ * Bounded in bytes: its rows (StoredRow::bytes) and its tables as they are (their bucket
+ * arrays and overflow nodes, hopscotch_held_bytes), in two generations: inserts go to the
+ * current one, which becomes the older one when it reaches half the bound (the older one is
+ * dropped then); a hit in the older one moves the row to the current one. A walk moves
+ * forward, so the rows of the last few levels are the ones its next paths meet. An insert
+ * (and a move, which inserts too) is made only with room for its table's doubling beside what
+ * the cache holds (hopscotch_growth_bytes: the old and the new bucket array at once), so the
+ * cache holds at most its bound after every insert, whatever the rows' ids, and throughout an
+ * insert that doubles its table once (GPT review 7, finding 8: a per-entry charge of 640 B,
+ * with rows hashed by their id, let crafted ids grow a table far past it). The tables hash
+ * rows seeded (|Hash|, SeededHash), which keeps them at the occupancy of random keys: the
+ * cache holds fewer rows with colliding ids, and only ids that collide after a doubling make
+ * one insert double a table twice, which can pass the bound while it runs (the generations
+ * are dropped after it until the bound holds): with the seeded hash no client can choose
+ * such ids. A generation dropped releases its table: a cleared hopscotch map keeps its
+ * bucket array, sized for the most entries it ever held, so after many narrow rows a few wide
+ * ones would hold that array beside their bound (74.7 MiB of heap for 63.9 MiB accounted at a
+ * 64 MiB bound). Single-threaded, as the request that owns it.
  */
-template <class RowT>
+template <class RowT, class Hash = graph::traversal::SeededHash>
 class RowDiffCache {
   public:
     using Row = BinaryMatrix::Row;
@@ -182,6 +192,8 @@ class RowDiffCache {
         // what a copy of the row holds (row_copy_bytes): the budget-aware decode charges a
         // hit as its copy
         uint64_t copy_bytes = 0;
+        // what the cache holds for the row (StoredRow::bytes; its share of the tables is
+        // counted with the tables, table_bytes())
         uint64_t bytes = 0;
         // rows from it to its anchor, itself excluded (0: an anchor): what the retention rule
         // reads for the rows reconstructed from it (keeps())
@@ -191,10 +203,8 @@ class RowDiffCache {
         bool has_path = false;
         PathAggregates path;
     };
-    // an entry's share of the tables besides its row's buffers: a slot of key and entry at
-    // load 0.4 after a growth, with the transient of a rehash (both bucket arrays)
-    static constexpr uint64_t kEntryBytes = 640;
-
+    // a generation's table (tests read its layout: graph::traversal::HopscotchLayout)
+    using Table = tsl::hopscotch_map<Row, Entry, Hash>;
     // The bound: |max_bytes|, or less while |room| (when set) returns less: the bytes a
     // caller sharing one allotment with another cache leaves it (re-read at every insert)
     void set_bound(uint64_t max_bytes, std::function<uint64_t()> room = {}) {
@@ -206,14 +216,21 @@ class RowDiffCache {
     uint64_t limit() const {
         return room_ ? std::min(max_bytes_, room_()) : max_bytes_;
     }
-    uint64_t bytes() const { return bytes_[0] + bytes_[1]; }
+    // what the cache holds: its rows and its tables
+    uint64_t bytes() const { return bytes_[0] + bytes_[1] + table_bytes(); }
+    // the tables as they are, both generations: their bucket arrays and overflow nodes
+    uint64_t table_bytes() const {
+        return graph::traversal::hopscotch_held_bytes(gen_[0])
+                + graph::traversal::hopscotch_held_bytes(gen_[1]);
+    }
     size_t size() const { return gen_[0].size() + gen_[1].size(); }
     // the tables' buckets, both generations (what the tests measure the tables by)
     size_t bucket_count() const { return gen_[0].bucket_count() + gen_[1].bucket_count(); }
 
     // The entry of |row| (with a known path only, if |need_path|), or null. A hit in the older
-    // generation moves the row to the current one. The pointer is valid until the next call
-    // of any member.
+    // generation moves the row to the current one, where there is room for the current
+    // table's doubling (else the row stays where it is). The pointer is valid until the next
+    // call of any member.
     const Entry* find(Row row, bool need_path) {
         auto it = gen_[0].find(row);
         if (it != gen_[0].end())
@@ -221,12 +238,15 @@ class RowDiffCache {
         auto old = gen_[1].find(row);
         if (old == gen_[1].end() || (need_path && !old->second.has_path))
             return nullptr;
-        // moved, not copied: the bytes stay within the bound
+        // the row's bytes move with it, but the current table can double for it (the older
+        // table keeps its buckets): moved only with room for that
+        if (bytes() + graph::traversal::hopscotch_growth_bytes(gen_[0]) > limit())
+            return &old->second;
         Entry entry = std::move(old.value());
         gen_[1].erase(old);
         bytes_[1] -= entry.bytes;
         bytes_[0] += entry.bytes;
-        return &gen_[0].emplace(row, std::move(entry)).first->second;
+        return emplace_current(row, std::move(entry));
     }
     /**
      * Which of the rows a decode call reconstructs are kept. Keeping every row of every path
@@ -306,15 +326,26 @@ class RowDiffCache {
             }
             return;
         }
-        const uint64_t b = StoredRow<RowT>::bytes_of(full) + kEntryBytes;
+        const uint64_t b = StoredRow<RowT>::bytes_of(full);
         const uint64_t bound = limit();
         // a shared bound may have shrunk since the last insert
         trim(bound);
-        if (b > bound / 2) {
+        // what the current generation needs for the row: the row, and its table's doubling
+        // beside what the table holds (a generation's table is counted with it)
+        auto need = [&]() {
+            return b + graph::traversal::hopscotch_growth_bytes(gen_[0]);
+        };
+        auto generation = [&](size_t i) {
+            return bytes_[i] + graph::traversal::hopscotch_held_bytes(gen_[i]);
+        };
+        // more than half the bound even in an empty generation: not kept
+        using Layout = graph::traversal::HopscotchLayout<Map>;
+        if (b + Layout::array_bytes(Layout::next_bucket_count(0)) + Layout::node_bytes()
+                > bound / 2) {
             rows_refused++;
             return;
         }
-        if (bytes_[0] + b > bound / 2 || bytes() + b > bound) {
+        if (generation(0) + need() > bound / 2 || bytes() + need() > bound) {
             // the current generation becomes the older one, the older one is dropped (the
             // counts move with their tables: a count left behind would let trim() and
             // make_room keep an older generation they no longer see)
@@ -322,34 +353,37 @@ class RowDiffCache {
             std::swap(bytes_[0], bytes_[1]);
             drop(0);
         }
-        if (bytes() + b > bound)
+        if (bytes() + need() > bound)
             drop(1);
-        // the copy, now that there is room for it: the cache holds bytes() + b from here on
-        // (the table's growth on the emplace is kEntryBytes's share), which the peak counts
+        // the copy, now that there is room for it and its table's doubling: the cache holds
+        // at most bytes() + need() from here on, which the peak counts (emplace_current)
         Entry entry;
         entry.row.store(full);
-        assert(entry.row.bytes() + kEntryBytes == b);
+        assert(entry.row.bytes() == b);
         entry.copy_bytes = row_copy_bytes(full);
         entry.bytes = b;
         entry.depth = depth;
         rows_inserted++;
-        bytes_inserted += b - kEntryBytes;
+        bytes_inserted += b;
         if (path) {
             entry.has_path = true;
             entry.path = *path;
         }
-        gen_[0].emplace(row, std::move(entry));
         bytes_[0] += b;
-        peak_bytes = std::max(peak_bytes, bytes());
+        emplace_current(row, std::move(entry));
+        // an insert that doubled the table more than once (ids colliding in the hash) may
+        // hold more than it had room for: the generations go until the bound holds again
+        trim(bound);
     }
-    // evict (the older generation first) until the cache holds at most |max| bytes; the
-    // decode calls trim to limit() when they begin, so that a shared bound that shrank
-    // without a trim (LabelOracle::make_room) is kept by every call that reads the cache
+    // evict (the older generation first) until the cache holds at most |max| bytes, its
+    // tables included; the decode calls trim to limit() when they begin, so that a shared
+    // bound that shrank without a trim (LabelOracle::make_room) is kept by every call that
+    // reads the cache
     void trim(uint64_t max) {
         if (bytes() <= max)
             return;
         drop(1);
-        if (bytes_[0] > max)
+        if (bytes() > max)
             drop(0);
     }
     void clear() {
@@ -366,8 +400,9 @@ class RowDiffCache {
     uint64_t bytes_inserted = 0;
     // rows the rule kept that did not fit (more than half the bound): refused before any copy
     uint64_t rows_refused = 0;
-    // the most the cache held at once (bytes(), at the end of an insert: rows are copied
-    // only after the evictions that make room for them, so no insert holds more)
+    // the most the cache held at once: bytes() at the end of an insert or a move, with the
+    // older bucket array beside the new one when its table doubled (rows are copied only
+    // after the evictions that make room for them)
     uint64_t peak_bytes = 0;
 
     // A budget-aware read with the cache holds less than without it — its paths stop at
@@ -382,11 +417,24 @@ class RowDiffCache {
     bool admit_as_uncached = false;
 
   private:
-    using Map = tsl::hopscotch_map<Row, Entry>;
+    using Map = Table;
     // a generation dropped with its table
     void drop(size_t i) {
         Map().swap(gen_[i]);
         bytes_[i] = 0;
+    }
+    // |entry| into the current table (its bytes counted already), the peak noting what the
+    // cache held: when the table doubled, the older bucket array was held beside the new one
+    // while the entries moved (the array of half the new count: the last doubling's)
+    Entry* emplace_current(Row row, Entry &&entry) {
+        using Layout = graph::traversal::HopscotchLayout<Map>;
+        const size_t buckets = gen_[0].bucket_count();
+        Entry *e = &gen_[0].emplace(row, std::move(entry)).first.value();
+        uint64_t held = bytes();
+        if (buckets && gen_[0].bucket_count() != buckets)
+            held += Layout::array_bytes(gen_[0].bucket_count() / 2);
+        peak_bytes = std::max(peak_bytes, held);
+        return e;
     }
 
     Map gen_[2];

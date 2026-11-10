@@ -3147,8 +3147,23 @@ charges or admits: a budget-aware read whose path stops at a cached row takes th
 cache (`PathAggregates`: the whole path's length, entries, stored bytes, scratch and reconstruction peak), so every
 row's `RowCost` — its work (8 per dependency row, 1 per entry) and its standalone demand — is that of its whole path,
 the cache only shortening the decoding (and the transient charges of a call; a row read alone never needs more
-than without the cache, so where a fetch stops is unchanged). The cache is bounded in bytes (each row as its exact
-copy plus 640 B for its share of the tables) in two generations: a row is **admitted before it is copied** — its
+than without the cache, so where a fetch stops is unchanged). The cache is bounded in bytes — each row as its exact
+copy, and its two hash tables as they are: their bucket arrays (`bucket_count + 61` buckets of 128 B for binary
+rows, 176 B for tuple rows) and overflow nodes, each buffer as the heap holds it (`alloc_bytes`, as every buffer of
+the decode budget's model). An insert, and a hit's move to the current generation, is made only
+with room for its table's doubling beside what the cache holds (the old and the new bucket array at once; a move
+without that room is not made, the row read where it is), so the cache holds at most its bound after every insert,
+whatever the rows' ids, and throughout a growth that doubles a table once. *(GPT review 7, finding 8, train 4: the cache charged 640 B per entry for its
+tables and hashed rows by their id; tsl doubles a table down to 10% load when a neighbourhood is full, so crafted
+row ids could grow a generation to 2²⁰ buckets, about 440 MiB across both against the 128 MiB bound, reasoned;
+and a table of one wide row held 63 × 176 B against its 640 B; rows with bit-reversed ids, whose low bits a run
+of consecutive rows shares, made identity-hashed tables hold up to 2,516 B per entry under a 1 MiB bound. The
+tables now also hash rows seeded, `SeededHash`, which keeps them at the occupancy of random ids (at most 285 B per
+entry in the same test): the bound no longer depends on it, the number of rows held does. A single insert that doubles a table twice, possible only for ids that collide in the hash after a
+doubling, can pass the bound until it returns, and the generations are then dropped until it holds again: the
+identity hash's bit-reversed ids did so in the test (a peak of 11.0 MiB under 8 MiB); the seeded hash's
+per-process seed keeps a client from choosing such ids.)*
+The cache keeps two generations: a row is **admitted before it is copied** — its
 stored size computed from the row, the shared bound read and the older entries evicted first, so that a row the
 cache refuses (more than half the bound) is never copied and the copy of one it keeps is made within the bound
 *(review of levels 4–5, finding 1: copying first, a cache bounded at 1 KiB allocated 4,210,688 bytes for a row of

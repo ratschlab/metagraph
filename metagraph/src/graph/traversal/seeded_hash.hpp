@@ -4,7 +4,13 @@
 #include <cstddef>
 #include <cstdint>
 #include <random>
+#include <type_traits>
 #include <utility>
+
+#include <tsl/hopscotch_map.h>
+#include <tsl/hopscotch_set.h>
+
+#include "annotation/binary_matrix/base/decode_budget.hpp"
 
 
 namespace mtg {
@@ -75,6 +81,77 @@ struct SeededPairHash {
 // buckets (median 0.90), 0.822 over 280 growths of 2^20 to 2^26 buckets (median 0.87)
 constexpr uint64_t hopscotch_entry_bytes(size_t value_bytes) {
     return (3 * (value_bytes + sizeof(uint64_t)) * 5 + 3) / 4;
+}
+
+/**
+ * The heap of a tsl::hopscotch_map or hopscotch_set as it is, whatever its keys and its hash
+ * (GPT review 7, findings 7 and 8: a table can double at 10% load, so a per-entry model is a
+ * bound only for keys spread as random keys are). A table holds its bucket array — once it has
+ * buckets, bucket_count() + NeighborhoodSize - 1 of them (the last bucket's neighbourhood is
+ * padding: a table of one entry holds 63 buckets) — and its overflow list's nodes (a value and
+ * two pointers each). An insert doubles the bucket count (2 after none), the new array held
+ * beside the old one while the entries move; an insert that doubles a table more than once
+ * (keys colliding in the hash after a doubling, which the seeded hash makes improbable) holds
+ * more. Each buffer is counted as the heap holds it (alloc_bytes, as every buffer of the
+ * budget's model).
+ */
+template <class Table>
+struct HopscotchLayout;
+
+template <class Value, unsigned int NeighborhoodSize, bool StoreHash, class GrowthPolicy>
+struct HopscotchLayoutOf {
+    static_assert(std::is_same<GrowthPolicy, tsl::hh::power_of_two_growth_policy<2>>::value,
+                  "the layout knows the doubling growth policy only");
+    // a bucket: its value and its neighbourhood bitmap (and its stored hash, if any)
+    static constexpr uint64_t kBucketBytes = sizeof(
+            tsl::detail_hopscotch_hash::hopscotch_bucket<Value, NeighborhoodSize, StoreHash>);
+    static constexpr uint64_t kPaddingBuckets = NeighborhoodSize - 1;
+    // an overflow node of std::list: two pointers, then the value at its alignment
+    static uint64_t node_bytes() {
+        return annot::matrix::alloc_bytes(
+                (2 * sizeof(void *) + alignof(Value) - 1) / alignof(Value) * alignof(Value)
+                    + sizeof(Value));
+    }
+
+    // the bucket array of a table of |bucket_count| buckets (one buffer)
+    static uint64_t array_bytes(uint64_t bucket_count) {
+        return bucket_count
+                ? annot::matrix::alloc_bytes((bucket_count + kPaddingBuckets) * kBucketBytes)
+                : 0;
+    }
+    // the bucket count an insert that grows a table of |bucket_count| buckets doubles it to
+    static constexpr uint64_t next_bucket_count(uint64_t bucket_count) {
+        return bucket_count ? 2 * bucket_count : 2;
+    }
+};
+
+template <class Key, class T, class Hash, class KeyEqual, class Allocator,
+          unsigned int NeighborhoodSize, bool StoreHash, class GrowthPolicy>
+struct HopscotchLayout<tsl::hopscotch_map<Key, T, Hash, KeyEqual, Allocator, NeighborhoodSize,
+                                          StoreHash, GrowthPolicy>>
+      : HopscotchLayoutOf<std::pair<Key, T>, NeighborhoodSize, StoreHash, GrowthPolicy> {};
+
+template <class Key, class Hash, class KeyEqual, class Allocator,
+          unsigned int NeighborhoodSize, bool StoreHash, class GrowthPolicy>
+struct HopscotchLayout<tsl::hopscotch_set<Key, Hash, KeyEqual, Allocator, NeighborhoodSize,
+                                          StoreHash, GrowthPolicy>>
+      : HopscotchLayoutOf<Key, NeighborhoodSize, StoreHash, GrowthPolicy> {};
+
+// What |table| holds: its bucket array and its overflow nodes
+template <class Table>
+uint64_t hopscotch_held_bytes(const Table &table) {
+    using Layout = HopscotchLayout<Table>;
+    return Layout::array_bytes(table.bucket_count())
+            + table.overflow_size() * Layout::node_bytes();
+}
+
+// What one insert into |table| adds at most to what it holds while it runs, when it doubles
+// the table once: the new bucket array beside the old one, or one overflow node
+template <class Table>
+uint64_t hopscotch_growth_bytes(const Table &table) {
+    using Layout = HopscotchLayout<Table>;
+    return Layout::array_bytes(Layout::next_bucket_count(table.bucket_count()))
+            + Layout::node_bytes();
 }
 
 } // namespace traversal
