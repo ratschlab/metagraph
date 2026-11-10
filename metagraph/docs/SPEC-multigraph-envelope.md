@@ -711,42 +711,41 @@ whole), and so does an empty one, with `--mmap` too, naming the file. A labelled
 columns, its whole trailer gone, cannot be told from one written before the trailer: it loads as such
 (`count_only`, the same answers).
 
-A `.seqs` whose stated sizes are corrupt fails its load the same way (`Cannot load CoordToHeader from '<file>': ...
-(caught: <reason>)`; a server exits 1 before it is ready, a CLI command exits 1, a per-request copy is the request's
-400) when the corrupt size is one a load checks. A load checks these sizes:
+A `.seqs` whose layout is corrupt fails its load the same way (`Cannot load CoordToHeader from '<file>': ...
+(caught: <reason>)`; a server exits 1 before it is ready, a CLI command exits 1, a per-request copy that reads it is
+the request's 400). Since train 4 (GPT review 7, finding 9) the load validates the whole layout before anything is
+allocated for it or sdsl reads it:
 - the number of columns, against the bytes left in the file, before anything is allocated for it;
-- each column's number of headers, against the bytes left;
+- each column's number of headers, against the bytes left; the headers are then added as they are read, never
+  constructed from the stated count (it built that many empty strings first, 24 to 32 bytes each, 41 times the file);
 - each header's and label's length, against the bytes left at its column's (or the labels') start;
-- before sdsl loads a column's coordinate offsets (an sd_vector), the data of their low part, of their high part and
-  of each inner vector of their two select supports, against the bytes left;
-- then the offsets' sizes against one another as sd_vector builds them: a valid low width, no more set bits than the
-  high part has, each select support over exactly the high part's set (or unset) bits, and a nonzero length within
-  what the high part encodes (`the coordinate offsets of column <j> state a length of <n>, more than their encoding
-  holds (<b> buckets of <w>)`);
-- once loaded, a column with records must end at its last record's end.
+- a column's coordinate offsets (an sdsl sd_vector of m positions in a length of n): the data of their low part, of
+  their high part and of each inner vector of their two select supports against the bytes left, then the layout
+  sdsl's builder makes and nothing else: the low bits per position wl = logn - logm as the builder derives them from n
+  and m, the low part's width wl, the high part's m + 2^logm bits, so that it has a zero (a zero-less high part
+  under a length of 0 segfaulted the load), a length within what the high part encodes (`the coordinate offsets of
+  column <j> state a length of <n>, more than their encoding holds (<b> buckets of <w>)`), and wl at most 57 (sdsl's
+  select over the zeros strides 64 x 2^wl positions: from 58 on it divides by zero, a trap on x86-64);
+- the high part's bits: exactly m set bits, none past its end;
+- each select support: over exactly the high part's set (or unset) bits, its superblocks and its blocks of a width in
+  1..64 and of the number of entries their mini-or-long flags make them (a superblock per 4096 arguments; a long
+  block 4096 entries, a short one 64), the flags none or one per superblock, and every value its select reads equal
+  to the position it stands for, checked against one pass over the high part (a short superblock's own value and its
+  block's entries, every entry of a long block). One width byte changed there segfaulted the load of a real r237 copy
+  (plain loads, which a per-request copy used), or the file loaded and answered wrong records;
+- the inversion flag, 0 or 1;
+- once loaded, a column with records must end at its last record's end, and a column without records must state no
+  length (`column <j>: no records, and its coordinate offsets state <n> k-mers`: any length loaded before, and a
+  coordinate lookup in the column then divided by its zero records and read a record of none, a segfault).
 
 Before the train-3 verification a stated length of 2^20 or more ended the process with a segfault (any of `stats`,
 `query`, `server_query`, and a per-request copy), a select support over 2^36 bits took 805 MiB and a header's or
-label's length of 2^30 took 1 GiB before the refusal.
+label's length of 2^30 took 1 GiB before the refusal; before train 4 the zero-less high part, the empty column's
+length and the select supports' inner layout and values (the train-3 verification's V3-S1 to V3-S3) still crashed a
+load or a lookup. Every file of that verification's fuzz corpus (76,618 runs) that crashed is now refused, plain and
+mapped, and every valid `.seqs` loads as before (the 11 r237 copies among them, the same output).
 
-A load does not check the rest of the file, and a corrupt file of the following kinds can still crash the load itself
-(a segfault in `stats`, `query`, `server_query` at start-up, or a per-request copy, which ends the running server),
-crash a later lookup, or load and give wrong records:
-- a high part without a zero bit under a stated length of 0 (the length test is skipped then): the load segfaults;
-- the length of a column without records: any length its encoding holds loads, and a coordinate lookup in the column
-  then segfaults;
-- the select supports' inner layout, checked only against the bytes left: the superblocks' width and length, the
-  mini-or-long flags' length, each block's width and length. One byte changed there segfaults the load of a real r237
-  copy, or the file loads and answers wrong records;
-- the high part's bits and the inversion flag, taken as stored;
-- the values inside the offsets, the select supports' superblocks and blocks and the low part's values, taken as
-  stored: a corrupt entry can give a wrong record or make a lookup read outside the column;
-- a header's text, taken as written.
-
-Some memory is still allocated before a refusal. A column's number of headers within its bound builds that many empty
-strings before the first is read: 24 to 32 bytes each, about 25 times the file (533 MiB for a 21 MB `.seqs`). One
-header's or label's stated length can be allocated up to the bytes left in the file before its read fails.
-
-These gaps predate the train (its base behaves the same). A client cannot reach them: it takes a corrupt `.seqs` on
-the server's disk, and staging's are checked against their manifests' sha256. They are the engine backlog's item
-".seqs (CoordToHeader) format hardening — before production".
+A load does not check the low part's values (the low bits of each position) or a header's text. A corrupt low value
+maps a coordinate to another record of its column, or states a wrong k-mer count for a record, without reading outside
+the column. One header's or label's stated length can be allocated up to the bytes left in the file before its read
+fails. A client cannot reach any of this: it takes a corrupt `.seqs` on the server's disk.
