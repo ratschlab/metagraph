@@ -49,18 +49,21 @@ void bitmap_builder_set_disk::add_ones(const uint64_t *begin, const uint64_t *en
     if (!on_disk_) {
         const uint64_t batch_size = end - begin;
         if (num_in_memory_ + batch_size > buffer_size_) {
-            // drop the duplicates before deciding to go to disk
+            // the buffer is full, drop the duplicates
             num_in_memory_ = in_memory_.data().size();
+            // go to disk if the batch still does not fit, or if less than half
+            // of the buffer got free. Otherwise, a nearly full buffer would
+            // drop the duplicates again on every insert.
+            if (num_in_memory_ > buffer_size_ / 2
+                    || num_in_memory_ + batch_size > buffer_size_) {
+                spill();
+            }
         }
-        // go to disk once the distinct positions fill half of the buffer,
-        // so that the duplicates are not dropped again on every insert
-        if (num_in_memory_ <= buffer_size_ / 2
-                && num_in_memory_ + batch_size <= buffer_size_) {
+        if (!on_disk_) {
             in_memory_.insert(begin, end);
             num_in_memory_ += batch_size;
             return;
         }
-        spill();
     }
     on_disk_->insert(begin, end);
 }

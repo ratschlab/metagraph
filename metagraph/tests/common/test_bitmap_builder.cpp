@@ -56,6 +56,18 @@ TEST_F(BitmapBuilderSetDisk, FitsInBufferWithoutDisk) {
     }
 }
 
+TEST_F(BitmapBuilderSetDisk, NearlyFullBufferStaysInMemory) {
+    bitmap_builder_set_disk builder(1000, 1, 100, swap_dir_);
+    std::vector<uint64_t> expected;
+    // 90 distinct positions inserted one by one into a buffer of 100
+    for (uint64_t i = 0; i < 90; ++i) {
+        builder.add_one(i * 3);
+        expected.push_back(i * 3);
+    }
+    EXPECT_EQ(0u, count_entries(swap_dir_));
+    EXPECT_EQ(expected, get_ones(builder, 1000));
+}
+
 TEST_F(BitmapBuilderSetDisk, DuplicatesDoNotForceDisk) {
     bitmap_builder_set_disk builder(1000, 1, 100, swap_dir_);
     // many more insertions than the buffer holds, but only 10 distinct positions

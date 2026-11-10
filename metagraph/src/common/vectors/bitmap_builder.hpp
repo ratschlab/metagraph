@@ -89,7 +89,8 @@ class bitmap_builder_set : public bitmap_builder {
  * The positions may be not distinct and can be passed in arbitrary order.
  * Keeps a buffer of a fixed size and writes temporary data to disk.
  * The temporary directory and the disk-backed set are created only when
- * the buffer overflows, so small bitmaps never touch the disk.
+ * the buffer is full and its distinct positions take more than half of it,
+ * or leave no room for the next batch. Small bitmaps never touch the disk.
  */
 class bitmap_builder_set_disk : public bitmap_builder {
   public:
