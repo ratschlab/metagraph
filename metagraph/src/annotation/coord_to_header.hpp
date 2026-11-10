@@ -2,7 +2,11 @@
 #define __COORD_TO_HEADER_HPP__
 
 #include <functional>
+#include <memory>
+#include <mutex>
+#include <optional>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include "annotation/int_matrix/base/int_matrix.hpp"
@@ -42,16 +46,22 @@ class CoordToHeader {
     using Tuple = mtg::annot::matrix::MultiIntMatrix::Tuple;
     using RowTuples = mtg::annot::matrix::MultiIntMatrix::RowTuples;
 
-    CoordToHeader() {}
+    // out of line, as the destructor: the header index type is private to the .cpp
+    CoordToHeader();
     // Constructor from sequence names and number of k-mers in them, per annotation column.
     CoordToHeader(std::vector<std::vector<std::string>> &&headers,
                   std::vector<std::vector<uint64_t>> &&num_kmers);
+    ~CoordToHeader();
 
     bool load(const std::string &filename_base);
     void serialize(const std::string &filename_base) const;
 
     // global_coord -> (seq_id, local_coord)
     std::pair<size_t, uint64_t> map_single_coord(Column col, uint64_t coord) const;
+
+    // The first and last global coordinates of a sequence. Throws std::out_of_range for a
+    // column or sequence id out of range.
+    std::pair<uint64_t, uint64_t> sequence_coords(Column col, size_t seq_id) const;
 
     /**
      * Batch variant of `map_single_coord` that replaces each global coord
@@ -63,6 +73,9 @@ class CoordToHeader {
      * Packing:   `packed = local_coord * num_sequences[col] + seq_id`
      * Unpacking: `seq_id   = packed % num_sequences[col]`
      *            `local_coord = packed / num_sequences[col]`
+     *
+     * Entries of columns without sequence records are removed: they have no
+     * header labels. A column outside the index throws std::runtime_error.
      *
      * For single-coord lookups prefer `map_single_coord`, which returns
      * the pair directly without packing.
@@ -79,6 +92,21 @@ class CoordToHeader {
     const std::vector<std::string>& get_headers(Column column) const { return headers_[column]; }
 
     /**
+     * The (column, seq_id) of a FASTA header: its first occurrence in column order (a
+     * header is unique within a column, not within the index), or nothing. The reverse
+     * index is built by index_headers() or on the first lookup, and owned by this object,
+     * so it lives and dies with the headers it indexes. load() drops it. Thread-safe,
+     * except against a concurrent load().
+     */
+    std::optional<std::pair<Column, size_t>> find_header(std::string_view header) const;
+
+    // Whether several records carry |header|, in one column or in several.
+    bool is_repeated_header(std::string_view header) const;
+
+    // Builds the reverse header index now, so that no lookup pays for it.
+    void index_headers() const;
+
+    /**
      * The records of |headers| whose header repeats an earlier record's, in record order:
      * |callback|(first, repeat) with the 0-based indices of the first occurrence and of the
      * repeat, once per repeat, until the callback returns false. One pass with a hash set over
@@ -91,8 +119,18 @@ class CoordToHeader {
     static constexpr auto kExtension = ".seqs";
 
   private:
+    struct HeaderIndex;
+    const HeaderIndex& header_index() const;
+    std::vector<std::pair<Column, size_t>> records_of(std::string_view header,
+                                                       size_t limit) const;
+
     std::vector<std::vector<std::string>> headers_;
     std::vector<bit_vector_sd> coord_offsets_;
+
+    // find_header(): keys are views into |headers_|, which only load() changes, and load()
+    // drops the index first
+    mutable std::mutex header_index_mutex_;
+    mutable std::unique_ptr<const HeaderIndex> header_index_;
 };
 
 } // namespace annot

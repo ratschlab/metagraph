@@ -1,5 +1,8 @@
 #include "annotation/coord_to_header.hpp"
 
+#include <algorithm>
+
+#include <tsl/hopscotch_map.h>
 #include <tsl/hopscotch_set.h>
 
 #include "common/logger.hpp"
@@ -34,6 +37,93 @@ struct HeaderOfRecordEqual {
 };
 
 } // namespace
+
+// The records in column order get global ids. The index keeps the ids sorted by the hash of
+// their header, then by id: 8 bytes per record. A lookup binary-searches the hash and compares
+// the headers of the records that share it.
+struct CoordToHeader::HeaderIndex {
+    std::vector<uint64_t> offsets;  // the global id of each column's first record, and the total
+    std::vector<uint64_t> by_hash;  // global record ids, by (header hash, id)
+};
+
+namespace {
+
+uint64_t header_hash(std::string_view header) {
+    return std::hash<std::string_view>()(header);
+}
+
+} // namespace
+
+CoordToHeader::CoordToHeader() {}
+CoordToHeader::~CoordToHeader() {}
+
+const CoordToHeader::HeaderIndex& CoordToHeader::header_index() const {
+    std::lock_guard<std::mutex> lock(header_index_mutex_);
+    if (!header_index_) {
+        auto index = std::make_unique<HeaderIndex>();
+        index->offsets.assign(headers_.size() + 1, 0);
+        for (Column col = 0; col < headers_.size(); ++col) {
+            index->offsets[col + 1] = index->offsets[col] + headers_[col].size();
+        }
+        std::vector<std::pair<uint64_t, uint64_t>> hashed;
+        hashed.reserve(index->offsets.back());
+        for (Column col = 0; col < headers_.size(); ++col) {
+            for (size_t s = 0; s < headers_[col].size(); ++s) {
+                hashed.emplace_back(header_hash(headers_[col][s]), index->offsets[col] + s);
+            }
+        }
+        std::sort(hashed.begin(), hashed.end());
+        index->by_hash.reserve(hashed.size());
+        for (const auto &[hash, id] : hashed) {
+            index->by_hash.push_back(id);
+        }
+        header_index_ = std::move(index);
+    }
+    // the index is immutable once built, so lookups run outside the lock
+    return *header_index_;
+}
+
+void CoordToHeader::index_headers() const {
+    header_index();
+}
+
+// The records holding |header|, at most |limit| of them, in column order
+std::vector<std::pair<CoordToHeader::Column, size_t>>
+CoordToHeader::records_of(std::string_view header, size_t limit) const {
+    const HeaderIndex &index = header_index();
+    auto record = [&](uint64_t id) {
+        const Column col = std::upper_bound(index.offsets.begin(), index.offsets.end(), id)
+                            - index.offsets.begin() - 1;
+        return std::make_pair(col, static_cast<size_t>(id - index.offsets[col]));
+    };
+    auto name = [&](uint64_t id) -> std::string_view {
+        const auto [col, s] = record(id);
+        return headers_[col][s];
+    };
+    const uint64_t hash = header_hash(header);
+    auto it = std::partition_point(index.by_hash.begin(), index.by_hash.end(),
+                                   [&](uint64_t id) { return header_hash(name(id)) < hash; });
+    std::vector<std::pair<Column, size_t>> records;
+    for (; it != index.by_hash.end() && records.size() < limit
+            && header_hash(name(*it)) == hash; ++it) {
+        if (name(*it) == header)
+            records.push_back(record(*it));
+    }
+    return records;
+}
+
+std::optional<std::pair<CoordToHeader::Column, size_t>>
+CoordToHeader::find_header(std::string_view header) const {
+    // ids of equal hash are in id order, which is column order
+    const auto records = records_of(header, 1);
+    if (records.empty())
+        return std::nullopt;
+    return records.front();
+}
+
+bool CoordToHeader::is_repeated_header(std::string_view header) const {
+    return records_of(header, 2).size() == 2;
+}
 
 void CoordToHeader::find_duplicate_headers(const std::vector<std::string> &headers,
                                            const std::function<bool(size_t, size_t)> &callback) {
@@ -71,6 +161,16 @@ CoordToHeader::CoordToHeader(std::vector<std::vector<std::string>> &&headers,
 void CoordToHeader::map_to_local_coords(std::vector<RowTuples> *rows) const {
     assert(rows);
     for (auto &row : *rows) {
+        for (const auto &[col, coords] : row) {
+            if (col >= num_columns())
+                throw std::runtime_error(fmt::format("Column {} is out of range: CoordToHeader "
+                                                     "has {} columns", col, num_columns()));
+        }
+        // a column without sequence records has no header labels
+        row.erase(std::remove_if(row.begin(), row.end(), [&](const auto &entry) {
+                      return !num_sequences(entry.first);
+                  }),
+                  row.end());
         for (auto &[col, coords] : row) {
             const size_t n = num_sequences(col);
             for (uint64_t &coord : coords) {
@@ -103,7 +203,8 @@ CoordToHeader::map_single_coord(Column col, uint64_t coord) const {
     return { header, local_coord };
 }
 
-uint64_t CoordToHeader::num_kmers_in_sequence(Column col, size_t seq_id) const {
+std::pair<uint64_t, uint64_t>
+CoordToHeader::sequence_coords(Column col, size_t seq_id) const {
     if (col >= num_columns()) {
         throw std::out_of_range(fmt::format("Column {} out of range "
                 "(CoordToHeader has {} columns)", col, num_columns()));
@@ -113,12 +214,13 @@ uint64_t CoordToHeader::num_kmers_in_sequence(Column col, size_t seq_id) const {
         throw std::out_of_range(fmt::format("Sequence id {} out of range for column {} "
                 "({} sequences)", seq_id, col, num_sequences(col)));
     }
-    // coord_offsets_ has a set bit at the partial-sum boundary of each
-    // sequence, so the k-mer count for sequence s is
-    //     select1(s+1) - (s == 0 ? -1 : select1(s)).
-    uint64_t end = offsets.select1(seq_id + 1);
-    uint64_t start = seq_id ? offsets.select1(seq_id) + 1 : 0;
-    return end - start + 1;
+    // coord_offsets_ has a set bit at the last coordinate of each sequence
+    return { seq_id ? offsets.select1(seq_id) + 1 : 0, offsets.select1(seq_id + 1) };
+}
+
+uint64_t CoordToHeader::num_kmers_in_sequence(Column col, size_t seq_id) const {
+    const auto [first, last] = sequence_coords(col, seq_id);
+    return last - first + 1;
 }
 
 bool CoordToHeader::load(const std::string &filename_base) {
@@ -129,16 +231,21 @@ bool CoordToHeader::load(const std::string &filename_base) {
                       utils::file_read_failure_detail(path));
         return false;
     }
-
     try {
+        // read into new vectors, so that a failed load leaves this object as it was
         uint64_t num_columns = load_number(*in);
-        headers_.resize(num_columns);
-        coord_offsets_.resize(num_columns);
+        std::vector<std::vector<std::string>> headers(num_columns);
+        std::vector<bit_vector_sd> coord_offsets(num_columns);
 
         for (uint64_t i = 0; i < num_columns; ++i) {
-            load_string_vector(*in, &headers_[i]);
-            coord_offsets_[i].load(*in);
+            load_string_vector(*in, &headers[i]);
+            coord_offsets[i].load(*in);
         }
+        // the index views the headers being replaced: drop it with them
+        std::lock_guard<std::mutex> lock(header_index_mutex_);
+        header_index_.reset();
+        headers_.swap(headers);
+        coord_offsets_.swap(coord_offsets);
         return true;
 
     } catch (const std::exception &e) {

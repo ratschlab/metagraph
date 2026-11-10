@@ -1,5 +1,6 @@
 #include "query.hpp"
 
+#include <exception>
 #include <mutex>
 #include <sstream>
 
@@ -121,24 +122,6 @@ Json::Value adjust_for_types(const std::string &v) {
     } catch(...) {}
 
     return Json::Value(v);
-}
-
-
-// Encode a k-mer presence bitmask as alternating x<len>o<len>... runs
-// (x = ones, o = zeros). Trailing zeros are included so the total length
-// is recoverable as the sum of all run lengths.
-// Example: 11100110 → x3o2x2o1
-std::string encode_presence_mask(const sdsl::bit_vector &mask) {
-    std::string result;
-    size_t pos = 0;
-    while (pos < mask.size()) {
-        bool bit = mask[pos];
-        size_t run_start = pos;
-        while (pos < mask.size() && (bool)mask[pos] == bit) ++pos;
-        result += (bit ? 'x' : 'o');
-        result += std::to_string(pos - run_start);
-    }
-    return result;
 }
 
 
@@ -1293,17 +1276,29 @@ size_t query_fasta(const std::string &file,
     size_t seq_count = 0;
     size_t num_bp = 0;
 
+    // a task that throws on a worker would terminate the process: keep the first error and
+    // rethrow it to the caller, which a server reports per request
+    std::exception_ptr error;
+    std::mutex error_mutex;
     ThreadPool thread_pool(get_num_threads(), 1000);
     for (const seq_io::kseq_t &kseq : fasta_parser) {
         thread_pool.enqueue([&](QuerySequence &sequence) {
-            // Callback with the SeqSearchResult
-            callback(query_sequence(std::move(sequence), anno_graph,
-                                    config, aligner_config));
+            try {
+                // Callback with the SeqSearchResult
+                callback(query_sequence(std::move(sequence), anno_graph,
+                                        config, aligner_config));
+            } catch (...) {
+                std::lock_guard<std::mutex> lock(error_mutex);
+                if (!error)
+                    error = std::current_exception();
+            }
         }, QuerySequence { seq_count++, std::string(kseq.name.s), std::string(kseq.seq.s) });
         num_bp += kseq.seq.l;
     }
     // wait while all threads finish processing the current file
     thread_pool.join();
+    if (error)
+        std::rethrow_exception(error);
 
     return num_bp;
 }

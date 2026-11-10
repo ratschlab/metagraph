@@ -3,6 +3,8 @@
 #include <cstdlib>
 #include <span>
 
+#include <fmt/format.h>
+
 #include <tsl/hopscotch_set.h>
 #include <tsl/hopscotch_map.h>
 
@@ -15,13 +17,11 @@
 #include "common/algorithms.hpp"
 #include "common/utils/template_utils.hpp"
 #include "common/vector_map.hpp"
-#include "common/logger.hpp"
 
 
 namespace mtg {
 namespace graph {
 
-using mtg::common::logger;
 using mtg::annot::matrix::BinaryMatrix;
 using mtg::annot::matrix::IntMatrix;
 using mtg::annot::matrix::MultiIntMatrix;
@@ -413,7 +413,8 @@ HeaderCounts count_header_matches(const std::vector<MultiIntMatrix::RowTuples> &
                                   const annot::CoordToHeader &mapping,
                                   size_t min_count, size_t num_top_labels,
                                   tsl::hopscotch_map<Header, size_t> *abundances = nullptr,
-                                  std::span<const size_t> weights = {}) {
+                                  std::span<const size_t> weights = {},
+                                  size_t *num_passed = nullptr) {
     VectorMap<Header, size_t> counts_map;
     tsl::hopscotch_set<Header> matches;
     size_t row_index = 0;
@@ -433,6 +434,8 @@ HeaderCounts count_header_matches(const std::vector<MultiIntMatrix::RowTuples> &
     }
     auto counts = to_vector(std::move(counts_map));
     std::erase_if(counts, [&](const auto &p) { return p.second < min_count; });
+    if (num_passed)
+        *num_passed = counts.size();
     if (counts.size() > num_top_labels)
         top_n_sorted(counts, num_top_labels);
     return counts;
@@ -446,7 +449,8 @@ Result filter_and_aggregate(const RowEnumerator &enumerate_rows,
                             size_t min_count,
                             size_t num_top_labels,
                             const std::vector<size_t> &kmer_positions,
-                            size_t num_kmers) {
+                            size_t num_kmers,
+                            size_t *num_passed = nullptr) {
     static_assert(utils::is_one_of_v<Result,
                     std::vector<std::tuple<Label, size_t, sdsl::bit_vector>>,
                     std::vector<std::tuple<Label, size_t, std::vector<size_t>>>,
@@ -462,6 +466,8 @@ Result filter_and_aggregate(const RowEnumerator &enumerate_rows,
     std::vector<std::pair<Column, size_t>> counts
             = utils::accumulate_counts(call_bits, label_encoder.size(), min_count);
 
+    if (num_passed)
+        *num_passed = counts.size();
     if (counts.size() > num_top_labels)
         top_n_sorted(counts, num_top_labels);
 
@@ -521,7 +527,7 @@ template <class Values>
 std::vector<std::tuple<Label, size_t, Values>>
 AnnotatedDBG::get_header_results(std::string_view sequence, size_t num_top_labels,
                                  double discovery_fraction, double presence_fraction,
-                                 bool with_kmer_counts) const {
+                                 bool with_kmer_counts, size_t *num_passed) const {
     static_assert(utils::is_one_of_v<Values, size_t, std::vector<size_t>, sdsl::bit_vector>);
     const size_t num_kmers = sequence.size() - dbg_.get_k() + 1;
     // Repeated query positions still count separately, but their annotation
@@ -563,13 +569,13 @@ AnnotatedDBG::get_header_results(std::string_view sequence, size_t num_top_label
             weights.push_back(positions.size());
     }
     const auto *matrix = dynamic_cast<const MultiIntMatrix *>(&annotator_->get_matrix());
-    if (!matrix) {
-        logger->error("k-mer coordinates are not indexed in this annotator");
-        exit(1);
-    }
+    if (!matrix)
+        throw std::runtime_error("k-mer coordinates are not indexed in this annotator");
     if (annotator_->num_labels() != coord_to_header_->num_columns()) {
-        logger->error("Incompatible number of columns in CoordToHeader and annotation matrix");
-        exit(1);
+        throw std::runtime_error(fmt::format("Incompatible number of columns in CoordToHeader "
+                                             "and annotation matrix: {} != {}",
+                                             coord_to_header_->num_columns(),
+                                             annotator_->num_labels()));
     }
     auto tuples = matrix->get_row_tuples(rows);
     coord_to_header_->map_to_local_coords(&tuples);
@@ -587,7 +593,7 @@ AnnotatedDBG::get_header_results(std::string_view sequence, size_t num_top_label
                                 with_kmer_counts ? abundances.at(h) : count);
     } else {
         auto counts = count_header_matches(tuples, *coord_to_header_, min_count,
-                                           num_top_labels, nullptr, weights);
+                                           num_top_labels, nullptr, weights, num_passed);
         tsl::hopscotch_map<Header, Values> values;
         values.reserve(counts.size());
         for (const auto &[h, count] : counts)
@@ -679,10 +685,8 @@ AnnotatedDBG::get_kmer_counts(std::string_view sequence,
         return {};
 
     const auto *int_matrix = dynamic_cast<const IntMatrix *>(&annotator_->get_matrix());
-    if (!int_matrix) {
-        logger->error("k-mer counts are not indexed in this annotator");
-        exit(1);
-    }
+    if (!int_matrix)
+        throw std::runtime_error("k-mer counts are not indexed in this annotator");
 
     auto get_results = [&](const auto &enumerate_rows) {
         auto results = filter_and_aggregate<std::vector<std::tuple<std::string, size_t, std::vector<size_t>>>>(
@@ -736,18 +740,17 @@ AnnotatedDBG::get_kmer_coordinates(std::string_view sequence,
         return {};
 
     const auto *tuple_matrix = dynamic_cast<const MultiIntMatrix *>(&annotator_->get_matrix());
-    if (!tuple_matrix) {
-        logger->error("k-mer coordinates are not indexed in this annotator");
-        exit(1);
-    }
+    if (!tuple_matrix)
+        throw std::runtime_error("k-mer coordinates are not indexed in this annotator");
 
     auto rows_tuples = tuple_matrix->get_row_tuples(row_indices);
 
     if (coord_to_header_) {
         if (annotator_->num_labels() != coord_to_header_->num_columns()) {
-            logger->error("Incompatible number of columns in CoordToHeader and annotation matrix: "
-                          "{} != {}", coord_to_header_->num_columns(), annotator_->num_labels());
-            exit(1);
+            throw std::runtime_error(fmt::format("Incompatible number of columns in CoordToHeader "
+                                                 "and annotation matrix: {} != {}",
+                                                 coord_to_header_->num_columns(),
+                                                 annotator_->num_labels()));
         }
 
         coord_to_header_->map_to_local_coords(&rows_tuples);
@@ -814,19 +817,26 @@ std::vector<std::tuple<Label, size_t, sdsl::bit_vector>>
 AnnotatedDBG::get_top_label_signatures(std::string_view sequence,
                                        size_t num_top_labels,
                                        double discovery_fraction,
-                                       double presence_fraction) const {
+                                       double presence_fraction,
+                                       size_t *num_passed,
+                                       bool header_labels) const {
     assert(discovery_fraction >= 0.);
     assert(discovery_fraction <= 1.);
     assert(presence_fraction >= 0.);
     assert(presence_fraction <= 1.);
     assert(check_compatibility());
 
+    if (num_passed)
+        *num_passed = 0;
+
     if (sequence.size() < dbg_.get_k())
         return {};
 
     size_t num_kmers = sequence.size() - dbg_.get_k() + 1;
 
-    if (discovery_fraction == 1.) {
+    // the shortcut ranks with get_top_labels, which reports no count and ranks headers when
+    // a CoordToHeader mapping is loaded
+    if (discovery_fraction == 1. && !num_passed && (header_labels || !coord_to_header_)) {
         auto label_counts = get_top_labels(sequence, num_top_labels, discovery_fraction, presence_fraction);
         std::vector<std::tuple<Label, size_t, sdsl::bit_vector>> presence_vectors;
         presence_vectors.reserve(label_counts.size());
@@ -840,9 +850,10 @@ AnnotatedDBG::get_top_label_signatures(std::string_view sequence,
         return presence_vectors;
     }
 
-    if (coord_to_header_) {
+    if (coord_to_header_ && header_labels) {
         return get_header_results<sdsl::bit_vector>(sequence, num_top_labels,
-                                                   discovery_fraction, presence_fraction);
+                                                   discovery_fraction, presence_fraction,
+                                                   false, num_passed);
     }
 
     // kmers in the graph and their positions in the query sequence
@@ -858,8 +869,11 @@ AnnotatedDBG::get_top_label_signatures(std::string_view sequence,
     const auto &matrix = annotator_->get_matrix();
     auto get_results = [&](const auto &enumerate_rows) {
         auto results = filter_and_aggregate<std::vector<std::tuple<std::string, size_t, sdsl::bit_vector>>>(
-            enumerate_rows, annotator_->get_label_encoder(), min_count, num_top_labels, kmer_positions, num_kmers);
-        assert(same_results(results, get_top_labels(sequence, num_top_labels, discovery_fraction, presence_fraction)));
+            enumerate_rows, annotator_->get_label_encoder(), min_count, num_top_labels, kmer_positions, num_kmers,
+            num_passed);
+        // get_top_labels ranks headers when a CoordToHeader mapping is loaded
+        assert(coord_to_header_ || same_results(results, get_top_labels(sequence, num_top_labels,
+                                                                         discovery_fraction, presence_fraction)));
         return results;
     };
 
@@ -896,6 +910,19 @@ bool AnnotatedSequenceGraph::check_compatibility() const {
         return canonical->get_graph().max_index() == annotator_->num_objects();
 
     return graph_->max_index() == annotator_->num_objects();
+}
+
+std::string encode_presence_mask(const sdsl::bit_vector &mask) {
+    std::string result;
+    size_t pos = 0;
+    while (pos < mask.size()) {
+        bool bit = mask[pos];
+        size_t run_start = pos;
+        while (pos < mask.size() && (bool)mask[pos] == bit) ++pos;
+        result += (bit ? 'x' : 'o');
+        result += std::to_string(pos - run_start);
+    }
+    return result;
 }
 
 } // namespace graph

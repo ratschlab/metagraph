@@ -133,22 +133,31 @@ class AnnotatedDBG : public AnnotatedSequenceGraph {
                          double discovery_fraction,
                          double presence_fraction) const;
 
+    // With |num_passed|, also report how many labels passed the thresholds, before the cut
+    // to |num_top_labels|. With |header_labels| false, rank annotation columns even when a
+    // CoordToHeader mapping is loaded.
     std::vector<std::tuple<Label, size_t, sdsl::bit_vector>>
     get_top_label_signatures(std::string_view sequence,
                              size_t num_top_labels,
                              double discovery_fraction = 0.0,
-                             double presence_fraction = 0.0) const;
+                             double presence_fraction = 0.0,
+                             size_t *num_passed = nullptr,
+                             bool header_labels = true) const;
 
   private:
     template <class Values>
     std::vector<std::tuple<Label, size_t, Values>>
     get_header_results(std::string_view sequence, size_t num_top_labels,
                        double discovery_fraction, double presence_fraction,
-                       bool with_kmer_counts = false) const;
+                       bool with_kmer_counts = false, size_t *num_passed = nullptr) const;
 
     DeBruijnGraph &dbg_;
     std::unique_ptr<annot::CoordToHeader> coord_to_header_;
 };
+
+// Encode a k-mer presence bitmask as alternating x<len>o<len>... runs (x = ones,
+// o = zeros), trailing zeros included. Example: 11100110 -> x3o2x2o1
+std::string encode_presence_mask(const sdsl::bit_vector &mask);
 
 } // namespace graph
 } // namespace mtg
