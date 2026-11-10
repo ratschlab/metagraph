@@ -4,8 +4,8 @@ build-backend = "scikit_build_core.build"
 
 [project]
 name = "pymetagraph"
-version = "0.2.0"
-description = "In-process queries against an annotated metagraph index"
+version = "0.3.0"
+description = "In-process queries and alignment against an annotated metagraph index"
 readme = "README.md"
 authors = [
     { name = "ratschlab", email = "grlab@ratschlab.org" },

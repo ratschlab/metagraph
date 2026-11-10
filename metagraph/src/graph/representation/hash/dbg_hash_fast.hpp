@@ -45,6 +45,11 @@ class DBGHashFast : public DeBruijnGraph {
         hash_dbg_->map_to_nodes_sequentially(sequence, callback, terminate);
     }
 
+    std::unique_ptr<NodeStream> node_stream(std::string_view sequence,
+                                            bool sequential) const override final {
+        return hash_dbg_->node_stream(sequence, sequential);
+    }
+
     void call_nodes(const std::function<void(node_index)> &callback,
                     const std::function<bool()> &stop_early = [](){ return false; },
                     size_t num_threads = 1,
