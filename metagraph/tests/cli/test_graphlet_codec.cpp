@@ -8448,8 +8448,9 @@ TEST(GraphletAttempt, NamesTextIsExact) {
             const std::string what = detail + " seed " + std::to_string(i);
             const Strategy st = walked_strategy(kNamedStrategy, detail);
             const WalkedForReserve w = walk_for_reserve(*g.anno, seeds[i], st);
-            if (i)
+            if (i) {
                 ASSERT_EQ(1u, w.r.dropped_labels.size()) << what;
+            }
             const uint64_t names_text = names_text_bytes(w.r, st, detail == "graphlet");
             EXPECT_GE(w.meter.memory_names, kNameAccountPerTextByte * names_text) << what;
             const std::vector<std::string> texts = server_texts(*g.anno, { seeds[i] }, kNamedStrategy,
