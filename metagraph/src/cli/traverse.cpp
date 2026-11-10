@@ -5794,7 +5794,7 @@ Json::Value resolve_capabilities_json(const ResolveTimeLimits &limits) {
     // the cap on a request's explicit label lists (--resolve-max-explicit-labels; 0: none):
     // the request's `labels` and each explicit seed's, a 400 above it
     r["max_explicit_labels"] = uint_json(limits.max_explicit_labels);
-    // the order of a selection's seeds (§4.2): a client need not infer it from the build
+    // the order of a selection's seeds (§4.3): a client need not infer it from the build
     r["seed_order"] = kSeedOrder;
     return r;
 }
@@ -5813,20 +5813,38 @@ Json::Value resolve_discovery_json(const ResolveTimeLimits &limits) {
     return d;
 }
 
+// The answer-labels clamp's part in a seed label that an answer did not keep
+// (SPEC-labeled-traversal-core.md §4.6): where it lowered discover.max_labels from |requested|
+// to |lowered| and the discovery ranked more labels than it kept, the label may be one ranked
+// past the effective value, which the request's own max_labels might have kept (empty
+// otherwise: the clamp dropped nothing, or did not lower max_labels)
+static std::string clamp_dropped_note(bool clamped, uint64_t requested, uint64_t lowered,
+                                      const SupportProfile &profile) {
+    if (!clamped || !profile.labels_truncated)
+        return "";
+    const std::string effective = std::to_string(lowered);
+    return "; discover.max_labels was lowered from " + std::to_string(requested) + " to "
+        + effective + " (--resolve-max-discover-answer-labels), and the discovery kept "
+        + effective + " of the " + std::to_string(profile.labels_truncated->total)
+        + " labels it ranked: the label may be one ranked past " + effective;
+}
+
 // Under a stop, why an explicit selection cannot be made from the prefix (empty: it can, and
 // is the prefix's): an interval ending past the k-mers resolved, or, on a discovery, a label
-// the prefix did not discover — whether either holds on the whole query is unknown, so the
-// selection is not made rather than refused (a 400 would blame the request for the deadline).
-// Likewise under a discovery's label cap (SPEC-labeled-traversal-core.md §4.6), with or without
-// a stop: a seed naming a label the capped discovery did not keep (whether the uncut one would
-// have kept it is unknown).
+// the prefix did not keep (it did not meet it, or its max_labels left it out) — whether either
+// holds on the whole query is unknown, so the selection is not made rather than refused (a 400
+// would blame the request for the deadline). Likewise under a discovery's label cap
+// (SPEC-labeled-traversal-core.md §4.6), with or without a stop: a seed naming a label the
+// capped discovery did not keep (whether the uncut one would have kept it is unknown). A label
+// reason ends with |clamp_note| (clamp_dropped_note), as the 400 of such a label does.
 // What is known whatever the stop is refused as without one, every seed checked first, in
 // select_seeds' order: an interval empty or out of range, an
 // interval not fully in the graph (the whole query's k-mers are mapped before the deadline is
 // read), and, with explicit labels (every one of them profiled whatever the stop), a seed
 // label that is not one of them
 static std::string explicit_selection_blocked(const SupportProfile &profile,
-                                              const SelectionPolicy &policy, bool discover) {
+                                              const SelectionPolicy &policy, bool discover,
+                                              const std::string &clamp_note) {
     // the whole query's k-mers and graph runs (the stop keeps them; without one, the profile's)
     const uint64_t query_kmers = profile.stop ? profile.stop->query_kmers : profile.num_kmers;
     const std::vector<KmerInterval> &query_graph_runs
@@ -5872,8 +5890,9 @@ static std::string explicit_selection_blocked(const SupportProfile &profile,
         for (const std::string &name : ex.labels) {
             const bool profiled = profiled_names.count(name) > 0;
             if (!profiled && !absent(name)) {
-                return seed + (profile.stop ? " names a label the resolved prefix did not discover"
-                                            : " names a label the capped discovery did not keep");
+                return seed + (profile.stop ? " names a label the resolved prefix did not keep"
+                                            : " names a label the capped discovery did not keep")
+                    + clamp_note;
             }
         }
     }
@@ -6107,7 +6126,12 @@ Json::Value process_resolve_request(
             if ((profile.stop || (profile.labels_capped && !profile.labels_capped->ranking_exact))
                     && req.policy.policy == SelectionPolicy::EXPLICIT)
                 not_made = explicit_selection_blocked(profile, req.policy,
-                                                      req.options.discover);
+                                                      req.options.discover,
+                                                      clamp_dropped_note(
+                                                              max_labels_clamped,
+                                                              max_labels_requested,
+                                                              req.options.discover_max_labels,
+                                                              profile));
             if (not_made.empty())
                 selection = select_seeds(profile, req.sequence, req.policy, oracle.regime() != Regime::BASIC);
         }
@@ -6116,15 +6140,11 @@ Json::Value process_resolve_request(
         // a seed's label that the answer-labels clamp may have left out: the discovery ranked
         // more labels than the clamp kept, so the request's own max_labels might have kept it
         // (§4.6); the refusal names the clamp (where it dropped nothing, the 400 is as before)
-        if (max_labels_clamped && profile.labels_truncated
-                && message.rfind(kSeedLabelNotProfiled, 0) == 0) {
+        const std::string clamp_note = clamp_dropped_note(max_labels_clamped,
+                max_labels_requested, req.options.discover_max_labels, profile);
+        if (!clamp_note.empty() && message.rfind(kSeedLabelNotProfiled, 0) == 0) {
             const std::string effective = std::to_string(req.options.discover_max_labels);
-            message += "; discover.max_labels was lowered from "
-                + std::to_string(max_labels_requested) + " to " + effective
-                + " (--resolve-max-discover-answer-labels), and the discovery kept " + effective
-                + " of the " + std::to_string(profile.labels_truncated->total)
-                + " labels it ranked: the label may be one ranked past " + effective
-                + ". Ask for at most " + effective
+            message += clamp_note + ". Ask for at most " + effective
                 + " labels and choose the seeds among them, or resolve with the seed's label "
                   "named in labels";
         }

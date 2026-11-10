@@ -21,6 +21,7 @@
 
 #include "graph/traversal/resolve.hpp"
 #include "graph/traversal/kept_rows.hpp"
+#include "graph/traversal/seeded_hash.hpp"
 #include "graph/annotated_dbg.hpp"
 #include "annotation/coord_to_header.hpp"
 #include "annotation/representation/column_compressed/annotate_column_compressed.hpp"
@@ -787,7 +788,7 @@ TEST(ResolveBoundsRoute, CapabilitiesBlock) {
     EXPECT_TRUE(c["max_explicit_labels"].isUInt64());
     EXPECT_EQ(10000u, c["max_explicit_labels"].asUInt64());
     EXPECT_EQ(0u, cli::resolve_capabilities_json({})["max_explicit_labels"].asUInt64());
-    // the order of a selection's seeds (§4.2), whatever the bounds
+    // the order of a selection's seeds (§4.3), whatever the bounds
     EXPECT_EQ("rank", c["seed_order"].asString());
     EXPECT_EQ("rank", cli::resolve_capabilities_json({})["seed_order"].asString());
     EXPECT_EQ("{\"max_answer_labels\":10000,\"max_memory_mb\":1024,\"max_tracked_labels\":1000000,"
@@ -997,6 +998,79 @@ TEST(ResolveBounds, KeptRowsChargeTheirTableUntilItIsFreed) {
     EXPECT_FALSE(none.keep(1, Row { 1 }, 8, 0));
     EXPECT_FALSE(none.holds());
     EXPECT_EQ(0u, small.held());
+}
+
+// The pass's node-keyed tables are seeded (SeededHash; SPEC §4.6, T3 review R2, F1). A table
+// takes a key's bucket from the hash's low bits and doubles, down to 10% load, when a key's
+// neighbourhood is full: under the identity, a query's node indices chosen so that 63 of them
+// share their low bits at each size grow a table far past its keys. Seeded, the same keys
+// leave it as natural ones do, its buckets within the per-entry charge (hopscotch_entry_bytes:
+// 3 buckets an entry at a growth at 80% load or above, so the table may hold up to 2.5 buckets
+// a key). R2 measured 1 M such kept rows at 1,344 MiB against 183 MiB charged
+TEST(ResolveBounds, ChosenNodeIndicesDoNotGrowTheTablesPastTheirCharge) {
+    using annot::matrix::DecodeBudget;
+    using Row = annot::matrix::BinaryMatrix::SetBitPositions;
+    using Kept = KeptRows<Row>;
+    namespace hop = tsl::detail_hopscotch_hash;
+    using KeptBucket = hop::hopscotch_bucket<Kept::Table::value_type, 62, false>;
+    using Positions = std::pair<uint64_t, size_t>;
+    using Record = std::pair<std::pair<uint64_t, uint64_t>, uint64_t>;
+    // each charge covers 3 of the pinned table's buckets at 80% load: a kept row of set bits
+    // 180 B (a 48 B bucket), of tuples 210 B (56 B), a setup key 90 B, a record 120 B
+    using KeptTuples = KeptRows<annot::matrix::MultiIntMatrix::RowTuples>;
+    EXPECT_EQ(180u, Kept::kEntryBytes);
+    EXPECT_EQ(210u, KeptTuples::kEntryBytes);
+    EXPECT_GE(Kept::kEntryBytes * 4, 3 * sizeof(KeptBucket) * 5);
+    EXPECT_GE(KeptTuples::kEntryBytes * 4,
+              3 * sizeof(hop::hopscotch_bucket<KeptTuples::Table::value_type, 62, false>) * 5);
+    EXPECT_EQ(90u, hopscotch_entry_bytes(sizeof(Positions)));
+    EXPECT_GE(90u * 4, 3 * sizeof(hop::hopscotch_bucket<Positions, 62, false>) * 5);
+    EXPECT_EQ(kDiscoverIndexEntryBytes, hopscotch_entry_bytes(sizeof(Record)));
+    EXPECT_GE(kDiscoverIndexEntryBytes * 4,
+              3 * sizeof(hop::hopscotch_bucket<Record, 62, false>) * 5);
+    // one seed a process, and not the identity
+    EXPECT_EQ(SeededHash()(12345), SeededHash()(12345));
+    EXPECT_NE(12345u, SeededHash()(12345));
+
+    // natural node indices, then 63 at each size sharing their low bits (R2's hop.cpp)
+    std::mt19937_64 rng(1);
+    constexpr size_t filler = 50'000;
+    std::vector<uint64_t> keys;
+    for (size_t i = 0; i < filler; ++i) {
+        keys.push_back(rng() & ((1ull << 36) - 1));
+    }
+    size_t level = 1;
+    while (0.9 * level <= filler) {
+        level <<= 1;
+    }
+    for ( ; filler >= level / 10; level <<= 1) {
+        const uint64_t c = rng() & (level - 1);
+        for (uint64_t t = 0; t < 63; ++t) {
+            keys.push_back(((2 * t + (t & 1)) * level + c) | (1ull << 40));
+        }
+    }
+    const double most_buckets = 2.5 * keys.size();
+    // identity: the table outgrows the charge (the train's 80 B a key and more)
+    tsl::hopscotch_map<uint64_t, size_t> identity;
+    for (uint64_t key : keys) {
+        identity.emplace(key, 0);
+    }
+    EXPECT_GT(identity.bucket_count(), most_buckets);
+    // seeded: within it, the setup's table as the kept rows'
+    tsl::hopscotch_map<uint64_t, size_t, SeededHash> seeded;
+    for (uint64_t key : keys) {
+        seeded.emplace(key, 0);
+    }
+    EXPECT_LE(seeded.bucket_count(), most_buckets);
+    DecodeBudget budget;
+    Kept kept(budget);
+    for (uint64_t key : keys) {
+        ASSERT_TRUE(kept.keep(key, Row { 7 }, 8, 0));
+    }
+    EXPECT_LE(kept.bucket_count(), most_buckets);
+    // what is held covers the table at its last growth: its buckets and half as many before
+    EXPECT_GE(budget.held(), kept.bucket_count() * sizeof(KeptBucket) * 3 / 2);
+    kept.drop();
 }
 
 // ---- the cap on a request's explicit label lists (--resolve-max-explicit-labels, SPEC §4.1)

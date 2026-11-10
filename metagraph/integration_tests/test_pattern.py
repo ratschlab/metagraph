@@ -4504,7 +4504,7 @@ class TestPatternRegression(TestingBase):
         def without_resolve_discovery(caps):
             # the `resolve` block's `discovery`, `max_explicit_labels` and `seed_order` members
             # (H2, train 3: the server's bounds of a /resolve discovery, SPEC-labeled-traversal-
-            # core.md §4.6, the cap on its explicit label lists, §4.1, and the seed order, §4.2),
+            # core.md §4.6, the cap on its explicit label lists, §4.1, and the seed order, §4.3),
             # gains over every base:
             # checked as stated here at the defaults, the rest of the block compared as before
             block = caps.get('resolve')
@@ -4518,7 +4518,7 @@ class TestPatternRegression(TestingBase):
                                  block.get('discovery'))
                 # and the cap on a request's explicit label lists (the H2 addendum)
                 self.assertEqual(10000, block.get('max_explicit_labels'))
-                # and the order of a selection's seeds (addendum 3, §4.2: since 01c05323b)
+                # and the order of a selection's seeds (addendum 3, §4.3: since 01c05323b)
                 self.assertEqual('rank', block.get('seed_order'))
             block.pop('discovery', None)
             block.pop('max_explicit_labels', None)

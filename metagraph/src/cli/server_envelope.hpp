@@ -117,7 +117,7 @@ Json::Value composite_fp_json(std::vector<std::string> index_fps);
  * the flags
  * unknown_labels (section 2), search_cuts (section 3) and resolve_boundary_ties (section 7),
  * resolve_seed_order (the order of a /resolve selection's seeds,
- * SPEC-labeled-traversal-core.md §4.2), discovery_trace_scale, |max_request_memory_mb| (the
+ * SPEC-labeled-traversal-core.md §4.3), discovery_trace_scale, |max_request_memory_mb| (the
  * server's request-wide memory bound of /traverse, --traverse-max-request-memory-mb; 0 = off)
  * and |caps| (max_concurrent, E19), which every /traverse capabilities probe states too: a
  * graph-less probe sees them without reading a pair; |request_intake| (H1: request_intake_json,
