@@ -3163,7 +3163,7 @@ entry in the same test): the bound no longer depends on it, the number of rows h
 doubling, can pass the bound until it returns, and the generations are then dropped until it holds again: the
 identity hash's bit-reversed ids did so in the test (a peak of 11.0 MiB under 8 MiB); the seeded hash's
 per-process seed keeps a client from choosing such ids.)*
-The cache keeps two generations: a row is **admitted before it is copied** — its
+The cache keeps its rows in two generations: a row is **admitted before it is copied** — its
 stored size computed from the row, the shared bound read and the older entries evicted first, so that a row the
 cache refuses (more than half the bound) is never copied and the copy of one it keeps is made within the bound
 *(review of levels 4–5, finding 1: copying first, a cache bounded at 1 KiB allocated 4,210,688 bytes for a row of
