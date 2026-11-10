@@ -105,6 +105,7 @@ sdsl::int_vector<> map_rows_to_graph(const DeBruijnGraph &source,
 void map_rows_to_graph(const DeBruijnGraph &source,
                        const DeBruijnGraph &target,
                        const std::string &filename,
+                       const std::filesystem::path &tmp_dir,
                        size_t num_threads) {
     const uint64_t num_rows = source.max_index();
     const uint64_t width = width_for(target.max_index());
@@ -140,7 +141,7 @@ void map_rows_to_graph(const DeBruijnGraph &source,
 
     try {
         for (uint64_t b = 0; b < num_buckets; ++b) {
-            buckets[b].filename = fmt::format("{}.bucket.{}", filename, b);
+            buckets[b].filename = (tmp_dir / fmt::format("bucket.{}", b)).string();
             buckets[b].out.open(buckets[b].filename, std::ios::binary);
             buckets[b].buffer.reserve(kBufferSize + record_size);
         }

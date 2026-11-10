@@ -337,8 +337,9 @@ int transform_annotation(Config *config) {
             exit(1);
         }
 
-        // The row map is the expensive part, so keep it for a rerun. With --mmap it
-        // is built in and read from that file instead of being held in RAM.
+        // The row map is the expensive part, so keep it for a rerun. With disk swap
+        // it is built in and read from that file instead of being held in RAM.
+        const bool on_disk = !config->tmp_dir.empty();
         const std::string row_map_fname = config->outfbase + ".rowmap";
         sdsl::packed_vector_view<> row_map;
         uint64_t target_num_rows;
@@ -349,7 +350,7 @@ int transform_annotation(Config *config) {
 
         auto load_row_map = [&]() {
             try {
-                row_map.load(*utils::open_ifstream(row_map_fname));
+                row_map.load(*utils::open_ifstream(row_map_fname, on_disk || utils::with_mmap()));
             } catch (const std::exception &e) {
                 logger->error("Cannot load row map from {}: {}", row_map_fname, e.what());
                 exit(1);
@@ -366,12 +367,18 @@ int transform_annotation(Config *config) {
             }
         } else {
             logger->trace("Matching rows of {} to {}...", config->remap_graph, config->infbase);
-            // With --mmap, the row map is built on disk and never held in RAM.
             const std::string tmp_fname = row_map_fname + ".tmp";
             sdsl::int_vector<> new_row_map;
             try {
-                if (utils::with_mmap()) {
-                    map_rows_to_graph(*source, *target, tmp_fname, get_num_threads());
+                if (on_disk) {
+                    auto tmp_dir = utils::create_temp_dir(config->tmp_dir, "rowmap");
+                    try {
+                        map_rows_to_graph(*source, *target, tmp_fname, tmp_dir, get_num_threads());
+                    } catch (...) {
+                        utils::remove_temp_dir(tmp_dir);
+                        throw;
+                    }
+                    utils::remove_temp_dir(tmp_dir);
                 } else {
                     new_row_map = map_rows_to_graph(*source, *target, get_num_threads());
                     std::ofstream out(tmp_fname, std::ios::binary);
@@ -387,7 +394,7 @@ int transform_annotation(Config *config) {
             std::filesystem::rename(tmp_fname, row_map_fname);
             logger->trace("Row map saved to {} in {} sec", row_map_fname, timer.elapsed());
 
-            if (utils::with_mmap()) {
+            if (on_disk) {
                 load_row_map();
             } else {
                 row_map = sdsl::packed_vector_view<>(std::move(new_row_map));

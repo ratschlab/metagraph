@@ -883,8 +883,9 @@ The command saves the matching of rows as ``moved.rowmap``.
 A repeated run with the same output name reuses this file and skips matching the rows again.
 Before reusing it, the command checks a sample of rows against both graphs and stops if they no longer match.
 Delete the file after changing either graph.
-With ``--mmap``, the row map is built in this file and read from it, and is never held in memory.
-Building it this way needs temporary files next to it of about the same total size.
+The row map is built in this file and read from it, and is never held in memory.
+Building it needs temporary files of about twice its size, in the output directory or in the directory passed with ``--disk-swap``.
+Pass ``--disk-swap ""`` to build and keep the row map in memory instead, which avoids the temporary files.
 
 .. _query_index:
 

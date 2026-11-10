@@ -1,6 +1,7 @@
 #ifndef __ANNOTATION_REMAP_HPP__
 #define __ANNOTATION_REMAP_HPP__
 
+#include <filesystem>
 #include <memory>
 #include <string>
 
@@ -34,12 +35,13 @@ sdsl::int_vector<> map_rows_to_graph(const graph::DeBruijnGraph &source,
 
 /**
  * Same, but writes the vector to `filename` in the sdsl::int_vector<> format
- * without holding it in memory. Uses temporary files `filename`.bucket.* of
- * about the same total size as the result.
+ * without holding it in memory. Uses temporary files in `tmp_dir` of about
+ * twice the size of the result.
  */
 void map_rows_to_graph(const graph::DeBruijnGraph &source,
                        const graph::DeBruijnGraph &target,
                        const std::string &filename,
+                       const std::filesystem::path &tmp_dir,
                        size_t num_threads = 1);
 
 /**
