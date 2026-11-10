@@ -2,6 +2,7 @@
 #define __SEQUENCE_GRAPH_HPP__
 
 #include "common/vectors/bit_vector.hpp"
+#include "graph/representation/base/node_stream.hpp"
 
 #include <vector>
 #include <string>
@@ -53,6 +54,18 @@ class SequenceGraph {
     virtual void map_to_nodes_sequentially(std::string_view sequence,
                                            const std::function<void(node_index)> &callback,
                                            const std::function<bool()> &terminate = [](){ return false; }) const = 0;
+
+    // Map the k-mers of |sequence| to nodes lazily, one node per k-mer position.
+    // With |sequential|, nodes are those of map_to_nodes_sequentially, otherwise
+    // those of map_to_nodes. |sequence| must outlive the returned range.
+    NodeRange node_range(std::string_view sequence, bool sequential = false) const {
+        return NodeRange(node_stream(sequence, sequential));
+    }
+
+    // Backend of node_range. The default runs the callback interface and
+    // buffers all nodes; graphs with a streaming mapping override it.
+    virtual std::unique_ptr<NodeStream> node_stream(std::string_view sequence,
+                                                    bool sequential) const;
 
     // Given a node index, call the target nodes of all edges outgoing from it.
     virtual void adjacent_outgoing_nodes(node_index node,
@@ -250,6 +263,14 @@ class DeBruijnGraph : public SequenceGraph {
 
     // Call all nodes that have no incoming edges
     virtual void call_source_nodes(const std::function<void(node_index)> &callback) const;
+
+  protected:
+    // Callback interface on top of node_stream, for graphs that override it.
+    // Maps at most |max_chunk_size| - 1 nodes past the one terminate() stops at.
+    void call_streamed_nodes(std::string_view sequence, bool sequential,
+                             const std::function<void(node_index)> &callback,
+                             const std::function<bool()> &terminate,
+                             size_t max_chunk_size = NodeRange::kChunkSize) const;
 };
 
 
