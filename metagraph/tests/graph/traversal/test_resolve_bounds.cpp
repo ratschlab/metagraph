@@ -30,6 +30,16 @@
 #include "cli/traverse.hpp"
 #include "common/utils/file_utils.hpp"
 
+#if defined(__APPLE__)
+#include <malloc/malloc.h>
+#elif defined(__GLIBC__)
+#include <malloc.h>
+#endif
+
+#if USE_JEMALLOC
+extern "C" int mallctl(const char *name, void *oldp, size_t *oldlenp, void *newp, size_t newlen);
+#endif
+
 
 // The bounds of a /resolve discovery (SPEC-labeled-traversal-core.md §4.6, GPT review 5 #3):
 // the label cap (ResolveOptions::discover_max_tracked) cuts the labels tracked by the first-met
@@ -1807,6 +1817,325 @@ TEST(ResolveBoundsRoute, Sample38) {
     EXPECT_EQ("seeds: " + doc["body"]["error"].asString(),
               seeds_refusal_of(doc["request"], 10'000, cap));
     EXPECT_EQ("", seeds_refusal_of(doc["request"], 10'000, cap + 1));
+}
+
+// ---- the explicit labels' pass and the answer account (T4-L1, GPT review 7, finding 2)
+
+// the names a discovery of every label of |c|'s kind finds on |r|'s query: the explicit labels
+std::vector<std::string> all_labels(LabelOracle &oracle, const std::string &q, const Case &c) {
+    ResolveOptions opts = discovery(c, kAll);
+    return names_of(resolve_support(oracle, q, opts));
+}
+
+ResolveOptions explicit_labels(const Case &c, const std::vector<std::string> &labels) {
+    ResolveOptions opts;
+    opts.labels = labels;
+    opts.support = c.support;
+    return opts;
+}
+
+// The explicit labels' pass on the row paths is a discovery's (for_each_row, charged to the
+// memory bound): under a bound that binds it stops at a k-mer, the answer exactly the resolve of
+// the query's prefix before it (reason memory, phase rows), the k-mer never moving back as the
+// bound grows; without a stop the profile is the unbounded one. Before, the explicit labels' rows
+// and hits were outside any account and never stopped
+TYPED_TEST(ResolveBoundsTest, ExplicitLabelsStopAtAPrefix) {
+    using Graph = typename TypeParam::first_type;
+    using Annotation = typename TypeParam::second_type;
+    const Records r = make_records<Graph, Annotation>(40, 5, 1919);
+    LabelOracle oracle(*r.anno, r.cth.get());
+    size_t stops = 0, cannot = 0;
+    for (const Case &c : kCases) {
+        const std::vector<std::string> labels = all_labels(oracle, r.q, c);
+        ASSERT_GT(labels.size(), 16u) << c.name() << ": not the row paths";
+        for (size_t rows : { size_t(7), kResolveBatchRows }) {
+            ResolveOptions opts = explicit_labels(c, labels);
+            opts.batch_rows = rows;
+            const SupportProfile plain = resolve_support(oracle, r.q, opts);
+            ASSERT_FALSE(plain.stop);
+            uint64_t last = 0;
+            bool ended = false;
+            for (uint64_t bound = 1024; !ended && bound < (uint64_t(64) << 20);
+                    bound += bound < 65536 ? 1024 : bound / 8) {
+                const std::string what = c.name() + " rows " + std::to_string(rows) + " bound "
+                        + std::to_string(bound);
+                ResolveOptions bounded = opts;
+                bounded.discover_max_memory = bound;
+                const SupportProfile got = resolve_support(oracle, r.q, bounded);
+                if (!got.stop) {
+                    expect_same_profile(plain, got, what);
+                    ended = true;
+                    break;
+                }
+                ++stops;
+                EXPECT_EQ(ResolveStop::MEMORY, got.stop->reason) << what;
+                EXPECT_EQ(ResolveStop::ROWS, got.stop->phase) << what;
+                EXPECT_EQ(bound, got.stop->max_memory) << what;
+                const uint64_t x = got.stop->resolved_kmers;
+                EXPECT_EQ(x, got.num_kmers) << what;
+                EXPECT_GE(x, last) << what;
+                last = x;
+                // every explicit label is profiled, the prefix's support
+                ASSERT_EQ(labels.size(), got.labels.size()) << what;
+                const uint64_t first = got.stop->query_graph_runs.front().begin;
+                EXPECT_EQ(x == first, got.stop->cannot_progress) << what;
+                cannot += got.stop->cannot_progress;
+                if (x == 0)
+                    continue;
+                const SupportProfile prefix
+                        = resolve_support(oracle, r.q.substr(0, x + kK - 1), opts);
+                expect_same_profile(prefix, got, what);
+            }
+            EXPECT_TRUE(ended) << c.name();
+        }
+    }
+    EXPECT_GT(stops, 50u);
+    EXPECT_GT(cannot, 0u);
+}
+
+// The explicit labels' pass holds one k-mer's hits at a time: under a deadline that never passes
+// and without one, and whatever the batches and the rows kept, the profile is the same; the
+// smallest bound that answers the whole query answers it as without a bound
+TYPED_TEST(ResolveBoundsTest, ExplicitLabelsHoldOneKmersHits) {
+    using Graph = typename TypeParam::first_type;
+    using Annotation = typename TypeParam::second_type;
+    const Records r = make_records<Graph, Annotation>(40, 5, 2020);
+    LabelOracle oracle(*r.anno, r.cth.get());
+    for (const Case &c : kCases) {
+        const std::vector<std::string> labels = all_labels(oracle, r.q, c);
+        const SupportProfile plain = resolve_support(oracle, r.q, explicit_labels(c, labels));
+        for (size_t rows : { size_t(1), size_t(3), size_t(64) }) {
+            for (uint64_t kept : { uint64_t(0), kResolveKeptBytes }) {
+                ResolveOptions opts = explicit_labels(c, labels);
+                opts.batch_rows = rows;
+                opts.kept_bytes = kept;
+                opts.time_up = []() { return false; };
+                const std::string what = c.name() + " rows " + std::to_string(rows);
+                expect_same_profile(plain, resolve_support(oracle, r.q, opts), what);
+            }
+        }
+        // the smallest bound that answers the whole query, bisected: above it every bound does
+        uint64_t lo = 1, hi = uint64_t(64) << 20;
+        while (lo + 1 < hi) {
+            ResolveOptions opts = explicit_labels(c, labels);
+            opts.discover_max_memory = (lo + hi) / 2;
+            (resolve_support(oracle, r.q, opts).stop ? lo : hi) = opts.discover_max_memory;
+        }
+        ResolveOptions opts = explicit_labels(c, labels);
+        opts.discover_max_memory = hi;
+        const SupportProfile got = resolve_support(oracle, r.q, opts);
+        ASSERT_FALSE(got.stop) << c.name();
+        expect_same_profile(plain, got, c.name());
+    }
+}
+
+// The answer's JSON is priced before each part is built (profile_to_json's answer account): an
+// account smaller than the price refuses it at that part (AnswerTooLarge), a larger one answers
+// it byte for byte as without an account, and the price covers what jsoncpp's tree and its text
+// hold (the allocator's live bytes, where they can be read)
+std::optional<int64_t> live_heap_bytes() {
+#if USE_JEMALLOC
+    uint64_t allocated = 0, deallocated = 0;
+    size_t sz = sizeof(uint64_t);
+    if (!mallctl("thread.allocated", &allocated, &sz, nullptr, 0)
+            && !mallctl("thread.deallocated", &deallocated, &sz, nullptr, 0)
+            && (allocated || deallocated)) {
+        return int64_t(allocated) - int64_t(deallocated);
+    }
+#endif
+#if defined(__APPLE__)
+    malloc_statistics_t stats;
+    malloc_zone_statistics(nullptr, &stats);
+    return int64_t(stats.size_in_use);
+#elif defined(__GLIBC__) && (__GLIBC__ > 2 || (__GLIBC__ == 2 && __GLIBC_MINOR__ >= 33))
+    return int64_t(mallinfo2().uordblks);
+#else
+    return std::nullopt;
+#endif
+}
+
+// A profile of |labels| labels of |runs| runs each (names of |name_bytes| bytes), its candidates
+// (a run of its own per label and one interval all share) and a selection of |seeds| seeds
+// naming every label, each overlapping the others
+std::pair<SupportProfile, SeedSelection> priced_profile(size_t labels, size_t runs,
+                                                        size_t name_bytes, size_t seeds,
+                                                        bool trace) {
+    SupportProfile p;
+    p.k = 31;
+    p.num_kmers = 3 * runs + 2000;
+    p.support = trace ? Support::TRACE : Support::KMER;
+    p.graph_runs = { { 0, p.num_kmers } };
+    for (size_t l = 0; l < labels; ++l) {
+        LabelProfile lp;
+        lp.label.kind = LabelKind::HEADER;
+        lp.label.name = std::string(name_bytes, 'a' + l % 26) + std::to_string(l);
+        for (size_t i = 0; i < runs; ++i) {
+            lp.runs.push_back({ 3 * i + l % 2, 3 * i + 2 });
+            if (trace)
+                lp.trace_breaks.push_back(3 * i + 1);
+        }
+        lp.runs.push_back({ 3 * runs + 7, 3 * runs + 1000 });
+        lp.kmers_supported = 2 * runs + 993;
+        p.labels.push_back(std::move(lp));
+    }
+    std::map<KmerInterval, std::vector<LabelId>> groups;
+    for (LabelId l = 0; l < labels; ++l) {
+        for (const auto &run : p.labels[l].runs) {
+            groups[run].push_back(l);
+        }
+    }
+    for (auto &[iv, ls] : groups) {
+        p.candidates.push_back({ iv, ls });
+    }
+    SeedSelection sel;
+    for (size_t i = 0; i < seeds; ++i) {
+        FrozenSeed seed;
+        seed.seed_id = "0123456789abcdef";
+        seed.sequence = std::string(1000, 'A');
+        seed.kmers = { 3 * runs + 7, 3 * runs + 977 };
+        for (const LabelProfile &lp : p.labels) {
+            seed.labels.push_back(lp.label.name);
+        }
+        seed.population.supporting_total = labels;
+        seed.population.included = labels;
+        for (size_t j = 0; j < seeds; ++j) {
+            if (j != i)
+                seed.overlaps_with.push_back(j);
+        }
+        sel.seeds.push_back(std::move(seed));
+    }
+    return { std::move(p), std::move(sel) };
+}
+
+TEST(ResolveAnswer, ThePriceCoversTheTree) {
+    size_t measured = 0;
+    for (bool trace : { false, true }) {
+        for (const char *format : { "intervals", "rle" }) {
+            for (auto [labels, runs, name, seeds] : { std::make_tuple(2000, 3, 12, 2),
+                                                       std::make_tuple(20, 2000, 40, 0),
+                                                       std::make_tuple(300, 100, 100, 30) }) {
+                const auto [p, sel] = priced_profile(labels, runs, name, seeds, trace);
+                const std::string what = std::string(format) + (trace ? " trace " : " kmer ")
+                        + std::to_string(labels) + "x" + std::to_string(runs);
+                AnswerAccount account(uint64_t(1) << 40);
+                const std::optional<int64_t> before = live_heap_bytes();
+                uint64_t tree_and_text = 0;
+                {
+                    const Json::Value out = cli::profile_to_json(p, &sel, format, nullptr,
+                                                                 &account);
+                    const std::string text = compact(out);
+                    const std::optional<int64_t> after = live_heap_bytes();
+                    if (before && after && *after > *before) {
+                        tree_and_text = *after - *before;
+                        ++measured;
+                    }
+                    // the same answer as without an account
+                    EXPECT_EQ(compact(cli::profile_to_json(p, &sel, format)), text) << what;
+                    // the text, three times its bytes in the price, at least once
+                    EXPECT_GE(account.held(), text.size()) << what;
+                }
+                EXPECT_GE(account.held(), tree_and_text) << what << ": priced " << account.held()
+                                                         << ", the heap held " << tree_and_text;
+                // an account a byte short of the price refuses it, at the answer's part
+                AnswerAccount short_one(account.held() - 1);
+                try {
+                    cli::profile_to_json(p, &sel, format, nullptr, &short_one);
+                    ADD_FAILURE() << what << ": not refused";
+                } catch (const AnswerTooLarge &e) {
+                    EXPECT_EQ("answer", e.part()) << what;
+                }
+            }
+        }
+    }
+    if (!measured)
+        GTEST_SKIP() << "no allocator counters to compare the prices with";
+}
+
+// The route: an answer priced past --resolve-max-discover-memory-mb is refused, 400
+// resolve_answer_too_large with the bound (members error, code, max_memory_mb; the server writes
+// them in that order); the same request with its runs as rle strings and no candidates of single
+// k-mers, or under a larger bound, is answered as without a bound. Labels that differ from the
+// query every 12 bases have about a run a dozen k-mers: an answer of about 450 B a k-mer
+TEST(ResolveBoundsRoute, TheAnswerIsPricedBeforeItIsBuilt) {
+    const std::string q = random_seq(8000, 2121);
+    std::vector<std::string> seqs { q }, names { "A" };
+    std::mt19937 gen(2122);
+    for (size_t b = 0; b < 4; ++b) {
+        std::string s = q;
+        for (size_t i = gen() % 12; i < s.size(); i += 12) {
+            s[i] = s[i] == 'A' ? 'C' : 'A';
+        }
+        seqs.push_back(s);
+        names.push_back("B" + std::to_string(b));
+    }
+    auto anno = build_anno_graph<DBGSuccinct, annot::ColumnCompressed<>>(kK, seqs, names);
+    Json::Value request;
+    request["sequence"] = q;
+    for (const std::string &name : names) {
+        request["labels"].append(name);
+    }
+    const cli::ResolveTimeLimits none;
+    const cli::ResolveTimeLimits one_mib { 0, cli::kResolveFinalizeMs, 0, 1 };
+    const cli::ResolveTimeLimits large { 0, cli::kResolveFinalizeMs, 0, 1024 };
+    const Json::Value plain = cli::process_resolve_request(request, *anno, "r1", 0, nullptr,
+                                                           nullptr, none);
+    ASSERT_GT(compact(plain).size(), 100'000u);
+    try {
+        cli::process_resolve_request(request, *anno, "r1", 0, nullptr, nullptr, one_mib);
+        ADD_FAILURE() << "not refused";
+    } catch (const AnswerTooLarge &e) {
+        const Json::Value body = cli::resolve_answer_too_large_json(e);
+        EXPECT_EQ((std::vector<std::string>{ "code", "error", "max_memory_mb" }),
+                  body.getMemberNames());
+        EXPECT_EQ("resolve_answer_too_large", body["code"].asString());
+        EXPECT_EQ(1u, body["max_memory_mb"].asUInt64());
+        EXPECT_EQ("resolve: the answer would hold more than --resolve-max-discover-memory-mb 1 MiB ("
+                  + e.part() + "): nothing partial is sent; ask for run_format \"rle\", a larger "
+                  "min_block_kmers, fewer labels or seeds, or a shorter sequence",
+                  body["error"].asString());
+    }
+    EXPECT_EQ(compact(untimed(plain)),
+              compact(untimed(cli::process_resolve_request(request, *anno, "r1", 0, nullptr,
+                                                           nullptr, large))));
+    Json::Value small = request;
+    small["run_format"] = "rle";
+    small["min_block_kmers"] = 12;
+    EXPECT_EQ(compact(untimed(cli::process_resolve_request(small, *anno, "r1", 0, nullptr,
+                                                           nullptr, none))),
+              compact(untimed(cli::process_resolve_request(small, *anno, "r1", 0, nullptr,
+                                                           nullptr, one_mib))));
+}
+
+// The route's explicit labels on the row paths under the bound: a memory stop without a deadline,
+// stated as a discovery's (reason memory, max_memory_mb, the prefix), the message the memory
+// stop's
+TEST(ResolveBoundsRoute, AnExplicitLabelsMemoryStopIsStated) {
+    const Records r = make_records<DBGSuccinct, annot::ColumnCompressed<>>(40, 5, 2323);
+    const auto index = with_mapping(r);
+    LabelOracle oracle(*r.anno, r.cth.get());
+    Json::Value request;
+    request["sequence"] = r.q;
+    for (const std::string &name : all_labels(oracle, r.q, { LabelKind::HEADER, Support::KMER })) {
+        request["labels"].append(name);
+    }
+    // a bound of 1 MiB with the query repeated: its setup alone does not fit
+    std::string q = r.q;
+    while (q.size() < 20000) {
+        q += r.q;
+    }
+    request["sequence"] = q;
+    const cli::ResolveTimeLimits one_mib { 0, cli::kResolveFinalizeMs, 0, 1 };
+    const Json::Value out = cli::process_resolve_request(request, *index, "r1", 0, nullptr,
+                                                         nullptr, one_mib);
+    ASSERT_TRUE(out["stop"].isObject()) << compact(out).substr(0, 300);
+    EXPECT_EQ("memory", out["stop"]["reason"].asString());
+    EXPECT_EQ("rows", out["stop"]["phase"].asString());
+    EXPECT_EQ(1u, out["stop"]["max_memory_mb"].asUInt64());
+    EXPECT_EQ(out["num_kmers"], out["stop"]["resolved_kmers"]);
+    EXPECT_EQ(0u, out["stop"]["message"].asString().find(
+            "--resolve-max-discover-memory-mb 1 ran out while the annotation rows of the query's "
+            "k-mers were read: this answer is exactly the resolve of the sequence's first "));
+    EXPECT_FALSE(out.isMember("limits"));
 }
 
 } // namespace

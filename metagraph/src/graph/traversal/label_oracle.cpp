@@ -962,6 +962,22 @@ void LabelQuery::prime(const std::vector<node_index> &keys,
 
 /********************** LabelQuery: the budget-aware path *********************/
 
+bool LabelQuery::hits_within(const BinaryMatrix::SetBitPositions &row, DecodeBudget &budget,
+                             NodeHits *hits) {
+    if (path_ == Path::TUPLES)
+        throw std::logic_error("LabelQuery::hits_within: this query reads tuple rows");
+    uint64_t peak = 0;
+    return hits_budgeted(row, budget, hits, &peak);
+}
+
+bool LabelQuery::hits_within(const MultiIntMatrix::RowTuples &row, DecodeBudget &budget,
+                             NodeHits *hits) {
+    if (path_ != Path::TUPLES)
+        throw std::logic_error("LabelQuery::hits_within: this query reads whole rows");
+    uint64_t peak = 0;
+    return hits_budgeted(row, budget, hits, &peak);
+}
+
 uint64_t LabelQuery::held_bytes(const NodeHits &hits) {
     uint64_t bytes = buffer_bytes(hits.size(), sizeof(Hit));
     for (const Hit &h : hits) {

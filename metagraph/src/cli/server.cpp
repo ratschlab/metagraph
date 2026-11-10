@@ -513,6 +513,15 @@ HttpError explicit_seeds_refusal(const TooManyExplicitSeeds &e) {
     return HttpError(400, std::move(body), std::move(text));
 }
 
+// A /resolve answer priced past --resolve-max-discover-memory-mb (SPEC-labeled-traversal-core.md
+// §4.6, GPT review 7, finding 2): 400 resolve_answer_too_large, its members written in the order
+// error, code, the bound (error_first_json_text). The work ran; nothing partial is sent
+HttpError answer_refusal(const graph::traversal::AnswerTooLarge &e) {
+    Json::Value body = resolve_answer_too_large_json(e);
+    std::string text = error_first_json_text(body);
+    return HttpError(400, std::move(body), std::move(text));
+}
+
 // The body of /resolve, /traverse or /traverse/cancel, read as /pattern reads its body
 // (parse_strict_json: one RFC 8259 JSON text, member names unique); a fault is 400
 // {"error": "Bad json received: ..."} without a code, as /search's reader answers a body that
@@ -2076,6 +2085,9 @@ int run_server(Config *config) {
                 result.aborted = true;
             } catch (const ResolveDeadline &e) {
                 refused(503, resolve_deadline_body(e));
+            } catch (const graph::traversal::AnswerTooLarge &e) {
+                // the pair's answer priced past the bound: that pair refused, the others answered
+                refused(400, resolve_answer_too_large_json(e));
             } catch (const HttpError &e) {
                 refused(e.status(), e.body());
             } catch (const std::exception &e) {
@@ -2254,6 +2266,8 @@ int run_server(Config *config) {
                     throw as_http(e);
                 } catch (const TooManyExplicitSeeds &e) {
                     throw explicit_seeds_refusal(e);
+                } catch (const graph::traversal::AnswerTooLarge &e) {
+                    throw answer_refusal(e);
                 }
             }
         }, /* compact */ true, &writing.control);
