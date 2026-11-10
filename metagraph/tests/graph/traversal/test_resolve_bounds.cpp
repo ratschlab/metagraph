@@ -8,6 +8,7 @@
 #include <iterator>
 #include <limits>
 #include <map>
+#include <optional>
 #include <random>
 #include <string>
 #include <tuple>
@@ -1527,7 +1528,10 @@ TEST(ResolveBounds, TheSelectionReadsTheDeadline) {
     }), Late);
     EXPECT_EQ(3u, calls);
 
-    // each max_support round sweeps every run (here 5,000 runs of one label: every round reads it)
+    // each max_support round sweeps every run (here 5,000 runs of one label), and reads the
+    // deadline inside it: a step a run clipped, a candidate start swept (about 10,000), the runs
+    // before each of its sorts, a label and its runs for the winner -- about 25,000 steps, six
+    // readings a round
     LabelProfile gapped;
     gapped.label.kind = LabelKind::COLUMN;
     gapped.label.name = "G";
@@ -1543,12 +1547,199 @@ TEST(ResolveBounds, TheSelectionReadsTheDeadline) {
     calls = 0;
     const SeedSelection swept = select_seeds(profile, query, rounds, false, [&]() { ++calls; });
     EXPECT_EQ(5u, swept.seeds.size());
-    EXPECT_EQ(5u, calls);
+    EXPECT_GE(calls, 5u * 5);
+    EXPECT_LE(calls, 5u * 7);
     calls = 0;
     EXPECT_THROW(select_seeds(profile, query, rounds, false, [&]() {
         if (++calls == 1)
             throw Late();
     }), Late);
+}
+
+// The max_support selection of the base (6872dd1fd), verbatim but for the deadline: each round
+// clips every run by every pick so far, then sweeps the candidate starts (the reference of
+// TheMaxSupportClipIsTheBases)
+std::vector<std::pair<KmerInterval, std::vector<LabelId>>>
+base_max_support(const SupportProfile &profile, size_t max_seeds, uint64_t min_kmers) {
+    struct Run { uint64_t begin, end; };
+    std::vector<Run> runs;
+    for (const auto &lp : profile.labels) {
+        for (const auto &run : lp.runs) {
+            if (run.size() >= min_kmers)
+                runs.push_back({ run.begin, run.end });
+        }
+    }
+    std::sort(runs.begin(), runs.end(), [](const Run &a, const Run &b) { return a.begin < b.begin; });
+    const std::vector<Run> all_runs = runs;
+    std::vector<KmerInterval> taken;
+    std::vector<std::pair<KmerInterval, std::vector<LabelId>>> picked;
+    while (picked.size() < max_seeds) {
+        runs.clear();
+        for (const Run &run : all_runs) {
+            uint64_t begin = run.begin;
+            for (const auto &t : taken) {
+                if (t.end <= begin || t.begin >= run.end)
+                    continue;
+                if (t.begin > begin && t.begin - begin >= min_kmers)
+                    runs.push_back({ begin, t.begin });
+                begin = std::max(begin, t.end);
+            }
+            if (begin < run.end && run.end - begin >= min_kmers)
+                runs.push_back({ begin, run.end });
+        }
+        if (runs.empty())
+            break;
+        // the best interval by brute force over the candidate starts and every end: the most
+        // runs containing it, then longer, then the smaller start
+        std::vector<uint64_t> starts;
+        for (const Run &run : runs) {
+            starts.push_back(run.begin);
+            if (run.end >= min_kmers)
+                starts.push_back(run.end - min_kmers);
+        }
+        std::sort(starts.begin(), starts.end());
+        starts.erase(std::unique(starts.begin(), starts.end()), starts.end());
+        std::optional<KmerInterval> best;
+        size_t best_count = 0;
+        for (uint64_t a : starts) {
+            if (a + min_kmers > profile.num_kmers)
+                break;
+            size_t count = 0;
+            uint64_t b = std::numeric_limits<uint64_t>::max();
+            for (const Run &run : runs) {
+                if (run.begin <= a && run.end >= a + min_kmers) {
+                    ++count;
+                    b = std::min(b, run.end);
+                }
+            }
+            if (!count)
+                continue;
+            const KmerInterval iv { a, b };
+            if (!best || count > best_count
+                    || (count == best_count && (iv.size() > best->size()
+                            || (iv.size() == best->size() && iv.begin < best->begin)))) {
+                best = iv;
+                best_count = count;
+            }
+        }
+        if (!best)
+            break;
+        std::vector<LabelId> labels;
+        for (LabelId l = 0; l < profile.labels.size(); ++l) {
+            for (const auto &run : profile.labels[l].runs) {
+                if (run.begin <= best->begin && run.end >= best->end) {
+                    labels.push_back(l);
+                    break;
+                }
+            }
+        }
+        taken.push_back(*best);
+        std::sort(taken.begin(), taken.end());
+        picked.emplace_back(*best, std::move(labels));
+    }
+    return picked;
+}
+
+// A random profile: |labels| labels, each with runs of 1 to |longest| k-mers separated by gaps
+// of 1 to |gap| k-mers, over |num_kmers| k-mers
+SupportProfile random_runs_profile(size_t labels, uint64_t num_kmers, uint64_t longest,
+                                   uint64_t gap, uint32_t seed) {
+    std::mt19937 gen(seed);
+    SupportProfile profile;
+    profile.k = kK;
+    profile.num_kmers = num_kmers;
+    profile.graph_runs = { { 0, num_kmers } };
+    for (size_t l = 0; l < labels; ++l) {
+        LabelProfile lp;
+        lp.label.kind = LabelKind::COLUMN;
+        lp.label.name = "L" + std::to_string(l);
+        uint64_t at = gen() % (gap + 1);
+        while (at < num_kmers) {
+            const uint64_t end = std::min(num_kmers, at + 1 + gen() % longest);
+            lp.runs.push_back({ at, end });
+            lp.kmers_supported += end - at;
+            at = end + 1 + gen() % gap;
+        }
+        profile.labels.push_back(std::move(lp));
+    }
+    return profile;
+}
+
+// The clip by a binary search into the picks (T4-L1) picks what the base's scan of every pick
+// picked: the same intervals with the same labels, on random profiles of many labels and runs
+TEST(ResolveBounds, TheMaxSupportClipIsTheBases) {
+    size_t compared = 0;
+    for (uint32_t seed = 0; seed < 30; ++seed) {
+        const uint64_t num_kmers = 40 + seed * 3;
+        const SupportProfile profile = random_runs_profile(1 + seed % 6, num_kmers,
+                                                           1 + seed % 13, 1 + seed % 5, seed);
+        const std::string query(num_kmers + kK - 1, 'A');
+        for (uint64_t min_bp : { kK, kK + 3, kK + 20 }) {
+            SelectionPolicy policy;
+            policy.policy = SelectionPolicy::MAX_SUPPORT;
+            policy.max_seeds = 1000;
+            policy.min_block_bp = min_bp;
+            const SeedSelection got = select_seeds(profile, query, policy, false);
+            const auto expected = base_max_support(profile, 1000, min_bp - kK + 1);
+            ASSERT_EQ(expected.size(), got.seeds.size()) << seed << " " << min_bp;
+            for (size_t i = 0; i < expected.size(); ++i) {
+                EXPECT_EQ(expected[i].first, got.seeds[i].kmers) << seed << " " << i;
+                std::vector<std::string> names;
+                for (LabelId l : expected[i].second) {
+                    names.push_back(profile.labels[l].label.name);
+                }
+                std::sort(names.begin(), names.end());
+                EXPECT_EQ(names, got.seeds[i].labels) << seed << " " << i;
+            }
+            compared += expected.size();
+        }
+    }
+    EXPECT_GT(compared, 500u);
+}
+
+// A tiny time budget stops a max_support selection of many runs inside its first round (V7-A:
+// the rounds are at most --resolve-max-explicit-seeds, but a round sweeps every run): the
+// deadline is read about once every kResolveCheckLabels runs swept, so a deadline passing at the
+// selection's second reading ends it within a few thousand steps, a small part of one round;
+// before, it was read once a round, after every run was clipped by every pick and swept
+TEST(ResolveBounds, AManyRunMaxSupportSelectionStopsInTime) {
+    // 400 labels of about 2,500 runs each: about a million runs
+    const SupportProfile profile = random_runs_profile(400, 10000, 2, 2, 2024);
+    size_t num_runs = 0;
+    for (const LabelProfile &lp : profile.labels) {
+        num_runs += lp.runs.size();
+    }
+    ASSERT_GT(num_runs, 800'000u);
+    const std::string query(profile.num_kmers + kK - 1, 'A');
+    SelectionPolicy policy;
+    policy.policy = SelectionPolicy::MAX_SUPPORT;
+    policy.min_block_bp = kK;
+    auto timed = [&](size_t max_seeds, const std::function<void()> &check) {
+        policy.max_seeds = max_seeds;
+        const auto t0 = std::chrono::steady_clock::now();
+        try {
+            select_seeds(profile, query, policy, false, check);
+        } catch (...) {}
+        return std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count();
+    };
+    // no round: the runs gathered and sorted (read before the sort); three rounds, every reading
+    // counted: at least one per kResolveCheckLabels runs clipped in each round
+    const double setup = timed(0, {});
+    size_t calls = 0;
+    const double three_rounds = timed(3, [&]() { ++calls; });
+    const double round = (three_rounds - setup) / 3;
+    EXPECT_GE(calls, 3 * num_runs / kResolveCheckLabels);
+    // the deadline passes at the third reading, the first inside the first round: stopped
+    // there, a small part of the round (before, the next reading came after the whole round)
+    struct Late {};
+    calls = 0;
+    const double stopped = timed(1024, [&]() {
+        if (++calls == 3)
+            throw Late();
+    });
+    EXPECT_EQ(3u, calls);
+    EXPECT_LT((stopped - setup) * 8, round) << stopped - setup << " s into the first round of "
+                                            << round << " s";
 }
 
 // The route (process_resolve_request): under bounds.time_budget_ms the selection of as many

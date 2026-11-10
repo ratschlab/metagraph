@@ -1582,15 +1582,6 @@ bool covers(const LabelProfile &lp, const KmerInterval &iv) {
     return false;
 }
 
-std::vector<LabelId> covering_labels(const SupportProfile &profile, const KmerInterval &iv) {
-    std::vector<LabelId> out;
-    for (LabelId l = 0; l < profile.labels.size(); ++l) {
-        if (covers(profile.labels[l], iv))
-            out.push_back(l);
-    }
-    return out;
-}
-
 struct Picked {
     KmerInterval kmers;
     std::vector<LabelId> labels;
@@ -1615,6 +1606,16 @@ SeedSelection select_seeds(const SupportProfile &profile,
             next_check = steps + kResolveCheckLabels;
             check();
         }
+    };
+    // the labels with a run containing |iv|, a label and its runs a step
+    auto covering = [&](const KmerInterval &iv) {
+        std::vector<LabelId> out;
+        for (LabelId l = 0; l < profile.labels.size(); ++l) {
+            poll(1 + profile.labels[l].runs.size());
+            if (covers(profile.labels[l], iv))
+                out.push_back(l);
+        }
+        return out;
     };
     SeedSelection selection;
     selection.policy = policy_in;
@@ -1651,11 +1652,13 @@ SeedSelection select_seeds(const SupportProfile &profile,
             struct Run { uint64_t begin, end; };
             std::vector<Run> runs;
             for (const auto &lp : profile.labels) {
+                poll(1 + lp.runs.size());
                 for (const auto &run : lp.runs) {
                     if (run.size() >= min_kmers)
                         runs.push_back({ run.begin, run.end });
                 }
             }
+            poll(runs.size());
             const std::vector<Run> all_runs = [&runs]() {
                 std::sort(runs.begin(), runs.end(),
                           [](const Run &a, const Run &b) { return a.begin < b.begin; });
@@ -1666,22 +1669,32 @@ SeedSelection select_seeds(const SupportProfile &profile,
             std::vector<KmerInterval> taken;
 
             while (picked.size() < policy.max_seeds) {
-                // a round sweeps every run
-                poll(all_runs.size() + 1);
+                // a round sweeps every run: the deadline is read inside it, a step a run
+                // clipped (and a pick it meets), a candidate start swept, a label checked for
+                // the winner (and its runs), so that one round of many runs is no piece the
+                // deadline cannot end (T4-L1: a round of 3 M runs took about a second)
+                poll(1);
                 // Rebuild the runs with the claimed intervals subtracted, so later rounds
                 // see clipped runs and their endpoints. Reusing the original endpoints and
                 // merely rejecting overlapping intervals loses the best remaining interval
                 // (e.g. with A=[0,10), B=[0,5) and [0,5) taken, [5,10) is only reachable
-                // through the clipped run's own endpoints).
+                // through the clipped run's own endpoints). The picks are disjoint and sorted,
+                // so a run meets those from the first one ending after its begin, as long as
+                // they begin before its end (a binary search: scanning every pick for every
+                // run made a round O(runs x picks), the rounds O(runs x picks^2))
                 runs.clear();
                 for (const Run &run : all_runs) {
+                    poll(1);
                     uint64_t begin = run.begin;
-                    for (const auto &t : taken) {
-                        if (t.end <= begin || t.begin >= run.end)
-                            continue;
-                        if (t.begin > begin && t.begin - begin >= min_kmers)
-                            runs.push_back({ begin, t.begin });
-                        begin = std::max(begin, t.end);
+                    auto t = std::upper_bound(taken.begin(), taken.end(), run.begin,
+                                              [](uint64_t x, const KmerInterval &iv) {
+                                                  return x < iv.end;
+                                              });
+                    for ( ; t != taken.end() && t->begin < run.end; ++t) {
+                        poll(1);
+                        if (t->begin > begin && t->begin - begin >= min_kmers)
+                            runs.push_back({ begin, t->begin });
+                        begin = std::max(begin, t->end);
                     }
                     if (begin < run.end && run.end - begin >= min_kmers)
                         runs.push_back({ begin, run.end });
@@ -1697,6 +1710,7 @@ SeedSelection select_seeds(const SupportProfile &profile,
                     if (run.end >= min_kmers)
                         candidate_a.push_back(run.end - min_kmers);
                 }
+                poll(runs.size());
                 std::sort(candidate_a.begin(), candidate_a.end());
                 candidate_a.erase(std::unique(candidate_a.begin(), candidate_a.end()),
                                   candidate_a.end());
@@ -1712,6 +1726,9 @@ SeedSelection select_seeds(const SupportProfile &profile,
                 for (const Run &run : runs) {
                     coords.push_back(run.end);
                 }
+                // (each of the round's three sorts, n log n of at most twice its runs, is a
+                // piece the deadline is read around, not inside)
+                poll(runs.size());
                 std::sort(coords.begin(), coords.end());
                 coords.erase(std::unique(coords.begin(), coords.end()), coords.end());
                 auto index_of = [&](uint64_t x) {
@@ -1721,6 +1738,7 @@ SeedSelection select_seeds(const SupportProfile &profile,
                 Fenwick ends(coords.size());
                 uint32_t inserted = 0;
                 for (uint64_t a : candidate_a) {
+                    poll(1);
                     while (next_run < runs.size() && runs[next_run].begin <= a) {
                         ends.add(index_of(runs[next_run].end), 1);
                         inserted++;
@@ -1749,7 +1767,7 @@ SeedSelection select_seeds(const SupportProfile &profile,
                 }
                 if (!best)
                     break;
-                best->labels = covering_labels(profile, best->kmers);
+                best->labels = covering(best->kmers);
                 assert(best->labels.size() == best_count);
                 taken.push_back(best->kmers);
                 std::sort(taken.begin(), taken.end());
@@ -1826,9 +1844,8 @@ SeedSelection select_seeds(const SupportProfile &profile,
                 KmerInterval common { std::max(m.kmers.begin, p.kmers.begin),
                                       std::min(m.kmers.end, p.kmers.end) };
                 if (common.size() >= min_kmers) {
-                    poll(profile.labels.size());
                     m.kmers = common;
-                    m.labels = covering_labels(profile, common);
+                    m.labels = covering(common);
                     m.rank = std::min(m.rank, p.rank);
                     continue;
                 }

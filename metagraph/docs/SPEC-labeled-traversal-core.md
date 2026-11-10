@@ -351,10 +351,16 @@ deadline. `src/cli/traverse.cpp` `process_resolve_request`, `src/graph/traversal
   `stop: null`; `limits` (the effective budget, the reserve, the clamps) is stated either way.
 - **The answer is built within the reserve.** After the work, the loops over the labels (a discovery's ranking
   and naming, the profiles, the candidates' grouping) read the whole budget every 4,096 labels, the selection
-  (`select_seeds`) every 4,096 steps — an explicit seed and each of its labels, a run a `max_support` round sweeps
-  (a round of 4,096 runs or more reads it), a merged pick, a frozen seed and each of its labels, a pair of seeds
-  compared for `overlaps_with` — and once it is done *(GPT review 7, finding 1: before, only once it was done,
-  after every overlapping pair was listed)*, the JSON every 4,096 labels, candidates or seeds, its text every 64 KiB
+  (`select_seeds`) every 4,096 steps — an explicit seed and each of its labels; a label and its runs gathered for
+  `max_support`, and the runs before their sort; in a `max_support` round a run clipped by the picks before it and
+  each pick it meets, a candidate start swept, the round's runs once before each of its sorts, and a label with its
+  runs checked for the winner; a merged pick and the labels checked for it;
+  a frozen seed and each of its labels, a pair of seeds compared for `overlaps_with` — and once it is done *(GPT
+  review 7, finding 1: before, only once it was done, after every overlapping pair was listed; train 4, T4-L1: a
+  `max_support` round was one reading, and a round of about 3 million runs — 10,000 labels of 300 runs, what a 10 kbp
+  query admits — ran about a second between two; the clip of every run by every pick before it, O(runs × picks) a
+  round, is a binary search into the sorted, disjoint picks, the same runs in the same order)*, the JSON every 4,096
+  labels, candidates or seeds, its text every 64 KiB
   and its compression every block of output and every 4 MiB of text (the server's transport check, as
   `/pattern`'s). Past the budget the answer is **503**
   `{"error": "resolve: the answer could not be built and written within bounds.time_budget_ms (… ms, the
@@ -370,9 +376,9 @@ deadline. `src/cli/traverse.cpp` `process_resolve_request`, `src/graph/traversal
   batch's decode (a row-diff row's whole path) and its accumulation (every label of its rows); a discovery
   pass's setup (the next occurrence of every present k-mer, one hash pass) and the explicit priming's distinct
   keys; one piece of hits and its accumulation; the ranking sort of a discovery's labels and the candidates'
-  sort (n log n); in `select_seeds`, one `max_support` round (it sweeps every run; the rounds are at most
-  `select.max_seeds`, §4.3), a seed's label sort and one row of the seeds' overlaps (as many pairs as seeds, at most
-  `--resolve-max-explicit-seeds`); and the transport. The client's checks
+  sort (n log n); in `select_seeds`, the sort of the runs `max_support` gathers and each of a round's three sorts (of
+  its runs, its candidate starts and its run ends: n log n of at most twice the runs), a seed's label sort and one row of the seeds' overlaps (as many
+  pairs as seeds, at most `--resolve-max-explicit-seeds`); and the transport. The client's checks
   are where they were (§10.3); a reserve that these overrun is not adapted to them (the reserve is fixed).
 - **Capabilities.** Both GET routes carry the `resolve` block (§10.3). The field is not a `feature_level`: every
   `/resolve` and `/traverse` response states the level, so a bump would change every answer; a client gates

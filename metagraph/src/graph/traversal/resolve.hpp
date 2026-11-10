@@ -329,10 +329,14 @@ uint64_t selection_bytes(const SeedSelection &selection);
 constexpr char kSeedOrder[] = "rank";
 
 // |check| (unset: none): the answer's deadline (ResolveOptions::finish_check), read every
-// kResolveCheckLabels steps of the selection -- an explicit seed and each of its labels, a run a
-// max_support round sweeps, a merged pick, a frozen seed and each of its labels, a pair of seeds
+// kResolveCheckLabels steps of the selection -- an explicit seed and each of its labels; a label
+// (with its runs) gathered for max_support and the runs before their sort; in a max_support
+// round a run clipped and each pick it meets, a candidate start swept, the round's runs once
+// before each of its sorts, a label (with its runs) checked for the winner; a merged
+// pick and the labels checked for it; a frozen seed and each of its labels, a pair of seeds
 // compared for overlaps -- and throwing to abandon it (GPT review 7, finding 1: the selection
-// was read only once it was done, after every overlapping pair was listed)
+// was read only once it was done, after every overlapping pair was listed; T4-L1: once per
+// max_support round, whose clip of every run by every pick was O(runs x picks))
 SeedSelection select_seeds(const SupportProfile &profile,
                            std::string_view query,
                            const SelectionPolicy &policy,
