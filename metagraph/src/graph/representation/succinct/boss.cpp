@@ -1001,15 +1001,26 @@ void BOSS::map_to_edges(const std::vector<TAlphabet> &seq_encoded,
                         const std::function<void(edge_index)> &callback,
                         const std::function<bool()> &terminate,
                         const std::function<bool()> &skip) const {
-    EdgeStream edges(*this, std::vector<TAlphabet>(seq_encoded), skip);
+    EdgeStream edges(*this, std::span<const TAlphabet>(seq_encoded), skip);
     while (!edges.done() && !terminate()) {
         callback(edges.next());
     }
 }
 
+BOSS::EdgeStream::EdgeStream(const BOSS &boss, std::string_view sequence,
+                             std::function<bool()> skip)
+      : EdgeStream(boss, boss.encode(sequence), std::move(skip)) {}
+
 BOSS::EdgeStream::EdgeStream(const BOSS &boss, std::vector<TAlphabet>&& seq_encoded,
                              std::function<bool()> skip)
-      : boss_(&boss), seq_(std::move(seq_encoded)), skip_(std::move(skip)) {
+      : EdgeStream(boss, std::span<const TAlphabet>(seq_encoded), std::move(skip)) {
+    // moving a vector keeps its buffer, so |seq_| stays valid
+    owned_seq_ = std::move(seq_encoded);
+}
+
+BOSS::EdgeStream::EdgeStream(const BOSS &boss, std::span<const TAlphabet> seq_encoded,
+                             std::function<bool()> skip)
+      : boss_(&boss), seq_(seq_encoded), skip_(std::move(skip)) {
     assert(std::all_of(seq_.begin(), seq_.end(),
                        [&](TAlphabet c) { return c <= boss.alph_size; }));
     if (seq_.size() > boss.k_)

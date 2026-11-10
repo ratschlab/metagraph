@@ -550,23 +550,26 @@ SequenceGraph::node_stream(std::string_view sequence, bool sequential) const {
 
 void DeBruijnGraph::call_streamed_nodes(std::string_view sequence, bool sequential,
                                         const std::function<void(node_index)> &callback,
-                                        const std::function<bool()> &terminate) const {
+                                        const std::function<bool()> &terminate,
+                                        size_t max_chunk_size) const {
+    assert(max_chunk_size && max_chunk_size <= NodeRange::kChunkSize);
+    if (terminate())
+        return;
+
     // Pull chunks of doubling size: a virtual call per node is slow for fast
     // graphs, while terminate() may stop early, and then at most as many nodes
     // are mapped in vain as were already passed to the callback
     auto stream = node_stream(sequence, sequential);
     std::array<node_index, NodeRange::kChunkSize> buffer;
-    for (size_t size = 1; !terminate(); size = std::min(2 * size, buffer.size())) {
+    for (size_t size = 1; ; size = std::min(2 * size, max_chunk_size)) {
         size_t n = stream->next({ buffer.data(), size });
-        if (!n)
-            return;
-
         for (size_t i = 0; i < n; ++i) {
-            if (i && terminate())
-                return;
-
             callback(buffer[i]);
+            if (terminate())
+                return;
         }
+        if (n < size)
+            return;
     }
 }
 

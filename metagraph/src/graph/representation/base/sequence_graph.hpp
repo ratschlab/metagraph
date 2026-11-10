@@ -265,10 +265,12 @@ class DeBruijnGraph : public SequenceGraph {
     virtual void call_source_nodes(const std::function<void(node_index)> &callback) const;
 
   protected:
-    // Callback interface on top of node_stream, for graphs that override it
+    // Callback interface on top of node_stream, for graphs that override it.
+    // Maps at most |max_chunk_size| - 1 nodes past the one terminate() stops at.
     void call_streamed_nodes(std::string_view sequence, bool sequential,
                              const std::function<void(node_index)> &callback,
-                             const std::function<bool()> &terminate) const;
+                             const std::function<bool()> &terminate,
+                             size_t max_chunk_size = NodeRange::kChunkSize) const;
 };
 
 

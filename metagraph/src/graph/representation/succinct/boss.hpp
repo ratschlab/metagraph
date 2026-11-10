@@ -2,6 +2,7 @@
 #define __BOSS_HPP__
 
 #include <memory>
+#include <span>
 #include <type_traits>
 
 #include "common/vectors/bit_vector.hpp"
@@ -105,18 +106,24 @@ class BOSS {
     class EdgeStream {
       public:
         EdgeStream(const BOSS &boss, std::string_view sequence,
-                   std::function<bool()> skip = {})
-              : EdgeStream(boss, boss.encode(sequence), std::move(skip)) {}
-        // |seq_encoded| must have no sentinels (zeros)
-        EdgeStream(const BOSS &boss, std::vector<TAlphabet>&& seq_encoded,
                    std::function<bool()> skip = {});
+        // |seq_encoded| must have no sentinels (zeros) and outlive the stream
+        EdgeStream(const BOSS &boss, std::span<const TAlphabet> seq_encoded,
+                   std::function<bool()> skip = {});
+
+        EdgeStream(const EdgeStream&) = delete;
+        EdgeStream& operator=(const EdgeStream&) = delete;
 
         bool done() const { return i_ + boss_->k_ + 1 > seq_.size(); }
         edge_index next();
 
       private:
+        EdgeStream(const BOSS &boss, std::vector<TAlphabet>&& seq_encoded,
+                   std::function<bool()> skip);
+
         const BOSS *boss_;
-        std::vector<TAlphabet> seq_;
+        std::vector<TAlphabet> owned_seq_;
+        std::span<const TAlphabet> seq_;
         std::vector<bool> invalid_;
         std::function<bool()> skip_;
         size_t i_ = 0;

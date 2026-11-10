@@ -69,14 +69,20 @@ class NodeRange {
         void operator++(int) { ++*this; }
 
         friend bool operator==(const iterator &it, std::default_sentinel_t) {
-            return it.range_->pos_ == it.range_->size_ && !it.range_->refill();
+            return it.at_end();
         }
 
       private:
         NodeRange *range_ = nullptr;
+
+        bool at_end() const { return range_->pos_ == range_->size_ && !range_->refill(); }
     };
 
-    iterator begin() { return iterator(this); }
+    iterator begin() {
+        if (pos_ == size_)
+            refill();
+        return iterator(this);
+    }
     std::default_sentinel_t end() const { return {}; }
 
   private:

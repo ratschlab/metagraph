@@ -279,7 +279,8 @@ std::string DBGSuccinct::get_node_sequence(node_index node) const {
 void DBGSuccinct::map_to_nodes_sequentially(std::string_view sequence,
                                             const std::function<void(node_index)> &callback,
                                             const std::function<bool()> &terminate) const {
-    call_streamed_nodes(sequence, true, callback, terminate);
+    // a BOSS lookup dwarfs the virtual call: map nothing past terminate()
+    call_streamed_nodes(sequence, true, callback, terminate, 1);
 }
 
 namespace {
@@ -442,7 +443,7 @@ void DBGSuccinct::map_to_nodes(std::string_view sequence,
                                const std::function<void(node_index)> &callback,
                                const std::function<bool()> &terminate) const {
     if (mode_ != CANONICAL) {
-        call_streamed_nodes(sequence, false, callback, terminate);
+        call_streamed_nodes(sequence, false, callback, terminate, 1);
         return;
     }
 
