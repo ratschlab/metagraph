@@ -504,6 +504,15 @@ HttpError json_values_refusal(const TooManyJsonValues &e) {
     return HttpError(400, std::move(body), std::move(text));
 }
 
+// A /resolve listing more explicit seeds than --resolve-max-explicit-seeds (GPT review 7,
+// finding 1): 400 too_many_explicit_seeds, its members written in the order error, code, the cap
+// (error_first_json_text), as the intake refusals. Nothing of the request ran or was registered
+HttpError explicit_seeds_refusal(const TooManyExplicitSeeds &e) {
+    Json::Value body = too_many_explicit_seeds_json(e);
+    std::string text = error_first_json_text(body);
+    return HttpError(400, std::move(body), std::move(text));
+}
+
 // The body of /resolve, /traverse or /traverse/cancel, read as /pattern reads its body
 // (parse_strict_json: one RFC 8259 JSON text, member names unique); a fault is 400
 // {"error": "Bad json received: ..."} without a code, as /search's reader answers a body that
@@ -1964,7 +1973,7 @@ int run_server(Config *config) {
             ? config->traverse_max_time_ms : static_cast<double>(kServerMaxDeadlineMs),
         kResolveFinalizeMs, config->resolve_max_discover_labels,
         config->resolve_max_discover_memory_mb, config->resolve_max_explicit_labels,
-        config->resolve_max_discover_answer_labels };
+        config->resolve_max_discover_answer_labels, config->resolve_max_explicit_seeds };
 
     /**
      * POST /resolve on a multi-graph server (SPEC-multigraph-envelope.md section 1, E2): the
@@ -1994,7 +2003,14 @@ int run_server(Config *config) {
         // sections 4 and 5, read last, where they were unknown fields before release 10), the
         // query's length (the server's limit and bounds.max_query_bp), a budget not above the
         // reserve
-        const ResolveRequest req = parse_resolve_request(json, resolve_time.max_explicit_labels);
+        const ResolveRequest req = [&]() {
+            try {
+                return parse_resolve_request(json, resolve_time.max_explicit_labels,
+                                             resolve_time.max_explicit_seeds);
+            } catch (const TooManyExplicitSeeds &e) {
+                throw explicit_seeds_refusal(e);
+            }
+        }();
         check_resolve_fields(req, config->resolve_max_query_bp, resolve_time);
         const RequestHandles handles = read_request_handles(json);
         // the request budget: bounds.time_budget_ms (lowered to the server's cap), else the
@@ -2236,6 +2252,8 @@ int run_server(Config *config) {
                     throw ClientGone(e.what());
                 } catch (const ResolveDeadline &e) {
                     throw as_http(e);
+                } catch (const TooManyExplicitSeeds &e) {
+                    throw explicit_seeds_refusal(e);
                 }
             }
         }, /* compact */ true, &writing.control);
@@ -2952,7 +2970,8 @@ int run_server(Config *config) {
                         { resolve_time.max_discover_labels,
                           resolve_time.max_discover_memory_mb,
                           resolve_time.max_explicit_labels,
-                          resolve_time.max_discover_answer_labels });
+                          resolve_time.max_discover_answer_labels,
+                          resolve_time.max_explicit_seeds });
             }
             // the request registry (section 5) on every server: a single-graph /resolve or
             // /pattern with request_id registers too, and GET /requests/{attempt_id} reads a

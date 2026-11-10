@@ -531,7 +531,8 @@ TEST(ServerEnvelope, Sample12MultigraphBlock) {
     // the sample's server ran with the default bounds of a /resolve discovery (H2,
     // SPEC-labeled-traversal-core.md §4.6), which the block states as resolve_discovery, as
     // the `resolve` block's `discovery` states them
-    const ResolveDiscoveryBounds defaults { 1'000'000, 1024, 10'000, 10'000 };
+    // (and the cap on a request's explicit seeds, --resolve-max-explicit-seeds 1024)
+    const ResolveDiscoveryBounds defaults { 1'000'000, 1024, 10'000, 10'000, 1024 };
     EXPECT_EQ(text(body["multigraph"]),
               text(multigraph_capabilities_json(0, {}, intake, column_labels, defaults)));
     // request_intake (H1): the byte cap as the top-level member states it
@@ -549,6 +550,10 @@ TEST(ServerEnvelope, Sample12MultigraphBlock) {
     EXPECT_EQ("10000", text(body["multigraph"]["resolve_max_explicit_labels"]));
     EXPECT_EQ(text(body["resolve"]["max_explicit_labels"]),
               text(body["multigraph"]["resolve_max_explicit_labels"]));
+    // and on its explicit seeds (GPT review 7, finding 1), as the resolve block states it
+    EXPECT_EQ("1024", text(body["multigraph"]["resolve_max_explicit_seeds"]));
+    EXPECT_EQ(text(body["resolve"]["max_explicit_seeds"]),
+              text(body["multigraph"]["resolve_max_explicit_seeds"]));
     // the order of a /resolve selection's seeds (addendum 3, SPEC-labeled-traversal-core.md
     // §4.3), as the resolve block states it
     EXPECT_EQ("\"rank\"", text(body["multigraph"]["resolve_seed_order"]));
@@ -570,6 +575,7 @@ TEST(ServerEnvelope, Sample12MultigraphBlock) {
     EXPECT_EQ("{\"max_answer_labels\":0,\"max_memory_mb\":0,\"max_tracked_labels\":0}",
               text(unbounded["resolve_discovery"]));
     EXPECT_EQ("0", text(unbounded["resolve_max_explicit_labels"]));
+    EXPECT_EQ("0", text(unbounded["resolve_max_explicit_seeds"]));
 }
 
 // Sample 10: every /traverse capabilities probe states the request-wide memory bound beside

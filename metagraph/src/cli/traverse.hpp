@@ -234,8 +234,29 @@ struct ResolveRequest {
 TraverseRequest parse_traverse_request(const Json::Value &json);
 // |max_explicit_labels| (0: none): the cap on the request's `labels` and on each explicit
 // seed's `labels` (SPEC-labeled-traversal-core.md §4.1), checked first, on the parsed body
-// before anything of it is copied: a 400 naming the list, the cap and the flag
-ResolveRequest parse_resolve_request(const Json::Value &json, uint64_t max_explicit_labels = 0);
+// before anything of it is copied: a 400 naming the list, the cap and the flag.
+// |max_explicit_seeds| (0: none): the cap on the number of explicit seeds (select.seeds),
+// checked with them: TooManyExplicitSeeds
+ResolveRequest parse_resolve_request(const Json::Value &json, uint64_t max_explicit_labels = 0,
+                                     uint64_t max_explicit_seeds = 0);
+
+// A /resolve listing more explicit seeds (select.seeds) than --resolve-max-explicit-seeds
+// (GPT review 7, finding 1; SPEC-labeled-traversal-core.md §4.1): an InvalidRequest, which the
+// server answers 400 too_many_explicit_seeds_json() and the CLI, which sets no cap, never throws
+class TooManyExplicitSeeds : public InvalidRequest {
+  public:
+    explicit TooManyExplicitSeeds(uint64_t max_seeds)
+          : InvalidRequest("request.select.seeds: at most " + std::to_string(max_seeds)
+                           + " seeds (--resolve-max-explicit-seeds)"),
+            max_seeds_(max_seeds) {}
+    uint64_t max_seeds() const { return max_seeds_; }
+
+  private:
+    uint64_t max_seeds_;
+};
+// {"error": the message, "code": "too_many_explicit_seeds", "max_explicit_seeds": the cap}, written
+// error first (error_first_json_text), as the intake refusals (too_many_json_values_json)
+Json::Value too_many_explicit_seeds_json(const TooManyExplicitSeeds &e);
 
 // Normalized strategy echo (what was actually used), resubmittable verbatim:
 // output.detail and output.timing come from the request, not from the Strategy
@@ -503,6 +524,10 @@ struct ResolveTimeLimits {
     // the most labels a discovery's answer keeps (--resolve-max-discover-answer-labels; 0: none):
     // a larger discover.max_labels is lowered to it, stated in limits.clamped
     uint64_t max_discover_answer_labels = 0;
+    // the most explicit seeds a request lists (--resolve-max-explicit-seeds; 0: none): more are
+    // refused 400 too_many_explicit_seeds before anything is copied (parse_resolve_request), and
+    // a larger select.max_seeds is lowered to it, stated in limits.clamped
+    uint64_t max_explicit_seeds = 0;
 };
 
 // A /resolve answer that could not be built and written within its bounds.time_budget_ms (the

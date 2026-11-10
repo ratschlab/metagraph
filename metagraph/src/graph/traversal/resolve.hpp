@@ -328,10 +328,16 @@ uint64_t selection_bytes(const SeedSelection &selection);
 // explicit seeds in the request's order
 constexpr char kSeedOrder[] = "rank";
 
+// |check| (unset: none): the answer's deadline (ResolveOptions::finish_check), read every
+// kResolveCheckLabels steps of the selection -- an explicit seed and each of its labels, a run a
+// max_support round sweeps, a merged pick, a frozen seed and each of its labels, a pair of seeds
+// compared for overlaps -- and throwing to abandon it (GPT review 7, finding 1: the selection
+// was read only once it was done, after every overlapping pair was listed)
 SeedSelection select_seeds(const SupportProfile &profile,
                            std::string_view query,
                            const SelectionPolicy &policy,
-                           bool canonical_orientation);
+                           bool canonical_orientation,
+                           const std::function<void()> &check = {});
 
 // What select_seeds refuses of an explicit selection that |query|'s length, k, |options|' labels
 // and |policy| decide alone: a seed's kmer_interval empty or out of range, a seed's label that

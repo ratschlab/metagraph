@@ -124,7 +124,8 @@ Json::Value composite_fp_json(std::vector<std::string> index_fps);
  * server_checks.hpp) and |column_labels| (H3: column_labels_capabilities_json), which a
  * single-graph server states at the top level; and |discovery| (resolve_discovery: the bounds
  * of a /resolve discovery per pair, as the `resolve` block's `discovery` states them,
- * SPEC-labeled-traversal-core.md §4.6)
+ * SPEC-labeled-traversal-core.md §4.6; and the caps on a request's explicit label lists and
+ * explicit seeds, resolve_max_explicit_labels and resolve_max_explicit_seeds, §4.1)
  */
 struct ResolveDiscoveryBounds {
     uint64_t max_tracked_labels = 0;     // --resolve-max-discover-labels (0: none)
@@ -135,6 +136,9 @@ struct ResolveDiscoveryBounds {
     // resolve_discovery.max_answer_labels: the most labels a discovery's answer keeps
     // (--resolve-max-discover-answer-labels, 0: none)
     uint64_t max_answer_labels = 0;
+    // and resolve_max_explicit_seeds: the cap on a request's explicit seeds
+    // (--resolve-max-explicit-seeds, 0: none), as the `resolve` block's max_explicit_seeds
+    uint64_t max_explicit_seeds = 0;
 };
 Json::Value multigraph_capabilities_json(uint64_t max_request_memory_mb, const RouteCaps &caps,
                                          const Json::Value &request_intake,

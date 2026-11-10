@@ -584,7 +584,13 @@ class TraverseClient:
         ranking_exact true exactly when the kept labels number the effective discover.max_labels,
         the clamped one, and the last supports more than untracked_max_kmers), and its memory
         bound's stop as `stop` with reason 'memory' (the same members as a time stop's, with or
-        without time_budget_ms)."""
+        without time_budget_ms).
+
+        The explicit seeds of |select| are capped by the server (SPEC §4.1;
+        capabilities()['resolve']['max_explicit_seeds'], 1024 by default, 0 for none): more raise
+        TraverseError 400 with the body {error, code: 'too_many_explicit_seeds',
+        max_explicit_seeds}; a select.max_seeds above the cap is lowered to it and stated in
+        limits.clamped (SPEC §4.3)."""
         req = {'sequence': sequence}
         if labels is not None:
             req['labels'] = list(labels)

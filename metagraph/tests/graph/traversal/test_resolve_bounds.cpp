@@ -781,13 +781,18 @@ TEST(ResolveBoundsRoute, TheCutAndTheMemoryStopAreStated) {
 // The capabilities' `discovery` member of the `resolve` block (§4.6, §10.3)
 TEST(ResolveBoundsRoute, CapabilitiesBlock) {
     const Json::Value c = cli::resolve_capabilities_json({ 30000, cli::kResolveFinalizeMs,
-                                                           1'000'000, 1024, 10'000, 10'000 });
-    EXPECT_EQ((std::vector<std::string>{ "discovery", "max_explicit_labels", "seed_order",
-                                         "time_budget" }),
+                                                           1'000'000, 1024, 10'000, 10'000,
+                                                           1024 });
+    EXPECT_EQ((std::vector<std::string>{ "discovery", "max_explicit_labels",
+                                         "max_explicit_seeds", "seed_order", "time_budget" }),
               c.getMemberNames());
     EXPECT_TRUE(c["max_explicit_labels"].isUInt64());
     EXPECT_EQ(10000u, c["max_explicit_labels"].asUInt64());
     EXPECT_EQ(0u, cli::resolve_capabilities_json({})["max_explicit_labels"].asUInt64());
+    // the cap on a request's explicit seeds (GPT review 7, finding 1; 0: none)
+    EXPECT_TRUE(c["max_explicit_seeds"].isUInt64());
+    EXPECT_EQ(1024u, c["max_explicit_seeds"].asUInt64());
+    EXPECT_EQ(0u, cli::resolve_capabilities_json({})["max_explicit_seeds"].asUInt64());
     // the order of a selection's seeds (§4.3), whatever the bounds
     EXPECT_EQ("rank", c["seed_order"].asString());
     EXPECT_EQ("rank", cli::resolve_capabilities_json({})["seed_order"].asString());
@@ -1300,6 +1305,317 @@ TEST(ResolveBoundsRoute, Samples30To32) {
     EXPECT_EQ((std::vector<std::string>{ "error" }), s32["body"].getMemberNames());
     EXPECT_EQ(s32["body"]["error"].asString(), refusal_of(s32["request"], 4));
     EXPECT_EQ("", refusal_of(s32["request"], 5));
+}
+
+
+// ---- the cap on a request's explicit seeds (--resolve-max-explicit-seeds; GPT review 7 #1)
+
+// A request of |n| explicit seeds on k-mer 0, each naming |label| (the request's one label)
+Json::Value seeds_request(const std::string &sequence, const std::string &label, size_t n) {
+    Json::Value request;
+    request["sequence"] = sequence;
+    request["labels"].append(label);
+    request["select"]["policy"] = "explicit";
+    Json::Value &seeds = request["select"]["seeds"];
+    seeds = Json::Value(Json::arrayValue);
+    for (size_t i = 0; i < n; ++i) {
+        Json::Value seed;
+        seed["kmer_interval"].append(0);
+        seed["kmer_interval"].append(1);
+        seed["labels"].append(label);
+        seeds.append(seed);
+    }
+    return request;
+}
+
+std::string seeds_refusal_of(const Json::Value &request, uint64_t labels_cap, uint64_t seeds_cap) {
+    try {
+        cli::parse_resolve_request(request, labels_cap, seeds_cap);
+    } catch (const cli::TooManyExplicitSeeds &e) {
+        EXPECT_EQ(seeds_cap, e.max_seeds());
+        return std::string("seeds: ") + e.what();
+    } catch (const cli::InvalidRequest &e) {
+        return e.what();
+    }
+    return "";
+}
+
+// More explicit seeds than the cap are refused before anything of the request is copied: after
+// the request's `labels`, before each seed's labels and every other fault of the request's
+// fields; at the cap the request is parsed; 0 is no cap. The 400's body: error, code, the cap
+TEST(ResolveBoundsRoute, TheExplicitSeedsCap) {
+    const std::string q = random_seq(200, 1717);
+    Json::Value request = seeds_request(q, "held", 4);
+    EXPECT_EQ("", seeds_refusal_of(request, 10, 4));
+    EXPECT_EQ("", seeds_refusal_of(request, 10, 0));
+    EXPECT_EQ("", seeds_refusal_of(request, 0, 0));
+    request = seeds_request(q, "held", 5);
+    const std::string refused
+            = "seeds: request.select.seeds: at most 4 seeds (--resolve-max-explicit-seeds)";
+    EXPECT_EQ(refused, seeds_refusal_of(request, 10, 4));
+    EXPECT_EQ(refused, seeds_refusal_of(request, 0, 4));
+    EXPECT_EQ("", seeds_refusal_of(request, 10, 5));
+    EXPECT_EQ("", seeds_refusal_of(request, 10, 0));
+    // an InvalidRequest (the CLI's exit status 1; it sets no cap)
+    try {
+        cli::parse_resolve_request(request, 0, 4);
+        ADD_FAILURE() << "not refused";
+    } catch (const cli::InvalidRequest &e) {
+        EXPECT_EQ("request.select.seeds: at most 4 seeds (--resolve-max-explicit-seeds)",
+                  std::string(e.what()));
+    }
+    // the request's `labels` first, then the count, then each seed's labels
+    Json::Value labelled = request;
+    labelled["labels"].append("a");
+    labelled["labels"].append("b");
+    EXPECT_EQ("request.labels: at most 2 labels (--resolve-max-explicit-labels)",
+              seeds_refusal_of(labelled, 2, 4));
+    labelled = request;
+    for (const char *name : { "a", "b", "c" }) {
+        labelled["select"]["seeds"][2]["labels"].append(name);
+    }
+    EXPECT_EQ(refused, seeds_refusal_of(labelled, 2, 4));
+    EXPECT_EQ("request.select.seeds[2].labels: at most 2 labels per seed "
+              "(--resolve-max-explicit-labels)", seeds_refusal_of(labelled, 2, 5));
+    // before every other fault of the request's fields, whatever the policy
+    Json::Value faulty = request;
+    faulty["bogus"] = 1;
+    faulty.removeMember("sequence");
+    faulty["select"]["policy"] = "max_support";
+    EXPECT_EQ(refused, seeds_refusal_of(faulty, 0, 4));
+    // seeds of another type are the parse's to refuse, in its words
+    Json::Value typed = request;
+    typed["select"]["seeds"] = "s";
+    EXPECT_EQ(seeds_refusal_of(typed, 0, 0), seeds_refusal_of(typed, 0, 1));
+    EXPECT_NE("", seeds_refusal_of(typed, 0, 1));
+
+    // the 400's body, written error first (as the intake refusals)
+    const cli::TooManyExplicitSeeds e(1024);
+    const Json::Value body = cli::too_many_explicit_seeds_json(e);
+    EXPECT_EQ((std::vector<std::string>{ "code", "error", "max_explicit_seeds" }),
+              body.getMemberNames());
+    EXPECT_EQ("{\"error\":\"request.select.seeds: at most 1024 seeds "
+              "(--resolve-max-explicit-seeds)\",\"code\":\"too_many_explicit_seeds\","
+              "\"max_explicit_seeds\":1024}", cli::error_first_json_text(body));
+    EXPECT_TRUE(body["max_explicit_seeds"].isUInt64());
+
+    // the route reads its cap from the limits: refused before the index is read; at the cap
+    // every seed is selected
+    auto anno = build_anno_graph<DBGSuccinct, annot::ColumnCompressed<>>(kK, { q }, { "held" });
+    cli::ResolveTimeLimits limits;
+    limits.max_explicit_seeds = 4;
+    try {
+        cli::process_resolve_request(request, *anno, "r1", 0, nullptr, nullptr, limits);
+        ADD_FAILURE() << "not refused";
+    } catch (const cli::TooManyExplicitSeeds &e) {
+        EXPECT_EQ(4u, e.max_seeds());
+    }
+    const Json::Value at_cap = cli::process_resolve_request(seeds_request(q, "held", 4), *anno,
+                                                            "r1", 0, nullptr, nullptr, limits);
+    EXPECT_EQ(4u, at_cap["selection"]["counts"]["selected"].asUInt64());
+    // (a cap below select.max_seeds' default, 10, lowers the default too, stated as any clamp)
+    EXPECT_EQ("{\"clamped\":[{\"effective\":4,\"field\":\"select.max_seeds\","
+              "\"requested\":10}]}", compact(at_cap["limits"]));
+    // 0: none (the CLI)
+    EXPECT_EQ(5u, cli::process_resolve_request(request, *anno, "r1", 0, nullptr, nullptr, {})
+                          ["selection"]["counts"]["selected"].asUInt64());
+}
+
+// A select.max_seeds above the cap is lowered to it and stated in limits.clamped (as the
+// answer-labels clamp of discover.max_labels), with or without a deadline; the answer is that of
+// the cap; at the cap, or with none, nothing is stated
+TEST(ResolveBoundsRoute, MaxSeedsIsClampedToTheSeedsCap) {
+    const Records r = make_records<DBGSuccinct, annot::ColumnCompressed<>>(40, 5, 717);
+    const auto index = with_mapping(r);
+    Json::Value request;
+    request["sequence"] = r.q;
+    request["discover"]["kind"] = "header";
+    request["select"]["policy"] = "longest_first";
+    request["select"]["merge_overlapping"] = false;
+    request["select"]["max_seeds"] = 50;
+    // the request picks more than 2 seeds without the cap
+    const Json::Value uncapped = cli::process_resolve_request(request, *index, "r1", 0, nullptr,
+                                                              nullptr, {});
+    ASSERT_GT(uncapped["selection"]["counts"]["selected"].asUInt64(), 2u);
+    EXPECT_FALSE(uncapped.isMember("limits"));
+    cli::ResolveTimeLimits limits;
+    limits.max_explicit_seeds = 2;
+    const Json::Value clamped = cli::process_resolve_request(request, *index, "r1", 0, nullptr,
+                                                             nullptr, limits);
+    EXPECT_EQ("{\"clamped\":[{\"effective\":2,\"field\":\"select.max_seeds\",\"requested\":50}]}",
+              compact(clamped["limits"]));
+    EXPECT_EQ(2u, clamped["selection"]["counts"]["selected"].asUInt64());
+    EXPECT_EQ(2u, clamped["selection"]["policy"]["max_seeds"].asUInt64());
+    EXPECT_FALSE(clamped.isMember("stop"));
+    // the answer of max_seeds 2
+    Json::Value two = request;
+    two["select"]["max_seeds"] = 2;
+    Json::Value plain = cli::process_resolve_request(two, *index, "r1", 0, nullptr, nullptr,
+                                                     limits);
+    EXPECT_FALSE(plain.isMember("limits"));
+    Json::Value got = clamped;
+    got.removeMember("limits");
+    EXPECT_EQ(compact(untimed(plain)), compact(untimed(got)));
+    // with a deadline and the answer-labels clamp: discover.max_labels, select.max_seeds, then
+    // the budget
+    Json::Value timed = request;
+    timed["bounds"]["time_budget_ms"] = 100000;
+    timed["discover"]["max_labels"] = 50;
+    limits.max_time_ms = 60000;
+    limits.max_discover_answer_labels = 7;
+    const Json::Value all = cli::process_resolve_request(timed, *index, "r1", 0, nullptr,
+                                                         nullptr, limits);
+    EXPECT_EQ("[{\"effective\":7,\"field\":\"discover.max_labels\",\"requested\":50},"
+              "{\"effective\":2,\"field\":\"select.max_seeds\",\"requested\":50},"
+              "{\"effective\":60000,\"field\":\"bounds.time_budget_ms\",\"requested\":100000}]",
+              compact(all["limits"]["clamped"]));
+    // none at the cap or without it, nor without a selection
+    limits = {};
+    limits.max_explicit_seeds = 50;
+    EXPECT_FALSE(cli::process_resolve_request(request, *index, "r1", 0, nullptr, nullptr, limits)
+                         .isMember("limits"));
+    limits.max_explicit_seeds = 2;
+    Json::Value unselected = request;
+    unselected.removeMember("select");
+    EXPECT_FALSE(cli::process_resolve_request(unselected, *index, "r1", 0, nullptr, nullptr,
+                                              limits).isMember("limits"));
+}
+
+// The selection reads the answer's deadline every kResolveCheckLabels steps (select_seeds'
+// |check|): explicit seeds frozen and their overlapping pairs listed, and each max_support round;
+// a check that throws ends it there, after at most kResolveCheckLabels steps more; the selection
+// does not depend on the check
+TEST(ResolveBounds, TheSelectionReadsTheDeadline) {
+    const uint64_t num_kmers = 10000;
+    SupportProfile profile;
+    profile.k = kK;
+    profile.num_kmers = num_kmers;
+    profile.graph_runs = { { 0, num_kmers } };
+    LabelProfile lp;
+    lp.label.kind = LabelKind::COLUMN;
+    lp.label.name = "L";
+    lp.runs = { { 0, num_kmers } };
+    lp.kmers_supported = num_kmers;
+    profile.labels.push_back(lp);
+    const std::string query(num_kmers + kK - 1, 'A');
+    SelectionPolicy policy;
+    policy.policy = SelectionPolicy::EXPLICIT;
+    const size_t n = 1024;
+    for (size_t i = 0; i < n; ++i) {
+        policy.explicit_seeds.push_back({ { 0, 1 }, { "L" } });
+    }
+    const SeedSelection plain = select_seeds(profile, query, policy, false);
+    ASSERT_EQ(n, plain.seeds.size());
+    EXPECT_EQ(n - 1, plain.seeds[0].overlaps_with.size());
+    size_t calls = 0;
+    const SeedSelection checked = select_seeds(profile, query, policy, false,
+                                               [&]() { ++calls; });
+    // n (n - 1) pairs, n seeds frozen and n named: about n^2 / 4096 readings
+    EXPECT_GE(calls, n * n / kResolveCheckLabels);
+    EXPECT_LE(calls, (n * n + 4 * n) / kResolveCheckLabels + 1);
+    ASSERT_EQ(n, checked.seeds.size());
+    for (size_t i = 0; i < n; ++i) {
+        EXPECT_EQ(plain.seeds[i].seed_id, checked.seeds[i].seed_id);
+        EXPECT_EQ(plain.seeds[i].overlaps_with, checked.seeds[i].overlaps_with);
+    }
+    // a deadline that passes stops it at that reading
+    struct Late {};
+    calls = 0;
+    EXPECT_THROW(select_seeds(profile, query, policy, false, [&]() {
+        if (++calls == 3)
+            throw Late();
+    }), Late);
+    EXPECT_EQ(3u, calls);
+
+    // each max_support round sweeps every run (here 5,000 runs of one label: every round reads it)
+    LabelProfile gapped;
+    gapped.label.kind = LabelKind::COLUMN;
+    gapped.label.name = "G";
+    for (uint64_t b = 0; b + 1 < num_kmers; b += 2) {
+        gapped.runs.push_back({ b, b + 1 });
+    }
+    gapped.kmers_supported = gapped.runs.size();
+    profile.labels = { gapped };
+    SelectionPolicy rounds;
+    rounds.policy = SelectionPolicy::MAX_SUPPORT;
+    rounds.max_seeds = 5;
+    rounds.min_block_bp = kK;
+    calls = 0;
+    const SeedSelection swept = select_seeds(profile, query, rounds, false, [&]() { ++calls; });
+    EXPECT_EQ(5u, swept.seeds.size());
+    EXPECT_EQ(5u, calls);
+    calls = 0;
+    EXPECT_THROW(select_seeds(profile, query, rounds, false, [&]() {
+        if (++calls == 1)
+            throw Late();
+    }), Late);
+}
+
+// The route (process_resolve_request): under bounds.time_budget_ms the selection of as many
+// explicit seeds as the cap (1024, every pair overlapping) reads the deadline about 256 times, and
+// a deadline that passes while it runs ends it at the next reading, the 503 deadline of an answer
+// that could not be built in time (nothing partial); before, the selection was read once it was
+// done, after all of its 1024 x 1023 overlaps were listed
+TEST(ResolveBoundsRoute, ATimeStopInTheSelectionIsTheDeadline) {
+    const std::string q = random_seq(200, 1818);
+    auto anno = build_anno_graph<DBGSuccinct, annot::ColumnCompressed<>>(kK, { q }, { "held" });
+    const cli::ResolveTimeLimits limits { 0, cli::kResolveFinalizeMs, 0, 0, 0, 0, 1024 };
+    const auto base = std::chrono::steady_clock::now();
+    uint64_t reads = 0;
+    uint64_t late_from = std::numeric_limits<uint64_t>::max();
+    std::function<std::chrono::steady_clock::time_point()> clock = [&]() {
+        return base + std::chrono::hours(reads++ >= late_from ? 1 : 0);
+    };
+    auto run = [&](size_t seeds) {
+        Json::Value request = seeds_request(q, "held", seeds);
+        request["bounds"]["time_budget_ms"] = 1000;
+        reads = 0;
+        return cli::process_resolve_request(request, *anno, "r1", 0, nullptr, nullptr, limits,
+                                            nullptr, clock);
+    };
+    // within the budget: the readings of one seed and of 1024
+    const Json::Value one = run(1);
+    const uint64_t reads_one = reads;
+    ASSERT_TRUE(one["stop"].isNull());
+    ASSERT_EQ(1u, one["selection"]["counts"]["selected"].asUInt64());
+    const Json::Value all = run(1024);
+    const uint64_t reads_all = reads;
+    ASSERT_EQ(1024u, all["selection"]["counts"]["selected"].asUInt64());
+    EXPECT_GE(reads_all - reads_one, 1024u * 1023u / kResolveCheckLabels);
+    // the deadline passes at the third reading inside the selection (the work before it reads
+    // the clock as one seed's does, which reads it twice after its selection): the 503 there
+    late_from = reads_one;
+    try {
+        run(1024);
+        ADD_FAILURE() << "not stopped";
+    } catch (const cli::ResolveDeadline &e) {
+        EXPECT_EQ("deadline", cli::resolve_deadline_body(e)["code"].asString());
+    }
+    // stopped at the reading that saw it, far before the selection's end
+    EXPECT_EQ(late_from + 1, reads);
+    EXPECT_LT(reads + 200, reads_all);
+}
+
+// Sample 38 (SPEC-labeled-traversal-core.md §4.1), a real run: more explicit seeds than the cap
+// (2 on the recording server), the route's own body for the sample's request and cap
+TEST(ResolveBoundsRoute, Sample38) {
+    const std::string path
+            = source_path("tests/data/multigraph_contract/38_resolve_400_explicit_seeds.json");
+    std::ifstream in(path, std::ios::binary);
+    ASSERT_TRUE(in.good()) << path << " not found";
+    Json::Value doc;
+    std::string errors;
+    Json::CharReaderBuilder builder;
+    ASSERT_TRUE(Json::parseFromStream(builder, in, &doc, &errors)) << errors;
+    EXPECT_EQ(400, doc["status"].asInt());
+    const uint64_t cap = doc["body"]["max_explicit_seeds"].asUInt64();
+    EXPECT_EQ(2u, cap);
+    EXPECT_GT(doc["request"]["select"]["seeds"].size(), cap);
+    EXPECT_EQ(compact(cli::too_many_explicit_seeds_json(cli::TooManyExplicitSeeds(cap))),
+              compact(doc["body"]));
+    EXPECT_EQ("seeds: " + doc["body"]["error"].asString(),
+              seeds_refusal_of(doc["request"], 10'000, cap));
+    EXPECT_EQ("", seeds_refusal_of(doc["request"], 10'000, cap + 1));
 }
 
 } // namespace

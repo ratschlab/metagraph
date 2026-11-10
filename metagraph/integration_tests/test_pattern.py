@@ -4504,7 +4504,8 @@ class TestPatternRegression(TestingBase):
         def without_resolve_discovery(caps):
             # the `resolve` block's `discovery`, `max_explicit_labels` and `seed_order` members
             # (H2, train 3: the server's bounds of a /resolve discovery, SPEC-labeled-traversal-
-            # core.md §4.6, the cap on its explicit label lists, §4.1, and the seed order, §4.3),
+            # core.md §4.6, the cap on its explicit label lists, §4.1, and the seed order, §4.3)
+            # and `max_explicit_seeds` (the cap on its explicit seeds, §4.1; GPT review 7 #1),
             # gains over every base:
             # checked as stated here at the defaults, the rest of the block compared as before
             block = caps.get('resolve')
@@ -4520,8 +4521,11 @@ class TestPatternRegression(TestingBase):
                 self.assertEqual(10000, block.get('max_explicit_labels'))
                 # and the order of a selection's seeds (addendum 3, §4.3: since 01c05323b)
                 self.assertEqual('rank', block.get('seed_order'))
+                # and the cap on a request's explicit seeds
+                self.assertEqual(1024, block.get('max_explicit_seeds'))
             block.pop('discovery', None)
             block.pop('max_explicit_labels', None)
+            block.pop('max_explicit_seeds', None)
             block.pop('seed_order', None)
             return caps
 

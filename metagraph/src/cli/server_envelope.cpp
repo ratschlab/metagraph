@@ -273,6 +273,10 @@ Json::Value multigraph_capabilities_json(uint64_t max_request_memory_mb, const R
     // max_explicit_labels states it
     m["resolve_max_explicit_labels"]
             = Json::Value(static_cast<Json::UInt64>(discovery.max_explicit_labels));
+    // and on its explicit seeds (GPT review 7, finding 1), as the `resolve` block's
+    // max_explicit_seeds states it
+    m["resolve_max_explicit_seeds"]
+            = Json::Value(static_cast<Json::UInt64>(discovery.max_explicit_seeds));
     return m;
 }
 

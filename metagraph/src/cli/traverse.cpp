@@ -535,11 +535,14 @@ TraverseRequest parse_traverse_request(const Json::Value &json, const TraverseLi
     return req;
 }
 
-// The request's explicit label lists under the server's cap, before anything of |json| is copied
-// or looked up (as /traverse's counts): the request's `labels`, then each explicit seed's, in
-// order; a list of another type is left to the parse that follows, which refuses it in its words
-static void check_resolve_counts(const Json::Value &json, uint64_t max_explicit_labels) {
-    if (!max_explicit_labels)
+// The request's explicit label lists and its explicit seeds under the server's caps, before
+// anything of |json| is copied or looked up (as /traverse's counts): the request's `labels`, then
+// the number of explicit seeds (TooManyExplicitSeeds, GPT review 7 finding 1: each seed is frozen
+// and every overlapping pair of them listed), then each seed's labels, in order; a list of
+// another type is left to the parse that follows, which refuses it in its words
+static void check_resolve_counts(const Json::Value &json, uint64_t max_explicit_labels,
+                                 uint64_t max_explicit_seeds) {
+    if (!max_explicit_labels && !max_explicit_seeds)
         return;
     // (indexing a const Value that is no object or null would throw jsoncpp's LogicError)
     auto member = [](const Json::Value &object, const char *key) -> const Json::Value& {
@@ -547,12 +550,16 @@ static void check_resolve_counts(const Json::Value &json, uint64_t max_explicit_
         return object.isObject() ? object[key] : kNone;
     };
     const Json::Value &labels = member(json, "labels");
-    if (labels.isArray() && labels.size() > max_explicit_labels) {
+    if (max_explicit_labels && labels.isArray() && labels.size() > max_explicit_labels) {
         throw InvalidRequest("request.labels: at most " + std::to_string(max_explicit_labels)
                              + " labels (--resolve-max-explicit-labels)");
     }
     const Json::Value &seeds = member(member(json, "select"), "seeds");
     if (!seeds.isArray())
+        return;
+    if (max_explicit_seeds && seeds.size() > max_explicit_seeds)
+        throw TooManyExplicitSeeds(max_explicit_seeds);
+    if (!max_explicit_labels)
         return;
     for (Json::ArrayIndex i = 0; i < seeds.size(); ++i) {
         const Json::Value &seed_labels = member(seeds[i], "labels");
@@ -564,8 +571,9 @@ static void check_resolve_counts(const Json::Value &json, uint64_t max_explicit_
     }
 }
 
-ResolveRequest parse_resolve_request(const Json::Value &json, uint64_t max_explicit_labels) {
-    check_resolve_counts(json, max_explicit_labels);
+ResolveRequest parse_resolve_request(const Json::Value &json, uint64_t max_explicit_labels,
+                                     uint64_t max_explicit_seeds) {
+    check_resolve_counts(json, max_explicit_labels, max_explicit_seeds);
     ResolveRequest req;
     Strict s(json, "request");
     // see parse_traverse_request: routing fields and in_ram are handled by the server
@@ -5772,6 +5780,14 @@ Json::Value resolve_deadline_body(const ResolveDeadline &e) {
     return b;
 }
 
+Json::Value too_many_explicit_seeds_json(const TooManyExplicitSeeds &e) {
+    Json::Value b(Json::objectValue);
+    b["code"] = "too_many_explicit_seeds";
+    b["error"] = e.what();
+    b["max_explicit_seeds"] = uint_json(e.max_seeds());
+    return b;
+}
+
 Json::Value resolve_capabilities_json(const ResolveTimeLimits &limits) {
     Json::Value t;
     t["accepted"] = true;
@@ -5794,6 +5810,9 @@ Json::Value resolve_capabilities_json(const ResolveTimeLimits &limits) {
     // the cap on a request's explicit label lists (--resolve-max-explicit-labels; 0: none):
     // the request's `labels` and each explicit seed's, a 400 above it
     r["max_explicit_labels"] = uint_json(limits.max_explicit_labels);
+    // the cap on a request's explicit seeds (--resolve-max-explicit-seeds; 0: none): more are a
+    // 400 too_many_explicit_seeds, a larger select.max_seeds is lowered to it (limits.clamped)
+    r["max_explicit_seeds"] = uint_json(limits.max_explicit_seeds);
     // the order of a selection's seeds (§4.3): a client need not infer it from the build
     r["seed_order"] = kSeedOrder;
     return r;
@@ -5980,8 +5999,9 @@ Json::Value process_resolve_request(
             && json["bounds"].isMember("time_budget_ms")) {
         start = now();
     }
-    // the explicit label lists first, before anything of the body is copied
-    ResolveRequest req = parse_resolve_request(json, time.max_explicit_labels);
+    // the explicit label lists and seeds first, before anything of the body is copied
+    ResolveRequest req = parse_resolve_request(json, time.max_explicit_labels,
+                                               time.max_explicit_seeds);
     req.options.drop_labels_not_in_graph = labels_not_in_graph_dropped;
     // the bounds of a discovery (§4.6; 0: none)
     req.options.discover_max_tracked = time.max_discover_labels;
@@ -5993,6 +6013,13 @@ Json::Value process_resolve_request(
     const uint64_t max_labels_requested = req.options.discover_max_labels;
     if (max_labels_clamped)
         req.options.discover_max_labels = time.max_discover_answer_labels;
+    // the seeds a selection picks (select.max_seeds: its rounds), lowered to the cap on a
+    // request's explicit seeds (§4.3) and stated in limits.clamped below
+    const bool max_seeds_clamped = req.select && time.max_explicit_seeds
+            && req.policy.max_seeds > time.max_explicit_seeds;
+    const uint64_t max_seeds_requested = req.policy.max_seeds;
+    if (max_seeds_clamped)
+        req.policy.max_seeds = time.max_explicit_seeds;
     // a client that is gone is not answered: the request is abandoned at the next phase
     auto abandon = []() {
         throw AttemptAborted("the client closed its connection: the resolve request was abandoned");
@@ -6011,6 +6038,10 @@ Json::Value process_resolve_request(
     if (max_labels_clamped) {
         note_clamped(&clamped, "discover.max_labels", uint_json(max_labels_requested),
                      uint_json(req.options.discover_max_labels));
+    }
+    if (max_seeds_clamped) {
+        note_clamped(&clamped, "select.max_seeds", uint_json(max_seeds_requested),
+                     uint_json(req.policy.max_seeds));
     }
     std::string late;
     // the budget an answer whose work did not stop by time states (the request's, under the
@@ -6132,8 +6163,13 @@ Json::Value process_resolve_request(
                                                               max_labels_requested,
                                                               req.options.discover_max_labels,
                                                               profile));
-            if (not_made.empty())
-                selection = select_seeds(profile, req.sequence, req.policy, oracle.regime() != Regime::BASIC);
+            // under a deadline the selection reads it as the answer's other loops do (every
+            // kResolveCheckLabels steps): past it, the 503 deadline (GPT review 7, finding 1)
+            if (not_made.empty()) {
+                selection = select_seeds(profile, req.sequence, req.policy,
+                                         oracle.regime() != Regime::BASIC,
+                                         req.options.finish_check);
+            }
         }
     } catch (const std::invalid_argument &e) {
         std::string message = e.what();
@@ -6150,7 +6186,7 @@ Json::Value process_resolve_request(
         }
         throw InvalidRequest(message);
     }
-    // the selection is not polled: read once it is done
+    // and once the selection is done (or none was made)
     if (req.options.finish_check)
         req.options.finish_check();
     Json::Value out = profile_to_json(profile, selection ? &*selection : nullptr, req.run_format,
@@ -6197,7 +6233,8 @@ Json::Value process_resolve_request(
         out["stop"] = resolve_stop_json(*profile.stop, profile.k, 0, 0, not_made);
     }
     if (!deadline && !clamped.empty()) {
-        // a clamp without a deadline (discover.max_labels): `limits` holds it alone
+        // a clamp without a deadline (discover.max_labels, select.max_seeds): `limits` holds it
+        // alone
         Json::Value l;
         l["clamped"] = std::move(clamped);
         out["limits"] = std::move(l);

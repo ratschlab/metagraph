@@ -8130,9 +8130,9 @@ TEST(ResolveRequest, ExplicitKmerIntervalEndsAreNonNegativeIntegers) {
 
 TEST(ResolveDeadline, CapabilitiesBlock) {
     const Json::Value c = resolve_capabilities_json({ 30000, kResolveFinalizeMs });
-    // the deadline's block, a discovery's bounds (§4.6), the explicit labels' cap and the seed
-    // order (ResolveBoundsRoute.CapabilitiesBlock)
-    ASSERT_EQ(4u, c.size());
+    // the deadline's block, a discovery's bounds (§4.6), the explicit labels' and seeds' caps
+    // and the seed order (ResolveBoundsRoute.CapabilitiesBlock)
+    ASSERT_EQ(5u, c.size());
     ASSERT_TRUE(c.isMember("discovery"));
     const Json::Value &t = c["time_budget"];
     EXPECT_TRUE(t["accepted"].asBool());

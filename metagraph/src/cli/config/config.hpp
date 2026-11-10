@@ -153,6 +153,12 @@ class Config {
     // explicit seed's, checked before anything of the request is copied (a 400 naming the list),
     // as /traverse's --traverse-max-explicit-labels. The CLI applies none
     uint64_t resolve_max_explicit_labels = 10'000;
+    // The cap on a /resolve's explicit seeds (select.seeds; 0 = none): more are refused 400
+    // too_many_explicit_seeds before anything of the request is copied, and a larger
+    // select.max_seeds is lowered to it (limits.clamped). A selection freezes every explicit seed
+    // and lists every overlapping pair of them (GPT review 7, finding 1). 1024 by default: the
+    // search service relays a `select` of at most 16 KiB, about 960 seeds. The CLI applies none
+    uint64_t resolve_max_explicit_seeds = 1024;
     // The most labels a /resolve discovery's answer keeps (0 = none): a larger discover.max_labels
     // is lowered to it, stated in the answer's limits.clamped. The answer is not charged against
     // the discovery's memory bound; this bounds it (SPEC-labeled-traversal-core.md §4.6)

@@ -1,0 +1,53 @@
+{
+ "route": "POST /resolve",
+ "status": 400,
+ "note": "G7-F1 (GPT review 7, finding 1; SPEC-labeled-traversal-core.md section 4.1): a /resolve lists at most --resolve-max-explicit-seeds explicit seeds (select.seeds, whatever the policy; 1,024 by default, 2 on the recording server so that the sample stays short; 0 = unlimited). A selection freezes every explicit seed, duplicates included, and lists every overlapping pair of them: before the cap, 40,000 seeds on one interval held about 12.8 GB before any deadline was read. More are refused 400 {error, code: \"too_many_explicit_seeds\", max_explicit_seeds}, written in this order (error first, as the intake refusals), checked with the explicit label lists at the start of the parse: after the request's `labels` (sample 32), before each seed's labels and every other fault of the request's fields; on a multi-graph server request-level, before any pair, nothing admitted (GET /requests/svc-res-g7-38 then answered 404). A select.max_seeds above the cap is not refused: it is lowered to the cap and stated in each answer's limits.clamped ({field: \"select.max_seeds\", requested, effective}). The search service relays a select of at most 16 KiB, about 960 seeds, below the default. Stated as the resolve block's max_explicit_seeds and the multigraph block's resolve_max_explicit_seeds (samples 10 and 12). A real run on the pairs of sample 30.",
+ "request": {
+  "sequence": "CCGTGATGGTGATCGTAAACACGAACTTGGTCTTTCTCACTGAGCTAGCACGGGTTCTTACAACAACCAATCTAGTTGATTCCTTGTGTTTGTACTTAGCTCACTATATCATTAGGTGCTTAGCTCAATTTATGTACTGATTGCTTAAAGGAATATCATCTACGCTGGGATAGATGTTCAACATCGCGCAAAAGTGATGTCGATCGCGCAGTTATGCCACGCCGCATTCGGTACCTCGGT",
+  "labels": [
+   "acc1"
+  ],
+  "graphs": [
+   "bact_other",
+   "bact_pseudomonadota"
+  ],
+  "select": {
+   "policy": "explicit",
+   "seeds": [
+    {
+     "kmer_interval": [
+      0,
+      10
+     ],
+     "labels": [
+      "acc1"
+     ]
+    },
+    {
+     "kmer_interval": [
+      0,
+      10
+     ],
+     "labels": [
+      "acc1"
+     ]
+    },
+    {
+     "kmer_interval": [
+      0,
+      10
+     ],
+     "labels": [
+      "acc1"
+     ]
+    }
+   ]
+  },
+  "request_id": "svc-res-g7-38"
+ },
+ "body": {
+  "error": "request.select.seeds: at most 2 seeds (--resolve-max-explicit-seeds)",
+  "code": "too_many_explicit_seeds",
+  "max_explicit_seeds": 2
+ }
+}

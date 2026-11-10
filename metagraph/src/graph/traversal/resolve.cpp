@@ -1603,7 +1603,19 @@ struct Picked {
 SeedSelection select_seeds(const SupportProfile &profile,
                            std::string_view query,
                            const SelectionPolicy &policy_in,
-                           bool canonical_orientation) {
+                           bool canonical_orientation,
+                           const std::function<void()> &check) {
+    // the answer's deadline, read once the steps since the last reading reach
+    // kResolveCheckLabels (resolve.hpp: a seed and its labels, a run swept, a pair compared)
+    uint64_t steps = 0;
+    uint64_t next_check = kResolveCheckLabels;
+    auto poll = [&](uint64_t units) {
+        steps += units;
+        if (check && steps >= next_check) {
+            next_check = steps + kResolveCheckLabels;
+            check();
+        }
+    };
     SeedSelection selection;
     selection.policy = policy_in;
     SelectionPolicy &policy = selection.policy;
@@ -1654,6 +1666,8 @@ SeedSelection select_seeds(const SupportProfile &profile,
             std::vector<KmerInterval> taken;
 
             while (picked.size() < policy.max_seeds) {
+                // a round sweeps every run
+                poll(all_runs.size() + 1);
                 // Rebuild the runs with the claimed intervals subtracted, so later rounds
                 // see clipped runs and their endpoints. Reusing the original endpoints and
                 // merely rejecting overlapping intervals loses the best remaining interval
@@ -1757,6 +1771,7 @@ SeedSelection select_seeds(const SupportProfile &profile,
             const std::unordered_set<std::string_view> absent(profile.unknown_labels.begin(),
                                                               profile.unknown_labels.end());
             for (const auto &ex : policy.explicit_seeds) {
+                poll(1 + ex.labels.size());
                 if (ex.kmers.end > profile.num_kmers || ex.kmers.begin >= ex.kmers.end)
                     throw std::invalid_argument("Explicit seed interval out of range");
                 bool in_one_run = false;
@@ -1805,11 +1820,13 @@ SeedSelection select_seeds(const SupportProfile &profile,
                   [](const Picked &a, const Picked &b) { return a.kmers < b.kmers; });
         std::vector<Picked> merged;
         for (auto &p : picked) {
+            poll(1);
             if (!merged.empty() && merged.back().kmers.end > p.kmers.begin) {
                 Picked &m = merged.back();
                 KmerInterval common { std::max(m.kmers.begin, p.kmers.begin),
                                       std::min(m.kmers.end, p.kmers.end) };
                 if (common.size() >= min_kmers) {
+                    poll(profile.labels.size());
                     m.kmers = common;
                     m.labels = covering_labels(profile, common);
                     m.rank = std::min(m.rank, p.rank);
@@ -1825,6 +1842,7 @@ SeedSelection select_seeds(const SupportProfile &profile,
 
     // freeze
     for (auto &p : picked) {
+        poll(1 + p.labels.size());
         FrozenSeed seed;
         seed.kmers = p.kmers;
         seed.sequence = std::string(query.substr(p.kmers.begin, p.kmers.size() + profile.k - 1));
@@ -1879,7 +1897,9 @@ SeedSelection select_seeds(const SupportProfile &profile,
         selection.seeds.push_back(std::move(seed));
     }
 
+    // every ordered pair of seeds (a row of them at a time)
     for (size_t i = 0; i < selection.seeds.size(); ++i) {
+        poll(selection.seeds.size());
         for (size_t j = 0; j < selection.seeds.size(); ++j) {
             if (i == j)
                 continue;

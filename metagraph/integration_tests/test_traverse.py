@@ -4168,6 +4168,50 @@ class TestResolveDiscoveryBounds(TestingBase):
                              stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         self.assertNotIn('--resolve-max-explicit-labels', res.stdout.decode())
 
+    def test_the_explicit_seeds_cap(self):
+        """--resolve-max-explicit-seeds (1,024 by default; GPT review 7, finding 1): a request
+        listing more explicit seeds is refused 400 too_many_explicit_seeds, its body error first,
+        then the code and the cap, before the request's other fields are read; at the cap every
+        seed is selected; a larger select.max_seeds is lowered to the cap (limits.clamped); both
+        capabilities routes state the cap; the CLI applies none"""
+        url = self.servers['default'][0]
+        for route in ('/capabilities', '/traverse/capabilities'):
+            self.assertEqual(1024, requests.get(url + route).json()['resolve'][
+                'max_explicit_seeds'])
+        # a header label covering k-mers 250-269 of CORE (every record holds CORE from its start,
+        # below 200, to its end)
+        seed = {'kmer_interval': [250, 260], 'labels': ['s00000']}
+
+        def request(n, **extra):
+            return dict({'sequence': self.core, 'labels': ['s00000'],
+                         'select': {'policy': 'explicit', 'seeds': [seed] * n}}, **extra)
+
+        ret = requests.post(url + '/resolve', data=json.dumps(request(1025)), timeout=600)
+        self.assertEqual(400, ret.status_code, ret.text[:500])
+        self.assertEqual('{"error":"request.select.seeds: at most 1024 seeds '
+                         '(--resolve-max-explicit-seeds)","code":"too_many_explicit_seeds",'
+                         '"max_explicit_seeds":1024}', ret.text)
+        # with an unknown field beside it: the count's body
+        ret = requests.post(url + '/resolve', data=json.dumps(request(1025, bogus=1)), timeout=600)
+        self.assertEqual((400, 'too_many_explicit_seeds'),
+                         (ret.status_code, ret.json().get('code')))
+        out = self._post('default', request(1024))
+        self.assertEqual(1024, out['selection']['counts']['selected'])
+        self.assertNotIn('limits', out)
+        # select.max_seeds above the cap: lowered and stated, the answer that of the cap
+        clamped = self._post('default', {'sequence': self.core, 'labels': ['s00000'],
+                                         'select': {'policy': 'max_support', 'max_seeds': 5000}})
+        self.assertEqual({'clamped': [{'field': 'select.max_seeds', 'requested': 5000,
+                                       'effective': 1024}]}, clamped['limits'])
+        self.assertEqual(1024, clamped['selection']['policy']['max_seeds'])
+        at_cap = self._post('default', {'sequence': self.core, 'labels': ['s00000'],
+                                        'select': {'policy': 'max_support', 'max_seeds': 1024}})
+        self.assertNotIn('limits', at_cap)
+        self.assertEqual(self._untimed(at_cap),
+                         self._untimed({k: v for k, v in clamped.items() if k != 'limits'}))
+        # the CLI: no cap
+        self.assertEqual(1025, self._cli(request(1025))['selection']['counts']['selected'])
+
     def test_the_default_bounds_change_nothing(self):
         """With the default bounds every record is tracked and the pass fits: the server's
         answers are the CLI's (no bounds), timing apart, with no labels_capped and no stop"""

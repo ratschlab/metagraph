@@ -357,9 +357,14 @@ From H2 (train 3) the block also states `resolve_discovery`: `{"max_tracked_labe
 integers, 0 for none; `SPEC-labeled-traversal-core.md` §4.6), as the `resolve` block's `discovery` states them, and
 `resolve_max_explicit_labels` (an integer, 0 = unlimited): the cap on a `/resolve`'s explicit label lists
 (`--resolve-max-explicit-labels`, `SPEC-labeled-traversal-core.md` §4.1), as the `resolve` block's
-`max_explicit_labels`; above it the whole request is refused 400, before any pair. And `resolve_seed_order`
-(`"rank"`, as the `resolve` block's `seed_order`; `SPEC-labeled-traversal-core.md` §4.3): the order of a `/resolve`
-selection's seeds, the same on every pair (one engine). Its absence states nothing: builds before 01c05323b order
+`max_explicit_labels`; above it the whole request is refused 400, before any pair. And `resolve_max_explicit_seeds`
+(GPT review 7, finding 1; an integer, 1024 by default, 0 = unlimited): the cap on a `/resolve`'s explicit seeds
+(`--resolve-max-explicit-seeds`, `SPEC-labeled-traversal-core.md` §4.1), as the `resolve` block's
+`max_explicit_seeds`; above it the whole request is refused 400 `too_many_explicit_seeds`, before any pair, and a
+larger `select.max_seeds` is lowered to it in each pair's answer (`limits.clamped`, §4.3 there). And
+`resolve_seed_order` (`"rank"`, as the `resolve` block's `seed_order`; `SPEC-labeled-traversal-core.md` §4.3): the
+order of a `/resolve` selection's seeds, the same on every pair (one engine). Its absence states nothing: builds
+before 01c05323b order
 by position, 01c05323b and later builds without it already rank, so a client without it takes the order from the
 build (rank if and only if 01c05323b is an ancestor).
 From E19 the block also states `max_concurrent`: `{"/pattern": n, "/resolve": n, "/traverse": n}`, the caps on
