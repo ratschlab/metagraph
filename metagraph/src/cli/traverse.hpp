@@ -333,6 +333,16 @@ uint64_t compact_json_size(const Json::Value &value);
 uint64_t coordinates_text_bytes(const Json::Value &result,
                                 const std::function<void()> &check = {});
 
+// The exact text a walked seed's result writes for the names its account's names share prices
+// (ResourceAccount::names): in JSON each quoted, escaped name per copy written — a seed label's in
+// label_dict and seed.labels, an extra or recorded label's in label_dict, a dropped label's, an
+// unknown label's (a multi-graph pair's), the seed_id echo; in a graphlet the L records'
+// front-coded and the X records' percent-escaped names as the JSON string holds them, and the JSON
+// summary's unknown labels and seed_id. What the delivery reserve's ratio sample leaves out with
+// the names share (SPEC §6.8)
+uint64_t names_text_bytes(const graph::traversal::SeedResult &r,
+                          const graph::traversal::Strategy &st, bool graphlet);
+
 // What the H record states besides the result: the index and the seed's position.
 struct GraphletContext {
     uint64_t k = 0;

@@ -1979,6 +1979,40 @@ uint64_t compact_json_size(const Json::Value &v) {
     return compact_size(v, {}, &values);
 }
 
+uint64_t names_text_bytes(const SeedResult &r, const Strategy &st, bool graphlet) {
+    // a string as the JSON text holds it, quoted
+    auto quoted = [](std::string_view s) { return json_escaped_size(s) + 2; };
+    // seed.seed_id (a graphlet's JSON summary holds it too)
+    uint64_t bytes = quoted(r.seed_id);
+    if (st.drop_labels_not_in_graph) {
+        for (const std::string &name : r.unknown_labels) {
+            bytes += quoted(name);
+        }
+    }
+    if (!graphlet) {
+        for (size_t i = 0; i < r.label_dict.size(); ++i) {
+            bytes += (i < r.num_seed_labels ? 2 : 1) * quoted(r.label_dict[i].name);
+        }
+        for (const DroppedLabel &d : r.dropped_labels) {
+            bytes += quoted(d.name);
+        }
+        return bytes;
+    }
+    // the L records' names as the writer front-codes them (its prefix length and the space apart),
+    // and the X records' names, percent-escaped, inside the graphlet's JSON string
+    static const std::string kNone;
+    const std::string *previous = nullptr;
+    for (const LabelRef &l : r.label_dict) {
+        const std::string coded = mgt::front_code(previous ? *previous : kNone, l.name);
+        bytes += json_escaped_size(std::string_view(coded).substr(coded.find(' ') + 1));
+        previous = &l.name;
+    }
+    for (const DroppedLabel &d : r.dropped_labels) {
+        bytes += json_escaped_size(mgt::pct_escape(d.name));
+    }
+    return bytes;
+}
+
 uint64_t coordinates_text_bytes(const Json::Value &result, const std::function<void()> &check) {
     if (!result.isObject())
         return 0;
@@ -5383,8 +5417,8 @@ Json::Value process_traverse_request(const Json::Value &json,
         // account is 20-73 times its text (872 bytes for 12-44), the rest of the output's
         // 115-129, so the reserve prices that share at its own bound
         // (kCoordinateAccountPerTextByte)
-        control.progress = [attempt](uint64_t account, uint64_t coordinates) {
-            attempt->progress(account, coordinates);
+        control.progress = [attempt](uint64_t account, uint64_t coordinates, uint64_t names) {
+            attempt->progress(account, coordinates, names);
         };
     }
     DeliveryScope delivery(attempt);
@@ -5400,7 +5434,7 @@ Json::Value process_traverse_request(const Json::Value &json,
     // estimates; |coordinates|: its record coordinates' share, which the ratio leaves out with
     // the exact text it wrote (coordinates_text_bytes, counted before the tree is freed)
     auto append = [&](Json::Value &&rj, double built_seconds, uint64_t account = 0,
-                      uint64_t coordinates = 0) {
+                      uint64_t coordinates = 0, uint64_t names = 0, uint64_t names_text = 0) {
         if (!texts) {
             results.append(std::move(rj));
             return;
@@ -5415,7 +5449,7 @@ Json::Value process_traverse_request(const Json::Value &json,
         rj = Json::Value();
         if (attempt) {
             attempt->note_delivered(texts->texts.back().size(), built_seconds + written.elapsed(),
-                                    account, coordinates, coordinate_text);
+                                    account, coordinates, coordinate_text, names, names_text);
         }
     };
     // how the request's seeds read the annotation (LabelOracle::reads_charged): what a seed's
@@ -5665,8 +5699,13 @@ Json::Value process_traverse_request(const Json::Value &json,
                        without_allotments(r.account.memory_final, r.account.allotted));
             const std::string outcome = rj["outcome"]["walks"].asString();
             // the delivery reserve's sample: the walk's account at its end without the
-            // budget's cache allotments (final_bytes), as the walk's progress states it
-            append(std::move(rj), seconds, meter.memory_final, meter.memory_coordinates);
+            // budget's cache allotments (final_bytes), as the walk's progress states it, with
+            // its coordinate and names shares (the names' exact text counted from the result)
+            const uint64_t names_text = attempt && texts
+                                      ? names_text_bytes(r, req.strategy, req.detail == "graphlet")
+                                      : 0;
+            append(std::move(rj), seconds, meter.memory_final, meter.memory_coordinates,
+                   meter.memory_names, names_text);
             delivered(outcome);
         } catch (const SeedDerivationError &e) {
             // The permitted set could not be derived from THIS seed (nothing carries it

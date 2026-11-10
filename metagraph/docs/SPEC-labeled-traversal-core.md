@@ -1494,15 +1494,26 @@ response is delivered whole (`outcome.delivery: inline`, §7.0; spooled / paged 
     the null form 106 for 1,584) —, where an occurrence's
     account is 20–73 times its text (872 bytes for 12–44) against 115–129 for a tree's other output, which the
     measured ratio would have understated 2.6–4.1 times on coordinate-heavy seeds (`DESIGN-traverse-graphlet.md`
-    §18.8, M2); a ratio is
-    measured as (A − C) / (the text − the text the coordinates wrote, counted exactly from digits and
-    punctuation), on a rest of at least 1 MiB of text or of at least 64 MiB of account (*E5b's review, F1*: a
+    §18.8, M2); and the account's names share N apart *(T4-L2, GPT review 7 F10 = review 6 #15)*: E =
+    ⌈(A − C − N) / ratio⌉ + ⌈C / 12⌉ + ⌈N / 3⌉, N every charge that grows with a name's bytes — a dictionary
+    label's name in its copies and its delivery, a dropped or unknown label's name and delivery, the echo of
+    `seed_id` — priced at 3 account bytes per text byte, a bound: a name of n bytes escaped to J ≤ 6n in JSON,
+    held h and written c times, is charged h·n + c·(n + 32 + 3·(J + 2)) and writes c·(J + 2), more than 10/3 per
+    text byte (the least at control characters; plain names 5 to 6), and a graphlet's percent-escaped,
+    front-coded names more than 4.5 — where a compact result's measured ratio (100 and more) understated a
+    name-heavy seed's text 20 times and its delivery overran the bound, a 503 (a seed of 4,096 labels named by
+    12,000 characters writes 97 MiB of text, nearly all names); a ratio is
+    measured as (A − C − N) / (the text − the text the coordinates wrote, counted exactly from digits and
+    punctuation − the text the names share's names wrote, counted exactly: each quoted, escaped name per copy
+    written, a graphlet's front-coded and percent-escaped as its JSON string holds them), on a rest of at least
+    1 MiB of text or of at least 64 MiB of account (*E5b's review, F1*: a
     detail writing a text byte per more than 896 account bytes — `summary` on an SRA-like index, 1,344 with the
     allotments — never writes 1 MiB of text below a 896 MiB account and would keep the configured ratio for
     good: at 6 a 900 MB account is estimated as 150 MB of text, which on a 30 s bound moves the walk-until from
     about 24.5 s to 6.5 s; at 64 MiB the result's fixed part is under 1% of its account), so that a request with
-    coordinates measures what the same walk without them would, and the server's measured ratios do not depend
-    on whether one came first; the sample's A is the walk's account at its end without the allotments, its
+    coordinates measures what the same walk without them would, a name-heavy seed the ratio of its rest (with its
+    names it measured theirs, about 6, and overstated every later seed's rest), and the server's measured ratios
+    do not depend on whether one came first; the sample's A is the walk's account at its end without the allotments, its
     `final_bytes` (§7.3), and E is estimated from the account the walk publishes at every level's end, likewise
     without them — *E5b's fix: with the allotments in both, a seed of 1 MiB of text under a budget of 1 GiB or more
     measured a ratio of at least 128 and the estimate of a larger seed after it fell short by as much: on
@@ -3975,7 +3986,8 @@ search's routes, `POST /pattern` and `GET /pattern/capabilities`, are `SPEC-patt
   `delivery_reserve` (`compress_mbps`, `build_mbps`, `account_per_text_byte: {json, graphlet}` (6 and 6; 30 and 50 until E5b's
   fix and its review, §6.8),
   `coordinate_account_per_text_byte` (feature level 6: 12, an integer, so that a ledger can reproduce the
-  reserve, §6.8),
+  reserve, §6.8; the names share's bound, 3, is fixed in this build and stated in §6.8 only, not as a member:
+  *T4-L2, GPT review 7 F10, no capabilities change*),
   `margin` (1.25), `stop_ms` (the configured time from the walk-until to the walk's end:
   `--traverse-chunk-target-ms` + 950), `calibration` (feature level 4: a reference to the measurements the
   starting estimates come from, §6.8, the delivery reserve: calibration), `measured_text_bytes`, `rate_window`, `measured_compress_mbps`, `measured_build_mbps`,

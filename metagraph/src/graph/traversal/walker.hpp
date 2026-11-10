@@ -1032,6 +1032,13 @@ struct ResourceAccount {
     // occurrences as charged at their creation); 0 without them. Their text per account byte
     // differs from the rest of the output's, which the server's delivery reserve tells apart
     uint64_t coordinates = 0;
+    // the part of the modelled memory that is names (the account's names share): every charge
+    // that grows with a name's bytes — a dictionary label's name in its copies and its delivery
+    // (DeliveryCosts::name), a dropped or unknown label's name and delivery, the echo of the
+    // request's seed_id. A name's text per account byte differs from the rest of the output's
+    // (a learned ratio of compact results would understate it many times), which the server's
+    // delivery reserve prices apart too
+    uint64_t names = 0;
     // The fixed allotments of a memory budget for the label cache and the lookahead
     // (memory_allotments(memory_limit), charged in the account with the depth-0 state and held
     // to its end: part of memory_peak and memory_final; 0 without a memory budget, or when the
@@ -1272,6 +1279,8 @@ struct AttemptMeter {
     bool walked = false;             // the walker ran (false: the strategy was refused first)
     // the part of the account that is recorded coordinates (ResourceAccount::coordinates)
     uint64_t memory_coordinates = 0;
+    // the part of the account that is names (ResourceAccount::names)
+    uint64_t memory_names = 0;
 };
 
 /**
@@ -1297,10 +1306,11 @@ struct AttemptControl {
     std::function<ExternalStop()> poll_now;
     // the walk's modelled account (bytes, the memory model's, computed with or without a
     // budget) at every level's end, without a memory budget's cache allotments (they write no
-    // text; ResourceAccount::allotted), and the part of it that is recorded coordinates (0
-    // without them): what the caller estimates the seed's output from (the server's delivery
-    // reserve), whose text per account byte differs between the two parts
-    std::function<void(uint64_t account, uint64_t coordinates)> progress;
+    // text; ResourceAccount::allotted), the part of it that is recorded coordinates (0
+    // without them) and the part that is names (ResourceAccount::names): what the caller
+    // estimates the seed's output from (the server's delivery reserve), whose text per account
+    // byte differs between the three parts
+    std::function<void(uint64_t account, uint64_t coordinates, uint64_t names)> progress;
 };
 
 struct WalkerHooks {
