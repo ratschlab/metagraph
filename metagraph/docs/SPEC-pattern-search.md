@@ -4379,7 +4379,8 @@ the other pairs.
   reserved (SPEC-labeled-traversal-core.md §10.3). Unlike `/search`, whose request is parsed per graph after its
   load.
 - A load for the request that fails -- a file of the pair that cannot be read or that its loader refuses (truncated
-  or corrupted, as far as the loader checks), a `.seqs` that cannot be read when the copy must load one, a
+  or corrupted, as far as the loader checks: a `.seqs` corrupted in a way it does not check can end the server
+  instead, SPEC-multigraph-envelope.md §10), a `.seqs` that cannot be read when the copy must load one, a
   `row_diff` annotation's anchors or fork successors (files beside the graph) that cannot be loaded, a graph and
   annotation that are not compatible -- is a failure of that pair while it is processed (§24.1): its entry
   `refused` with `http_status` 400 and `error` the loader's message, which names the file and the step (`Cannot
