@@ -622,16 +622,40 @@ annotation that cannot be loaded or whose format is unknown, a `row_diff` annota
 a `.seqs` that cannot be loaded or is refused, `--pattern-build-mask`; a multi-graph server's graphs, loaded before
 its annotations and before it listens, exit as before. A server's per-request load into RAM (`in_ram`: `/traverse`,
 `/resolve`, `/pattern` and, since the review of H4, `/search`) is built with the resident pair's mapping, checked at
-start-up, while the pair's annotation on disk is the file loaded then (its device, inode, size and modification time
-unchanged before the copy's load and after it, and the copy's labels the resident's), so that it reads no `.seqs`
-again; once the annotation was replaced, also during the copy's load, the copy reads its `.seqs` from disk with the
-checks above. One residual stays: a file swapped in and back within one copy's load whose labels equal the
-resident's, in order, keeps the resident mapping, though equal labels do not make equal records (a newer build under
-the same file names has other records). It takes two renames within one load. A load of it that fails (an annotation replaced by one whose `.seqs` is refused; a file that cannot be
-read) throws, and that request alone fails with the route's 400, the loader's message as `error` (`/search`:
-`{"error": "<message>"}`, for instance `The record mapping '<anno-base>.seqs' does not belong to the annotation
-'<annotation>': it has 2 columns, the annotation 3 labels. Rebuild it ...`), while the server runs on with its
-resident indexes. A mapping that passed the load but places a coordinate past the end of its column (an old `.seqs`
+start-up, so that it reads no `.seqs` again, and only while every file of the pair is the one the server started on
+(since train 4, GPT review 7 finding 4): the graph, the annotation, a `row_diff` annotation's anchors and fork
+successors, the `.seqs` the pair loaded, and the graph's dummy-edge mask and Bloom filter (one that appears counts
+as a change). Each is stamped at start-up, before any file of any pair is read, with its device, inode, size,
+modification time and status change time, and the stamps are compared when the request reaches the pair (before its
+memory wait), before the copy's load and after it; the copy's labels must be the resident's too. The status change
+time (ctime) is set by the kernel to the current time on every write, truncation, utime, chmod, chown, link and
+rename of the file, and by no call to a chosen value: a file rewritten in place with its size and modification time
+restored differs (GPT review 6 #7's residual), and so does a file swapped in and back within one load (that takes a
+rename or a link, which sets it). A metadata-only change (chmod, chown, a hard link) refuses too, the conservative
+side. The residual: a directory on the path renamed away and back, a symlink on the path retargeted and back, or a
+mount over a file and its unmount, within one copy's load (each keeps every stamped file's inode and status change
+time; closing it needs an fstat of the descriptors the loaders open), and a change within the file system clock's
+granularity (a few ms on Linux) of the file's previous change.
+
+A changed pair is refused, never answered from the new files under the start-up identity (`index_fp`,
+`index_meta_fp`, `server_instance`), certificates (`headers_unique`, `labels_disjoint`, `seqs_order`,
+`composite_fp`) and record mapping. Before train 4 a replaced annotation was answered from its own records while
+`headers_unique` stated the start-up value (a header the rebuild shared with another pair went unstated), and a
+replaced graph answered 200 with wrong coordinates. The refusal is the route's failed-load answer: `/search` 400
+`{"error": "<text>"}`, `/traverse` 400 `{"error": "<text>"}` (`usage` beside it on a managed attempt), `/resolve`
+and `/pattern` the pair's entry `refused` with `refusal: {"http_status": 400, "error": "<text>"}` (no `code`), the
+text `The file '<path>' (<role>) of the pair ('<graph>', '<annotation>') changed on disk since the server started
+(<how>): a request does not load it into RAM, since the answer would carry the start-up identity and certificates;
+restart onto the new files, or send the request without in_ram`, `<role>` one of `graph`, `annotation`,
+`row_diff_anchors`, `row_diff_fork_succ`, `coord_to_header`, `graph_mask`, `graph_bloom`, `<how>` one of `it is
+another file`, `its size`, `its modification time`, `its status change time`, `it is gone or cannot be read`, `it
+appeared`. Nothing is reserved for a pair refused before its memory wait. Requests without `in_ram`, and pairs
+served from the resident index (above `--mem-cap-gb`, or on a server that loaded its graphs into RAM), answer from
+the files mapped at start-up as before; a server on `--mem-cap-gb 0` (staging) loads no copy, so nothing changes
+there. The search cache needs no generation in its key: no answer is computed on other files. A load that fails
+otherwise (a file that cannot be read: an I/O error) throws, and that request alone fails with the route's 400, the
+loader's message as `error`, while the server runs on with its resident indexes. A mapping that passed the load but
+places a coordinate past the end of its column (an old `.seqs`
 of a `count_only` pair written for the files in another order, or a corrupt one) fails the query that meets it:
 `/search` answers 400 `{"error": "Coordinate <c> for column <j> out of range (CoordToHeader has <n> coordinates for
 that column)"}` and the server runs on (before H4's verification the query's thread pool ended the process), and
@@ -712,8 +736,8 @@ columns, its whole trailer gone, cannot be told from one written before the trai
 (`count_only`, the same answers).
 
 A `.seqs` whose layout is corrupt fails its load the same way (`Cannot load CoordToHeader from '<file>': ...
-(caught: <reason>)`; a server exits 1 before it is ready, a CLI command exits 1, a per-request copy that reads it is
-the request's 400). Since train 4 (GPT review 7, finding 9) the load validates the whole layout before anything is
+(caught: <reason>)`; a server exits 1 before it is ready, a CLI command exits 1; a per-request copy reads no `.seqs`,
+above). Since train 4 (GPT review 7, finding 9) the load validates the whole layout before anything is
 allocated for it or sdsl reads it:
 - the number of columns, against the bytes left in the file, before anything is allocated for it;
 - each column's number of headers, against the bytes left; the headers are then added as they are read, never

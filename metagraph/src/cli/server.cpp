@@ -792,49 +792,59 @@ int run_server(Config *config) {
     Json::Value graph_summary;
     // and the identity of the indexes it serves together (GET /capabilities' composite_fp)
     Json::Value composite_fp;
-    // the stamp of each pair's annotation file when its load began (a multi-graph server): a
-    // copy of the pair loaded into RAM for one request shares the resident pair's record mapping
-    // only while the annotation on disk is still that file (resident_mapping)
-    std::map<GraphPair, std::optional<FileStamp>> annotation_stamps;
-    // The record mapping a copy of |pair| loaded into RAM for one request is built with: the
-    // resident index's, checked at start-up, while the pair's annotation on disk is the file
-    // loaded then (its stamp unchanged), so that no request reads its .seqs again; null when the
-    // annotation was replaced (or cannot be stat'ed): the copy then loads its .seqs from disk
-    // with the load's checks (H4, the verification's finding 2: a replaced annotation paired
-    // with the resident mapping answered other records)
-    auto stamp_unchanged = [&](const GraphPair &pair) {
-        const auto it = annotation_stamps.find(pair);
-        return it != annotation_stamps.end() && it->second && *it->second == file_stamp(pair.second);
+    // The stamps of every file a copy of a pair loaded into RAM for one request reads
+    // (pair_file_stamps: the loader inventory and the graph's derived data), taken at start-up
+    // before any file of any pair was read (a multi-graph server)
+    std::map<GraphPair, std::vector<PairFileStamp>> pair_stamps;
+    // A request's load of |pair| into RAM is refused once a file of the pair changed on disk
+    // since start-up (GPT review 7 finding 4): its answer would carry the start-up identity
+    // (index_fp, index_meta_fp), the start-up certificates (headers_unique, labels_disjoint,
+    // seqs_order, composite_fp) and the resident record mapping, and a replaced graph answered
+    // silently wrong. Thrown as a load that fails: the route's 400 with the refusal's text
+    auto refuse_changed_pair = [&](const GraphPair &pair) {
+        if (std::string why = pair_files_changed(pair_stamps.at(pair), pair.first, pair.second);
+                !why.empty()) {
+            throw std::runtime_error(why);
+        }
     };
-    auto resident_mapping = [&](const GraphPair &pair, const AnnotatedDBG &resident)
-            -> std::shared_ptr<const annot::CoordToHeader> {
-        return stamp_unchanged(pair) ? resident.share_coord_to_header() : nullptr;
-    };
-    // A copy of |pair| loaded into RAM for one request: with the resident pair's mapping while its
-    // annotation is unchanged (resident_mapping), and checked once loaded, since the file may be
-    // replaced between that stamp and the load's open (H4's re-check, N-a: under a 1-ms swap loop
-    // about 1% of the answers came from a new annotation with the resident mapping). The copy
-    // keeps the shared mapping only when the stamp still is the start-up one after the load and
-    // its labels are the resident's; else it is loaded again with its own .seqs, checked. The
-    // residual: a file swapped in and back within one load whose labels equal the resident's, in
-    // order, keeps the resident mapping, and equal labels do not make equal records (a newer
-    // build under the same file names has other records). |load|(mapping) loads it
+    // A copy of |pair| loaded into RAM for one request: with the resident pair's record mapping
+    // (the .seqs the stamps vouch for, checked at start-up), so that no request reads a .seqs
+    // or builds its header index, while every file of the pair is the one stamped at start-up,
+    // before the load and after it (a file replaced during the load), and the copy's labels
+    // the resident's. Else refused (refuse_changed_pair): no copy is served from other files.
+    // The status change time in the stamps makes a file swapped in and back within one load
+    // differ too (it takes a rename or a link, which sets it); a directory or a symlink on the
+    // path swapped and back does not. |load|(mapping) loads it
     auto load_copy = [&](const GraphPair &pair, const AnnotatedDBG &resident,
                          const std::function<std::unique_ptr<AnnotatedDBG>(
                                  std::shared_ptr<const annot::CoordToHeader>)> &load) {
-        auto mapping = resident_mapping(pair, resident);
-        if (!mapping)
-            return load(nullptr);
-        auto copy = load(std::move(mapping));
-        if (stamp_unchanged(pair)
-                && copy->get_annotator().get_label_encoder().get_labels()
-                        == resident.get_annotator().get_label_encoder().get_labels()) {
-            return copy;
+        refuse_changed_pair(pair);
+        auto copy = load(resident.share_coord_to_header());
+        refuse_changed_pair(pair);
+        if (copy->get_annotator().get_label_encoder().get_labels()
+                != resident.get_annotator().get_label_encoder().get_labels()) {
+            throw std::runtime_error(fmt::format(
+                    "The annotation '{}' loaded into RAM for the request has other column labels "
+                    "than the one the server started with: restart onto the new files, or send "
+                    "the request without in_ram", pair.second));
         }
-        logger->warn("[Server] The annotation '{}' was replaced while a copy of it loaded: loaded "
-                     "again with its own record mapping", pair.second);
-        copy.reset();
-        return load(nullptr);
+        return copy;
+    };
+    // the bytes of |pair|'s graph and annotation, which an in_ram load reserves; a file that
+    // cannot be stat'ed is refused as changed when it was there at start-up (it is gone)
+    auto pair_bytes = [&](const GraphPair &pair) -> size_t {
+        std::error_code graph_error;
+        std::error_code annotation_error;
+        const uintmax_t graph = std::filesystem::file_size(pair.first, graph_error);
+        const uintmax_t annotation = std::filesystem::file_size(pair.second, annotation_error);
+        if (graph_error || annotation_error) {
+            refuse_changed_pair(pair);
+            throw std::filesystem::filesystem_error(
+                    "Cannot read the size of the index file",
+                    graph_error ? pair.first : pair.second,
+                    graph_error ? graph_error : annotation_error);
+        }
+        return graph + annotation;
     };
     // a single-graph server's headers_unique and labels_disjoint of GET /capabilities, set before
     // its index is ready
@@ -997,6 +1007,11 @@ int run_server(Config *config) {
                          graphs_cache.size(), unique_graph_paths.size());
         }
 
+        // every file a request's copy of a pair reads, stamped before any is read (load_copy)
+        for (const auto &[pair, index] : graphs_cache) {
+            pair_stamps[pair] = pair_file_stamps(pair.first, pair.second,
+                                                 !config->no_coord_mapping);
+        }
         logger->info("[Server] Loading {} unique graph(s)...", unique_graph_paths.size());
         std::vector<std::shared_ptr<DeBruijnGraph>> loaded_graphs(unique_graph_paths.size());
         // each graph prepared for the pattern search in its loading thread, as a single-graph
@@ -1013,10 +1028,6 @@ int run_server(Config *config) {
             prepare_pattern_graph(loaded_graphs[i], unique_graph_paths[i], list_preparation);
         }
 
-        // each annotation's stamp before it is read (resident_mapping)
-        for (const auto &[pair, index] : graphs_cache) {
-            annotation_stamps[pair] = file_stamp(pair.second);
-        }
         logger->info("[Server] Loading {} annotation(s)...", graphs_cache.size());
         #pragma omp parallel for num_threads(get_num_threads() * num_server_threads) schedule(dynamic)
         for (size_t i = 0; i < graphs_cache.size(); ++i) {
@@ -1258,8 +1269,7 @@ int run_server(Config *config) {
                                         std::unique_ptr<AnnotatedDBG> index_loaded;
                                         const AnnotatedDBG *index;
                                         bool in_ram = load_in_ram;
-                                        size_t index_size = in_ram ? std::filesystem::file_size(graph_fname)
-                                                                        + std::filesystem::file_size(anno_fname)
+                                        size_t index_size = in_ram ? pair_bytes({ graph_fname, anno_fname })
                                                                    : -1;
                                         if (in_ram && index_size > memory_all) {
                                             logger->warn("Request {}: Graph of size {} GB is too large to fit into "
@@ -1269,6 +1279,9 @@ int run_server(Config *config) {
                                         }
                                         Timer timer;
                                         if (in_ram) {
+                                            // a pair whose files changed since start-up is
+                                            // refused before its memory is waited for
+                                            refuse_changed_pair({ graph_fname, anno_fname });
                                             reservations.reserve(index_size);
                                             index_size_reserved = index_size;
                                             logger->trace("Request {}: Loading graph {} of size {} GB to RAM...",
@@ -1279,10 +1292,10 @@ int run_server(Config *config) {
                                             config_copy.infbase_annotators = { anno_fname };
                                             // as /traverse, /resolve and /pattern load a pair
                                             // into RAM: with the resident pair's mapping while
-                                            // its annotation is unchanged (resident_mapping),
-                                            // and a load that fails throws, so that it fails
-                                            // this request alone (the route's 400 with the
-                                            // load's message), never the server (H4 review S2)
+                                            // the pair's files are unchanged (load_copy), and a
+                                            // load that fails or is refused throws, so that it
+                                            // fails this request alone (the route's 400 with
+                                            // its message), never the server (H4 review S2)
                                             const AnnotatedDBG &resident
                                                     = *graphs_cache.at({ graph_fname, anno_fname });
                                             config_copy.no_coord_mapping
@@ -1421,9 +1434,7 @@ int run_server(Config *config) {
                            const std::function<bool()> &gone, bool for_pattern,
                            PairControl *control, const std::function<bool()> &expired) {
         const AnnotatedDBG &resident = *graphs_cache.at(pair);
-        const size_t bytes = in_ram && loaded_with_mmap
-                ? std::filesystem::file_size(pair.first) + std::filesystem::file_size(pair.second)
-                : 0;
+        const size_t bytes = in_ram && loaded_with_mmap ? pair_bytes(pair) : 0;
         const InRamPlan plan = in_ram_plan(in_ram, loaded_with_mmap, bytes, memory_all);
         if (plan == InRamPlan::RESIDENT_TOO_LARGE) {
             logger->warn("Request {}: Graph of size {} GB is too large to fit into RAM (reserved "
@@ -1435,6 +1446,9 @@ int run_server(Config *config) {
                 throw PairNotStarted();
             return std::make_unique<IndexLease>(resident, plan);
         }
+        // a pair whose files changed since start-up is refused before its memory is waited
+        // for (load_copy refuses it again after the wait, before and after the load)
+        refuse_changed_pair(pair);
         const char *expired_text = "the request's finish_by_ms (less the clock skew allowance) "
                                    "passed while it waited for the memory to load its index";
         if (expired && expired())
@@ -1474,11 +1488,11 @@ int run_server(Config *config) {
             preparation.progress = false;
             // the resident index of this very pair (graphs_cache's key is the pair, its
             // annotation path the one loaded here), so its mapping is this annotation's
-            // .seqs while the annotation on disk is the file loaded at start-up
-            // (resident_mapping; else the copy loads its .seqs, with the load's checks), and a
-            // resident without one (no .seqs beside the annotation, or --no-coord-mapping) has
-            // none for its copy either: the .seqs is not looked for again, so the operator's
-            // notice of a missing one is logged at start-up, not by every request
+            // .seqs while the pair's files are the ones stamped at start-up (load_copy; else
+            // the load is refused), and a resident without one (no .seqs beside the annotation,
+            // or --no-coord-mapping) has none for its copy either: the .seqs is not looked for
+            // again, so the operator's notice of a missing one is logged at start-up, not by
+            // every request
             config_copy.no_coord_mapping = !resident.get_coord_to_header();
             return load_copy(pair, resident, [&](auto mapping) {
                 return initialize_annotated_dbg(config_copy, preparation, std::move(mapping));

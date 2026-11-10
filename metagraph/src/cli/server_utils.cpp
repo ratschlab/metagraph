@@ -1869,17 +1869,54 @@ std::optional<FileStamp> file_stamp(const std::string &path) {
     struct stat st;
     if (::stat(path.c_str(), &st))
         return std::nullopt;
-    std::error_code error;
-    const auto mtime = std::filesystem::last_write_time(path, error);
-    if (error)
-        return std::nullopt;
+#if defined(__APPLE__)
+    const struct timespec mtime = st.st_mtimespec;
+    const struct timespec ctime = st.st_ctimespec;
+#else
+    const struct timespec mtime = st.st_mtim;
+    const struct timespec ctime = st.st_ctim;
+#endif
     FileStamp stamp;
     stamp.device = static_cast<uint64_t>(st.st_dev);
     stamp.inode = static_cast<uint64_t>(st.st_ino);
     stamp.size = static_cast<uint64_t>(st.st_size);
-    stamp.mtime_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(
-            mtime.time_since_epoch()).count();
+    stamp.mtime_ns = static_cast<int64_t>(mtime.tv_sec) * 1000000000 + mtime.tv_nsec;
+    stamp.ctime_ns = static_cast<int64_t>(ctime.tv_sec) * 1000000000 + ctime.tv_nsec;
     return stamp;
+}
+
+std::vector<PairFileStamp> pair_file_stamps(const std::string &graph,
+                                            const std::string &annotation, bool coord_mapping) {
+    std::vector<PairFileStamp> stamps;
+    for (const IndexFile &f : index_load_inventory(graph, annotation, coord_mapping)) {
+        stamps.push_back({ f.path, f.role, file_stamp(f.path) });
+    }
+    for (const IndexDerivedFile &f : index_derived_files(graph)) {
+        stamps.push_back({ f.path, f.role, file_stamp(f.path) });
+    }
+    return stamps;
+}
+
+std::string pair_files_changed(const std::vector<PairFileStamp> &stamps,
+                               const std::string &graph, const std::string &annotation) {
+    for (const PairFileStamp &f : stamps) {
+        const std::optional<FileStamp> now = file_stamp(f.path);
+        if (now == f.stamp)
+            continue;
+        const char *how = !now ? "it is gone or cannot be read"
+                : !f.stamp ? "it appeared"
+                : now->device != f.stamp->device || now->inode != f.stamp->inode
+                        ? "it is another file"
+                : now->size != f.stamp->size ? "its size"
+                : now->mtime_ns != f.stamp->mtime_ns ? "its modification time"
+                : "its status change time";
+        return fmt::format("The file '{}' ({}) of the pair ('{}', '{}') changed on disk since the "
+                           "server started ({}): a request does not load it into RAM, since the "
+                           "answer would carry the start-up identity and certificates; restart "
+                           "onto the new files, or send the request without in_ram", f.path,
+                           f.role, graph, annotation, how);
+    }
+    return "";
 }
 
 } // namespace cli

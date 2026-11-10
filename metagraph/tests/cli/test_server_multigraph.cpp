@@ -15,6 +15,7 @@
 #include <stdexcept>
 #include <string>
 #include <thread>
+#include <tuple>
 #include <vector>
 
 #include <sys/stat.h>
@@ -1708,4 +1709,104 @@ TEST(MultiGraphInRam, AFileThatCannotBeOpenedFailsBeforeTheGraphLoads) {
     }
     fs::remove(pair.graph);
     fs::remove(row_diff.graph);
+}
+
+
+// The stamps of a pair's files (GPT review 7 finding 4): every file a copy of the pair loaded
+// into RAM reads, with its role, the graph's derived data stamped absent when it does not exist
+// (here the Bloom filter; the mask is written with the graph); a change names the first file
+// that changed and how, also a rewrite in place that restores the size and the modification
+// time (its status change time differs) and a file that appears
+TEST(MultiGraphInRam, PairFileStampsNameTheFileThatChanged) {
+    const PairOnDisk pair = write_pair("stamps");
+    const std::string seqs = pair.dir + "/anno" + annot::CoordToHeader::kExtension;
+    const std::string mask = pair.dir + "/graph" + DBGSuccinct::kDummyMaskExtension;
+    const std::string bloom = pair.dir + "/graph" + DBGSuccinct::kBloomFilterExtension;
+    auto stamps = pair_file_stamps(pair.graph, pair.annotation, true);
+    std::vector<std::pair<std::string, std::string>> roles;
+    for (const PairFileStamp &f : stamps) {
+        roles.emplace_back(f.path, f.role);
+    }
+    EXPECT_EQ((std::vector<std::pair<std::string, std::string>> {
+                      { pair.graph, "graph" }, { pair.annotation, "annotation" },
+                      { seqs, "coord_to_header" }, { mask, "graph_mask" },
+                      { bloom, "graph_bloom" } }), roles);
+    ASSERT_EQ(5u, stamps.size());
+    EXPECT_TRUE(stamps[2].stamp);
+    EXPECT_TRUE(stamps[3].stamp);
+    EXPECT_FALSE(stamps[4].stamp);
+    EXPECT_EQ("", pair_files_changed(stamps, pair.graph, pair.annotation));
+    // without the record mapping (--no-coord-mapping) no copy reads the .seqs: not stamped
+    EXPECT_EQ(4u, pair_file_stamps(pair.graph, pair.annotation, false).size());
+    auto refusal = [&](const std::string &path, const std::string &role, const std::string &how) {
+        return "The file '" + path + "' (" + role + ") of the pair ('" + pair.graph + "', '"
+                + pair.annotation + "') changed on disk since the server started (" + how
+                + "): a request does not load it into RAM, since the answer would carry the "
+                  "start-up identity and certificates; restart onto the new files, or send the "
+                  "request without in_ram";
+    };
+    // (a status change in a later tick of the file system's clock, a few ms on Linux)
+    auto tick = []() { std::this_thread::sleep_for(std::chrono::milliseconds(20)); };
+    // the .seqs renamed over by a copy of itself
+    tick();
+    fs::copy_file(seqs, seqs + ".new");
+    fs::rename(seqs + ".new", seqs);
+    EXPECT_EQ(refusal(seqs, "coord_to_header", "it is another file"),
+              pair_files_changed(stamps, pair.graph, pair.annotation));
+    // the Bloom filter appearing, and gone again
+    stamps = pair_file_stamps(pair.graph, pair.annotation, true);
+    std::ofstream(bloom) << "x";
+    EXPECT_EQ(refusal(bloom, "graph_bloom", "it appeared"),
+              pair_files_changed(stamps, pair.graph, pair.annotation));
+    fs::remove(bloom);
+    EXPECT_EQ("", pair_files_changed(stamps, pair.graph, pair.annotation));
+    // the mask removed
+    const std::string mask_bytes = [&]() {
+        std::ifstream in(mask, std::ios::binary);
+        return std::string(std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>());
+    }();
+    fs::remove(mask);
+    EXPECT_EQ(refusal(mask, "graph_mask", "it is gone or cannot be read"),
+              pair_files_changed(stamps, pair.graph, pair.annotation));
+    std::ofstream(mask, std::ios::binary) << mask_bytes;
+    stamps = pair_file_stamps(pair.graph, pair.annotation, true);
+    // the annotation rewritten in place with its own bytes, its modification time restored
+    const auto mtime = fs::last_write_time(pair.annotation);
+    std::string bytes;
+    {
+        std::ifstream in(pair.annotation, std::ios::binary);
+        bytes.assign(std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>());
+    }
+    tick();
+    {
+        std::fstream out(pair.annotation, std::ios::in | std::ios::out | std::ios::binary);
+        out.write(bytes.data(), bytes.size());
+    }
+    fs::last_write_time(pair.annotation, mtime);
+    const auto before = *stamps[1].stamp;
+    const auto after = *file_stamp(pair.annotation);
+    EXPECT_EQ(std::make_tuple(before.device, before.inode, before.size, before.mtime_ns),
+              std::make_tuple(after.device, after.inode, after.size, after.mtime_ns));
+    EXPECT_EQ(refusal(pair.annotation, "annotation", "its status change time"),
+              pair_files_changed(stamps, pair.graph, pair.annotation));
+    // the graph renamed away, then back: gone, then its status change time
+    stamps = pair_file_stamps(pair.graph, pair.annotation, true);
+    tick();
+    fs::rename(pair.graph, pair.graph + ".away");
+    EXPECT_EQ(refusal(pair.graph, "graph", "it is gone or cannot be read"),
+              pair_files_changed(stamps, pair.graph, pair.annotation));
+    fs::rename(pair.graph + ".away", pair.graph);
+    EXPECT_EQ(refusal(pair.graph, "graph", "its status change time"),
+              pair_files_changed(stamps, pair.graph, pair.annotation));
+    // a chmod alone (a change of its metadata only: refused too, the conservative side)
+    stamps = pair_file_stamps(pair.graph, pair.annotation, true);
+    tick();
+    fs::permissions(seqs, fs::perms::group_write, fs::perm_options::add);
+    EXPECT_EQ(refusal(seqs, "coord_to_header", "its status change time"),
+              pair_files_changed(stamps, pair.graph, pair.annotation));
+    // its size: the .seqs appended to in place
+    stamps = pair_file_stamps(pair.graph, pair.annotation, true);
+    std::ofstream(seqs, std::ios::app | std::ios::binary) << "x";
+    EXPECT_EQ(refusal(seqs, "coord_to_header", "its size"),
+              pair_files_changed(stamps, pair.graph, pair.annotation));
 }
