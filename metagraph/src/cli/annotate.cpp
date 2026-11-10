@@ -487,8 +487,9 @@ void annotate_data(std::shared_ptr<graph::DeBruijnGraph> graph,
         // the annotation's own, once each file passed the spot check against its column: the
         // column holds the coordinates of the file's probes (a renamed column, or files at
         // another path, then pass the load's check). A spot check: a file of the same sequences
-        // under other headers, or with other records between its probes, passes it (what the
-        // records are rests on the files passed being those the annotation was made from)
+        // under other headers, or with other records between its probes, passes it, and so does
+        // a copy cut short, since the tail probe bounds the file's k-mers from below only (what
+        // the records are rests on the files passed being those the annotation was made from)
         std::vector<std::string> column_labels(files.begin(), files.end());
         if (probe) {
             const std::string &anno_file = config.infbase_annotators.at(0);
@@ -509,14 +510,26 @@ void annotate_data(std::shared_ptr<graph::DeBruijnGraph> graph,
                 exit(1);
             }
             for (size_t i = 0; i < files.size(); ++i) {
-                // a file with k-mers none of which the graph has (before GPT review 6 it passed,
-                // nothing checked); one without k-mers has no records in the mapping to bind
-                if (heads[i].sequence.empty() && !headers[i].empty()) {
-                    logger->error("The file '{}' has no k-mer of the graph: it cannot be checked "
-                                  "against column {} ('{}') of the annotation '{}'. Pass the files "
-                                  "the annotation was made from, in its column order (metagraph "
-                                  "stats --print-col-names lists the columns)", files[i], i,
-                                  labels[i], anno_file);
+                // a file without a k-mer of the graph cannot be any column: an annotation makes no
+                // column from a file without k-mers (empty, as an interrupted copy, or each
+                // record shorter than k), so each column holds a k-mer of its file. Before GPT
+                // review 6 a file with k-mers none of which the graph has passed, nothing
+                // checked, and before the train-3 review (R4, S1) so did one without k-mers
+                if (heads[i].sequence.empty()) {
+                    if (headers[i].empty()) {
+                        logger->error("The file '{}' has no k-mers (it is empty, or each of its "
+                                      "records is shorter than k = {}): no annotation column is "
+                                      "made from such a file, so it cannot be column {} ('{}') of "
+                                      "the annotation '{}'. Pass the files the annotation was made "
+                                      "from, in its column order (metagraph stats --print-col-names "
+                                      "lists the columns)", files[i], k, i, labels[i], anno_file);
+                    } else {
+                        logger->error("The file '{}' has no k-mer of the graph: it cannot be "
+                                      "checked against column {} ('{}') of the annotation '{}'. "
+                                      "Pass the files the annotation was made from, in its column "
+                                      "order (metagraph stats --print-col-names lists the columns)",
+                                      files[i], i, labels[i], anno_file);
+                    }
                     exit(1);
                 }
                 if (!heads[i].sequence.empty() && tails[i].sequence.empty()) {

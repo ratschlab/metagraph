@@ -397,6 +397,40 @@ TEST(CoordToHeader, AnEmptyFileFailsItsLoad) {
     utils::set_mmap(mmap);
 }
 
+// A corrupt count is checked against the bytes left in the file before anything is allocated
+// for it (train-3 review R4, N3: 8 bytes stating 2^22 columns reached 3.6 GB before they failed)
+TEST(CoordToHeader, LoadBoundsItsCountsByTheFileSize) {
+    const std::string base = test_dump_dir() + "/cth_counts";
+    const std::string path = base + CoordToHeader::kExtension;
+    auto write = [&](const std::string &bytes) {
+        std::ofstream out(path, std::ios::binary | std::ios::trunc);
+        out << bytes;
+    };
+    auto number = [](uint64_t n) {
+        std::ostringstream out;
+        serialize_number(out, n);
+        return out.str();
+    };
+    const bool with_mmap = utils::with_mmap();
+    for (bool mmap : { false, true }) {
+        utils::set_mmap(mmap);
+        CoordToHeader cth;
+        for (uint64_t columns : { uint64_t(1) << 22, uint64_t(1) << 40, ~uint64_t(0) }) {
+            write(number(columns) + std::string(8, '\0'));
+            EXPECT_FALSE(cth.load(base)) << columns << (mmap ? " mmap" : "");
+            EXPECT_EQ(0u, cth.num_columns());
+        }
+        // one column stating more headers than the bytes after it hold
+        write(number(1) + number(uint64_t(1) << 40) + std::string(32, '\0'));
+        EXPECT_FALSE(cth.load(base)) << (mmap ? "mmap" : "");
+        // a whole file loads
+        three_columns().serialize(base);
+        EXPECT_TRUE(cth.load(base)) << (mmap ? "mmap" : "");
+        EXPECT_EQ(3u, cth.num_columns());
+    }
+    utils::set_mmap(with_mmap);
+}
+
 // The load's check of a record mapping against its annotation (cli::check_record_mapping): the
 // count, the stated labels, and the coordinates of a column against its k-mers where the
 // annotation states them per column (column_coord, brwt_coord); the row-diff form only by count

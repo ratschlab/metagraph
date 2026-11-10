@@ -1392,8 +1392,11 @@ size_t batched_query_fasta(seq_io::FastaParser &fasta_parser,
     size_t parallel_each = std::max<size_t>(1, config.parallel_each);
     size_t threads_per_batch = std::max<size_t>(1, get_num_threads() / parallel_each);
     // as query_fasta's pool: an exception must not leave an OpenMP task or loop iteration (it
-    // ends the process), so each keeps the first one, rethrown once the parallel region has
-    // ended (a server's request then fails with its route's answer, the CLI exits with it)
+    // ends the process), so the batch's task and its two loops keep the first one, rethrown once
+    // the parallel region has ended (a server's request then fails with its route's answer, the
+    // CLI exits with it). Not covered: the parallel loops of construct_query_graph and of the
+    // annotation decoders it runs, and the reading loop below, where only an allocation failure
+    // throws (no request input or .seqs does: this path runs for a pair without a .seqs)
     std::mutex error_mutex;
     std::exception_ptr error;
     auto keep_error = [&](std::exception_ptr e) {

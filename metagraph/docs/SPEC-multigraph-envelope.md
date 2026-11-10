@@ -578,7 +578,7 @@ name selects the column where one has it`).
 
 | Value | Guarantee |
 | --- | --- |
-| `"verified"` | the `.seqs` states its column labels (written by `annotate --index-header-coords` since H4) and they equal the annotation's column labels, in order. Written without `-a`, the labels are the files' names as passed: the files were passed in the annotation's column order under the names it gave them. Written with `-a`, the labels are the annotation's own, copied once each file passed the spot check of section 10: its column holds the coordinates of the file's probed k-mers (its first and last k-mers that the graph has), and a file with k-mers none of which the graph has is refused. Neither establishes that the records are those the columns were made from: that rests on the build's provenance (the files passed are those the annotation was made from). A file of the same sequences under other headers passes either way, and with `-a` so does one whose records between its probes differ |
+| `"verified"` | the `.seqs` states its column labels (written by `annotate --index-header-coords` since H4) and they equal the annotation's column labels, in order. Written without `-a`, the labels are the files' names as passed: the files were passed in the annotation's column order under the names it gave them. Written with `-a`, the labels are the annotation's own, copied once each file passed the spot check of section 10: its column holds the coordinates of the file's probed k-mers (its first and last k-mers that the graph has), and a file with no k-mer of the graph (none at all, as an empty file, or none the graph has) is refused. Neither establishes that the records are those the columns were made from: that rests on the build's provenance (the files passed are those the annotation was made from). A file of the same sequences under other headers passes either way, and with `-a` so does one whose records between its probes differ, and so does a copy cut short: the tail probe bounds the file's k-mers from below only, so a copy that ends after it passes. `column_coord` and `brwt_coord` refuse it at load when its column then holds more coordinates than the copy states k-mers, as a cut of sequence does (section 10). On the row-diff forms the pair is served, and its column answers 400 for any of its k-mers past the cut. An existing `.seqs` is certified against its old bytes instead (section 10) |
 | `"count_only"` | the `.seqs` states no labels (written before H4): its number of columns equalled the annotation's, its order was not verified. On `column_coord` and `brwt_coord` each column's coordinates were also checked against its k-mers, which refuses some permutations but certifies none. A header-label answer on such a pair rests on a column order the load did not check: a `.seqs` written for the files in another order maps coordinates to other records |
 | null | no `.seqs` loaded: the pair's labels are columns only |
 
@@ -618,8 +618,10 @@ its annotations and before it listens, exit as before. A server's per-request lo
 `/resolve`, `/pattern` and, since the review of H4, `/search`) is built with the resident pair's mapping, checked at
 start-up, while the pair's annotation on disk is the file loaded then (its device, inode, size and modification time
 unchanged before the copy's load and after it, and the copy's labels the resident's), so that it reads no `.seqs`
-again; once the annotation was replaced, even during the copy's load, the copy reads its `.seqs` from disk with the
-checks above. A load of it that fails (an annotation replaced by one whose `.seqs` is refused; a file that cannot be
+again; once the annotation was replaced, also during the copy's load, the copy reads its `.seqs` from disk with the
+checks above. One residual stays: a file swapped in and back within one copy's load whose labels equal the
+resident's, in order, keeps the resident mapping, though equal labels do not make equal records (a newer build under
+the same file names has other records). It takes two renames within one load. A load of it that fails (an annotation replaced by one whose `.seqs` is refused; a file that cannot be
 read) throws, and that request alone fails with the route's 400, the loader's message as `error` (`/search`:
 `{"error": "<message>"}`, for instance `The record mapping '<anno-base>.seqs' does not belong to the annotation
 '<annotation>': it has 2 columns, the annotation 3 labels. Rebuild it ...`), while the server runs on with its
@@ -650,18 +652,28 @@ its first stretch of 1000 characters holding a k-mer the graph has, its tail pro
 column must hold the coordinates of the first and last k-mer of each probe that the graph has, at their nodes, else
 it exits 1 naming the file, the column and the coordinate (`The file '<file>' is not column <i> ('<label>') of the
 annotation '<annotation>': the column lacks the file's k-mer at coordinate <c>. ...`), and writes nothing. A file
-with k-mers none of which the graph has is refused the same way, nothing written: `The file '<file>' has no k-mer of
-the graph: it cannot be checked against column <i> ('<label>') of the annotation '<annotation>'. Pass the files the
-annotation was made from, in its column order (metagraph stats --print-col-names lists the columns)` (before GPT
-review 6 it passed, nothing checked). A file whose last record has no k-mer of the graph in those 65536 characters is
-checked by its head probe alone, with a warning (`The last record of '<file>' has no k-mer of the graph in its last
-65536 characters: the file is checked by its first k-mers alone`); a file without k-mers (every record shorter than
-k) has no records in the mapping and nothing to check. The command then states the annotation's labels. That is how a
-mapping is written for an annotation whose columns were renamed, or whose files have moved. It is a spot check: it
-refuses files passed in another order and files of another file set whose probed k-mers the graph or the column
-lacks, but a file of the same sequences under other headers passes, and so does one whose records between its probes
-differ. What records a column's labels select rests on the build's provenance: the files passed are those the
-annotation was made from (section 9.1, `seqs_order`).
+without a k-mer of the graph is refused the same way, nothing written. One with k-mers none of which the graph has:
+`The file '<file>' has no k-mer of the graph: it cannot be checked against column <i> ('<label>') of the annotation
+'<annotation>'. Pass the files the annotation was made from, in its column order (metagraph stats --print-col-names
+lists the columns)` (before GPT review 6 it passed, nothing checked). One without k-mers, empty (an interrupted copy)
+or with each record shorter than k: `The file '<file>' has no k-mers (it is empty, or each of its records is shorter
+than k = <k>): no annotation column is made from such a file, so it cannot be column <i> ('<label>') of the
+annotation '<annotation>'. Pass the files ...` (before the train-3 review it passed, nothing checked, and was served
+`"verified"`: on `row_diff_brwt_coord` each query meeting its column then answered 400 and its column's records left
+the header namespace). No legitimate file is refused so: `annotate` makes no column from a file without k-mers (it
+labels k-mers only, merged or `--separately`), so each column holds a k-mer of its file. A file whose last record has
+no k-mer of the graph in those 65536 characters is checked by its head probe alone, with a warning (`The last record
+of '<file>' has no k-mer of the graph in its last 65536 characters: the file is checked by its first k-mers alone`).
+The command then states the annotation's labels. That is how a mapping is written for an annotation whose columns
+were renamed, or whose files have moved. It is a spot check: it refuses files passed in another order and files of
+another file set whose probed k-mers the graph or the column lacks, but a file of the same sequences under other
+headers passes, and so does one whose records between its probes differ. The tail probe bounds the file's k-mers from
+below only, so a copy cut short after it passes too. `column_coord` and `brwt_coord` refuse its `.seqs` at load when
+the column then holds more coordinates than the copy states k-mers, as a cut of sequence does (a cut inside a final
+gap of Ns removes no coordinates). On the row-diff forms the pair is served, and its column answers 400 for any of
+its k-mers past the cut. What records a column's labels select rests on the build's
+provenance: the files passed are those the annotation was made from (section 9.1, `seqs_order`); an existing `.seqs`
+is certified against its old bytes (below).
 Binaries before H4 read the columns and stop, so a `.seqs` with labels serves on them unchanged; an H4 binary reads a
 file that ends after its columns as one without labels, and fails the load of one with any other data after them.
 `metagraph stats <base>.seqs` states which it is (`column labels: stated` or `column labels: none`).
