@@ -130,6 +130,10 @@ The answer keeps its upstream shape (a list of `{seq_description, results, ...}`
 - `/search` takes `graphs` only (no `pairs`; it has no re-ask): `pairs` is refused 400 `pairs_unsupported` on every
   server, single-graph included, before any cached answer is looked up. On a single-graph server the field used to
   be ignored (a request it refused for `graphs` keeps that refusal).
+- On a multi-graph server an empty `graphs` (`[]`) selects no pair: it is refused 400 `pair_not_found` (section 6),
+  before any cached answer is looked up and before any pair is searched (train 4; it was answered 200 with the
+  body `null`, nothing searched). A `graphs` that is not a list is still read as no field, and an unknown name
+  is refused first (`graph_unknown`).
 
 ## 4. Deadlines and the work cutoff (E4, E20)
 
@@ -306,7 +310,11 @@ any later change is announced first). The names cap's three texts, `{N}` the cap
   several graphs); GET /capabilities lists the graphs`.
 The other texts kept: an unknown name on `/resolve`, `/traverse` and a probe `Bad request: unknown graph '<name>'`
 (on `/search` `Request with an uninitialized graph <name>`, on `/pattern` `request.graphs: unknown graph '<name>'
-(GET /capabilities lists the graphs)`), each now with `graph_unknown`; on `/resolve`, `/traverse` and the probes
+(GET /capabilities lists the graphs)`), each now with `graph_unknown`; on `/search` an empty `graphs`, which the
+release-9 server answered 200 with the body `null`, is refused with `pair_not_found` in its own words since train 4:
+`request.graphs: the list is empty: it selects no pair (name at least one graph; GET /capabilities lists them)`
+(on `/resolve` and `/traverse` an empty `graphs` keeps the release-9 text `... expected [name]` without a code, on
+`/pattern` `invalid_request`: there it is a malformed selector); on `/resolve`, `/traverse` and the probes
 without `pairs` or `annotation_path` the release-9 selection texts (`... spans several graphs (...); pass
 'graph_path' to pick one`, `... with several annotations ...`, `graph_path '<path>' is not part of index
 '<name>'`, `'graphs' names the one graph a traversal reads: expected [name]`, `'graph' (index name) is required

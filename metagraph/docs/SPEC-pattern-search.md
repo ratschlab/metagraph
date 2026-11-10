@@ -4260,8 +4260,9 @@ how the search service uses it; the route serves any number.
 - A well-formed selection — a list of known names (one given twice is one), or no `graphs` — selects the same
   graphs on `/pattern` and `/search`. `/pattern` reads the field more strictly: an empty list, a value that is not
   a list (`null` included) and an item that is not a string are 400 `invalid_request` (`request.graphs: expected a
-  non-empty array of graph names (GET /capabilities lists them)`), where `/search` answers an empty list with 200
-  and the body `null` (it queries nothing), reads a value that is not a list as no `graphs`, and reads a scalar
+  non-empty array of graph names (GET /capabilities lists them)`), where `/search` refuses an empty list 400 with
+  the selection code `pair_not_found` (it selects no pair; answered 200 with the body `null` before train 4,
+  SPEC-multigraph-envelope.md sections 3 and 6), reads a value that is not a list as no `graphs`, and reads a scalar
   item as its text (`1` names the graph `"1"`; an object or list item is 400). An unknown name is 400 on both, in each route's words (`/pattern`:
   `request.graphs: unknown graph 'X' (GET /capabilities lists the graphs)`; `/search`: `Request with an
   uninitialized graph X`), with the selection code `graph_unknown` since release 10 (SPEC-multigraph-envelope.md

@@ -1076,15 +1076,19 @@ class TestMultiGraphServer(TestingBase):
                 self.assertEqual(expected, searched(selection))
 
         # where /pattern is stricter: an empty list, a value that is not a list and an item that
-        # is not a string are its 400; /search answers [] with null (it queries nothing), reads a
-        # value that is not a list as no field, and an item as its text
+        # is not a string are its 400; /search refuses [] (it selects no pair) with the section 6
+        # code pair_not_found (answered 200 with the body null before), reads a value that is
+        # not a list as no field, and an item as its text
         for graphs in ([], 'ecoli', None, [1], ['ecoli', 1]):
             with self.subTest(graphs=graphs):
                 body = self.post('pattern', dict(p, graphs=graphs), 400)
                 self.assertEqual({'code': 'invalid_request',
                                   'error': 'request.graphs: expected a non-empty array of graph '
                                            'names (GET /capabilities lists them)'}, body)
-        self.assertIsNone(self.post('search', dict(s, graphs=[])))
+        self.assertEqual({'error': 'request.graphs: the list is empty: it selects no pair (name '
+                                   'at least one graph; GET /capabilities lists them)',
+                          'code': 'pair_not_found'},
+                         self.post('search', dict(s, graphs=[]), 400))
         self.assertEqual(set(chunks), searched({'graphs': 'ecoli'}))
         self.assertEqual(set(chunks), searched({'graphs': None}))
         self.assertEqual({'error': 'Request with an uninitialized graph 1', 'code': 'graph_unknown'},

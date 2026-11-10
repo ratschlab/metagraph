@@ -138,6 +138,9 @@ probe_parameters(const Query &query, const std::string &route) {
 // (/search selects by `graphs` only)
 void refuse_search_pairs(const Json::Value &request);
 
+// The text of a multi-graph POST /search whose `graphs` is an empty list (pair_not_found)
+extern const char kSearchGraphsEmpty[];
+
 /**
  * The pairs a request on |route| selects on a multi-graph server (|indexes|), in the
  * envelope's order (ordered_pairs: the names in byte order, each name's pairs in the graph
@@ -169,7 +172,8 @@ void refuse_search_pairs(const Json::Value &request);
  *    'graph' or as 'graphs', not both"); on PATTERN pattern_graph_names' texts.
  *  - SEARCH reads `graphs` as POST /search always has (filter_graphs_from_list: a `graphs`
  *    that is no array selects nothing, every name is then read), an unknown name refused
- *    with its message and graph_unknown.
+ *    with its message and graph_unknown, and an empty list (which selects no pair; answered
+ *    200 with the body null before) with kSearchGraphsEmpty and pair_not_found.
  *  - CAPABILITIES reads the members `graph`, `graph_path` and `annotation_path` as
  *    select_pairs_from_parameters reads the GET probes' parameters.
  * Throws SelectionRefusal (HTTP 400 {error, code, candidates?}), InvalidRequest for a

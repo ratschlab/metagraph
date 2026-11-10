@@ -125,7 +125,8 @@ TEST(ServerSelection, OrderedPairs) {
 
 // POST /search: `graphs` deduplicated and sorted, every name of a small list without it; a
 // pair listed twice once; `pairs` refused (it has no re-ask); an unknown name refused with its
-// message and graph_unknown
+// message and graph_unknown; an empty list, which selects no pair, refused with pair_not_found
+// (answered 200 with the body null before); a `graphs` that is no list read as no field
 TEST(ServerSelection, Search) {
     EXPECT_EQ(Pairs({ kA, kB1, kB2, kC0, kC1 }), select(SelectionRoute::SEARCH, "{}"));
     EXPECT_EQ(Pairs({ kA, kC0, kC1 }),
@@ -152,6 +153,23 @@ TEST(ServerSelection, Search) {
     EXPECT_EQ("pairs_unsupported", selection_code_of([] {
         select(SelectionRoute::SEARCH, R"({"graphs": ["a"], "pairs": [{"graph": "a"}]})");
     }));
+    EXPECT_EQ("pairs_unsupported", selection_code_of([] {
+        select(SelectionRoute::SEARCH, R"({"graphs": [], "pairs": [{"graph": "a"}]})");
+    }));
+    // an empty list: the selection refusal {error, code}, no candidates; under the names cap too
+    for (size_t cap : { size_t(10), size_t(2) }) {
+        EXPECT_EQ("pair_not_found", selection_code_of([cap] {
+            select(SelectionRoute::SEARCH, R"({"graphs": []})", cap);
+        }, &body)) << cap;
+        EXPECT_EQ(parse(R"x({"error": "request.graphs: the list is empty: it selects no pair )x"
+                        R"x((name at least one graph; GET /capabilities lists them)", )x"
+                        R"x("code": "pair_not_found"})x"), body);
+    }
+    // a value that is no list is no field, as before
+    EXPECT_EQ(Pairs({ kA, kB1, kB2, kC0, kC1 }),
+              select(SelectionRoute::SEARCH, R"({"graphs": "a"})"));
+    EXPECT_EQ(Pairs({ kA, kB1, kB2, kC0, kC1 }),
+              select(SelectionRoute::SEARCH, R"({"graphs": null})"));
 }
 
 // POST /pattern: `graphs` (pattern_graph_names' rule, an unknown name coded) or `pairs`; `graph`
@@ -874,6 +892,7 @@ TEST(ServerSelection, Sample22Refusals) {
         [&] { select_on(indexes, SelectionRoute::TRAVERSE, R"({"graph": "refseq"})"); },
         [&] { select_on(indexes, SelectionRoute::RESOLVE, R"({"graphs": ["bact_othr"]})"); },
         [&] { select_on(indexes, SelectionRoute::SEARCH, R"({"pairs": [{"graph": "refseq"}]})"); },
+        [&] { select_on(indexes, SelectionRoute::SEARCH, R"({"graphs": []})"); },
         [&] { select_pairs_from_parameters(SelectionRoute::TRAVERSE,
                                            { { "graph", "sra-human-1/3" } }, indexes, 11); },
     };
