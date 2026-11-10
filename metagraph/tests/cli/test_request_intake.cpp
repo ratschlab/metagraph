@@ -17,6 +17,7 @@
 #include "cli/json_helpers.hpp"
 #include "cli/server_checks.hpp"
 #include "cli/traverse.hpp"
+#include "common/utils/string_utils.hpp"
 
 
 // What the server reads of a request (H1, review 5 #2 and #6; SPEC-multigraph-envelope.md
@@ -713,6 +714,33 @@ TEST(ServerRequestIntake, QuotedClientStringsAreClipped) {
                   StrictObject<RefuseRequest> o(v, "request");
                   o.finish();
               }));
+}
+
+// A log line quotes a client's text with its control characters escaped (GPT review 7, finding
+// 11): a label "x\n[...] [info] FORGED" made a second log line that looked like the server's.
+// Bytes below 0x20 and 0x7F become \n, \r, \t or \xNN; every other byte, a UTF-8 name's too,
+// and a backslash the client wrote stay as they are
+TEST(ServerRequestLog, ControlCharactersAreEscaped) {
+    EXPECT_EQ("", ::utils::escape_for_log(""));
+    EXPECT_EQ("Label not found: 'x\\n[2026-01-01 00:00:00.000] [info] FORGED'",
+              ::utils::escape_for_log("Label not found: 'x\n[2026-01-01 00:00:00.000] [info] "
+                                      "FORGED'"));
+    EXPECT_EQ("a\\r\\nb\\tc\\x00d\\x1b[31me\\x7f\\x1f", ::utils::escape_for_log(
+            std::string("a\r\nb\tc\0d\x1b[31me\x7f\x1f", 16)));
+    EXPECT_EQ("caf\xc3\xa9 \\n kept \x80\xff",
+              ::utils::escape_for_log("caf\xc3\xa9 \\n kept \x80\xff"));
+    // every byte: one line, nothing below 0x20 and no 0x7F left
+    std::string all;
+    for (int c = 0; c < 256; ++c) {
+        all.push_back(static_cast<char>(c));
+    }
+    const std::string escaped = ::utils::escape_for_log(all);
+    EXPECT_EQ(std::string::npos, escaped.find('\n'));
+    for (unsigned char c : escaped) {
+        EXPECT_TRUE(c >= 0x20 && c != 0x7F) << int(c);
+    }
+    // 33 control bytes: \n, \r and \t two bytes each, the other 30 four
+    EXPECT_EQ(256u - 33 + 3 * 2 + 30 * 4, escaped.size());
 }
 
 // jsoncpp's own messages that quote the client's text are clipped by the same rule: the quoted

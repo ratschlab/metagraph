@@ -66,6 +66,28 @@ std::string clip_for_message(std::string_view text, size_t max_bytes) {
     return std::string(text.substr(0, cut)) + "... (" + std::to_string(text.size()) + " bytes)";
 }
 
+std::string escape_for_log(std::string_view text) {
+    static constexpr char digits[] = "0123456789abcdef";
+    std::string out;
+    out.reserve(text.size());
+    for (unsigned char c : text) {
+        if (c >= 0x20 && c != 0x7F) {
+            out.push_back(c);
+        } else if (c == '\n') {
+            out += "\\n";
+        } else if (c == '\r') {
+            out += "\\r";
+        } else if (c == '\t') {
+            out += "\\t";
+        } else {
+            out += "\\x";
+            out.push_back(digits[c >> 4]);
+            out.push_back(digits[c & 0xF]);
+        }
+    }
+    return out;
+}
+
 // Try to parse ka:f:[abundance] or km:f:[abundance] from header
 // https://github.com/IndexThePlanet/Logan/blob/main/Unitigs.md
 std::optional<uint64_t> parse_abundance(const std::string &comment) {

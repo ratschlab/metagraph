@@ -1864,6 +1864,53 @@ class TestTraverseAPI(TestTraverseBase):
             self.assertEqual(400, ret.status_code, ret.text)
             self.assertEqual({'error': "request: unknown field 'pairs'"}, ret.json())
 
+    def test_api_client_text_cannot_forge_a_log_line(self):
+        """GPT review 7, finding 11 (V7-C's reproduction): a client's text that the server logs
+        (a label quoted by a 400 on /resolve and on /traverse, a request's path and method)
+        has its control characters escaped (\\n, \\r, \\t, \\xNN), so a JSON-escaped newline
+        in a label cannot end the server's log line and start one that looks like the
+        server's own. The answers are unchanged: the 400 quotes the label as it was sent."""
+        forged = '[2026-01-01 00:00:00.000] [info] FORGED-BY-CLIENT'
+        label = f'x\n{forged} ok'
+        seed = {'seed_id': 's0', 'sequence': self.element}
+        strategy = {'direction': 'right', 'bounds': {'max_extension_bp': 20},
+                    'output': {'detail': 'full', 'timing': False}}
+        for route, payload in (
+                ('resolve', {'sequence': self.element, 'labels': [label]}),
+                ('traverse', {'seeds': [dict(seed, labels=[label])], 'strategy': strategy})):
+            ret = self._post(route, payload)
+            self.assertEqual(400, ret.status_code, ret.text)
+            self.assertIn(f"Label not found in the annotation: '{label}'", ret.json()['error'])
+        # a path holding ESC and a carriage return (raw bytes: a client library would
+        # percent-encode them), answered 404 and logged as not found
+        got = self._exchange(self.port, [b'GET /x\x1b[2J\rFORGED HTTP/1.1\r\nHost: x\r\n'
+                                         b'Connection: close\r\n\r\n'])
+        self.assertTrue(got.startswith(b'HTTP/1.1 404'), got[:300])
+        # the log is flushed line by line: read it once both refusals are in it
+        deadline = time.time() + 10
+        while True:
+            with open(self.server_log.name, errors='replace') as f:
+                text = f.read()
+            if (text.count('FORGED-BY-CLIENT ok') >= 2 and 'FORGED for GET' in text) \
+                    or time.time() > deadline:
+                break
+            time.sleep(0.1)
+        lines = text.split('\n')
+        # no line starts with the client's text: each refusal's text is on its own line
+        self.assertEqual([], [line for line in lines if line.startswith(forged)],
+                         log_tail(self.server_log.name))
+        refusals = [line for line in lines if 'FORGED-BY-CLIENT ok' in line]
+        self.assertEqual(2, len(refusals), log_tail(self.server_log.name))
+        for line in refusals:
+            self.assertIn('[warning] [Server] Error on request ', line)
+            self.assertIn(f"Label not found in the annotation: 'x\\n{forged} ok'", line)
+        self.assertTrue(any('[Server] Not found /x\\x1b[2J\\rFORGED for GET request' in line
+                            for line in lines), log_tail(self.server_log.name))
+        # no raw control character but the newlines that end the lines
+        self.assertEqual([], [line for line in lines if any(ord(c) < 0x20 or c == '\x7f'
+                                                              for c in line)],
+                         log_tail(self.server_log.name))
+
     def test_api_task_resources(self):
         """The per-task figures on the server and the CLI (SPEC §7.2.1, SPEC-pattern-search.md
         §8.4): timing.cpu_ms (and timing.page_faults on Linux) on /traverse per request and
