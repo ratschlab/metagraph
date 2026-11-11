@@ -96,13 +96,10 @@ class AnswerAccount {
     uint64_t peak_ = 0;
 };
 
-// The answer account's prices of the structures a resolve builds after its pass: per run
-// grouped into candidates at most a node of the grouping's map (80 B) and twice a candidate
-// (40 B) for a run of its own, and twice a label id; per run a max_support selection gathers
-// its scratch: the runs twice (16 B each, the round's at twice their size), the candidate starts
-// (two per run, at twice their size), the run ends and the Fenwick tree's counts
+// The answer account's price of a run grouped into candidates: at most a node of the grouping's
+// map (80 B) and twice a candidate (40 B) for a run of its own, and twice a label id. (A
+// max_support selection charges its scratch as it is allocated: select_seeds)
 constexpr uint64_t kCandidateRunBytes = 80 + 2 * 40 + 2 * 4;
-constexpr uint64_t kSelectionRunBytes = 16 + 2 * 16 + 2 * 2 * 8 + 8 + 4;
 
 struct ResolveOptions {
     // exactly one of |labels| (explicit) or |discover| must be set
@@ -416,8 +413,9 @@ constexpr char kSeedOrder[] = "rank";
 // max_support round, whose clip of every run by every pick was O(runs x picks))
 //
 // |answer| (null: none): the answer account (AnswerAccount), charged with the selection's
-// scratch before it gathers it (a max_support selection's runs, kSelectionRunBytes each), each
-// pick before it is made and each frozen seed before it is built (its sequence, names, the
+// scratch before it is allocated (a max_support selection's gathered runs, twice; the round's
+// vector of clipped pieces each time it grows past them; a round's candidate starts, run ends
+// and Fenwick counts for its pieces, released with them), each pick before it is made and each frozen seed before it is built (its sequence, names, the
 // label order's copy of them, its overlaps), a selection passing it throwing AnswerTooLarge
 SeedSelection select_seeds(const SupportProfile &profile,
                            std::string_view query,

@@ -1704,6 +1704,10 @@ SeedSelection select_seeds(const SupportProfile &profile,
         if (answer)
             answer->charge(bytes, "selection");
     };
+    auto answer_release = [&](uint64_t bytes) {
+        if (answer)
+            answer->release(bytes);
+    };
     // a pick as the account prices it: the object, its label ids (at twice their number) and
     // the names it lists as not covering
     auto pick_bytes = [](size_t labels, const std::vector<std::string> *names) {
@@ -1771,16 +1775,23 @@ SeedSelection select_seeds(const SupportProfile &profile,
             // endpoints, so a ranges over run starts and over (e - min_kmers).
             // This is O(R log R) per round for R runs, instead of scanning pairs.
             struct Run { uint64_t begin, end; };
-            // the scratch of the rounds: per run gathered kSelectionRunBytes (charged before it
-            // is gathered, held until the selection is frozen)
+            // The scratch of the rounds, charged as it is allocated (T4 review R1, F1: priced
+            // once a run gathered, it missed that a round holds a piece for each part of a run
+            // the picks clip, P + 1 pieces of a run with P picks inside it): the gathered runs
+            // twice (the round's vector, reserved to them, and their sorted copy), the round's
+            // vector each time it grows past them (its new buffer beside the old one), and in a
+            // round its candidate starts, run ends and Fenwick counts for its pieces (charged
+            // before they are built, released with them). Held until the selection is frozen
             uint64_t gathered = 0;
             for (const auto &lp : profile.labels) {
                 for (const auto &run : lp.runs) {
                     gathered += run.size() >= min_kmers;
                 }
             }
-            charge(gathered * kSelectionRunBytes);
+            uint64_t scratch = 2 * annot::matrix::buffer_bytes(gathered, sizeof(Run));
+            charge(scratch);
             std::vector<Run> runs;
+            runs.reserve(gathered);
             for (const auto &lp : profile.labels) {
                 poll(1 + lp.runs.size());
                 for (const auto &run : lp.runs) {
@@ -1788,6 +1799,19 @@ SeedSelection select_seeds(const SupportProfile &profile,
                         runs.push_back({ run.begin, run.end });
                 }
             }
+            // a piece of a round, the round's vector doubled first where it is full
+            auto push_piece = [&](uint64_t begin, uint64_t end) {
+                if (runs.size() == runs.capacity()) {
+                    const size_t grown = std::max<size_t>(64, 2 * runs.capacity());
+                    const uint64_t was = annot::matrix::buffer_bytes(runs.capacity(), sizeof(Run));
+                    const uint64_t bytes = annot::matrix::buffer_bytes(grown, sizeof(Run));
+                    charge(bytes);
+                    runs.reserve(grown);
+                    answer_release(was);
+                    scratch += bytes - was;
+                }
+                runs.push_back({ begin, end });
+            };
             poll(runs.size());
             const std::vector<Run> all_runs = [&runs]() {
                 std::sort(runs.begin(), runs.end(),
@@ -1797,6 +1821,8 @@ SeedSelection select_seeds(const SupportProfile &profile,
 
             // intervals already claimed by a picked seed, as sorted disjoint ranges
             std::vector<KmerInterval> taken;
+            // what the account holds of the last round's own vectors
+            uint64_t round_bytes = 0;
 
             while (picked.size() < policy.max_seeds) {
                 // a round sweeps every run: the deadline is read inside it, a step a run
@@ -1823,18 +1849,26 @@ SeedSelection select_seeds(const SupportProfile &profile,
                     for ( ; t != taken.end() && t->begin < run.end; ++t) {
                         poll(1);
                         if (t->begin > begin && t->begin - begin >= min_kmers)
-                            runs.push_back({ begin, t->begin });
+                            push_piece(begin, t->begin);
                         begin = std::max(begin, t->end);
                     }
                     if (begin < run.end && run.end - begin >= min_kmers)
-                        runs.push_back({ begin, run.end });
+                        push_piece(begin, run.end);
                 }
                 std::sort(runs.begin(), runs.end(),
                           [](const Run &a, const Run &b) { return a.begin < b.begin; });
                 if (runs.empty())
                     break;
 
+                // the round's candidate starts (two a piece at most), run ends and Fenwick
+                // counts, each reserved to its pieces
+                answer_release(round_bytes);
+                round_bytes = annot::matrix::buffer_bytes(2 * runs.size(), sizeof(uint64_t))
+                            + annot::matrix::buffer_bytes(runs.size(), sizeof(uint64_t))
+                            + annot::matrix::buffer_bytes(runs.size() + 1, sizeof(uint32_t));
+                charge(round_bytes);
                 std::vector<uint64_t> candidate_a;
+                candidate_a.reserve(2 * runs.size());
                 for (const auto &run : runs) {
                     candidate_a.push_back(run.begin);
                     if (run.end >= min_kmers)
@@ -1906,8 +1940,7 @@ SeedSelection select_seeds(const SupportProfile &profile,
             }
             selection.num_eligible = picked.size();
             // the rounds' scratch, freed with this block
-            if (answer)
-                answer->release(gathered * kSelectionRunBytes);
+            answer_release(scratch + round_bytes);
             break;
         }
         case SelectionPolicy::EXPLICIT: {

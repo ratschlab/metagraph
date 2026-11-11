@@ -5,6 +5,7 @@
 #include <functional>
 #include <filesystem>
 #include <fstream>
+#include <iostream>
 #include <iterator>
 #include <limits>
 #include <map>
@@ -2211,6 +2212,80 @@ TEST(ResolveAnswer, ThePriceCoversTheTree) {
     }
     if (!measured)
         GTEST_SKIP() << "no allocator counters to compare the prices with";
+}
+
+// A max_support selection's scratch is charged as its rounds allocate it (T4 review R1, F1): a
+// round holds a piece for each part of a run that the picks clip, so long runs split by many
+// picks hold far more than one entry a gathered run, the price before. Here 100 labels with a run
+// over the whole query and three labels of short runs every 32 k-mers, every pick inside the long
+// runs: at every reading of the selection's check the heap the selection added is within what its
+// account holds then (a few KiB aside: the picks' and the claimed intervals' vectors), and the
+// selection is the one made without an account
+TEST(ResolveAnswer, TheSelectionChargesTheClippedPieces) {
+    SupportProfile profile;
+    profile.k = kK;
+    profile.num_kmers = 4000;
+    profile.graph_runs = { { 0, profile.num_kmers } };
+    for (size_t l = 0; l < 100; ++l) {
+        LabelProfile lp;
+        lp.label.kind = LabelKind::HEADER;
+        lp.label.name = "long" + std::to_string(l);
+        lp.runs.push_back({ 0, profile.num_kmers });
+        lp.kmers_supported = profile.num_kmers;
+        profile.labels.push_back(std::move(lp));
+    }
+    for (uint64_t offset : { 7, 17, 27 }) {
+        LabelProfile lp;
+        lp.label.kind = LabelKind::HEADER;
+        lp.label.name = "short" + std::to_string(offset);
+        for (uint64_t s = offset; s < profile.num_kmers; s += 32) {
+            lp.runs.push_back({ s, s + 1 });
+        }
+        lp.kmers_supported = lp.runs.size();
+        profile.labels.push_back(std::move(lp));
+    }
+    const std::string query(profile.num_kmers + kK - 1, 'A');
+    SelectionPolicy policy;
+    policy.policy = SelectionPolicy::MAX_SUPPORT;
+    policy.min_block_bp = kK;
+    policy.max_seeds = 250;
+    const SeedSelection plain = select_seeds(profile, query, policy, false);
+    ASSERT_EQ(250u, plain.seeds.size());
+
+    AnswerAccount account(uint64_t(1) << 40);
+    const std::optional<int64_t> base = live_heap_bytes();
+    int64_t worst = std::numeric_limits<int64_t>::min();
+    int64_t heap_at_worst = 0;
+    uint64_t held_at_worst = 0;
+    size_t readings = 0;
+    auto check = [&]() {
+        const std::optional<int64_t> now = live_heap_bytes();
+        if (!base || !now)
+            return;
+        ++readings;
+        const int64_t gap = (*now - *base) - int64_t(account.held());
+        if (gap > worst) {
+            worst = gap;
+            heap_at_worst = *now - *base;
+            held_at_worst = account.held();
+        }
+    };
+    const SeedSelection got = select_seeds(profile, query, policy, false, check, &account);
+    ASSERT_EQ(plain.seeds.size(), got.seeds.size());
+    for (size_t i = 0; i < got.seeds.size(); ++i) {
+        EXPECT_EQ(plain.seeds[i].kmers, got.seeds[i].kmers) << i;
+        EXPECT_EQ(plain.seeds[i].labels, got.seeds[i].labels) << i;
+    }
+    // the rounds' pieces: 100 long runs, each split by up to 250 picks
+    EXPECT_GT(account.peak(), 100u * 250 * sizeof(uint64_t) * 4);
+    if (!readings)
+        GTEST_SKIP() << "no allocator counters to compare the prices with";
+    EXPECT_GT(readings, 1000u);
+    EXPECT_LE(worst, 64 << 10) << "the heap held " << heap_at_worst << " B while the account held "
+                               << held_at_worst << " B";
+    std::cerr << "max_support selection: at its worst reading of " << readings << " the heap held "
+              << heap_at_worst << " B, the account " << held_at_worst << " B (peak "
+              << account.peak() << " B)" << std::endl;
 }
 
 // The route: an answer priced past --resolve-max-discover-memory-mb is refused, 400

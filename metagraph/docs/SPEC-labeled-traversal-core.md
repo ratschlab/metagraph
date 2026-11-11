@@ -597,8 +597,10 @@ is charged to an account of its own of M bytes (the same flag, for a discovery a
 and the CLI has none), each part priced **before** it is built from its sizes and element sizes: the profile (its
 labels with their names, runs and trace breaks, at their vectors' capacities: part `profile`); the candidates'
 grouping (before it is built, a map node, two candidates and two label ids per run it groups, 168 B; then what the
-candidates hold: `candidates`); the selection (a `max_support` selection's scratch, 76 B a run it gathers; each pick
-before it is made; each frozen seed before it is built, its sequence, names, the label order's copy of them and
+candidates hold: `candidates`); the selection (a `max_support` selection's scratch as it is allocated: the runs it
+gathers twice, 16 B each; the vector of a round's clipped pieces each time it grows past them, its new buffer beside
+the old one, for a run with P picks inside it is P + 1 pieces; a round's candidate starts, run ends and Fenwick
+counts, about 28 B a piece, released with the round; each pick before it is made; each frozen seed before it is built, its sequence, names, the label order's copy of them and
 its overlaps: `selection`); and the answer's JSON tree with its text (each label, candidate and seed before it is
 built: a value in an array or an object 96 B, an object member's name 32 B more, a container 64 B, a string its bytes
 and 32 B, the text three times its bytes — written, its growth, its compressed copy —, and 64 KiB for the members
@@ -4595,7 +4597,10 @@ profile under every batch, kept-rows bound and deadline that does not pass, and 
 query answers it as without one), `ResolveAnswer.ThePriceCoversTheTree` (the answer's priced bytes at least the
 allocator's live bytes of the tree and text it builds — profiles of many labels, of many runs, with long names,
 candidates and overlapping seeds, `intervals` and `rle`, presence and trace —, the answer the same as without an
-account, an account a byte short refused at part `answer`), `ResolveBoundsRoute.TheAnswerIsPricedBeforeItIsBuilt` (a
+account, an account a byte short refused at part `answer`), `ResolveAnswer.TheSelectionChargesTheClippedPieces` (T4
+review R1, F1: long runs split by 250 `max_support` picks; at every reading of the selection's check the heap it added
+within what its account holds then, 64 KiB aside; the seeds those made without an account),
+`ResolveBoundsRoute.TheAnswerIsPricedBeforeItIsBuilt` (a
 1 MiB bound: `resolve_answer_too_large` with its exact text and members; the same request answered under 1,024 MiB and,
 with `rle` and a larger `min_block_kmers`, under 1 MiB), `.AnExplicitLabelsMemoryStopIsStated` (the stop block of
 explicit labels on the route); integration `TestResolveDiscoveryBounds.test_explicit_labels_stop_under_the_memory_bound`
