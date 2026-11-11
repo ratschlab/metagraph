@@ -33,6 +33,7 @@ class Config {
     bool to_adj_list = false;
     bool to_fasta = false;
     bool enumerate_out_sequences = false;
+    bool row_map = false;
     bool to_gfa = false;
     bool output_compacted = false;
     bool unitigs = false;

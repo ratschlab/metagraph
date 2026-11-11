@@ -6,6 +6,7 @@
 #include <optional>
 #include <stdexcept>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "traversal_types.hpp"
@@ -25,6 +26,7 @@ enum class EndReason : uint8_t {
     // semantic, per label
     DEAD_END = 0,     // no structural successor in this direction
     LABEL_LOST,       // successors exist but none carries the label
+    RECORD_END,       // a HEADER label: the record ends here (its first or last k-mer)
     BRANCH,           // the label is on several successors and its branch limit is exhausted
     EDGE_REUSE,       // the label's continuation uses an edge already used on this path
     EDGE_REUSE_RC,    // ... used in the opposite orientation (hairpin / inverted repeat)
@@ -43,7 +45,7 @@ const char* to_string(EndReason reason);
  * Label-constrained extension of a seed.
  *
  * A seed is a sequence whose k-mers are all in the graph, and a set of permitted labels that
- * carry every one of them: named explicitly, or derived as the labels on every seed k-mer.
+ * carry every one of them: named explicitly, or derived as the labels carrying the seed.
  * From the seed's last k-mer (right arm) and its first (left arm) the walker extends level
  * by level, one base per level, keeping per path the labels that carry every k-mer walked
  * so far. A label leaves a path when no admissible successor carries it (LABEL_LOST, or
@@ -52,9 +54,27 @@ const char* to_string(EndReason reason);
  * its branch allowance (BRANCH). A path splits where its labels continue on several
  * successors. The result is a tree of segments per arm.
  *
- * The walk rule, which makes the set of walks finite on a graph with cycles: a path never
- * takes an edge ((k+1)-mer) twice, in either orientation in canonical graphs, never steps
- * back into the seed, and never takes a self-reverse-complementary step (a hairpin).
+ * What "carries" means depends on the label's kind.
+ * A COLUMN label carries a k-mer that is annotated with the column (membership).
+ * A HEADER label (one sequence record) is followed in coordinate order. It carries the
+ * seed when the record holds the seed's k-mers at consecutive coordinates: k-mer j at
+ * o + d * j, with d = +1, or d = -1 in canonical and primary graphs when the record holds
+ * the seed's reverse complement. A record holding the seed in several places is followed
+ * from the place with the lowest coordinate (o for d = +1, the last k-mer's coordinate
+ * for d = -1; d = +1 first when equal), so that a seed and its reverse complement, one
+ * seed in those graphs, take the same place and mirror walks. From a k-mer at coordinate
+ * c, the label continues only on the successor holding the record's next coordinate (c + d
+ * on the right arm, c - d on the left). So it follows the record's own sequence through
+ * repeats, cannot fork, and ends where the record does (RECORD_END; DEAD_END when the
+ * node has no successor at all), or with LABEL_LOST where the record's next k-mer is not
+ * in the graph (a non-ACGT base).
+ *
+ * The walk rule, which makes the set of membership walks finite on a graph with cycles: a
+ * path never takes an edge ((k+1)-mer) twice, in either orientation in canonical graphs,
+ * never steps back into the seed, and never takes a self-reverse-complementary step (a
+ * hairpin). It binds COLUMN labels only. A HEADER label is finite by coordinate order
+ * and may reuse an edge (a tandem repeat) or re-enter the seed: on a successor the rule
+ * forbids, the path's COLUMN labels end and its HEADER labels go on.
  *
  * Completeness: levels are synchronous, so a cap trips between two heads of one level.
  * ArmResult::complete_to_bp is the extension up to which every admissible walk is present.
@@ -91,7 +111,8 @@ struct Strategy {
 struct Seed {
     std::string seed_id;
     std::string sequence;
-    // The permitted labels. Empty: derive them from the seed (the labels on every k-mer).
+    // The permitted labels. Empty: derive them from the seed (the columns on every k-mer,
+    // or the records holding the seed at consecutive coordinates).
     std::vector<std::string> labels;
 };
 
@@ -115,8 +136,8 @@ class SeedNotInGraph : public std::invalid_argument {
 class SeedDerivationError : public std::invalid_argument {
   public:
     enum Cause {
-        // no label, named or derived, carries every k-mer of the seed: |limit| the seed's
-        // k-mers, |observed| the k-mers read when that was known
+        // no label, named or derived, carries the seed: |limit| the seed's k-mers,
+        // |observed| the k-mers read when that was known
         NO_CARRIER,
         // the narrowest of the first 64 k-mers has more annotation entries than the
         // derivation materialises: |limit| that bound, |observed| its entries
@@ -220,10 +241,13 @@ struct ArmResult {
     uint64_t steps = 0;
 };
 
-// A seed label that does not carry every seed k-mer
+// A seed label that does not carry the seed: a column not on every seed k-mer, or a record
+// that does not hold the seed's k-mers at consecutive coordinates
 struct DroppedLabel {
     std::string name;
-    std::vector<KmerInterval> runs;   // the k-mer runs it carries
+    // the runs of seed k-mers annotated with the label (for a record: holding any of its
+    // coordinates, which can be every k-mer of a seed the record still does not hold)
+    std::vector<KmerInterval> runs;
 };
 
 struct SeedResult {
@@ -236,7 +260,7 @@ struct SeedResult {
     std::vector<LabelRef> label_dict;
     // The labels were derived from the seed. Then |labels_dropped| is how many of them
     // max_seed_labels cut.
-    // |labels_supporting_total| is how many labels carry every seed k-mer.
+    // |labels_supporting_total| is how many labels carry the seed.
     bool labels_from_seed = false;
     size_t labels_supporting_total = 0;
     size_t labels_dropped = 0;
@@ -248,7 +272,8 @@ struct SeedResult {
 /**
  * Validate the seed and extend it under |strategy|.
  * Throws SeedNotInGraph for a seed with a k-mer the graph does not have,
- * SeedDerivationError when an empty |seed.labels| yields no permitted set, and
+ * SeedDerivationError when the seed has no permitted set (no named label carries the
+ * whole seed, or the labels could not be derived for an empty |seed.labels|), and
  * std::invalid_argument for invalid seeds, labels or strategies.
  */
 SeedResult traverse_seed(const LabelOracle &oracle,

@@ -1,6 +1,7 @@
 #ifndef __TEST_TRIE_REFERENCE_HPP__
 #define __TEST_TRIE_REFERENCE_HPP__
 
+#include <algorithm>
 #include <cassert>
 #include <limits>
 #include <map>
@@ -19,8 +20,9 @@
  * A string-level model of an annotated index and of the walk rule, built from the records
  * a fixture is made of and nothing else: no graph object, no annotation matrix, no walker
  * code. label_trie() gives the walks the rule admits over ONE label's k-mers — the label's
- * maximal label-consistent walks, which is what the walker claims for that label with an
- * unlimited branch allowance.
+ * maximal label-consistent walks, which is what the walker claims for that COLUMN label
+ * with an unlimited branch allowance. header_claim() gives the one walk of a HEADER label
+ * (a sequence record), which is followed in coordinate order and not by the walk rule.
  *
  * Orientation: a k-mer and its reverse complement are one node in canonical and primary
  * graphs, so there both orientations of every record k-mer are in the model; in a basic
@@ -308,6 +310,43 @@ inline RefClaims claims(const StringIndex &ix, const std::set<std::string> &perm
         }
     }
     return out;
+}
+
+// The claim of a HEADER label in a BASIC graph, added to |out|: the record is followed in
+// coordinate order from its first position holding the seed, so the walk is the record's
+// own sequence beside that position, whatever repeats it goes through. It ends at the
+// radius, or where the record does: with DEAD_END when the record's last node on this arm
+// has no successor in the graph, with RECORD_END otherwise. Nothing when the record does
+// not hold the seed.
+inline void header_claim(const StringIndex &ix, const std::string &header,
+                         const std::string &record, const std::string &seed,
+                         Arm arm, uint64_t radius, RefClaims *out) {
+    assert(!ix.canonical);
+    const size_t at = record.find(seed);
+    if (at == std::string::npos)
+        return;
+    std::string walk;
+    if (arm == Arm::RIGHT) {
+        walk = record.substr(at + seed.size());
+    } else {
+        walk = record.substr(0, at);
+        std::reverse(walk.begin(), walk.end());
+    }
+    EndReason reason = EndReason::MAX_EXTENSION;
+    if (walk.size() >= radius) {
+        walk.resize(radius);
+    } else {
+        const std::string node = arm == Arm::RIGHT ? record.substr(record.size() - ix.k)
+                                                   : record.substr(0, ix.k);
+        bool successor = false;
+        for (char c : std::string("ACGT")) {
+            std::string v, edge;
+            ix.step(arm, node, c, &v, &edge);
+            successor |= ix.has(v);
+        }
+        reason = successor ? EndReason::RECORD_END : EndReason::DEAD_END;
+    }
+    (*out)[{ walk, header }] = reason;
 }
 
 } // namespace trie

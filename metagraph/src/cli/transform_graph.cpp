@@ -6,15 +6,75 @@
 #include "common/unix_tools.hpp"
 #include "common/utils/file_utils.hpp"
 #include "common/threads/threading.hpp"
+#include "graph/representation/hash/dbg_sshash.hpp"
 #include "graph/representation/succinct/dbg_succinct.hpp"
 #include "config/config.hpp"
 #include "load/load_graph.hpp"
+#include "clean.hpp"
 
 
 namespace mtg {
 namespace cli {
 
 using mtg::common::logger;
+
+
+// Build an SSHash graph from the contigs of `graph` and save it with the row map
+// that `transform_anno --remap-graph` needs to move annotations to it.
+static int convert_to_sshash(Config *config, std::shared_ptr<graph::DeBruijnGraph> graph) {
+    using graph::DBGSSHash;
+
+    if (graph->get_mode() == graph::DeBruijnGraph::CANONICAL) {
+        logger->error("Only graphs in basic or primary mode can be converted to SSHash");
+        exit(1);
+    }
+    const size_t k = graph->get_k();
+    const auto mode = graph->get_mode();
+    // without --mode, config->graph_mode is basic
+    if (config->graph_mode != graph::DeBruijnGraph::BASIC && config->graph_mode != mode) {
+        logger->error("The SSHash graph keeps the mode of the input graph."
+                      " Change the mode of the input graph first");
+        exit(1);
+    }
+
+    auto tmp_dir = utils::create_temp_dir(
+            config->tmp_dir.empty() ? std::filesystem::path(config->outfbase).remove_filename()
+                                    : config->tmp_dir,
+            "convert");
+
+    // Extract the contigs as `transform --to-fasta --row-map` does
+    Config extract(*config);
+    extract.to_fasta = true;
+    extract.row_map = true;
+    extract.outfbase = tmp_dir / "contigs";
+    clean_graph(&extract, std::move(graph));
+
+    Timer timer;
+    try {
+        DBGSSHash sshash(extract.outfbase + ".fasta.gz", k, mode,
+                         config->num_chars, config->memory_available);
+        logger->trace("SSHash graph built in {} sec", timer.elapsed());
+        sshash.serialize(config->outfbase);
+
+        const std::string row_map_fname
+                = utils::remove_suffix(config->outfbase, DBGSSHash::kExtension) + ".rowmap";
+        std::error_code ec;
+        std::filesystem::rename(extract.outfbase + ".rowmap", row_map_fname, ec);
+        // the temporary directory can be on another file system
+        if (ec) {
+            std::filesystem::copy_file(extract.outfbase + ".rowmap", row_map_fname,
+                                       std::filesystem::copy_options::overwrite_existing);
+        }
+        logger->trace("Row map saved to {}", row_map_fname);
+    } catch (const std::exception &e) {
+        logger->error("{}", e.what());
+        utils::remove_temp_dir(tmp_dir);
+        exit(1);
+    }
+    utils::remove_temp_dir(tmp_dir);
+
+    return 0;
+}
 
 
 int transform_graph(Config *config) {
@@ -34,6 +94,9 @@ int transform_graph(Config *config) {
     auto graph = load_critical_dbg(files.at(0));
 
     logger->trace("Graph loaded in {} sec", timer.elapsed());
+
+    if (config->graph_type == Config::GraphType::SSHASH)
+        return convert_to_sshash(config, std::move(graph));
 
     auto dbg_succ = std::dynamic_pointer_cast<graph::DBGSuccinct>(graph);
 
