@@ -661,8 +661,13 @@ annotation '<annotation>' loaded into RAM for the request has other column label
 with: restart onto the new files, or send the request without in_ram`. Nothing is reserved for a pair refused
 before its memory wait. Requests without `in_ram`, and pairs
 served from the resident index (above `--mem-cap-gb`, or on a server that loaded its graphs into RAM), answer from
-the files mapped at start-up as before; a server on `--mem-cap-gb 0` (staging) loads no copy, so nothing changes
-there. The search cache needs no generation in its key: no answer is computed on other files. A load that fails
+the files mapped at start-up as before. A server on `--mem-cap-gb 0` (staging) loads no copy, and one answer changes
+there: every `in_ram` request on a server on `--mmap` sizes its pair's graph and annotation before the cap decides
+the plan, and one of them that can no longer be stat'ed (gone, or its directory unreadable) refuses the pair with the
+changed-file text (`it is gone or cannot be read`) and the code, where before train 4 the request failed with the
+route's 400 `filesystem error: in file_size: ...` and no code (T4's review R3, S2;
+`TestRecordMappingAtLoad.test_a_gone_file_is_refused_on_a_server_without_a_cap`). The search cache
+needs no generation in its key: no answer is computed on other files. A load that fails
 otherwise (a file that cannot be read: an I/O error) throws, and that request alone fails with the route's 400, the
 loader's message as `error`, while the server runs on with its resident indexes. A mapping that passed the load but
 places a coordinate past the end of its column (an old `.seqs`

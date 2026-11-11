@@ -3888,6 +3888,56 @@ class TestRecordMappingAtLoad(TestingBase):
         self.assertNotIn("The record mapping offered for " + anno, server.text())
         self.assertNotIn("does not belong to the annotation", server.text())
 
+    def test_a_gone_file_is_refused_on_a_server_without_a_cap(self):
+        """T4 review R3, S2: a server on --mmap with --mem-cap-gb 0 (staging's) loads no copy,
+        but an in_ram request still sizes its pair's graph and annotation before the cap decides
+        the plan: one that can no longer be stat'ed (gone) is refused with the changed-file text
+        and the code index_changed (/search 400, /resolve the pair refused; before train 4 the
+        route's 400 "filesystem error: ...", no code). Requests without in_ram answer from the
+        files mapped at start-up, and in_ram on files that are all there is served resident."""
+        out = os.path.join(self.d, 'gone')
+        os.makedirs(out)
+        anno = os.path.join(out, 'anno.column_coord.annodbg')
+        shutil.copyfile(os.path.join(self.d, 'anno.column_coord.annodbg'), anno)
+        shutil.copyfile(os.path.join(self.d, 'right.seqs'), os.path.join(out, 'anno.seqs'))
+        csv = os.path.join(self.d, 'gone.csv')
+        with open(csv, 'w') as f:
+            f.write(f'gone,{self.graph},{anno}\n')
+        with open(os.path.join(self.d, 'small.fa')) as f:
+            fasta = f.read()
+        query = {'FASTA': fasta, 'graphs': ['gone'], 'discovery_fraction': 0.5}
+        resolve = {'sequence': fasta.splitlines()[1], 'graphs': ['gone'],
+                   'discover': {'kind': 'header', 'max_labels': 2}}
+        server = Server([csv, '--mmap', '--mem-cap-gb', '0', '--cache-size', '0'],
+                        os.path.join(self.d, 'gone.log'))
+        try:
+            resident = server.post('search', query)
+            self.assertEqual(200, resident.status_code, resident.text)
+            self.assertTrue(resident.json()[0]['results'], resident.text)
+            on_disk = server.post('resolve', resolve)
+            self.assertEqual((200, 1), (on_disk.status_code, on_disk.json()['answered']),
+                             on_disk.text)
+            # every file there: in_ram is served resident (no copy under a cap of 0)
+            loaded = server.post('search', dict(query, in_ram=True))
+            self.assertEqual((200, resident.json()), (loaded.status_code, loaded.json()))
+            os.remove(anno)
+            refusal = changed_file_refusal(anno, 'annotation', self.graph, anno,
+                                           'it is gone or cannot be read')
+            assert_index_changed(self, server.post('search', dict(query, in_ram=True)), refusal)
+            ret = server.post('resolve', dict(resolve, in_ram=True))
+            self.assertEqual(200, ret.status_code, ret.text[:2000])
+            self.assertEqual((0, 1), (ret.json()['answered'], ret.json()['refused']), ret.text)
+            self.assertEqual(dict(index_changed(refusal), http_status=400),
+                             ret.json()['answers'][0]['refusal'])
+            # without in_ram: the files mapped at start-up answer as before
+            again = server.post('search', query)
+            self.assertEqual((200, resident.json()), (again.status_code, again.json()))
+            self.assertEqual(on_disk.json()['answers'][0]['labels'],
+                             server.post('resolve', resolve).json()['answers'][0]['labels'])
+            self.assertIsNone(server.process.poll())
+        finally:
+            server.stop()
+
     def test_in_ram_refuses_a_pair_whose_files_changed(self):
         """GPT review 7 finding 4 (V7-B's f4_replace.py and f4_graph.py): a request's load of a
         pair into RAM (`in_ram`, a multi-graph server on --mmap with --mem-cap-gb) is refused
