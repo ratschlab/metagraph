@@ -1,6 +1,7 @@
 #include "annotation_remap.hpp"
 
 #include <atomic>
+#include <cassert>
 #include <cstring>
 #include <filesystem>
 #include <fstream>
@@ -135,112 +136,126 @@ sdsl::int_vector<> map_rows_to_graph(const DeBruijnGraph &source,
     return row_map;
 }
 
+// Each pair is appended to the file of its bucket, a range of 2^bucket_bits_ source
+// rows, so that every bucket can then be placed in memory on its own. A bucket
+// spans a whole number of 64-bit words of the row map.
+static constexpr uint64_t kMaxBuckets = 256;
+static constexpr size_t kBufferSize = 1 << 16;
+
+RowMapWriter::RowMapWriter(uint64_t num_rows, uint64_t max_target_node,
+                           const std::filesystem::path &tmp_dir)
+      : num_rows_(num_rows), width_(width_for(max_target_node)), bucket_bits_(6) {
+    while (((num_rows_ + (1ull << bucket_bits_) - 1) >> bucket_bits_) > kMaxBuckets) {
+        ++bucket_bits_;
+    }
+    record_size_ = (bucket_bits_ + width_ + 7) / 8;
+
+    buckets_ = std::vector<Bucket>((num_rows_ + (1ull << bucket_bits_) - 1) >> bucket_bits_);
+    try {
+        for (uint64_t b = 0; b < buckets_.size(); ++b) {
+            buckets_[b].filename = (tmp_dir / fmt::format("bucket.{}", b)).string();
+            buckets_[b].out.open(buckets_[b].filename, std::ios::binary);
+            buckets_[b].buffer.reserve(kBufferSize + record_size_);
+        }
+    } catch (...) {
+        // the destructor does not run for a partially constructed writer
+        remove_buckets();
+        throw;
+    }
+}
+
+RowMapWriter::~RowMapWriter() {
+    remove_buckets();
+}
+
+void RowMapWriter::remove_buckets() {
+    for (auto &bucket : buckets_) {
+        if (bucket.filename.empty())
+            continue;
+        bucket.out.close();
+        std::error_code ec;
+        std::filesystem::remove(bucket.filename, ec);
+    }
+}
+
+void RowMapWriter::add(uint64_t row, uint64_t target_node) {
+    assert(row < num_rows_);
+    assert(target_node && width_for(target_node) <= width_);
+    unsigned __int128 record = row & ((1ull << bucket_bits_) - 1);
+    record = (record << width_) | target_node;
+    Bucket &bucket = buckets_[row >> bucket_bits_];
+    std::lock_guard<std::mutex> lock(bucket.mutex);
+    const char *bytes = reinterpret_cast<const char *>(&record);
+    bucket.buffer.insert(bucket.buffer.end(), bytes, bytes + record_size_);
+    if (bucket.buffer.size() >= kBufferSize) {
+        bucket.out.write(bucket.buffer.data(), bucket.buffer.size());
+        bucket.buffer.clear();
+    }
+}
+
+void RowMapWriter::write(const std::string &filename, uint64_t target_max_index,
+                         size_t num_threads) {
+    const uint64_t width = width_for(target_max_index);
+    if (width > width_)
+        throw std::invalid_argument("Row map entries are wider than declared");
+
+    for (auto &bucket : buckets_) {
+        bucket.out.write(bucket.buffer.data(), bucket.buffer.size());
+        bucket.buffer = {};
+        bucket.out.close();
+        if (!bucket.out)
+            throw std::runtime_error("Cannot write to " + bucket.filename);
+    }
+
+    {
+        std::ofstream out(filename, std::ios::binary);
+        sdsl::int_vector<>::write_header(num_rows_ * width, width, out);
+        if (!out)
+            throw std::runtime_error("Cannot write to " + filename);
+    }
+    const uint64_t header_size = std::filesystem::file_size(filename);
+    std::filesystem::resize_file(filename, header_size + ((num_rows_ * width + 63) / 64) * 8);
+
+    // Each thread holds one bucket of the row map in memory.
+    std::atomic<bool> failed(false);
+    #pragma omp parallel for num_threads(std::min<size_t>(std::max<size_t>(1, num_threads), 16)) schedule(dynamic)
+    for (uint64_t b = 0; b < buckets_.size(); ++b) {
+        const uint64_t begin = b << bucket_bits_;
+        sdsl::int_vector<> rows(std::min<uint64_t>(num_rows_ - begin, 1ull << bucket_bits_), 0, width);
+
+        std::ifstream in(buckets_[b].filename, std::ios::binary);
+        std::vector<char> buffer(record_size_ * (kBufferSize / record_size_));
+        while (in.read(buffer.data(), buffer.size()) || in.gcount()) {
+            for (std::streamsize i = 0; i + record_size_ <= static_cast<size_t>(in.gcount()); i += record_size_) {
+                unsigned __int128 record = 0;
+                std::memcpy(&record, buffer.data() + i, record_size_);
+                rows[static_cast<uint64_t>(record >> width_)]
+                    = static_cast<uint64_t>(record) & sdsl::bits::lo_set[width_];
+            }
+        }
+
+        std::fstream out(filename, std::ios::binary | std::ios::in | std::ios::out);
+        out.seekp(header_size + (begin * width) / 8);
+        out.write(reinterpret_cast<const char *>(rows.data()), ((rows.size() * width + 63) / 64) * 8);
+        out.close();
+        if (!out || !in.is_open() || !in.eof())
+            failed = true;
+    }
+    if (failed)
+        throw std::runtime_error("Cannot write row map to " + filename);
+}
+
 void map_rows_to_graph(const DeBruijnGraph &source,
                        const DeBruijnGraph &target,
                        const std::string &filename,
                        const std::filesystem::path &tmp_dir,
                        size_t num_threads) {
-    const uint64_t num_rows = source.max_index();
-    const uint64_t width = width_for(target.max_index());
-
-    // The walk visits source rows in no particular order. Each pair is appended to
-    // the file of its bucket, a range of 2^bucket_bits source rows, so that every
-    // bucket can then be placed in memory on its own. A bucket spans a whole
-    // number of 64-bit words of the row map.
-    constexpr uint64_t kMaxBuckets = 256;
-    constexpr size_t kBufferSize = 1 << 16;
-    uint64_t bucket_bits = 6;
-    while (((num_rows + (1ull << bucket_bits) - 1) >> bucket_bits) > kMaxBuckets) {
-        ++bucket_bits;
-    }
-    const uint64_t num_buckets = (num_rows + (1ull << bucket_bits) - 1) >> bucket_bits;
-    const size_t record_size = (bucket_bits + width + 7) / 8;
-
-    struct Bucket {
-        std::mutex mutex;
-        std::string filename;
-        std::ofstream out;
-        std::vector<char> buffer;
-    };
-    std::vector<Bucket> buckets(num_buckets);
-
-    auto remove_buckets = [&]() {
-        for (auto &bucket : buckets) {
-            bucket.out.close();
-            std::error_code ec;
-            std::filesystem::remove(bucket.filename, ec);
-        }
-    };
-
-    try {
-        for (uint64_t b = 0; b < num_buckets; ++b) {
-            buckets[b].filename = (tmp_dir / fmt::format("bucket.{}", b)).string();
-            buckets[b].out.open(buckets[b].filename, std::ios::binary);
-            buckets[b].buffer.reserve(kBufferSize + record_size);
-        }
-
-        match_rows(source, target, num_threads, [&](uint64_t row, node_index target_node) {
-            unsigned __int128 record = row & ((1ull << bucket_bits) - 1);
-            record = (record << width) | target_node;
-            Bucket &bucket = buckets[row >> bucket_bits];
-            std::lock_guard<std::mutex> lock(bucket.mutex);
-            const char *bytes = reinterpret_cast<const char *>(&record);
-            bucket.buffer.insert(bucket.buffer.end(), bytes, bytes + record_size);
-            if (bucket.buffer.size() >= kBufferSize) {
-                bucket.out.write(bucket.buffer.data(), bucket.buffer.size());
-                bucket.buffer.clear();
-            }
-        });
-
-        for (auto &bucket : buckets) {
-            bucket.out.write(bucket.buffer.data(), bucket.buffer.size());
-            bucket.buffer = {};
-            bucket.out.close();
-            if (!bucket.out)
-                throw std::runtime_error("Cannot write to " + bucket.filename);
-        }
-
-        {
-            std::ofstream out(filename, std::ios::binary);
-            sdsl::int_vector<>::write_header(num_rows * width, width, out);
-            if (!out)
-                throw std::runtime_error("Cannot write to " + filename);
-        }
-        const uint64_t header_size = std::filesystem::file_size(filename);
-        std::filesystem::resize_file(filename, header_size + ((num_rows * width + 63) / 64) * 8);
-
-        // Each thread holds one bucket of the row map in memory.
-        std::atomic<bool> failed(false);
-        #pragma omp parallel for num_threads(std::min<size_t>(std::max<size_t>(1, num_threads), 16)) schedule(dynamic)
-        for (uint64_t b = 0; b < num_buckets; ++b) {
-            const uint64_t begin = b << bucket_bits;
-            sdsl::int_vector<> rows(std::min<uint64_t>(num_rows - begin, 1ull << bucket_bits), 0, width);
-
-            std::ifstream in(buckets[b].filename, std::ios::binary);
-            std::vector<char> buffer(record_size * (kBufferSize / record_size));
-            while (in.read(buffer.data(), buffer.size()) || in.gcount()) {
-                for (std::streamsize i = 0; i + record_size <= static_cast<size_t>(in.gcount()); i += record_size) {
-                    unsigned __int128 record = 0;
-                    std::memcpy(&record, buffer.data() + i, record_size);
-                    rows[static_cast<uint64_t>(record >> width)]
-                        = static_cast<uint64_t>(record) & sdsl::bits::lo_set[width];
-                }
-            }
-
-            std::fstream out(filename, std::ios::binary | std::ios::in | std::ios::out);
-            out.seekp(header_size + (begin * width) / 8);
-            out.write(reinterpret_cast<const char *>(rows.data()), ((rows.size() * width + 63) / 64) * 8);
-            out.close();
-            if (!out || !in.is_open() || !in.eof())
-                failed = true;
-        }
-        if (failed)
-            throw std::runtime_error("Cannot write row map to " + filename);
-    } catch (...) {
-        remove_buckets();
-        throw;
-    }
-    remove_buckets();
+    // The walk visits source rows in no particular order.
+    RowMapWriter writer(source.max_index(), target.max_index(), tmp_dir);
+    match_rows(source, target, num_threads, [&](uint64_t row, node_index target_node) {
+        writer.add(row, target_node);
+    });
+    writer.write(filename, target.max_index(), num_threads);
 }
 
 // A row map held in memory. Every thread reads the same vector.
