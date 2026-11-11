@@ -836,9 +836,21 @@ class TestTraverseRowDiffFormsAsTheBase(RowDiffFixture, AgainstTheBase, FormsBas
                             {'sequence': self.long[1000:4000],
                              'discover': {'max_labels': 10, 'kind': 'column'}}):
                 with self.subTest(form=form, request=list(request)):
+                    base = self.base_servers[form].post_text('resolve', request)
+                    new = self.servers[form].post_text('resolve', request)
+                    self.assertEqual(base[0], new[0], (form, base[1][:500], new[1][:500]))
+                    base, new = json.loads(base[1]), json.loads(new[1])
                     # (a /resolve answer always states its timing: the run's own)
-                    paths = [p for p in self.differ(form, 'resolve', request)
-                             if not p.startswith('.timing.')]
+                    paths = [p for p in diff_paths(base, new) if not p.startswith('.timing.')]
+                    if 'labels' in request:
+                        # explicit labels on the row paths are profiled by the discovery's pass
+                        # since train 4 (T4-L1, GPT review 7 finding 2; §7.2.2): their
+                        # work.memory_bytes models that pass, not every k-mer's hits, so it is
+                        # the base's or lower, never 0. Every other member is compared exactly
+                        self.assertGreater(new['work']['memory_bytes'], 0)
+                        self.assertLessEqual(new['work']['memory_bytes'],
+                                             base['work']['memory_bytes'])
+                        paths = [p for p in paths if p != '.work.memory_bytes']
                     self.assertEqual(['.capabilities.counts'] if form.endswith('int_brwt')
                                      else [], paths)
 
