@@ -46,23 +46,50 @@ class TraverseFixture(TestingBase):
         cls._annotate_graph(fasta, cls.graph, anno_base, 'column')
 
 
-class TraverseCLI:
-    def _run(self, request, *flags):
-        path = self.tempdir.name + '/request.json'
-        with open(path, 'w') as f:
-            json.dump(request, f)
-        command = f'{METAGRAPH} traverse -i {self.graph} -a {self.annotation} {" ".join(flags)} {path}'
-        res = subprocess.run(shlex.split(command), stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-        return res
+class TraverseServer(TraverseFixture):
+    """A server on the fixture's index; the tests post their requests to it."""
+    server_flags = ''
 
-    def _traverse(self, request, *flags):
-        res = self._run(request, *flags)
-        self.assertEqual(res.returncode, 0, res.stderr.decode())
-        return json.loads(res.stdout.decode())
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        cls.host = '127.0.0.1'
+        os.environ['NO_PROXY'] = cls.host
+        cls.server, cls.port = start_server(cls.graph, cls.annotation, cls.host, 4567,
+                                            cls.server_flags)
+        # the server answers 503 while it loads: wait until it answers
+        deadline = time.time() + 60
+        while True:
+            try:
+                if requests.get(cls._url('stats'), timeout=1).status_code == 200:
+                    break
+            except requests.RequestException:
+                pass
+            if time.time() > deadline:
+                cls.server.kill()
+                raise RuntimeError(f'The server on port {cls.port} did not get ready')
+            time.sleep(0.05)
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.server.kill()
+        super().tearDownClass()
+
+    @classmethod
+    def _url(cls, route):
+        return f'http://{cls.host}:{cls.port}/{route}'
+
+    def _post(self, route, request):
+        return requests.post(self._url(route), data=json.dumps(request))
+
+    def _traverse(self, request, route='traverse'):
+        res = self._post(route, request)
+        self.assertEqual(200, res.status_code, res.text)
+        return res.json()
 
 
 @parameterized_class(('mode',), input_values=[(mode,) for mode in GRAPH_MODES])
-class TestTraverseCLI(TraverseCLI, TraverseFixture):
+class TestTraverse(TraverseServer):
     def test_fork(self):
         out = self._traverse({'seeds': [{'seed_id': 'x', 'sequence': self.X, 'labels': ['A', 'B']}]})
         self.assertEqual(1, out['schema_version'])
@@ -112,7 +139,7 @@ class TestTraverseCLI(TraverseCLI, TraverseFixture):
     def test_resolve(self):
         out = self._traverse({'sequence': self.X + self.P, 'discover': {},
                               'select': {'min_block_bp': len(self.X + self.P), 'max_seeds': 1}},
-                             '--resolve')
+                             'resolve')
         self.assertEqual(K, out['k'])
         names = {label['label']: label for label in out['labels']}
         self.assertEqual({'A', 'B'}, set(names))
@@ -139,22 +166,14 @@ class TestTraverseCLI(TraverseCLI, TraverseFixture):
             {'seeds': [{'sequence': self.X, 'labels': ['C']}]},
             {'seeds': [{'sequence': self.X}], 'strategy': {'branching': {'max_label_branches': -1}}},
             {'seeds': [{'sequence': self.X}] * 11},
+            {'seeds': [{'sequence': self.X}], 'graph': 'x'},
         ]:
-            res = self._run(request)
-            self.assertNotEqual(res.returncode, 0, request)
-        self.assertNotEqual(0, self._run({'seeds': [{'sequence': self.X}]},
-                                         '--traverse-max-seed-bp', '50').returncode)
-        resolve = {'sequence': self.X, 'labels': ['A']}
-        self.assertEqual(0, self._run(resolve, '--resolve').returncode)
-        self.assertNotEqual(0, self._run(resolve, '--resolve',
-                                         '--resolve-max-query-bp', '50').returncode)
-        # a limit must be a whole number: 1e6 is refused, not read as 1
-        self.assertNotEqual(0, self._run(resolve, '--resolve',
-                                         '--resolve-max-query-bp', '1e6').returncode)
+            self.assertEqual(400, self._post('traverse', request).status_code, request)
+        self.assertEqual(400, self._post('resolve', {'sequence': self.X}).status_code)
 
 
 @parameterized_class(('mode',), input_values=[(mode,) for mode in GRAPH_MODES])
-class TestTraverseBranchLimit(TraverseCLI, TraverseFixture):
+class TestTraverseBranchLimit(TraverseServer):
     """One label C on both records, so that it reaches the fork after X."""
 
     @classmethod
@@ -178,77 +197,26 @@ class TestTraverseBranchLimit(TraverseCLI, TraverseFixture):
             self.assertEqual({self.P, self.Q}, flanks, branches)
 
 
-class TestTraverseServer(TraverseFixture):
+class TestTraverseLimits(TraverseServer):
+    """The server's limits of a request."""
     mode = 'basic'
+    server_flags = '--traverse-max-seeds 2 --traverse-max-seed-bp 50 --resolve-max-query-bp 50'
 
-    @classmethod
-    def setUpClass(cls):
-        super().setUpClass()
-        cls.host = '127.0.0.1'
-        os.environ['NO_PROXY'] = cls.host
-        cls.servers = {}
-        port = 4567
-        for gated in [True, False]:
-            flag = '--experimental-traverse' if gated else ''
-            cls.servers[gated] = start_server(cls.graph, cls.annotation, cls.host, port, flag)
-            port = cls.servers[gated][1] + 1
-        # a server answers 503 while it loads: wait until each one answers
-        deadline = time.time() + 60
-        for gated, (_, port) in cls.servers.items():
-            route = 'traverse/capabilities' if gated else 'stats'
-            while True:
-                try:
-                    if requests.get(f'http://{cls.host}:{port}/{route}', timeout=1).status_code == 200:
-                        break
-                except requests.RequestException:
-                    pass
-                if time.time() > deadline:
-                    raise RuntimeError(f'The server on port {port} did not get ready')
-                time.sleep(0.05)
+    def test_limits(self):
+        short = self.X[:50]
+        self.assertEqual(200, self._post('traverse', {'seeds': [{'sequence': short}] * 2}).status_code)
+        self.assertEqual(400, self._post('traverse', {'seeds': [{'sequence': short}] * 3}).status_code)
+        self.assertEqual(400, self._post('traverse', {'seeds': [{'sequence': self.X}]}).status_code)
+        self.assertEqual(200, self._post('resolve', {'sequence': short, 'labels': ['A']}).status_code)
+        self.assertEqual(400, self._post('resolve', {'sequence': self.X, 'labels': ['A']}).status_code)
 
-    @classmethod
-    def tearDownClass(cls):
-        for process, _ in cls.servers.values():
-            process.kill()
-
-    def _url(self, route, gated=True):
-        return f'http://{self.host}:{self.servers[gated][1]}/{route}'
-
-    def test_capabilities(self):
-        res = requests.get(self._url('traverse/capabilities'))
-        self.assertEqual(200, res.status_code, res.text)
-        caps = res.json()
-        self.assertEqual(1, caps['schema_version'])
-        self.assertEqual(K, caps['k'])
-        self.assertEqual('basic', caps['regime'])
-        self.assertEqual(10, caps['limits']['max_seeds'])
-
-    def test_traverse_and_resolve(self):
-        res = requests.post(self._url('traverse'),
-                            data=json.dumps({'seeds': [{'sequence': self.X, 'labels': ['A']}]}))
-        self.assertEqual(200, res.status_code, res.text)
-        paths = res.json()['results'][0]['arms']['right']['paths']
-        self.assertEqual(1, len(paths))
-        self.assertEqual(len(self.P), paths[0]['length_bp'])
-
-        res = requests.post(self._url('resolve'),
-                            data=json.dumps({'sequence': self.X, 'labels': ['A', 'B']}))
-        self.assertEqual(200, res.status_code, res.text)
-        self.assertEqual(2, len(res.json()['labels']))
-
-    def test_invalid_request(self):
-        # an unknown field is refused even in an otherwise valid request
-        request = {'seeds': [{'sequence': self.X}]}
-        self.assertEqual(200, requests.post(self._url('traverse'), data=json.dumps(request)).status_code)
-        request['graph'] = 'x'
-        self.assertEqual(400, requests.post(self._url('traverse'), data=json.dumps(request)).status_code)
-
-    def test_routes_are_gated(self):
-        for route in ['traverse/capabilities']:
-            self.assertEqual(404, requests.get(self._url(route, gated=False)).status_code)
-        for route in ['traverse', 'resolve']:
-            res = requests.post(self._url(route, gated=False), data=json.dumps({}))
-            self.assertEqual(404, res.status_code)
+    def test_malformed_limit(self):
+        # a limit must be a whole number: 1e6 is refused, not read as 1
+        command = (f'{METAGRAPH} server_query -i {self.graph} -a {self.annotation}'
+                   f' --port {self.port + 1} --resolve-max-query-bp 1e6')
+        res = subprocess.run(shlex.split(command), stdout=subprocess.PIPE,
+                             stderr=subprocess.PIPE, timeout=60)
+        self.assertNotEqual(0, res.returncode)
 
 
 if __name__ == '__main__':

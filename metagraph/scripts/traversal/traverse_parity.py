@@ -1,16 +1,16 @@
 #!/usr/bin/env python3
 """
-Parity of `metagraph traverse` with the labeled-traversal prototype (gr/labeled-traversal,
-d5d26baa) on the v1 feature set.
+Parity of the /traverse and /resolve routes with the labeled-traversal prototype
+(gr/labeled-traversal, d5d26baa) on the v1 feature set.
 
 The requests (REQUESTS below) are v1 requests on the mini RefSeq index
 (fetch_mini_refseq.sh). Both binaries' responses are projected onto the fields v1 states;
 the prototype's projections are committed as golden files (tests/data/traverse_parity/).
 
-    # check this build against the golden files (CI)
+    # check this build against the golden files (CI): starts a server on the index
     traverse_parity.py --metagraph build/metagraph --index build/mini_refseq
 
-    # record the golden files with a build of the prototype
+    # record the golden files with a build of the prototype, through its `traverse` command
     traverse_parity.py --metagraph <d5d26baa>/build/metagraph --index build/mini_refseq --record
 
 The prototype follows a header label as it follows a column label: by membership. v1 follows a
@@ -25,9 +25,13 @@ path, no continuation sequences, detail full.
 import argparse
 import json
 import os
+import socket
 import subprocess
 import sys
 import tempfile
+import time
+import urllib.error
+import urllib.request
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 GOLDEN_DIR = os.path.join(HERE, '..', '..', 'tests', 'data', 'traverse_parity')
@@ -149,9 +153,14 @@ def project_resolve(response):
     return out
 
 
-def run(metagraph, index, kind, request, prototype):
+def project(kind, response):
+    return project_resolve(response) if kind == 'resolve' else project_traverse(response)
+
+
+def run_prototype(metagraph, index, kind, request):
+    """the prototype's answer, through its `traverse` command"""
     with tempfile.NamedTemporaryFile('w', suffix='.json', delete=False) as f:
-        json.dump(to_prototype(kind, request) if prototype else request, f)
+        json.dump(to_prototype(kind, request), f)
         path = f.name
     try:
         command = [metagraph, 'traverse'] + (['--resolve'] if kind == 'resolve' else []) + [
@@ -161,10 +170,43 @@ def run(metagraph, index, kind, request, prototype):
                              timeout=TIME_BUDGET_MS / 1000 + 60)
         if res.returncode:
             sys.exit(f'{" ".join(command)} failed:\n{res.stderr}')
-        response = json.loads(res.stdout)
+        return project(kind, json.loads(res.stdout))
     finally:
         os.unlink(path)
-    return project_resolve(response) if kind == 'resolve' else project_traverse(response)
+
+
+def start_server(metagraph, index):
+    """a server on the index: (process, its address)"""
+    with socket.socket() as s:
+        s.bind(('127.0.0.1', 0))
+        port = s.getsockname()[1]
+    server = subprocess.Popen(
+        [metagraph, 'server_query', '-i', os.path.join(index, GRAPH),
+         '-a', os.path.join(index, ANNOTATION), '--address', '127.0.0.1', '--port', str(port),
+         '--traverse-max-time-ms', str(TIME_BUDGET_MS)],
+        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    address = f'http://127.0.0.1:{port}'
+    # the server answers 503 while it loads the index
+    deadline = time.time() + 300
+    while True:
+        try:
+            with urllib.request.urlopen(address + '/stats', timeout=5):
+                return server, address
+        except (urllib.error.URLError, OSError):
+            pass
+        if server.poll() is not None or time.time() > deadline:
+            server.kill()
+            sys.exit('The server did not get ready')
+        time.sleep(0.2)
+
+
+def post(address, kind, request):
+    req = urllib.request.Request(f'{address}/{kind}', data=json.dumps(request).encode())
+    try:
+        with urllib.request.urlopen(req, timeout=TIME_BUDGET_MS / 1000 + 60) as res:
+            return project(kind, json.loads(res.read()))
+    except urllib.error.HTTPError as e:
+        sys.exit(f'/{kind} failed with {e.code}:\n{e.read().decode()}')
 
 
 def main():
@@ -177,9 +219,21 @@ def main():
     parser.add_argument('--golden-dir', default=GOLDEN_DIR)
     args = parser.parse_args()
 
+    server, address = (None, None) if args.record else start_server(args.metagraph, args.index)
+    try:
+        failed = compare(args, address)
+    finally:
+        if server:
+            server.kill()
+    if failed:
+        sys.exit(f'{len(failed)} request(s) differ from the prototype: {", ".join(failed)}')
+
+
+def compare(args, address):
     failed = []
     for name, (kind, request) in sorted(requests(args.index).items()):
-        got = run(args.metagraph, args.index, kind, request, prototype=args.record)
+        got = (run_prototype(args.metagraph, args.index, kind, request) if args.record
+               else post(address, kind, request))
         golden = os.path.join(args.golden_dir, name + '.json')
         if args.record:
             os.makedirs(args.golden_dir, exist_ok=True)
@@ -195,8 +249,7 @@ def main():
             print(f'DIFFERS: {name}')
         else:
             print(f'same: {name}')
-    if failed:
-        sys.exit(f'{len(failed)} request(s) differ from the prototype: {", ".join(failed)}')
+    return failed
 
 
 if __name__ == '__main__':

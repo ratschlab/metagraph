@@ -14,7 +14,6 @@
 #include "cli/query.hpp"
 #include "cli/assemble.hpp"
 #include "cli/server.hpp"
-#include "cli/traverse.hpp"
 #include "cli/transform_graph.hpp"
 #include "cli/transform_annotation.hpp"
 
@@ -60,8 +59,6 @@ int main(int argc, char *argv[]) {
             case Config::SERVER_QUERY:
                 return cli::run_server(config.get());
 
-            case Config::TRAVERSE:
-                return cli::traverse_graph(config.get());
 
             case Config::COMPARE:
                 return cli::compare(config.get());

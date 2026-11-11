@@ -90,8 +90,6 @@ Config::Config(int argc, char *argv[]) {
         identity = SERVER_QUERY;
         num_top_labels = 10'000;
         memory_available = 0;
-    } else if (!strcmp(argv[1], "traverse")) {
-        identity = TRAVERSE;
     } else if (!strcmp(argv[1], "transform")) {
         identity = TRANSFORM;
     } else if (!strcmp(argv[1], "transform_anno")) {
@@ -436,10 +434,6 @@ Config::Config(int argc, char *argv[]) {
             relax_arity_brwt = atoi(get_value(i++));
         } else if (!strcmp(argv[i], "--RA-ivbuff-size")) {
             RA_ivbuffer_size = atoll(get_value(i++));
-        } else if (!strcmp(argv[i], "--resolve")) {
-            traverse_resolve = true;
-        } else if (!strcmp(argv[i], "--experimental-traverse")) {
-            experimental_traverse = true;
         } else if (!strcmp(argv[i], "--traverse-max-time-ms")) {
             const std::string value = get_value(i++);
             size_t end = 0;
@@ -655,14 +649,7 @@ Config::Config(int argc, char *argv[]) {
     if (identity == QUERY && infbase_annotators.size() != 1)
         print_usage_and_exit = true;
 
-    if (identity == TRAVERSE
-            && (fnames.size() != 1 || infbase.empty() || infbase_annotators.size() != 1)) {
-        std::cerr << "Error: traverse needs a graph (-i), an annotation (-a) and one request file"
-                  << std::endl;
-        print_usage_and_exit = true;
-    }
-
-    if ((identity == TRAVERSE || identity == SERVER_QUERY)
+    if (identity == SERVER_QUERY
             && (!std::isfinite(traverse_max_time_ms) || !(traverse_max_time_ms > 0)
                 || !traverse_max_seeds || !traverse_max_seed_bp || !resolve_max_query_bp)) {
         std::cerr << "Error: --traverse-max-time-ms, --traverse-max-seeds, --traverse-max-seed-bp"
@@ -675,12 +662,6 @@ Config::Config(int argc, char *argv[]) {
                 || (fnames.size() && (infbase.size() || infbase_annotators.size()))
                 || (fnames.empty() && (infbase.empty() || infbase_annotators.size() != 1))))
         print_usage_and_exit = true;  // only one of fnames or (infbase & annotator) must be used
-
-    if (identity == SERVER_QUERY && experimental_traverse && fnames.size()) {
-        std::cerr << "Error: --experimental-traverse needs a single graph (-i) and annotation (-a),"
-                     " not a list of graphs" << std::endl;
-        print_usage_and_exit = true;
-    }
 
     if ((identity == TRANSFORM
             || identity == CLEAN
@@ -1105,8 +1086,6 @@ if (advanced) {
 
             fprintf(stderr, "\tquery\t\tsearch an annotated graph with FASTA or FASTQ sequences\n\n");
             fprintf(stderr, "\tserver_query\tserve sequence queries over HTTP\n\n");
-            fprintf(stderr, "\ttraverse\textend seeds in the graph under the labels carrying them\n");
-            fprintf(stderr, "\t\t\t(experimental)\n\n");
 
             fprintf(stderr, "\tstats\t\tprint graph statistics for given graph(s) or annotation\n\n");
 
@@ -1581,24 +1560,13 @@ if (advanced) {
             fprintf(stderr, "\n\t   --num-top-labels [INT] \tmaximum number of top labels per query by default [10'000]\n");
             fprintf(stderr, "\t   --no-coord-mapping \t\tquery without mapping coords to sequence headers even if the .seqs index exists [off]\n");
             fprintf(stderr, "\t   --mem-cap-gb [FLOAT] \tmemory in GB available for the server to load graphs for queries into RAM [0]\n");
-            fprintf(stderr, "\n\t   --experimental-traverse \tserve /resolve, /traverse and /traverse/capabilities (single index only) [off]\n");
+            fprintf(stderr, "\n\tA server on a single index (-i, -a) also serves /resolve and /traverse (experimental):\n");
             fprintf(stderr, "\t   --traverse-max-time-ms [FLOAT] \tthe most time one seed's walk may take [30000]\n");
             fprintf(stderr, "\t   --traverse-max-seeds [INT] \tthe most seeds a traversal request may hold [10]\n");
             fprintf(stderr, "\t   --traverse-max-seed-bp [INT] \tthe longest seed a traversal request may hold [10000]\n");
             fprintf(stderr, "\t   --resolve-max-query-bp [INT] \tthe longest query a /resolve request may hold [1000000]\n");
         } break;
-        case TRAVERSE: {
-            fprintf(stderr, "Usage: %s traverse -i <GRAPH> -a <ANNOTATION> [options] REQUEST.json\n\n"
-                            "\tRun a /traverse request (or with --resolve a /resolve request) on the index\n"
-                            "\tand print the JSON response. Experimental: see docs traverse.md.\n\n", prog_name.c_str());
 
-            fprintf(stderr, "Available options for traverse:\n");
-            fprintf(stderr, "\t   --resolve \t\tthe request is a /resolve request [off]\n");
-            fprintf(stderr, "\t   --traverse-max-time-ms [FLOAT] \tthe most time one seed's walk may take [30000]\n");
-            fprintf(stderr, "\t   --traverse-max-seeds [INT] \tthe most seeds the request may hold [10]\n");
-            fprintf(stderr, "\t   --traverse-max-seed-bp [INT] \tthe longest seed the request may hold [10000]\n");
-            fprintf(stderr, "\t   --resolve-max-query-bp [INT] \tthe longest query a /resolve request may hold [1000000]\n");
-        } break;
     }
 
     fprintf(stderr, "\nGeneral options:\n");
