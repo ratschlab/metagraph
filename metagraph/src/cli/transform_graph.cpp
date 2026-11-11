@@ -30,6 +30,12 @@ static int convert_to_sshash(Config *config, std::shared_ptr<graph::DeBruijnGrap
     }
     const size_t k = graph->get_k();
     const auto mode = graph->get_mode();
+    // without --mode, config->graph_mode is basic
+    if (config->graph_mode != graph::DeBruijnGraph::BASIC && config->graph_mode != mode) {
+        logger->error("The SSHash graph keeps the mode of the input graph."
+                      " Change the mode of the input graph first");
+        exit(1);
+    }
 
     auto tmp_dir = utils::create_temp_dir(
             config->tmp_dir.empty() ? std::filesystem::path(config->outfbase).remove_filename()

@@ -60,7 +60,8 @@ class RowMapWriter {
                  const std::filesystem::path &tmp_dir);
     ~RowMapWriter();
 
-    // Thread-safe. Every source row can be added at most once.
+    // Thread-safe. Every source row can be added at most once, with
+    // target_node >= 1 (0 marks a dropped row), and only before write().
     void add(uint64_t row, uint64_t target_node);
 
     // Write the map in the sdsl::int_vector<> format with entries wide enough
@@ -74,6 +75,8 @@ class RowMapWriter {
         std::ofstream out;
         std::vector<char> buffer;
     };
+
+    void remove_buckets();
 
     const uint64_t num_rows_;
     const uint64_t width_;

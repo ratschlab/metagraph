@@ -291,6 +291,20 @@ class TestRemapAnnotation(TestingBase):
         self.assertNotEqual(res.returncode, 0)
         self.assertIn('basic or primary', res.stderr.decode() + res.stdout.decode())
 
+    @parameterized.expand([
+        ('--graph sshash --to-fasta', '--to-fasta --row-map'),
+        ('--graph sshash --initialize-bloom', 'cannot be combined'),
+        ('--graph sshash --mode primary', 'keeps the mode'),
+        ('--graph hash', 'only with'),
+    ])
+    def test_convert_rejects_options(self, flags, message):
+        out = self.tempdir.name + '/rejected'
+        res = subprocess.run(f'{METAGRAPH} transform {flags} -o {out} {self.source}',
+                             shell=True, stdout=PIPE, stderr=PIPE)
+        self.assertNotEqual(res.returncode, 0)
+        self.assertIn(message, res.stderr.decode() + res.stdout.decode())
+        self.assertEqual(glob.glob(out + '*'), [])
+
     def test_remap_rejects_mixed_modes(self):
         prefix = f'{self.tempdir.name}/mixed'
         self._annotate_graph(INPUT, self.source, prefix, 'brwt', num_threads=NUM_THREADS)

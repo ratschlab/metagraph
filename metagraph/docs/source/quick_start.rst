@@ -904,6 +904,7 @@ To build the SSHash graph in a separate step, for example on another machine, wr
     metagraph transform -v -p 36 --to-fasta --row-map -o moved graph.dbg
     metagraph build -v -p 36 --graph sshash -k 31 -o moved moved.fasta.gz
 
+Pass the ``-k`` of the old graph.
 This row map is valid only for an SSHash graph built from exactly ``moved.fasta.gz``.
 For a graph in ``primary`` mode, build the SSHash graph with ``--mode primary``.
 

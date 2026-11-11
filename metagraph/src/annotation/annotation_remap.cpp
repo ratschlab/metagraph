@@ -151,15 +151,27 @@ RowMapWriter::RowMapWriter(uint64_t num_rows, uint64_t max_target_node,
     record_size_ = (bucket_bits_ + width_ + 7) / 8;
 
     buckets_ = std::vector<Bucket>((num_rows_ + (1ull << bucket_bits_) - 1) >> bucket_bits_);
-    for (uint64_t b = 0; b < buckets_.size(); ++b) {
-        buckets_[b].filename = (tmp_dir / fmt::format("bucket.{}", b)).string();
-        buckets_[b].out.open(buckets_[b].filename, std::ios::binary);
-        buckets_[b].buffer.reserve(kBufferSize + record_size_);
+    try {
+        for (uint64_t b = 0; b < buckets_.size(); ++b) {
+            buckets_[b].filename = (tmp_dir / fmt::format("bucket.{}", b)).string();
+            buckets_[b].out.open(buckets_[b].filename, std::ios::binary);
+            buckets_[b].buffer.reserve(kBufferSize + record_size_);
+        }
+    } catch (...) {
+        // the destructor does not run for a partially constructed writer
+        remove_buckets();
+        throw;
     }
 }
 
 RowMapWriter::~RowMapWriter() {
+    remove_buckets();
+}
+
+void RowMapWriter::remove_buckets() {
     for (auto &bucket : buckets_) {
+        if (bucket.filename.empty())
+            continue;
         bucket.out.close();
         std::error_code ec;
         std::filesystem::remove(bucket.filename, ec);

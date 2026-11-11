@@ -656,6 +656,18 @@ Config::Config(int argc, char *argv[]) {
                      " '--graph sshash'" << std::endl;
         print_usage_and_exit = true;
     }
+    if (identity == TRANSFORM && graph_type == SSHASH
+            && (initialize_bloom || clear_dummy || to_adj_list)) {
+        std::cerr << "'--graph sshash' only converts the graph and cannot be combined with"
+                     " --initialize-bloom, --clear-dummy or --to-adj-list" << std::endl;
+        print_usage_and_exit = true;
+    }
+    // 'transform --to-fasta' runs as CLEAN and writes only the sequences
+    if (identity == CLEAN && graph_type != SUCCINCT) {
+        std::cerr << "--graph cannot be combined with --to-fasta. To get the row map with"
+                     " the sequences, use '--to-fasta --row-map'" << std::endl;
+        print_usage_and_exit = true;
+    }
 
     // 'transform --to-fasta' runs as CLEAN
     if (row_map && !(identity == CLEAN && to_fasta)) {
