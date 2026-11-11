@@ -128,9 +128,19 @@ void check_invariants(const ArmResult &arm) {
 
 std::string serialize(const SeedResult &r) {
     std::ostringstream os;
-    os << r.validated_seed_id << '|' << r.label_dict.size() << '|' << r.length_bp << '|';
+    // without labels_from_seed and its counters: a derived run is compared with a named one
+    os << r.validated_seed_id << '|' << r.seed_id_mismatch << '|' << r.length_bp << '|'
+       << r.num_kmers << '|';
+    for (const LabelRef &l : r.label_dict) {
+        os << to_string(l.kind) << ':' << l.name << ';';
+    }
+    os << '|';
     for (const auto &d : r.dropped_labels) {
-        os << d.name << ';';
+        os << d.name;
+        for (const KmerInterval &run : d.runs) {
+            os << ' ' << run.begin << '-' << run.end;
+        }
+        os << ';';
     }
     for (const ArmResult &a : r.arms) {
         os << "\nARM " << to_string(a.arm) << ' ' << a.requested << ' ' << a.status << ' '
@@ -672,6 +682,15 @@ TYPED_TEST(WalkerTest, Caps) {
             EXPECT_EQ(ArmResult::COMPLETE, left.status);
             EXPECT_EQ(2u, count_ends(left, EndReason::DEAD_END));
         }
+        // a fork at the last level needs no further expansion, so it is not capped
+        st = Strategy();
+        st.max_live_paths = 1;
+        st.max_extension_bp = 1;
+        st.direction = Strategy::RIGHT;
+        res = run(*fork, X, { "A", "B" }, st);
+        EXPECT_EQ(ArmResult::COMPLETE, res.arms[kRight].status);
+        EXPECT_FALSE(res.arms[kRight].cap_trigger.has_value());
+        EXPECT_EQ(2u, res.arms[kRight].paths.size());
         st = Strategy();
         st.max_paths = 1;
         res = run(*fork, X, { "A", "B" }, st);

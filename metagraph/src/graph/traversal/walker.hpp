@@ -6,6 +6,7 @@
 #include <optional>
 #include <stdexcept>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "traversal_types.hpp"
@@ -271,7 +272,8 @@ struct SeedResult {
 /**
  * Validate the seed and extend it under |strategy|.
  * Throws SeedNotInGraph for a seed with a k-mer the graph does not have,
- * SeedDerivationError when an empty |seed.labels| yields no permitted set, and
+ * SeedDerivationError when the seed has no permitted set (no named label carries the
+ * whole seed, or the labels could not be derived for an empty |seed.labels|), and
  * std::invalid_argument for invalid seeds, labels or strategies.
  */
 SeedResult traverse_seed(const LabelOracle &oracle,

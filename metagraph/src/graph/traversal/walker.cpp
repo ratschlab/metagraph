@@ -287,7 +287,8 @@ class Walker {
     }
     void run_level(ArmState &arm, uint64_t depth);
     void check_structure(ArmState &arm, const Item &item, Cand &c);
-    std::optional<EndReason> cap_check(const ArmState &arm, size_t nf, size_t remaining);
+    std::optional<EndReason> cap_check(const ArmState &arm, const Item &item, size_t nf,
+                                       size_t remaining);
     std::optional<EndReason> process_item(ArmState &arm, Item &item,
                                           const std::vector<Succ> &succs,
                                           const LabelQuery::Hits *const *hits,
@@ -628,8 +629,7 @@ void Walker::derive_seed_labels(const std::vector<node_index> &keys,
                                           static_cast<double>(keys.size()),
                                           static_cast<double>(read));
             }
-            if (read < keys.size() && strategy_.time_budget_ms > 0
-                    && elapsed_ms() >= strategy_.time_budget_ms) {
+            if (read < keys.size() && time_exceeded()) {
                 throw SeedDerivationError(SeedDerivationError::TIME_BUDGET,
                         "The time budget (" + std::to_string(strategy_.time_budget_ms)
                         + " ms) ran out deriving the permitted set from the seed, after "
@@ -966,9 +966,10 @@ void Walker::check_structure(ArmState &arm, const Item &item, Cand &c) {
     }
 }
 
-// The caps, decided before anything of a head is committed: |nf| successors would be
-// followed, |remaining| heads of the level are still to come after this one
-std::optional<EndReason> Walker::cap_check(const ArmState &arm, size_t nf, size_t remaining) {
+// The caps, decided before anything of a head is committed: |nf| successors of |item| would
+// be followed, |remaining| heads of the level are still to come after this one
+std::optional<EndReason> Walker::cap_check(const ArmState &arm, const Item &item, size_t nf,
+                                           size_t remaining) {
     if (!nf)
         return std::nullopt;
     auto over = [&](uint64_t demand, EndReason reason) {
@@ -980,8 +981,10 @@ std::optional<EndReason> Walker::cap_check(const ArmState &arm, size_t nf, size_
     const size_t live_after = remaining + arm.next.size() + nf;
     if (nf >= 2 && arm.finished_leaves + live_after > strategy_.max_paths)
         return over(arm.finished_leaves + live_after, EndReason::MAX_PATHS);
-    if (live_after > strategy_.max_live_paths)
-        return over(live_after, EndReason::MAX_LIVE_PATHS);
+    // a head that reaches the extension length is not expanded again, so it is not live
+    const size_t live = item.ext_bp + 1 < strategy_.max_extension_bp ? live_after : remaining;
+    if (live > strategy_.max_live_paths)
+        return over(live, EndReason::MAX_LIVE_PATHS);
     return std::nullopt;
 }
 
@@ -1102,7 +1105,7 @@ std::optional<EndReason> Walker::process_item(ArmState &arm, Item &item,
     const size_t nf = followed.size();
 
     // ---- the caps, before anything is committed
-    if (auto cap = cap_check(arm, nf, remaining_in_level))
+    if (auto cap = cap_check(arm, item, nf, remaining_in_level))
         return cap;
 
     // ---- the labels that end here, in state order
