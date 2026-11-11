@@ -1546,8 +1546,11 @@ class TestMultiGraphServer(TestingBase):
         twice a_kleb's time plus a third of b_big's work: b_big gets about a third of its work,
         well past its mapping and short of its end. A request whose b_big still ends by a
         timing outcome is sent again, up to five times, each under a new request_id: after a
-        refusal with a later cutoff, after a complete answer with an earlier one, between the
-        two once both are seen (bisected); the outcomes are stated if the last one fails."""
+        timing refusal with a later cutoff, after a complete answer with an earlier one, between
+        the two once both are seen (bisected); the outcomes are stated if the last one fails.
+        The timing refusals are a 503 with the code deadline (b_big's first poll past its
+        budget), unfinished or not_reached (the cutoff); any other refusal, of either pair,
+        fails the test at once (R4 review, S2)."""
         server = self._cutoff_server('finish', '--traverse-clock-skew-ms', '500',
                                      '--request-retention', '1')
         try:
@@ -1570,17 +1573,31 @@ class TestMultiGraphServer(TestingBase):
                 self.assertEqual(200, ret.status_code, ret.text[:2000])
                 out = ret.json()
                 outcomes = [(a['graph'], a['outcome'],
+                             a.get('refusal', {}).get('http_status'),
                              a.get('refusal', {}).get('code'),
                              a.get('refusal', {}).get('error', '')[:200],
                              (a.get('stop') or {}).get('reason')) for a in out['answers']]
                 tries.append((cutoff_ms, round(took, 3), outcomes))
-                big = out['answers'][1] if len(out['answers']) == 2 else {}
+                # only a timing refusal sends the request again: any other refusal, of either
+                # pair, fails at once
+                self.assertEqual(['a_kleb', 'b_big'], [a['graph'] for a in out['answers']],
+                                 tries)
+                for a in out['answers']:
+                    if a['outcome'] != 'answered':
+                        refusal = a.get('refusal') or {}
+                        self.assertIn((a['outcome'], refusal.get('http_status'),
+                                       refusal.get('code')),
+                                      [('refused', 503, 'deadline'),
+                                       ('refused', 503, 'unfinished'),
+                                       ('refused', 503, 'not_reached')], tries)
+                big = out['answers'][1]
                 # the request ends (b_big's worker stops) before the next one starts
                 self._wait_ended(server, rid)
                 if big.get('outcome') == 'answered' and (big.get('stop') or {}).get('reason'):
                     break
-                # b_big refused (its first poll past its budget, or a_kleb past the cutoff):
-                # more time; b_big answered complete (its work done before the cutoff): less
+                # b_big refused by time (its first poll past its budget, or a_kleb past the
+                # cutoff): more time; b_big answered complete (its work done before the
+                # cutoff): less
                 if big.get('outcome') != 'answered':
                     early = cutoff_ms
                 else:
