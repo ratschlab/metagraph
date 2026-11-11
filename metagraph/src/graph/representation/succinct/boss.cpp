@@ -1016,7 +1016,10 @@ void BOSS::map_to_edges(std::string_view sequence,
                         const std::function<void(edge_index)> &callback,
                         const std::function<bool()> &terminate,
                         const std::function<bool()> &skip) const {
-    map_to_edges(encode(sequence), callback, terminate, skip);
+    EdgeStream edges(*this, sequence, skip);
+    while (!edges.done() && !terminate()) {
+        callback(edges.next());
+    }
 }
 
 std::vector<edge_index> BOSS::map_to_edges(std::string_view sequence) const {
@@ -1027,51 +1030,46 @@ void BOSS::map_to_edges(const std::vector<TAlphabet> &seq_encoded,
                         const std::function<void(edge_index)> &callback,
                         const std::function<bool()> &terminate,
                         const std::function<bool()> &skip) const {
-    assert(std::all_of(seq_encoded.begin(), seq_encoded.end(),
-                       [this](TAlphabet c) { return c <= alph_size; }));
-
-    if (seq_encoded.size() <= k_)
-        return;
-
-    // Mark where (k+1)-mers with invalid characters end
-    // Example for (k+1)=3: [X]***[X]****[X]***
-    //              ---->   [111]0[111]00[111]0
-    auto invalid = utils::drag_and_mark_segments(seq_encoded, alph_size, k_ + 1);
-
-    // slide through all (k+1)-mers
-    for (size_t i = 0; i + k_ + 1 <= seq_encoded.size() && !terminate(); ++i) {
-        if (skip())
-            continue;
-
-        if (invalid[i + k_]) {
-            // this (k+1)-mer contains at least one invalid character
-            callback(npos);
-            continue;
-        }
-
-        auto edge = map_to_edge(seq_encoded.data() + i,
-                                seq_encoded.data() + i + k_ + 1);
-        callback(edge);
-
-        while (edge && ++i + k_ < seq_encoded.size()) {
-            if (terminate())
-                return;
-
-            if (skip())
-                break;
-
-            if (invalid[i + k_]) {
-                // this (k+1)-mer contains at least one invalid character
-                callback(npos);
-                break;
-            }
-
-            edge = fwd(edge, seq_encoded[i + k_ - 1]);
-            edge = pick_edge(edge, seq_encoded[i + k_]);
-
-            callback(edge);
-        }
+    EdgeStream edges(*this, std::span<const TAlphabet>(seq_encoded), skip);
+    while (!edges.done() && !terminate()) {
+        callback(edges.next());
     }
+}
+
+BOSS::EdgeStream::EdgeStream(const BOSS &boss, std::string_view sequence,
+                             std::function<bool()> skip)
+      : EdgeStream(boss, boss.encode(sequence), std::move(skip)) {}
+
+BOSS::EdgeStream::EdgeStream(const BOSS &boss, std::vector<TAlphabet>&& seq_encoded,
+                             std::function<bool()> skip)
+      : EdgeStream(boss, std::span<const TAlphabet>(seq_encoded), std::move(skip)) {
+    // moving a vector keeps its buffer, so |seq_| stays valid
+    owned_seq_ = std::move(seq_encoded);
+}
+
+BOSS::EdgeStream::EdgeStream(const BOSS &boss, std::span<const TAlphabet> seq_encoded,
+                             std::function<bool()> skip)
+      : boss_(&boss), seq_(seq_encoded), skip_(std::move(skip)) {
+    assert(std::all_of(seq_.begin(), seq_.end(),
+                       [&](TAlphabet c) { return c <= boss.alph_size; }));
+    if (seq_.size() > boss.k_)
+        invalid_ = utils::drag_and_mark_segments(seq_, boss.alph_size, boss.k_ + 1);
+}
+
+edge_index BOSS::EdgeStream::next() {
+    assert(!done());
+    const size_t i = i_++;
+    const size_t k = boss_->k_;
+
+    if ((skip_ && skip_()) || invalid_[i + k])
+        return edge_ = npos;
+
+    if (edge_) {
+        edge_ = boss_->fwd(edge_, seq_[i + k - 1]);
+        return edge_ = boss_->pick_edge(edge_, seq_[i + k]);
+    }
+
+    return edge_ = boss_->map_to_edge(seq_.data() + i, seq_.data() + i + k + 1);
 }
 
 std::vector<edge_index>

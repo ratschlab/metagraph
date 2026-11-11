@@ -1074,6 +1074,24 @@ TEST(CoordToHeader, MapSingleCoordConsistentWithBatch) {
     }
 }
 
+// master's map_to_local_coords (#708) drops the entries of a column without records and
+// throws std::runtime_error for a column outside the mapping; staging's throws
+// std::out_of_range for both (map_single_coord) and is kept until the owner decides (staging
+// refuses a mismatched mapping at load, so neither case reaches a request on a sound index)
+TEST(CoordToHeader, DISABLED_MapToLocalCoordsDropsRecordlessColumnsAndRefusesUnknownOnes) {
+    // column 1 has no sequence records
+    CoordToHeader cth({ { "h0", "h1" }, {} }, { { 3, 4 }, {} });
+    using RowTuples = CoordToHeader::RowTuples;
+
+    std::vector<RowTuples> rows = { { { 0, { 0, 4 } }, { 1, { 0 } } } };
+    cth.map_to_local_coords(&rows);
+    ASSERT_EQ(1u, rows[0].size());
+    EXPECT_EQ(0u, rows[0][0].first);
+
+    std::vector<RowTuples> unknown = { { { 2, { 0 } } } };
+    EXPECT_THROW(cth.map_to_local_coords(&unknown), std::runtime_error);
+}
+
 // Test Alignment::format_coords(cth, k) renders per-header ranges
 TEST(AlignmentFormatCoords, WithCoordToHeader) {
     using namespace mtg::graph::align;

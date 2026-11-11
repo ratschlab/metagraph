@@ -68,13 +68,7 @@ bool DBGSuccinct::find(std::string_view sequence,
         },
         [&]() { return num_kmers_missing > max_kmers_missing
                         || num_kmers_discovered >= min_kmers_discovered; },
-        [&]() {
-            if (!is_invalid())
-                return false;
-
-            num_kmers_missing++;
-            return true;
-        }
+        is_invalid
     );
 
     return num_kmers_missing <= max_kmers_missing;
@@ -285,23 +279,43 @@ std::string DBGSuccinct::get_node_sequence(node_index node) const {
 void DBGSuccinct::map_to_nodes_sequentially(std::string_view sequence,
                                             const std::function<void(node_index)> &callback,
                                             const std::function<bool()> &terminate) const {
-    if (sequence.size() < get_k())
-        return;
+    // a BOSS lookup dwarfs the virtual call: map nothing past terminate()
+    call_streamed_nodes(sequence, true, callback, terminate, 1);
+}
 
-    auto is_missing = get_missing_kmer_skipper(bloom_filter_.get(), sequence);
+namespace {
 
-    boss_graph_->map_to_edges(
-        sequence,
-        [&](BOSS::edge_index i) { callback(validate_edge(i)); },
-        terminate,
-        [&]() {
-            if (!is_missing())
-                return false;
+class DBGSuccinctNodeStream final : public NodeStream {
+  public:
+    DBGSuccinctNodeStream(const DBGSuccinct &graph, std::string_view sequence,
+                          std::function<bool()> skip)
+          : graph_(graph), edges_(graph.get_boss(), sequence, std::move(skip)) {}
 
-            callback(npos);
-            return true;
+    size_t next(std::span<node_index> out) override {
+        size_t n = 0;
+        for (; n < out.size() && !edges_.done(); ++n) {
+            out[n] = graph_.validate_edge(edges_.next());
         }
-    );
+        return n;
+    }
+
+  private:
+    const DBGSuccinct &graph_;
+    BOSS::EdgeStream edges_;
+};
+
+} // namespace
+
+std::unique_ptr<NodeStream>
+DBGSuccinct::node_stream(std::string_view sequence, bool sequential) const {
+    if (mode_ == CANONICAL && !sequential)
+        return DeBruijnGraph::node_stream(sequence, sequential);
+
+    std::function<bool()> skip;
+    if (bloom_filter_ && sequence.size() >= get_k())
+        skip = get_missing_kmer_skipper(bloom_filter_.get(), sequence);
+
+    return std::make_unique<DBGSuccinctNodeStream>(*this, sequence, std::move(skip));
 }
 
 void DBGSuccinct
@@ -592,72 +606,50 @@ void DBGSuccinct::traverse(node_index start,
 void DBGSuccinct::map_to_nodes(std::string_view sequence,
                                const std::function<void(node_index)> &callback,
                                const std::function<bool()> &terminate) const {
+    if (mode_ != CANONICAL) {
+        call_streamed_nodes(sequence, false, callback, terminate, 1);
+        return;
+    }
+
     if (sequence.size() < get_k())
         return;
 
     auto is_missing = get_missing_kmer_skipper(bloom_filter_.get(), sequence);
 
-    if (mode_ == CANONICAL) {
-        std::string sequence_rev_compl(sequence.begin(), sequence.end());
-        reverse_complement(sequence_rev_compl.begin(), sequence_rev_compl.end());
+    std::string sequence_rev_compl(sequence.begin(), sequence.end());
+    reverse_complement(sequence_rev_compl.begin(), sequence_rev_compl.end());
 
-        std::vector<BOSS::edge_index> boss_edges;
-        boss_edges.resize(sequence.size() - get_k() + 1);
+    std::vector<BOSS::edge_index> boss_edges;
+    boss_edges.resize(sequence.size() - get_k() + 1);
 
-        auto jt = boss_edges.begin();
-        boss_graph_->map_to_edges(sequence,
-            [&](auto index) { *jt = index; ++jt; },
-            []() { return false; },
-            [&]() {
-                if (!is_missing())
-                    return false;
+    auto jt = boss_edges.begin();
+    boss_graph_->map_to_edges(sequence,
+        [&](auto index) { *jt = index; ++jt; },
+        []() { return false; },
+        is_missing
+    );
 
-                ++jt;
-                return true;
-            }
-        );
+    assert(jt == boss_edges.end());
 
-        assert(jt == boss_edges.end());
-
-        auto it = boss_edges.rbegin();
-        boss_graph_->map_to_edges(sequence_rev_compl,
-            [&](auto rc_index) {
-                assert(it < boss_edges.rend());
-                *it = std::min(*it, rc_index);
-                ++it;
-            },
-            []() { return false; },
-            [&]() {
-                assert(it < boss_edges.rend());
-                // if a k-mer is missing, skip its reverse compliment, as it's missing too.
-                if (!*it) {
-                    ++it;
-                    return true;
-                } else {
-                    return false;
-                }
-            }
-        );
-
-        for (size_t i = 0; i < boss_edges.size() && !terminate(); ++i) {
-            // the definition of a canonical k-mer is redefined:
-            //      use k-mer with smaller index in the BOSS table.
-            callback(validate_edge(boss_edges[i]));
+    auto it = boss_edges.rbegin();
+    boss_graph_->map_to_edges(sequence_rev_compl,
+        [&](auto rc_index) {
+            assert(it < boss_edges.rend());
+            *it = std::min(*it, rc_index);
+            ++it;
+        },
+        []() { return false; },
+        [&]() {
+            assert(it < boss_edges.rend());
+            // if a k-mer is missing, skip its reverse compliment, as it's missing too.
+            return !*it;
         }
+    );
 
-    } else {
-        boss_graph_->map_to_edges(
-            sequence,
-            [&](BOSS::edge_index i) { callback(validate_edge(i)); },
-            terminate,
-            [&]() {
-                if (!is_missing())
-                    return false;
-
-                callback(npos);
-                return true;
-            }
-        );
+    for (size_t i = 0; i < boss_edges.size() && !terminate(); ++i) {
+        // the definition of a canonical k-mer is redefined:
+        //      use k-mer with smaller index in the BOSS table.
+        callback(validate_edge(boss_edges[i]));
     }
 }
 

@@ -32,16 +32,13 @@ auto AnnotationKeyMapper::keys(std::span<const node_index> nodes,
                                 std::string_view sequence) const -> std::vector<node_index> {
     if (nodes.empty())
         return {};
-    std::vector<node_index> result(nodes.size());
     if (needs_sequence()) {
         assert(sequence.size() == nodes.size() + graph_.get_k() - 1);
-        size_t i = 0;
-        graph_.map_to_nodes(sequence, [&](node_index key) { result[i++] = key; });
-        assert(i == nodes.size());
-    } else {
-        std::transform(nodes.begin(), nodes.end(), result.begin(),
-                       [&](node_index node) { return key(node); });
+        return map_to_nodes(graph_, sequence);
     }
+    std::vector<node_index> result(nodes.size());
+    std::transform(nodes.begin(), nodes.end(), result.begin(),
+                   [&](node_index node) { return key(node); });
     return result;
 }
 

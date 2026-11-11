@@ -914,6 +914,9 @@ The command saves the matching of rows as ``moved.rowmap``.
 A repeated run with the same output name reuses this file and skips matching the rows again.
 Before reusing it, the command checks a sample of rows against both graphs and stops if they no longer match.
 Delete the file after changing either graph.
+The row map is built in ``moved.rowmap`` and read from it without loading it whole into memory.
+Building it needs temporary files of about twice its size, in the output directory or in the directory passed with ``--disk-swap``.
+Pass ``--disk-swap ""`` to build and keep the row map in memory instead, which avoids the temporary files.
 
 .. _query_index:
 

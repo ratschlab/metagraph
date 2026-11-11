@@ -58,7 +58,7 @@ std::unique_ptr<AnnotatedDBG> build_anno_graph(uint64_t k,
             std::filesystem::path tmp_dir = utils::create_temp_dir("", "test_col");
             std::string out_path = tmp_dir/"test_col";
             anno_graph->get_annotator().serialize(out_path);
-            return std::make_unique<AnnotatedDBG>(
+            return std::make_unique<MutableAnnotatedDBG>(
                 graph,
                 std::unique_ptr<AnnotatedDBG::Annotator>(new ColumnCoordAnnotator(
                     load_coords(std::move(dynamic_cast<ColumnCompressed<>&>(*anno_graph->annotator_)),
@@ -79,7 +79,7 @@ std::unique_ptr<AnnotatedDBG> build_anno_graph(uint64_t k,
         if constexpr(!std::is_same_v<Annotation, RowDiffColumnAnnotator>
                 && !std::is_same_v<Annotation, RowDiffDiskAnnotator>
                 && !std::is_same_v<Annotation, RowDiffCoordAnnotator>) {
-            return std::make_unique<AnnotatedDBG>(
+            return std::make_unique<MutableAnnotatedDBG>(
                 graph,
                 std::unique_ptr<AnnotatedDBG::Annotator>(
                     convert<Annotation>(
@@ -178,7 +178,7 @@ std::unique_ptr<AnnotatedDBG> build_anno_graph(uint64_t k,
         ));
         row_diff.load_anchor(anchors_file);
         row_diff.load_fork_succ(fork_succ_file);
-        return std::make_unique<AnnotatedDBG>(graph, std::move(annotator));
+        return std::make_unique<MutableAnnotatedDBG>(graph, std::move(annotator));
 
     } else if constexpr(std::is_same_v<Annotation, RowDiffDiskAnnotator>) {
         std::filesystem::path tmp_dir = utils::create_temp_dir("", "test_col");
@@ -218,7 +218,7 @@ std::unique_ptr<AnnotatedDBG> build_anno_graph(uint64_t k,
             exit(1);
         }
 
-        return std::make_unique<AnnotatedDBG>(graph, std::move(annotator));
+        return std::make_unique<MutableAnnotatedDBG>(graph, std::move(annotator));
 
     } else {
         throw std::runtime_error("Unsupported combination");

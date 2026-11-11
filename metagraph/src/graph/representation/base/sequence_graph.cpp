@@ -1,5 +1,7 @@
 #include "sequence_graph.hpp"
 
+#include <algorithm>
+#include <array>
 #include <cassert>
 #include <progress_bar.hpp>
 #include <sdsl/int_vector.hpp>
@@ -536,6 +538,39 @@ size_t incoming_edge_rank(const SequenceGraph &graph,
     assert(done && "the edge must exist in graph");
 
     return edge_rank;
+}
+
+std::unique_ptr<NodeStream>
+SequenceGraph::node_stream(std::string_view sequence, bool sequential) const {
+    return std::make_unique<BufferedNodeStream>(
+        sequential ? graph::map_to_nodes_sequentially(*this, sequence)
+                   : graph::map_to_nodes(*this, sequence)
+    );
+}
+
+void DeBruijnGraph::call_streamed_nodes(std::string_view sequence, bool sequential,
+                                        const std::function<void(node_index)> &callback,
+                                        const std::function<bool()> &terminate,
+                                        size_t max_chunk_size) const {
+    assert(max_chunk_size && max_chunk_size <= NodeRange::kChunkSize);
+    if (terminate())
+        return;
+
+    // Pull chunks of doubling size: a virtual call per node is slow for fast
+    // graphs, while terminate() may stop early, and then at most as many nodes
+    // are mapped in vain as were already passed to the callback
+    auto stream = node_stream(sequence, sequential);
+    std::array<node_index, NodeRange::kChunkSize> buffer;
+    for (size_t size = 1; ; size = std::min(2 * size, max_chunk_size)) {
+        size_t n = stream->next({ buffer.data(), size });
+        for (size_t i = 0; i < n; ++i) {
+            callback(buffer[i]);
+            if (terminate())
+                return;
+        }
+        if (n < size)
+            return;
+    }
 }
 
 std::vector<SequenceGraph::node_index>
