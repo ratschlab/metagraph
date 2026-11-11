@@ -1433,14 +1433,14 @@ void Walker::validate_seed() {
         result_.labels_supporting_total = result_.num_seed_labels;
     }
     // the seed id is defined over the case-mapped sequence (§4.3 / §6.1), over the kept labels'
-    // names (views of the dictionary's)
+    // names (views of the dictionary's, handed over: make_seed_id sorts its own vector)
     std::vector<std::string_view> kept_names;
     kept_names.reserve(result_.label_dict.size());
     for (const LabelRef &ref : result_.label_dict) {
         kept_names.push_back(ref.name);
     }
     result_.validated_seed_id = make_seed_id(release_id_, seed_upper_,
-                                             regime_ != Regime::BASIC, kept_names);
+                                             regime_ != Regime::BASIC, std::move(kept_names));
     result_.seed_id_mismatch = !seed_.seed_id.empty()
                                 && seed_.seed_id != result_.validated_seed_id;
 
