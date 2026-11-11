@@ -15,6 +15,7 @@
 #include "annotation/binary_matrix/multi_brwt/brwt.hpp"
 #include "annotation/representation/annotation_matrix/static_annotators_def.hpp"
 #include "common/logger.hpp"
+#include "common/source_revision.hpp"
 #include "common/utils/string_utils.hpp"
 #include "common/utils/file_utils.hpp"
 #include "seq_io/formats.hpp"
@@ -99,6 +100,15 @@ Config::Config(int argc, char *argv[]) {
         identity = RELAX_BRWT;
     } else if (!strcmp(argv[1], "--version")) {
         std::cout << "Version: " VERSION << std::endl;
+        // the commit the binary was built from and whether the checkout differed from it
+        // (CMakeListsSourceRevision.cmake): "Commit: <hex> (clean)", "(dirty)", "(state
+        // unknown)", or "Commit: unknown" without git; a deploy compares it with its commit
+        const std::string commit = mtg::common::source_commit();
+        const std::string state = mtg::common::source_state();
+        std::cout << "Commit: " << commit;
+        if (commit != "unknown")
+            std::cout << " (" << (state == "unknown" ? "state unknown" : state) << ")";
+        std::cout << std::endl;
         exit(0);
     } else if (!strcmp(argv[1], "--advanced")) {
         advanced = true;
@@ -1559,7 +1569,8 @@ if (advanced) {
 
             fprintf(stderr, "General options:\n");
             fprintf(stderr, "\t--advanced \tshow other advanced and legacy options [off]\n");
-            fprintf(stderr, "\t--version \tprint version\n");
+            fprintf(stderr, "\t--version \tprint the version and the commit built from: clean, dirty or\n");
+            fprintf(stderr, "\t\t\tstate unknown, or 'Commit: unknown' (no git checkout of this source)\n");
             fprintf(stderr, "\n");
             return;
         }

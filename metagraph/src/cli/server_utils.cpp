@@ -1004,10 +1004,14 @@ RequestAnswer answer_request(const std::string &content, const std::string &enco
     } catch (const ClientGone &e) {
         // nobody to answer: nothing is written, and the connection is closed rather than
         // kept for a next request
-        logger->info("[Server] Request {}: {}; no response written", request_id, e.what());
+        logger->info("[Server] Request {}: {}; no response written", request_id,
+                     ::utils::escape_for_log(e.what()));
         return RequestAnswer();
     } catch (const HttpError &e) {
-        logger->warn("[Server] Error on request {} ({}): {}", request_id, e.status(), e.what());
+        // a client's text in it (a label, a member name) with its control characters escaped,
+        // here and below: a newline in it would otherwise start a forged log line
+        logger->warn("[Server] Error on request {} ({}): {}", request_id, e.status(),
+                     ::utils::escape_for_log(e.what()));
         answer.status = e.status();
         answer.header.clear();
         // the body as the route wrote it, uncompressed like every error
@@ -1024,7 +1028,8 @@ RequestAnswer answer_request(const std::string &content, const std::string &enco
         logger->info("[Server] Request {}: busy; 503", request_id);
         answer = busy_answer(e, compact);
     } catch (const std::exception& e) {
-        logger->warn("[Server] Error on request {}: {}", request_id, e.what());
+        logger->warn("[Server] Error on request {}: {}", request_id,
+                     ::utils::escape_for_log(e.what()));
         answer.status = 400;
         ret = json_str_with_error_msg(e.what());
     } catch (...) {
@@ -1050,8 +1055,8 @@ void process_request(std::shared_ptr<HttpServer::Response> &response,
                      bool compact,
                      const ResponseControl *control,
                      std::function<void(const SimpleWeb::error_code &)> on_sent) {
-    logger->info("[Server] {} request {} from {}", request->path, request_id,
-                 request->remote_endpoint().address().to_string());
+    logger->info("[Server] {} request {} from {}", ::utils::escape_for_log(request->path),
+                 request_id, request->remote_endpoint().address().to_string());
     Timer timer;
     const RequestAnswer answer = answer_request(request->content.string(),
                                                 requested_encoding(request), request_id,

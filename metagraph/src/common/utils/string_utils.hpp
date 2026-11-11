@@ -35,6 +35,12 @@ constexpr size_t kMessageQuoteBytes = 1024;
 // into its log
 std::string clip_for_message(std::string_view text, size_t max_bytes = kMessageQuoteBytes);
 
+// |text| as a log line quotes it: the control characters (bytes below 0x20, and 0x7F) written
+// as \n, \r, \t or \xNN, every other byte as it is (a UTF-8 name stays readable). A client's
+// string (a label in an error text, a request's path) then cannot end the log line it is
+// quoted in and start a forged one (GPT review 7, finding 11)
+std::string escape_for_log(std::string_view text);
+
 std::optional<uint64_t> parse_abundance(const std::string &comment);
 
 std::string remove_suffix(const std::string &str, const std::string &suffix);

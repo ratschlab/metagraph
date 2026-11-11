@@ -1642,7 +1642,7 @@ int run_server(Config *config) {
         std::optional<Json::Value> refused = id_admission.admit(entry, handles);
         if (refused) {
             logger->info("[Server] Request {}: not started, {}", request_id,
-                         refused->get("error", "").asString());
+                         ::utils::escape_for_log(refused->get("error", "").asString()));
             throw HttpError(409, std::move(*refused));
         }
     };
@@ -1808,7 +1808,7 @@ int run_server(Config *config) {
             } catch (const PatternRefusal &e) {
                 logger->warn("[Server] Request {}: pair ({}, {}) of '{}' refused ({} {}): {}",
                              request_id, pair.first, pair.second, selected.name, e.status(),
-                             e.code(), e.what());
+                             e.code(), ::utils::escape_for_log(e.what()));
                 refused(e.status(), e.body());
             } catch (const graph::pattern::Aborted &) {
                 result.aborted = true;
@@ -1818,7 +1818,8 @@ int run_server(Config *config) {
                 // a failure of this pair, as the route answers one for a single graph
                 // (answer_request): 400 with its text, no code
                 logger->warn("[Server] Request {}: pair ({}, {}) of '{}' failed: {}",
-                             request_id, pair.first, pair.second, selected.name, e.what());
+                             request_id, pair.first, pair.second, selected.name,
+                             ::utils::escape_for_log(e.what()));
                 Json::Value body;
                 body["error"] = e.what();
                 refused(400, body);
@@ -2130,7 +2131,8 @@ int run_server(Config *config) {
                 // what the pair alone would have been answered (answer_request): 400 with its
                 // text, no code
                 logger->warn("[Server] Request {}: pair ({}, {}) of '{}' failed: {}",
-                             request_id, pair.first, pair.second, selected.name, e.what());
+                             request_id, pair.first, pair.second, selected.name,
+                             ::utils::escape_for_log(e.what()));
                 Json::Value body;
                 body["error"] = e.what();
                 refused(400, body);
@@ -2501,7 +2503,8 @@ int run_server(Config *config) {
                     if (refused->instance_mismatch || refused->expired) {
                         logger->info("[Server] Attempt {} (request {}): not started, {}",
                                      attempt->ids().attempt_id, request_id,
-                                     refused->body.get("error", "").asString());
+                                     ::utils::escape_for_log(
+                                             refused->body.get("error", "").asString()));
                         throw HttpError(409, std::move(refused->body));
                     }
                     Json::Value body;
@@ -2531,7 +2534,7 @@ int run_server(Config *config) {
                 // handler start once passed, nothing run
                 Json::Value body = expired_json(attempt->ids(), now, attempts.server_instance());
                 logger->info("[Server] Request {}: not started, {}", request_id,
-                             body["error"].asString());
+                             ::utils::escape_for_log(body["error"].asString()));
                 throw HttpError(409, std::move(body));
             }
             try {
@@ -3153,7 +3156,8 @@ int run_server(Config *config) {
                                         shared_ptr<HttpServer::Request> request) {
         size_t request_id = num_requests++;
         logger->warn("[Server] Not found {} for {} request {} from {}",
-                     request->path, request->method, request_id,
+                     ::utils::escape_for_log(request->path),
+                     ::utils::escape_for_log(request->method), request_id,
                      request->remote_endpoint().address().to_string());
         response->write(SimpleWeb::StatusCode::client_error_not_found,
                         "Could not find path " + request->path);
@@ -3173,20 +3177,23 @@ int run_server(Config *config) {
             const std::string address = request->remote_endpoint().address().to_string();
             const bool answered = refuse_body_too_large(request, config->max_request_body_mb);
             const std::string length = it != request->header.end()
-                    ? ::utils::clip_for_message(it->second, 64) : std::string();
+                    ? ::utils::escape_for_log(::utils::clip_for_message(it->second, 64))
+                    : std::string();
             if (answered) {
                 // the count as the 413 states it (content_length_value: " 3145728 " is 3145728)
                 const auto count = it != request->header.end()
                         ? content_length_value(it->second) : std::nullopt;
                 logger->warn("[Server] {} {} from {} refused 413: its body ({}) exceeds "
                              "--max-request-body-mb {} MiB",
-                             request->method, ::utils::clip_for_message(request->path, 256),
+                             ::utils::escape_for_log(request->method),
+                             ::utils::escape_for_log(::utils::clip_for_message(request->path, 256)),
                              address, count ? std::to_string(*count) + " bytes" : "chunked",
                              config->max_request_body_mb);
             } else {
                 logger->warn("[Server] {} {} from {} dropped without an answer: its "
                              "Content-Length '{}' is no byte count",
-                             request->method, ::utils::clip_for_message(request->path, 256),
+                             ::utils::escape_for_log(request->method),
+                             ::utils::escape_for_log(::utils::clip_for_message(request->path, 256)),
                              address, length);
             }
             return;

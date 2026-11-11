@@ -1,7 +1,7 @@
 {
  "route": "several",
  "status": 400,
- "note": "E12: the selector refusals, before any pair starts. Every one is 400 with code and, where a choice exists, the candidate pairs. A request the release-9 server already refused keeps that refusal's error text byte for byte (the code is an added member). The names cap (max_graphs_without_selection) keeps its existing 400.",
+ "note": "E12: the selector refusals, before any pair starts. Every one is 400 with code and, where a choice exists, the candidate pairs. A request the release-9 server already refused keeps that refusal's error text byte for byte (the code is an added member). The names cap (max_graphs_without_selection) keeps its existing 400. An empty graphs on a multi-graph /search (train 4) was answered 200 with the body null before; it selects no pair and is refused with pair_not_found, before any cached answer.",
  "body": [
   {
    "case": "graphs and pairs together",
@@ -96,6 +96,15 @@
    "body": {
     "error": "request: /search selects by graphs only (it has no re-ask): pairs is not accepted",
     "code": "pairs_unsupported"
+   }
+  },
+  {
+   "case": "an empty graphs on /search",
+   "route": "POST /search",
+   "status": 400,
+   "body": {
+    "error": "request.graphs: the list is empty: it selects no pair (name at least one graph; GET /capabilities lists them)",
+    "code": "pair_not_found"
    }
   },
   {

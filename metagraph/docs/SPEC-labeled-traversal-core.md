@@ -3291,8 +3291,38 @@ charges or admits: a budget-aware read whose path stops at a cached row takes th
 cache (`PathAggregates`: the whole path's length, entries, stored bytes, scratch and reconstruction peak), so every
 row's `RowCost` — its work (8 per dependency row, 1 per entry) and its standalone demand — is that of its whole path,
 the cache only shortening the decoding (and the transient charges of a call; a row read alone never needs more
-than without the cache, so where a fetch stops is unchanged). The cache is bounded in bytes (each row as its exact
-copy plus 640 B for its share of the tables) in two generations: a row is **admitted before it is copied** — its
+than without the cache, so where a fetch stops is unchanged). The cache is bounded in bytes — each row as its exact
+copy, and its two hash tables as they are: their bucket arrays (`bucket_count + 61` buckets of 128 B for binary
+rows, 176 B for tuple rows) and overflow nodes, each buffer at its jemalloc size class (`alloc_bytes`, as every
+buffer of the decode budget's model): what the heap holds with jemalloc 5.3 and earlier (four classes per
+doubling), an upper bound of it under jemalloc 5.4, whose large buffers on macOS (16 KiB pages) take
+page-granular sizes — a 2,105,984 B buffer takes 2,113,536 B, counted 2,621,440 — and whose 8 B class is counted
+16 *(review R4 of train 4, S4: the count was never below the heap)*. An insert, and a hit's move to the current
+generation, is made only with room for what it can add to its table: when it can double the table — at tsl's
+threshold (90% load) or from 80% load, where a full neighbourhood doubles a seeded table (the lowest load at a
+growth of 133k seeded tables of 2¹ to 2²² buckets was 0.825) — its doubling beside what the cache holds (the old
+and the new bucket array at once), else one overflow node; a move without that room is not made, the row read where it is. So the cache holds
+at most its bound after every insert, whatever the rows' ids (it reads what it holds again after each), and
+throughout every growth it reserved; a generation fills its table to 80% load before it rotates. *(Review R4 of
+train 4, S1: room for a doubling at every insert stopped a generation of narrow tuple rows at 45% load of a table
+whose doubling did not fit half the bound, about half the bound used: under 128 MiB, 1.5 M random ids, the most
+rows held were 117,966 tuple rows of 48 B against 195,082 at the old 640 B charge, 117,966 of 352 B against
+135,300; now 209,714 of either, 85,196 of 1,280 B against 69,904, and 419,430 binary rows against 209,714.)* *(GPT review 7, finding 8, train 4: the cache charged 640 B per entry for its
+tables and hashed rows by their id; tsl doubles a table down to 10% load when a neighbourhood is full, so crafted
+row ids could grow a generation to 2²⁰ buckets, about 440 MiB across both against the 128 MiB bound, reasoned;
+and a table of one wide row held 63 × 176 B against its 640 B; rows with bit-reversed ids, whose low bits a run
+of consecutive rows shares, made identity-hashed tables hold up to 2,516 B per entry under a 1 MiB bound. The
+tables now also hash rows seeded, `SeededHash`, which keeps them at the occupancy of random ids (at most 285 B per
+entry in the same test): the bound no longer depends on it, the number of rows held does. A single insert or move that doubles a table below 80% load, or more than once, possible only for ids
+that collide in the hash, can pass the bound until it returns. After an insert the generations are then dropped
+until the bound holds again; after a hit's move only at the next insert or decode call, which trim to the bound
+when they begin (a trim in the move would evict rows the decode has already found cached). The factor has no
+constant bound, only the number of doublings colliding ids allow: with the identity hash and bit-reversed ids,
+review R4's probe measured a heap peak of 4.6 times the bound under 1 MiB (tuple rows, while every insert kept
+room for a doubling), and since S1 up to 2.1 times under 1 MiB and 1.6 times under 8 MiB; the seeded hash's
+per-process seed keeps a client from choosing such ids (its heap stayed within 0.63 of the bound in every pattern
+of the probe).)*
+The cache keeps its rows in two generations: a row is **admitted before it is copied** — its
 stored size computed from the row, the shared bound read and the older entries evicted first, so that a row the
 cache refuses (more than half the bound) is never copied and the copy of one it keeps is made within the bound
 *(review of levels 4–5, finding 1: copying first, a cache bounded at 1 KiB allocated 4,210,688 bytes for a row of

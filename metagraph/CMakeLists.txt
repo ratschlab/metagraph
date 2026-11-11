@@ -568,6 +568,28 @@ file(GLOB_RECURSE metagraph_cli_files "src/cli/*.cpp")
 add_library(metagraph-cli STATIC ${metagraph_cli_files})
 add_dependencies(metagraph-core HTSLIB)
 
+# The source revision `metagraph --version` states (common/source_revision.hpp): the commit and
+# whether the checkout differed from it, read by CMakeListsSourceRevision.cmake at configure time
+# (so that the generated source exists) and again at every build, which rewrites the source only
+# when the state changed. Without git, or outside a checkout, both are "unknown"
+find_package(Git QUIET)
+set(SOURCE_REVISION_CPP ${CMAKE_CURRENT_BINARY_DIR}/gen/source_revision.cpp)
+set(SOURCE_REVISION_ARGS
+  -DSOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}
+  -DOUTPUT=${SOURCE_REVISION_CPP}
+  -DGIT_EXECUTABLE=${GIT_EXECUTABLE}
+  -P ${CMAKE_CURRENT_SOURCE_DIR}/CMakeListsSourceRevision.cmake
+)
+execute_process(COMMAND ${CMAKE_COMMAND} ${SOURCE_REVISION_ARGS})
+add_custom_target(source_revision
+  COMMAND ${CMAKE_COMMAND} ${SOURCE_REVISION_ARGS}
+  BYPRODUCTS ${SOURCE_REVISION_CPP}
+  COMMENT "Reading the source revision and the state of the checkout"
+  VERBATIM
+)
+target_sources(metagraph-cli PRIVATE ${SOURCE_REVISION_CPP})
+add_dependencies(metagraph-cli source_revision)
+
 
 set(METALIBS ${METALIBS}
   -lKMC

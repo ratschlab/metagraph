@@ -1102,15 +1102,19 @@ class TestMultiGraphServer(TestingBase):
                 self.assertEqual(expected, searched(selection))
 
         # where /pattern is stricter: an empty list, a value that is not a list and an item that
-        # is not a string are its 400; /search answers [] with null (it queries nothing), reads a
-        # value that is not a list as no field, and an item as its text
+        # is not a string are its 400; /search refuses [] (it selects no pair) with the section 6
+        # code pair_not_found (answered 200 with the body null before), reads a value that is
+        # not a list as no field, and an item as its text
         for graphs in ([], 'ecoli', None, [1], ['ecoli', 1]):
             with self.subTest(graphs=graphs):
                 body = self.post('pattern', dict(p, graphs=graphs), 400)
                 self.assertEqual({'code': 'invalid_request',
                                   'error': 'request.graphs: expected a non-empty array of graph '
                                            'names (GET /capabilities lists them)'}, body)
-        self.assertIsNone(self.post('search', dict(s, graphs=[])))
+        self.assertEqual({'error': 'request.graphs: the list is empty: it selects no pair (name '
+                                   'at least one graph; GET /capabilities lists them)',
+                          'code': 'pair_not_found'},
+                         self.post('search', dict(s, graphs=[]), 400))
         self.assertEqual(set(chunks), searched({'graphs': 'ecoli'}))
         self.assertEqual(set(chunks), searched({'graphs': None}))
         self.assertEqual({'error': 'Request with an uninitialized graph 1', 'code': 'graph_unknown'},
@@ -1342,6 +1346,28 @@ class TestMultiGraphServer(TestingBase):
         self.post('resolve', dict(request, graphs=['kleb']))
         return max(750, int(3000 * (time.time() - started)))
 
+    def _pattern_cutoff_ms(self, request):
+        """The work cutoff (ms after the request's arrival) of a /pattern cutoff test with
+        |request|: three times the time a one-pair /pattern of it on kleb takes on this machine
+        now (the class's server, a_kleb's files), at least 1000 ms (an idle machine's, the
+        fixed time_budget_ms 1500 less the reserve 500 these tests used). Under ASan and at
+        high load a_kleb was unfinished at a fixed 1000 ms; b_big's work on the slow pattern
+        is about ten times a_kleb's, so it is still working at three times a_kleb's time
+        (2d7410423 calibrated the /resolve cutoff tests alike)"""
+        started = time.time()
+        self.post('pattern', dict(request, graphs=['kleb']))
+        return max(1000, int(3000 * (time.time() - started)))
+
+    def _pair_times(self, server, request):
+        """The time (s) a one-pair /resolve of |request| takes on |server| now: on b_big (its
+        whole work; the shorter of two, the first warming its pages) and then on a_kleb"""
+        def one(graph):
+            started = time.time()
+            self.post_to(server, 'resolve', dict(request, graphs=[graph]))
+            return time.time() - started
+        big = min(one('b_big'), one('b_big'))
+        return one('a_kleb'), big
+
     def _wait_ended(self, server, request_id, timeout=120):
         """GET /requests/{request_id} until it states the request ended"""
         deadline = time.time() + timeout
@@ -1435,16 +1461,20 @@ class TestMultiGraphServer(TestingBase):
 
     def test_a_pooled_pair_stopped_by_time_answers_by_the_cutoff(self):
         """SPEC-multigraph-envelope.md section 4 (the owner's decision of 2026-11-01): a pooled
-        pair's own budget is capped at the request's work cutoff (arrival + time_budget_ms 1500
-        less the finalisation reserve 500 ms), so that a pair stopped by time answers by the
+        pair's own budget is capped at the request's work cutoff (arrival + time_budget_ms less
+        the finalisation reserve 500 ms; 1500 ms on an idle machine, scaled with the load:
+        _pattern_cutoff_ms), so that a pair stopped by time answers by the
         cutoff instead of racing it. On one pool thread a_kleb completes, its single-graph
         answer exactly (its own budget stated, nothing clamped); b_big, whose work runs for over
         a second, starts after it, stops by time before the cutoff and answers what it found,
         the cap stated as a clamp of its budget (limits.time_budget_ms, the time_budget_ms entry
         of limits.clamped: the time left before the cutoff at its start)."""
+        # time_budget_ms 1500 on an idle machine: the cutoff (budget - 500) scaled with the load
+        cutoff_ms = self._pattern_cutoff_ms(self.SLOW_PATTERN)
+        budget_ms = cutoff_ms + 500
         server = self._cutoff_server('cap')
         try:
-            request = dict(self.SLOW_PATTERN, time_budget_ms=1500)
+            request = dict(self.SLOW_PATTERN, time_budget_ms=budget_ms)
             started = time.time()
             out = self.post_to(server, 'pattern', dict(request, graphs=['a_kleb', 'b_big']))
             took = time.time() - started
@@ -1452,20 +1482,20 @@ class TestMultiGraphServer(TestingBase):
                              [(a['graph'], a['outcome']) for a in out['answers']])
             self.assertEqual(([], []), (out['not_reached'], out['unfinished']))
             kleb, big = out['answers']
-            self.assertEqual((1500, []), (kleb['limits']['time_budget_ms'],
-                                          kleb['limits']['clamped']))
+            self.assertEqual((budget_ms, []), (kleb['limits']['time_budget_ms'],
+                                               kleb['limits']['clamped']))
             # the pair alone (one pair: inline, the single-graph request) answers the same
             alone = self.post_to(server, 'pattern', dict(request, graphs=['a_kleb']))
             self.assertEqual(untimed(alone['answers'][0]), untimed(kleb))
             # b_big: stopped by time, its budget capped at the cutoff and stated so
             budget = big['limits']['time_budget_ms']
-            self.assertEqual([{'field': 'time_budget_ms', 'requested': 1500,
+            self.assertEqual([{'field': 'time_budget_ms', 'requested': budget_ms,
                                'effective': budget}], big['limits']['clamped'])
-            self.assertLess(budget, 1000)
+            self.assertLess(budget, cutoff_ms)
             self.assertIn('time', {e['stop']['reason'] for e in big['patterns'] if e['stop']})
             self.assertEqual(16, len(big['patterns']))
             # by the effective deadline
-            self.assertLess(took, 5)
+            self.assertLess(took, budget_ms / 1000 + 3.5)
         finally:
             server.stop()
 
@@ -1521,38 +1551,94 @@ class TestMultiGraphServer(TestingBase):
     def test_finish_by_ms_cuts_a_pair_and_the_registry_states_its_end(self):
         """finish_by_ms (E20) on /resolve without a budget: the effective deadline is
         finish_by_ms less the clock skew allowance (--traverse-clock-skew-ms 500), the cutoff
-        250 ms (the reserve) before it (finish_by_ms 1600 ms after the request on an idle
-        machine, scaled with the load: _cutoff_ms); the deadline block states all four, and a pair's
+        250 ms (the reserve) before it; the deadline block states all four, and a pair's
         deadline is the minimum of its own (the server's maximum), finish_by_ms - the skew and,
         pooled, the cutoff. On one pool thread a_kleb, from which the query is absent, completes
         first, under the finish_by_ms clamp alone, as a single-graph request with that
-        finish_by_ms; b_big resolves the query (about a second of work) after it: it stops by
-        time before the cutoff and answers the resolve of a prefix, both caps stated as clamps of
-        its budget (finish_by_ms's, then the cutoff's, the budget it ran under). The request's
-        request_id (E4): GET /requests/{request_id} states it ended, each pair with its state,
-        outcome and final usage, the response written (status, bytes); a repeat of the id
-        starts no work (409, the entry with an error); an id never sent, or past the retention
-        count (--request-retention 1), is 404."""
+        finish_by_ms; b_big resolves the query (about a second of work on an idle machine)
+        after it: it stops by time before the cutoff and answers the resolve of a prefix, both
+        caps stated as clamps of its budget (finish_by_ms's, then the cutoff's, the budget it ran
+        under). The request's request_id (E4): GET /requests/{request_id} states it ended, each
+        pair with its state, outcome and final usage, the response written (status, bytes); a
+        repeat of the id starts no work (409, the entry with an error); an id never sent, or
+        past the retention count (--request-retention 1), is 404.
+
+        The window is measured on this server just before (_pair_times): b_big maps every k-mer
+        of the query before its first time poll (a fifth of its work, about as long as a_kleb's
+        whole request), so a cutoff from a_kleb's time alone (at 3 x a_kleb's time on the class
+        server, b_big got about twice that minus a_kleb's actual time) let b_big's first poll
+        come after its budget whenever a_kleb ran slower than measured or the mapping met a
+        burst of load: b_big refused (the CI flake of 2026-11-09/10). The cutoff now comes at
+        twice a_kleb's time plus a third of b_big's work: b_big gets about a third of its work,
+        well past its mapping and short of its end. A request whose b_big still ends by a
+        timing outcome is sent again, up to five times, each under a new request_id: after a
+        timing refusal with a later cutoff, after a complete answer with an earlier one, between
+        the two once both are seen (bisected); the outcomes are stated if the last one fails.
+        The timing refusals are a 503 with the code deadline (b_big's first poll past its
+        budget), unfinished or not_reached (the cutoff); any other refusal, of either pair,
+        fails the test at once (R4 review, S2)."""
         server = self._cutoff_server('finish', '--traverse-clock-skew-ms', '500',
                                      '--request-retention', '1')
         try:
             # effective = finish_by - 500 (skew), the cutoff 250 ms (reserve) before it
             request = self._slow_resolve()
-            window_ms = self._cutoff_ms(request) + 750
-            finish_by = int(time.time() * 1000) + window_ms
-            body = dict(request, graphs=['a_kleb', 'b_big'], finish_by_ms=finish_by,
-                        request_id='it-finish-1')
-            started = time.time()
-            ret = server.post('resolve', body)
-            took = time.time() - started
-            self.assertEqual(200, ret.status_code, ret.text[:2000])
-            out = ret.json()
+            kleb_s, big_s = self._pair_times(server, request)
+            cutoff_ms = max(750, int(1000 * (2 * kleb_s + big_s / 3)))
+            tries = []
+            # cutoffs that refused b_big (too early) and that let it complete (too late)
+            early, late = None, None
+            for attempt in range(5):
+                rid = f'it-finish-a{attempt + 1}'
+                window_ms = cutoff_ms + 750
+                finish_by = int(time.time() * 1000) + window_ms
+                body = dict(request, graphs=['a_kleb', 'b_big'], finish_by_ms=finish_by,
+                            request_id=rid)
+                started = time.time()
+                ret = server.post('resolve', body)
+                took = time.time() - started
+                self.assertEqual(200, ret.status_code, ret.text[:2000])
+                out = ret.json()
+                outcomes = [(a['graph'], a['outcome'],
+                             a.get('refusal', {}).get('http_status'),
+                             a.get('refusal', {}).get('code'),
+                             a.get('refusal', {}).get('error', '')[:200],
+                             (a.get('stop') or {}).get('reason')) for a in out['answers']]
+                tries.append((cutoff_ms, round(took, 3), outcomes))
+                # only a timing refusal sends the request again: any other refusal, of either
+                # pair, fails at once
+                self.assertEqual(['a_kleb', 'b_big'], [a['graph'] for a in out['answers']],
+                                 tries)
+                for a in out['answers']:
+                    if a['outcome'] != 'answered':
+                        refusal = a.get('refusal') or {}
+                        self.assertIn((a['outcome'], refusal.get('http_status'),
+                                       refusal.get('code')),
+                                      [('refused', 503, 'deadline'),
+                                       ('refused', 503, 'unfinished'),
+                                       ('refused', 503, 'not_reached')], tries)
+                big = out['answers'][1]
+                # the request ends (b_big's worker stops) before the next one starts
+                self._wait_ended(server, rid)
+                if big.get('outcome') == 'answered' and (big.get('stop') or {}).get('reason'):
+                    break
+                # b_big refused by time (its first poll past its budget, or a_kleb past the
+                # cutoff): more time; b_big answered complete (its work done before the
+                # cutoff): less
+                if big.get('outcome') != 'answered':
+                    early = cutoff_ms
+                else:
+                    late = cutoff_ms
+                if early and late:
+                    cutoff_ms = int((early * late) ** 0.5)
+                else:
+                    cutoff_ms = max(300, int(cutoff_ms * (1.6 if late is None else 0.5)))
+            where = f'measured a_kleb {kleb_s:.3f} s, b_big {big_s:.3f} s; tries {tries}'
             # by the effective deadline (the writer refuses a later envelope, 503), not after
             # b_big's whole work
-            self.assertLess(took, (window_ms - 500) / 1000 + 1.9)
-            self.assertEqual(('/resolve', 'it-finish-1'), (out['route'], out['request_id']))
+            self.assertLess(took, (window_ms - 500) / 1000 + 1.9, where)
+            self.assertEqual(('/resolve', rid), (out['route'], out['request_id']))
             self.assertEqual([('a_kleb', 'answered'), ('b_big', 'answered')],
-                             [(a['graph'], a['outcome']) for a in out['answers']])
+                             [(a['graph'], a['outcome']) for a in out['answers']], where)
             self.assertEqual(([], []), (out['not_reached'], out['unfinished']))
             kleb, big = out['answers']
             # a_kleb: finish_by_ms - the skew caps its deadline (none requested: the server's
@@ -1566,7 +1652,7 @@ class TestMultiGraphServer(TestingBase):
             self.assertIsNone(kleb['stop'])
             # b_big: stopped by time before the cutoff, the resolve of a prefix; both caps
             # stated, the cutoff's last (the budget it ran under)
-            self.assertEqual('time', big['stop']['reason'])
+            self.assertEqual('time', (big['stop'] or {}).get('reason'), where)
             self.assertLess(big['stop']['resolved_kmers'], big['stop']['query_kmers'])
             clamped = big['limits']['clamped']
             self.assertEqual(['bounds.time_budget_ms'] * 2, [c['field'] for c in clamped])
@@ -1580,8 +1666,8 @@ class TestMultiGraphServer(TestingBase):
                               'effective_deadline_at': iso(finish_by - 500),
                               'cutoff_at': iso(finish_by - 750)}, out['deadline'])
             # the registry: the request ended once its workers ended
-            entry = self._wait_ended(server, 'it-finish-1')
-            self.assertEqual(('it-finish-1', '/resolve', 'ended', 'answered'),
+            entry = self._wait_ended(server, rid)
+            self.assertEqual((rid, '/resolve', 'ended', 'answered'),
                              (entry['request_id'], entry['route'], entry['state'],
                               entry['reason']))
             self.assertEqual(out['server_instance'], entry['server_instance'])
@@ -1599,9 +1685,9 @@ class TestMultiGraphServer(TestingBase):
             ret = server.post('resolve', body)
             self.assertEqual(409, ret.status_code, ret.text[:2000])
             repeat = ret.json()
-            self.assertIn("request_id 'it-finish-1' is running, or retained", repeat['error'])
+            self.assertIn(f"request_id '{rid}' is running, or retained", repeat['error'])
             self.assertEqual(entry, {k: v for k, v in repeat.items() if k != 'error'})
-            self.assertEqual(1, server.text().count('graph name(s), request_id it-finish-1'))
+            self.assertEqual(1, server.text().count(f'graph name(s), request_id {rid}\n'))
             # an id never sent (F3: with the server's clock, an integer)
             before = int(time.time() * 1000)
             ret = server.get('requests/it-never-sent')
@@ -1625,7 +1711,7 @@ class TestMultiGraphServer(TestingBase):
             self.assertIsNone(clamped['bounds.time_budget_ms']['requested'])
             self.assertLess(clamped['bounds.time_budget_ms']['effective'], 9500)
             self.assertEqual('ended', self._wait_ended(server, 'it-finish-2')['state'])
-            ret = server.get('requests/it-finish-1')
+            ret = server.get(f'requests/{rid}')
             self.assertEqual(404, ret.status_code, ret.text[:2000])
             self.assertIn('at most 1', ret.json()['error'])
             # a malformed request_id is the request's 400 (nothing registered)
@@ -1637,27 +1723,31 @@ class TestMultiGraphServer(TestingBase):
 
     def test_a_short_budget_bounds_the_cutoff_before_a_later_finish_by_ms(self):
         """The cutoff comes from the EFFECTIVE deadline, never from finish_by_ms alone: a short
-        time_budget_ms (1500 ms) under a finish_by_ms a minute later puts the cutoff at arrival
-        + 1000 ms, which caps b_big's budget (stopped by time, answered, the cap stated), the
-        completed a_kleb written beside it within the budget"""
+        time_budget_ms (1500 ms on an idle machine, scaled with the load: _pattern_cutoff_ms)
+        under a finish_by_ms a minute later puts the cutoff at arrival + time_budget_ms - 500 ms,
+        which caps b_big's budget (stopped by time, answered, the cap stated), the completed
+        a_kleb written beside it within the budget"""
+        # time_budget_ms 1500 on an idle machine: the cutoff (budget - 500) scaled with the load
+        cutoff_ms = self._pattern_cutoff_ms(self.SLOW_PATTERN)
+        budget_ms = cutoff_ms + 500
         server = self._cutoff_server('short')
         try:
-            finish_by = int(time.time() * 1000) + 60000
+            finish_by = int(time.time() * 1000) + 60000 + 2 * budget_ms
             started = time.time()
-            out = self.post_to(server, 'pattern', dict(self.SLOW_PATTERN, time_budget_ms=1500,
+            out = self.post_to(server, 'pattern', dict(self.SLOW_PATTERN, time_budget_ms=budget_ms,
                                                        finish_by_ms=finish_by,
                                                        graphs=['a_kleb', 'b_big']))
-            self.assertLess(time.time() - started, 5)
+            self.assertLess(time.time() - started, budget_ms / 1000 + 3.5)
             self.assertEqual([('a_kleb', 'answered'), ('b_big', 'answered')],
                              [(a['graph'], a.get('refusal', {}).get('code', a['outcome']))
                               for a in out['answers']])
             kleb, big = out['answers']
             # finish_by_ms a minute later caps nothing: a_kleb states its own budget
-            self.assertEqual((1500, []), (kleb['limits']['time_budget_ms'],
-                                          kleb['limits']['clamped']))
-            # the cutoff (arrival + 1000 ms) caps b_big's
+            self.assertEqual((budget_ms, []), (kleb['limits']['time_budget_ms'],
+                                               kleb['limits']['clamped']))
+            # the cutoff (arrival + budget - 500 ms) caps b_big's
             self.assertEqual(['time_budget_ms'], [c['field'] for c in big['limits']['clamped']])
-            self.assertLess(big['limits']['time_budget_ms'], 1000)
+            self.assertLess(big['limits']['time_budget_ms'], cutoff_ms)
             self.assertEqual(finish_by, out['deadline']['finish_by_ms'])
             effective = out['deadline']['effective_deadline_at']
             cutoff = out['deadline']['cutoff_at']

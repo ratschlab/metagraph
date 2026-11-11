@@ -185,6 +185,131 @@ class TestTraverseBase(TestingBase):
 
 
 class TestTraverseCLI(TestTraverseBase):
+    def test_version_states_the_source_commit(self):
+        """GPT review 7, finding 6: `metagraph --version` states the version (its first line, as
+        before; build_mini_refseq.sh reads it) and then the commit the binary was built from
+        with the state of the checkout at the build: `Commit: <40 hex> (clean)`, `(dirty)`,
+        `(state unknown)`, or `Commit: unknown` without git. A deploy compares the line with
+        the commit it deploys. The commit is one the checkout knows, when the tests run in one."""
+        res = subprocess.run(shlex.split(METAGRAPH) + ['--version'], stdout=subprocess.PIPE,
+                             stderr=subprocess.PIPE)
+        self.assertEqual(0, res.returncode, res.stderr.decode())
+        lines = res.stdout.decode().split('\n')
+        self.assertEqual(3, len(lines), lines)
+        self.assertEqual('', lines[2])
+        self.assertRegex(lines[0], r'^Version: [0-9]+\.[0-9]+\.[0-9]+$')
+        m = re.fullmatch(r'Commit: ([0-9a-f]{40}) \((clean|dirty|state unknown)\)|Commit: unknown',
+                         lines[1])
+        self.assertTrue(m, lines[1])
+        git = shutil.which('git')
+        if not m.group(1) or not git:
+            return
+        source = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        if subprocess.run([git, '-C', source, 'rev-parse', '--verify', 'HEAD'],
+                          stdout=subprocess.PIPE, stderr=subprocess.PIPE).returncode == 0:
+            kind = subprocess.run([git, '-C', source, 'cat-file', '-t', m.group(1)],
+                                  stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            self.assertEqual('commit', kind.stdout.decode().strip(), lines[1])
+
+    def test_source_revision_states_the_checkout(self):
+        """The step that reads the source revision (CMakeListsSourceRevision.cmake, run by CMake
+        at configure time and at every build) on scratch repositories laid out as this one (the
+        sources under metagraph/src, .gitignore's `metagraph/**/build*`): clean at a commit;
+        untracked files outside src (a build directory at the root, test output) leave it
+        clean (nothing compiles them); a tracked change is dirty, and clean again once undone;
+        an untracked file under src is dirty, an ignored one too (CMake compiles every
+        src/*.cpp); outside a repository both are unknown, and so in a repository that does not
+        hold the source (its metagraph/ directory tracking the script): a copy of the sources,
+        such as a tarball, unpacked inside another repository states no commit, not that
+        repository's (R4 review, N1). An unchanged state does not rewrite the generated source
+        (nothing recompiles)."""
+        cmake, git = shutil.which('cmake'), shutil.which('git')
+        if not cmake or not git:
+            self.skipTest('cmake or git is not on the PATH')
+        script = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                              'CMakeListsSourceRevision.cmake')
+        d = tempfile.mkdtemp(dir=self.tempdir.name)
+        root = os.path.join(d, 'repo')
+        source = os.path.join(root, 'metagraph')
+        os.makedirs(os.path.join(source, 'src', 'cli'))
+        out = os.path.join(d, 'source_revision.cpp')
+
+        def git_run(*args):
+            subprocess.run([git, '-C', root, '-c', 'user.name=t', '-c', 'user.email=t@t',
+                            '-c', 'commit.gpgsign=false'] + list(args), check=True,
+                           stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+
+        def write(path, text):
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            with open(path, 'w') as f:
+                f.write(text)
+
+        def state(directory=source):
+            # git looks no higher than the scratch directory (a TMPDIR inside a checkout)
+            env = dict(os.environ, GIT_CEILING_DIRECTORIES=d)
+            subprocess.run([cmake, f'-DSOURCE_DIR={directory}', f'-DOUTPUT={out}',
+                            f'-DGIT_EXECUTABLE={git}', '-P', script], check=True,
+                           stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=env)
+            with open(out) as f:
+                text = f.read()
+            return (re.search(r'source_commit\(\) \{ return "([^"]*)"; \}', text).group(1),
+                    re.search(r'source_state\(\) \{ return "([^"]*)"; \}', text).group(1))
+
+        write(os.path.join(root, '.gitignore'), 'metagraph/build*\nmetagraph/**/build*\n')
+        write(os.path.join(source, 'src', 'cli', 'a.cpp'), 'int a() { return 1; }\n')
+        write(os.path.join(source, 'CMakeLists.txt'), '# sources: src/*.cpp\n')
+        shutil.copy(script, os.path.join(source, 'CMakeListsSourceRevision.cmake'))
+        git_run('init', '-q')
+        git_run('add', '-A')
+        git_run('commit', '-q', '-m', 'one')
+        head = subprocess.run([git, '-C', root, 'rev-parse', 'HEAD'], stdout=subprocess.PIPE,
+                              check=True).stdout.decode().strip()
+        self.assertEqual((head, 'clean'), state())
+        # an unchanged state leaves the generated source as it was
+        before = os.stat(out).st_mtime_ns
+        time.sleep(0.05)
+        self.assertEqual((head, 'clean'), state())
+        self.assertEqual(before, os.stat(out).st_mtime_ns)
+        # untracked files outside src: still clean
+        write(os.path.join(root, 'build-traversal', 'metagraph_DNA'), 'binary\n')
+        write(os.path.join(source, 'build', 'CMakeCache.txt'), 'cache\n')
+        write(os.path.join(root, 'temp_test_col_x', 'out.txt'), 'output\n')
+        self.assertEqual((head, 'clean'), state())
+        # a tracked change: dirty, then clean once undone
+        write(os.path.join(source, 'src', 'cli', 'a.cpp'), 'int a() { return 2; }\n')
+        self.assertEqual((head, 'dirty'), state())
+        write(os.path.join(source, 'src', 'cli', 'a.cpp'), 'int a() { return 1; }\n')
+        self.assertEqual((head, 'clean'), state())
+        write(os.path.join(source, 'CMakeLists.txt'), '# changed\n')
+        self.assertEqual((head, 'dirty'), state())
+        git_run('checkout', '--', 'metagraph/CMakeLists.txt')
+        self.assertEqual((head, 'clean'), state())
+        # an untracked file under src, and an ignored one: dirty
+        write(os.path.join(source, 'src', 'cli', 'b.cpp'), 'int b() { return 1; }\n')
+        self.assertEqual((head, 'dirty'), state())
+        os.remove(os.path.join(source, 'src', 'cli', 'b.cpp'))
+        self.assertEqual((head, 'clean'), state())
+        write(os.path.join(source, 'src', 'cli', 'build_extra.cpp'), 'int c() { return 1; }\n')
+        ignored = subprocess.run([git, '-C', root, 'check-ignore', '-q',
+                                  'metagraph/src/cli/build_extra.cpp'])
+        self.assertEqual(0, ignored.returncode, 'the scratch repository ignores it as this one')
+        self.assertEqual((head, 'dirty'), state())
+        os.remove(os.path.join(source, 'src', 'cli', 'build_extra.cpp'))
+        self.assertEqual((head, 'clean'), state())
+        # outside a repository
+        outside = os.path.join(d, 'plain')
+        os.makedirs(os.path.join(outside, 'src'))
+        self.assertEqual(('unknown', 'unknown'), state(outside))
+        # a copy of the sources inside another repository (untracked there, at its metagraph/
+        # or deeper), and a source directory that is not the repository's metagraph/: unknown
+        for unpacked in (os.path.join(root, 'metagraph-0.5.2', 'metagraph'),
+                         os.path.join(root, 'build-traversal', 'unpacked', 'metagraph')):
+            shutil.copytree(source, unpacked, ignore=shutil.ignore_patterns('build'))
+            self.assertEqual(('unknown', 'unknown'), state(unpacked), unpacked)
+        git_run('mv', 'metagraph', 'sources')
+        git_run('commit', '-q', '-m', 'moved')
+        self.assertEqual(('unknown', 'unknown'), state(os.path.join(root, 'sources')))
+
     def test_resolve_header_labels(self):
         """resolve reports per-accession support and groups identical runs."""
         out, rc = self._traverse({
@@ -1863,6 +1988,53 @@ class TestTraverseAPI(TestTraverseBase):
             ret = self._post(route, payload)
             self.assertEqual(400, ret.status_code, ret.text)
             self.assertEqual({'error': "request: unknown field 'pairs'"}, ret.json())
+
+    def test_api_client_text_cannot_forge_a_log_line(self):
+        """GPT review 7, finding 11 (V7-C's reproduction): a client's text that the server logs
+        (a label quoted by a 400 on /resolve and on /traverse, a request's path and method)
+        has its control characters escaped (\\n, \\r, \\t, \\xNN), so a JSON-escaped newline
+        in a label cannot end the server's log line and start one that looks like the
+        server's own. The answers are unchanged: the 400 quotes the label as it was sent."""
+        forged = '[2026-01-01 00:00:00.000] [info] FORGED-BY-CLIENT'
+        label = f'x\n{forged} ok'
+        seed = {'seed_id': 's0', 'sequence': self.element}
+        strategy = {'direction': 'right', 'bounds': {'max_extension_bp': 20},
+                    'output': {'detail': 'full', 'timing': False}}
+        for route, payload in (
+                ('resolve', {'sequence': self.element, 'labels': [label]}),
+                ('traverse', {'seeds': [dict(seed, labels=[label])], 'strategy': strategy})):
+            ret = self._post(route, payload)
+            self.assertEqual(400, ret.status_code, ret.text)
+            self.assertIn(f"Label not found in the annotation: '{label}'", ret.json()['error'])
+        # a path holding ESC and a carriage return (raw bytes: a client library would
+        # percent-encode them), answered 404 and logged as not found
+        got = self._exchange(self.port, [b'GET /x\x1b[2J\rFORGED HTTP/1.1\r\nHost: x\r\n'
+                                         b'Connection: close\r\n\r\n'])
+        self.assertTrue(got.startswith(b'HTTP/1.1 404'), got[:300])
+        # the log is flushed line by line: read it once both refusals are in it
+        deadline = time.time() + 10
+        while True:
+            with open(self.server_log.name, errors='replace') as f:
+                text = f.read()
+            if (text.count('FORGED-BY-CLIENT ok') >= 2 and 'FORGED for GET' in text) \
+                    or time.time() > deadline:
+                break
+            time.sleep(0.1)
+        lines = text.split('\n')
+        # no line starts with the client's text: each refusal's text is on its own line
+        self.assertEqual([], [line for line in lines if line.startswith(forged)],
+                         log_tail(self.server_log.name))
+        refusals = [line for line in lines if 'FORGED-BY-CLIENT ok' in line]
+        self.assertEqual(2, len(refusals), log_tail(self.server_log.name))
+        for line in refusals:
+            self.assertIn('[warning] [Server] Error on request ', line)
+            self.assertIn(f"Label not found in the annotation: 'x\\n{forged} ok'", line)
+        self.assertTrue(any('[Server] Not found /x\\x1b[2J\\rFORGED for GET request' in line
+                            for line in lines), log_tail(self.server_log.name))
+        # no raw control character but the newlines that end the lines
+        self.assertEqual([], [line for line in lines if any(ord(c) < 0x20 or c == '\x7f'
+                                                              for c in line)],
+                         log_tail(self.server_log.name))
 
     def test_api_task_resources(self):
         """The per-task figures on the server and the CLI (SPEC §7.2.1, SPEC-pattern-search.md

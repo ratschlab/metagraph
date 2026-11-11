@@ -661,6 +661,9 @@ std::vector<SelectedPair> select_posted(SelectionRoute route, const Json::Value 
 
 } // namespace
 
+const char kSearchGraphsEmpty[] = "request.graphs: the list is empty: it selects no pair (name at "
+                                 "least one graph; GET /capabilities lists them)";
+
 void refuse_search_pairs(const Json::Value &request) {
     if (request.isObject() && request.isMember("pairs")) {
         throw SelectionRefusal("request: /search selects by graphs only (it has no re-ask): "
@@ -684,6 +687,10 @@ std::vector<SelectedPair> select_pairs(SelectionRoute route,
                                                + name.asString(), "graph_unknown");
                     }
                 }
+                // an empty list selects no pair: refused with the code of a selection that
+                // finds none (it was answered 200 with the body null, nothing queried)
+                if (object["graphs"].empty())
+                    throw SelectionRefusal(kSearchGraphsEmpty, "pair_not_found");
             }
             std::vector<std::string> names = filter_graphs_from_list(
                     indexes, object, 0, max_names_without_selection);
