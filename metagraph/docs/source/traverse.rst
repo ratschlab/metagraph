@@ -68,13 +68,13 @@ names it is refused (HTTP 400). The server builds its index of header names on f
      - ``column`` or ``header``
      - ``column``
    * - ``select``
-     - also select seeds: first the interval contained in the most labels' support runs, then each time the interval contained in the most runs of labels no seed carries yet, until every label has a seed
+     - also select seeds: first the interval contained in the most labels' support runs, then each time the interval contained in the most runs of labels no seed carries yet. Selection stops when every label has a seed, at ``max_seeds`` seeds, or when no interval of ``min_block_bp`` is left
      - none
    * - ``select.max_seeds``, ``select.min_block_bp``
      - at most that many seeds (at most 1000), each at least that long (at least k)
      - 10, 0
    * - ``select.max_labels_per_seed``
-     - the labels kept per seed, by the FNV-1a hash of their names; dropped labels are counted, and listed when at most 1000 are dropped
+     - the labels kept per seed. Which ones are kept depends only on their names, so it is the same on every request; dropped labels are counted, and listed when at most 1000 are dropped
      - 1000
 
 The response:
@@ -252,7 +252,8 @@ The response
       ]
     }
 
-- ``labels`` and the ``label`` fields of an arm are indices into ``label_dict``.
+- In an arm, a segment's ``labels`` and ``labels_at_end`` and every ``label`` field are indices
+  into ``label_dict``. ``seed.labels`` holds the label names.
 - ``validated_seed_id`` is the hex FNV-1a-64 of the case-mapped seed (in canonical graphs the
   smaller of it and its reverse complement) and its sorted labels: the id ``/resolve`` gives.
 - A derived set over ``max_seed_labels`` states how many labels it dropped
@@ -289,6 +290,7 @@ Python client
     from metagraph.client import GraphClient
 
     client = GraphClient('localhost', 5555)
+    query = 'ATGGAATTGCCC...'  # the sequence to place and extend
     profile = client.resolve(query, discover={'kind': 'header'},
                              select={'min_block_bp': len(query), 'max_seeds': 1})
     seed = profile['selection']['seeds'][0]
