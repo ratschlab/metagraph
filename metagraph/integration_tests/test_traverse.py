@@ -2,6 +2,7 @@ import json
 import os
 import random
 import shlex
+import socket
 import subprocess
 import time
 import unittest
@@ -55,7 +56,11 @@ class TraverseServer(TraverseFixture):
         super().setUpClass()
         cls.host = '127.0.0.1'
         os.environ['NO_PROXY'] = cls.host
-        cls.server, cls.port = start_server(cls.graph, cls.annotation, cls.host, 4567,
+        # the test classes run in parallel: each server gets a port that is free now
+        with socket.socket() as s:
+            s.bind((cls.host, 0))
+            port = s.getsockname()[1]
+        cls.server, cls.port = start_server(cls.graph, cls.annotation, cls.host, port,
                                             cls.server_flags)
         # the server answers 503 while it loads: wait until it answers
         deadline = time.time() + 60
@@ -65,7 +70,7 @@ class TraverseServer(TraverseFixture):
                     break
             except requests.RequestException:
                 pass
-            if time.time() > deadline:
+            if cls.server.poll() is not None or time.time() > deadline:
                 cls.server.kill()
                 raise RuntimeError(f'The server on port {cls.port} did not get ready')
             time.sleep(0.05)
