@@ -43,7 +43,7 @@ names it is refused (HTTP 400). The server builds its header index when it start
 
 | Field | | Default |
 |---|---|---|
-| `sequence` | the query, at most 1,000,000 bp | required |
+| `sequence` | the query, at most `--resolve-max-query-bp` long (1,000,000 bp by default) | required |
 | `labels` | the labels to profile, at most 100,000 | exactly one of `labels` and `discover` |
 | `discover.max_labels` | keep the labels supporting the most k-mers, ranked as `/search` with `with_signature` ranks them | 1000 |
 | `discover.kind` | `column` or `header` | `column` |
@@ -124,7 +124,7 @@ A label leaves a path with a reason:
 |---|---|
 | `dead_end` | the node has no successor (`hairpin`: its only continuation was a hairpin) |
 | `label_lost` | successors exist, none carries the label |
-| `record_end` | a header label: its record ends here |
+| `record_end` | a header label: its record ends here and the graph goes on |
 | `branch` | the label is on several successors and its branch allowance is spent |
 | `edge_reuse` | the label's continuation takes an edge this path took before |
 | `edge_reuse_rc` | ... in the opposite orientation (an inverted repeat) |
