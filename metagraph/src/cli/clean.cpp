@@ -42,7 +42,8 @@ int clean_graph(Config *config) {
     return clean_graph(config, load_critical_dbg(config->fnames.at(0)));
 }
 
-int clean_graph(Config *config, std::shared_ptr<graph::DeBruijnGraph> graph) {
+int clean_graph(Config *config, std::shared_ptr<graph::DeBruijnGraph> graph,
+                std::pair<sdsl::bit_vector, sdsl::bit_vector> *succ_pred) {
     assert(config);
 
     const auto &files = config->fnames;
@@ -189,13 +190,69 @@ int clean_graph(Config *config, std::shared_ptr<graph::DeBruijnGraph> graph) {
                                                             2 * graph->max_index(),
                                                             row_map_tmp_dir);
         }
+        const graph::boss::BOSS *boss = nullptr;
+        const bit_vector *boss_mask = nullptr;
+        if (succ_pred) {
+            auto *dbg_succ = dynamic_cast<const graph::DBGSuccinct*>(graph.get());
+            assert(dbg_succ && graph->get_mode() == graph::DeBruijnGraph::BASIC);
+            boss = &dbg_succ->get_boss();
+            boss_mask = dbg_succ->get_mask();
+            // resized to the number of written k-mers after the extraction
+            succ_pred->first = sdsl::bit_vector(graph->max_index() + 1, false);
+            succ_pred->second = sdsl::bit_vector(graph->max_index() + 1, false);
+        }
         // `first` is the number of k-mers written before this contig
         auto add_rows = [&](const auto &path, uint64_t first) {
             if (row_map) {
+                uint64_t target = first;
                 for (auto node : path) {
-                    row_map->add(node - 1, ++first);
+                    row_map->add(node - 1, ++target);
                 }
             }
+            if (succ_pred) {
+                // K-mer j of this contig is SSHash node first + 1 + j. Edge path[j + 1]
+                // leaves the BOSS node that edge path[j] enters, so the degrees of
+                // that node are read here without fwd or bwd.
+                for (size_t j = 0; j + 1 < path.size(); ++j) {
+                    if (boss->is_single_outgoing(path[j + 1]))
+                        set_bit(succ_pred->first.data(), first + 1 + j, true);
+
+                    auto w = boss->get_W(path[j]);
+                    bool single_incoming;
+                    if (w < boss->alph_size) {
+                        // path[j] is the first edge incoming to that node
+                        single_incoming = boss->is_single_incoming(path[j], w);
+                    } else if (!boss_mask) {
+                        single_incoming = false;
+                    } else {
+                        // single if the only other incoming edge is a masked dummy
+                        auto d = w - boss->alph_size;
+                        auto x = boss->pred_W(path[j], d);
+                        single_incoming = !(*boss_mask)[x]
+                                    && boss->num_incoming_to_target(x, d) == 2;
+                    }
+                    if (single_incoming)
+                        set_bit(succ_pred->second.data(), first + 2 + j, true);
+                }
+            }
+        };
+        // the end of the last written contig, for the edge between two contigs
+        std::string prev_suffix;
+        bool prev_single_outgoing = false;
+        // call under the lock, before num_kmers is advanced
+        auto link_contigs = [&](const std::string &contig, bool single_incoming,
+                                bool single_outgoing) {
+            if (!succ_pred)
+                return;
+            const size_t overlap = graph->get_k() - 1;
+            if (num_kmers && prev_suffix == std::string_view(contig).substr(0, overlap)) {
+                if (prev_single_outgoing)
+                    set_bit(succ_pred->first.data(), num_kmers, true);
+                if (single_incoming)
+                    set_bit(succ_pred->second.data(), num_kmers + 1, true);
+            }
+            prev_suffix = contig.substr(contig.size() - overlap);
+            prev_single_outgoing = single_outgoing;
         };
 
         if (node_weights) {
@@ -220,9 +277,12 @@ int clean_graph(Config *config, std::shared_ptr<graph::DeBruijnGraph> graph) {
                 utils::smooth_vector(config->smoothing_window, &kmer_counts);
 
                 uint64_t first;
+                const bool single_incoming = succ_pred && graph->has_single_incoming(path.front());
+                const bool single_outgoing = succ_pred && graph->has_single_outgoing(path.back());
                 {
                     std::lock_guard<std::mutex> lock(seq_mutex);
                     writer.write(contig, kmer_counts);
+                    link_contigs(contig, single_incoming, single_outgoing);
                     num_bp += contig.size();
                     first = num_kmers;
                     num_kmers += contig.size() - graph->get_k() + 1;
@@ -239,9 +299,12 @@ int clean_graph(Config *config, std::shared_ptr<graph::DeBruijnGraph> graph) {
 
             call_contigs([&](const std::string &contig, const auto &path) {
                 uint64_t first;
+                const bool single_incoming = succ_pred && graph->has_single_incoming(path.front());
+                const bool single_outgoing = succ_pred && graph->has_single_outgoing(path.back());
                 {
                     std::lock_guard<std::mutex> lock(seq_mutex);
                     writer.write(contig);
+                    link_contigs(contig, single_incoming, single_outgoing);
                     num_bp += contig.size();
                     first = num_kmers;
                     num_kmers += contig.size() - graph->get_k() + 1;
@@ -253,6 +316,11 @@ int clean_graph(Config *config, std::shared_ptr<graph::DeBruijnGraph> graph) {
         }
         logger->trace("Extracted {} bp of sequences with {} k-mers and wrote to {}",
                       num_bp, num_kmers, fasta_fname);
+
+        if (succ_pred) {
+            succ_pred->first.resize(num_kmers + 1);
+            succ_pred->second.resize(num_kmers + 1);
+        }
 
         if (row_map) {
             const std::string row_map_fname = outfbase + ".rowmap";
