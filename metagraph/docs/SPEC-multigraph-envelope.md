@@ -152,7 +152,9 @@ The answer keeps its upstream shape (a list of `{seq_description, results, ...}`
   admitting and waiting:
   - a pair not yet started (queued, waiting for room in the pool's bounded queue, waiting for memory) is
     `not_reached`: refusal `{http_status: 503, code: "not_reached", reason: "cutoff" | "not_after_ms" | "transport",
-    error}`; a full queue never holds the handler past the cutoff or past its client's departure;
+    error}`; a full queue never holds the handler past the cutoff or past its client's departure (an `in_ram` pair
+    whose files changed since start-up and that a worker reaches first is refused 400 `index_changed` instead,
+    section 10);
   - a pair started and not finished is `unfinished`: refusal `{http_status: 503, code: "unfinished", reason:
     "cutoff" | "loading", error, usage: {state, started_at, elapsed_ms, cpu_ms, memory_bytes}}`; it is told to stop;
     a load in progress may run past every deadline;
@@ -177,7 +179,8 @@ The answer keeps its upstream shape (a list of `{seq_description, results, ...}`
   only, so it can be written after `finish_by_ms`). Before it starts, an in_ram load is not started once its wait
   limit has passed (`finish_by_ms` - clock_skew_allowance_ms, else the transport cap) or its client has left:
   nothing is loaded and its entry is refused 503 `not_reached` (reason `cutoff`, `transport` or `not_after_ms` as
-  above). `not_after_ms` refuses it as in a fan-out. The envelope's `deadline` states the request's instants as for
+  above), unless its files changed since start-up: then it is refused 400 `index_changed` (section 10).
+  `not_after_ms` refuses it as in a fan-out. The envelope's `deadline` states the request's instants as for
   any request.
 - `deadline.effective_deadline_at` and `deadline.cutoff_at` are stated only when the request gives `not_after_ms`
   or `finish_by_ms` (samples 01 and 02 give neither); otherwise they are null, the cutoff applying all the same.
@@ -659,7 +662,18 @@ change time`, `it is gone or cannot be read`, `it appeared`. A copy whose labels
 refused the same way, with the code (a check behind the stamps, which no copy of the stamped files fails): `The
 annotation '<annotation>' loaded into RAM for the request has other column labels than the one the server started
 with: restart onto the new files, or send the request without in_ram`. Nothing is reserved for a pair refused
-before its memory wait. Requests without `in_ram`, and pairs
+before its memory wait.
+
+The order of the refusals (T4's review R3, S3): a changed pair is refused when the request reaches it, before its
+memory wait's own refusals. A `/traverse` whose `finish_by_ms` (less the clock skew allowance) has passed is answered
+400 `index_changed` (with `usage.reason` `error` on a managed attempt), not 503 (`usage.reason` `deadline`), and a
+`/resolve` or `/pattern` pair reached after the request's stop, its `not_after_ms` or its wait limit is refused 400
+`index_changed`, not `not_reached`. In a pooled fan-out the outcome at the cutoff depends on timing: a changed pair
+that the request marks `not_reached` before a worker reaches it stays `not_reached` (503, section 4), one that a
+worker reaches first is `refused` 400 `index_changed`; an unchanged pair past its limits is always `not_reached`. A
+changed pair is never answered before a restart, so the 400 is the more useful of the two.
+
+Requests without `in_ram`, and pairs
 served from the resident index (above `--mem-cap-gb`, or on a server that loaded its graphs into RAM), answer from
 the files mapped at start-up as before. A server on `--mem-cap-gb 0` (staging) loads no copy, and one answer changes
 there: every `in_ram` request on a server on `--mmap` sizes its pair's graph and annotation before the cap decides

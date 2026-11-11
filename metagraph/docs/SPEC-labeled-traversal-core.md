@@ -3801,7 +3801,9 @@ search's routes, `POST /pattern` and `GET /pattern/capabilities`, are `SPEC-patt
     before its memory wait and again before and after the load, the text naming the file and how it changed and
     saying to restart onto the new files, and the code `index_changed` (the owner's decision of 2026-11-11): a
     `/traverse` 400 `{"error", "code"}`, error first (`usage` beside them on a managed attempt), a `/resolve` pair's
-    refusal block `{http_status: 400, error, code}` (`SPEC-multigraph-envelope.md` §10, samples 43 and 44). A load
+    refusal block `{http_status: 400, error, code}` (`SPEC-multigraph-envelope.md` §10, samples 43 and 44), before
+    the wait's own refusals (a passed `finish_by_ms`, a fan-out's `not_reached`: the envelope's §10 states the
+    order and its timing at the cutoff). A load
     for the request that fails (a file of the
     pair that cannot be read or that its loader refuses, a `row_diff` annotation's anchors or fork successors that
     cannot be loaded, a graph and annotation that are not compatible) is the route's 400 with the loader's message
