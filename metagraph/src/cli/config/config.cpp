@@ -899,6 +899,9 @@ Config::Config(int argc, char *argv[]) {
 
     if (tmp_dir == "OUTFBASE_TEMP_DIR") {
         tmp_dir = std::filesystem::path(outfbase).remove_filename();
+        // an output name without a directory, as opposed to --disk-swap ""
+        if (tmp_dir.empty())
+            tmp_dir = "./";
     }
     utils::set_swap_path(tmp_dir);
 

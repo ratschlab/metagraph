@@ -4,9 +4,7 @@
 #include <cassert>
 #include <array>
 
-#include <cache.hpp>
-#include <lru_cache_policy.hpp>
-
+#include "common/shared_cache.hpp"
 #include "common/vector.hpp"
 #include "graph/representation/base/dbg_wrapper.hpp"
 #include "graph/graph_extensions/node_first_cache.hpp"
@@ -26,6 +24,12 @@ class CanonicalDBG : public DBGWrapper<DeBruijnGraph> {
 
     CanonicalDBG(const CanonicalDBG &canonical)
           : CanonicalDBG(canonical.graph_, canonical.cache_size_) {}
+
+    // A wrapper of the PRIMARY |graph| with caches of its own, including a NodeFirstCache
+    // when it is a DBGSuccinct, which speeds up backward traversal. Nothing shared with
+    // other wrappers of |graph| is changed.
+    static std::shared_ptr<CanonicalDBG>
+    with_node_first_cache(std::shared_ptr<const DeBruijnGraph> graph);
 
     /**
      * Added methods
@@ -122,8 +126,7 @@ class CanonicalDBG : public DBGWrapper<DeBruijnGraph> {
     const size_t cache_size_;
 
     // cache whether a given node is a palindrome (it's equal to its reverse complement)
-    mutable caches::fixed_sized_cache<node_index, bool,
-                                      caches::LRUCachePolicy<node_index>> is_palindrome_cache_;
+    mutable common::SharedCache<node_index, bool> is_palindrome_cache_;
 
     const size_t offset_;
     const bool k_odd_;

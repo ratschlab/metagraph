@@ -3,6 +3,7 @@ from parameterized import parameterized
 import subprocess
 from subprocess import PIPE
 from tempfile import TemporaryDirectory
+import glob
 import os
 from base import PROTEIN_MODE, TestingBase, METAGRAPH, MMAP_FLAG
 
@@ -57,11 +58,12 @@ class TestRemapAnnotation(TestingBase):
         self.assertEqual(res.returncode, 0, res.stderr.decode())
         return sorted(res.stdout.decode().splitlines())
 
-    def _remap(self, anno, out, target, anno_type=None):
+    def _remap(self, anno, out, target, anno_type=None, in_memory=False):
         anno_type_flag = f' --anno-type {anno_type}' if anno_type else ''
+        in_memory_flag = ' --disk-swap ""' if in_memory else ''
         return subprocess.run(
             f'{METAGRAPH} transform_anno -p {NUM_THREADS} --remap-graph {self.source}'
-            f' -i {target}{anno_type_flag} -o {out} {anno}',
+            f' -i {target}{anno_type_flag}{in_memory_flag} -o {out} {anno}',
             shell=True, stdout=PIPE, stderr=PIPE)
 
     @parameterized.expand([
@@ -105,6 +107,32 @@ class TestRemapAnnotation(TestingBase):
         res = self._remap(anno, out, self.partial_target)
         self.assertNotEqual(res.returncode, 0)
         self.assertIn('does not match', res.stderr.decode() + res.stdout.decode())
+
+    @parameterized.expand(['brwt', 'row_diff_brwt'])
+    def test_remap_on_disk_and_in_memory(self, anno_repr):
+        prefix = f'{self.tempdir.name}/disk_{anno_repr}'
+        self._annotate_graph(INPUT, self.source, prefix, anno_repr,
+                             num_threads=NUM_THREADS)
+        anno = prefix + anno_file_extension[anno_repr]
+
+        res = self._remap(anno, prefix + '_owned', self.target, in_memory=True)
+        self.assertEqual(res.returncode, 0, res.stderr.decode())
+        with open(prefix + '_owned' + anno_file_extension[anno_repr], 'rb') as f:
+            expected = f.read()
+        with open(prefix + '_owned.rowmap', 'rb') as f:
+            expected_row_map = f.read()
+
+        # By default the row map is built on disk. The second run reuses it from the mapped file.
+        out = prefix + '_mapped'
+        for _ in range(2):
+            res = self._remap(anno, out, self.target)
+            self.assertEqual(res.returncode, 0, res.stderr.decode())
+            with open(out + anno_file_extension[anno_repr], 'rb') as f:
+                self.assertEqual(expected, f.read())
+            with open(out + '.rowmap', 'rb') as f:
+                self.assertEqual(expected_row_map, f.read())
+            self.assertEqual(glob.glob(out + '.rowmap.*'), [])
+            self.assertEqual(glob.glob(f'{self.tempdir.name}/**/bucket.*', recursive=True), [])
 
     @parameterized.expand(['row_diff_flat', 'row_diff_disk'])
     def test_remap_and_convert(self, anno_type):

@@ -975,10 +975,8 @@ AnnotatedDBG::get_header_results(std::string_view sequence, size_t num_top_label
     }
 
     const auto *matrix = dynamic_cast<const MultiIntMatrix *>(&annotator_->get_matrix());
-    if (!matrix) {
-        logger->error("k-mer coordinates are not indexed in this annotator");
-        exit(1);
-    }
+    if (!matrix)
+        throw std::runtime_error("k-mer coordinates are not indexed in this annotator");
     // the constructor refused a mapping of another column count: a request never exits here
     if (annotator_->num_labels() != coord_to_header_->num_columns()) {
         throw std::logic_error(fmt::format(
@@ -1199,10 +1197,8 @@ AnnotatedDBG::get_kmer_counts(std::string_view sequence,
         return {};
 
     const auto *int_matrix = dynamic_cast<const IntMatrix *>(&annotator_->get_matrix());
-    if (!int_matrix) {
-        logger->error("k-mer counts are not indexed in this annotator");
-        exit(1);
-    }
+    if (!int_matrix)
+        throw std::runtime_error("k-mer counts are not indexed in this annotator");
 
     auto get_results = [&](const auto &enumerate_rows) {
         // the abundances of the ties, from the rows read for the counts (one per position)
@@ -1274,10 +1270,8 @@ AnnotatedDBG::get_kmer_coordinates(std::string_view sequence,
         return {};
 
     const auto *tuple_matrix = dynamic_cast<const MultiIntMatrix *>(&annotator_->get_matrix());
-    if (!tuple_matrix) {
-        logger->error("k-mer coordinates are not indexed in this annotator");
-        exit(1);
-    }
+    if (!tuple_matrix)
+        throw std::runtime_error("k-mer coordinates are not indexed in this annotator");
 
     auto rows_tuples = tuple_matrix->get_row_tuples(row_indices);
 
