@@ -1318,9 +1318,9 @@ TEST(RowDiffPathCache, BudgetedCostsDoNotDependOnTheCache) {
 
 // The cache's own bookkeeping: two generations within the bound, its rows and its tables
 // counted as they are (bytes() = the rows' stored bytes + table_bytes()), an insert made only
-// with room for its table's doubling; a hit in the older generation moves the row to the
-// current one; a row larger than half the bound is not kept; the aggregates are added to a
-// row cached without them; trim() and clear()
+// with room for what it can add to its table (its doubling where it can double it); a hit in
+// the older generation moves the row to the current one; a row larger than half the bound is
+// not kept; the aggregates are added to a row cached without them; trim() and clear()
 TEST(RowDiffPathCache, Generations) {
     using Cache = RowDiffCache<SetBits>;
     using Layout = graph::traversal::HopscotchLayout<Cache::Table>;
@@ -1334,29 +1334,35 @@ TEST(RowDiffPathCache, Generations) {
     // what the rows and the tables hold, as the cache counts them
     auto counted = [&]() { return cache.size() * r + cache.table_bytes(); };
     // tsl doubles a table at 90% load: 2 buckets for one entry, 4 for two or three, 8 for
-    // four to seven. A generation fits half the bound with three rows and room for the fourth
-    // (its doubling from 4 to 8 buckets beside the table), not with four and room for a fifth
+    // four to seven. An insert keeps room for its table's doubling only where it can double
+    // it: at that threshold (the 2nd, 4th and 8th row) or from 80% load (the 7th row, into 8
+    // buckets: kHopscotchGrowthLoad); else for one overflow node. Half the bound is the
+    // fourth row's insert (three rows, 4 buckets and the 8 beside them, the fourth row): a
+    // generation takes six rows in 8 buckets (the fifth and the sixth fit where the 4
+    // buckets were), not the seventh (its doubling to 16 buckets). Room for a doubling at
+    // every insert rotated it at the fifth row (R4 review, S1)
     const uint64_t half = 4 * r + Layout::array_bytes(4) + Layout::array_bytes(8)
                         + Layout::node_bytes();
+    ASSERT_LE(2 * r, Layout::array_bytes(4));
     const uint64_t bound = 2 * half;
     cache.set_bound(bound);
-    for (Row i = 0; i < 4; ++i) {
+    for (Row i = 0; i < 6; ++i) {
         cache.insert(i, row);
         EXPECT_EQ(counted(), cache.bytes());
     }
-    EXPECT_EQ(4u, cache.size());
+    EXPECT_EQ(6u, cache.size());
     EXPECT_EQ(Layout::array_bytes(8), cache.table_bytes());
-    EXPECT_EQ(4 * r + Layout::array_bytes(8), cache.bytes());
-    cache.insert(4, row);     // the current generation is full: rotated
-    EXPECT_EQ(5u, cache.size());
+    EXPECT_EQ(6 * r + Layout::array_bytes(8), cache.bytes());
+    cache.insert(6, row);     // the current generation is full: rotated
+    EXPECT_EQ(7u, cache.size());
     // the counts move with their tables (a rotation that dropped the current generation's
-    // count with the older table would count 1 entry of the 5 held)
-    EXPECT_EQ(5 * r + Layout::array_bytes(8) + Layout::array_bytes(2), cache.bytes());
+    // count with the older table would count 1 entry of the 7 held)
+    EXPECT_EQ(7 * r + Layout::array_bytes(8) + Layout::array_bytes(2), cache.bytes());
     ASSERT_TRUE(cache.find(0, false));       // moved to the current generation
     // the row's bytes moved; the current table doubled for it, the older one kept its buckets
-    EXPECT_EQ(5 * r + Layout::array_bytes(8) + Layout::array_bytes(4), cache.bytes());
+    EXPECT_EQ(7 * r + Layout::array_bytes(8) + Layout::array_bytes(4), cache.bytes());
     EXPECT_EQ(counted(), cache.bytes());
-    for (Row i = 5; i < 8; ++i) {
+    for (Row i = 7; i < 12; ++i) {
         cache.insert(i, row);
         EXPECT_EQ(counted(), cache.bytes());
         EXPECT_LE(cache.bytes(), bound);
@@ -1418,13 +1424,14 @@ TEST(RowDiffPathCache, Generations) {
 // a neighbourhood full and doubles a table down to 10% load: the tables held far more than the
 // old per-entry charge (640 B, the share at 40% load) allowed for. Ids that share their low 20
 // bits all fall on one bucket, which no doubling separates: they go to the overflow list.
-// Counted as they are, with room for a doubling before each insert, the cache holds at most its
-// bound after every insert, with the identity hash as with the seeded one. Its peak stays within
-// the bound with the seeded hash; with the identity hash the bit-reversed ids, which still share
-// a neighbourhood after a doubling, make one insert double a table twice, which passes the
-// bound while it runs (the residual SPEC-labeled-traversal-core.md section 8.4 states). The
-// seeded tables stay at the occupancy of random ids (their buckets within 3 per entry / 0.8,
-// the padding aside), so the bound is spent on rows
+// Counted as they are, with room for the doubling of each insert that can double its table
+// (tsl's threshold, or from 80% load, where a full neighbourhood doubles a seeded table), the
+// cache holds at most its bound after every insert, with the identity hash as with the seeded
+// one. Its peak stays within the bound with the seeded hash; with the identity hash the
+// bit-reversed ids, which share a neighbourhood, double a table below that load or twice in one
+// insert, which passes the bound while it runs (the residual SPEC-labeled-traversal-core.md
+// section 8.4 states). The seeded tables stay at the occupancy of random ids (their buckets
+// within 3 per entry / 0.8, the padding aside), so the bound is spent on rows
 uint64_t bitreverse_20(uint64_t i) {
     uint64_t r = 0;
     for (int b = 0; b < 20; ++b) {
@@ -1506,6 +1513,90 @@ void check_bound_whatever_the_ids(const char *name) {
 TEST(RowDiffPathCache, TheBoundHoldsWhateverTheRowIds) {
     check_bound_whatever_the_ids<std::hash<Row>>("identity hash");
     check_bound_whatever_the_ids<graph::traversal::SeededHash>("seeded hash");
+}
+
+// An insert can double a table at tsl's threshold (90% load) and, when the neighbourhood of its
+// key's bucket is full, before it: the seeded tables did so from 82.5% load at the lowest
+// (seeded_hash.hpp, kHopscotchGrowthLoad 0.8). Every growth of a seeded table, over random and
+// consecutive keys and many seeds, is one hopscotch_insert_can_grow foresaw, and what an insert
+// held while it ran is within the room hopscotch_insert_bytes states (R4 review, S1)
+TEST(RowDiffPathCache, EveryGrowthOfASeededTableIsForeseen) {
+    using Table = tsl::hopscotch_map<uint64_t, uint64_t, graph::traversal::SeededHash>;
+    using Layout = graph::traversal::HopscotchLayout<Table>;
+    // 8 buckets: no growth before the 6th entry (80% load), tsl's threshold at the 7th
+    Table eight(8);
+    ASSERT_EQ(8u, eight.bucket_count());
+    for (uint64_t key = 0; key < 7; ++key) {
+        EXPECT_EQ(key >= 6, graph::traversal::hopscotch_insert_can_grow(eight)) << key;
+        EXPECT_EQ(key >= 6 ? graph::traversal::hopscotch_growth_bytes(eight)
+                           : Layout::node_bytes(),
+                  graph::traversal::hopscotch_insert_bytes(eight)) << key;
+        eight.emplace(key, key);
+    }
+    EXPECT_TRUE(graph::traversal::hopscotch_insert_can_grow(Table()));
+    uint64_t growths = 0;
+    for (uint64_t seed = 1; seed <= 40; ++seed) {
+        Table table(0, graph::traversal::SeededHash{ seed });
+        std::mt19937_64 rng(seed);
+        for (uint64_t i = 0; i < (1u << 14); ++i) {
+            const bool can = graph::traversal::hopscotch_insert_can_grow(table);
+            const uint64_t room = graph::traversal::hopscotch_insert_bytes(table);
+            const uint64_t before = graph::traversal::hopscotch_held_bytes(table);
+            const size_t buckets = table.bucket_count();
+            table.emplace(seed % 2 ? rng() : i, i);
+            if (table.bucket_count() == buckets) {
+                EXPECT_LE(graph::traversal::hopscotch_held_bytes(table), before + room);
+                continue;
+            }
+            growths++;
+            ASSERT_TRUE(can) << "seed " << seed << ": " << table.size() - 1 << " entries in "
+                             << buckets << " buckets";
+            ASSERT_EQ(Layout::next_bucket_count(buckets), table.bucket_count());
+            // the old and the new bucket array at once
+            EXPECT_LE(Layout::array_bytes(buckets) + Layout::array_bytes(table.bucket_count()),
+                      before + room);
+        }
+    }
+    EXPECT_GE(growths, 40u * 13);
+}
+
+// A generation fills its table to the load at which an insert can double it (80%) before it
+// rotates. Room for a doubling at every insert left a generation of narrow rows at 45% load of
+// a table whose doubling did not fit half the bound: 13-40% fewer narrow tuple rows under
+// 128 MiB than the old 640 B charge kept (R4 review, S1; most rows held under 128 MiB over
+// 1.5 M random ids, old charge / room at every insert / now: tuple rows of 48 B 195,082 /
+// 117,966 / 209,714, of 352 B 135,300 / 117,966 / 209,714)
+template <class RowT>
+void check_a_generation_fills_its_table(const RowT &row, const char *name) {
+    using Cache = RowDiffCache<RowT>;
+    using Layout = graph::traversal::HopscotchLayout<typename Cache::Table>;
+    const uint64_t bound = uint64_t(8) << 20;
+    const uint64_t b = StoredRow<RowT>::bytes_of(row);
+    // the largest table a generation affords: its doubling from half as many buckets, made at
+    // 90% load of those at the latest, fits half the bound
+    uint64_t top = 2;
+    while (Layout::array_bytes(top) + Layout::array_bytes(2 * top) + Layout::node_bytes()
+               + (top * 9 / 10 + 1) * b <= bound / 2) {
+        top *= 2;
+    }
+    Cache cache;
+    cache.set_bound(bound);
+    std::mt19937_64 rng(7);
+    size_t most = 0;
+    for (uint64_t i = 0; i < 6 * top; ++i) {
+        cache.insert(rng(), row);
+        most = std::max(most, cache.size());
+        ASSERT_LE(cache.bytes(), bound) << name;
+    }
+    // both generations at 80% load of the largest table
+    EXPECT_GE(most, 2 * size_t(float(top) * graph::traversal::kHopscotchGrowthLoad))
+        << name << ": tables of " << top << " buckets";
+    EXPECT_LE(cache.peak_bytes, bound) << name;
+}
+
+TEST(RowDiffPathCache, AGenerationFillsItsTable) {
+    check_a_generation_fills_its_table(SetBits{ 1 }, "binary rows");
+    check_a_generation_fills_its_table(RowTuples{ { 0, { 1 } } }, "tuple rows");
 }
 
 // A generation dropped releases its table. A cleared hopscotch map keeps its bucket array,

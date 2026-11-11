@@ -154,6 +154,42 @@ uint64_t hopscotch_growth_bytes(const Table &table) {
             + Layout::node_bytes();
 }
 
+/**
+ * The load (entries in buckets per bucket) from which an insert is taken to be able to double
+ * a seeded table. tsl doubles a table at its own threshold — an insert into a table whose
+ * buckets hold size_type(bucket_count x max_load_factor) entries (0.9) rehashes first — and
+ * before it, from 10% load, when no empty bucket can be brought into the key's neighbourhood.
+ * Which insert finds its neighbourhood full depends on the bucket array, which tsl does not
+ * expose; with the seeded hash it happens near the threshold only: over 133k growths of seeded
+ * tables of 2^1 to 2^22 buckets (2,000 seeds x 4 key patterns to 2^16, 60 to 2^22; random,
+ * consecutive, bit-reversed and i << 20 keys) the lowest load at a growth was 0.825, none
+ * below 0.8 (T4-L4 fix round, s1/growth.cpp), and 0.822 over 280 growths of 2^20 to 2^26
+ * buckets (hopscotch_entry_bytes). A growth below this load needs keys that collide in the
+ * hash, which the seeded hash keeps a client from choosing.
+ */
+constexpr float kHopscotchGrowthLoad = 0.8f;
+
+// Whether one insert into |table| can double it: at tsl's threshold, or from
+// kHopscotchGrowthLoad (a full neighbourhood of a seeded table). An empty table (no buckets)
+// gets its first array at its first insert: it can
+template <class Table>
+bool hopscotch_insert_can_grow(const Table &table) {
+    const size_t buckets = table.bucket_count();
+    const size_t in_buckets = table.size() - table.overflow_size();
+    return in_buckets >= size_t(float(buckets) * table.max_load_factor())
+            || in_buckets >= size_t(float(buckets) * kHopscotchGrowthLoad);
+}
+
+// What one insert into |table| adds at most to what it holds while it runs: its doubling
+// (hopscotch_growth_bytes) when it can grow the table (hopscotch_insert_can_grow), else one
+// overflow node (an entry put into a bucket adds nothing). Ids that double a table below
+// kHopscotchGrowthLoad add more: the caller reads what the table holds after the insert
+template <class Table>
+uint64_t hopscotch_insert_bytes(const Table &table) {
+    return hopscotch_insert_can_grow(table) ? hopscotch_growth_bytes(table)
+                                            : HopscotchLayout<Table>::node_bytes();
+}
+
 } // namespace traversal
 } // namespace graph
 } // namespace mtg

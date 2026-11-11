@@ -169,16 +169,19 @@ struct StoredRow<MultiIntMatrix::RowTuples> {
  * current one, which becomes the older one when it reaches half the bound (the older one is
  * dropped then); a hit in the older one moves the row to the current one. A walk moves
  * forward, so the rows of the last few levels are the ones its next paths meet. An insert
- * (and a move, which inserts too) is made only with room for its table's doubling beside what
- * the cache holds (hopscotch_growth_bytes: the old and the new bucket array at once), so the
- * cache holds at most its bound after every insert, whatever the rows' ids, and throughout an
- * insert that doubles its table once (GPT review 7, finding 8: a per-entry charge of 640 B,
- * with rows hashed by their id, let crafted ids grow a table far past it). The tables hash
- * rows seeded (|Hash|, SeededHash), which keeps them at the occupancy of random keys: the
- * cache holds fewer rows with colliding ids, and only ids that collide after a doubling make
- * one insert double a table twice, which can pass the bound while it runs (the generations
- * are dropped after it until the bound holds): with the seeded hash no client can choose
- * such ids. A generation dropped releases its table: a cleared hopscotch map keeps its
+ * (and a move, which inserts too) is made only with room for what it can add to its table
+ * (hopscotch_insert_bytes): when it can grow the table — at tsl's threshold, or from the load
+ * at which a full neighbourhood doubles a seeded table (kHopscotchGrowthLoad, 0.8) — its
+ * doubling beside what the cache holds (the old and the new bucket array at once), else one
+ * overflow node. So the cache holds at most its bound after every insert, whatever the rows'
+ * ids (what it holds is read again after each insert), and throughout every insert whose
+ * growth it reserved (GPT review 7, finding 8: a per-entry charge of 640 B, with rows hashed
+ * by their id, let crafted ids grow a table far past it). The tables hash rows seeded
+ * (|Hash|, SeededHash), which keeps them at the occupancy of random keys: the cache holds
+ * fewer rows with colliding ids, and only ids that collide in the hash double a table below
+ * that load or more than once in one insert, which can pass the bound while it runs (the
+ * generations are dropped after it until the bound holds): with the seeded hash no client
+ * can choose such ids. A generation dropped releases its table: a cleared hopscotch map keeps its
  * bucket array, sized for the most entries it ever held, so after many narrow rows a few wide
  * ones would hold that array beside their bound (74.7 MiB of heap for 63.9 MiB accounted at a
  * 64 MiB bound). Single-threaded, as the request that owns it.
@@ -228,9 +231,9 @@ class RowDiffCache {
     size_t bucket_count() const { return gen_[0].bucket_count() + gen_[1].bucket_count(); }
 
     // The entry of |row| (with a known path only, if |need_path|), or null. A hit in the older
-    // generation moves the row to the current one, where there is room for the current
-    // table's doubling (else the row stays where it is). The pointer is valid until the next
-    // call of any member.
+    // generation moves the row to the current one, where there is room for what the insert can
+    // add to the current table (else the row stays where it is). The pointer is valid until
+    // the next call of any member.
     const Entry* find(Row row, bool need_path) {
         auto it = gen_[0].find(row);
         if (it != gen_[0].end())
@@ -239,8 +242,8 @@ class RowDiffCache {
         if (old == gen_[1].end() || (need_path && !old->second.has_path))
             return nullptr;
         // the row's bytes move with it, but the current table can double for it (the older
-        // table keeps its buckets): moved only with room for that
-        if (bytes() + graph::traversal::hopscotch_growth_bytes(gen_[0]) > limit())
+        // table keeps its buckets): moved only with room for what the insert can add
+        if (bytes() + graph::traversal::hopscotch_insert_bytes(gen_[0]) > limit())
             return &old->second;
         Entry entry = std::move(old.value());
         gen_[1].erase(old);
@@ -330,10 +333,14 @@ class RowDiffCache {
         const uint64_t bound = limit();
         // a shared bound may have shrunk since the last insert
         trim(bound);
-        // what the current generation needs for the row: the row, and its table's doubling
-        // beside what the table holds (a generation's table is counted with it)
+        // what the current generation needs for the row: the row, and what the insert can add
+        // to its table (a generation's table is counted with it): the doubling beside the
+        // table when the insert can grow it, else one overflow node — a generation fills its
+        // table to the load at which it can double, rather than keeping room for a doubling
+        // that its next insert cannot make (which left a generation of narrow rows at 45%
+        // load of a table whose doubling did not fit half the bound: R4 review, S1)
         auto need = [&]() {
-            return b + graph::traversal::hopscotch_growth_bytes(gen_[0]);
+            return b + graph::traversal::hopscotch_insert_bytes(gen_[0]);
         };
         auto generation = [&](size_t i) {
             return bytes_[i] + graph::traversal::hopscotch_held_bytes(gen_[i]);
@@ -355,8 +362,8 @@ class RowDiffCache {
         }
         if (bytes() + need() > bound)
             drop(1);
-        // the copy, now that there is room for it and its table's doubling: the cache holds
-        // at most bytes() + need() from here on, which the peak counts (emplace_current)
+        // the copy, now that there is room for it and what its insert can add: the cache
+        // holds at most bytes() + need() from here on, which the peak counts (emplace_current)
         Entry entry;
         entry.row.store(full);
         assert(entry.row.bytes() == b);
@@ -371,8 +378,9 @@ class RowDiffCache {
         }
         bytes_[0] += b;
         emplace_current(row, std::move(entry));
-        // an insert that doubled the table more than once (ids colliding in the hash) may
-        // hold more than it had room for: the generations go until the bound holds again
+        // an insert that doubled the table below the load at which it can (ids colliding in
+        // the hash), or more than once, may hold more than it had room for: the generations
+        // go until the bound holds again
         trim(bound);
     }
     // evict (the older generation first) until the cache holds at most |max| bytes, its
