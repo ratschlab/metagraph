@@ -367,22 +367,28 @@ int transform_annotation(Config *config) {
             } else {
                 logger->trace("Matching rows of {} to {}...", config->remap_graph, config->infbase);
                 const std::string tmp_fname = row_map_fname + ".tmp";
-                if (on_disk) {
-                    auto tmp_dir = utils::create_temp_dir(config->tmp_dir, "rowmap");
-                    try {
-                        map_rows_to_graph(*source, *target, tmp_fname, tmp_dir, get_num_threads());
-                    } catch (...) {
+                try {
+                    if (on_disk) {
+                        auto tmp_dir = utils::create_temp_dir(config->tmp_dir, "rowmap");
+                        try {
+                            map_rows_to_graph(*source, *target, tmp_fname, tmp_dir, get_num_threads());
+                        } catch (...) {
+                            utils::remove_temp_dir(tmp_dir);
+                            throw;
+                        }
                         utils::remove_temp_dir(tmp_dir);
-                        throw;
+                    } else {
+                        row_map = map_rows_to_graph(*source, *target, get_num_threads());
+                        std::ofstream out(tmp_fname, std::ios::binary);
+                        row_map.serialize(out);
+                        out.close();
+                        if (!out)
+                            throw std::runtime_error("Cannot write row map to " + tmp_fname);
                     }
-                    utils::remove_temp_dir(tmp_dir);
-                } else {
-                    row_map = map_rows_to_graph(*source, *target, get_num_threads());
-                    std::ofstream out(tmp_fname, std::ios::binary);
-                    row_map.serialize(out);
-                    out.close();
-                    if (!out)
-                        throw std::runtime_error("Cannot write row map to " + tmp_fname);
+                } catch (...) {
+                    std::error_code ec;
+                    std::filesystem::remove(tmp_fname, ec);
+                    throw;
                 }
                 std::filesystem::rename(tmp_fname, row_map_fname);
                 logger->trace("Row map saved to {} in {} sec", row_map_fname, timer.elapsed());

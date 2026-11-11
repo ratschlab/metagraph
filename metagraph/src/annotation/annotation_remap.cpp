@@ -200,7 +200,7 @@ void map_rows_to_graph(const DeBruijnGraph &source,
             out.seekp(header_size + (begin * width) / 8);
             out.write(reinterpret_cast<const char *>(rows.data()), ((rows.size() * width + 63) / 64) * 8);
             out.close();
-            if (!out || in.bad())
+            if (!out || !in.is_open() || !in.eof())
                 failed = true;
         }
         if (failed)
