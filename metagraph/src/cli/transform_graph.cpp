@@ -47,12 +47,17 @@ static int convert_to_sshash(Config *config, std::shared_ptr<graph::DeBruijnGrap
     extract.to_fasta = true;
     extract.row_map = true;
     extract.outfbase = tmp_dir / "contigs";
-    clean_graph(&extract, std::move(graph));
+    // For a basic succinct graph, the node degrees read during the extraction give
+    // the succ/pred bitmaps, which SSHash otherwise computes with k-mer lookups.
+    std::pair<sdsl::bit_vector, sdsl::bit_vector> succ_pred;
+    clean_graph(&extract, std::move(graph), &succ_pred);
+    const bool shortcut = !succ_pred.first.empty();
 
     Timer timer;
     try {
         DBGSSHash sshash(extract.outfbase + ".fasta.gz", k, mode,
-                         config->num_chars, config->memory_available);
+                         config->num_chars, config->memory_available,
+                         shortcut ? &succ_pred : nullptr);
         logger->trace("SSHash graph built in {} sec", timer.elapsed());
         sshash.serialize(config->outfbase);
 

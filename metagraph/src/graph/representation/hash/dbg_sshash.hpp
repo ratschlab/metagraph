@@ -40,7 +40,10 @@ class DBGSSHash : public DeBruijnGraph {
               size_t k,
               Mode mode = BASIC,
               size_t num_chars = 0,
-              double ram_limit_gb = 0);
+              double ram_limit_gb = 0,
+              // succ_is_next and pred_is_prev (num k-mers + 1 bits each) to move
+              // from if the caller already knows them, e.g., from another graph
+              std::pair<sdsl::bit_vector, sdsl::bit_vector> *succ_pred = nullptr);
 
     // SequenceGraph overrides
     void add_sequence(
