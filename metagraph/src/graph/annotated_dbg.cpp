@@ -83,10 +83,10 @@ void AnnotatedSequenceGraph
     std::vector<row_index> indices;
     indices.reserve(sequence.size());
 
-    graph_->map_to_nodes(sequence, [&](node_index i) {
+    for (node_index i : graph_->node_range(sequence)) {
         if (i > 0)
             indices.push_back(graph_to_anno_index(i));
-    });
+    }
 
     if (!indices.size())
         return;
@@ -116,10 +116,10 @@ void AnnotatedSequenceGraph
         if (!indices.capacity())
             indices.reserve(data[t].first.size());
 
-        graph_->map_to_nodes(data[t].first, [&](node_index i) {
+        for (node_index i : graph_->node_range(data[t].first)) {
             if (i > 0)
                 indices.push_back(graph_to_anno_index(i));
-        });
+        }
     }
 
     std::lock_guard<std::mutex> lock(mutex_);
@@ -153,13 +153,13 @@ void AnnotatedDBG::add_kmer_counts(std::string_view sequence,
     indices.reserve(sequence.size() - dbg_.get_k() + 1);
     size_t end = 0;
 
-    graph_->map_to_nodes(sequence, [&](node_index i) {
+    for (node_index i : graph_->node_range(sequence)) {
         // only insert indexes for matched k-mers and shift counts accordingly
         if (i > 0) {
             indices.push_back(graph_to_anno_index(i));
             kmer_counts[indices.size() - 1] = kmer_counts[end++];
         }
-    });
+    }
 
     kmer_counts.resize(end);
 
@@ -236,13 +236,13 @@ void AnnotatedDBG::annotate_kmer_coords(
             coords[last].reserve(sequence.size() - dbg_.get_k() + 1);
         }
 
-        graph_->map_to_nodes(sequence, [&](node_index i) {
+        for (node_index i : graph_->node_range(sequence)) {
             if (i > 0) {
                 ids[last].push_back(graph_to_anno_index(i));
                 coords[last].emplace_back(graph_to_anno_index(i), coord);
             }
             coord++;
-        });
+        }
     }
 
     std::lock_guard<std::mutex> lock(mutex_);
@@ -292,12 +292,12 @@ std::vector<Label> AnnotatedDBG::get_labels(std::string_view sequence,
 
     size_t num_present_kmers = 0;
 
-    graph_->map_to_nodes(sequence, [&](node_index i) {
+    for (node_index i : graph_->node_range(sequence)) {
         if (i > 0) {
             index_counts[graph_to_anno_index(i)]++;
             num_present_kmers++;
         }
-    });
+    }
 
     size_t min_count = get_min_count(discovery_fraction, presence_fraction,
                                      num_kmers, num_present_kmers);
@@ -813,12 +813,12 @@ AnnotatedDBG::get_top_labels(std::string_view sequence,
 
     size_t num_present_kmers = 0;
 
-    graph_->map_to_nodes(sequence, [&](node_index i) {
+    for (node_index i : graph_->node_range(sequence)) {
         if (i > 0) {
             index_counts[graph_to_anno_index(i)]++;
             num_present_kmers++;
         }
-    });
+    }
 
     size_t min_count = get_min_count(discovery_fraction, presence_fraction,
                                      num_kmers, num_present_kmers);
@@ -1121,13 +1121,13 @@ void map_to_rows(const DeBruijnGraph &graph, std::string_view sequence,
     row_indices->reserve(num_kmers);
     kmer_positions->reserve(num_kmers);
     size_t j = 0;
-    graph.map_to_nodes(sequence, [&](AnnotatedDBG::node_index i) {
+    for (AnnotatedDBG::node_index i : graph.node_range(sequence)) {
         if (i > 0) {
             kmer_positions->push_back(j);
             row_indices->push_back(AnnotatedDBG::graph_to_anno_index(i));
         }
         j++;
-    });
+    }
     assert(j == num_kmers);
 }
 

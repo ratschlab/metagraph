@@ -4,6 +4,7 @@ import subprocess
 from subprocess import PIPE
 from tempfile import TemporaryDirectory
 import glob
+import gzip
 import os
 from base import PROTEIN_MODE, TestingBase, METAGRAPH, MMAP_FLAG
 
@@ -39,6 +40,8 @@ class TestRemapAnnotation(TestingBase):
         cls.partial_target = cls.tempdir.name + '/partial.sshashdbg'
         cls._build_sshash(cls.partial_input, cls.partial_target)
 
+        cls.primary_source, cls.primary_target, cls.flipped_target = cls._build_primary_graphs()
+
     @staticmethod
     def _build_sshash(input, output):
         # SSHash needs each k-mer once, so build it from the unitigs of a succinct graph.
@@ -51,6 +54,32 @@ class TestRemapAnnotation(TestingBase):
             f'{METAGRAPH} build -p {NUM_THREADS} --mode basic --graph sshash'
             f' -k {K} -o {output} {prefix}_unitigs.fasta.gz', 'Build command', shell=True)
 
+    @classmethod
+    def _build_primary_graphs(cls):
+        """A primary succinct graph, an SSHash graph built from its contigs, and an
+        SSHash graph built from the reverse complements of those contigs."""
+        prefix = cls.tempdir.name + '/primary'
+        cls._build_graph(INPUT, prefix + '.dbg', K, 'succinct', 'primary')
+        # The contigs of the primary graph spell every k-mer as the graph stores it.
+        cls._run_command(
+            f'{METAGRAPH} transform -p {NUM_THREADS} --to-fasta'
+            f' -o {prefix}_contigs {prefix}.dbg', 'Transform command', shell=True)
+        contigs = prefix + '_contigs.fasta.gz'
+        cls._run_command(
+            f'{METAGRAPH} build -p {NUM_THREADS} --mode primary --graph sshash'
+            f' -k {K} -o {prefix}.sshashdbg {contigs}', 'Build command', shell=True)
+
+        complement = str.maketrans('ACGT', 'TGCA')
+        flipped = prefix + '_flipped.fa'
+        with gzip.open(contigs, 'rt') as f, open(flipped, 'w') as out:
+            for line in f:
+                line = line.strip()
+                out.write((line if line.startswith('>') else line.translate(complement)[::-1]) + '\n')
+        cls._run_command(
+            f'{METAGRAPH} build -p {NUM_THREADS} --mode primary --graph sshash'
+            f' -k {K} -o {prefix}_flipped.sshashdbg {flipped}', 'Build command', shell=True)
+        return prefix + '.dbg', prefix + '.sshashdbg', prefix + '_flipped.sshashdbg'
+
     def _query(self, graph, anno, mode):
         res = subprocess.run(
             f'{METAGRAPH} query --query-mode {mode} -i {graph} -a {anno} {INPUT}' + MMAP_FLAG,
@@ -58,11 +87,11 @@ class TestRemapAnnotation(TestingBase):
         self.assertEqual(res.returncode, 0, res.stderr.decode())
         return sorted(res.stdout.decode().splitlines())
 
-    def _remap(self, anno, out, target, anno_type=None, in_memory=False):
+    def _remap(self, anno, out, target, anno_type=None, in_memory=False, source=None):
         anno_type_flag = f' --anno-type {anno_type}' if anno_type else ''
         in_memory_flag = ' --disk-swap ""' if in_memory else ''
         return subprocess.run(
-            f'{METAGRAPH} transform_anno -p {NUM_THREADS} --remap-graph {self.source}'
+            f'{METAGRAPH} transform_anno -p {NUM_THREADS} --remap-graph {source or self.source}'
             f' -i {target}{anno_type_flag}{in_memory_flag} -o {out} {anno}',
             shell=True, stdout=PIPE, stderr=PIPE)
 
@@ -168,6 +197,39 @@ class TestRemapAnnotation(TestingBase):
         self.assertNotEqual(res.returncode, 0)
         self.assertIn('--anno-type' if anno_repr == 'row_diff_brwt' else 'can convert only',
                       res.stderr.decode() + res.stdout.decode())
+
+    @parameterized.expand(['brwt', 'row_diff_brwt'])
+    def test_remap_primary_to_sshash(self, anno_repr):
+        source, target = self.primary_source, self.primary_target
+        prefix = f'{self.tempdir.name}/primary_{anno_repr}'
+        self._annotate_graph(INPUT, source, prefix, anno_repr, num_threads=NUM_THREADS)
+        anno = prefix + anno_file_extension[anno_repr]
+        out = prefix + '_remapped'
+        out_anno = out + anno_file_extension[anno_repr]
+
+        res = self._remap(anno, out, target, source=source)
+        self.assertEqual(res.returncode, 0, res.stderr.decode())
+
+        # The SSHash graph also has a node, and so a row, for every reverse complement.
+        stats = self._get_stats(f'-a {out_anno}')
+        self.assertEqual(stats['objects'], self._get_stats(target)['nodes (k)'])
+        for mode in ['labels', 'matches', 'signature']:
+            expected = self._query(source, anno, mode)
+            self.assertEqual(len(expected), 100)
+            self.assertTrue(all(line.split('\t')[-1] for line in expected))
+            self.assertEqual(expected, self._query(target, out_anno, mode))
+
+        res = self._remap(anno, prefix + '_flipped', self.flipped_target, source=source)
+        self.assertNotEqual(res.returncode, 0)
+        self.assertIn('other orientation', res.stderr.decode() + res.stdout.decode())
+
+    def test_remap_rejects_mixed_modes(self):
+        prefix = f'{self.tempdir.name}/mixed'
+        self._annotate_graph(INPUT, self.source, prefix, 'brwt', num_threads=NUM_THREADS)
+        res = self._remap(prefix + anno_file_extension['brwt'], prefix + '_remapped',
+                          self.primary_target)
+        self.assertNotEqual(res.returncode, 0)
+        self.assertIn('basic mode', res.stderr.decode() + res.stdout.decode())
 
     def test_remap_rejects_different_kmers(self):
         prefix = f'{self.tempdir.name}/mismatch'

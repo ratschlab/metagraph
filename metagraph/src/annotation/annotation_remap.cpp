@@ -15,6 +15,7 @@
 #include "common/logger.hpp"
 #include "common/threads/threading.hpp"
 #include "common/vectors/vector_algorithm.hpp"
+#include "graph/representation/hash/dbg_sshash.hpp"
 #include "graph/representation/succinct/dbg_succinct.hpp"
 
 
@@ -29,6 +30,18 @@ static uint64_t width_for(uint64_t max_value) {
     return max_value ? sdsl::bits::hi(max_value) + 1 : 1;
 }
 
+// A canonical SSHash graph has a node for every stored k-mer and one more for its
+// reverse complement.
+static bool is_canonical_sshash(const DeBruijnGraph &graph) {
+    return graph.get_mode() == DeBruijnGraph::CANONICAL
+            && dynamic_cast<const graph::DBGSSHash *>(&graph);
+}
+
+// The number of k-mers that `graph` stores.
+static uint64_t num_stored_kmers(const DeBruijnGraph &graph) {
+    return is_canonical_sshash(graph) ? graph.num_nodes() / 2 : graph.num_nodes();
+}
+
 // Walk `source`, look every k-mer up in `target`, and pass each matched pair to
 // store(source_row, target_node). Throws if the graphs have different k-mers.
 template <class Store>
@@ -36,9 +49,11 @@ static void match_rows(const DeBruijnGraph &source,
                        const DeBruijnGraph &target,
                        size_t num_threads,
                        const Store &store) {
-    if (source.get_mode() != DeBruijnGraph::BASIC
-            || target.get_mode() != DeBruijnGraph::BASIC)
-        throw std::invalid_argument("Row remapping supports only graphs in basic mode");
+    if (!(source.get_mode() == DeBruijnGraph::BASIC && target.get_mode() == DeBruijnGraph::BASIC)
+            && !(source.get_mode() == DeBruijnGraph::PRIMARY && is_canonical_sshash(target))) {
+        throw std::invalid_argument("Row remapping supports two graphs in basic mode, or a"
+                                    " primary graph and an SSHash graph built in primary mode");
+    }
 
     if (source.get_k() != target.get_k())
         throw std::invalid_argument("Row remapping needs graphs with the same k");
@@ -48,6 +63,11 @@ static void match_rows(const DeBruijnGraph &source,
     std::atomic<uint64_t> num_mapped(0);
     std::atomic<uint64_t> num_missing(0);
     std::atomic<uint64_t> num_repeated(0);
+    // A target node above num_kmers is the reverse complement of a stored k-mer.
+    // Row-diff successors survive only if both graphs store a k-mer in the same
+    // orientation, which holds for a target built from the contigs of the source.
+    const uint64_t num_kmers = num_stored_kmers(target);
+    std::atomic<uint64_t> num_flipped(0);
 
     source.call_sequences([&](const std::string &sequence, const std::vector<node_index> &path) {
         uint64_t mapped = 0;
@@ -58,6 +78,10 @@ static void match_rows(const DeBruijnGraph &source,
             node_index source_node = path.at(i++);
             if (!target_node) {
                 ++missing;
+                return;
+            }
+            if (target_node > num_kmers) {
+                ++num_flipped;
                 return;
             }
             if (fetch_and_set_bit(found.data(), target_node - 1, true,
@@ -73,12 +97,19 @@ static void match_rows(const DeBruijnGraph &source,
         num_repeated += repeated;
     }, num_threads);
 
-    if (num_missing || num_repeated || num_mapped != target.num_nodes()) {
+    if (num_flipped) {
+        throw std::runtime_error(fmt::format(
+            "The target graph stores {} k-mers in the other orientation than the source"
+            " graph. Build the target graph from the contigs of the source graph",
+            num_flipped.load()));
+    }
+
+    if (num_missing || num_repeated || num_mapped != num_kmers) {
         throw std::runtime_error(fmt::format(
             "The graphs have different k-mers: {} source k-mers are missing from the"
             " target graph, {} target nodes were matched more than once, and {} of"
             " {} target nodes were matched",
-            num_missing.load(), num_repeated.load(), num_mapped.load(), target.num_nodes()));
+            num_missing.load(), num_repeated.load(), num_mapped.load(), num_kmers));
     }
 
     logger->trace("Matched {} of {} source rows to target rows",
@@ -261,7 +292,7 @@ static bool check_row_map(const DeBruijnGraph &source,
                 matches = false;
         }
     }
-    return matches && num_kept == target.num_nodes() && max_target_row <= target.max_index();
+    return matches && num_kept == num_stored_kmers(target) && max_target_row <= target.max_index();
 }
 
 bool check_row_map(const DeBruijnGraph &source,

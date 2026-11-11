@@ -893,7 +893,8 @@ Move an annotation to another graph with the same k-mers
 """"""""""""""""""""""""""""""""""""""""""""""""""""""""
 A ``brwt`` or ``row_diff_brwt`` annotation can be moved to another graph with the same k-mers, such as an SSHash graph built from the unitigs of a succinct graph.
 This avoids annotating the new graph again from the input sequences.
-Both graphs must be in ``basic`` mode.
+Both graphs must be in ``basic`` mode, or the old graph in ``primary`` mode and the new one an SSHash graph built with ``--mode primary``.
+In the second case, build the SSHash graph from the contigs of the old graph (``transform --to-fasta``), so that both store every k-mer in the same orientation.
 Pass the graph that the annotation was built for with ``--remap-graph`` and the new graph with ``-i``::
 
     metagraph transform_anno -v -p 36 --remap-graph graph.dbg -i graph.sshashdbg \

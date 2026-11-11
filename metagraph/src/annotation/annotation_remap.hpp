@@ -21,7 +21,9 @@ class MultiLabelAnnotation;
 
 /**
  * Match the annotation rows of `source` to the rows of `target` by k-mer.
- * Both graphs must be in BASIC mode and contain the same k-mers. Source nodes
+ * Both graphs must contain the same k-mers. Either both are in BASIC mode, or
+ * `source` is in PRIMARY mode and `target` is an SSHash graph built in PRIMARY
+ * mode that stores every k-mer in the same orientation. Source nodes
  * that do not represent a k-mer, such as the dummy nodes of a succinct graph,
  * are dropped.
  *
