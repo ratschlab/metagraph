@@ -8263,6 +8263,48 @@ TEST(GraphletHeldBound, SeedPhaseObservesItsResolvedNames) {
     }
 }
 
+// The references' names are observed before the validation's first read can fail the seed (T4
+// review R2, finding 1): a refusal of that read — here injected at every seed-phase charge, so that
+// the seed's one k-mer, read alone, is refused — fails the seed with the six names in its excess.
+// Observed only with the first chunk's rows (after the read), they were in no statement of a seed
+// refused or stopped inside that chunk
+TEST(GraphletHeldBound, FirstValidationReadRefusedStatesTheNames) {
+    // six columns named by 200 KB (a plain column annotation: budget-aware, the six labels read
+    // cell by cell)
+    std::vector<std::string> names, seqs;
+    for (size_t i = 0; i < 6; ++i) {
+        names.push_back("N" + std::to_string(i) + std::string(200'000, 'x'));
+        seqs.push_back("AAAC");
+    }
+    auto anno = test::build_anno_graph<DBGSuccinct, annot::ColumnCompressed<>>(3, seqs, names);
+    LabelOracle oracle(*anno);
+    ASSERT_TRUE(oracle.decode_charged());
+    Strategy st;
+    st.direction = Strategy::RIGHT;
+    st.max_extension_bp = 1;
+    st.max_memory_bytes = uint64_t(1) << 20;
+    st.delivery = delivery_costs("graphlet", true);
+    size_t denied = 0;
+    WalkerHooks deny;
+    deny.deny_decode = [&](const DecodeCharge &d) {
+        if (d.where != DecodeCharge::SEED)
+            return false;
+        ++denied;
+        return true;
+    };
+    try {
+        traverse_seed(oracle, seed_of("AAA", names), st, LabelChangeCost::forbid(), "", &deny);
+        FAIL() << "a refused validation read lets no seed phase end";
+    } catch (const SeedBudgetError &e) {
+        EXPECT_GT(denied, 0u);
+        EXPECT_EQ(ResourceStop::MEMORY, e.stop().resource);
+        EXPECT_STREQ("annotation_decode", e.stop().phase);
+        EXPECT_TRUE(e.stop().injected);
+        EXPECT_GE(e.account().soft_overshoot, 6 * 200'000u - (uint64_t(1) << 20));
+        EXPECT_LT(e.account().soft_overshoot, 2 * 6 * 200'000u - (uint64_t(1) << 20));
+    }
+}
+
 
 /*************** the names' share of the delivery reserve (T4-L2, GPT review 7 F10) ***************/
 

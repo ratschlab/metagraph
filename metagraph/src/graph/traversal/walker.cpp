@@ -1214,8 +1214,11 @@ void Walker::validate_seed() {
     bool all_supported = false;
     if (seed_.labels.empty()) {
         all_supported = derive_seed_labels(keys, &seed_refs, &hits);
-        // the derived references hold their names (from the index: one copy each)
+        // the derived references hold their names (from the index: one copy each), observed
+        // before anything can fail the seed (an extra label's refusal after a partial
+        // derivation, a stop in the walk's first read: T4 review R2, finding 1)
         seed_names_ = names_held(seed_refs);
+        observe_seed_scratch(0);
         if (result_.derivation_partial && record_coords_) {
             // a set derived from part of the seed (a partial derivation) was not followed over
             // the whole seed: no label's occurrences of the seed are known (under trace its
@@ -1269,9 +1272,12 @@ void Walker::validate_seed() {
             throw SeedLabelsNotInGraph("none of the seed's labels is in this graph: " + names,
                                        unknown);
         }
-        // the references now hold the names (one copy of the request's): observed with every
-        // fetch call's rows below
+        // the references now hold the names (one copy of the request's): observed now, before the
+        // validation's first read can fail the seed (a refused read or a paced stop inside the
+        // first chunk comes before that chunk's observation: T4 review R2, finding 1), and with
+        // every fetch call's rows below
         seed_names_ = names_held(seed_refs);
+        observe_seed_scratch(0);
         // AUTO with a budget or without: a plain brwt or column annotation is read cell by cell
         // for at most 16 labels, charged under the budget-aware reads (LabelQuery::decode_cells).
         // The query takes the references by move and hands them back: a copy would hold every
