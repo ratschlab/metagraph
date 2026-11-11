@@ -19,6 +19,7 @@ or propose a pull request against the `manual source <https://github.com/ratschl
    workflows.rst
    api.rst
    sequence_search.rst
+   traverse.rst
    sequence_assembly.rst
    faq.rst
    troubleshooting.rst

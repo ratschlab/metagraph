@@ -160,7 +160,7 @@ class GraphClientJson:
                 timeout=None) -> JsonDict:
         """
         Where the labels support the sequence, and optionally the seeds selected from it
-        (experimental; a server on a single index, see traverse.md).
+        (experimental; a server on a single index, see the manual page "Labeled traversal").
         Give exactly one of `labels` and `discover` (e.g. {'kind': 'header'}).
         """
         payload = {'sequence': sequence}
@@ -176,7 +176,7 @@ class GraphClientJson:
                  timeout=None) -> JsonDict:
         """
         Extend seeds ({'sequence': ..., 'labels': [...], 'seed_id': ...}) under the labels
-        carrying them (experimental; see traverse.md for the strategy and the response)
+        carrying them (experimental; see the manual page "Labeled traversal" for the strategy and the response)
         """
         payload = {'seeds': seeds}
         if strategy is not None:
