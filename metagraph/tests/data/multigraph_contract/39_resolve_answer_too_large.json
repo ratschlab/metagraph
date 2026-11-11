@@ -92,8 +92,8 @@
     "release": "refseq237",
     "support": "kmer",
     "timing": {
-     "cpu_ms": 0.542583,
-     "elapsed_ms": 0.515208
+     "cpu_ms": 0.653875,
+     "elapsed_ms": 0.683834
     },
     "unknown_labels": [],
     "work": {
@@ -102,7 +102,7 @@
    }
   ],
   "timing": {
-   "elapsed_ms": 2.858292
+   "elapsed_ms": 4.516792000000001
   },
   "work": {
    "memory_bytes": 18007

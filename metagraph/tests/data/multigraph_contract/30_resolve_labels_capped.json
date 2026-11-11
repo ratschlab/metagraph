@@ -136,8 +136,8 @@
     "release": "refseq237",
     "support": "kmer",
     "timing": {
-     "cpu_ms": 0.793334,
-     "elapsed_ms": 0.723625
+     "cpu_ms": 0.888208,
+     "elapsed_ms": 1.537334
     },
     "unknown_labels": [],
     "work": {
@@ -247,8 +247,8 @@
     "release": "refseq237",
     "support": "kmer",
     "timing": {
-     "cpu_ms": 0.464584,
-     "elapsed_ms": 0.9015409999999999
+     "cpu_ms": 0.850917,
+     "elapsed_ms": 1.520375
     },
     "unknown_labels": [],
     "work": {
@@ -257,7 +257,7 @@
    }
   ],
   "timing": {
-   "elapsed_ms": 3.1458749999999998
+   "elapsed_ms": 2.1648330000000002
   },
   "work": {
    "memory_bytes": 29814
