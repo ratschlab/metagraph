@@ -2313,9 +2313,9 @@ static Json::Value interval_json(const KmerInterval &iv) {
 // value placed in an array or an object in a node of its container's map (88 B: 96), an object
 // member's key in a copy of its own (its bytes and a terminator), an array's or object's map in
 // a block of its own (48 B; libc++ 24 B: 32) and a string in a copy of its bytes with a 4-byte
-// length and a terminator. Measured (T4-L1 fix round): an interval in a run list 336 B of heap
-// on Linux (320 on macOS) and 12 B of text, priced 336 + 13. A model of the heap, never a
-// measurement; ResolveAnswer.ThePriceCoversTheTree checks it against the allocator
+// length and a terminator. An interval in a run list: 336 B of heap with libstdc++ (from its
+// sizes; 320 measured with libc++ on macOS) and 12 B of text, priced 336 + 13. A model of the
+// heap, never a measurement; ResolveAnswer.ThePriceCoversTheTree checks it against the allocator
 constexpr uint64_t kJsonValueBytes = 96;
 constexpr uint64_t kJsonContainerBytes = 48;
 // what an answer holds beside its labels, graph runs, candidates, seeds and names (its scalar

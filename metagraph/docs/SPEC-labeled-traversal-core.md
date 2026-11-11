@@ -616,9 +616,10 @@ object member's name its bytes and a terminator, a container 48 B, a string its 
 bytes; 64 KiB for the members beside them. Once the tree is complete, the text's buffer at its size class (the route
 writes the text into a buffer reserved to its exact size, so no growth holds an old and a new buffer) and, where the
 account holds less, what the text holds once the tree is freed: the text, its copy (the compressed body or the
-transport's, at its last growth up to three times the text) and the compressor's state, 272 KiB. Measured on
-jsoncpp 1.9.3: an element 96 B, an interval in a run list 336 B on Linux (320 B on macOS) and 12 B of text. A
-charge that would pass M ends the request with **400**, nothing partial sent:
+transport's, at its last growth up to three times the text) and the compressor's state, 272 KiB. On jsoncpp 1.9.3
+an element holds 96 B, and an interval in a run list 336 B with libstdc++ (from its sizes) or 320 B with libc++
+(measured on macOS), beside 12 B of text. A charge that would pass M ends the request with **400**, nothing partial
+sent:
 
 ```json
 {"error": "resolve: the answer would hold more than --resolve-max-discover-memory-mb 1024 MiB (answer): nothing partial is sent; ask for run_format \"rle\", a larger min_block_kmers, fewer labels or seeds, or a shorter sequence",
@@ -647,15 +648,15 @@ envelope holds every pair's answer, each within its M, until it is written.
 **The margin, measured** *(T4 review R1, F3; `e23/T4/L1/mem/grid/`: macOS, a fresh server a case, peak RSS over
 idle, the body uncompressed)*. R1's fixture `grid6500` has 6,500 records of a 10 kbp query, each with a SNP every
 32 bp: 2,028,000 runs of one k-mer, 312 candidates and a 44 MB answer. Its 6,500 explicit labels, and the header
-discovery that keeps them, are priced at 981-985 MiB: refused under 980, answered from 985 and at the default 1024.
-The request grows the process by 954 MiB in 7 of 9 servers and by about 1,000 MiB in 2, the allocator's retained
-pages included (the base without an account: 969). So the account is within a few percent of the request's
-footprint (0.98-1.03x of it), and an answer is refused only when it would hold close to M. Before, with three copies
-of every text byte, 64 B a container and 32 B more a string, the same answer was priced at 1,100-1,150 MiB and
-refused at the default. On the deployed build the model is the tree's own allocation sizes. On macOS, whose maps are
-smaller, the unit test finds the price 1.04-1.09x jemalloc's peak of the tree, the text and its copies. An answer of
-long strings is priced for its text and a copy at its last growth beside it: about 2x what a plain copy holds. The
-refusal stays: the answer is priced after the work, as above.
+discovery that keeps them, are priced at 981-985 MiB: refused at 980, answered from 985 and at the default 1024.
+Answered, the request grows the process by 953-958 MiB in 7 of 11 servers, 973 MiB in 1 and 994-1,001 MiB in 3, the
+allocator's retained pages included (the base without an account: 969). So the account is within a few percent of the
+request's footprint (0.98-1.03x of it), and an answer is refused only when it would hold close to M. Before, with
+three copies of every text byte, 64 B a container and 32 B more a string, the same answer was priced at 1,100-1,150
+MiB and refused at the default. On the deployed build the model is the tree's own allocation sizes. On macOS, whose
+maps are smaller, the unit test finds the price 1.04-1.09x jemalloc's peak of the tree, the text and its copies. An
+answer of long strings is priced for its text and a copy at its last growth beside it: about 2x what a plain copy
+holds. The refusal stays: the answer is priced after the work, as above.
 
 **What this bounds.** Per discovery and pair: M (1 GiB by default) charged; at the default N, 1,000,000 records hold
 about 272 MB of it (column labels 152 MB). The memory bound binds on a k-mer whose row, read alone (on the
