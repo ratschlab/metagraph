@@ -3149,12 +3149,15 @@ row's `RowCost` — its work (8 per dependency row, 1 per entry) and its standal
 the cache only shortening the decoding (and the transient charges of a call; a row read alone never needs more
 than without the cache, so where a fetch stops is unchanged). The cache is bounded in bytes — each row as its exact
 copy, and its two hash tables as they are: their bucket arrays (`bucket_count + 61` buckets of 128 B for binary
-rows, 176 B for tuple rows) and overflow nodes, each buffer as the heap holds it (`alloc_bytes`, as every buffer of
-the decode budget's model). An insert, and a hit's move to the current generation, is made only
-with room for what it can add to its table: when it can double the table — at tsl's threshold (90% load) or from
-80% load, where a full neighbourhood doubles a seeded table (the lowest load at a growth of 133k seeded tables of
-2¹ to 2²² buckets was 0.825) — its doubling beside what the cache holds (the old and the new bucket array at
-once), else one overflow node; a move without that room is not made, the row read where it is. So the cache holds
+rows, 176 B for tuple rows) and overflow nodes, each buffer at its jemalloc size class (`alloc_bytes`, as every
+buffer of the decode budget's model): what the heap holds with jemalloc 5.3 and earlier (four classes per
+doubling), an upper bound of it under jemalloc 5.4, whose large buffers on macOS (16 KiB pages) take
+page-granular sizes — a 2,105,984 B buffer takes 2,113,536 B, counted 2,621,440 — and whose 8 B class is counted
+16 *(review R4 of train 4, S4: the count was never below the heap)*. An insert, and a hit's move to the current
+generation, is made only with room for what it can add to its table: when it can double the table — at tsl's
+threshold (90% load) or from 80% load, where a full neighbourhood doubles a seeded table (the lowest load at a
+growth of 133k seeded tables of 2¹ to 2²² buckets was 0.825) — its doubling beside what the cache holds (the old
+and the new bucket array at once), else one overflow node; a move without that room is not made, the row read where it is. So the cache holds
 at most its bound after every insert, whatever the rows' ids (it reads what it holds again after each), and
 throughout every growth it reserved; a generation fills its table to 80% load before it rotates. *(Review R4 of
 train 4, S1: room for a doubling at every insert stopped a generation of narrow tuple rows at 45% load of a table

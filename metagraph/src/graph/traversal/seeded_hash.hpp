@@ -92,8 +92,11 @@ constexpr uint64_t hopscotch_entry_bytes(size_t value_bytes) {
  * two pointers each). An insert doubles the bucket count (2 after none), the new array held
  * beside the old one while the entries move; an insert that doubles a table more than once
  * (keys colliding in the hash after a doubling, which the seeded hash makes improbable) holds
- * more. Each buffer is counted as the heap holds it (alloc_bytes, as every buffer of the
- * budget's model).
+ * more. Each buffer is counted at its jemalloc size class (alloc_bytes, as every buffer of
+ * the budget's model): what the heap holds with jemalloc 5.3 and earlier (four classes per
+ * doubling), an upper bound of it under jemalloc 5.4, which gives large buffers page-granular
+ * sizes on macOS (16 KiB pages: a 2,105,984 B buffer takes 2,113,536 B, counted 2,621,440)
+ * and has an 8 B class (counted 16); never below the heap (R4 review, S4).
  */
 template <class Table>
 struct HopscotchLayout;
@@ -113,7 +116,8 @@ struct HopscotchLayoutOf {
                     + sizeof(Value));
     }
 
-    // the bucket array of a table of |bucket_count| buckets (one buffer)
+    // the bucket array of a table of |bucket_count| buckets (one buffer) at its size class:
+    // what the heap holds, or an upper bound of it (jemalloc 5.4's page-granular large sizes)
     static uint64_t array_bytes(uint64_t bucket_count) {
         return bucket_count
                 ? annot::matrix::alloc_bytes((bucket_count + kPaddingBuckets) * kBucketBytes)
