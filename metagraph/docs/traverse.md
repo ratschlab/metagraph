@@ -110,13 +110,21 @@ seed. A named label that does not carry every seed k-mer is dropped and reported
 k-mer runs it carries.
 
 From the seed's last k-mer (the right arm) and its first (the left arm) the walk extends
-level by level, one base per level. Each path keeps the labels that carry every k-mer walked
-so far. A label leaves a path with a reason:
+level by level, one base per level. The two kinds of label are followed differently:
+
+- A **column** label stays on a path while it carries every k-mer walked so far.
+- A **header** label follows its record's k-mer coordinates. It continues on the successor
+  that holds the record's next coordinate and ends at the record's first or last k-mer, so
+  a repeat inside the record is walked through. If the record holds the seed several
+  times, the walk starts from the place with the lowest coordinate.
+
+A label leaves a path with a reason:
 
 | Reason | |
 |---|---|
 | `dead_end` | the node has no successor (`hairpin`: its only continuation was a hairpin) |
 | `label_lost` | successors exist, none carries the label |
+| `record_end` | a header label: its record ends here |
 | `branch` | the label is on several successors and its branch allowance is spent |
 | `edge_reuse` | the label's continuation takes an edge this path took before |
 | `edge_reuse_rc` | ... in the opposite orientation (an inverted repeat) |
@@ -127,9 +135,15 @@ so far. A label leaves a path with a reason:
 Where the labels of a path continue on different successors, the path splits. Paths that
 meet again are kept apart, so each arm is a tree of segments.
 
-The walk rule makes the walks finite on a graph with cycles: a path never takes an edge
-((k+1)-mer) twice, in canonical graphs in either orientation, never steps back into the seed,
-and never takes a self-reverse-complementary step.
+The walk rule makes the walks of column labels finite on a graph with cycles: a path never
+takes an edge ((k+1)-mer) twice, in canonical graphs in either orientation, never steps back
+into the seed, and never takes a self-reverse-complementary step. It applies to column labels
+only, so `branch`, `edge_reuse`, `edge_reuse_rc`, `rejoined_seed` and `hairpin` end column
+labels. A header label is finite because its record is. On a step the rule forbids, the
+path's column labels end and its header labels go on.
+
+Column labels have been walked on test data only. Every traversal run on the staging server
+so far named records.
 
 **Bounds.** Besides the extension length and the time budget, fixed caps bound a seed's work:
 1,000,000 steps, 1000 live paths and 10,000 paths per arm, and 64 splits per path. The time
@@ -163,11 +177,11 @@ limit ends only the path that reached it. Any cap makes the arm `truncated`:
           "segments": [
             {"id": 0, "parents": [], "from_bp": 0, "length_bp": 1200, "sequence": "GCAT...",
              "labels": [0], "labels_at_end": [0],
-             "events": [{"at_bp": 1200, "type": "label_end", "label": 0, "reason": "dead_end"}]}
+             "events": [{"at_bp": 1200, "type": "label_end", "label": 0, "reason": "record_end"}]}
           ],
           "splits": [],
           "paths": [{"id": 0, "segments": [0], "length_bp": 1200,
-                     "end_labels": [{"label": 0, "reason": "dead_end", "branches": 0}]}],
+                     "end_labels": [{"label": 0, "reason": "record_end", "branches": 0}]}],
           "steps": 1200
         }
       },
@@ -223,7 +237,8 @@ result = client.traverse([{'seed_id': seed['seed_id'], 'sequence': seed['sequenc
 ## Origin
 
 This is version 1 of the labeled traversal of `gr/labeled-traversal` (Gunnar Rätsch), with
-the same walk and labels for these features. Not included: label switching and loss budgets,
-`support: trace` and record coordinates, the annotate mode, memory and work budgets, the
+the same labels and, for column labels, the same walk. Header labels follow their record's
+coordinates instead. Not included: label switching and loss budgets, `support: trace` and
+record coordinates in the response, the annotate mode, memory and work budgets, the
 attempt and cancel protocol, reconvergence merging, beams and quorums, continuations, and the
 graphlet (MGT) output.
