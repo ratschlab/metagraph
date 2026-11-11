@@ -18,6 +18,7 @@
 #include <tuple>
 #include <vector>
 
+#include <fcntl.h>
 #include <sys/stat.h>
 #include <unistd.h>
 
@@ -1728,7 +1729,8 @@ TEST(MultiGraphInRam, AFileThatCannotBeOpenedFailsBeforeTheGraphLoads) {
 // into RAM reads, with its role, the graph's derived data stamped absent when it does not exist
 // (here the Bloom filter; the mask is written with the graph); a change names the first file
 // that changed and how, also a rewrite in place that restores the size and the modification
-// time (its status change time differs) and a file that appears
+// time (its status change time differs) and a file that appears; a metadata-only change (a
+// chmod, a utime of the access time alone) differs too, a plain read does not
 TEST(MultiGraphInRam, PairFileStampsNameTheFileThatChanged) {
     const PairOnDisk pair = write_pair("stamps");
     const std::string seqs = pair.dir + "/anno" + annot::CoordToHeader::kExtension;
@@ -1816,6 +1818,43 @@ TEST(MultiGraphInRam, PairFileStampsNameTheFileThatChanged) {
     fs::permissions(seqs, fs::perms::group_write, fs::perm_options::add);
     EXPECT_EQ(refusal(seqs, "coord_to_header", "its status change time"),
               pair_files_changed(stamps, pair.graph, pair.annotation));
+    // a utime that restores the access time alone, the modification time given as it was (a
+    // backup or scanner agent that restores the times it read): its status change time, refused
+    // too (T4 review R3, S4)
+    stamps = pair_file_stamps(pair.graph, pair.annotation, true);
+    tick();
+    {
+        const int64_t mtime_ns = stamps[1].stamp->mtime_ns;
+        const struct timespec times[2] = {
+            { 1'000'000'000, 0 },
+            { static_cast<time_t>(mtime_ns / 1'000'000'000), mtime_ns % 1'000'000'000 }
+        };
+        ASSERT_EQ(0, ::utimensat(AT_FDCWD, pair.annotation.c_str(), times, 0));
+    }
+    EXPECT_EQ(refusal(pair.annotation, "annotation", "its status change time"),
+              pair_files_changed(stamps, pair.graph, pair.annotation));
+#if defined(__linux__)
+    // on Linux also one that omits the modification time (touch -a, tar
+    // --atime-preserve=replace); APFS leaves the status change time then
+    stamps = pair_file_stamps(pair.graph, pair.annotation, true);
+    tick();
+    {
+        const struct timespec times[2] = { { 1'000'000'000, 0 }, { 0, UTIME_OMIT } };
+        ASSERT_EQ(0, ::utimensat(AT_FDCWD, pair.annotation.c_str(), times, 0));
+    }
+    EXPECT_EQ(refusal(pair.annotation, "annotation", "its status change time"),
+              pair_files_changed(stamps, pair.graph, pair.annotation));
+#endif
+    // a plain read does not: the kernel's own access time update leaves the status change time
+    stamps = pair_file_stamps(pair.graph, pair.annotation, true);
+    tick();
+    {
+        std::ifstream in(pair.graph, std::ios::binary);
+        const std::string read { std::istreambuf_iterator<char>(in),
+                                 std::istreambuf_iterator<char>() };
+        EXPECT_FALSE(read.empty());
+    }
+    EXPECT_EQ("", pair_files_changed(stamps, pair.graph, pair.annotation));
     // its size: the .seqs appended to in place
     stamps = pair_file_stamps(pair.graph, pair.annotation, true);
     std::ofstream(seqs, std::ios::app | std::ios::binary) << "x";

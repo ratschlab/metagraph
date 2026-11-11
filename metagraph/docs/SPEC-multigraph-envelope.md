@@ -638,8 +638,13 @@ of another column count than the mapping's is refused by the copy's load itself,
 time (ctime) is set by the kernel to the current time on every write, truncation, utime, chmod, chown, link and
 rename of the file, and by no call to a chosen value: a file rewritten in place with its size and modification time
 restored differs (GPT review 6 #7's residual), and so does a file swapped in and back within one load (that takes a
-rename or a link, which sets it). A metadata-only change (chmod, chown, a hard link) refuses too, the conservative
-side. The residual: a directory on the path renamed away and back, a symlink on the path retargeted and back, or a
+rename or a link, which sets it). A metadata-only change refuses too, the conservative side, until a restart: a
+chmod, a chown, a hard link, an extended attribute written or removed, and a utime, also one that restores only the
+access time with the modification time given as it was (a backup or scanner agent that restores the times it read),
+and on Linux one that omits the modification time (`touch -a`, `tar --atime-preserve=replace`; APFS leaves the
+status change time then; T4's review R3, S4, measured on both). A plain read does not refuse: the kernel's own
+access time update leaves the status change time alone. The residual: a directory on the path renamed away and
+back, a symlink on the path retargeted and back, or a
 mount over a file and its unmount, within one copy's load (each keeps every stamped file's inode and status change
 time; closing it needs an fstat of the descriptors the loaders open), and a change within the file system clock's
 granularity (a few ms on Linux) of the file's previous change.

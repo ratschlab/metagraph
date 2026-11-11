@@ -762,8 +762,9 @@ Json::Value labels_disjoint_json(const std::vector<HeaderPair> &pairs, size_t nu
 // kernel sets the status change time (ctime) to the current time on every write, truncation,
 // utime (the call that restores a modification time), chmod, chown, link and rename of the file,
 // and no call sets it to a chosen value (GPT review 6 #7's residual, GPT review 7 finding 4). A
-// metadata-only change (chmod, a hard link) differs too. A multi-graph server stamps every file a
-// copy of a pair loaded into RAM for one request reads (pair_file_stamps)
+// metadata-only change differs too (chmod, chown, a hard link, an extended attribute, a utime,
+// also one that restores only the access time; a plain read does not). A multi-graph server
+// stamps every file a copy of a pair loaded into RAM for one request reads (pair_file_stamps)
 struct FileStamp {
     uint64_t device = 0;
     uint64_t inode = 0;
