@@ -598,14 +598,19 @@ and the CLI has none), each part priced **before** it is built from its sizes an
 labels with their names, runs and trace breaks, at their vectors' capacities: part `profile`); the candidates'
 grouping (before it is built, a map node, two candidates and two label ids per run it groups, 168 B, the candidates
 reserved so that no growth holds an old and a new buffer beside the map; then what the candidates hold:
-`candidates`); the selection (a `max_support` selection's scratch as it is allocated: the runs it
-gathers twice, 16 B each; the vector of a round's clipped pieces each time it grows past them, its new buffer beside
-the old one, for a run with P picks inside it is P + 1 pieces; a round's candidate starts, run ends and Fenwick
-counts, about 28 B a piece, released with the round; each pick before it is made; each frozen seed before it is built, its sequence, names, the label order's copy of them and
-its overlaps: `selection`); and the answer's JSON tree with its text (each label, candidate and seed before it is
-built: a value in an array or an object 96 B, an object member's name 32 B more, a container 64 B, a string its bytes
-and 32 B, the text three times its bytes — written, its growth, its compressed copy —, and 64 KiB for the members
-beside them: `answer`; measured on jsoncpp 1.9.3: an element 96 B, an interval 320 B, a string of 17 B 128 B). A
+`candidates`); the selection (a `max_support` selection's scratch as it is allocated: the runs it gathers twice,
+16 B each; the vector of a round's clipped pieces each time it grows past them, its new buffer beside the old one,
+for a run with P picks inside it is P + 1 pieces; a round's candidate starts, run ends and Fenwick counts, about 28 B
+a piece, released with the round; each pick before it is made; each frozen seed before it is built, its sequence,
+names, the label order's copy of them and its overlaps: `selection`); and the answer's JSON tree with its text, part
+`answer`. Each label, candidate and seed is priced before it is built at the deployed build's sizes (libstdc++ and
+jemalloc's size classes, so that a price is the same on every platform): a value in an array or an object 96 B, an
+object member's name its bytes and a terminator, a container 48 B, a string its bytes and 5; and its compact text's
+bytes; 64 KiB for the members beside them. Once the tree is complete, the text's buffer at its size class (the route
+writes the text into a buffer reserved to its exact size, so no growth holds an old and a new buffer) and, where the
+account holds less, what the text holds once the tree is freed: the text, its copy (the compressed body or the
+transport's, at its last growth up to three times the text) and the compressor's state, 272 KiB. Measured on
+jsoncpp 1.9.3: an element 96 B, an interval in a run list 336 B on Linux (320 B on macOS) and 12 B of text. A
 charge that would pass M ends the request with **400**, nothing partial sent:
 
 ```json
@@ -623,6 +628,19 @@ so the same request is often answered with it. A model of the heap, never a meas
 flags a `/resolve` holds at most M charged during its pass and M charged for its answer after it** (the
 accumulators that become the profile counted in both), beside what is bounded otherwise (below); a multi-graph
 envelope holds every pair's answer, each within its M, until it is written.
+
+**The margin, measured** *(T4 review R1, F3; `e23/T4/L1/mem/grid/`: macOS, a fresh server a case, peak RSS over
+idle, the body uncompressed)*. R1's fixture `grid6500` has 6,500 records of a 10 kbp query, each with a SNP every
+32 bp: 2,028,000 runs of one k-mer, 312 candidates and a 44 MB answer. Its 6,500 explicit labels, and the header
+discovery that keeps them, are priced at 981-985 MiB: refused under 980, answered from 985 and at the default 1024.
+The request grows the process by 954 MiB in 7 of 9 servers and by about 1,000 MiB in 2, the allocator's retained
+pages included (the base without an account: 969). So the account is within a few percent of the request's
+footprint (0.98-1.03x of it), and an answer is refused only when it would hold close to M. Before, with three copies
+of every text byte, 64 B a container and 32 B more a string, the same answer was priced at 1,100-1,150 MiB and
+refused at the default. On the deployed build the model is the tree's own allocation sizes. On macOS, whose maps are
+smaller, the unit test finds the price 1.04-1.09x jemalloc's peak of the tree, the text and its copies. An answer of
+long strings is priced for its text and a copy at its last growth beside it: about 2x what a plain copy holds. The
+refusal stays: the answer is priced after the work, as above.
 
 **What this bounds.** Per discovery and pair: M (1 GiB by default) charged; at the default N, 1,000,000 records hold
 about 272 MB of it (column labels 152 MB). The memory bound binds on a k-mer whose row, read alone (on the
@@ -4597,8 +4615,11 @@ the last stop the unbounded profile), `.ExplicitLabelsHoldOneKmersHits` (the pas
 profile under every batch, kept-rows bound and deadline that does not pass, and the smallest bound that answers the
 query answers it as without one), `ResolveAnswer.ThePriceCoversTheTree` (the answer's priced bytes at least the
 allocator's live bytes of the tree and text it builds — profiles of many labels, of many runs, with long names,
-candidates and overlapping seeds, `intervals` and `rle`, presence and trace —, the answer the same as without an
-account, an account a byte short refused at part `answer`), `ResolveAnswer.TheSelectionChargesTheClippedPieces` (T4
+candidates and overlapping seeds, `intervals` and `rle`, presence and trace —, and, T4 review R1, F3, jemalloc's
+peak over the tree, its text written into a buffer reserved as the route reserves it, then the gzip body or a copy
+for the transport; the price within 1.15x of that peak on shapes of many small elements; the answer the same as
+without an account, an account a byte short refused at part `answer`; `ServerRequest.
+TheResolveRouteWritesUnderItsGoneCheck`: the route's text `json_text`'s bytes at a capacity of its exact size), `ResolveAnswer.TheSelectionChargesTheClippedPieces` (T4
 review R1, F1: long runs split by 250 `max_support` picks; at every reading of the selection's check the heap it added
 within what its account holds then, 64 KiB aside; the seeds those made without an account),
 `ResolveAnswer.TheGroupingIsPricedAboveItsPeak` (F2: 2^17 + 1 runs of their own, jemalloc's peak within the price,

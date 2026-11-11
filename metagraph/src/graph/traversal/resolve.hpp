@@ -84,16 +84,25 @@ class AnswerAccount {
         held_ += bytes;
         peak_ = std::max(peak_, held_);
     }
+    // a part of the answer's JSON: |bytes| of its tree and |text| bytes of its text, both
+    // charged, the text counted (text()) for what is priced once the tree is complete
+    void charge_text(uint64_t bytes, uint64_t text, const char *part) {
+        charge(bytes + text, part);
+        text_ += text;
+    }
     void release(uint64_t bytes) { held_ -= std::min(bytes, held_); }
 
     uint64_t max_bytes() const { return max_; }
     uint64_t held() const { return held_; }
     uint64_t peak() const { return peak_; }
+    // the answer's text bytes charged so far (charge_text)
+    uint64_t text() const { return text_; }
 
   private:
     uint64_t max_;
     uint64_t held_ = 0;
     uint64_t peak_ = 0;
+    uint64_t text_ = 0;
 };
 
 // The answer account's price of a run grouped into candidates: at most a node of the grouping's

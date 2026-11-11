@@ -2170,39 +2170,85 @@ std::pair<SupportProfile, SeedSelection> priced_profile(size_t labels, size_t ru
     return { std::move(p), std::move(sel) };
 }
 
+// The answer as the route holds it after its account priced it (T4 review R1, F3): the tree, its
+// text written into a buffer reserved to its exact size (ResolveWriting), then without the tree
+// the gzip body (the traversal routes' level 1) and a copy of the body for the transport, or of
+// the text where nothing is compressed. The allocator's live bytes of the tree and text, and
+// jemalloc's peak over all of it, within the price (profile_to_json's, then charge_answer_text's);
+// the price within 1.15x of that peak on the shapes of many small elements (intervals, short
+// names: about 1.05x on macOS, whose maps are smaller than the model's), where three copies of
+// every text byte priced 1.15-1.4x. Long names are priced for the text and a copy of it at its
+// last growth beside it once the tree is freed: about 2x what a plain copy holds
 TEST(ResolveAnswer, ThePriceCoversTheTree) {
     size_t measured = 0;
     for (bool trace : { false, true }) {
         for (const char *format : { "intervals", "rle" }) {
             for (auto [labels, runs, name, seeds] : { std::make_tuple(2000, 3, 12, 2),
                                                        std::make_tuple(20, 2000, 40, 0),
-                                                       std::make_tuple(300, 100, 100, 30) }) {
+                                                       std::make_tuple(300, 100, 100, 30),
+                                                       std::make_tuple(40, 2, 1100, 4) }) {
                 const auto [p, sel] = priced_profile(labels, runs, name, seeds, trace);
                 const std::string what = std::string(format) + (trace ? " trace " : " kmer ")
-                        + std::to_string(labels) + "x" + std::to_string(runs);
+                        + std::to_string(labels) + "x" + std::to_string(runs) + " names "
+                        + std::to_string(name);
+                const std::string plain = compact(cli::profile_to_json(p, &sel, format));
                 AnswerAccount account(uint64_t(1) << 40);
-                const std::optional<int64_t> before = live_heap_bytes();
                 uint64_t tree_and_text = 0;
-                {
-                    const Json::Value out = cli::profile_to_json(p, &sel, format, nullptr,
-                                                                 &account);
-                    const std::string text = compact(out);
-                    const std::optional<int64_t> after = live_heap_bytes();
-                    if (before && after && *after > *before) {
-                        tree_and_text = *after - *before;
-                        ++measured;
+                uint64_t peak = 0;
+                for (bool gzip : { true, false }) {
+#if USE_JEMALLOC
+                    size_t sz = sizeof(uint64_t);
+                    const bool peaks = !mallctl("thread.peak.reset", nullptr, nullptr, nullptr, 0);
+#endif
+                    const std::optional<int64_t> before = live_heap_bytes();
+                    AnswerAccount priced(uint64_t(1) << 40);
+                    {
+                        Json::Value out = cli::profile_to_json(p, &sel, format, nullptr, &priced);
+                        cli::charge_answer_text(&priced);
+                        std::string text = cli::json_text(out, true, {}, nullptr,
+                                                          cli::compact_json_size(out));
+                        const std::optional<int64_t> after = live_heap_bytes();
+                        if (before && after && *after > *before)
+                            tree_and_text = std::max<uint64_t>(tree_and_text, *after - *before);
+                        // the same answer as without an account
+                        EXPECT_EQ(plain, text) << what;
+                        out = Json::Value();
+                        std::string body = gzip ? cli::compress_string(text, 1, true)
+                                                : std::move(text);
+                        if (gzip)
+                            std::string().swap(text);
+                        const std::string transport = body;
+                        EXPECT_FALSE(transport.empty());
                     }
-                    // the same answer as without an account
-                    EXPECT_EQ(compact(cli::profile_to_json(p, &sel, format)), text) << what;
-                    // the text, three times its bytes in the price, at least once
-                    EXPECT_GE(account.held(), text.size()) << what;
+#if USE_JEMALLOC
+                    uint64_t got = 0;
+                    if (peaks && !mallctl("thread.peak.read", &got, &sz, nullptr, 0))
+                        peak = std::max(peak, got);
+#endif
+                    account = priced;
                 }
+                if (tree_and_text)
+                    ++measured;
+                // the text at least once in the price
+                EXPECT_GE(account.held(), plain.size()) << what;
                 EXPECT_GE(account.held(), tree_and_text) << what << ": priced " << account.held()
                                                          << ", the heap held " << tree_and_text;
+                if (peak) {
+                    EXPECT_LE(peak, account.held()) << what << ": priced " << account.held()
+                                                    << ", jemalloc's peak " << peak;
+                    if (name <= 40 && std::string(format) == "intervals") {
+                        EXPECT_LE(account.held() * 100, peak * 115) << what << ": priced "
+                                << account.held() << ", jemalloc's peak " << peak;
+                    }
+                    std::cerr << what << ": priced " << account.held() << ", jemalloc's peak "
+                              << peak << " (x" << double(account.held()) / peak << ")"
+                              << std::endl;
+                }
                 // an account a byte short of the price refuses it, at the answer's part
                 AnswerAccount short_one(account.held() - 1);
                 try {
                     cli::profile_to_json(p, &sel, format, nullptr, &short_one);
+                    cli::charge_answer_text(&short_one);
                     ADD_FAILURE() << what << ": not refused";
                 } catch (const AnswerTooLarge &e) {
                     EXPECT_EQ("answer", e.part()) << what;

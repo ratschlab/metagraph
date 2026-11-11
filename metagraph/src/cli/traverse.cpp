@@ -28,6 +28,7 @@
 #include "cli/server_checks.hpp"
 #include "cli/server_fanout.hpp"
 #include "cli/traverse_attempts.hpp"
+#include "annotation/binary_matrix/base/decode_budget.hpp"
 #include "annotation/coord_to_header.hpp"
 #include "annotation/representation/annotation_matrix/static_annotators_def.hpp"
 #include "annotation/representation/column_compressed/annotate_column_compressed.hpp"
@@ -2304,45 +2305,64 @@ static Json::Value interval_json(const KmerInterval &iv) {
 }
 
 // ---- the answer's JSON priced before it is built (SPEC-labeled-traversal-core.md §4.6, the
-// answer account; GPT review 7, finding 2). jsoncpp 1.9.3 holds a value placed in an array or
-// an object in a node of its container's map (88 B: 96 B on macOS, glibc and jemalloc), an
-// object member's key in a copy of its own (at most 32 B for the keys written here), an array's
-// or object's map in a block of its own (24-48 B) and a string in a copy of its bytes with a
-// 4-byte length (its bytes + at most 32 B). The text is written once the tree is built and then
-// compressed: three times its bytes (the text, its growth while written, its compressed copy).
-// Measured (T4-L1, e23/T4/L1/price/json_cost.cpp, macOS): an element 96 B, an interval [a, b]
-// 320 B, a string of 17 B 128 B, an object member 112 B. A model of the heap, never a
+// answer account; GPT review 7, finding 2; T4 review R1, F3). Each part's price is its tree's
+// heap and its compact text's bytes (JsonPrice), the text counted by the account, so that what
+// it costs once the tree is complete is priced from the text's size (charge_answer_text). The
+// heap is the deployed build's (libstdc++ and jemalloc, alloc_bytes; libc++'s structures are the
+// same size or smaller), so that a price is the same on every platform: jsoncpp 1.9.3 holds a
+// value placed in an array or an object in a node of its container's map (88 B: 96), an object
+// member's key in a copy of its own (its bytes and a terminator), an array's or object's map in
+// a block of its own (48 B; libc++ 24 B: 32) and a string in a copy of its bytes with a 4-byte
+// length and a terminator. Measured (T4-L1 fix round): an interval in a run list 336 B of heap
+// on Linux (320 on macOS) and 12 B of text, priced 336 + 13. A model of the heap, never a
 // measurement; ResolveAnswer.ThePriceCoversTheTree checks it against the allocator
 constexpr uint64_t kJsonValueBytes = 96;
-constexpr uint64_t kJsonKeyBytes = 32;
-constexpr uint64_t kJsonContainerBytes = 64;
-constexpr uint64_t kJsonStringBytes = 32;
-constexpr uint64_t kJsonTextCopies = 3;
+constexpr uint64_t kJsonContainerBytes = 48;
 // what an answer holds beside its labels, graph runs, candidates, seeds and names (its scalar
 // members, labels_truncated, labels_capped, the selection's policy and counts, limits, stop,
-// capabilities, work, timing): below 12 KiB measured, priced at 64 KiB
+// capabilities, work, timing): below 12 KiB of tree and text measured, priced at 64 KiB, of which
+// at most 16 KiB of text
 constexpr uint64_t kJsonAnswerFixedBytes = 64 << 10;
+constexpr uint64_t kJsonAnswerFixedText = 16 << 10;
+// zlib's deflate state at the server's window and memory level (2 x 128 KiB and its stream)
+constexpr uint64_t kCompressorBytes = 272 << 10;
 
-// a value placed in an array (|text| bytes of text, its separator included)
-static uint64_t element_price(uint64_t text) {
-    return kJsonValueBytes + kJsonTextCopies * (text + 1);
+struct JsonPrice {
+    uint64_t heap = 0;   // what the tree allocates
+    uint64_t text = 0;   // the bytes of its compact text
+    JsonPrice &operator+=(const JsonPrice &other) {
+        heap += other.heap;
+        text += other.text;
+        return *this;
+    }
+    friend JsonPrice operator+(JsonPrice a, const JsonPrice &b) { return a += b; }
+};
+
+// a value placed in an array (|text| bytes of text, without its separator)
+static JsonPrice element_price(uint64_t text) {
+    return { kJsonValueBytes, text + 1 };
 }
 // a member of an object, |key| its name, holding a value of |text| bytes of text
-static uint64_t member_price(const char *key, uint64_t text) {
-    return kJsonValueBytes + kJsonKeyBytes + kJsonTextCopies * (std::strlen(key) + 4 + text);
+static JsonPrice member_price(const char *key, uint64_t text) {
+    const uint64_t key_bytes = std::strlen(key);
+    return { kJsonValueBytes + annot::matrix::alloc_bytes(key_bytes + 1), key_bytes + 4 + text };
+}
+// an array's or object's map (beyond its node) and its brackets
+static JsonPrice container_price() {
+    return { kJsonContainerBytes, 2 };
 }
 // a string value's copy beyond its node, and its text
-static uint64_t string_price(const std::string &value) {
-    return value.size() + kJsonStringBytes + kJsonTextCopies * json_string_length(value);
+static JsonPrice string_price(const std::string &value) {
+    return { annot::matrix::alloc_bytes(value.size() + 5), json_string_length(value) };
 }
 // an interval [a, b] in an array or a member (beyond its node): its array and two elements
-static uint64_t interval_price(uint64_t a, uint64_t b) {
-    return kJsonContainerBytes + element_price(decimal_digits(a)) + element_price(decimal_digits(b))
-         + kJsonTextCopies * 2;
+static JsonPrice interval_price(uint64_t a, uint64_t b) {
+    return container_price() + element_price(decimal_digits(a)) + element_price(decimal_digits(b));
 }
 // a member |key| holding runs (beyond its node): an array of intervals, or the rle string as
-// built (its growth: twice its bytes) and as copied into the tree
-static uint64_t runs_price(const std::vector<KmerInterval> &runs, uint64_t num_kmers, bool rle) {
+// built (its last growth an old and a new buffer, up to three times its bytes; then its buffer
+// beside its copy into the tree) and its text
+static JsonPrice runs_price(const std::vector<KmerInterval> &runs, uint64_t num_kmers, bool rle) {
     if (rle) {
         uint64_t len = 0;
         uint64_t pos = 0;
@@ -2354,74 +2374,96 @@ static uint64_t runs_price(const std::vector<KmerInterval> &runs, uint64_t num_k
         }
         if (num_kmers > pos)
             len += 1 + decimal_digits(num_kmers - pos);
-        return 3 * len + 2 * kJsonStringBytes + kJsonTextCopies * (len + 2);
+        return { 3 * annot::matrix::alloc_bytes(len + 5), len + 2 };
     }
-    uint64_t bytes = kJsonContainerBytes + kJsonTextCopies * 2;
+    JsonPrice price = container_price();
     for (const KmerInterval &run : runs) {
-        bytes += kJsonValueBytes + interval_price(run.begin, run.end) + kJsonTextCopies;
+        price += element_price(0) + interval_price(run.begin, run.end);
     }
-    return bytes;
+    return price;
 }
 // an array of names (beyond its node)
-static uint64_t names_price(const std::vector<std::string> &names) {
-    uint64_t bytes = kJsonContainerBytes + kJsonTextCopies * 2;
+static JsonPrice names_price(const std::vector<std::string> &names) {
+    JsonPrice price = container_price();
     for (const std::string &name : names) {
-        bytes += element_price(0) + string_price(name);
+        price += element_price(0) + string_price(name);
     }
-    return bytes;
+    return price;
 }
 
 // A label of the answer's `labels`, as profile_to_json builds it
-static uint64_t label_price(const LabelProfile &l, uint64_t num_kmers, bool rle, bool trace) {
-    uint64_t bytes = element_price(2) + kJsonContainerBytes
+static JsonPrice label_price(const LabelProfile &l, uint64_t num_kmers, bool rle, bool trace) {
+    JsonPrice price = element_price(0) + container_price()
             + member_price("label", 0) + string_price(l.label.name)
             + member_price("kind", 0) + string_price(to_string(l.label.kind))
             + member_price("kmers_supported", decimal_digits(l.kmers_supported))
             + member_price("runs", 0) + runs_price(l.runs, num_kmers, rle);
     if (trace) {
-        bytes += member_price("trace_breaks", 2) + kJsonContainerBytes;
+        price += member_price("trace_breaks", 0) + container_price();
         for (uint64_t x : l.trace_breaks) {
-            bytes += element_price(decimal_digits(x));
+            price += element_price(decimal_digits(x));
         }
     }
-    return bytes;
+    return price;
 }
 
 // A candidate of the answer's `candidates`, as profile_to_json builds it
-static uint64_t candidate_price(const SupportProfile &p, const SeedCandidate &c) {
+static JsonPrice candidate_price(const SupportProfile &p, const SeedCandidate &c) {
     const auto [a, b] = p.bp_interval(c.kmers);
-    uint64_t bytes = element_price(2) + kJsonContainerBytes
+    JsonPrice price = element_price(0) + container_price()
             + member_price("kmer_interval", 0) + interval_price(c.kmers.begin, c.kmers.end)
             + member_price("bp_interval", 0) + interval_price(a, b)
-            + member_price("labels", 2) + kJsonContainerBytes;
+            + member_price("labels", 0) + container_price();
     for (LabelId l : c.labels) {
-        bytes += element_price(0) + string_price(p.labels[l].label.name);
+        price += element_price(0) + string_price(p.labels[l].label.name);
     }
-    return bytes;
+    return price;
 }
 
 // A frozen seed of the answer's `selection.seeds`, as profile_to_json builds it
-static uint64_t seed_price(const FrozenSeed &seed) {
-    uint64_t bytes = element_price(2) + kJsonContainerBytes
+static JsonPrice seed_price(const FrozenSeed &seed) {
+    JsonPrice price = element_price(0) + container_price()
             + member_price("seed_id", 0) + string_price(seed.seed_id)
             + member_price("sequence", 0) + string_price(seed.sequence)
             + member_price("kmer_interval", 0) + interval_price(seed.kmers.begin, seed.kmers.end)
             + member_price("labels", 0) + names_price(seed.labels)
-            + member_price("label_population", 2) + kJsonContainerBytes
+            + member_price("label_population", 0) + container_price()
             + member_price("supporting_total", decimal_digits(seed.population.supporting_total))
             + member_price("included", decimal_digits(seed.population.included))
             + member_price("dropped_count", decimal_digits(seed.population.dropped_count))
-            + member_price("overlaps_with", 2) + kJsonContainerBytes;
+            + member_price("overlaps_with", 0) + container_price();
     if (seed.population.dropped_count) {
-        bytes += member_price("dropped_digest", 0) + string_price(seed.population.dropped_digest)
+        price += member_price("dropped_digest", 0) + string_price(seed.population.dropped_digest)
                + member_price("dropped", 0) + names_price(seed.population.dropped);
     }
     for (size_t o : seed.overlaps_with) {
-        bytes += element_price(decimal_digits(o));
+        price += element_price(decimal_digits(o));
     }
     if (!seed.labels_not_covering.empty())
-        bytes += member_price("labels_not_covering", 0) + names_price(seed.labels_not_covering);
-    return bytes;
+        price += member_price("labels_not_covering", 0) + names_price(seed.labels_not_covering);
+    return price;
+}
+
+static void charge_json(AnswerAccount *answer, const JsonPrice &price) {
+    if (answer)
+        answer->charge_text(price.heap, price.text, "answer");
+}
+
+void charge_answer_text(AnswerAccount *answer) {
+    if (!answer)
+        return;
+    // the text's buffer, reserved to its exact size, at the allocator's class beyond the bytes
+    // charged (the fixed members' text within their 64 KiB)
+    const uint64_t text = answer->text() + kJsonAnswerFixedText;
+    answer->charge(annot::matrix::alloc_bytes(text + 1) - text, "answer");
+    // once the text is written the tree is freed (and the profile and the selection before it):
+    // the text then holds beside its copy, the compressed body or the transport's, each at its
+    // last growth up to three times the text, and the compressor's state. More than the tree
+    // held only for an answer that is mostly long strings, which the account then covers
+    const uint64_t after_tree = annot::matrix::alloc_bytes(text + 1) + 3 * text
+                              + kCompressorBytes;
+    if (after_tree > answer->held())
+        answer->charge(after_tree - answer->held(), "answer");
 }
 
 // The labels_capped member (SPEC-labeled-traversal-core.md §4.6): where a discovery's label cap
@@ -2487,14 +2529,11 @@ Json::Value profile_to_json(const SupportProfile &p, const SeedSelection *sel, c
             check();
     };
     // the answer account: each part priced before it is built (§4.6)
-    auto charge = [&](uint64_t bytes) {
-        if (answer)
-            answer->charge(bytes, "answer");
-    };
+    auto charge = [&](const JsonPrice &price) { charge_json(answer, price); };
     const bool rle = run_format == "rle";
     const bool trace = p.support == Support::TRACE;
     if (answer) {
-        charge(kJsonAnswerFixedBytes + member_price("graph_runs", 0)
+        charge(JsonPrice { kJsonAnswerFixedBytes, 0 } + member_price("graph_runs", 0)
                + runs_price(p.graph_runs, p.num_kmers, rle));
     }
     Json::Value j;
@@ -6355,8 +6394,8 @@ Json::Value process_resolve_request(
     // others, and none of these is in it
     if (labels_not_in_graph_dropped) {
         if (answer) {
-            answer->charge(member_price("unknown_labels", 0) + names_price(profile.unknown_labels),
-                           "answer");
+            charge_json(&*answer, member_price("unknown_labels", 0)
+                                      + names_price(profile.unknown_labels));
         }
         out["unknown_labels"] = names_json(profile.unknown_labels);
     }
@@ -6407,6 +6446,8 @@ Json::Value process_resolve_request(
     t["elapsed_ms"] = timer.elapsed() * 1000;
     put_thread_usage(&t, request_usage.elapsed());
     out["timing"] = std::move(t);
+    // what the answer's text holds once the tree is complete (§4.6)
+    charge_answer_text(answer ? &*answer : nullptr);
     if (req.options.finish_check)
         req.options.finish_check();
     return out;

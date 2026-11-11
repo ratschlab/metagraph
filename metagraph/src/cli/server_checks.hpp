@@ -288,10 +288,12 @@ bool peer_closed(int fd);
 // caller. What stays uninterruptible is what the writer does between two pieces — preparing
 // one token, e.g. escaping one string value of 16 MiB, before it is copied — and |max_gap_ms|,
 // when given, receives the longest time between two checks (and from the start to the first,
-// and from the last to the end) for observed_max_uninterruptible_ms
+// and from the last to the end) for observed_max_uninterruptible_ms. |reserve|: the bytes the
+// text is reserved before it is written (the /resolve answer's exact size: compact_json_size), so
+// that it never grows by doubling, whose last step held an old and a new buffer; 0: none
 std::string json_text(const Json::Value &value, bool compact,
                       const std::function<void()> &check = nullptr,
-                      double *max_gap_ms = nullptr);
+                      double *max_gap_ms = nullptr, size_t reserve = 0);
 
 // The compact text of a /traverse response whose results were written as text one by one
 // (ResultTexts): |envelope|'s members before "results" and after it (jsoncpp writes an
