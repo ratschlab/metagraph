@@ -22,6 +22,8 @@
  *   - a permitted set derived from the seed is its carriers and runs like the explicit list;
  *   - with a branch allowance of 0 every claim is a claim of the reference cut at the
  *     label's first fork, where it ends with BRANCH.
+ * Those fixtures have COLUMN labels. HeaderLabelsFollowTheirRecords checks HEADER labels
+ * against the model of a record followed in coordinate order (trie::header_claim).
  */
 
 namespace {
@@ -348,6 +350,67 @@ TYPED_TEST(WalkerReference, RandomGraphs) {
         const size_t at = gen() % (host.size() - 10);
         check_case<Graph, Annotation>({ "Random" + std::to_string(trial), 7, seqs, labels,
                                         host.substr(at, 10), 25 });
+    }
+}
+
+// HEADER labels on random records full of repeats: every record holding the seed is
+// derived, and its walk is the record's own sequence from its first such position to the
+// record's end or the radius, with no fork and no stop by the walk rule
+TEST(WalkerHeaderReference, HeaderLabelsFollowTheirRecords) {
+    const size_t k = 7;
+    std::mt19937 gen(119);
+    for (size_t trial = 0; trial < 12; ++trial) {
+        std::vector<std::string> pieces;
+        for (size_t i = 0; i < 6; ++i) {
+            pieces.push_back(random_seq(6 + gen() % 10, gen()));
+        }
+        std::vector<Record> records;
+        std::vector<std::string> seqs, headers;
+        for (size_t r = 0; r < 5; ++r) {
+            std::string s;
+            for (size_t j = 0; j < 5; ++j) {
+                s += pieces[gen() % pieces.size()];
+            }
+            // two columns: the first two records in one, the others in the second
+            records.push_back({ r < 2 ? "F" : "G", "rec" + std::to_string(r), s });
+            seqs.push_back(s);
+            headers.push_back(records.back().header);
+        }
+        auto anno = build_records<DBGSuccinct, annot::ColumnCompressed<>>(k, records);
+        trie::StringIndex ix(k, DeBruijnGraph::BASIC, seqs, headers);
+        const std::string &host = seqs[gen() % seqs.size()];
+        const size_t at = gen() % (host.size() - 10);
+        for (uint64_t radius : { uint64_t(8), uint64_t(1000) }) {
+            Case c { "Header" + std::to_string(trial), k, seqs, headers, host.substr(at, 10),
+                     radius };
+            std::set<std::string> carriers;
+            for (size_t r = 0; r < seqs.size(); ++r) {
+                if (seqs[r].find(c.seed) != std::string::npos)
+                    carriers.insert(headers[r]);
+            }
+            const SeedResult derived = walk(*anno, c, {}, 0);
+            std::set<std::string> names;
+            for (const LabelRef &l : derived.label_dict) {
+                EXPECT_EQ(LabelKind::HEADER, l.kind);
+                names.insert(l.name);
+            }
+            EXPECT_EQ(carriers, names) << c.name;
+            const SeedResult named = walk(
+                    *anno, c, std::vector<std::string>(carriers.begin(), carriers.end()), 0);
+            for (Arm arm : { Arm::LEFT, Arm::RIGHT }) {
+                trie::RefClaims expected;
+                for (size_t r = 0; r < seqs.size(); ++r) {
+                    trie::header_claim(ix, headers[r], seqs[r], c.seed, arm, radius, &expected);
+                }
+                const trie::RefClaims got = walker_claims(derived, arm);
+                EXPECT_EQ(expected, got) << c.name << " radius " << radius << " arm "
+                                         << to_string(arm) << "\nexpected:" << show(expected)
+                                         << "\ngot:" << show(got);
+                EXPECT_EQ(got, walker_claims(named, arm)) << c.name;
+                EXPECT_EQ(ArmResult::COMPLETE,
+                          derived.arms[static_cast<size_t>(arm)].status) << c.name;
+            }
+        }
     }
 }
 

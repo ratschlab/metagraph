@@ -337,7 +337,9 @@ int transform_annotation(Config *config) {
             exit(1);
         }
 
-        // The row map is the expensive part, so keep it for a rerun.
+        // The row map is the expensive part, so keep it for a rerun. With disk swap
+        // it is built in and read from that file instead of being held in RAM.
+        const bool on_disk = !config->tmp_dir.empty();
         const std::string row_map_fname = config->outfbase + ".rowmap";
         sdsl::int_vector<> row_map;
         uint64_t target_num_rows;
@@ -346,34 +348,54 @@ int transform_annotation(Config *config) {
         auto target = load_critical_dbg(config->infbase);
         target_num_rows = target->max_index();
 
-        if (std::filesystem::exists(row_map_fname)) {
-            logger->trace("Loading row map from {}", row_map_fname);
-            std::ifstream in(row_map_fname, std::ios::binary);
-            row_map.load(in);
-            if (!in.good() || !check_row_map(*source, *target, row_map)) {
-                logger->error("Row map {} does not match graphs {} and {}. Delete it and run again",
-                              row_map_fname, config->remap_graph, config->infbase);
-                exit(1);
+        try {
+            if (std::filesystem::exists(row_map_fname)) {
+                logger->trace("Loading row map from {}", row_map_fname);
+                bool matches;
+                if (on_disk) {
+                    matches = check_row_map(*source, *target, row_map_fname);
+                } else {
+                    std::ifstream in(row_map_fname, std::ios::binary);
+                    row_map.load(in);
+                    matches = in.good() && check_row_map(*source, *target, row_map);
+                }
+                if (!matches) {
+                    throw std::runtime_error(fmt::format(
+                        "Row map {} does not match graphs {} and {}. Delete it and run again",
+                        row_map_fname, config->remap_graph, config->infbase));
+                }
+            } else {
+                logger->trace("Matching rows of {} to {}...", config->remap_graph, config->infbase);
+                const std::string tmp_fname = row_map_fname + ".tmp";
+                try {
+                    if (on_disk) {
+                        auto tmp_dir = utils::create_temp_dir(config->tmp_dir, "rowmap");
+                        try {
+                            map_rows_to_graph(*source, *target, tmp_fname, tmp_dir, get_num_threads());
+                        } catch (...) {
+                            utils::remove_temp_dir(tmp_dir);
+                            throw;
+                        }
+                        utils::remove_temp_dir(tmp_dir);
+                    } else {
+                        row_map = map_rows_to_graph(*source, *target, get_num_threads());
+                        std::ofstream out(tmp_fname, std::ios::binary);
+                        row_map.serialize(out);
+                        out.close();
+                        if (!out)
+                            throw std::runtime_error("Cannot write row map to " + tmp_fname);
+                    }
+                } catch (...) {
+                    std::error_code ec;
+                    std::filesystem::remove(tmp_fname, ec);
+                    throw;
+                }
+                std::filesystem::rename(tmp_fname, row_map_fname);
+                logger->trace("Row map saved to {} in {} sec", row_map_fname, timer.elapsed());
             }
-        } else {
-            logger->trace("Matching rows of {} to {}...", config->remap_graph, config->infbase);
-            try {
-                row_map = map_rows_to_graph(*source, *target, get_num_threads());
-            } catch (const std::exception &e) {
-                logger->error("{}", e.what());
-                exit(1);
-            }
-
-            const std::string tmp_fname = row_map_fname + ".tmp";
-            std::ofstream out(tmp_fname, std::ios::binary);
-            row_map.serialize(out);
-            out.close();
-            if (!out) {
-                logger->error("Cannot write row map to {}", tmp_fname);
-                exit(1);
-            }
-            std::filesystem::rename(tmp_fname, row_map_fname);
-            logger->trace("Row map saved to {} in {} sec", row_map_fname, timer.elapsed());
+        } catch (const std::exception &e) {
+            logger->error("{}", e.what());
+            exit(1);
         }
         target.reset();
 
@@ -386,8 +408,11 @@ int transform_annotation(Config *config) {
 
         std::unique_ptr<MultiLabelAnnotation<std::string>> remapped;
         try {
-            remapped = remap_annotation_rows(*annotation, *source, row_map,
-                                             target_num_rows, get_num_threads());
+            remapped = on_disk
+                ? remap_annotation_rows(*annotation, *source, row_map_fname,
+                                        target_num_rows, get_num_threads())
+                : remap_annotation_rows(*annotation, *source, row_map,
+                                        target_num_rows, get_num_threads());
         } catch (const std::exception &e) {
             logger->error("{}", e.what());
             exit(1);

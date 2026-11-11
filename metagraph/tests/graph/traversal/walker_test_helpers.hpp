@@ -2,6 +2,8 @@
 #define __TESTS_GRAPH_TRAVERSAL_WALKER_TEST_HELPERS_HPP__
 
 #include <algorithm>
+#include <map>
+#include <memory>
 #include <random>
 #include <set>
 #include <string>
@@ -9,6 +11,7 @@
 
 #include "graph/traversal/walker.hpp"
 #include "tests/graph/traversal/traversal_test_helpers.hpp"
+#include "tests/annotation/test_annotated_dbg_helpers.hpp"
 #include "common/seq_tools/reverse_complement.hpp"
 
 
@@ -94,6 +97,40 @@ struct DerivedFixture : public LabelEndFixture {
     std::vector<std::string> seqs() const { return { W + R + X, R + X + Y, prefix() }; }
     std::vector<std::string> labels() const { return { "A", "B", "C" }; }
 };
+
+// one sequence record (FASTA header and sequence) of an annotation column
+struct Record {
+    std::string column;
+    std::string header;
+    std::string sequence;
+};
+
+// A coordinate annotation of |records| with their headers (CoordToHeader), as built from
+// FASTA files: a column's records, listed together, get consecutive coordinates
+template <class Graph, class Annotation>
+std::unique_ptr<graph::AnnotatedDBG>
+build_records(size_t k, const std::vector<Record> &records,
+              graph::DeBruijnGraph::Mode mode = graph::DeBruijnGraph::BASIC) {
+    std::vector<std::string> sequences, columns;
+    std::vector<uint64_t> starts;
+    std::map<std::string, uint64_t> num_coords;
+    for (const Record &r : records) {
+        sequences.push_back(r.sequence);
+        columns.push_back(r.column);
+        starts.push_back(num_coords[r.column]);
+        num_coords[r.column] += r.sequence.size() - k + 1;
+    }
+    auto anno = build_anno_graph<Graph, Annotation>(k, sequences, columns, mode, true, starts);
+    const auto &encoder = anno->get_annotator().get_label_encoder();
+    std::vector<std::vector<std::string>> headers(num_coords.size());
+    std::vector<std::vector<uint64_t>> num_kmers(num_coords.size());
+    for (const Record &r : records) {
+        const size_t column = encoder.encode(r.column);
+        headers[column].push_back(r.header);
+        num_kmers[column].push_back(r.sequence.size() - k + 1);
+    }
+    return with_coord_to_header(std::move(anno), std::move(headers), std::move(num_kmers));
+}
 
 // the bases of a path from the seed boundary outward (natural orientation on the left arm)
 inline std::string spell_path(const graph::traversal::ArmResult &arm,

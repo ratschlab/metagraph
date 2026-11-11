@@ -375,6 +375,8 @@ Config::Config(int argc, char *argv[]) {
             unitigs = true;
         } else if (!strcmp(argv[i], "--primary-kmers")) {
             kmers_in_single_form = true;
+        } else if (!strcmp(argv[i], "--row-map")) {
+            row_map = true;
         } else if (!strcmp(argv[i], "--header")) {
             header = std::string(get_value(i++));
         } else if (!strcmp(argv[i], "--prune-tips")) {
@@ -553,6 +555,9 @@ Config::Config(int argc, char *argv[]) {
 
     if (tmp_dir == "OUTFBASE_TEMP_DIR") {
         tmp_dir = std::filesystem::path(outfbase).remove_filename();
+        // an output name without a directory, as opposed to --disk-swap ""
+        if (tmp_dir.empty())
+            tmp_dir = "./";
     }
     utils::set_swap_path(tmp_dir);
 
@@ -683,6 +688,30 @@ Config::Config(int argc, char *argv[]) {
             || identity == RELAX_BRWT)
                     && outfbase.empty())
         print_usage_and_exit = true;
+
+    if (identity == TRANSFORM && graph_type != SUCCINCT && graph_type != SSHASH) {
+        std::cerr << "transform can change the graph representation only with"
+                     " '--graph sshash'" << std::endl;
+        print_usage_and_exit = true;
+    }
+    if (identity == TRANSFORM && graph_type == SSHASH
+            && (initialize_bloom || clear_dummy || to_adj_list)) {
+        std::cerr << "'--graph sshash' only converts the graph and cannot be combined with"
+                     " --initialize-bloom, --clear-dummy or --to-adj-list" << std::endl;
+        print_usage_and_exit = true;
+    }
+    // 'transform --to-fasta' runs as CLEAN and writes only the sequences
+    if (identity == CLEAN && graph_type != SUCCINCT) {
+        std::cerr << "--graph cannot be combined with --to-fasta. To get the row map with"
+                     " the sequences, use '--to-fasta --row-map'" << std::endl;
+        print_usage_and_exit = true;
+    }
+
+    // 'transform --to-fasta' runs as CLEAN
+    if (row_map && !(identity == CLEAN && to_fasta)) {
+        std::cerr << "--row-map needs 'transform --to-fasta'" << std::endl;
+        print_usage_and_exit = true;
+    }
 
     if (identity == TRANSFORM_ANNOTATION && remap_graph.size()) {
         if (infbase.empty() || fnames.size() != 1) {
@@ -1255,9 +1284,15 @@ if (advanced) {
             fprintf(stderr, "\t   --clear-dummy \terase all redundant dummy edges and build an edgemask for non-redundant [off]\n");
             fprintf(stderr, "\t   --prune-tips [INT] \tprune all dead ends shorter than this many k-mers [1]\n");
             fprintf(stderr, "\t   --state [STR] \tchange state of succinct graph: small / dynamic / stat / fast [stat]\n");
+            fprintf(stderr, "\t   --graph [STR] \tconvert the graph to another representation: sshash [off]\n");
+            fprintf(stderr, "\t                 \tAlso writes <OUT>.rowmap, the row map that 'transform_anno --remap-graph'\n");
+            fprintf(stderr, "\t                 \tneeds to move annotations to the new graph\n");
             fprintf(stderr, "\t   --to-adj-list \twrite adjacency list to file [off]\n");
             fprintf(stderr, "\t   --to-fasta \t\textract sequences from graph and dump to compressed FASTA file [off]\n");
             fprintf(stderr, "\t   --enumerate \t\tenumerate sequences in FASTA [off]\n");
+            fprintf(stderr, "\t   --row-map \t\twith --to-fasta, also write <OUT>.rowmap: the row map that\n");
+            fprintf(stderr, "\t             \t\t'transform_anno --remap-graph' needs for an SSHash graph built\n");
+            fprintf(stderr, "\t             \t\tfrom the written file [off]\n");
             fprintf(stderr, "\t   --initialize-bloom \tconstruct a Bloom filter for faster detection of non-existing k-mers [off]\n");
             fprintf(stderr, "\t   --unitigs \t\textract all unitigs from graph and dump to compressed FASTA file [off]\n");
 #if ! _PROTEIN_GRAPH

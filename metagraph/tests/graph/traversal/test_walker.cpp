@@ -21,6 +21,7 @@
 #include "graph/representation/succinct/dbg_succinct.hpp"
 #include "graph/representation/hash/dbg_sshash.hpp"
 #include "annotation/representation/column_compressed/annotate_column_compressed.hpp"
+#include "annotation/representation/annotation_matrix/static_annotators_def.hpp"
 #include "annotation/coord_to_header.hpp"
 
 
@@ -127,9 +128,19 @@ void check_invariants(const ArmResult &arm) {
 
 std::string serialize(const SeedResult &r) {
     std::ostringstream os;
-    os << r.validated_seed_id << '|' << r.label_dict.size() << '|' << r.length_bp << '|';
+    // without labels_from_seed and its counters: a derived run is compared with a named one
+    os << r.validated_seed_id << '|' << r.seed_id_mismatch << '|' << r.length_bp << '|'
+       << r.num_kmers << '|';
+    for (const LabelRef &l : r.label_dict) {
+        os << to_string(l.kind) << ':' << l.name << ';';
+    }
+    os << '|';
     for (const auto &d : r.dropped_labels) {
-        os << d.name << ';';
+        os << d.name;
+        for (const KmerInterval &run : d.runs) {
+            os << ' ' << run.begin << '-' << run.end;
+        }
+        os << ';';
     }
     for (const ArmResult &a : r.arms) {
         os << "\nARM " << to_string(a.arm) << ' ' << a.requested << ' ' << a.status << ' '
@@ -671,6 +682,15 @@ TYPED_TEST(WalkerTest, Caps) {
             EXPECT_EQ(ArmResult::COMPLETE, left.status);
             EXPECT_EQ(2u, count_ends(left, EndReason::DEAD_END));
         }
+        // a fork at the last level needs no further expansion, so it is not capped
+        st = Strategy();
+        st.max_live_paths = 1;
+        st.max_extension_bp = 1;
+        st.direction = Strategy::RIGHT;
+        res = run(*fork, X, { "A", "B" }, st);
+        EXPECT_EQ(ArmResult::COMPLETE, res.arms[kRight].status);
+        EXPECT_FALSE(res.arms[kRight].cap_trigger.has_value());
+        EXPECT_EQ(2u, res.arms[kRight].paths.size());
         st = Strategy();
         st.max_paths = 1;
         res = run(*fork, X, { "A", "B" }, st);
@@ -1018,6 +1038,404 @@ TEST(WalkerDerive, AmbiguousDerivedHeaderNamesAreRefused) {
     seed.labels = { "ACC1" };
     EXPECT_THROW(traverse_seed(oracle, seed, Strategy()), std::invalid_argument);
 }
+
+/************ HEADER labels: a sequence record is followed in coordinate order ************/
+
+template <typename Pair>
+class WalkerRecordTest : public ::testing::Test {};
+
+typedef ::testing::Types<
+    std::pair<DBGSuccinct, annot::ColumnCompressed<>>,
+    std::pair<DBGHashFast, annot::ColumnCompressed<>>,
+    std::pair<DBGSuccinct, annot::RowDiffColumnAnnotator>
+> WalkerRecordTypes;
+TYPED_TEST_SUITE(WalkerRecordTest, WalkerRecordTypes);
+
+// the one end of a label on an arm with a single path
+const LabelEnd& only_end(const ArmResult &arm, LabelId label) {
+    EXPECT_EQ(1u, arm.paths.size());
+    size_t n = 0;
+    for (const auto &seg : arm.segments) {
+        for (const auto &e : seg.label_ends) {
+            n += e.label == label;
+        }
+    }
+    EXPECT_EQ(1u, n);
+    const LabelEnd *end = label_end(arm, label);
+    static const LabelEnd none {};
+    return end ? *end : none;
+}
+
+// A record whose two ends share a repeat longer than k. By membership the record's first
+// and last k-mers have neighbours carrying the record (the other copy's), and both arms
+// walked on into them. In coordinate order both arms end where the record does.
+TYPED_TEST(WalkerRecordTest, TerminalRepeatEndsAtTheRecordEnds) {
+    using Graph = typename TypeParam::first_type;
+    using Annotation = typename TypeParam::second_type;
+    auto b = clean_blocks({ 30, 40, 40 }, 301);
+    const std::string &T = b[0], &A = b[1], &B = b[2];
+    const std::string record = T + A + B + T;
+    const std::string seed = A.substr(5, 25);
+    auto anno = build_records<Graph, Annotation>(kK, { { "F", "rec", record } });
+
+    for (const std::vector<std::string> &labels : { std::vector<std::string>{ "rec" },
+                                                    std::vector<std::string>{} }) {
+        auto res = run(*anno, seed, labels);
+        ASSERT_EQ(1u, res.label_dict.size());
+        EXPECT_EQ(LabelKind::HEADER, res.label_dict[0].kind);
+        EXPECT_EQ("rec", res.label_dict[0].name);
+        EXPECT_TRUE(res.dropped_labels.empty());
+        const ArmResult &left = res.arms[kLeft], &right = res.arms[kRight];
+        check_invariants(left);
+        check_invariants(right);
+        ASSERT_EQ(1u, left.paths.size());
+        ASSERT_EQ(1u, right.paths.size());
+        // exactly the record's bases on both sides of the seed
+        EXPECT_EQ(T + A.substr(0, 5), spell_path(left, left.paths[0]));
+        EXPECT_EQ(A.substr(30) + B + T, spell_path(right, right.paths[0]));
+        for (const ArmResult *arm : { &left, &right }) {
+            EXPECT_EQ(ArmResult::COMPLETE, arm->status);
+            EXPECT_TRUE(arm->splits.empty());
+            const LabelEnd &end = only_end(*arm, 0);
+            EXPECT_EQ(EndReason::RECORD_END, end.reason) << to_string(end.reason);
+            EXPECT_EQ(arm->paths[0].length_bp, end.at_bp);
+            EXPECT_FALSE(arm->paths[0].path_reason.has_value());
+            EXPECT_EQ(1u, path_ends(arm->paths[0], EndReason::RECORD_END));
+        }
+        EXPECT_STREQ("record_end", to_string(EndReason::RECORD_END));
+    }
+}
+
+// A repeat inside one record, its two copies followed by different bases. By membership
+// both successors after the first copy carry the record: a fork, BRANCH at allowance 0.
+// In coordinate order the walk goes through both copies, re-using the repeat's edges.
+TYPED_TEST(WalkerRecordTest, RepeatInsideARecordIsWalkedThrough) {
+    using Graph = typename TypeParam::first_type;
+    using Annotation = typename TypeParam::second_type;
+    std::vector<std::string> b;
+    for (uint32_t s = 302; ; ++s) {
+        b = clean_blocks({ 40, 30, 40, 40 }, s);
+        if (b[2][0] != b[3][0])
+            break;
+    }
+    const std::string &L = b[0], &R = b[1], &M = b[2], &N = b[3];
+    const std::string record = L + R + M + R + N;
+    const std::string seed = L.substr(5, 25);
+    auto anno = build_records<Graph, Annotation>(kK, { { "F", "rec", record } });
+
+    for (size_t branches : { size_t(0), Strategy::kUnlimited }) {
+        auto res = run(*anno, seed, { "rec" }, strategy(branches));
+        const ArmResult &left = res.arms[kLeft], &right = res.arms[kRight];
+        check_invariants(left);
+        check_invariants(right);
+        ASSERT_EQ(1u, right.paths.size());
+        EXPECT_EQ(record.substr(30), spell_path(right, right.paths[0]));
+        EXPECT_TRUE(right.splits.empty());
+        EXPECT_EQ(0u, right.paths[0].end_labels[0].branches);
+        for (EndReason never : { EndReason::BRANCH, EndReason::EDGE_REUSE,
+                                 EndReason::EDGE_REUSE_RC, EndReason::REACHED_SEED,
+                                 EndReason::LABEL_LOST }) {
+            EXPECT_EQ(0u, count_ends(right, never)) << to_string(never);
+        }
+        // the record ends in a tip of the graph on both sides
+        EXPECT_EQ(EndReason::DEAD_END, only_end(right, 0).reason);
+        ASSERT_EQ(1u, left.paths.size());
+        EXPECT_EQ(L.substr(0, 5), spell_path(left, left.paths[0]));
+        EXPECT_EQ(EndReason::DEAD_END, only_end(left, 0).reason);
+    }
+
+    // the extension length still cuts the walk, inside the second copy
+    Strategy st;
+    st.max_extension_bp = 10 + R.size() + M.size() + 15;
+    auto cut = run(*anno, seed, { "rec" }, st);
+    const ArmResult &right = cut.arms[kRight];
+    ASSERT_EQ(1u, right.paths.size());
+    EXPECT_EQ(record.substr(30, st.max_extension_bp), spell_path(right, right.paths[0]));
+    EXPECT_EQ(EndReason::MAX_EXTENSION, only_end(right, 0).reason);
+    EXPECT_EQ(ArmResult::COMPLETE, right.status);
+    EXPECT_EQ(st.max_extension_bp, right.complete_to_bp);
+}
+
+// A record holding the seed twice is followed from the lower place. The record is the
+// second of its column, so its coordinates do not start at 0.
+TYPED_TEST(WalkerRecordTest, ASeedHeldTwiceIsPlacedAtTheLowestCoordinate) {
+    using Graph = typename TypeParam::first_type;
+    using Annotation = typename TypeParam::second_type;
+    auto b = clean_blocks({ 50, 30, 40, 40 }, 303);
+    const std::string &X = b[0], &S = b[1], &A = b[2], &B = b[3];
+    const std::string record = S + A + S + B;
+    auto anno = build_records<Graph, Annotation>(kK, { { "F", "other", X },
+                                                      { "F", "rec", record } });
+
+    for (const std::vector<std::string> &labels : { std::vector<std::string>{ "rec" },
+                                                    std::vector<std::string>{} }) {
+        auto res = run(*anno, S, labels);
+        ASSERT_EQ(1u, res.label_dict.size());
+        EXPECT_EQ("rec", res.label_dict[0].name);
+        EXPECT_EQ(1u, res.label_dict[0].seq_id);
+        const ArmResult &left = res.arms[kLeft], &right = res.arms[kRight];
+        check_invariants(left);
+        check_invariants(right);
+        // from the first copy: nothing to the left, the whole rest to the right
+        ASSERT_EQ(1u, right.paths.size());
+        EXPECT_EQ(A + S + B, spell_path(right, right.paths[0]));
+        EXPECT_EQ(0u, count_ends(right, EndReason::BRANCH));
+        EXPECT_EQ(0u, count_ends(right, EndReason::REACHED_SEED));
+        EXPECT_EQ(EndReason::DEAD_END, only_end(right, 0).reason);
+        ASSERT_EQ(1u, left.paths.size());
+        EXPECT_EQ(0u, left.paths[0].length_bp);
+        // the record's first k-mer has a predecessor in the graph (the second copy's)
+        EXPECT_EQ(EndReason::RECORD_END, only_end(left, 0).reason);
+        EXPECT_EQ(0u, only_end(left, 0).at_bp);
+    }
+
+    // A record with every k-mer of the seed, but not at consecutive coordinates (the
+    // seed's two overlapping halves side by side), does not carry it: dropped, with the
+    // runs of k-mers it is on
+    const std::string halves = S.substr(0, 25) + S.substr(5);
+    auto gapped = build_records<Graph, Annotation>(kK, { { "F", "whole", S + B },
+                                                        { "F", "gapped", halves } });
+    auto res = run(*gapped, S, { "whole", "gapped" });
+    ASSERT_EQ(1u, res.label_dict.size());
+    EXPECT_EQ("whole", res.label_dict[0].name);
+    ASSERT_EQ(1u, res.dropped_labels.size());
+    EXPECT_EQ("gapped", res.dropped_labels[0].name);
+    EXPECT_EQ((std::vector<KmerInterval>{ { 0, S.size() - kK + 1 } }),
+              res.dropped_labels[0].runs);
+    auto derived = run(*gapped, S, {});
+    ASSERT_EQ(1u, derived.label_dict.size());
+    EXPECT_EQ("whole", derived.label_dict[0].name);
+    try {
+        run(*gapped, S, { "gapped" });
+        ADD_FAILURE() << "a record not holding the seed in a row must not carry it";
+    } catch (const SeedDerivationError &e) {
+        EXPECT_EQ(SeedDerivationError::NO_CARRIER, e.cause());
+    }
+}
+
+// A column and one of its records on one seed: the column keeps its membership walk and
+// the walk rule, the record goes on alone
+TYPED_TEST(WalkerRecordTest, ColumnAndHeaderLabelsOnOneSeed) {
+    using Graph = typename TypeParam::first_type;
+    using Annotation = typename TypeParam::second_type;
+    std::vector<std::string> b;
+    for (uint32_t s = 304; ; ++s) {
+        b = clean_blocks({ 40, 30, 40, 40 }, s);
+        if (b[2][0] != b[3][0])
+            break;
+    }
+    const std::string &L = b[0], &R = b[1], &M = b[2], &N = b[3];
+    const std::string record = L + R + M + R + N;
+    const std::string seed = L.substr(5, 25);
+    const uint64_t fork_bp = 10 + R.size();
+    const uint64_t end_bp = record.size() - 30;
+    auto anno = build_records<Graph, Annotation>(kK, { { "F", "rec", record } });
+
+    // allowance 0: the column ends at the fork after the first copy, as it does alone
+    auto res = run(*anno, seed, { "F", "rec" });
+    ASSERT_EQ(2u, res.label_dict.size());
+    EXPECT_EQ(LabelKind::COLUMN, res.label_dict[0].kind);
+    EXPECT_EQ(LabelKind::HEADER, res.label_dict[1].kind);
+    {
+        const ArmResult &right = res.arms[kRight];
+        check_invariants(right);
+        ASSERT_EQ(1u, right.paths.size());
+        EXPECT_EQ(record.substr(30), spell_path(right, right.paths[0]));
+        EXPECT_EQ(EndReason::BRANCH, only_end(right, 0).reason);
+        EXPECT_EQ(fork_bp, only_end(right, 0).at_bp);
+        EXPECT_EQ(EndReason::DEAD_END, only_end(right, 1).reason);
+        EXPECT_EQ(end_bp, only_end(right, 1).at_bp);
+        EXPECT_EQ((std::vector<LabelId>{ 0, 1 }), right.segments[0].labels_start);
+        EXPECT_EQ((std::vector<LabelId>{ 1 }), right.segments[0].labels_end);
+
+        auto alone = run(*anno, seed, { "F" });
+        const ArmResult &column = alone.arms[kRight];
+        ASSERT_EQ(1u, column.paths.size());
+        EXPECT_EQ(EndReason::BRANCH, only_end(column, 0).reason);
+        EXPECT_EQ(fork_bp, only_end(column, 0).at_bp);
+        EXPECT_EQ(record.substr(30, fork_bp), spell_path(column, column.paths[0]));
+    }
+
+    // unlimited: the column follows both successors of the first copy; on the way back
+    // into the repeat the walk rule stops it, and only it
+    res = run(*anno, seed, { "F", "rec" }, strategy(Strategy::kUnlimited));
+    const ArmResult &right = res.arms[kRight];
+    check_invariants(right);
+    ASSERT_EQ(2u, right.paths.size());
+    std::set<std::string> flanks;
+    for (const auto &path : right.paths) {
+        flanks.insert(spell_path(right, path));
+    }
+    EXPECT_EQ((std::set<std::string>{ record.substr(30), L.substr(30) + R + N }), flanks);
+    EXPECT_EQ(1u, count_ends(right, EndReason::EDGE_REUSE));
+    EXPECT_EQ(0u, count_ends(right, EndReason::BRANCH));
+    size_t header_ends = 0;
+    for (const auto &seg : right.segments) {
+        for (const auto &e : seg.label_ends) {
+            if (e.label == 1) {
+                header_ends++;
+                EXPECT_EQ(EndReason::DEAD_END, e.reason);
+                EXPECT_EQ(end_bp, e.at_bp);
+            } else {
+                EXPECT_TRUE(e.reason == EndReason::EDGE_REUSE || e.reason == EndReason::DEAD_END)
+                    << to_string(e.reason);
+            }
+        }
+    }
+    EXPECT_EQ(1u, header_ends);
+    // the column's walks are those of the column alone
+    auto alone = run(*anno, seed, { "F" }, strategy(Strategy::kUnlimited));
+    const ArmResult &column = alone.arms[kRight];
+    EXPECT_EQ(1u, count_ends(column, EndReason::EDGE_REUSE));
+    EXPECT_EQ(1u, count_ends(column, EndReason::DEAD_END));
+    ASSERT_EQ(2u, column.paths.size());
+}
+
+// A record with a base outside the alphabet has no k-mers over it, and so a gap in its
+// coordinates. Here the gap is annotated directly: the record's two parts are given
+// coordinates kK apart, as around one such base. The label is lost at the gap (the last
+// k-mer before it has a successor, of another record), not at a record end.
+TYPED_TEST(WalkerRecordTest, AGapInTheRecordsCoordinatesLosesTheLabel) {
+    using Graph = typename TypeParam::first_type;
+    using Annotation = typename TypeParam::second_type;
+    auto b = clean_blocks({ 60, 40, 30 }, 306);
+    const std::string &X = b[0], &Y = b[1], &W = b[2];
+    const std::string other = X.substr(40) + W;
+    const uint64_t nx = X.size() - kK + 1, ny = Y.size() - kK + 1;
+    auto anno = build_anno_graph<Graph, Annotation>(
+            kK, { X, Y, other }, { "F", "F", "G" }, DeBruijnGraph::BASIC, true,
+            { 0, nx + kK, 0 });
+    const auto &encoder = anno->get_annotator().get_label_encoder();
+    std::vector<std::vector<std::string>> headers(2);
+    std::vector<std::vector<uint64_t>> num_kmers(2);
+    headers[encoder.encode("F")] = { "rec" };
+    num_kmers[encoder.encode("F")] = { nx + kK + ny };
+    headers[encoder.encode("G")] = { "other" };
+    num_kmers[encoder.encode("G")] = { other.size() - kK + 1 };
+    anno = with_coord_to_header(std::move(anno), std::move(headers), std::move(num_kmers));
+
+    const std::string seed = X.substr(10, 25);
+    for (const std::vector<std::string> &labels : { std::vector<std::string>{ "rec" },
+                                                    std::vector<std::string>{} }) {
+        auto res = run(*anno, seed, labels);
+        ASSERT_EQ(1u, res.label_dict.size());
+        EXPECT_EQ("rec", res.label_dict[0].name);
+        const ArmResult &left = res.arms[kLeft], &right = res.arms[kRight];
+        check_invariants(left);
+        check_invariants(right);
+        ASSERT_EQ(1u, right.paths.size());
+        EXPECT_EQ(X.substr(35), spell_path(right, right.paths[0]));
+        EXPECT_EQ(EndReason::LABEL_LOST, only_end(right, 0).reason)
+            << to_string(only_end(right, 0).reason);
+        EXPECT_EQ(X.size() - 35, only_end(right, 0).at_bp);
+        EXPECT_EQ(0u, count_ends(right, EndReason::RECORD_END));
+        ASSERT_EQ(1u, left.paths.size());
+        EXPECT_EQ(X.substr(0, 10), spell_path(left, left.paths[0]));
+        EXPECT_EQ(EndReason::DEAD_END, only_end(left, 0).reason);
+    }
+    // after the gap the record goes on at its own coordinates
+    auto after = run(*anno, Y.substr(5, 25), { "rec" });
+    ASSERT_EQ(1u, after.arms[kLeft].paths.size());
+    EXPECT_EQ(Y.substr(0, 5), spell_path(after.arms[kLeft], after.arms[kLeft].paths[0]));
+    // the record's first k-mer after the gap has no predecessor in the graph
+    EXPECT_EQ(EndReason::DEAD_END, only_end(after.arms[kLeft], 0).reason);
+}
+
+#if ! _PROTEIN_GRAPH
+// In canonical and primary graphs a seed that is the reverse complement of a part of the
+// record is held at descending coordinates: the arms follow the record backwards
+template <class Annotation>
+void check_reverse_complement_seed() {
+    auto b = clean_blocks({ 30, 40, 40 }, 305);
+    const std::string &T = b[0], &A = b[1], &B = b[2];
+    const std::string record = T + A + B + T;
+    const std::string forward = A.substr(5, 25);
+    for (auto mode : canonical_modes()) {
+        auto anno = build_records<DBGSuccinct, Annotation>(kK, { { "F", "rec", record } }, mode);
+        for (const std::vector<std::string> &labels : { std::vector<std::string>{ "rec" },
+                                                        std::vector<std::string>{} }) {
+            auto fwd = run(*anno, forward, labels);
+            ASSERT_EQ(1u, fwd.label_dict.size()) << mode;
+            ASSERT_EQ(1u, fwd.arms[kRight].paths.size()) << mode;
+            ASSERT_EQ(1u, fwd.arms[kLeft].paths.size()) << mode;
+            EXPECT_EQ(A.substr(30) + B + T,
+                      spell_path(fwd.arms[kRight], fwd.arms[kRight].paths[0])) << mode;
+            EXPECT_EQ(T + A.substr(0, 5),
+                      spell_path(fwd.arms[kLeft], fwd.arms[kLeft].paths[0])) << mode;
+
+            auto bwd = run(*anno, rc(forward), labels);
+            ASSERT_EQ(1u, bwd.label_dict.size()) << mode;
+            EXPECT_EQ(LabelKind::HEADER, bwd.label_dict[0].kind);
+            ASSERT_EQ(1u, bwd.arms[kRight].paths.size()) << mode;
+            ASSERT_EQ(1u, bwd.arms[kLeft].paths.size()) << mode;
+            // the right arm of the reverse complement is the record's left side
+            EXPECT_EQ(rc(T + A.substr(0, 5)),
+                      spell_path(bwd.arms[kRight], bwd.arms[kRight].paths[0])) << mode;
+            EXPECT_EQ(rc(A.substr(30) + B + T),
+                      spell_path(bwd.arms[kLeft], bwd.arms[kLeft].paths[0])) << mode;
+            for (const SeedResult *res : { &fwd, &bwd }) {
+                for (const ArmResult &arm : res->arms) {
+                    check_invariants(arm);
+                    EXPECT_EQ(EndReason::RECORD_END, only_end(arm, 0).reason) << mode;
+                }
+            }
+        }
+    }
+}
+
+TEST(WalkerRecord, ReverseComplementSeedFollowsTheRecordBackwards) {
+    check_reverse_complement_seed<annot::ColumnCompressed<>>();
+}
+
+// the same on a row-diff coordinate annotation, whose rows are decoded through the cache
+TEST(WalkerRecord, ReverseComplementSeedOnRowDiff) {
+    check_reverse_complement_seed<annot::RowDiffColumnAnnotator>();
+}
+
+// A seed and its reverse complement are one seed in canonical and primary graphs (one
+// seed id), so they take the same place in a record and their walks are mirror images.
+// Here the record holds rc(S) at its coordinates c..c+19 and S, overlapping it, at
+// c+10..c+29: both seeds are placed on the lower occurrence.
+TEST(WalkerRecord, ASeedAndItsReverseComplementTakeTheSamePlace) {
+    auto b = clean_blocks({ 40, 40, 10, 10 }, 307);
+    const std::string &L = b[0], &R = b[1], &H = b[2], &T = b[3];
+    const std::string S = H + rc(H) + T;
+    // rc(S) = rc(T) + H + rc(H): the two occurrences share H + rc(H)
+    const std::string record = L + rc(T) + H + rc(H) + T + R;
+    ASSERT_EQ(L.size(), record.find(rc(S)));
+    ASSERT_EQ(L.size() + 10, record.find(S));
+    for (auto mode : canonical_modes()) {
+        auto anno = build_records<DBGSuccinct, annot::ColumnCompressed<>>(
+                kK, { { "F", "rec", record } }, mode);
+        for (const std::vector<std::string> &labels : { std::vector<std::string>{ "rec" },
+                                                        std::vector<std::string>{} }) {
+            auto fwd = run(*anno, S, labels);
+            auto bwd = run(*anno, rc(S), labels);
+            EXPECT_EQ(fwd.validated_seed_id, bwd.validated_seed_id);
+            ASSERT_EQ(1u, fwd.label_dict.size()) << mode;
+            ASSERT_EQ(1u, bwd.label_dict.size()) << mode;
+            for (const SeedResult *res : { &fwd, &bwd }) {
+                for (const ArmResult &arm : res->arms) {
+                    check_invariants(arm);
+                    ASSERT_EQ(1u, arm.paths.size()) << mode;
+                }
+            }
+            // rc(S) lies forwards at the lower occurrence: the record's own flanks
+            EXPECT_EQ(L, spell_path(bwd.arms[kLeft], bwd.arms[kLeft].paths[0])) << mode;
+            EXPECT_EQ(T + R, spell_path(bwd.arms[kRight], bwd.arms[kRight].paths[0])) << mode;
+            // S is placed there too, backwards: the mirror image
+            EXPECT_EQ(rc(spell_path(bwd.arms[kLeft], bwd.arms[kLeft].paths[0])),
+                      spell_path(fwd.arms[kRight], fwd.arms[kRight].paths[0])) << mode;
+            EXPECT_EQ(rc(spell_path(bwd.arms[kRight], bwd.arms[kRight].paths[0])),
+                      spell_path(fwd.arms[kLeft], fwd.arms[kLeft].paths[0])) << mode;
+            EXPECT_EQ(only_end(bwd.arms[kLeft], 0).reason, only_end(fwd.arms[kRight], 0).reason);
+            EXPECT_EQ(only_end(bwd.arms[kRight], 0).reason, only_end(fwd.arms[kLeft], 0).reason);
+            EXPECT_EQ(only_end(bwd.arms[kLeft], 0).at_bp, only_end(fwd.arms[kRight], 0).at_bp);
+            EXPECT_EQ(only_end(bwd.arms[kRight], 0).at_bp, only_end(fwd.arms[kLeft], 0).at_bp);
+        }
+    }
+}
+#endif
 
 // zero caps, a radius of 0 and a non-finite or negative time budget are refused
 TEST(Walker, RefusesInvalidCaps) {

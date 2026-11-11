@@ -328,6 +328,22 @@ TYPED_TEST(LabelOracleCoordTest, HeaderLabels) {
         EXPECT_EQ((LabelQuery::NodeHits{ 1, 3 }), hits2[i]) << "s2 k-mer " << i;
     }
 
+    // the coordinates of a header label: s2's k-mer i is coordinate n1 + i of acc2's record
+    {
+        const auto with_coords = query.fetch_hits(map_to_nodes(oracle.graph(), s2));
+        ASSERT_EQ(hits2.size(), with_coords.size());
+        for (size_t i = 0; i < hits2.size(); ++i) {
+            EXPECT_EQ(hits2[i], with_coords[i]->labels);
+            const LabelQuery::HeaderCoord expected { 1, n1 + i };
+            EXPECT_TRUE(std::find(with_coords[i]->coords.begin(), with_coords[i]->coords.end(),
+                                  expected) != with_coords[i]->coords.end()) << "s2 k-mer " << i;
+            EXPECT_TRUE(std::is_sorted(with_coords[i]->coords.begin(),
+                                       with_coords[i]->coords.end()));
+        }
+        EXPECT_EQ(std::make_pair(n1, n1 + n2 - 1), query.record_coords(1));
+        EXPECT_EQ(std::make_pair(uint64_t(0), uint64_t(0)), query.record_coords(3));
+    }
+
     // s1's k-mers: acc1 everywhere; acc3 on the k-mers shared with s3
     auto hits1 = query.fetch(map_to_nodes(oracle.graph(), s1));
     for (size_t i = 0; i < hits1.size(); ++i) {
@@ -414,6 +430,91 @@ TYPED_TEST(LabelOracleCoordTest, HeaderLabels) {
     LabelOracle no_headers(*anno);
     EXPECT_THROW(no_headers.resolve_label("acc1"), std::invalid_argument);
     EXPECT_THROW(LabelQuery(no_headers, { acc1 }), std::invalid_argument);
+}
+
+// The header coordinates of fetch_hits do not depend on the cache: a record with a tandem
+// repeat (many coordinates per k-mer) read through a small cache, which is cleared by its
+// coordinate bound and by its key bound, and in a batch too large to cache
+TYPED_TEST(LabelOracleCoordTest, HeaderCoordinatesSurviveCacheEviction) {
+    using Graph = typename TypeParam::first_type;
+    using Annotation = typename TypeParam::second_type;
+    auto rnd = make_sequences(3, 30, 23);
+    std::string record = rnd[0];
+    for (size_t i = 0; i < 40; ++i) {
+        record += rnd[1].substr(0, 20);
+    }
+    record += rnd[2];
+    const uint64_t n = record.size() - kTestK + 1;
+    auto anno = with_coord_to_header(
+            build_anno_graph<Graph, Annotation>(kTestK, { record }, { "F" },
+                                                DeBruijnGraph::BASIC, true, { 0 }),
+            { { "acc" } }, { { n } });
+    LabelOracle oracle(*anno);
+    const LabelRef acc = oracle.resolve_label("acc");
+    ASSERT_EQ(LabelKind::HEADER, acc.kind);
+    const std::vector<node_index> keys = map_to_nodes(oracle.graph(), record);
+    ASSERT_EQ(n, keys.size());
+
+    // the reference: one fetch through a cache that holds everything
+    LabelQuery whole(oracle, { acc });
+    std::vector<LabelQuery::Hits> expected;
+    size_t max_coords = 0;
+    size_t num_coords = 0;
+    for (const LabelQuery::Hits *hit : whole.fetch_hits(keys)) {
+        expected.push_back(*hit);
+        max_coords = std::max(max_coords, hit->coords.size());
+        num_coords += hit->coords.size();
+    }
+    // every k-mer has its own coordinate among those of its key
+    for (size_t i = 0; i < keys.size(); ++i) {
+        ASSERT_NE(npos, keys[i]);
+        EXPECT_EQ((LabelQuery::NodeHits{ 0 }), expected[i].labels);
+        const LabelQuery::HeaderCoord own { 0, i };
+        EXPECT_TRUE(std::binary_search(expected[i].coords.begin(), expected[i].coords.end(), own))
+            << "k-mer " << i;
+    }
+    // a k-mer of the tandem repeat has a coordinate per copy
+    ASSERT_GE(max_coords, 30u);
+    ASSERT_GT(num_coords, keys.size());
+
+    auto same = [&](const LabelQuery::Hits &hit, size_t i) {
+        return hit.labels == expected[i].labels && hit.coords == expected[i].coords;
+    };
+    // 8 keys and 8 * 16 coordinates: four k-mers of the repeat exceed the coordinate
+    // bound, ten k-mers of a flank the key bound
+    LabelQuery small(oracle, { acc }, 8);
+    for (size_t round = 0; round < 2; ++round) {
+        for (size_t begin = 0; begin < keys.size(); begin += 2) {
+            const size_t end = std::min(keys.size(), begin + 2);
+            const std::vector<node_index> batch(keys.begin() + begin, keys.begin() + end);
+            const auto hits = small.fetch_hits(batch);
+            ASSERT_EQ(batch.size(), hits.size());
+            for (size_t i = begin; i < end; ++i) {
+                EXPECT_TRUE(same(*hits[i - begin], i)) << "round " << round << " k-mer " << i;
+            }
+            // read again, now from the cache
+            const auto again = small.fetch_hits(batch);
+            for (size_t i = begin; i < end; ++i) {
+                EXPECT_TRUE(same(*again[i - begin], i)) << "round " << round << " k-mer " << i;
+            }
+        }
+        // a batch larger than the cache is answered without caching it
+        const auto hits = small.fetch_hits(keys);
+        ASSERT_EQ(keys.size(), hits.size());
+        for (size_t i = 0; i < keys.size(); ++i) {
+            EXPECT_TRUE(same(*hits[i], i)) << "round " << round << " k-mer " << i;
+        }
+        const auto labels = small.fetch(keys);
+        for (size_t i = 0; i < keys.size(); ++i) {
+            EXPECT_EQ(expected[i].labels, labels[i]);
+        }
+    }
+    // no cache at all
+    LabelQuery none(oracle, { acc }, 0);
+    const auto hits = none.fetch_hits(keys);
+    for (size_t i = 0; i < keys.size(); ++i) {
+        EXPECT_TRUE(same(*hits[i], i)) << "k-mer " << i;
+    }
 }
 
 // The reverse header index answers each header's first record, also after a load()

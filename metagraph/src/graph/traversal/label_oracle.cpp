@@ -1,6 +1,7 @@
 #include "label_oracle.hpp"
 
 #include <algorithm>
+#include <limits>
 #include <set>
 
 #include "graph/annotated_dbg.hpp"
@@ -153,6 +154,7 @@ LabelQuery::LabelQuery(const LabelOracle &oracle,
     if (labels_.empty())
         throw std::invalid_argument("Empty permitted label set");
 
+    record_coords_.assign(labels_.size(), { 0, 0 });
     std::set<std::pair<Column, uint64_t>> headers;
     for (LabelId i = 0; i < labels_.size(); ++i) {
         const LabelRef &ref = labels_[i];
@@ -168,6 +170,7 @@ LabelQuery::LabelQuery(const LabelOracle &oracle,
             throw std::invalid_argument("Duplicate label '" + ref.name + "'");
         const auto [first, last] = oracle_.coord_to_header()->sequence_coords(ref.column, ref.seq_id);
         header_ranges_[ref.column].push_back(HeaderRange{ first, last, i });
+        record_coords_[i] = { first, last };
     }
     for (auto it = header_ranges_.begin(); it != header_ranges_.end(); ++it) {
         std::sort(it.value().begin(), it.value().end(),
@@ -178,19 +181,19 @@ LabelQuery::LabelQuery(const LabelOracle &oracle,
     tuples_ = !header_ranges_.empty() || (oracle_.has_coordinates() && oracle_.is_row_diff());
 }
 
-void LabelQuery::hits_from_row(const BinaryMatrix::SetBitPositions &row, NodeHits *hits) const {
+void LabelQuery::hits_from_row(const BinaryMatrix::SetBitPositions &row, Hits *hits) const {
     for (Column c : row) {
         auto it = column_labels_.find(c);
         if (it != column_labels_.end())
-            hits->push_back(it->second);
+            hits->labels.push_back(it->second);
     }
-    std::sort(hits->begin(), hits->end());
+    std::sort(hits->labels.begin(), hits->labels.end());
 }
 
-void LabelQuery::hits_from_tuples(const MultiIntMatrix::RowTuples &row, NodeHits *hits) const {
+void LabelQuery::hits_from_tuples(const MultiIntMatrix::RowTuples &row, Hits *hits) const {
     for (const auto &[c, coords] : row) {
         if (auto it = column_labels_.find(c); it != column_labels_.end())
-            hits->push_back(it->second);
+            hits->labels.push_back(it->second);
         auto rt = header_ranges_.find(c);
         if (rt == header_ranges_.end())
             continue;
@@ -200,15 +203,20 @@ void LabelQuery::hits_from_tuples(const MultiIntMatrix::RowTuples &row, NodeHits
             auto it = std::upper_bound(ranges.begin(), ranges.end(), coord,
                                        [](uint64_t x, const HeaderRange &r) { return x < r.first; });
             if (it != ranges.begin() && coord <= (--it)->last)
-                hits->push_back(it->label);
+                hits->coords.push_back(HeaderCoord{ it->label, coord });
         }
     }
-    std::sort(hits->begin(), hits->end());
-    hits->erase(std::unique(hits->begin(), hits->end()), hits->end());
+    std::sort(hits->coords.begin(), hits->coords.end());
+    // a header label is present once, however many of its coordinates the key has
+    for (size_t i = 0; i < hits->coords.size(); ++i) {
+        if (!i || hits->coords[i].label != hits->coords[i - 1].label)
+            hits->labels.push_back(hits->coords[i].label);
+    }
+    std::sort(hits->labels.begin(), hits->labels.end());
 }
 
 void LabelQuery::read_hits(const std::vector<node_index> &keys,
-                           tsl::hopscotch_map<node_index, NodeHits> *out) {
+                           tsl::hopscotch_map<node_index, Hits> *out) {
     if (keys.empty())
         return;
     std::vector<Row> rows;
@@ -229,7 +237,13 @@ void LabelQuery::read_hits(const std::vector<node_index> &keys,
     }
 }
 
-std::vector<LabelQuery::NodeHits> LabelQuery::fetch(const std::vector<node_index> &keys) {
+std::vector<const LabelQuery::Hits*>
+LabelQuery::fetch_hits(const std::vector<node_index> &keys) {
+    // on average 16 header coordinates per cached key
+    const size_t max_cached_coords = max_cache_size_ > std::numeric_limits<size_t>::max() / 16
+            ? std::numeric_limits<size_t>::max() : max_cache_size_ * 16;
+
+    uncached_.clear();
     std::vector<node_index> missing;
     tsl::hopscotch_set<node_index> requested;
     for (node_index key : keys) {
@@ -237,8 +251,9 @@ std::vector<LabelQuery::NodeHits> LabelQuery::fetch(const std::vector<node_index
             missing.push_back(key);
     }
     // when the new keys do not fit, clear the cache and read every key of this batch
-    if (cache_.size() + missing.size() > max_cache_size_) {
+    if (cache_.size() + missing.size() > max_cache_size_ || cached_coords_ > max_cached_coords) {
         cache_.clear();
+        cached_coords_ = 0;
         missing.clear();
         requested.clear();
         for (node_index key : keys) {
@@ -248,14 +263,29 @@ std::vector<LabelQuery::NodeHits> LabelQuery::fetch(const std::vector<node_index
     }
 
     // a batch larger than the cache is answered without caching it
-    tsl::hopscotch_map<node_index, NodeHits> uncached;
-    auto *found = missing.size() > max_cache_size_ ? &uncached : &cache_;
+    const bool cached = missing.size() <= max_cache_size_;
+    auto *found = cached ? &cache_ : &uncached_;
     read_hits(missing, found);
+    if (cached) {
+        for (node_index key : missing) {
+            cached_coords_ += cache_.at(key).coords.size();
+        }
+    }
 
-    std::vector<NodeHits> result(keys.size());
+    // nothing is inserted from here on: the addresses of the hits are stable
+    std::vector<const Hits*> result(keys.size(), &empty_);
     for (size_t i = 0; i < keys.size(); ++i) {
         if (keys[i] != npos)
-            result[i] = found->at(keys[i]);
+            result[i] = &found->at(keys[i]);
+    }
+    return result;
+}
+
+std::vector<LabelQuery::NodeHits> LabelQuery::fetch(const std::vector<node_index> &keys) {
+    const std::vector<const Hits*> hits = fetch_hits(keys);
+    std::vector<NodeHits> result(keys.size());
+    for (size_t i = 0; i < keys.size(); ++i) {
+        result[i] = hits[i]->labels;
     }
     return result;
 }

@@ -862,7 +862,8 @@ Move an annotation to another graph with the same k-mers
 """"""""""""""""""""""""""""""""""""""""""""""""""""""""
 A ``brwt`` or ``row_diff_brwt`` annotation can be moved to another graph with the same k-mers, such as an SSHash graph built from the unitigs of a succinct graph.
 This avoids annotating the new graph again from the input sequences.
-Both graphs must be in ``basic`` mode.
+Both graphs must be in ``basic`` mode, or the old graph in ``primary`` mode and the new one an SSHash graph built with ``--mode primary``.
+In the second case, build the SSHash graph from the contigs of the old graph (``transform --to-fasta``), so that both store every k-mer in the same orientation.
 Pass the graph that the annotation was built for with ``--remap-graph`` and the new graph with ``-i``::
 
     metagraph transform_anno -v -p 36 --remap-graph graph.dbg -i graph.sshashdbg \
@@ -883,6 +884,29 @@ The command saves the matching of rows as ``moved.rowmap``.
 A repeated run with the same output name reuses this file and skips matching the rows again.
 Before reusing it, the command checks a sample of rows against both graphs and stops if they no longer match.
 Delete the file after changing either graph.
+The row map is built in ``moved.rowmap`` and read from it without loading it whole into memory.
+Building it needs temporary files of about twice its size, in the output directory or in the directory passed with ``--disk-swap``.
+Pass ``--disk-swap ""`` to build and keep the row map in memory instead, which avoids the temporary files.
+
+If the new graph is not built yet, convert the old graph with ``transform --graph sshash``.
+It writes the SSHash graph and the row map, so the remap skips matching the rows::
+
+    metagraph transform -v -p 36 --graph sshash -o moved graph.dbg
+    metagraph transform_anno -v -p 36 --remap-graph graph.dbg -i moved.sshashdbg \
+                             -o moved annotation.row_diff_brwt.annodbg
+
+The first command writes ``moved.sshashdbg`` and ``moved.rowmap``.
+It keeps the mode of the old graph, which must be ``basic`` or ``primary``.
+The contigs go to a temporary file in the output directory or in the directory passed with ``--disk-swap``.
+
+To build the SSHash graph in a separate step, for example on another machine, write the row map together with the contigs::
+
+    metagraph transform -v -p 36 --to-fasta --row-map -o moved graph.dbg
+    metagraph build -v -p 36 --graph sshash -k 31 -o moved moved.fasta.gz
+
+Pass the ``-k`` of the old graph.
+This row map is valid only for an SSHash graph built from exactly ``moved.fasta.gz``.
+For a graph in ``primary`` mode, build the SSHash graph with ``--mode primary``.
 
 .. _query_index:
 
