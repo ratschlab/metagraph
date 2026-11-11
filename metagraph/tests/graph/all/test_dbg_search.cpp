@@ -109,22 +109,21 @@ TYPED_TEST(DeBruijnGraphTest, map_to_nodes) {
         };
 
         for (size_t i = 2; i + k <= sequence_to_map.size(); ++i) {
-            graph->map_to_nodes(
-                sequence_to_map.substr(i, k),
-                [&](auto i) { expected_result.push_back(i);}
-            );
+            for (auto node : map_to_nodes(*graph, sequence_to_map.substr(i, k))) {
+                expected_result.push_back(node);
+            }
         }
 
         std::vector<DeBruijnGraph::node_index> observed_result;
-        graph->map_to_nodes(
-            sequence_to_map,
-            [&](const auto &index) { observed_result.emplace_back(index); }
-        );
+        for (const auto index : map_to_nodes(*graph, sequence_to_map)) {
+            observed_result.emplace_back(index);
+        }
         EXPECT_EQ(expected_result, observed_result);
 
         size_t pos = 0;
-        graph->map_to_nodes(sequence_to_map,
-                            [&](auto i) { EXPECT_EQ(expected_result[pos++], i); });
+        for (auto i : map_to_nodes(*graph, sequence_to_map)) {
+            EXPECT_EQ(expected_result[pos++], i);
+        }
     }
 }
 
