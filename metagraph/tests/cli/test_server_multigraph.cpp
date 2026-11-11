@@ -1354,7 +1354,8 @@ std::unique_ptr<Config> config_of(const PairOnDisk &pair) {
 // the traversal routes' copy and for /pattern's (its mask checked, its dummy fraction
 // sampled); header-label requests on the copy answer as on the resident. Without the
 // resident's mapping the .seqs is loaded, as every load does; a mapping of another
-// annotation is not shared
+// annotation refuses the load, and the .seqs is not read in its place (T4 review R3, S1: no
+// request reads a .seqs)
 TEST(MultiGraphInRam, LoadSharesTheResidentRecordMapping) {
     const PairOnDisk pair = write_pair("shared");
     ASSERT_TRUE(fs::exists(pair.graph));
@@ -1440,14 +1441,25 @@ TEST(MultiGraphInRam, LoadSharesTheResidentRecordMapping) {
     EXPECT_EQ(1u, loaded->get_coord_to_header()->num_header_index_builds());
     EXPECT_EQ(1u, resident->get_coord_to_header()->num_header_index_builds());
 
-    // a mapping of another annotation (two columns to this one's label) is not shared
+    // a mapping of another annotation (two columns to this one's label) refuses the load: the
+    // .seqs is not read in its place (it is away meanwhile: a load of it would fail otherwise)
     auto other = std::make_shared<annot::CoordToHeader>(
             std::vector<std::vector<std::string>>{ { "x" }, { "y" } },
             std::vector<std::vector<uint64_t>>{ { 3 }, { 4 } });
-    auto refused = initialize_annotated_dbg(*config, none, other);
-    ASSERT_TRUE(refused->get_coord_to_header());
-    EXPECT_NE(other.get(), refused->get_coord_to_header());
-    EXPECT_EQ(2u, refused->get_coord_to_header()->build_header_index());
+    const std::string seqs = pair.dir + "/anno" + annot::CoordToHeader::kExtension;
+    fs::rename(seqs, seqs + ".away");
+    try {
+        initialize_annotated_dbg(*config, none, other);
+        ADD_FAILURE() << "loaded with another annotation's mapping";
+    } catch (const RecordMappingMismatch &e) {
+        EXPECT_EQ("The record mapping offered for " + pair.annotation + " has 2 columns, the "
+                  "annotation 1 labels: not the mapping of this annotation", std::string(e.what()));
+    }
+    fs::rename(seqs + ".away", seqs);
+    // the resident's mapping still loads the copy
+    EXPECT_EQ(resident->get_coord_to_header(),
+              initialize_annotated_dbg(*config, none, resident->share_coord_to_header())
+                      ->get_coord_to_header());
 }
 
 // A load for one request (`in_ram`: the overload with a PatternPreparation) that fails throws

@@ -809,11 +809,20 @@ int run_server(Config *config) {
             throw IndexChanged(why);
         }
     };
+    // the refusal of a copy whose annotation has other column labels than the resident's
+    auto other_labels = [&](const GraphPair &pair) {
+        return IndexChanged(fmt::format(
+                "The annotation '{}' loaded into RAM for the request has other column labels "
+                "than the one the server started with: restart onto the new files, or send the "
+                "request without in_ram", pair.second));
+    };
     // A copy of |pair| loaded into RAM for one request: with the resident pair's record mapping
     // (the .seqs the stamps vouch for, checked at start-up), so that no request reads a .seqs
     // or builds its header index, while every file of the pair is the one stamped at start-up,
     // before the load and after it (a file replaced during the load), and the copy's labels
-    // the resident's. Else refused (refuse_changed_pair): no copy is served from other files.
+    // the resident's (an annotation of another column count is refused by its load, without
+    // reading its .seqs). Else refused (refuse_changed_pair, other_labels): no copy is served
+    // from other files.
     // The status change time in the stamps makes a file swapped in and back within one load
     // differ too (it takes a rename or a link, which sets it); a directory or a symlink on the
     // path swapped and back does not. |load|(mapping) loads it
@@ -821,15 +830,19 @@ int run_server(Config *config) {
                          const std::function<std::unique_ptr<AnnotatedDBG>(
                                  std::shared_ptr<const annot::CoordToHeader>)> &load) {
         refuse_changed_pair(pair);
-        auto copy = load(resident.share_coord_to_header());
+        std::unique_ptr<AnnotatedDBG> copy;
+        try {
+            copy = load(resident.share_coord_to_header());
+        } catch (const RecordMappingMismatch &) {
+            // the annotation loaded has another column count than the resident's mapping (it
+            // was replaced during the load): refused, its .seqs never read (T4 review R3, S1)
+            refuse_changed_pair(pair);
+            throw other_labels(pair);
+        }
         refuse_changed_pair(pair);
         if (copy->get_annotator().get_label_encoder().get_labels()
-                != resident.get_annotator().get_label_encoder().get_labels()) {
-            throw IndexChanged(fmt::format(
-                    "The annotation '{}' loaded into RAM for the request has other column labels "
-                    "than the one the server started with: restart onto the new files, or send "
-                    "the request without in_ram", pair.second));
-        }
+                != resident.get_annotator().get_label_encoder().get_labels())
+            throw other_labels(pair);
         return copy;
     };
     // the bytes of |pair|'s graph and annotation, which an in_ram load reserves; a file that

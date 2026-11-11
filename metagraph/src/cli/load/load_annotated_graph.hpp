@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <future>
 #include <memory>
+#include <stdexcept>
 #include <string>
 
 namespace mtg {
@@ -105,7 +106,9 @@ async_load_critical_dbg(const std::string &path, const PatternPreparation &prep)
 // loading the .seqs again, and so has its reverse header index as built. The caller passes
 // the mapping of the very pair it loads (the same annotation file: the same .seqs); null
 // loads the .seqs as every load does, unless |config| says not to map (no_coord_mapping: the
-// caller's index has no mapping, so none is looked for).
+// caller's index has no mapping, so none is looked for). A mapping whose number of columns is
+// not the annotation's labels (the annotation is another file than the one it was checked
+// with) throws RecordMappingMismatch: the .seqs is never read in its place (T4 review R3, S1).
 // A load that fails throws (LoadFailure::THROW), where the other overloads exit: a
 // std::runtime_error naming the file and the step -- "Cannot load graph from '<file>': <cause>",
 // "Cannot load annotation from '<file>': <cause>", "Cannot load the record mapping from
@@ -119,6 +122,14 @@ async_load_critical_dbg(const std::string &path, const PatternPreparation &prep)
 std::unique_ptr<graph::AnnotatedDBG>
 initialize_annotated_dbg(const Config &config, const PatternPreparation &prep,
                          std::shared_ptr<const annot::CoordToHeader> coord_to_header = nullptr);
+
+// The record mapping offered to a load (the overload above) has another number of columns than
+// the annotation it loads has labels: not this annotation's mapping. Nothing is read from the
+// annotation's .seqs; the caller (a server's in_ram load) refuses the copy
+class RecordMappingMismatch : public std::runtime_error {
+  public:
+    using std::runtime_error::runtime_error;
+};
 
 /**
  * --pattern-build-mask (DESIGN-pattern-search.md §4, mask: built_at_load): when |graph| is a

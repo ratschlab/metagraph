@@ -629,7 +629,9 @@ start-up, so that it reads no `.seqs` again, and only while every file of the pa
 successors, the `.seqs` the pair loaded, and the graph's dummy-edge mask and Bloom filter (one that appears counts
 as a change). Each is stamped at start-up, before any file of any pair is read, with its device, inode, size,
 modification time and status change time, and the stamps are compared when the request reaches the pair (before its
-memory wait), before the copy's load and after it; the copy's labels must be the resident's too. The status change
+memory wait), before the copy's load and after it; the copy's labels must be the resident's too, and an annotation
+of another column count than the mapping's is refused by the copy's load itself, its `.seqs` never read in its place
+(before T4's review R3 that load read the new `.seqs`, and the stamps then refused the copy). The status change
 time (ctime) is set by the kernel to the current time on every write, truncation, utime, chmod, chown, link and
 rename of the file, and by no call to a chosen value: a file rewritten in place with its size and modification time
 restored differs (GPT review 6 #7's residual), and so does a file swapped in and back within one load (that takes a
