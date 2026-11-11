@@ -1,6 +1,7 @@
 #ifndef __ANNOTATION_REMAP_HPP__
 #define __ANNOTATION_REMAP_HPP__
 
+#include <filesystem>
 #include <memory>
 #include <string>
 
@@ -32,6 +33,17 @@ sdsl::int_vector<> map_rows_to_graph(const graph::DeBruijnGraph &source,
                                      size_t num_threads = 1);
 
 /**
+ * Same, but writes the vector to `filename` in the sdsl::int_vector<> format
+ * without holding it in memory. Uses temporary files in `tmp_dir` of about
+ * twice the size of the result.
+ */
+void map_rows_to_graph(const graph::DeBruijnGraph &source,
+                       const graph::DeBruijnGraph &target,
+                       const std::string &filename,
+                       const std::filesystem::path &tmp_dir,
+                       size_t num_threads = 1);
+
+/**
  * Check a saved row map against both graphs. Returns false if the row counts
  * differ, or if a kept row maps to another target row than its k-mer. The
  * k-mer check covers num_samples evenly spaced rows and skips dropped ones.
@@ -39,6 +51,14 @@ sdsl::int_vector<> map_rows_to_graph(const graph::DeBruijnGraph &source,
 bool check_row_map(const graph::DeBruijnGraph &source,
                    const graph::DeBruijnGraph &target,
                    const sdsl::int_vector<> &row_map,
+                   uint64_t num_samples = 10000);
+
+/**
+ * Same, but reads the row map from a file without holding it in memory.
+ */
+bool check_row_map(const graph::DeBruijnGraph &source,
+                   const graph::DeBruijnGraph &target,
+                   const std::string &row_map_filename,
                    uint64_t num_samples = 10000);
 
 /**
@@ -51,6 +71,16 @@ std::unique_ptr<MultiLabelAnnotation<std::string>>
 remap_annotation_rows(const MultiLabelAnnotation<std::string> &annotation,
                       const graph::DeBruijnGraph &source,
                       const sdsl::int_vector<> &row_map,
+                      uint64_t target_num_rows,
+                      size_t num_threads = 1);
+
+/**
+ * Same, but reads the row map from a file without holding it in memory.
+ */
+std::unique_ptr<MultiLabelAnnotation<std::string>>
+remap_annotation_rows(const MultiLabelAnnotation<std::string> &annotation,
+                      const graph::DeBruijnGraph &source,
+                      const std::string &row_map_filename,
                       uint64_t target_num_rows,
                       size_t num_threads = 1);
 
