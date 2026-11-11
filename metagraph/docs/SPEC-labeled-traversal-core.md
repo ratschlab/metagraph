@@ -3166,10 +3166,15 @@ row ids could grow a generation to 2²⁰ buckets, about 440 MiB across both aga
 and a table of one wide row held 63 × 176 B against its 640 B; rows with bit-reversed ids, whose low bits a run
 of consecutive rows shares, made identity-hashed tables hold up to 2,516 B per entry under a 1 MiB bound. The
 tables now also hash rows seeded, `SeededHash`, which keeps them at the occupancy of random ids (at most 285 B per
-entry in the same test): the bound no longer depends on it, the number of rows held does. A single insert that doubles a table below 80% load, or twice, possible only for ids that collide in
-the hash, can pass the bound until it returns, and the generations are then dropped until it holds again: the
-identity hash's bit-reversed ids did so in the test; the seeded hash's per-process seed keeps a client from
-choosing such ids.)*
+entry in the same test): the bound no longer depends on it, the number of rows held does. A single insert or move that doubles a table below 80% load, or more than once, possible only for ids
+that collide in the hash, can pass the bound until it returns. After an insert the generations are then dropped
+until the bound holds again; after a hit's move only at the next insert or decode call, which trim to the bound
+when they begin (a trim in the move would evict rows the decode has already found cached). The factor has no
+constant bound, only the number of doublings colliding ids allow: with the identity hash and bit-reversed ids,
+review R4's probe measured a heap peak of 4.6 times the bound under 1 MiB (tuple rows, while every insert kept
+room for a doubling), and since S1 up to 2.1 times under 1 MiB and 1.6 times under 8 MiB; the seeded hash's
+per-process seed keeps a client from choosing such ids (its heap stayed within 0.63 of the bound in every pattern
+of the probe).)*
 The cache keeps its rows in two generations: a row is **admitted before it is copied** — its
 stored size computed from the row, the shared bound read and the older entries evicted first, so that a row the
 cache refuses (more than half the bound) is never copied and the copy of one it keeps is made within the bound

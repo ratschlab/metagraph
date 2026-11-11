@@ -232,8 +232,11 @@ class RowDiffCache {
 
     // The entry of |row| (with a known path only, if |need_path|), or null. A hit in the older
     // generation moves the row to the current one, where there is room for what the insert can
-    // add to the current table (else the row stays where it is). The pointer is valid until
-    // the next call of any member.
+    // add to the current table (else the row stays where it is). A move that doubles the table
+    // below the load at which it can, or more than once (ids colliding in the hash), may leave
+    // the cache above its bound until the next insert or decode call trims it: a trim here
+    // would evict rows the decode has already found cached. The pointer is valid until the
+    // next call of any member.
     const Entry* find(Row row, bool need_path) {
         auto it = gen_[0].find(row);
         if (it != gen_[0].end())
