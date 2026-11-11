@@ -294,6 +294,8 @@ class TestRemapAnnotation(TestingBase):
     @parameterized.expand([
         ('--graph sshash --to-fasta', '--to-fasta --row-map'),
         ('--graph sshash --initialize-bloom', 'cannot be combined'),
+        ('--graph sshash --clear-dummy', 'cannot be combined'),
+        ('--graph sshash --to-adj-list', 'cannot be combined'),
         ('--graph sshash --mode primary', 'keeps the mode'),
         ('--graph hash', 'only with'),
     ])
