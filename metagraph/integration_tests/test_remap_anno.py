@@ -40,6 +40,8 @@ class TestRemapAnnotation(TestingBase):
         cls.partial_target = cls.tempdir.name + '/partial.sshashdbg'
         cls._build_sshash(cls.partial_input, cls.partial_target)
 
+        cls.primary_source, cls.primary_target, cls.flipped_target = cls._build_primary_graphs()
+
     @staticmethod
     def _build_sshash(input, output):
         # SSHash needs each k-mer once, so build it from the unitigs of a succinct graph.
@@ -198,7 +200,7 @@ class TestRemapAnnotation(TestingBase):
 
     @parameterized.expand(['brwt', 'row_diff_brwt'])
     def test_remap_primary_to_sshash(self, anno_repr):
-        source, target, flipped_target = self._build_primary_graphs()
+        source, target = self.primary_source, self.primary_target
         prefix = f'{self.tempdir.name}/primary_{anno_repr}'
         self._annotate_graph(INPUT, source, prefix, anno_repr, num_threads=NUM_THREADS)
         anno = prefix + anno_file_extension[anno_repr]
@@ -217,15 +219,15 @@ class TestRemapAnnotation(TestingBase):
             self.assertTrue(all(line.split('\t')[-1] for line in expected))
             self.assertEqual(expected, self._query(target, out_anno, mode))
 
-        res = self._remap(anno, prefix + '_flipped', flipped_target, source=source)
+        res = self._remap(anno, prefix + '_flipped', self.flipped_target, source=source)
         self.assertNotEqual(res.returncode, 0)
         self.assertIn('other orientation', res.stderr.decode() + res.stdout.decode())
 
     def test_remap_rejects_mixed_modes(self):
-        _, target, _ = self._build_primary_graphs()
         prefix = f'{self.tempdir.name}/mixed'
         self._annotate_graph(INPUT, self.source, prefix, 'brwt', num_threads=NUM_THREADS)
-        res = self._remap(prefix + anno_file_extension['brwt'], prefix + '_remapped', target)
+        res = self._remap(prefix + anno_file_extension['brwt'], prefix + '_remapped',
+                          self.primary_target)
         self.assertNotEqual(res.returncode, 0)
         self.assertIn('basic mode', res.stderr.decode() + res.stdout.decode())
 

@@ -30,11 +30,16 @@ static uint64_t width_for(uint64_t max_value) {
     return max_value ? sdsl::bits::hi(max_value) + 1 : 1;
 }
 
-// The number of k-mers that `graph` stores. A canonical SSHash graph also has a
-// node for the reverse complement of each of them.
+// A canonical SSHash graph has a node for every stored k-mer and one more for its
+// reverse complement.
+static bool is_canonical_sshash(const DeBruijnGraph &graph) {
+    return graph.get_mode() == DeBruijnGraph::CANONICAL
+            && dynamic_cast<const graph::DBGSSHash *>(&graph);
+}
+
+// The number of k-mers that `graph` stores.
 static uint64_t num_stored_kmers(const DeBruijnGraph &graph) {
-    return graph.get_mode() == DeBruijnGraph::CANONICAL ? graph.num_nodes() / 2
-                                                         : graph.num_nodes();
+    return is_canonical_sshash(graph) ? graph.num_nodes() / 2 : graph.num_nodes();
 }
 
 // Walk `source`, look every k-mer up in `target`, and pass each matched pair to
@@ -44,10 +49,8 @@ static void match_rows(const DeBruijnGraph &source,
                        const DeBruijnGraph &target,
                        size_t num_threads,
                        const Store &store) {
-    const bool to_canonical_sshash = target.get_mode() == DeBruijnGraph::CANONICAL
-                                        && dynamic_cast<const graph::DBGSSHash *>(&target);
     if (!(source.get_mode() == DeBruijnGraph::BASIC && target.get_mode() == DeBruijnGraph::BASIC)
-            && !(source.get_mode() == DeBruijnGraph::PRIMARY && to_canonical_sshash)) {
+            && !(source.get_mode() == DeBruijnGraph::PRIMARY && is_canonical_sshash(target))) {
         throw std::invalid_argument("Row remapping supports two graphs in basic mode, or a"
                                     " primary graph and an SSHash graph built in primary mode");
     }
