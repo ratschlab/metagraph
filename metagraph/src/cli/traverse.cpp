@@ -130,8 +130,7 @@ class Strict {
     void done() const {
         for (const std::string &name : value_.getMemberNames()) {
             if (!known_.count(name)) {
-                throw InvalidRequest(child(name.c_str()) + ": unknown field (traverse.md lists "
-                                     "the fields of the v1 schema)");
+                throw InvalidRequest(child(name.c_str()) + ": unknown field");
             }
         }
     }
