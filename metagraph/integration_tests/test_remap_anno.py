@@ -281,13 +281,22 @@ class TestRemapAnnotation(TestingBase):
                              self._query(target, prefix + anno_file_extension[anno_repr],
                                          query_mode))
 
-    @parameterized.expand([(False, 1), (False, NUM_THREADS), (True, 1), (True, NUM_THREADS)])
-    def test_convert_basic_succinct(self, clear_dummy, num_threads):
+    @parameterized.expand([
+        ('plain', False, 1, '', ''),
+        ('plain_threads', False, NUM_THREADS, '', ''),
+        ('masked', True, 1, '', ''),
+        ('masked_threads', True, NUM_THREADS, '', ''),
+        # extractions that do not write the whole graph
+        ('pruned', False, NUM_THREADS, '', '--prune-tips 30'),
+        ('counts', False, NUM_THREADS, '--count-kmers', ''),
+        ('filtered', False, NUM_THREADS, '--count-kmers', '--min-count 2'),
+    ])
+    def test_convert_basic_succinct(self, name, clear_dummy, num_threads, build_flags, flags):
         """A basic succinct graph converts to the SSHash graph that a build from
         its contigs gives. Debug builds also compare the succ/pred bitmaps taken
         from the succinct graph with the ones SSHash computes."""
-        prefix = f'{self.tempdir.name}/basic_{int(clear_dummy)}_{num_threads}'
-        self._build_graph(INPUT, prefix + '.dbg', K, 'succinct', 'basic')
+        prefix = f'{self.tempdir.name}/basic_{name}'
+        self._build_graph(INPUT, prefix + '.dbg', K, 'succinct', 'basic', build_flags)
         source = prefix + '.dbg'
         if clear_dummy:
             self._run_command(
@@ -295,10 +304,10 @@ class TestRemapAnnotation(TestingBase):
                 f' -o {prefix}_masked {source}', 'Transform command', shell=True)
             source = prefix + '_masked.dbg'
         self._run_command(
-            f'{METAGRAPH} transform -p {num_threads} --graph sshash'
+            f'{METAGRAPH} transform -p {num_threads} --graph sshash {flags}'
             f' -o {prefix}_converted {source}', 'Transform command', shell=True)
         self._run_command(
-            f'{METAGRAPH} transform -p {num_threads} --to-fasta'
+            f'{METAGRAPH} transform -p {num_threads} --to-fasta {flags}'
             f' -o {prefix}_contigs {source}', 'Transform command', shell=True)
         self._run_command(
             f'{METAGRAPH} build -p {NUM_THREADS} --mode basic --graph sshash'

@@ -21,8 +21,9 @@ class Config;
 int clean_graph(Config *config);
 
 // Same, for a graph that is already loaded from config->fnames[0]
-// With |succ_pred| (basic succinct graphs only), also fill the succ_is_next and
-// pred_is_prev bitmaps of the SSHash graph built from the written sequences.
+// With |succ_pred|, also fill the succ_is_next and pred_is_prev bitmaps of the SSHash
+// graph built from the written sequences. They are left empty unless all k-mers of
+// a basic succinct graph are written.
 int clean_graph(Config *config, std::shared_ptr<graph::DeBruijnGraph> graph,
                 std::pair<sdsl::bit_vector, sdsl::bit_vector> *succ_pred = nullptr);
 

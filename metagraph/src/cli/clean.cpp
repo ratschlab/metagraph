@@ -192,9 +192,14 @@ int clean_graph(Config *config, std::shared_ptr<graph::DeBruijnGraph> graph,
         }
         const graph::boss::BOSS *boss = nullptr;
         const bit_vector *boss_mask = nullptr;
+        // The degrees in the source graph are those in the SSHash graph only if all
+        // k-mers of a basic graph are written: no subgraph, no k-mer counts to filter
+        // by, no pruned tips.
+        auto *dbg_succ = dynamic_cast<const graph::DBGSuccinct*>(graph.get());
+        if (!dbg_succ || node_weights || config->min_tip_size > 1
+                || graph->get_mode() != graph::DeBruijnGraph::BASIC)
+            succ_pred = nullptr;
         if (succ_pred) {
-            auto *dbg_succ = dynamic_cast<const graph::DBGSuccinct*>(graph.get());
-            assert(dbg_succ && graph->get_mode() == graph::DeBruijnGraph::BASIC);
             boss = &dbg_succ->get_boss();
             boss_mask = dbg_succ->get_mask();
             // resized to the number of written k-mers after the extraction
@@ -277,12 +282,9 @@ int clean_graph(Config *config, std::shared_ptr<graph::DeBruijnGraph> graph,
                 utils::smooth_vector(config->smoothing_window, &kmer_counts);
 
                 uint64_t first;
-                const bool single_incoming = succ_pred && graph->has_single_incoming(path.front());
-                const bool single_outgoing = succ_pred && graph->has_single_outgoing(path.back());
                 {
                     std::lock_guard<std::mutex> lock(seq_mutex);
                     writer.write(contig, kmer_counts);
-                    link_contigs(contig, single_incoming, single_outgoing);
                     num_bp += contig.size();
                     first = num_kmers;
                     num_kmers += contig.size() - graph->get_k() + 1;

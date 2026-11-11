@@ -50,9 +50,8 @@ static int convert_to_sshash(Config *config, std::shared_ptr<graph::DeBruijnGrap
     // For a basic succinct graph, the node degrees read during the extraction give
     // the succ/pred bitmaps, which SSHash otherwise computes with k-mer lookups.
     std::pair<sdsl::bit_vector, sdsl::bit_vector> succ_pred;
-    const bool shortcut = mode == graph::DeBruijnGraph::BASIC
-                            && dynamic_cast<const graph::DBGSuccinct*>(graph.get());
-    clean_graph(&extract, std::move(graph), shortcut ? &succ_pred : nullptr);
+    clean_graph(&extract, std::move(graph), &succ_pred);
+    const bool shortcut = !succ_pred.first.empty();
 
     Timer timer;
     try {
