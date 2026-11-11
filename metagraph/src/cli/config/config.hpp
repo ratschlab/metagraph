@@ -103,6 +103,8 @@ class Config {
     double traverse_max_time_ms = 30'000;
     size_t traverse_max_seeds = 10;
     uint64_t traverse_max_seed_bp = 10'000;
+    // the longest query of a /resolve request
+    uint64_t resolve_max_query_bp = 1'000'000;
     unsigned int min_tip_size = 1;
     unsigned int min_unitig_median_kmer_abundance = 1;
     int fallback_abundance_cutoff = 1;

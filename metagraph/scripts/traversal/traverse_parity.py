@@ -13,6 +13,11 @@ the prototype's projections are committed as golden files (tests/data/traverse_p
     # record the golden files with a build of the prototype
     traverse_parity.py --metagraph <d5d26baa>/build/metagraph --index build/mini_refseq --record
 
+The prototype follows a header label as it follows a column label: by membership. v1 follows a
+header label along its record's coordinates. So the requests are column walks, and header
+walks only where no record ends or repeats within the radius. Header walks are checked
+against the source records in tests/graph/traversal/test_mini_refseq.cpp.
+
 The prototype is sent each request translated into its schema with the knobs v1 fixes stated
 explicitly: no reconvergence merging (paths are kept apart), hairpins skipped, 64 splits per
 path, no continuation sequences, detail full.
@@ -61,24 +66,11 @@ def requests(index):
 
     out = {
         'resolve_discover_headers': ('resolve', {'sequence': ndm1, 'discover': {'kind': 'header'}}),
-        'ndm1_derived': traverse({'sequence': ndm1}, bounds={'max_extension_bp': 3000}),
         'ndm1_derived_columns': traverse({'sequence': ndm1}, labels={'seed_label_kind': 'column'},
                                          bounds={'max_extension_bp': 2000}),
-        'ndm1_branches_2': traverse({'sequence': ndm1}, branching={'max_label_branches': 2},
-                                    bounds={'max_extension_bp': 3000}),
-        'ndm1_unlimited': traverse({'sequence': ndm1}, branching={'max_label_branches': 'unlimited'},
-                                   bounds={'max_extension_bp': 1000}),
-        'ndm1_right': traverse({'sequence': ndm1}, direction='right', bounds={'max_extension_bp': 2000}),
-        'ndm1_capped_labels': traverse({'sequence': ndm1}, labels={'max_seed_labels': 5},
-                                       bounds={'max_extension_bp': 1000}),
         'ndm1_short_radius': traverse({'sequence': ndm1}, bounds={'max_extension_bp': 10}),
-        'ndm1_prefix': traverse({'sequence': ndm1[:261]}, bounds={'max_extension_bp': 1500}),
-        'ndm1_explicit_with_dropped': traverse(
-            {'seed_id': 'x', 'sequence': ndm1,
-             'labels': ['NZ_CM008882.1', 'NZ_MOIC01000010.1', '562']},
-            bounds={'max_extension_bp': 1500}),
     }
-    for i in (0, 17, 33):
+    for i in (0, 17):
         out[f'window_{i}'] = traverse({'sequence': records[names[i]][1000:1150]},
                                       branching={'max_label_branches': 'unlimited'},
                                       bounds={'max_extension_bp': 500})

@@ -37,6 +37,17 @@ constexpr unsigned int kDefaultBuildK = kPacked64Capacity;
 constexpr unsigned int kDefaultBuildK = kPacked64Capacity - (kPacked64Capacity % 2 == 0);
 #endif
 
+// A limit given as a whole number. Anything else reads as 0, which the limit checks refuse
+static uint64_t parse_limit(const std::string &value) {
+    if (value.empty() || value.find_first_not_of("0123456789") != std::string::npos)
+        return 0;
+    try {
+        return std::stoull(value);
+    } catch (const std::exception &) {
+        return 0;
+    }
+}
+
 void print_welcome_message() {
     fprintf(stderr, "#############################\n");
     fprintf(stderr, "### Welcome to MetaGraph! ###\n");
@@ -430,16 +441,21 @@ Config::Config(int argc, char *argv[]) {
         } else if (!strcmp(argv[i], "--experimental-traverse")) {
             experimental_traverse = true;
         } else if (!strcmp(argv[i], "--traverse-max-time-ms")) {
+            const std::string value = get_value(i++);
+            size_t end = 0;
             try {
-                traverse_max_time_ms = std::stod(get_value(i++));
+                traverse_max_time_ms = std::stod(value, &end);
             } catch (const std::exception &) {
-                traverse_max_time_ms = -1;   // refused below
+                end = 0;
             }
+            if (end != value.size())
+                traverse_max_time_ms = -1;   // refused below
         } else if (!strcmp(argv[i], "--traverse-max-seeds")) {
-            // a value below 1 becomes 0, which the check below refuses
-            traverse_max_seeds = std::max(0LL, atoll(get_value(i++)));
+            traverse_max_seeds = parse_limit(get_value(i++));
         } else if (!strcmp(argv[i], "--traverse-max-seed-bp")) {
-            traverse_max_seed_bp = std::max(0LL, atoll(get_value(i++)));
+            traverse_max_seed_bp = parse_limit(get_value(i++));
+        } else if (!strcmp(argv[i], "--resolve-max-query-bp")) {
+            resolve_max_query_bp = parse_limit(get_value(i++));
         } else if (!strcmp(argv[i], "--cache-size")) {
             std::string value = get_value(i++);
             size_t end = 0;
@@ -648,9 +664,9 @@ Config::Config(int argc, char *argv[]) {
 
     if ((identity == TRAVERSE || identity == SERVER_QUERY)
             && (!std::isfinite(traverse_max_time_ms) || !(traverse_max_time_ms > 0)
-                || !traverse_max_seeds || !traverse_max_seed_bp)) {
-        std::cerr << "Error: --traverse-max-time-ms, --traverse-max-seeds and"
-                     " --traverse-max-seed-bp must be positive and finite" << std::endl;
+                || !traverse_max_seeds || !traverse_max_seed_bp || !resolve_max_query_bp)) {
+        std::cerr << "Error: --traverse-max-time-ms, --traverse-max-seeds, --traverse-max-seed-bp"
+                     " and --resolve-max-query-bp must be positive and finite" << std::endl;
         print_usage_and_exit = true;
     }
 
@@ -1569,6 +1585,7 @@ if (advanced) {
             fprintf(stderr, "\t   --traverse-max-time-ms [FLOAT] \tthe most time one seed's walk may take [30000]\n");
             fprintf(stderr, "\t   --traverse-max-seeds [INT] \tthe most seeds a traversal request may hold [10]\n");
             fprintf(stderr, "\t   --traverse-max-seed-bp [INT] \tthe longest seed a traversal request may hold [10000]\n");
+            fprintf(stderr, "\t   --resolve-max-query-bp [INT] \tthe longest query a /resolve request may hold [1000000]\n");
         } break;
         case TRAVERSE: {
             fprintf(stderr, "Usage: %s traverse -i <GRAPH> -a <ANNOTATION> [options] REQUEST.json\n\n"
@@ -1580,6 +1597,7 @@ if (advanced) {
             fprintf(stderr, "\t   --traverse-max-time-ms [FLOAT] \tthe most time one seed's walk may take [30000]\n");
             fprintf(stderr, "\t   --traverse-max-seeds [INT] \tthe most seeds the request may hold [10]\n");
             fprintf(stderr, "\t   --traverse-max-seed-bp [INT] \tthe longest seed the request may hold [10000]\n");
+            fprintf(stderr, "\t   --resolve-max-query-bp [INT] \tthe longest query a /resolve request may hold [1000000]\n");
         } break;
     }
 

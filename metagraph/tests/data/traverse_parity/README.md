@@ -20,3 +20,8 @@ before (2026-11-09).
 
 The `labels` of `resolve_discover_headers.json` are sorted by support, then name (2026-11-09): equally
 supported labels are ranked differently by the prototype and v1.
+
+v1 follows a header label along its record's coordinates, where the prototype follows it by
+membership (2026-11-11). The eight requests whose header labels reach a record end or a repeat
+were removed with their golden files. `test_mini_refseq` checks header walks against the
+source records.

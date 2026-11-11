@@ -145,6 +145,13 @@ class TestTraverseCLI(TraverseCLI, TraverseFixture):
             self.assertNotEqual(res.returncode, 0, request)
         self.assertNotEqual(0, self._run({'seeds': [{'sequence': self.X}]},
                                          '--traverse-max-seed-bp', '50').returncode)
+        resolve = {'sequence': self.X, 'labels': ['A']}
+        self.assertEqual(0, self._run(resolve, '--resolve').returncode)
+        self.assertNotEqual(0, self._run(resolve, '--resolve',
+                                         '--resolve-max-query-bp', '50').returncode)
+        # a limit must be a whole number: 1e6 is refused, not read as 1
+        self.assertNotEqual(0, self._run(resolve, '--resolve',
+                                         '--resolve-max-query-bp', '1e6').returncode)
 
 
 @parameterized_class(('mode',), input_values=[(mode,) for mode in GRAPH_MODES])
@@ -186,7 +193,19 @@ class TestTraverseServer(TraverseFixture):
             flag = '--experimental-traverse' if gated else ''
             cls.servers[gated] = start_server(cls.graph, cls.annotation, cls.host, port, flag)
             port = cls.servers[gated][1] + 1
-        time.sleep(1)
+        # a server answers 503 while it loads: wait until each one answers
+        deadline = time.time() + 60
+        for gated, (_, port) in cls.servers.items():
+            route = 'traverse/capabilities' if gated else 'stats'
+            while True:
+                try:
+                    if requests.get(f'http://{cls.host}:{port}/{route}', timeout=1).status_code == 200:
+                        break
+                except requests.RequestException:
+                    pass
+                if time.time() > deadline:
+                    raise RuntimeError(f'The server on port {port} did not get ready')
+                time.sleep(0.05)
 
     @classmethod
     def tearDownClass(cls):
