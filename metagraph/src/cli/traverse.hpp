@@ -21,11 +21,12 @@ class Config;
 struct TraverseLimits {
     double max_time_ms = 30'000;     // a seed's time budget is clamped to it
     size_t max_seeds = 10;
-    uint64_t max_seed_bp = 10'000;
     uint64_t max_resolve_query_bp = 1'000'000;   // the longest /resolve query
 };
 TraverseLimits traverse_limits(const Config &config);
 
+// The longest seed of a /traverse request
+constexpr uint64_t kMaxSeedBp = 10'000;
 // The largest labels.max_seed_labels of a /traverse request
 constexpr uint64_t kMaxSeedLabels = 100'000;
 
