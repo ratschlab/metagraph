@@ -36,7 +36,7 @@ class InvalidRequest : public std::invalid_argument {
     using std::invalid_argument::invalid_argument;
 };
 
-// The v1 request and response schemas are documented in traverse.md
+// The request and response schemas are documented in the manual (docs/source/traverse.rst)
 Json::Value process_traverse_request(const Json::Value &request,
                                      const graph::AnnotatedDBG &anno_graph,
                                      const TraverseLimits &limits);
