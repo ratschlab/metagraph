@@ -44,6 +44,28 @@ TEST(SharedCache, FindInserted) {
     EXPECT_FALSE(cache.find(100));
 }
 
+TEST(SharedCache, MappedTableFindsInserted) {
+    // 131,072 slots of 24 B: a table mapped from the kernel (at least 1 MiB), empty until
+    // a slot is written
+    SharedCache<uint64_t, uint64_t> cache(100'000);
+    ASSERT_EQ(131072u, cache.capacity());
+    EXPECT_FALSE(cache.find(0));
+    EXPECT_FALSE(cache.find(12345));
+    for (uint64_t i = 0; i < 1000; ++i) {
+        cache.insert(i * 977, i);
+    }
+    size_t found = 0;
+    for (uint64_t i = 0; i < 1000; ++i) {
+        if (auto value = cache.find(i * 977)) {
+            EXPECT_EQ(i, *value);
+            ++found;
+        }
+    }
+    // a few keys may have replaced each other in a shared slot
+    EXPECT_LE(990u, found);
+    EXPECT_FALSE(cache.find(1000 * 977));
+}
+
 TEST(SharedCache, Overwrite) {
     SharedCache<uint64_t, bool> cache(16);
     cache.insert(7, true);

@@ -13,6 +13,8 @@
 #include <optional>
 #include <type_traits>
 
+#include <sys/mman.h>
+
 #include "common/utils/atomic.hpp"
 
 
@@ -45,8 +47,19 @@ class SharedCache {
         uint64_t words[kWords];
     };
 
+    // a table this large is mapped from the kernel rather than calloc'ed (see the constructor)
+    static constexpr size_t kMapBytes = size_t(1) << 20;
+
+    // |mapped|: the size of a mapped table, 0 for one from calloc
     struct Free {
-        void operator()(Slot *slots) const { std::free(slots); }
+        size_t mapped = 0;
+        void operator()(Slot *slots) const {
+            if (mapped) {
+                munmap(slots, mapped);
+            } else {
+                std::free(slots);
+            }
+        }
     };
 
   public:
@@ -55,10 +68,23 @@ class SharedCache {
         if (!capacity)
             return;
         capacity = std::bit_ceil(std::max(capacity, size_t(2)));
-        // zeroed pages are only touched when a slot is first used
-        slots_.reset(static_cast<Slot*>(std::calloc(capacity, sizeof(Slot))));
-        if (!slots_)
-            throw std::bad_alloc();
+        // Zeroed pages are only touched when a slot is first used. A large table is mapped
+        // from the kernel for this: calloc under an allocator that recycles freed blocks
+        // (jemalloc, glibc) zeroes a recycled block in full and keeps its pages resident after
+        // free, so that each short-lived cache (one per request) would write and hold all of
+        // its pages. A mapping is unmapped, its pages returned, when the cache is destroyed.
+        const size_t bytes = capacity * sizeof(Slot);
+        if (bytes >= kMapBytes) {
+            void *table = mmap(nullptr, bytes, PROT_READ | PROT_WRITE,
+                               MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+            if (table == MAP_FAILED)
+                throw std::bad_alloc();
+            slots_ = std::unique_ptr<Slot[], Free>(static_cast<Slot*>(table), Free { bytes });
+        } else {
+            slots_.reset(static_cast<Slot*>(std::calloc(capacity, sizeof(Slot))));
+            if (!slots_)
+                throw std::bad_alloc();
+        }
         shift_ = 64 - std::countr_zero(capacity);
     }
 
