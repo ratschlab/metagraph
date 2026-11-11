@@ -235,10 +235,15 @@ constexpr uint64_t kCoordinateAccountPerTextByte = 12;
 // and writes c (J + 2): 3 + (h n + c (n + 32)) / (c (J + 2)) > 3 + (h + c) / (6 c) >= 10/3 per
 // text byte, the least at control characters (seed labels h = c = 2; dropped, unknown and the
 // seed_id h = c = 1); plain names 5 (seed labels, dropped) to 6 (extra and recorded labels: h = 2,
-// c = 1). A graphlet writes a name once, percent-escaped to P and JSON-escaped to J (front-coded:
-// at most that), charged h n + P + 3 J: more than 4.5 per text byte. The reserve estimates the
-// names' text with it, not with the measured ratio of the rest of the output (a compact result's
-// ratio, 100 and more, would understate a name-heavy seed's text 20 times: GPT review 7 F10)
+// c = 1). A graphlet writes a name once, percent-escaped to P (only '%', line feed and carriage
+// return are: P <= 3n) and JSON-escaped to J(P) (front-coded: at most that), charged
+// h n + P + 3 J(P): (h + 19) / 6 >= 10/3 per text byte at the other control characters (raw in the
+// record, 6 bytes each in JSON), h + 4 for plain names (T4 review R2, finding 2: not 4.5). An
+// unknown label's copy in a graphlet's JSON summary (unknown_labels, quoted JSON) is priced as its
+// X record: with that record the pair costs less than 3 per text byte only for a name of one byte
+// or none (at most 6 account bytes short). The reserve estimates the names' text with it, not with
+// the measured ratio of the rest of the output (a compact result's ratio, 100 and more, would
+// understate a name-heavy seed's text 20 times: GPT review 7 F10)
 constexpr uint64_t kNameAccountPerTextByte = 3;
 
 // a seed's text (or a response) of at least this many bytes measures a delivery rate (smaller

@@ -1499,9 +1499,12 @@ response is delivered whole (`outcome.delivery: inline`, §7.0; spooled / paged 
     label's name in its copies and its delivery, a dropped or unknown label's name and delivery, the echo of
     `seed_id` — priced at 3 account bytes per text byte, a bound: a name of n bytes escaped to J ≤ 6n in JSON,
     held h and written c times, is charged h·n + c·(n + 32 + 3·(J + 2)) and writes c·(J + 2), more than 10/3 per
-    text byte (the least at control characters; plain names 5 to 6), and a graphlet's percent-escaped,
-    front-coded names more than 4.5 — where a compact result's measured ratio (100 and more) understated a
-    name-heavy seed's text 20 times and its delivery overran the bound, a 503 (a seed of 4,096 labels named by
+    text byte (the least at control characters; plain names 5 to 6), and a graphlet's names, percent-escaped
+    (only `%`, line feed and carriage return) and front-coded, at least 10/3 too (the other control characters
+    stay raw in the record and take 6 bytes each in the JSON string; plain names 5 to 6) *(T4 review R2,
+    finding 2: not 4.5)*; an unknown label's copy in a graphlet's JSON summary is priced as its X record, so for
+    a name of one byte or none that pair falls short of 3 per text byte by at most 6 account bytes — where a
+    compact result's measured ratio (100 and more) understated a name-heavy seed's text 20 times and its delivery overran the bound, a 503 (a seed of 4,096 labels named by
     12,000 characters writes 97 MiB of text, nearly all names); a ratio is
     measured as (A − C − N) / (the text − the text the coordinates wrote, counted exactly from digits and
     punctuation − the text the names share's names wrote, counted exactly: each quoted, escaped name per copy
