@@ -19,19 +19,8 @@ class DBGHashString : public DeBruijnGraph {
     void add_sequence(std::string_view sequence,
                       const std::function<void(node_index)> &on_insertion = [](node_index) {});
 
-    // Traverse graph mapping sequence to the graph nodes
-    // and run callback for each node until the termination condition is satisfied.
-    // Guarantees that nodes are called in the same order as the input sequence.
-    // In canonical mode, non-canonical k-mers are NOT mapped to canonical ones
-    void map_to_nodes_sequentially(std::string_view sequence,
-                                   const std::function<void(node_index)> &callback,
-                                   const std::function<bool()> &terminate = [](){ return false; }) const;
-
-    // Traverse graph mapping sequence to the graph nodes
-    // and run callback for each node until the termination condition is satisfied
-    void map_to_nodes(std::string_view sequence,
-                      const std::function<void(node_index)> &callback,
-                      const std::function<bool()> &terminate = [](){ return false; }) const;
+    std::unique_ptr<NodeStream> node_stream(std::string_view sequence,
+                                            bool sequential) const;
 
     void call_outgoing_kmers(node_index node, const OutgoingEdgeCallback &callback) const;
 

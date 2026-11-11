@@ -47,18 +47,11 @@ class CanonicalDBG : public DBGWrapper<DeBruijnGraph> {
     /**
      * Methods from DeBruijnGraph
      */
-    // Traverse graph mapping sequence to the graph nodes
-    // and run callback for each node until the termination condition is satisfied
-    virtual void map_to_nodes(std::string_view sequence,
-                              const std::function<void(node_index)> &callback,
-                              const std::function<bool()> &terminate = [](){ return false; }) const override final;
-
-    // Traverse graph mapping sequence to the graph nodes
-    // and run callback for each node until the termination condition is satisfied.
-    // Guarantees that nodes are called in the same order as the input sequence
-    virtual void map_to_nodes_sequentially(std::string_view sequence,
-                                           const std::function<void(node_index)> &callback,
-                                           const std::function<bool()> &terminate = [](){ return false; }) const override final;
+    // Map the k-mers of |sequence| to nodes: forward k-mers of the base graph
+    // first, then reverse-complement ones. If not |sequential|, the latter map
+    // to the nodes of their reverse complements in the base graph
+    virtual std::unique_ptr<NodeStream> node_stream(std::string_view sequence,
+                                                    bool sequential) const override final;
 
     // Given a node index, call the target nodes of all edges outgoing from it.
     virtual void adjacent_outgoing_nodes(node_index node,

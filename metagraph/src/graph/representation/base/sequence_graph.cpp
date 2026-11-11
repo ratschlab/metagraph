@@ -1,7 +1,6 @@
 #include "sequence_graph.hpp"
 
 #include <algorithm>
-#include <array>
 #include <cassert>
 #include <progress_bar.hpp>
 #include <sdsl/int_vector.hpp>
@@ -540,59 +539,47 @@ size_t incoming_edge_rank(const SequenceGraph &graph,
     return edge_rank;
 }
 
-std::unique_ptr<NodeStream>
-SequenceGraph::node_stream(std::string_view sequence, bool sequential) const {
-    return std::make_unique<BufferedNodeStream>(
-        sequential ? graph::map_to_nodes_sequentially(*this, sequence)
-                   : graph::map_to_nodes(*this, sequence)
-    );
-}
-
-void DeBruijnGraph::call_streamed_nodes(std::string_view sequence, bool sequential,
-                                        const std::function<void(node_index)> &callback,
-                                        const std::function<bool()> &terminate,
-                                        size_t max_chunk_size) const {
-    assert(max_chunk_size && max_chunk_size <= NodeRange::kChunkSize);
-    if (terminate())
-        return;
-
-    // Pull chunks of doubling size: a virtual call per node is slow for fast
-    // graphs, while terminate() may stop early, and then at most as many nodes
-    // are mapped in vain as were already passed to the callback
-    auto stream = node_stream(sequence, sequential);
-    std::array<node_index, NodeRange::kChunkSize> buffer;
-    for (size_t size = 1; ; size = std::min(2 * size, max_chunk_size)) {
-        size_t n = stream->next({ buffer.data(), size });
-        for (size_t i = 0; i < n; ++i) {
-            callback(buffer[i]);
-            if (terminate())
-                return;
-        }
-        if (n < size)
+static void call_mapped_nodes(NodeRange&& nodes,
+                              const std::function<void(node_index)> &callback,
+                              const std::function<bool()> &terminate) {
+    for (node_index node : nodes) {
+        callback(node);
+        if (terminate())
             return;
     }
 }
 
+void SequenceGraph::map_to_nodes(std::string_view sequence,
+                                 const std::function<void(node_index)> &callback,
+                                 const std::function<bool()> &terminate) const {
+    if (!terminate())
+        call_mapped_nodes(node_range(sequence), callback, terminate);
+}
+
+void SequenceGraph::map_to_nodes_sequentially(std::string_view sequence,
+                                              const std::function<void(node_index)> &callback,
+                                              const std::function<bool()> &terminate) const {
+    if (!terminate())
+        call_mapped_nodes(node_range(sequence, true), callback, terminate);
+}
+
+static std::vector<node_index> collect_nodes(NodeRange&& nodes, size_t max_num_nodes) {
+    std::vector<node_index> result;
+    result.reserve(max_num_nodes);
+    for (node_index node : nodes) {
+        result.push_back(node);
+    }
+    return result;
+}
+
 std::vector<SequenceGraph::node_index>
 map_to_nodes_sequentially(const SequenceGraph &graph, std::string_view sequence) {
-    std::vector<SequenceGraph::node_index> nodes;
-    nodes.reserve(sequence.size());
-
-    graph.map_to_nodes_sequentially(sequence,
-        [&nodes](auto node) { nodes.push_back(node); }
-    );
-
-    return nodes;
+    return collect_nodes(graph.node_range(sequence, true), sequence.size());
 }
 
 std::vector<SequenceGraph::node_index>
 map_to_nodes(const SequenceGraph &graph, std::string_view sequence) {
-    std::vector<node_index> nodes;
-    nodes.reserve(sequence.size());
-
-    graph.map_to_nodes(sequence, [&](node_index i) { nodes.push_back(i); });
-
-    return nodes;
+    return collect_nodes(graph.node_range(sequence), sequence.size());
 }
 
 void reverse_complement_seq_path(const SequenceGraph &graph,

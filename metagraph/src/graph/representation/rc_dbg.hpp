@@ -1,6 +1,8 @@
 #ifndef __RC_DBG_HPP__
 #define __RC_DBG_HPP__
 
+#include <algorithm>
+
 #include "graph/representation/base/dbg_wrapper.hpp"
 #include "common/seq_tools/reverse_complement.hpp"
 #include "graph/graph_extensions/node_first_cache.hpp"
@@ -31,40 +33,15 @@ class RCDBG : public DBGWrapper<DeBruijnGraph> {
         return graph_->traverse(node, complement(prev_char));
     }
 
-    virtual void
-    map_to_nodes_sequentially(std::string_view sequence,
-                              const std::function<void(node_index)> &callback,
-                              const std::function<bool()> &terminate
-                                  = [](){ return false; }) const override final {
-        if (terminate())
-            return;
-
+    virtual std::unique_ptr<NodeStream>
+    node_stream(std::string_view sequence, bool sequential) const override final {
         std::string rc(sequence);
         ::reverse_complement(rc.begin(), rc.end());
-        std::vector<node_index> nodes = graph::map_to_nodes_sequentially(*graph_, rc);
-
-        for (auto it = nodes.rbegin(); it != nodes.rend() && !terminate(); ++it) {
-            callback(*it);
-        }
-    }
-
-    virtual void map_to_nodes(std::string_view sequence,
-                              const std::function<void(node_index)> &callback,
-                              const std::function<bool()> &terminate
-                                  = [](){ return false; }) const override final {
-        if (terminate() || sequence.size() < get_k())
-            return;
-
-        std::string rc(sequence);
-        ::reverse_complement(rc.begin(), rc.end());
-
-        std::vector<node_index> nodes;
-        nodes.reserve(sequence.size() - get_k() + 1);
-        graph_->map_to_nodes(rc, [&](node_index node) { nodes.push_back(node); });
-
-        for (auto it = nodes.rbegin(); it != nodes.rend() && !terminate(); ++it) {
-            callback(*it);
-        }
+        std::vector<node_index> nodes = sequential
+                ? graph::map_to_nodes_sequentially(*graph_, rc)
+                : graph::map_to_nodes(*graph_, rc);
+        std::reverse(nodes.begin(), nodes.end());
+        return std::make_unique<BufferedNodeStream>(std::move(nodes));
     }
 
     virtual size_t outdegree(node_index node) const override final {
