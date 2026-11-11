@@ -809,12 +809,15 @@ int run_server(Config *config) {
             throw IndexChanged(why);
         }
     };
-    // the refusal of a copy whose annotation has other column labels than the resident's
+    // the refusal of a copy whose annotation has other column labels than the resident's,
+    // logged for the operator as refuse_changed_pair's (T4 review R3, N4)
     auto other_labels = [&](const GraphPair &pair) {
-        return IndexChanged(fmt::format(
+        const std::string why = fmt::format(
                 "The annotation '{}' loaded into RAM for the request has other column labels "
                 "than the one the server started with: restart onto the new files, or send the "
-                "request without in_ram", pair.second));
+                "request without in_ram", pair.second);
+        logger->warn("[Server] in_ram refused: {}", why);
+        return IndexChanged(why);
     };
     // A copy of |pair| loaded into RAM for one request: with the resident pair's record mapping
     // (the .seqs the stamps vouch for, checked at start-up), so that no request reads a .seqs
