@@ -620,8 +620,12 @@ charge that would pass M ends the request with **400**, nothing partial sent:
 
 its members in that order, the part in parentheses `profile`, `candidates`, `selection` or `answer`. The work ran:
 this is a refusal, not a stop, for the answer is priced after the work, and a discovery's kept labels are known
-only after its ranking (a part of its answer is not the answer of a prefix). On a multi-graph server the pair is
-refused with that status and body and the other pairs are answered (SPEC-multigraph-envelope.md §5). The run format
+only after its ranking (a part of its answer is not the answer of a prefix). On a multi-graph server that pair is a
+refused entry of a 200 envelope (SPEC-multigraph-envelope.md §1): its `refusal` holds the body's members and
+`http_status` 400, in byte order as every entry's refusal (`code`, `error`, `http_status`, `max_memory_mb`), and the
+other pairs are answered. As for every 400 that only the work finds (SPEC-multigraph-envelope.md §5), the
+single-graph refusal frees the `request_id`, and the multi-graph envelope retains it. Contract sample 39 is such an
+envelope and states the single-graph text. The run format
 `rle` writes a label's runs as one string (a few bytes a run against about 1 KB a run as intervals, tree and text),
 so the same request is often answered with it. A model of the heap, never a measurement:
 `ResolveAnswer.ThePriceCoversTheTree` checks it against the allocator's live bytes. **So per pair at the default
@@ -4625,7 +4629,8 @@ within what its account holds then, 64 KiB aside; the seeds those made without a
 `ResolveAnswer.TheGroupingIsPricedAboveItsPeak` (F2: 2^17 + 1 runs of their own, jemalloc's peak within the price,
 about 1.3x it before the reserve; the candidates the same; an account a byte short refused at `candidates` before
 anything is grouped),
-`ResolveBoundsRoute.TheAnswerIsPricedBeforeItIsBuilt` (a
+`ResolveBoundsRoute.Sample39` (T4 review R1, S1: the refused entry the route's body and status in its byte order,
+the note's single-graph text the route's, error first), `ResolveBoundsRoute.TheAnswerIsPricedBeforeItIsBuilt` (a
 1 MiB bound: `resolve_answer_too_large` with its exact text and members; the same request answered under 1,024 MiB and,
 with `rle` and a larger `min_block_kmers`, under 1 MiB), `.AnExplicitLabelsMemoryStopIsStated` (the stop block of
 explicit labels on the route); integration `TestResolveDiscoveryBounds.test_explicit_labels_stop_under_the_memory_bound`

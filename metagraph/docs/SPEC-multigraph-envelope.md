@@ -211,8 +211,9 @@ The answer keeps its upstream shape (a list of `{seq_description, results, ...}`
   `not_after_ms` gets 400. The seeds are checked in their order, the work's, which checks a seed's labels before
   the next seed: under a discovery the seeds after the first that names labels are checked by the work. An
   HTTP-level 400 never holds a `request_id`: one that only the work can find (a seed not fully present in the graph,
-  a seed label a discovery did not find, a fault of a seed after it, a `/pattern` the index cannot answer) frees the
-  id when it is answered, so `GET /requests/{id}` answers 404 and a retry runs. On a multi-graph server such a 400
+  a seed label a discovery did not find, a fault of a seed after it, a `/pattern` the index cannot answer, a
+  `/resolve` answer priced past `--resolve-max-discover-memory-mb`: `resolve_answer_too_large`, contract sample 39)
+  frees the id when it is answered, so `GET /requests/{id}` answers 404 and a retry runs. On a multi-graph server such a 400
   of one pair is a refused entry (`refusal.http_status` 400) of a 200 envelope: the request was answered, its id
   is retained like any answered request's (`GET /requests/{id}` states it ended, that pair `refused`), and a
   corrected request takes a new id. A fan-out is never forgotten because one of its pairs gave 400; only a 400 of

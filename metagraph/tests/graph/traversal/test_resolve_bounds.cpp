@@ -1982,6 +1982,44 @@ TEST(ResolveBoundsRoute, Sample38) {
     EXPECT_EQ("", seeds_refusal_of(doc["request"], 10'000, cap + 1));
 }
 
+// Sample 39 (SPEC-labeled-traversal-core.md §4.6, SPEC-multigraph-envelope.md §5; T4 review R1, S1), a
+// real run: an answer priced past --resolve-max-discover-memory-mb (1 on the recording server) on a
+// multi-graph server, that pair a refused entry of a 200 envelope with the route's own refusal body
+// and status, the other pair answered; the note states the single-graph server's 400 text, error first
+TEST(ResolveBoundsRoute, Sample39) {
+    const std::string path
+            = source_path("tests/data/multigraph_contract/39_resolve_answer_too_large.json");
+    std::ifstream in(path, std::ios::binary);
+    ASSERT_TRUE(in.good()) << path << " not found";
+    Json::Value doc;
+    std::string errors;
+    Json::CharReaderBuilder builder;
+    ASSERT_TRUE(Json::parseFromStream(builder, in, &doc, &errors)) << errors;
+    EXPECT_EQ(200, doc["status"].asInt());
+    const Json::Value &body = doc["body"];
+    EXPECT_EQ(1u, body["answered"].asUInt64());
+    EXPECT_EQ(1u, body["refused"].asUInt64());
+    EXPECT_EQ(doc["request"]["request_id"], body["request_id"]);
+    ASSERT_EQ(2u, body["answers"].size());
+    const Json::Value &entry = body["answers"][0];
+    EXPECT_EQ("refused", entry["outcome"].asString());
+    Json::Value refusal = entry["refusal"];
+    EXPECT_EQ((std::vector<std::string>{ "code", "error", "http_status", "max_memory_mb" }),
+              refusal.getMemberNames());
+    EXPECT_EQ(400, refusal["http_status"].asInt());
+    refusal.removeMember("http_status");
+    const uint64_t mb = refusal["max_memory_mb"].asUInt64();
+    EXPECT_EQ(1u, mb);
+    // the route's body for an answer that passed the bound at its part "answer"
+    const Json::Value route = cli::resolve_answer_too_large_json(AnswerTooLarge("answer", mb << 20));
+    EXPECT_EQ(compact(route), compact(refusal));
+    const std::string text = cli::error_first_json_text(route);
+    EXPECT_EQ(0u, text.rfind("{\"error\":", 0)) << text;
+    EXPECT_NE(std::string::npos, doc["note"].asString().find(text)) << text;
+    EXPECT_EQ("answered", body["answers"][1]["outcome"].asString());
+    EXPECT_EQ(0u, body["answers"][1]["labels"].size());
+}
+
 // ---- the explicit labels' pass and the answer account (T4-L1, GPT review 7, finding 2)
 
 // the names a discovery of every label of |c|'s kind finds on |r|'s query: the explicit labels
