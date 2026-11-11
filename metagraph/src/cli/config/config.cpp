@@ -1569,7 +1569,8 @@ if (advanced) {
 
             fprintf(stderr, "General options:\n");
             fprintf(stderr, "\t--advanced \tshow other advanced and legacy options [off]\n");
-            fprintf(stderr, "\t--version \tprint the version and the commit built from (clean or dirty)\n");
+            fprintf(stderr, "\t--version \tprint the version and the commit built from: clean, dirty or\n");
+            fprintf(stderr, "\t\t\tstate unknown, or 'Commit: unknown' (no git checkout of this source)\n");
             fprintf(stderr, "\n");
             return;
         }
