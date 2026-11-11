@@ -821,8 +821,10 @@ runs.
   - **`/traverse`** (and `POST /traverse/cancel`): **8 × B + 256 bytes × V + 16 MiB**. The transport's buffer and
     the route's copy of the body (2B: all a body refused at the count, or at a control character, holds),
     jsoncpp's tree (101 to 165 bytes per value measured, plus each string's bytes: a long string or sequence holds
-    4B in all) and the copies of label names (the request's, a seed's dictionary and its checks: 4.5B for many
-    names, 6B for one huge name; an error text quotes at most 1 KiB of it, above; a number token no double holds,
+    4B in all) and the copies of label names (the request's and its checks': 4.5B for many names, 6B for one
+    huge name, measured while a seed's cost dictionary still copied an explicit list — it views the request's
+    names since T4-L2, and the walker's references and dictionary are observed or in its account, §7.3, so both
+    figures are upper bounds; an error text quotes at most 1 KiB of it, above; a number token no double holds,
     which the JSON reader copies several times before its message, 7B). Measured at most 7.08 × B (1,812 MiB at
     B = 256 MiB, that number token) and 41 MiB at B = 2 MiB, against 2.1 GiB and 96 MiB stated.
   - **`/resolve` and `/pattern`** on P pairs (P = 1 on a single-graph server): **8 × B + 256 bytes × V + 16 MiB
@@ -4539,6 +4541,7 @@ and before every other fault, a list of another type left to the parse, 0 no cap
 `.ExplicitSeedNamesAreLookedUpByHash` (100,000 names a pair does not hold in an explicit seed: the selection, the
 stop's check and the single-graph check before the work each well under the bound, the same answers);
 `test_traverse.TestResolveDiscoveryBounds.test_the_explicit_labels_cap`. Integration `test_traverse.TestResolveDiscoveryBounds` (a server with small bounds on a fixture of many records, header discovery: the cut and the memory stop end to end, the default bounds binding neither) | §4.6, §10.3 |
+| T68 | the seed phase's label names and the names share of the delivery reserve (T4-L2: GPT review 7 F3 and F10, T4 review R2; §6.8, §7.3; no feature level) | `Stage2ReviewRound3.FailedAdmissionStatesTheDictionaryItHeld` (constrain: a dictionary the depth-0 admission refuses held and observed once, the walk's query built only after the admission), `GraphletHeldBound.SeedPhaseObservesItsResolvedNames` (the references' names in the excess of a seed cancelled at its first poll), `.FirstValidationReadRefusedStatesTheNames` (six names of 200 KB under 1 MiB, the validation's first read refused: the names in the excess), `.SeedIdsReadViewsOfTheNames` (`make_seed_id` on views equals the by-value form); `GraphletAttempt.ReservePricesNamesApart` (the names share at 3 per text byte, the coordinates' at 12, the rest at the ratio; the ratio sample without the names' account and text), `.ReserveCoversANameHeavySeedAfterACompactOne` (the server's texts in `full` and `graphlet`: after a compact seed's ratio the reserve covers a name-heavy seed's text, at most 2.5 times it; the estimate before the split under a fifth), `.NamesTextIsExact` (`names_text_bytes` equals the names' text in every detail, JSON and graphlet, escaped `seed_id` and a dropped label included). The peak footprint against `held_bound_bytes`: §7.3's measurement |
 
 ## 12. Implementation increments (each with tests, then an adversarial review)
 
