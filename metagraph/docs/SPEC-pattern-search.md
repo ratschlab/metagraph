@@ -4378,14 +4378,25 @@ the other pairs.
   pair is leased or loaded (§24.1), so a malformed body with `in_ram: true` is refused without a load, nothing
   reserved (SPEC-labeled-traversal-core.md §10.3). Unlike `/search`, whose request is parsed per graph after its
   load.
+- A pair one of whose files changed on disk since the server started (the graph, the annotation, the anchors and
+  fork successors beside a `row_diff` annotation, the `.seqs`, the graph's mask and Bloom filter, stamped at
+  start-up) is not loaded for a request: the copy's answer would carry the start-up identity and certificates (GPT
+  review 7 finding 4). It is refused as a load that fails (below), before its memory wait, nothing reserved, its
+  `error` `The file '<path>' (<role>) of the pair ('<graph_path>', '<annotation_path>') changed on disk since the
+  server started (<how>): a request does not load it into RAM, since the answer would carry the start-up identity
+  and certificates; restart onto the new files, or send the request without in_ram` (SPEC-multigraph-envelope.md
+  §10 lists the roles and the hows), with `"code": "index_changed"` beside it in the refusal block (the owner's
+  decision of 2026-11-11; the loader's failures below have no code). A copy whose annotation has other column labels
+  than the resident's (a check behind the stamps) is refused the same way, with the code and the text `The
+  annotation '<annotation_path>' loaded into RAM for the request has other column labels than the one the server
+  started with: restart onto the new files, or send the request without in_ram` (T4's review R3, N5). The pair is
+  still answered without `in_ram` from the files it mapped at start-up.
 - A load for the request that fails -- a file of the pair that cannot be read or that its loader refuses (truncated
-  or corrupted, as far as the loader checks: a `.seqs` corrupted in a way it does not check can end the server
-  instead, SPEC-multigraph-envelope.md §10), a `.seqs` that cannot be read when the copy must load one, a
-  `row_diff` annotation's anchors or fork successors (files beside the graph) that cannot be loaded, a graph and
-  annotation that are not compatible -- is a failure of that pair while it is processed (§24.1): its entry
-  `refused` with `http_status` 400 and `error` the loader's message, which names the file and the step (`Cannot
-  load annotation from '<annotation_path>': <cause>`, `Cannot load graph from '<graph_path>': <cause>`, `Cannot
-  load the record mapping from '<path>': <cause>`, `Cannot load anchor from '<path>': <cause>`, `Cannot load fork
+  or corrupted), a `row_diff` annotation's anchors or fork successors (files beside the graph) that cannot be
+  loaded, a graph and annotation that are not compatible -- is a failure of that pair while it is processed (§24.1):
+  its entry `refused` with `http_status` 400 and `error` the loader's message, which names the file and the step
+  (`Cannot load annotation from '<annotation_path>': <cause>`, `Cannot load graph from '<graph_path>': <cause>`,
+  `Cannot load anchor from '<path>': <cause>`, `Cannot load fork
   successor bitmap from '<path>': <cause>`, `Graph '<graph_path>' and annotation '<annotation_path>' are not
   compatible`; `<cause>` the file's failure as the server sees it, such as `Permission denied (missing read
   permission on this file)`, `No such file or directory` or `could not read contents (possibly corrupted or

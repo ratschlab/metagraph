@@ -40,9 +40,12 @@ An entry is either the pair's single-graph answer with the tags merged in, or a 
   the request's). The entry's `index_fp` equals the identity inside the answer (`capabilities.index_fp`).
 - refused: `{graph, graph_path, annotation_path, index_fp, outcome: "refused", refusal: {http_status, error,
   code?, reason?, usage?, max_memory_mb?}}`: what the pair alone would have been answered, or a `not_reached` /
-  `unfinished` outcome (section 4). `max_memory_mb` is a `/resolve` pair's 400 `resolve_answer_too_large` (its
-  answer priced past `--resolve-max-discover-memory-mb`, `SPEC-labeled-traversal-core.md` §4.6; train 4, T4-L1):
-  that pair is refused, the others answered.
+  `unfinished` outcome (section 4). `code` where the refusal has one: the pair's own (a `/pattern` refusal's, a
+  `/resolve` pair's `resolve_answer_too_large`), `not_reached` or `unfinished` (section 4), `index_changed` for a pair
+  whose files changed on disk since the server started, refused an `in_ram` load (section 10, sample 44).
+  `max_memory_mb` is a `/resolve` pair's 400 `resolve_answer_too_large` (its answer priced past
+  `--resolve-max-discover-memory-mb`, `SPEC-labeled-traversal-core.md` §4.6; train 4, T4-L1): that pair is refused,
+  the others answered.
 
 The capabilities routes (`GET /traverse/capabilities`, `GET /pattern/capabilities`) answer without a pair
 selection with the envelope over every pair (up to `max_graphs_without_selection`): `envelope_version`, `route`,
@@ -152,7 +155,9 @@ The answer keeps its upstream shape (a list of `{seq_description, results, ...}`
   admitting and waiting:
   - a pair not yet started (queued, waiting for room in the pool's bounded queue, waiting for memory) is
     `not_reached`: refusal `{http_status: 503, code: "not_reached", reason: "cutoff" | "not_after_ms" | "transport",
-    error}`; a full queue never holds the handler past the cutoff or past its client's departure;
+    error}`; a full queue never holds the handler past the cutoff or past its client's departure (an `in_ram` pair
+    whose files changed since start-up and that a worker reaches first is refused 400 `index_changed` instead,
+    section 10);
   - a pair started and not finished is `unfinished`: refusal `{http_status: 503, code: "unfinished", reason:
     "cutoff" | "loading", error, usage: {state, started_at, elapsed_ms, cpu_ms, memory_bytes}}`; it is told to stop;
     a load in progress may run past every deadline;
@@ -177,7 +182,8 @@ The answer keeps its upstream shape (a list of `{seq_description, results, ...}`
   only, so it can be written after `finish_by_ms`). Before it starts, an in_ram load is not started once its wait
   limit has passed (`finish_by_ms` - clock_skew_allowance_ms, else the transport cap) or its client has left:
   nothing is loaded and its entry is refused 503 `not_reached` (reason `cutoff`, `transport` or `not_after_ms` as
-  above). `not_after_ms` refuses it as in a fan-out. The envelope's `deadline` states the request's instants as for
+  above), unless its files changed since start-up: then it is refused 400 `index_changed` (section 10).
+  `not_after_ms` refuses it as in a fan-out. The envelope's `deadline` states the request's instants as for
   any request.
 - `deadline.effective_deadline_at` and `deadline.cutoff_at` are stated only when the request gives `not_after_ms`
   or `finish_by_ms` (samples 01 and 02 give neither); otherwise they are null, the cutoff applying all the same.
@@ -627,16 +633,73 @@ annotation that cannot be loaded or whose format is unknown, a `row_diff` annota
 a `.seqs` that cannot be loaded or is refused, `--pattern-build-mask`; a multi-graph server's graphs, loaded before
 its annotations and before it listens, exit as before. A server's per-request load into RAM (`in_ram`: `/traverse`,
 `/resolve`, `/pattern` and, since the review of H4, `/search`) is built with the resident pair's mapping, checked at
-start-up, while the pair's annotation on disk is the file loaded then (its device, inode, size and modification time
-unchanged before the copy's load and after it, and the copy's labels the resident's), so that it reads no `.seqs`
-again; once the annotation was replaced, also during the copy's load, the copy reads its `.seqs` from disk with the
-checks above. One residual stays: a file swapped in and back within one copy's load whose labels equal the
-resident's, in order, keeps the resident mapping, though equal labels do not make equal records (a newer build under
-the same file names has other records). It takes two renames within one load. A load of it that fails (an annotation replaced by one whose `.seqs` is refused; a file that cannot be
-read) throws, and that request alone fails with the route's 400, the loader's message as `error` (`/search`:
-`{"error": "<message>"}`, for instance `The record mapping '<anno-base>.seqs' does not belong to the annotation
-'<annotation>': it has 2 columns, the annotation 3 labels. Rebuild it ...`), while the server runs on with its
-resident indexes. A mapping that passed the load but places a coordinate past the end of its column (an old `.seqs`
+start-up, so that it reads no `.seqs` again, and only while every file of the pair is the one the server started on
+(since train 4, GPT review 7 finding 4): the graph, the annotation, a `row_diff` annotation's anchors and fork
+successors, the `.seqs` the pair loaded, and the graph's dummy-edge mask and Bloom filter (one that appears counts
+as a change). Each is stamped at start-up, before any file of any pair is read, with its device, inode, size,
+modification time and status change time, and the stamps are compared when the request reaches the pair (before its
+memory wait), before the copy's load and after it; the copy's labels must be the resident's too, and an annotation
+of another column count than the mapping's is refused by the copy's load itself, its `.seqs` never read in its place
+(before T4's review R3 that load read the new `.seqs`, and the stamps then refused the copy). The status change
+time (ctime) is set by the kernel to the current time on every write, truncation, utime, chmod, chown, link and
+rename of the file, and by no call to a chosen value: a file rewritten in place with its size and modification time
+restored differs (GPT review 6 #7's residual), and so does a file swapped in and back within one load (that takes a
+rename or a link, which sets it). A metadata-only change refuses too, the conservative side, until a restart: a
+chmod, a chown, a hard link, an extended attribute written or removed, and a utime, also one that restores only the
+access time with the modification time given as it was (a backup or scanner agent that restores the times it read),
+and on Linux one that omits the modification time (`touch -a`, `tar --atime-preserve=replace`; APFS leaves the
+status change time then; T4's review R3, S4, measured on both). A plain read does not refuse: the kernel's own
+access time update leaves the status change time alone. The residual: a directory on the path renamed away and
+back, a symlink on the path retargeted and back, or a
+mount over a file and its unmount, within one copy's load (each keeps every stamped file's inode and status change
+time; closing it needs an fstat of the descriptors the loaders open), a change within the file system clock's
+granularity (a few ms on Linux) of the file's previous change, a write through a shared writable mapping of the file
+to a page already dirty when it was stamped (Linux sets the status change time at the first write fault after the
+page's writeback, not at every store), and a network file system whose attribute cache answers the stat with the
+times it held before the change (T4's review R3, N2). Each takes a writer of the index files while the server runs
+on them, or an index on a network file system.
+
+A changed pair is refused, never answered from the new files under the start-up identity (`index_fp`,
+`index_meta_fp`, `server_instance`), certificates (`headers_unique`, `labels_disjoint`, `seqs_order`,
+`composite_fp`) and record mapping. Before train 4 a replaced annotation was answered from its own records while
+`headers_unique` stated the start-up value (a header the rebuild shared with another pair went unstated), and a
+replaced graph answered 200 with wrong coordinates. The refusal has the route's failed-load status and the code
+`index_changed` (the owner's decision of 2026-11-11, asked by the async service; before, it had no code): `/search`
+400 `{"error": "<text>", "code": "index_changed"}` (sample 43), `/traverse` 400 the same (`usage` beside them on a
+managed attempt), both written in this order (error first, as the intake refusals), `/resolve` and `/pattern` the
+pair's entry `refused` with `refusal: {"http_status": 400, "error": "<text>", "code": "index_changed"}`, the other
+pairs answered and the envelope 200 (sample 44). The text: `The file '<path>' (<role>) of the pair ('<graph>',
+'<annotation>') changed on disk since the server started (<how>): a request does not load it into RAM, since the
+answer would carry the start-up identity and certificates; restart onto the new files, or send the request without
+in_ram`, `<role>` one of `graph`, `annotation`, `row_diff_anchors`, `row_diff_fork_succ`, `coord_to_header`,
+`graph_mask`, `graph_bloom`, `<how>` one of `it is another file`, `its size`, `its modification time`, `its status
+change time`, `it is gone or cannot be read`, `it appeared`. A copy whose labels differ from the resident's is
+refused the same way, with the code (a check behind the stamps, which no copy of the stamped files fails): `The
+annotation '<annotation>' loaded into RAM for the request has other column labels than the one the server started
+with: restart onto the new files, or send the request without in_ram`. Nothing is reserved for a pair refused
+before its memory wait.
+
+The order of the refusals (T4's review R3, S3): a changed pair is refused when the request reaches it, before its
+memory wait's own refusals. A `/traverse` whose `finish_by_ms` (less the clock skew allowance) has passed is answered
+400 `index_changed` (with `usage.reason` `error` on a managed attempt), not 503 (`usage.reason` `deadline`), and a
+`/resolve` or `/pattern` pair reached after the request's stop, its `not_after_ms` or its wait limit is refused 400
+`index_changed`, not `not_reached`. In a pooled fan-out the outcome at the cutoff depends on timing: a changed pair
+that the request marks `not_reached` before a worker reaches it stays `not_reached` (503, section 4), one that a
+worker reaches first is `refused` 400 `index_changed`; an unchanged pair past its limits is always `not_reached`. A
+changed pair is never answered before a restart, so the 400 is the more useful of the two.
+
+Requests without `in_ram`, and pairs
+served from the resident index (above `--mem-cap-gb`, or on a server that loaded its graphs into RAM), answer from
+the files mapped at start-up as before. A server on `--mem-cap-gb 0` (staging) loads no copy, and one answer changes
+there: every `in_ram` request on a server on `--mmap` sizes its pair's graph and annotation before the cap decides
+the plan, and one of them that can no longer be stat'ed (gone, or its directory unreadable) refuses the pair with the
+changed-file text (`it is gone or cannot be read`) and the code, where before train 4 the request failed with the
+route's 400 `filesystem error: in file_size: ...` and no code (T4's review R3, S2;
+`TestRecordMappingAtLoad.test_a_gone_file_is_refused_on_a_server_without_a_cap`). The search cache
+needs no generation in its key: no answer is computed on other files. A load that fails
+otherwise (a file that cannot be read: an I/O error) throws, and that request alone fails with the route's 400, the
+loader's message as `error`, while the server runs on with its resident indexes. A mapping that passed the load but
+places a coordinate past the end of its column (an old `.seqs`
 of a `count_only` pair written for the files in another order, or a corrupt one) fails the query that meets it:
 `/search` answers 400 `{"error": "Coordinate <c> for column <j> out of range (CoordToHeader has <n> coordinates for
 that column)"}` and the server runs on (before H4's verification the query's thread pool ended the process), and
@@ -716,42 +779,50 @@ whole), and so does an empty one, with `--mmap` too, naming the file. A labelled
 columns, its whole trailer gone, cannot be told from one written before the trailer: it loads as such
 (`count_only`, the same answers).
 
-A `.seqs` whose stated sizes are corrupt fails its load the same way (`Cannot load CoordToHeader from '<file>': ...
-(caught: <reason>)`; a server exits 1 before it is ready, a CLI command exits 1, a per-request copy is the request's
-400) when the corrupt size is one a load checks. A load checks these sizes:
+A `.seqs` whose layout is corrupt fails its load the same way (`Cannot load CoordToHeader from '<file>': ...
+(caught: <reason>)`; a server exits 1 before it is ready, a CLI command exits 1; a per-request copy reads no `.seqs`,
+above). Since train 4 (GPT review 7, finding 9) the load validates the whole layout before anything is
+allocated for it or sdsl reads it:
 - the number of columns, against the bytes left in the file, before anything is allocated for it;
-- each column's number of headers, against the bytes left;
+- each column's number of headers, against the bytes left; the headers are then added as they are read, never
+  constructed from the stated count (it built that many empty strings first, 24 to 32 bytes each, 41 times the file);
 - each header's and label's length, against the bytes left at its column's (or the labels') start;
-- before sdsl loads a column's coordinate offsets (an sd_vector), the data of their low part, of their high part and
-  of each inner vector of their two select supports, against the bytes left;
-- then the offsets' sizes against one another as sd_vector builds them: a valid low width, no more set bits than the
-  high part has, each select support over exactly the high part's set (or unset) bits, and a nonzero length within
-  what the high part encodes (`the coordinate offsets of column <j> state a length of <n>, more than their encoding
-  holds (<b> buckets of <w>)`);
-- once loaded, a column with records must end at its last record's end.
+- a column's coordinate offsets (an sdsl sd_vector of m positions in a length of n): the data of their low part, of
+  their high part and of each inner vector of their two select supports against the bytes left, then the layout
+  sdsl's builder makes and nothing else: the low bits per position wl = logn - logm as the builder derives them from n
+  and m, the low part's width wl, the high part's m + 2^logm bits, so that it has a zero (a zero-less high part
+  under a length of 0 segfaulted the load), a length within what the high part encodes (`the coordinate offsets of
+  column <j> state a length of <n>, more than their encoding holds (<b> buckets of <w>)`), and wl at most 57 (sdsl's
+  select over the zeros strides 64 x 2^wl positions: from 58 on it divides by zero, a trap on x86-64);
+- the high part's bits: exactly m set bits, none past its end;
+- each select support: over exactly the high part's set (or unset) bits, its superblocks and its blocks of a width in
+  1..64 and of the number of entries their mini-or-long flags make them (a superblock per 4096 arguments; a long
+  block 4096 entries, a short one 64), the flags none or one per superblock, and every value its select reads equal
+  to the position it stands for, checked against one pass over the high part (a short superblock's own value and its
+  block's entries, every entry of a long block). One width byte changed there segfaulted the load of a real r237 copy
+  (plain loads, which a per-request copy used), or the file loaded and answered wrong records;
+- the inversion flag, 0 or 1;
+- once loaded, a column with records must end at its last record's end, and a column without records must state no
+  length (`column <j>: no records, and its coordinate offsets state <n> k-mers`: any length loaded before, and a
+  coordinate lookup in the column then divided by its zero records and read a record of none, a segfault).
 
 Before the train-3 verification a stated length of 2^20 or more ended the process with a segfault (any of `stats`,
 `query`, `server_query`, and a per-request copy), a select support over 2^36 bits took 805 MiB and a header's or
-label's length of 2^30 took 1 GiB before the refusal.
+label's length of 2^30 took 1 GiB before the refusal; before train 4 the zero-less high part, the empty column's
+length and the select supports' inner layout and values (the train-3 verification's V3-S1 to V3-S3) still crashed a
+load or a lookup. Every file of that verification's fuzz corpus (76,618 runs) that crashed is now refused, plain and
+mapped, and every valid `.seqs` loads as before (the 11 r237 copies among them, the same output).
 
-A load does not check the rest of the file, and a corrupt file of the following kinds can still crash the load itself
-(a segfault in `stats`, `query`, `server_query` at start-up, or a per-request copy, which ends the running server),
-crash a later lookup, or load and give wrong records:
-- a high part without a zero bit under a stated length of 0 (the length test is skipped then): the load segfaults;
-- the length of a column without records: any length its encoding holds loads, and a coordinate lookup in the column
-  then segfaults;
-- the select supports' inner layout, checked only against the bytes left: the superblocks' width and length, the
-  mini-or-long flags' length, each block's width and length. One byte changed there segfaults the load of a real r237
-  copy, or the file loads and answers wrong records;
-- the high part's bits and the inversion flag, taken as stored;
-- the values inside the offsets, the select supports' superblocks and blocks and the low part's values, taken as
-  stored: a corrupt entry can give a wrong record or make a lookup read outside the column;
-- a header's text, taken as written.
+The check's memory (T4's review R3, S5): it reads one column at a time onto the heap, the column's high part and the
+inner vectors of its two select supports, also on `--mmap`, where sdsl's own load of them maps the file and
+allocates nothing, and frees them before the next column. That is about 3 bits per record of the column plus its
+select samples, held while the column is checked: measured +0.2 to 4 MiB peak on the r237 copies' loads (the most
+on the largest, bact_pseudomonadota, plain and `--mmap`), and about 250 to 300 MB for a single-column `.seqs` of
+6 x 10^8 records (UniParc's size), small beside that column's header strings (24 to 32 bytes each). Its time is
+linear in the file: each word of the high part read once, each stored select value checked once (+0 to 10 % CPU
+on the r237 copies' loads).
 
-Some memory is still allocated before a refusal. A column's number of headers within its bound builds that many empty
-strings before the first is read: 24 to 32 bytes each, about 25 times the file (533 MiB for a 21 MB `.seqs`). One
-header's or label's stated length can be allocated up to the bytes left in the file before its read fails.
-
-These gaps predate the train (its base behaves the same). A client cannot reach them: it takes a corrupt `.seqs` on
-the server's disk, and staging's are checked against their manifests' sha256. They are the engine backlog's item
-".seqs (CoordToHeader) format hardening — before production".
+A load does not check the low part's values (the low bits of each position) or a header's text. A corrupt low value
+maps a coordinate to another record of its column, or states a wrong k-mer count for a record, without reading outside
+the column. One header's or label's stated length can be allocated up to the bytes left in the file before its read
+fails. A client cannot reach any of this: it takes a corrupt `.seqs` on the server's disk.

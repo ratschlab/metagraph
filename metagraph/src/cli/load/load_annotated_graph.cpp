@@ -537,16 +537,20 @@ build_annotated_dbg(std::shared_future<std::shared_ptr<DeBruijnGraph>> graph_fut
         }
 
         // The mapping another index of this annotation holds is shared (a column per label,
-        // as the .seqs of this annotation has: a mapping of another annotation is not, and the
-        // .seqs is loaded instead); else the CTH load (graph-independent) overlaps with the
-        // graph load.
+        // as the .seqs of this annotation has); else the CTH load (graph-independent) overlaps
+        // with the graph load. A mapping of another column count is not this annotation's: the
+        // load is refused, and the .seqs is never read in its place (a request reads no .seqs:
+        // T4 review R3, S1)
         if (shared_coord_to_header
                 && shared_coord_to_header->num_columns() != annotation->num_labels()) {
-            logger->warn("The record mapping offered for {} has {} columns, the annotation {} "
-                         "labels: not the mapping of this annotation; its .seqs is loaded",
-                         config.infbase_annotators.at(0), shared_coord_to_header->num_columns(),
-                         annotation->num_labels());
-            shared_coord_to_header = nullptr;
+            const std::string why = fmt::format(
+                    "The record mapping offered for {} has {} columns, the annotation {} labels: "
+                    "not the mapping of this annotation", config.infbase_annotators.at(0),
+                    shared_coord_to_header->num_columns(), annotation->num_labels());
+            if (on_failure == LoadFailure::THROW)
+                throw RecordMappingMismatch(why);
+            logger->error(why);
+            exit_at_load();
         }
         if (shared_coord_to_header) {
             coord_to_header = std::move(shared_coord_to_header);

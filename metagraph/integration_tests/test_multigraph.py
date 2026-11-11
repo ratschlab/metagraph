@@ -118,6 +118,32 @@ def records_of(paths):
     return [seq for _, seq in named_records_of(paths)]
 
 
+def changed_file_refusal(path, role, graph, annotation, how):
+    """The refusal of a load into RAM for a request (in_ram) of a pair one of whose files changed
+    on disk since the server started (GPT review 7 finding 4, SPEC-multigraph-envelope.md
+    section 10)"""
+    return (f"The file '{path}' ({role}) of the pair ('{graph}', '{annotation}') changed on disk "
+            f"since the server started ({how}): a request does not load it into RAM, since the "
+            f"answer would carry the start-up identity and certificates; restart onto the new "
+            f"files, or send the request without in_ram")
+
+
+def index_changed(text):
+    """The body of that refusal (the owner's decision of 2026-11-11): the text and the code
+    index_changed, written error first on /search and /traverse"""
+    return {'error': text, 'code': 'index_changed'}
+
+
+def assert_index_changed(test, response, text, usage=False):
+    """|response| is the 400 of a changed pair on /search or /traverse: {error, code} (with
+    `usage` on a managed /traverse), its text starting with the error, as the intake refusals'"""
+    test.assertEqual(400, response.status_code, response.text[:2000])
+    body = response.json()
+    test.assertEqual(['error', 'code'] + (['usage'] if usage else []), list(body), response.text)
+    test.assertEqual(index_changed(text), {k: body[k] for k in ('error', 'code')})
+    test.assertTrue(response.text.startswith('{"error":'), response.text[:200])
+
+
 def revcomp(s):
     return s[::-1].translate(str.maketrans('ACGT', 'TGCA'))
 
@@ -2734,33 +2760,38 @@ class TestMultiGraphServer(TestingBase):
     def test_a_failed_in_ram_load_is_answered_and_the_server_lives(self):
         """A pair whose annotation cannot be read any more after start-up (chmod 000; the resident
         index, mapped at start-up, still answers): an `in_ram` request on it is answered, not the
-        process ended -- /pattern's pair refused with the loader's message (400, no code, the
-        request 200, and so /resolve's), /traverse 400 with it --, its memory released, and the server
-        lives: the pair without in_ram, the other pair with it (above the cap: served resident)
-        and, once readable again, the pair with in_ram answer, the last proving the release (the
-        cap holds one copy of it: a reservation a failed load kept would make it wait). A malformed
-        body with in_ram: true naming the pair is refused before any load (SPEC §24.2): the
-        server's line of a failed load, which every attempt to load the unreadable file logs,
-        not logged again."""
+        process ended. Since train 4 the chmod changes the file's status change time, so the load
+        is refused before the memory wait (GPT review 7 finding 4) with the changed-file text and
+        the code index_changed: /pattern's pair refused (400, the request 200, and so /resolve's),
+        /traverse 400 with it, error first (with usage on a managed attempt) --, no memory
+        reserved for it, and the server lives: the pair without in_ram,
+        the other pair with it (above the cap: served resident), and a copy of the same files
+        under another name (kleb2) with it, which proves that no refused request kept a
+        reservation (the cap holds one copy). Readable again, the pair stays refused (the stamp
+        is not the start-up one); a server restarted onto the files loads it. A malformed body
+        with in_ram: true naming the pair is refused before any load (SPEC §24.2): the server's
+        line of the refusal not logged again. A load that fails after its reservation (a file
+        changed during the wait or the load) releases it by the same scope as before."""
         d = os.path.join(self.tempdir.name, 'unreadable')
         pairs = {}
-        for name in ('kleb', 'pseudo'):
+        for name, source in (('kleb', 'kleb'), ('kleb2', 'kleb'), ('pseudo', 'pseudo')):
             dst = os.path.join(d, name)
-            shutil.copytree(os.path.dirname(self.pairs[name][0]), dst)
-            pairs[name] = tuple(os.path.join(dst, os.path.basename(p)) for p in self.pairs[name])
+            shutil.copytree(os.path.dirname(self.pairs[source][0]), dst)
+            pairs[name] = tuple(os.path.join(dst, os.path.basename(p))
+                                for p in self.pairs[source])
         csv = os.path.join(d, 'graphs.csv')
         with open(csv, 'w') as f:
             for name, (graph, anno) in pairs.items():
                 f.write(f'{name},{graph},{anno}\n')
         kleb_bytes = sum(os.path.getsize(p) for p in pairs['kleb'])
         pseudo_bytes = sum(os.path.getsize(p) for p in pairs['pseudo'])
-        # one copy of kleb fits the cap, pseudo does not
+        # one copy of kleb (or kleb2) fits the cap, two do not, pseudo does not
         cap_gb = kleb_bytes * 1.2 / 1e9
         self.assertGreater(pseudo_bytes, cap_gb * 1e9)
-        server = Server([csv, '--mmap', '--mem-cap-gb', f'{cap_gb:.9f}'],
-                        os.path.join(d, 'server.log'))
-        anno = pairs['kleb'][1]
-        failed = f"Cannot load annotation from '{anno}'"
+        args = [csv, '--mmap', '--mem-cap-gb', f'{cap_gb:.9f}']
+        server = Server(args, os.path.join(d, 'server.log'))
+        graph, anno = pairs['kleb']
+        refusal = changed_file_refusal(anno, 'annotation', graph, anno, 'its status change time')
         kleb = self.records['kleb'][0]
         seed = kleb[20000:20100]
         p = {'patterns': [{'dna': kleb[5000:5020]}], 'mode': 'count', 'graphs': ['kleb']}
@@ -2768,46 +2799,34 @@ class TestMultiGraphServer(TestingBase):
              'strategy': {'direction': 'right', 'bounds': {'max_extension_bp': 50},
                           'output': {'detail': 'full'}}}
         r = {'graphs': ['kleb'], 'sequence': seed, 'discover': {'max_labels': 10}}
+
+        def refused_entry(ret, route):
+            self.assertEqual(200, ret.status_code, ret.text[:2000])
+            body = ret.json()
+            self.assertEqual((0, 1), (body['answered'], body['refused']), body)
+            self.assertEqual(route, body['route'])
+            entry = body['answers'][0]
+            self.assertEqual(('kleb', 'refused'), (entry['graph'], entry['outcome']), entry)
+            self.assertEqual(dict(index_changed(refusal), http_status=400), entry['refusal'])
+
         try:
             os.chmod(anno, 0)
             # the resident index answers
             self.assertEqual(1, server.post('pattern', p).json()['answered'])
-            # /pattern: the pair refused with the loader's message, the request answered
-            ret = server.post('pattern', dict(p, in_ram=True))
-            self.assertEqual(200, ret.status_code, ret.text[:2000])
-            body = ret.json()
-            self.assertEqual((0, 1), (body['answered'], body['refused']), body)
-            entry = body['answers'][0]
-            self.assertEqual(('kleb', 'refused'), (entry['graph'], entry['outcome']), entry)
-            self.assertEqual({'http_status', 'error'}, set(entry['refusal']), entry)
-            self.assertEqual(400, entry['refusal']['http_status'])
-            self.assertIn(failed, entry['refusal']['error'])
-            self.assertIn('read permission', entry['refusal']['error'])
-            # /traverse: 400 with the message; with usage on a managed attempt
-            ret = server.post('traverse', dict(t, in_ram=True))
-            self.assertEqual(400, ret.status_code, ret.text[:2000])
-            self.assertEqual({'error'}, set(ret.json()))
-            self.assertIn(failed, ret.json()['error'])
+            # /pattern: the pair refused with the text, the request answered
+            refused_entry(server.post('pattern', dict(p, in_ram=True)), '/pattern')
+            # /traverse: 400 with the text; with usage on a managed attempt
+            assert_index_changed(self, server.post('traverse', dict(t, in_ram=True)), refusal)
             ret = server.post('traverse', dict(t, in_ram=True, attempt_id='in-ram-unreadable'))
-            self.assertEqual(400, ret.status_code, ret.text[:2000])
-            self.assertEqual({'error', 'usage'}, set(ret.json()))
-            self.assertIn(failed, ret.json()['error'])
+            assert_index_changed(self, ret, refusal, usage=True)
             self.assertEqual('error', ret.json()['usage']['reason'])
-            # /resolve: the pair refused with the message (400, no code), the envelope 200
-            ret = server.post('resolve', dict(r, in_ram=True))
-            self.assertEqual(200, ret.status_code, ret.text[:2000])
-            body = ret.json()
-            self.assertEqual((0, 1, '/resolve'), (body['answered'], body['refused'],
-                                                  body['route']), body)
-            entry = body['answers'][0]
-            self.assertEqual(('kleb', 'refused'), (entry['graph'], entry['outcome']), entry)
-            self.assertEqual({'http_status', 'error'}, set(entry['refusal']), entry)
-            self.assertEqual(400, entry['refusal']['http_status'])
-            self.assertIn(failed, entry['refusal']['error'])
+            # /resolve: the pair refused with the text and the code (400), the envelope 200
+            refused_entry(server.post('resolve', dict(r, in_ram=True)), '/resolve')
             log = server.text()
-            # one line per load attempt: the server's, with the message (the annotation
-            # does not open, so the load fails before any loader or the graph's load starts)
-            self.assertEqual(4, log.count(failed), log[-3000:])
+            # refused before any load: no loader ran, nothing was loaded into RAM
+            logged = log.count(refusal)
+            self.assertGreaterEqual(logged, 1, log[-3000:])
+            self.assertEqual(0, log.count(f"Cannot load annotation from '{anno}'"), log[-3000:])
             self.assertEqual(0, log.count('loaded into RAM for it'), log[-3000:])
 
             # a malformed body with in_ram naming the pair: refused before any load
@@ -2819,9 +2838,9 @@ class TestMultiGraphServer(TestingBase):
                     ret = server.post(route, payload)
                     self.assertEqual(400, ret.status_code, ret.text[:2000])
                     self.assertIn(words, ret.json()['error'])
-                    self.assertNotIn(failed, ret.text)
+                    self.assertNotIn(refusal, ret.text)
             log = server.text()
-            self.assertEqual(4, log.count(failed), log[-3000:])
+            self.assertEqual(logged, log.count(refusal), log[-3000:])
             self.assertEqual(0, log.count('loaded into RAM for it'), log[-3000:])
 
             # the server lives: the pair without in_ram, the other pair with it (above the cap)
@@ -2834,18 +2853,31 @@ class TestMultiGraphServer(TestingBase):
             self.assertEqual(1, ret.json()['answered'], ret.text[:2000])
             self.assertEqual(0, ret.json()['answers'][0]['timing']['load_ms'])
             self.assertIn('too large to fit into RAM', server.text())
-        finally:
-            os.chmod(anno, 0o644)
-        try:
-            # readable again: the load succeeds, the memory of the failed loads was released
-            # (the cap holds one copy; a kept reservation would make this request wait)
-            ret = requests.post(server.url('pattern'), data=json.dumps(dict(p, in_ram=True)),
+            # kleb2, the same files under another name, loads: no refused request kept a
+            # reservation (the cap holds one copy; a kept one would make this request wait)
+            ret = requests.post(server.url('pattern'),
+                                data=json.dumps(dict(p, in_ram=True, graphs=['kleb2'])),
                                 timeout=120)
             self.assertEqual(200, ret.status_code, ret.text[:2000])
             self.assertEqual(1, ret.json()['answered'], ret.text[:2000])
             self.assertGreater(ret.json()['answers'][0]['timing']['load_ms'], 0)
             self.assertEqual(1, server.text().count('loaded into RAM for it'))
+        finally:
+            os.chmod(anno, 0o644)
+        try:
+            # readable again, the pair stays refused: its stamp is not the start-up one
+            refused_entry(server.post('pattern', dict(p, in_ram=True)), '/pattern')
             self.assertIsNone(server.process.poll())
+        finally:
+            server.stop()
+        # a server restarted onto the files loads the pair into RAM for a request
+        server = Server(args, os.path.join(d, 'server-restarted.log'))
+        try:
+            ret = server.post('pattern', dict(p, in_ram=True))
+            self.assertEqual(200, ret.status_code, ret.text[:2000])
+            self.assertEqual(1, ret.json()['answered'], ret.text[:2000])
+            self.assertGreater(ret.json()['answers'][0]['timing']['load_ms'], 0)
+            self.assertEqual(1, server.text().count('loaded into RAM for it'))
         finally:
             server.stop()
 
@@ -3803,13 +3835,13 @@ class TestRecordMappingAtLoad(TestingBase):
 
     def test_a_search_load_into_ram_never_exits_the_server(self):
         # /search with in_ram on a --mmap server loads the pair with the resident pair's
-        # mapping, checked at start-up, as /traverse, /resolve and /pattern do, while the
-        # annotation on disk is the file loaded then: a .seqs replaced alone is not read again;
-        # an annotation replaced has its .seqs read and checked. A load that fails (here the
-        # annotation replaced by one of three columns, and the .seqs on disk of two columns
-        # refused) fails that request alone, the route's 400 with the load's
-        # message as error (as /traverse, /resolve and /pattern answer a load that fails), and
-        # the server runs on (H4 review S2: it exited)
+        # mapping, checked at start-up, as /traverse, /resolve and /pattern do, while every file
+        # of the pair is the one loaded then. A file changed since (here the .seqs replaced
+        # alone, then the annotation by one of three columns) refuses the load: the route's 400
+        # with the refusal as error (as /traverse, /resolve and /pattern answer a load that
+        # fails), and the server runs on (H4 review S2: it exited), its resident pair answering
+        # as before. Before train 4 the .seqs alone was served with the resident's mapping and
+        # the annotation's replacement loaded its own .seqs (GPT review 7 finding 4)
         out = os.path.join(self.d, 'live')
         os.makedirs(out)
         anno = os.path.join(out, 'anno.column_coord.annodbg')
@@ -3836,36 +3868,205 @@ class TestRecordMappingAtLoad(TestingBase):
             self.assertTrue(resident.json()[0]['results'], resident.text)
             loaded = server.post('search', dict(query, in_ram=True))
             self.assertEqual((200, resident.json()), (loaded.status_code, loaded.json()))
-            # the .seqs replaced (the files in another order): the resident's mapping serves
+            # the .seqs replaced (the files in another order): refused, naming it
             replace(os.path.join(self.d, 'swapped.seqs'), seqs)
-            loaded = server.post('search', dict(query, in_ram=True))
-            self.assertEqual((200, resident.json()), (loaded.status_code, loaded.json()))
-            # the annotation and its .seqs replaced by a rebuild of the files in the other
-            # order (the same column count): the annotation is not the one loaded at start-up,
-            # so the copy loads its .seqs from disk with the load's checks, and answers the
-            # same records (with the resident's mapping it answered big.fa's for small.fa's:
-            # H4's verification, finding 2)
-            replace(os.path.join(self.d, 'rev.column_coord.annodbg'), anno)
-            replace(os.path.join(self.d, 'rev.seqs'), seqs)
-            loaded = server.post('search', dict(query, in_ram=True))
-            self.assertEqual((200, resident.json()), (loaded.status_code, loaded.json()))
-            self.assertEqual(['s1'], [r['sample'] for r in loaded.json()[0]['results']])
-            # the annotation replaced: the request fails, the route's 400 with the load's message
+            failed = server.post('search', dict(query, in_ram=True))
+            assert_index_changed(self, failed, changed_file_refusal(
+                    seqs, 'coord_to_header', self.graph, anno, 'it is another file'))
+            # the annotation replaced by one of three columns: refused, naming the annotation
             replace(os.path.join(self.d, 'three.column_coord.annodbg'), anno)
             failed = server.post('search', dict(query, in_ram=True))
-            self.assertEqual(400, failed.status_code, failed.text)
-            self.assertEqual(['error'], list(failed.json()))
-            self.assertTrue(failed.json()['error'].startswith(
-                    f"The record mapping '{seqs}' does not belong to the annotation '{anno}': "
-                    f"it has 2 columns, the annotation 3 labels. Rebuild it"), failed.text)
+            assert_index_changed(self, failed, changed_file_refusal(
+                    anno, 'annotation', self.graph, anno, 'it is another file'))
             # the server runs on, its resident pair answering as before
             self.assertIsNone(server.process.poll())
             again = server.post('search', query)
             self.assertEqual((200, resident.json()), (again.status_code, again.json()))
         finally:
             server.stop()
-        # a replaced annotation is never offered the resident's mapping: its own .seqs is read
+        # no request read a .seqs, and none was offered the resident's mapping for another file
         self.assertNotIn("The record mapping offered for " + anno, server.text())
+        self.assertNotIn("does not belong to the annotation", server.text())
+
+    def test_a_gone_file_is_refused_on_a_server_without_a_cap(self):
+        """T4 review R3, S2: a server on --mmap with --mem-cap-gb 0 (staging's) loads no copy,
+        but an in_ram request still sizes its pair's graph and annotation before the cap decides
+        the plan: one that can no longer be stat'ed (gone) is refused with the changed-file text
+        and the code index_changed (/search 400, /resolve the pair refused; before train 4 the
+        route's 400 "filesystem error: ...", no code). Requests without in_ram answer from the
+        files mapped at start-up, and in_ram on files that are all there is served resident."""
+        out = os.path.join(self.d, 'gone')
+        os.makedirs(out)
+        anno = os.path.join(out, 'anno.column_coord.annodbg')
+        shutil.copyfile(os.path.join(self.d, 'anno.column_coord.annodbg'), anno)
+        shutil.copyfile(os.path.join(self.d, 'right.seqs'), os.path.join(out, 'anno.seqs'))
+        csv = os.path.join(self.d, 'gone.csv')
+        with open(csv, 'w') as f:
+            f.write(f'gone,{self.graph},{anno}\n')
+        with open(os.path.join(self.d, 'small.fa')) as f:
+            fasta = f.read()
+        query = {'FASTA': fasta, 'graphs': ['gone'], 'discovery_fraction': 0.5}
+        resolve = {'sequence': fasta.splitlines()[1], 'graphs': ['gone'],
+                   'discover': {'kind': 'header', 'max_labels': 2}}
+        server = Server([csv, '--mmap', '--mem-cap-gb', '0', '--cache-size', '0'],
+                        os.path.join(self.d, 'gone.log'))
+        try:
+            resident = server.post('search', query)
+            self.assertEqual(200, resident.status_code, resident.text)
+            self.assertTrue(resident.json()[0]['results'], resident.text)
+            on_disk = server.post('resolve', resolve)
+            self.assertEqual((200, 1), (on_disk.status_code, on_disk.json()['answered']),
+                             on_disk.text)
+            # every file there: in_ram is served resident (no copy under a cap of 0)
+            loaded = server.post('search', dict(query, in_ram=True))
+            self.assertEqual((200, resident.json()), (loaded.status_code, loaded.json()))
+            os.remove(anno)
+            refusal = changed_file_refusal(anno, 'annotation', self.graph, anno,
+                                           'it is gone or cannot be read')
+            assert_index_changed(self, server.post('search', dict(query, in_ram=True)), refusal)
+            ret = server.post('resolve', dict(resolve, in_ram=True))
+            self.assertEqual(200, ret.status_code, ret.text[:2000])
+            self.assertEqual((0, 1), (ret.json()['answered'], ret.json()['refused']), ret.text)
+            self.assertEqual(dict(index_changed(refusal), http_status=400),
+                             ret.json()['answers'][0]['refusal'])
+            # without in_ram: the files mapped at start-up answer as before
+            again = server.post('search', query)
+            self.assertEqual((200, resident.json()), (again.status_code, again.json()))
+            self.assertEqual(on_disk.json()['answers'][0]['labels'],
+                             server.post('resolve', resolve).json()['answers'][0]['labels'])
+            self.assertIsNone(server.process.poll())
+        finally:
+            server.stop()
+
+    def test_in_ram_refuses_a_pair_whose_files_changed(self):
+        """GPT review 7 finding 4 (V7-B's f4_replace.py and f4_graph.py): a request's load of a
+        pair into RAM (`in_ram`, a multi-graph server on --mmap with --mem-cap-gb) is refused
+        once any file of the pair changed on disk since the server started, on /search,
+        /traverse, /resolve and /pattern, with the route's failed-load status (400), the text
+        naming the file and the code index_changed (the owner's decision of 2026-11-11):
+        - the graph rebuilt with one base of b1 changed (the same node count): the copy answered
+          200 with other coordinates, silently wrong (V7-B);
+        - the annotation and its .seqs replaced by a consistent rebuild of the files in another
+          order: the copy answered its own records under the start-up identity and
+          certificates (V7-B R1, R2);
+        - the annotation rewritten in place with its size and modification time restored (GPT
+          review 6 #7's residual): only its status change time tells.
+        Resident requests keep answering from the files mapped at start-up, the server lives,
+        and a server started on the new files answers them."""
+        records = dict(named_records_of([os.path.join(self.d, 'big.fa')]))
+        b1 = records['b1']
+        query = {'FASTA': f'>q\n{b1[20:80]}\n', 'graphs': ['live'], 'discovery_fraction': 0.1,
+                 'query_coords': True}
+        bodies = {
+            'traverse': {'graphs': ['live'], 'seeds': [{'sequence': b1[30:70]}],
+                         'strategy': {'direction': 'right', 'bounds': {'max_extension_bp': 50},
+                                      'output': {'detail': 'summary'}}},
+            'resolve': {'graphs': ['live'], 'sequence': b1[30:70],
+                        'discover': {'max_labels': 10}},
+            'pattern': {'patterns': [{'dna': b1[40:60]}], 'mode': 'count', 'graphs': ['live']},
+        }
+        # the graph's inputs with one base of b1 changed in its middle, built as the fixture
+        g2 = os.path.join(self.d, 'graph_one_base_changed')
+        os.makedirs(g2)
+        with open(os.path.join(self.d, 'big.fa')) as f:
+            big = f.read()
+        m = len(b1) // 2
+        with open(os.path.join(g2, 'big.fa'), 'w') as f:
+            f.write(big.replace(b1, b1[:m] + {'A': 'C', 'C': 'G', 'G': 'T', 'T': 'A'}[b1[m]]
+                                + b1[m + 1:]))
+        shutil.copyfile(os.path.join(self.d, 'small.fa'), os.path.join(g2, 'small.fa'))
+        res = subprocess.run(shlex.split(METAGRAPH) + [
+                'build', '-p', '1', '--mode', 'basic', '--graph', 'succinct', '-k', '31', '-o',
+                'graph', 'big.fa', 'small.fa'], cwd=g2, stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT)
+        self.assertEqual(0, res.returncode, res.stdout.decode()[-2000:])
+
+        def replace(source, target):
+            shutil.copyfile(source, target + '.new')
+            os.replace(target + '.new', target)
+
+        def rewrite_in_place(target):
+            # the same bytes written into the same inode, its modification time restored
+            st = os.stat(target)
+            with open(target, 'rb') as f:
+                data = f.read()
+            time.sleep(0.05)
+            with open(target, 'r+b') as f:
+                f.write(data)
+            os.utime(target, ns=(st.st_atime_ns, st.st_mtime_ns))
+            now = os.stat(target)
+            self.assertEqual((st.st_ino, st.st_size, st.st_mtime_ns),
+                             (now.st_ino, now.st_size, now.st_mtime_ns))
+            self.assertNotEqual(st.st_ctime_ns, now.st_ctime_ns)
+
+        cases = {
+            'graph': ('graph', 'it is another file',
+                      lambda graph, anno, seqs: replace(os.path.join(g2, 'graph.dbg'), graph)),
+            'annotation': ('annotation', 'it is another file',
+                           lambda graph, anno, seqs: (
+                               replace(os.path.join(self.d, 'rev.column_coord.annodbg'), anno),
+                               replace(os.path.join(self.d, 'rev.seqs'), seqs))),
+            'rewrite': ('annotation', 'its status change time',
+                        lambda graph, anno, seqs: rewrite_in_place(anno)),
+        }
+        for case, (role, how, change) in cases.items():
+            with self.subTest(case=case):
+                out = os.path.join(self.d, f'changed_{case}')
+                os.makedirs(out)
+                graph = os.path.join(out, 'graph.dbg')
+                anno = os.path.join(out, 'anno.column_coord.annodbg')
+                seqs = os.path.join(out, 'anno.seqs')
+                shutil.copyfile(self.graph, graph)
+                shutil.copyfile(os.path.join(self.d, 'anno.column_coord.annodbg'), anno)
+                shutil.copyfile(os.path.join(self.d, 'right.seqs'), seqs)
+                csv = os.path.join(out, 'graphs.csv')
+                with open(csv, 'w') as f:
+                    f.write(f'live,{graph},{anno}\n')
+                server = Server([csv, '--mmap', '--mem-cap-gb', '1', '--cache-size', '0'],
+                                os.path.join(out, 'server.log'))
+                try:
+                    resident = server.post('search', query)
+                    self.assertEqual(200, resident.status_code, resident.text)
+                    self.assertTrue(resident.json()[0]['results'], resident.text)
+                    loaded = server.post('search', dict(query, in_ram=True))
+                    self.assertEqual((200, resident.json()), (loaded.status_code, loaded.json()))
+                    change(graph, anno, seqs)
+                    refusal = changed_file_refusal(graph if role == 'graph' else anno, role,
+                                                   graph, anno, how)
+                    assert_index_changed(self, server.post('search', dict(query, in_ram=True)),
+                                         refusal)
+                    assert_index_changed(self, server.post('traverse', dict(bodies['traverse'],
+                                                                            in_ram=True)),
+                                         refusal)
+                    for route in ('resolve', 'pattern'):
+                        ret = server.post(route, dict(bodies[route], in_ram=True))
+                        self.assertEqual(200, ret.status_code, ret.text[:2000])
+                        body = ret.json()
+                        self.assertEqual((0, 1), (body['answered'], body['refused']), body)
+                        entry = body['answers'][0]
+                        self.assertEqual('refused', entry['outcome'], entry)
+                        self.assertEqual(dict(index_changed(refusal), http_status=400),
+                                         entry['refusal'])
+                    # resident requests answer from the files mapped at start-up
+                    again = server.post('search', query)
+                    self.assertEqual((200, resident.json()), (again.status_code, again.json()))
+                    for route in ('traverse', 'resolve', 'pattern'):
+                        self.assertEqual(200, server.post(route, bodies[route]).status_code)
+                    self.assertIsNone(server.process.poll())
+                    self.assertEqual(0, server.text().count('loaded into RAM for it'))
+                finally:
+                    server.stop()
+                if case == 'graph':
+                    continue
+                # restarted onto the new files: answered (the rebuild's own records)
+                fresh = Server([csv, '--mmap', '--mem-cap-gb', '1', '--cache-size', '0'],
+                               os.path.join(out, 'fresh.log'))
+                try:
+                    ret = fresh.post('search', dict(query, in_ram=True))
+                    self.assertEqual(200, ret.status_code, ret.text)
+                    self.assertEqual(resident.json(), ret.json())
+                finally:
+                    fresh.stop()
 
     def test_the_row_diff_form_checks_an_old_mapping_by_its_count_only(self):
         # the documented limit: the row-diff forms state no coordinates per column, so an old

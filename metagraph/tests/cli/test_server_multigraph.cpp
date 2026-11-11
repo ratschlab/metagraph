@@ -15,8 +15,10 @@
 #include <stdexcept>
 #include <string>
 #include <thread>
+#include <tuple>
 #include <vector>
 
+#include <fcntl.h>
 #include <sys/stat.h>
 #include <unistd.h>
 
@@ -1353,7 +1355,8 @@ std::unique_ptr<Config> config_of(const PairOnDisk &pair) {
 // the traversal routes' copy and for /pattern's (its mask checked, its dummy fraction
 // sampled); header-label requests on the copy answer as on the resident. Without the
 // resident's mapping the .seqs is loaded, as every load does; a mapping of another
-// annotation is not shared
+// annotation refuses the load, and the .seqs is not read in its place (T4 review R3, S1: no
+// request reads a .seqs)
 TEST(MultiGraphInRam, LoadSharesTheResidentRecordMapping) {
     const PairOnDisk pair = write_pair("shared");
     ASSERT_TRUE(fs::exists(pair.graph));
@@ -1439,14 +1442,25 @@ TEST(MultiGraphInRam, LoadSharesTheResidentRecordMapping) {
     EXPECT_EQ(1u, loaded->get_coord_to_header()->num_header_index_builds());
     EXPECT_EQ(1u, resident->get_coord_to_header()->num_header_index_builds());
 
-    // a mapping of another annotation (two columns to this one's label) is not shared
+    // a mapping of another annotation (two columns to this one's label) refuses the load: the
+    // .seqs is not read in its place (it is away meanwhile: a load of it would fail otherwise)
     auto other = std::make_shared<annot::CoordToHeader>(
             std::vector<std::vector<std::string>>{ { "x" }, { "y" } },
             std::vector<std::vector<uint64_t>>{ { 3 }, { 4 } });
-    auto refused = initialize_annotated_dbg(*config, none, other);
-    ASSERT_TRUE(refused->get_coord_to_header());
-    EXPECT_NE(other.get(), refused->get_coord_to_header());
-    EXPECT_EQ(2u, refused->get_coord_to_header()->build_header_index());
+    const std::string seqs = pair.dir + "/anno" + annot::CoordToHeader::kExtension;
+    fs::rename(seqs, seqs + ".away");
+    try {
+        initialize_annotated_dbg(*config, none, other);
+        ADD_FAILURE() << "loaded with another annotation's mapping";
+    } catch (const RecordMappingMismatch &e) {
+        EXPECT_EQ("The record mapping offered for " + pair.annotation + " has 2 columns, the "
+                  "annotation 1 labels: not the mapping of this annotation", std::string(e.what()));
+    }
+    fs::rename(seqs + ".away", seqs);
+    // the resident's mapping still loads the copy
+    EXPECT_EQ(resident->get_coord_to_header(),
+              initialize_annotated_dbg(*config, none, resident->share_coord_to_header())
+                      ->get_coord_to_header());
 }
 
 // A load for one request (`in_ram`: the overload with a PatternPreparation) that fails throws
@@ -1708,4 +1722,168 @@ TEST(MultiGraphInRam, AFileThatCannotBeOpenedFailsBeforeTheGraphLoads) {
     }
     fs::remove(pair.graph);
     fs::remove(row_diff.graph);
+}
+
+
+// The stamps of a pair's files (GPT review 7 finding 4): every file a copy of the pair loaded
+// into RAM reads, with its role, the graph's derived data stamped absent when it does not exist
+// (here the Bloom filter; the mask is written with the graph); a change names the first file
+// that changed and how, also a rewrite in place that restores the size and the modification
+// time (its status change time differs) and a file that appears; a metadata-only change (a
+// chmod, a utime of the access time alone) differs too, a plain read does not
+TEST(MultiGraphInRam, PairFileStampsNameTheFileThatChanged) {
+    const PairOnDisk pair = write_pair("stamps");
+    const std::string seqs = pair.dir + "/anno" + annot::CoordToHeader::kExtension;
+    const std::string mask = pair.dir + "/graph" + DBGSuccinct::kDummyMaskExtension;
+    const std::string bloom = pair.dir + "/graph" + DBGSuccinct::kBloomFilterExtension;
+    auto stamps = pair_file_stamps(pair.graph, pair.annotation, true);
+    std::vector<std::pair<std::string, std::string>> roles;
+    for (const PairFileStamp &f : stamps) {
+        roles.emplace_back(f.path, f.role);
+    }
+    EXPECT_EQ((std::vector<std::pair<std::string, std::string>> {
+                      { pair.graph, "graph" }, { pair.annotation, "annotation" },
+                      { seqs, "coord_to_header" }, { mask, "graph_mask" },
+                      { bloom, "graph_bloom" } }), roles);
+    ASSERT_EQ(5u, stamps.size());
+    EXPECT_TRUE(stamps[2].stamp);
+    EXPECT_TRUE(stamps[3].stamp);
+    EXPECT_FALSE(stamps[4].stamp);
+    EXPECT_EQ("", pair_files_changed(stamps, pair.graph, pair.annotation));
+    // without the record mapping (--no-coord-mapping) no copy reads the .seqs: not stamped
+    EXPECT_EQ(4u, pair_file_stamps(pair.graph, pair.annotation, false).size());
+    auto refusal = [&](const std::string &path, const std::string &role, const std::string &how) {
+        return "The file '" + path + "' (" + role + ") of the pair ('" + pair.graph + "', '"
+                + pair.annotation + "') changed on disk since the server started (" + how
+                + "): a request does not load it into RAM, since the answer would carry the "
+                  "start-up identity and certificates; restart onto the new files, or send the "
+                  "request without in_ram";
+    };
+    // (a status change in a later tick of the file system's clock, a few ms on Linux)
+    auto tick = []() { std::this_thread::sleep_for(std::chrono::milliseconds(20)); };
+    // the .seqs renamed over by a copy of itself
+    tick();
+    fs::copy_file(seqs, seqs + ".new");
+    fs::rename(seqs + ".new", seqs);
+    EXPECT_EQ(refusal(seqs, "coord_to_header", "it is another file"),
+              pair_files_changed(stamps, pair.graph, pair.annotation));
+    // the Bloom filter appearing, and gone again
+    stamps = pair_file_stamps(pair.graph, pair.annotation, true);
+    std::ofstream(bloom) << "x";
+    EXPECT_EQ(refusal(bloom, "graph_bloom", "it appeared"),
+              pair_files_changed(stamps, pair.graph, pair.annotation));
+    fs::remove(bloom);
+    EXPECT_EQ("", pair_files_changed(stamps, pair.graph, pair.annotation));
+    // the mask removed
+    const std::string mask_bytes = [&]() {
+        std::ifstream in(mask, std::ios::binary);
+        return std::string(std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>());
+    }();
+    fs::remove(mask);
+    EXPECT_EQ(refusal(mask, "graph_mask", "it is gone or cannot be read"),
+              pair_files_changed(stamps, pair.graph, pair.annotation));
+    std::ofstream(mask, std::ios::binary) << mask_bytes;
+    stamps = pair_file_stamps(pair.graph, pair.annotation, true);
+    // the annotation rewritten in place with its own bytes, its modification time restored
+    const auto mtime = fs::last_write_time(pair.annotation);
+    std::string bytes;
+    {
+        std::ifstream in(pair.annotation, std::ios::binary);
+        bytes.assign(std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>());
+    }
+    tick();
+    {
+        std::fstream out(pair.annotation, std::ios::in | std::ios::out | std::ios::binary);
+        out.write(bytes.data(), bytes.size());
+    }
+    fs::last_write_time(pair.annotation, mtime);
+    const auto before = *stamps[1].stamp;
+    const auto after = *file_stamp(pair.annotation);
+    EXPECT_EQ(std::make_tuple(before.device, before.inode, before.size, before.mtime_ns),
+              std::make_tuple(after.device, after.inode, after.size, after.mtime_ns));
+    EXPECT_EQ(refusal(pair.annotation, "annotation", "its status change time"),
+              pair_files_changed(stamps, pair.graph, pair.annotation));
+    // the graph renamed away, then back: gone, then its status change time
+    stamps = pair_file_stamps(pair.graph, pair.annotation, true);
+    tick();
+    fs::rename(pair.graph, pair.graph + ".away");
+    EXPECT_EQ(refusal(pair.graph, "graph", "it is gone or cannot be read"),
+              pair_files_changed(stamps, pair.graph, pair.annotation));
+    fs::rename(pair.graph + ".away", pair.graph);
+    EXPECT_EQ(refusal(pair.graph, "graph", "its status change time"),
+              pair_files_changed(stamps, pair.graph, pair.annotation));
+    // a chmod alone (a change of its metadata only: refused too, the conservative side)
+    stamps = pair_file_stamps(pair.graph, pair.annotation, true);
+    tick();
+    fs::permissions(seqs, fs::perms::group_write, fs::perm_options::add);
+    EXPECT_EQ(refusal(seqs, "coord_to_header", "its status change time"),
+              pair_files_changed(stamps, pair.graph, pair.annotation));
+    // a utime that restores the access time alone, the modification time given as it was (a
+    // backup or scanner agent that restores the times it read): its status change time, refused
+    // too (T4 review R3, S4)
+    stamps = pair_file_stamps(pair.graph, pair.annotation, true);
+    tick();
+    {
+        const int64_t mtime_ns = stamps[1].stamp->mtime_ns;
+        const struct timespec times[2] = {
+            { 1'000'000'000, 0 },
+            { static_cast<time_t>(mtime_ns / 1'000'000'000), mtime_ns % 1'000'000'000 }
+        };
+        ASSERT_EQ(0, ::utimensat(AT_FDCWD, pair.annotation.c_str(), times, 0));
+    }
+    EXPECT_EQ(refusal(pair.annotation, "annotation", "its status change time"),
+              pair_files_changed(stamps, pair.graph, pair.annotation));
+#if defined(__linux__)
+    // on Linux also one that omits the modification time (touch -a, tar
+    // --atime-preserve=replace); APFS leaves the status change time then
+    stamps = pair_file_stamps(pair.graph, pair.annotation, true);
+    tick();
+    {
+        const struct timespec times[2] = { { 1'000'000'000, 0 }, { 0, UTIME_OMIT } };
+        ASSERT_EQ(0, ::utimensat(AT_FDCWD, pair.annotation.c_str(), times, 0));
+    }
+    EXPECT_EQ(refusal(pair.annotation, "annotation", "its status change time"),
+              pair_files_changed(stamps, pair.graph, pair.annotation));
+#endif
+    // a plain read does not: the kernel's own access time update leaves the status change time
+    stamps = pair_file_stamps(pair.graph, pair.annotation, true);
+    tick();
+    {
+        std::ifstream in(pair.graph, std::ios::binary);
+        const std::string read { std::istreambuf_iterator<char>(in),
+                                 std::istreambuf_iterator<char>() };
+        EXPECT_FALSE(read.empty());
+    }
+    EXPECT_EQ("", pair_files_changed(stamps, pair.graph, pair.annotation));
+    // its size: the .seqs appended to in place
+    stamps = pair_file_stamps(pair.graph, pair.annotation, true);
+    std::ofstream(seqs, std::ios::app | std::ios::binary) << "x";
+    EXPECT_EQ(refusal(seqs, "coord_to_header", "its size"),
+              pair_files_changed(stamps, pair.graph, pair.annotation));
+}
+
+// The refusal of a changed pair carries the code index_changed (the owner's decision of
+// 2026-11-11, asked by the async service): 400, the body {"error": the text, "code":
+// "index_changed"}, written error first as the intake refusals (/search, /traverse); its body is
+// a /resolve or /pattern pair's refusal block (http_status beside it, samples 43 and 44)
+TEST(MultiGraphInRam, AChangedPairIsRefusedWithTheCodeIndexChanged) {
+    const std::string text = changed_file_text("d/anno.annodbg", "annotation", "d/graph.dbg",
+                                               "d/anno.annodbg", "it is another file");
+    EXPECT_EQ("The file 'd/anno.annodbg' (annotation) of the pair ('d/graph.dbg', "
+              "'d/anno.annodbg') changed on disk since the server started (it is another "
+              "file): a request does not load it into RAM, since the answer would carry the "
+              "start-up identity and certificates; restart onto the new files, or send the "
+              "request without in_ram", text);
+    const IndexChanged refusal(text);
+    EXPECT_EQ(400, refusal.status());
+    EXPECT_EQ(text, refusal.what());
+    Json::Value body(Json::objectValue);
+    body["error"] = text;
+    body["code"] = "index_changed";
+    EXPECT_EQ(body, refusal.body());
+    EXPECT_EQ(body, index_changed_json(text));
+    EXPECT_EQ("{\"error\":\"" + text + "\",\"code\":\"index_changed\"}", refusal.text());
+    // an HttpError, which the routes answer with its status and text
+    const HttpError &as_http = refusal;
+    EXPECT_EQ(refusal.text(), as_http.text());
 }

@@ -1,6 +1,7 @@
 #include "annotation/coord_to_header.hpp"
 
 #include <algorithm>
+#include <cassert>
 #include <filesystem>
 #include <limits>
 #include <memory>
@@ -8,6 +9,7 @@
 #include <tuple>
 
 #include <ips4o.hpp>
+#include <sdsl/bits.hpp>
 #include <tsl/hopscotch_set.h>
 
 #include "common/logger.hpp"
@@ -538,12 +540,56 @@ static uint64_t bytes_left(std::istream &in, uint64_t size) {
     return at < 0 || static_cast<uint64_t>(at) > size ? 0 : size - static_cast<uint64_t>(at);
 }
 
+namespace {
+
+// An sdsl int_vector as read by check_offsets_layout: its stated size in bits, its width and its
+// words (little-endian, as sdsl writes them)
+struct StoredIntVector {
+    uint64_t bits = 0;
+    uint8_t width = 1;
+    std::vector<uint64_t> words;
+
+    // the |i|-th entry (its |width| bits: an entry below bits / width)
+    uint64_t get(uint64_t i) const {
+        const uint64_t bit = i * width;
+        const uint64_t word = bit >> 6;
+        const unsigned offset = bit & 63;
+        uint64_t value = words[word] >> offset;
+        if (offset + width > 64)
+            value |= words[word + 1] << (64 - offset);
+        return width == 64 ? value : value & ((uint64_t(1) << width) - 1);
+    }
+    bool bit(uint64_t i) const { return (words[i >> 6] >> (i & 63)) & 1; }
+};
+
+} // namespace
+
 // The coordinate offsets of column |column| (a bit_vector_sd: an sdsl sd_vector, then its
-// inversion flag), read for their layout before sdsl loads them: each stated size is checked
-// against the bytes left in the file, and the sizes against one another as sd_vector builds
-// them, so that sdsl allocates nothing from a corrupt size (a select support takes 48 bytes per
-// 4096 stated bits, touched) and no rank selects past the encoded length (it segfaulted on a
-// stated length of 2^20). |in| is returned to where it was (train-3 verification V2, S2, S3)
+// inversion flag), validated before sdsl loads them, so that no load or lookup of a corrupt file
+// reads outside what it stores (train-3 verification V2 and V3, GPT review 7 finding 9). The
+// sd_vector is: its length n, the low bits per position wl, the low part (an int_vector of m
+// entries of wl bits, the positions' low bits), the high part (a bit vector of m + 2^logm bits:
+// the i-th position's high bits plus i, a set bit each, the zeros the bucket boundaries), then a
+// select support over the high part's set bits and one over its unset bits (select_support_mcl:
+// their count, a superblock per 4096 of them storing the position of its first, the
+// mini-or-long flags, then per superblock a block: a long one storing the position of each of
+// its arguments, a short one every 64th's less the superblock's). Checked:
+// - each stated size against the bytes left before it is read or skipped, so that sdsl
+//   allocates nothing from a corrupt size (a select support takes 48 bytes per 4096 stated bits);
+// - the sizes against one another as sd_vector_builder makes them: m <= n, wl = logn - logm (of
+//   n and m), the low width wl, the high part m + 2^logm bits — so it always has a zero (V3-S1:
+//   a zero-less high part segfaulted at load) —, a length within what the high part encodes (a
+//   stated length of 2^20 segfaulted, V2-S3), and wl at most 57 (select_0_support_sd strides
+//   64 x 2^wl positions: at 58 and more it divides by zero, a trap on x86-64);
+// - the high part: m set bits, and no set bit past its length (select_0_support_sd counts them);
+// - each select support: over exactly the high part's set (unset) bits; its superblocks and
+//   blocks of a width in 1..64 and of the number of entries their flags make them (V3-S3: one
+//   width byte changed segfaulted the load of an r237 copy); and every value its select can read
+//   equal to the position it stands for, against one pass over the high part (V3-S3: a corrupt
+//   value read outside the high part or answered wrong records);
+// - the inversion flag 0 or 1.
+// Not checked: the low part's values (a corrupt one maps a coordinate to another record or
+// states a wrong count, inside the column). |in| is returned to where it was
 static void check_offsets_layout(std::istream &in, uint64_t file_size, uint64_t column) {
     const std::streampos start = in.tellg();
     auto fail = [&](const std::string &why) {
@@ -561,20 +607,76 @@ static void check_offsets_layout(std::istream &in, uint64_t file_size, uint64_t 
             fail("end inside their sizes");
         return static_cast<uint8_t>(c);
     };
-    // an sdsl int_vector: its size in bits, its width (unless fixed), then its 64-bit words
-    auto int_vector = [&](uint8_t *width) {
-        const uint64_t bits = number();
-        if (width)
-            *width = byte();
-        const uint64_t bytes = (bits / 64 + (bits % 64 != 0)) * 8;
-        if (const uint64_t left = bytes_left(in, file_size); bytes > left)
-            fail(fmt::format("state {} bytes of data, more than the {} bytes left", bytes, left));
-        in.seekg(static_cast<std::streamoff>(bytes), std::ios_base::cur);
-        return bits;
+    // an sdsl int_vector: its size in bits, its width (unless fixed: |with_width| false), then
+    // its 64-bit words, read into the result when |read| (else skipped)
+    auto int_vector = [&](bool with_width, bool read) {
+        StoredIntVector v;
+        v.bits = number();
+        if (with_width)
+            v.width = byte();
+        const uint64_t num_words = v.bits / 64 + (v.bits % 64 != 0);
+        if (const uint64_t left = bytes_left(in, file_size); num_words > left / 8)
+            fail(fmt::format("state {} bytes of data, more than the {} bytes left",
+                             num_words * 8, left));
+        if (read) {
+            v.words.resize(num_words);
+            if (!in.read(reinterpret_cast<char *>(v.words.data()), num_words * 8))
+                fail("end inside their data");
+        } else {
+            in.seekg(static_cast<std::streamoff>(num_words * 8), std::ios_base::cur);
+        }
+        return v;
     };
-    // an sdsl select_support_mcl over the |expected| set (or unset) bits of the high part: their
-    // count, the superblocks, the mini-or-long flags, then a block per 4096 of them
-    auto select_support = [&](uint64_t expected, const char *what) {
+
+    const uint64_t length = number();
+    const uint8_t low_bits_per_position = byte();
+    const StoredIntVector low = int_vector(true, false);
+    const StoredIntVector high = int_vector(false, true);
+    if (low_bits_per_position >= 64 || !low.width || low.width > 64 || low.bits % low.width)
+        fail("state an invalid width");
+    const uint64_t ones = low.bits / low.width;
+    if (ones > high.bits)
+        fail(fmt::format("state {} positions in a high part of {} bits", ones, high.bits));
+    // a position's high part indexes the zeros of the high part, one bucket each (a high part
+    // without a zero encodes no length, not even 0: V3-S1)
+    const uint64_t buckets = high.bits - ones;
+    if ((length >> low_bits_per_position) >= buckets) {
+        fail(fmt::format("state a length of {}, more than their encoding holds ({} buckets of {})",
+                         length, buckets, uint64_t(1) << low_bits_per_position));
+    }
+    // the layout sd_vector_builder makes for m positions in a length of n
+    if (ones > length)
+        fail(fmt::format("state {} positions in a length of {}", ones, length));
+    uint64_t logm = sdsl::bits::hi(ones) + 1;
+    const uint64_t logn = sdsl::bits::hi(length) + 1;
+    if (logm == logn)
+        --logm;
+    if (low_bits_per_position != logn - logm || low.width != low_bits_per_position
+            || high.bits != ones + (uint64_t(1) << logm)) {
+        fail(fmt::format("state {} low bits of width {} per position and a high part of {} bits, "
+                         "where {} positions in a length of {} take {} and {} bits",
+                         low_bits_per_position, low.width, high.bits, ones, length,
+                         logn - logm, ones + (uint64_t(1) << logm)));
+    }
+    if (low_bits_per_position > 57) {
+        fail(fmt::format("state {} low bits per position, more than the 57 their select support "
+                         "indexes", low_bits_per_position));
+    }
+    // the high part's set bits, and none past its end
+    uint64_t set_bits = 0;
+    for (uint64_t word : high.words) {
+        set_bits += sdsl::bits::cnt(word);
+    }
+    if (high.bits % 64 && high.words.back() >> (high.bits % 64))
+        fail("state a high part with set bits past its end");
+    if (set_bits != ones) {
+        fail(fmt::format("state {} positions and a high part of {} set bits", ones, set_bits));
+    }
+
+    // an sdsl select_support_mcl over the |expected| set (or, |unset|, unset) bits of the high
+    // part, read whole and checked against it
+    auto select_support = [&](uint64_t expected, bool unset) {
+        const char *what = unset ? "unset" : "set";
         const uint64_t count = number();
         if (count != expected) {
             fail(fmt::format("state a select support over {} {} bits, for the {} of their high part",
@@ -582,31 +684,80 @@ static void check_offsets_layout(std::istream &in, uint64_t file_size, uint64_t 
         }
         if (!count)
             return;
-        uint8_t width = 0;
-        int_vector(&width);
-        int_vector(nullptr);
-        for (uint64_t i = 0; i < count / 4096 + (count % 4096 != 0); ++i)
-            int_vector(&width);
+        auto invalid = [&](const std::string &part) {
+            fail(fmt::format("state a select support over their {} bits with {}", what, part));
+        };
+        const uint64_t num_superblocks = count / 4096 + (count % 4096 != 0);
+        const StoredIntVector superblocks = int_vector(true, true);
+        if (!superblocks.width || superblocks.width > 64
+                || superblocks.bits != num_superblocks * superblocks.width) {
+            invalid(fmt::format("superblocks of {} bits of width {}, for {} superblocks",
+                                superblocks.bits, superblocks.width, num_superblocks));
+        }
+        // a cleared flag marks a long superblock; none stored: every one is short
+        const StoredIntVector flags = int_vector(false, true);
+        if (flags.bits && flags.bits != num_superblocks) {
+            invalid(fmt::format("{} mini-or-long flags, for {} superblocks", flags.bits,
+                                num_superblocks));
+        }
+        auto is_long = [&](uint64_t k) { return flags.bits && !flags.bit(k); };
+        std::vector<StoredIntVector> blocks;
+        blocks.reserve(num_superblocks);
+        for (uint64_t k = 0; k < num_superblocks; ++k) {
+            blocks.push_back(int_vector(true, true));
+            const StoredIntVector &block = blocks.back();
+            const uint64_t entries = is_long(k) ? 4096 : 64;
+            if (!block.width || block.width > 64 || block.bits != entries * block.width) {
+                invalid(fmt::format("a block {} of {} bits of width {}, for {} entries", k,
+                                    block.bits, block.width, entries));
+            }
+        }
+        // every value select reads: each entry of a long block (the position of its argument),
+        // each short superblock's (the position of its first argument) and each entry of its
+        // block (the position of every 64th argument, less the superblock's), for the arguments
+        // there are, against the high part's arguments met in one pass over its words (a long
+        // superblock's own value is never read: sdsl's init_fast leaves the last one 0)
+        uint64_t next = 1;  // the next argument whose position is stored (1-based)
+        uint64_t before = 0;  // the arguments before the current word
+        for (uint64_t w = 0; w < high.words.size() && next <= count; ++w) {
+            uint64_t word = unset ? ~high.words[w] : high.words[w];
+            if (w + 1 == high.words.size() && high.bits % 64)
+                word &= (uint64_t(1) << (high.bits % 64)) - 1;
+            const uint64_t in_word = sdsl::bits::cnt(word);
+            while (next <= count && next <= before + in_word) {
+                const uint64_t position
+                        = w * 64 + sdsl::bits::sel(word, static_cast<uint32_t>(next - before));
+                const uint64_t k = (next - 1) >> 12;
+                const uint64_t offset = (next - 1) & 4095;
+                if (!offset && !is_long(k) && superblocks.get(k) != position) {
+                    invalid(fmt::format("superblock {} at {}, its first argument at {}", k,
+                                        superblocks.get(k), position));
+                }
+                if (is_long(k)) {
+                    if (blocks[k].get(offset) != position) {
+                        invalid(fmt::format("entry {} of the long block {} at {}, its argument at "
+                                            "{}", offset, k, blocks[k].get(offset), position));
+                    }
+                    ++next;
+                } else {
+                    if (blocks[k].get(offset >> 6) != position - superblocks.get(k)) {
+                        invalid(fmt::format("entry {} of the short block {} at {} past the "
+                                            "superblock, its argument {} past it", offset >> 6,
+                                            k, blocks[k].get(offset >> 6),
+                                            position - superblocks.get(k)));
+                    }
+                    next += 64;
+                }
+            }
+            before += in_word;
+        }
+        // (every argument is met: the high part holds |count| of them, checked above)
+        assert(next > count);
     };
-    const uint64_t length = number();
-    const uint8_t low_bits_per_position = byte();
-    uint8_t low_width = 0;
-    const uint64_t low_bits = int_vector(&low_width);
-    const uint64_t high_bits = int_vector(nullptr);
-    if (low_bits_per_position >= 64 || !low_width || low_width > 64 || low_bits % low_width)
-        fail("state an invalid width");
-    const uint64_t ones = low_bits / low_width;
-    if (ones > high_bits)
-        fail(fmt::format("state {} positions in a high part of {} bits", ones, high_bits));
-    // a position's high part indexes the zeros of the high part, one bucket each
-    const uint64_t buckets = high_bits - ones;
-    if (length && (length >> low_bits_per_position) >= buckets) {
-        fail(fmt::format("state a length of {}, more than their encoding holds ({} buckets of {})",
-                         length, buckets, uint64_t(1) << low_bits_per_position));
-    }
-    select_support(ones, "set");
-    select_support(buckets, "unset");
-    byte();
+    select_support(ones, false);
+    select_support(buckets, true);
+    if (byte() > 1)
+        fail("state an inversion flag that is neither 0 nor 1");
     in.seekg(start);
 }
 
@@ -662,10 +813,16 @@ bool CoordToHeader::load(const std::string &filename_base) {
                         "column {}: {} headers stated, more than its last bytes hold", i,
                         num_headers));
             }
-            std::vector<std::string> headers(num_headers);
-            for (std::string &header : headers) {
+            // added as they are read, never constructed from the stated count: a count within
+            // the bound built that many empty strings first, 24-32 bytes each (V3-S4: 41 times
+            // the file). Reserved up to one string per 32 bytes left, which no file amplifies
+            std::vector<std::string> headers;
+            headers.reserve(std::min(num_headers, left / 32));
+            for (uint64_t h = 0; h < num_headers; ++h) {
+                std::string header;
                 if (!load_string(*in, &header, left))
                     throw std::runtime_error(fmt::format("the headers of column {}", i));
+                headers.push_back(std::move(header));
             }
             // every column read whole: a file cut inside its last column would otherwise
             // reach the test below in a failed state, where peek() answers EOF as at the end
@@ -685,6 +842,13 @@ bool CoordToHeader::load(const std::string &filename_base) {
                         "column {}: its coordinate offsets state {} k-mers, past its last record's "
                         "end", i, offsets.size()));
             }
+            // and a column without records states none (V3-S2: a stated length loaded, and a
+            // coordinate lookup in the column read record 0 of none)
+            if (headers.empty() && offsets.size()) {
+                throw std::runtime_error(fmt::format(
+                        "column {}: no records, and its coordinate offsets state {} k-mers", i,
+                        offsets.size()));
+            }
             headers_.push_back(std::move(headers));
             coord_offsets_.push_back(std::move(offsets));
         }
@@ -698,11 +862,15 @@ bool CoordToHeader::load(const std::string &filename_base) {
                 throw std::runtime_error(fmt::format("{} column labels for {} columns",
                                                      num_labels, num_columns));
             }
-            std::vector<std::string> labels(num_labels);
+            // added as they are read, as the headers
+            std::vector<std::string> labels;
             const uint64_t left = bytes_left(*in, file_size);
-            for (std::string &label : labels) {
+            labels.reserve(std::min(num_labels, left / 32));
+            for (uint64_t l = 0; l < num_labels; ++l) {
+                std::string label;
                 if (!load_string(*in, &label, left))
                     throw std::runtime_error("the column labels");
+                labels.push_back(std::move(label));
             }
             if (in->peek() != std::char_traits<char>::eof())
                 throw std::runtime_error("unexpected data after the column labels");

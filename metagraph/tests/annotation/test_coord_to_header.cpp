@@ -1047,6 +1047,452 @@ TEST(CoordToHeaderRepeats, AgreesWithTheReferenceOnRandomHeaders) {
     }
 }
 
+// ---------------------------------------------------------------------------------------------
+// The layout of a .seqs validated at load (GPT review 7 finding 9; train-3 verification V3:
+// S1 a high part without a zero, S2 a column without records stating a length, S3 a select
+// support's inner widths and values, S4 a header count allocated before its headers)
+
+// A field of a serialized record mapping, named as V3's seqs_layout.py names them: num_columns,
+// c<j>.num_headers, c<j>.sd.{size, wl, low.bits, low.width, high.bits, high.data},
+// c<j>.sd.{sel1, sel0}.{arg_cnt, superblock.bits, superblock.width, superblock.data,
+// miniblock.bits, miniblock.data, block<k>.bits, block<k>.width, block<k>.data}, c<j>.inverted,
+// marker, num_labels. |size| 8 for a number (big-endian the mapping's own counts, little-endian
+// sdsl's), 1 for a byte, the bytes of a vector's data
+struct SeqsField {
+    size_t offset;
+    size_t size;
+    bool big_endian;
+};
+
+std::map<std::string, SeqsField> seqs_fields(const std::string &bytes) {
+    std::map<std::string, SeqsField> fields;
+    std::istringstream in(bytes);
+    auto at = [&]() { return static_cast<size_t>(in.tellg()); };
+    auto be64 = [&](const std::string &name) {
+        fields[name] = { at(), 8, true };
+        return load_number(in);
+    };
+    auto le64 = [&](const std::string &name) {
+        fields[name] = { at(), 8, false };
+        uint64_t n;
+        in.read(reinterpret_cast<char *>(&n), 8);
+        return n;
+    };
+    auto u8 = [&](const std::string &name) {
+        fields[name] = { at(), 1, false };
+        return static_cast<uint8_t>(in.get());
+    };
+    auto int_vector = [&](const std::string &name, bool width) {
+        const uint64_t bits = le64(name + ".bits");
+        if (width)
+            u8(name + ".width");
+        const size_t data = (bits + 63) / 64 * 8;
+        fields[name + ".data"] = { at(), data, false };
+        in.seekg(static_cast<std::streamoff>(data), std::ios_base::cur);
+    };
+    const uint64_t num_columns = be64("num_columns");
+    for (uint64_t c = 0; c < num_columns; ++c) {
+        const std::string p = "c" + std::to_string(c);
+        const uint64_t num_headers = be64(p + ".num_headers");
+        for (uint64_t h = 0; h < num_headers; ++h) {
+            std::string header;
+            EXPECT_TRUE(load_string(in, &header));
+        }
+        le64(p + ".sd.size");
+        u8(p + ".sd.wl");
+        int_vector(p + ".sd.low", true);
+        int_vector(p + ".sd.high", false);
+        for (const char *s : { ".sd.sel1", ".sd.sel0" }) {
+            const uint64_t count = le64(p + s + ".arg_cnt");
+            if (!count)
+                continue;
+            int_vector(p + s + ".superblock", true);
+            int_vector(p + s + ".miniblock", false);
+            for (uint64_t k = 0; k < (count + 4095) / 4096; ++k) {
+                int_vector(p + s + ".block" + std::to_string(k), true);
+            }
+        }
+        u8(p + ".inverted");
+    }
+    if (at() < bytes.size()) {
+        be64("marker");
+        be64("num_labels");
+    }
+    EXPECT_TRUE(in.good());
+    return fields;
+}
+
+uint64_t seqs_value(const std::string &bytes, const SeqsField &f) {
+    uint64_t n = 0;
+    if (f.size == 1)
+        return static_cast<uint8_t>(bytes[f.offset]);
+    for (size_t i = 0; i < 8; ++i) {
+        const uint64_t b = static_cast<uint8_t>(bytes[f.offset + (f.big_endian ? i : 7 - i)]);
+        n = (n << 8) | b;
+    }
+    return n;
+}
+
+std::string with_value(std::string bytes, const SeqsField &f, uint64_t value) {
+    if (f.size == 1) {
+        bytes[f.offset] = static_cast<char>(value);
+        return bytes;
+    }
+    for (size_t i = 0; i < 8; ++i) {
+        bytes[f.offset + (f.big_endian ? 7 - i : i)] = static_cast<char>(value >> (8 * i));
+    }
+    return bytes;
+}
+
+// The bit |bit| of the data of |f| set to |value|
+std::string with_data_bit(std::string bytes, const SeqsField &f, uint64_t bit, bool value) {
+    char &b = bytes[f.offset + bit / 8];
+    b = value ? (b | (1 << (bit % 8))) : (b & ~(1 << (bit % 8)));
+    return bytes;
+}
+
+// A column of |n| records of the given k-mer counts
+std::vector<uint64_t> seqs_counts(size_t n, uint64_t each) { return std::vector<uint64_t>(n, each); }
+
+std::vector<std::string> seqs_names(size_t n, const std::string &prefix) {
+    std::vector<std::string> v;
+    for (size_t i = 0; i < n; ++i) {
+        v.push_back(prefix + std::to_string(i));
+    }
+    return v;
+}
+
+// The shapes V3 fuzzed (its fixtures FA-FG and the r237 copies FE, FF), built here: a column
+// without records (FD), small columns with stated labels (FA), two superblocks (FB), a dense
+// column stored inverted (FC), the 8 superblocks over the unset bits of FF's column 14, a column
+// whose high part sdsl indexes with init_fast (100,000 bits and more), its last superblock long
+// (FE), and a long first superblock over the unset bits (records whose ends crowd the first
+// buckets)
+std::map<std::string, CoordToHeader> seqs_shapes() {
+    std::map<std::string, CoordToHeader> shapes;
+    shapes.emplace("FD", CoordToHeader({ { "a" }, {} }, { { 5 }, {} }));
+    CoordToHeader fa({ { "b1", "b2" }, { "s1", "s2" } }, { { 270, 270 }, { 30, 510 } });
+    fa.set_column_labels({ "big.fa", "small.fa" });
+    shapes.emplace("FA", std::move(fa));
+    shapes.emplace("FB", CoordToHeader({ seqs_names(5000, "r"), { "x" } }, { seqs_counts(5000, 10), { 70 } }));
+    std::vector<uint64_t> dense = seqs_counts(3000, 1);
+    dense[0] = 1501;
+    shapes.emplace("FC", CoordToHeader({ seqs_names(3000, "d") }, { std::move(dense) }));
+    shapes.emplace("FF14", CoordToHeader({ seqs_names(25256, "c") }, { seqs_counts(25256, 400000) }));
+    shapes.emplace("FE", CoordToHeader({ seqs_names(35000, "e") }, { seqs_counts(35000, 87000) }));
+    std::vector<uint64_t> crowded = seqs_counts(104000, 40);
+    crowded.resize(120000, 8126);
+    shapes.emplace("LONG", CoordToHeader({ seqs_names(120000, "l") }, { std::move(crowded) }));
+    return shapes;
+}
+
+// Loads |bytes| as the .seqs of |base| plain and mapped (--mmap): whether each loaded. A file
+// that loads answers every lookup without leaving its columns (each throws or answers)
+std::pair<bool, bool> load_both(const std::string &base, const std::string &bytes) {
+    {
+        std::ofstream out(base + CoordToHeader::kExtension, std::ios::binary | std::ios::trunc);
+        out << bytes;
+    }
+    const bool with_mmap = utils::with_mmap();
+    bool loaded[2];
+    for (bool mmap : { false, true }) {
+        utils::set_mmap(mmap);
+        CoordToHeader cth;
+        loaded[mmap] = cth.load(base);
+        if (!loaded[mmap])
+            continue;
+        for (uint64_t j = 0; j < cth.num_columns(); ++j) {
+            const uint64_t n = cth.num_kmers(j);
+            for (uint64_t coord : { uint64_t(0), uint64_t(1), n / 2, n ? n - 1 : 0, n }) {
+                try {
+                    cth.map_single_coord(j, coord);
+                    cth.sequence_range(j, coord);
+                } catch (const std::exception &) {}
+            }
+            for (size_t s = 0; s < std::min<size_t>(cth.num_sequences(j), 70); ++s) {
+                try {
+                    cth.num_kmers_in_sequence(j, s);
+                    cth.last_coord(j, s);
+                } catch (const std::exception &) {}
+            }
+        }
+    }
+    utils::set_mmap(with_mmap);
+    return { loaded[0], loaded[1] };
+}
+
+const std::pair<bool, bool> kRefused { false, false };
+const std::pair<bool, bool> kLoaded { true, true };
+
+TEST(CoordToHeaderLayout, EveryShapeLoadsAsBuilt) {
+    const std::string base = test_dump_dir() + "/cth_shapes";
+    for (auto &[name, built] : seqs_shapes()) {
+        built.serialize(base);
+        const std::string bytes = file_bytes(base + CoordToHeader::kExtension);
+        const auto fields = seqs_fields(bytes);
+        ASSERT_EQ(kLoaded, load_both(base, bytes)) << name;
+        CoordToHeader cth;
+        ASSERT_TRUE(cth.load(base)) << name;
+        for (uint64_t j = 0; j < built.num_columns(); ++j) {
+            ASSERT_EQ(built.num_kmers(j), cth.num_kmers(j)) << name;
+            for (size_t s = 0; s < built.num_sequences(j); ++s) {
+                ASSERT_EQ(built.num_kmers_in_sequence(j, s), cth.num_kmers_in_sequence(j, s));
+            }
+        }
+        // the shapes are what they stand for
+        if (name == "FC") {
+            EXPECT_EQ(1u, seqs_value(bytes, fields.at("c0.inverted")));
+        }
+        if (name == "FE" || name == "LONG") {
+            const char *s = name == "FE" ? "c0.sd.sel1" : "c0.sd.sel0";
+            ASSERT_TRUE(fields.count(std::string(s) + ".miniblock.data")) << name;
+            const SeqsField flags = fields.at(std::string(s) + ".miniblock.data");
+            const uint64_t num_flags = seqs_value(bytes, fields.at(std::string(s) + ".miniblock.bits"));
+            // FE: only its last superblock long; LONG: its first
+            const uint64_t long_one = name == "FE" ? num_flags - 1 : 0;
+            ASSERT_GT(num_flags, 1u) << name;
+            EXPECT_FALSE((bytes[flags.offset + long_one / 8] >> (long_one % 8)) & 1) << name;
+        }
+        if (name == "FF14") {
+            EXPECT_EQ(32768u, seqs_value(bytes, fields.at("c0.sd.sel0.arg_cnt")));
+        }
+    }
+}
+
+// V3-S1: a high part without a zero (FD's empty column with its high part's length 1 -> 0, one
+// bit flip of the unit test's own file; a column with records whose high part has only set bits)
+// segfaulted at load, both modes
+TEST(CoordToHeaderLayout, AHighPartWithoutAZeroIsRefused) {
+    const std::string base = test_dump_dir() + "/cth_nozero";
+    auto shapes = seqs_shapes();
+    shapes.at("FD").serialize(base);
+    std::string fd = file_bytes(base + CoordToHeader::kExtension);
+    auto fields = seqs_fields(fd);
+    ASSERT_EQ(1u, seqs_value(fd, fields.at("c1.sd.high.bits")));
+    EXPECT_EQ(kRefused, load_both(base, with_value(fd, fields.at("c1.sd.high.bits"), 0)));
+    // FA's first column: its high part's zeros set (2 records, 6 bits)
+    shapes.at("FA").serialize(base);
+    const std::string fa = file_bytes(base + CoordToHeader::kExtension);
+    fields = seqs_fields(fa);
+    std::string nozero = fa;
+    for (uint64_t bit = 0; bit < 6; ++bit) {
+        nozero = with_data_bit(nozero, fields.at("c0.sd.high.data"), bit, true);
+    }
+    EXPECT_EQ(kRefused, load_both(base, nozero));
+    // and with a length of 0, which skipped the test (`length && ...`)
+    EXPECT_EQ(kRefused, load_both(base, with_value(nozero, fields.at("c0.sd.size"), 0)));
+}
+
+// V3-S2: a column without records keeps any length its encoding holds, and a coordinate lookup in
+// it divided by its zero records and read record 0 of none (a segfault; SIGFPE on x86-64)
+TEST(CoordToHeaderLayout, AColumnWithoutRecordsStatesNoLength) {
+    const std::string base = test_dump_dir() + "/cth_emptysize";
+    seqs_shapes().at("FD").serialize(base);
+    const std::string fd = file_bytes(base + CoordToHeader::kExtension);
+    const auto fields = seqs_fields(fd);
+    EXPECT_EQ(kLoaded, load_both(base, fd));
+    EXPECT_EQ(kRefused, load_both(base, with_value(fd, fields.at("c1.sd.size"), 1)));
+    CoordToHeader cth;
+    EXPECT_FALSE(cth.load(base));
+}
+
+// V3-S3: the inner layout of a select support (its superblocks' and blocks' widths and sizes, its
+// mini-or-long flags) and its values. One width byte changed segfaulted the load of an r237 copy
+// (plain; the mapped load refused a block's width but not a superblock's), or the file loaded and
+// answered wrong records
+TEST(CoordToHeaderLayout, ASelectSupportsLayoutAndValuesAreChecked) {
+    const std::string base = test_dump_dir() + "/cth_select";
+    for (auto &[name, built] : seqs_shapes()) {
+        built.serialize(base);
+        const std::string bytes = file_bytes(base + CoordToHeader::kExtension);
+        const auto fields = seqs_fields(bytes);
+        // V3's blocks (2, 4, 18), the first and the last of each support
+        auto chosen_block = [&](const std::string &field, const std::string &suffix) {
+            const size_t at = field.find(".block");
+            if (at == std::string::npos || !field.ends_with(suffix))
+                return false;
+            const uint64_t k = std::stoull(field.substr(at + 6));
+            const std::string next = field.substr(0, at) + ".block" + std::to_string(k + 1)
+                                        + suffix;
+            return !k || k == 2 || k == 4 || k == 18 || !fields.count(next);
+        };
+        // (the large shapes, whose loads take milliseconds, with fewer widths)
+        const bool large = name == "FE" || name == "LONG";
+        for (const auto &[field, f] : fields) {
+            if (!field.ends_with(".superblock.width") && !chosen_block(field, ".width"))
+                continue;
+            // V3's crashing widths and a few more: every other width is a size mismatch too
+            const uint64_t width = seqs_value(bytes, f);
+            const std::vector<uint64_t> widths = large
+                    ? std::vector<uint64_t> { 0, width + 1, 65, 255 }
+                    : std::vector<uint64_t> { 0, 1, 31, 32, 62, 63, 64, 65, 66, 127, 128, 144,
+                                              200, 254, 255 };
+            for (uint64_t w : widths) {
+                if (w == width)
+                    continue;
+                EXPECT_EQ(kRefused, load_both(base, with_value(bytes, f, w)))
+                        << name << " " << field << " = " << w;
+            }
+        }
+        // the values select reads, each with its lowest bit flipped: entry 0 of every block (a
+        // short block's first entry, 0, or a long block's first position) and the first
+        // superblock's when it is short (a long superblock's own value is never read)
+        for (const auto &[field, f] : fields) {
+            const bool superblocks = field.ends_with(".superblock.data");
+            const bool block = chosen_block(field, ".data");
+            if (!superblocks && !block)
+                continue;
+            const std::string support = field.substr(0, field.find(superblocks ? ".superblock"
+                                                                                : ".block"));
+            if (superblocks && fields.count(support + ".miniblock.data")
+                    && fields.at(support + ".miniblock.data").size
+                    && !(bytes[fields.at(support + ".miniblock.data").offset] & 1)) {
+                continue;
+            }
+            std::string flipped = bytes;
+            flipped[f.offset] ^= 1;
+            EXPECT_EQ(kRefused, load_both(base, flipped)) << name << " " << field;
+        }
+        // the mini-or-long flags: every superblock long, every one short
+        for (const char *s : { "c0.sd.sel1", "c0.sd.sel0" }) {
+            const std::string flags = std::string(s) + ".miniblock";
+            if (!fields.count(flags + ".data") || !fields.at(flags + ".data").size)
+                continue;
+            const SeqsField &data = fields.at(flags + ".data");
+            for (bool value : { false, true }) {
+                std::string all = bytes;
+                const uint64_t n = seqs_value(bytes, fields.at(flags + ".bits"));
+                for (uint64_t bit = 0; bit < n; ++bit) {
+                    all = with_data_bit(all, data, bit, value);
+                }
+                EXPECT_EQ(kRefused, load_both(base, all)) << name << " " << s << " " << value;
+            }
+        }
+    }
+}
+
+// The layout sd_vector_builder makes: the low bits per position, the low width and the high part's
+// size follow from the length and the number of positions; the high part holds exactly that many
+// set bits, none past its end; the inversion flag is 0 or 1. A low-bits value of 58 to 63 made
+// select_0_support_sd divide by zero (a trap on x86-64)
+TEST(CoordToHeaderLayout, TheSdVectorsOwnRelationsAreChecked) {
+    const std::string base = test_dump_dir() + "/cth_relations";
+    seqs_shapes().at("FA").serialize(base);
+    const std::string fa = file_bytes(base + CoordToHeader::kExtension);
+    const auto fields = seqs_fields(fa);
+    ASSERT_EQ(8u, seqs_value(fa, fields.at("c0.sd.wl")));
+    for (uint64_t wl : { 0, 1, 7, 9, 57, 58, 60, 63 }) {
+        EXPECT_EQ(kRefused, load_both(base, with_value(fa, fields.at("c0.sd.wl"), wl))) << wl;
+    }
+    // FD's one-record column (a length of 5, 2 low bits) stated with a length of 2^59 + 4 and its
+    // 59 low bits whole (a word of data either way): a layout sd_vector_builder makes, which
+    // select_0_support_sd cannot index
+    {
+        seqs_shapes().at("FD").serialize(base);
+        std::string wide = file_bytes(base + CoordToHeader::kExtension);
+        const auto fd = seqs_fields(wide);
+        ASSERT_EQ(2u, seqs_value(wide, fd.at("c0.sd.wl")));
+        wide = with_value(wide, fd.at("c0.sd.size"), (uint64_t(1) << 59) + 4);
+        wide = with_value(wide, fd.at("c0.sd.wl"), 59);
+        wide = with_value(wide, fd.at("c0.sd.low.bits"), 59);
+        wide = with_value(wide, fd.at("c0.sd.low.width"), 59);
+        EXPECT_EQ(kRefused, load_both(base, wide));
+        // and the same with 57 low bits (a length of 2^57 + 4) passes the layout, refused only by
+        // its record's end (its one position is not the column's last)
+        std::string fits = with_value(wide, fd.at("c0.sd.size"), (uint64_t(1) << 57) + 4);
+        fits = with_value(fits, fd.at("c0.sd.wl"), 57);
+        fits = with_value(fits, fd.at("c0.sd.low.bits"), 57);
+        fits = with_value(fits, fd.at("c0.sd.low.width"), 57);
+        EXPECT_EQ(kRefused, load_both(base, fits));
+        seqs_shapes().at("FA").serialize(base);
+    }
+    EXPECT_EQ(kRefused, load_both(base, with_value(fa, fields.at("c0.sd.low.width"), 7)));
+    // a set bit past the high part's 6 bits, and one of its set bits cleared
+    EXPECT_EQ(kRefused, load_both(base, with_data_bit(fa, fields.at("c0.sd.high.data"), 6, true)));
+    std::string cleared = fa;
+    for (uint64_t bit = 0; bit < 6; ++bit) {
+        const auto &data = fields.at("c0.sd.high.data");
+        if ((fa[data.offset + bit / 8] >> (bit % 8)) & 1) {
+            cleared = with_data_bit(fa, data, bit, false);
+            break;
+        }
+    }
+    EXPECT_EQ(kRefused, load_both(base, cleared));
+    for (uint64_t flag : { 2, 255 }) {
+        EXPECT_EQ(kRefused, load_both(base, with_value(fa, fields.at("c0.inverted"), flag)));
+    }
+}
+
+// V3-S4: a header count within its bound (the bytes left) built that many empty strings before the
+// first header was read, 24-32 bytes each (41 times the file). The headers are added as read: the
+// count is refused at the first header the file does not hold
+TEST(CoordToHeaderLayout, AHeaderCountIsNotAllocatedBeforeItsHeaders) {
+    const std::string base = test_dump_dir() + "/cth_hdrcount";
+    seqs_shapes().at("FB").serialize(base);
+    const std::string fb = file_bytes(base + CoordToHeader::kExtension);
+    const auto fields = seqs_fields(fb);
+    const SeqsField &count = fields.at("c0.num_headers");
+    const uint64_t left = fb.size() - count.offset - 8;
+    for (uint64_t n : { left - 1, left, left / 2, uint64_t(5001), uint64_t(4999) }) {
+        EXPECT_EQ(kRefused, load_both(base, with_value(fb, count, n))) << n;
+    }
+}
+
+// A deterministic fuzz of the small shapes in V3's mutation classes: every cut, every bit flip,
+// every size field set to V3's values. None may crash a load or a lookup of a file that loads
+// (plain and mapped), and the two modes agree
+TEST(CoordToHeaderLayout, CorruptFilesNeverCrashALoadOrALookup) {
+    const std::string base = test_dump_dir() + "/cth_fuzz";
+    auto shapes = seqs_shapes();
+    for (const char *name : { "FD", "FA" }) {
+        shapes.at(name).serialize(base);
+        const std::string bytes = file_bytes(base + CoordToHeader::kExtension);
+        size_t num_loaded = 0;
+        for (size_t size = 0; size < bytes.size(); ++size) {
+            const auto loaded = load_both(base, bytes.substr(0, size));
+            EXPECT_EQ(loaded.first, loaded.second) << name << " cut " << size;
+            num_loaded += loaded.first;
+        }
+        // each byte's lowest two bits and highest bit (V3-S1 was the lowest bit of a size), and
+        // the whole byte
+        for (size_t i = 0; i < bytes.size(); ++i) {
+            for (int mask : { 1, 2, 0x80, 0xFF }) {
+                std::string flipped = bytes;
+                flipped[i] ^= static_cast<char>(mask);
+                const auto loaded = load_both(base, flipped);
+                EXPECT_EQ(loaded.first, loaded.second) << name << " byte " << i << " ^ " << mask;
+                num_loaded += loaded.first;
+            }
+        }
+        // (a flip in a header's text, or a cut at the labels' start, loads)
+        EXPECT_GT(num_loaded, 0u) << name;
+    }
+    for (const char *name : { "FD", "FA", "FC" }) {
+        shapes.at(name).serialize(base);
+        const std::string bytes = file_bytes(base + CoordToHeader::kExtension);
+        const uint64_t file_size = bytes.size();
+        for (const auto &[field, f] : seqs_fields(bytes)) {
+            if (field.ends_with(".data"))
+                continue;
+            const uint64_t v = seqs_value(bytes, f);
+            std::vector<uint64_t> values;
+            if (f.size == 1) {
+                values = { 0, 1, v - 1, v + 1, 31, 32, 57, 58, 62, 63, 64, 65, 127, 128, 200,
+                           255 };
+            } else {
+                const uint64_t left = file_size - f.offset - 8;
+                values = { 0, 1, v - 1, v + 1, left / 8, left, left * 8, left * 4096,
+                           uint64_t(1) << 20, uint64_t(1) << 32, uint64_t(1) << 40,
+                           uint64_t(1) << 62, uint64_t(1) << 63, ~uint64_t(0) };
+            }
+            for (uint64_t v : values) {
+                const auto loaded = load_both(base, with_value(bytes, f, v));
+                EXPECT_EQ(loaded.first, loaded.second) << name << " " << field << " = " << v;
+            }
+        }
+    }
+}
+
 TEST(CoordToHeader, MapSingleCoordConsistentWithBatch) {
     // Verify map_single_coord gives same results as map_to_local_coords
     CoordToHeader cth(

@@ -758,20 +758,76 @@ Json::Value headers_unique_json(const std::vector<HeaderPair> &pairs, size_t num
 Json::Value labels_disjoint_json(const std::vector<HeaderPair> &pairs, size_t num_threads = 0,
                                  size_t max_examples = 10, size_t max_listed = 10);
 
-// The identity of a file on disk at one moment: its device, inode, size and modification time
-// (ns, the clock of std::filesystem::last_write_time). A file renamed over, rewritten or rebuilt
-// differs in one of them at least. A server compares an annotation's stamp with the one taken
-// at start-up before it loads the pair into RAM with the resident pair's record mapping (H4)
+// The identity of a file on disk at one moment: its device, inode, size, modification time and
+// status change time (ns, one stat). A file renamed over, rewritten or rebuilt differs in one of
+// them at least, also one rewritten in place with its size and modification time restored: the
+// kernel sets the status change time (ctime) to the current time on every write, truncation,
+// utime (the call that restores a modification time), chmod, chown, link and rename of the file,
+// and no call sets it to a chosen value (GPT review 6 #7's residual, GPT review 7 finding 4). A
+// metadata-only change differs too (chmod, chown, a hard link, an extended attribute, a utime,
+// also one that restores only the access time; a plain read does not). A multi-graph server
+// stamps every file a copy of a pair loaded into RAM for one request reads (pair_file_stamps)
 struct FileStamp {
     uint64_t device = 0;
     uint64_t inode = 0;
     uint64_t size = 0;
     int64_t mtime_ns = 0;
+    int64_t ctime_ns = 0;
 
     bool operator==(const FileStamp &other) const = default;
 };
 // |path|'s stamp now, nullopt when it cannot be read (no such file, no permission)
 std::optional<FileStamp> file_stamp(const std::string &path);
+
+// A file a copy of a (graph, annotation) pair loaded into RAM for one request reads (`in_ram`, a
+// multi-graph server), its role and its stamp when the server started (nullopt: absent then)
+struct PairFileStamp {
+    std::string path;
+    std::string role;
+    std::optional<FileStamp> stamp;
+};
+/**
+ * Every file a copy of the pair (|graph|, |annotation|) loaded into RAM reads, stamped now: the
+ * loader inventory (index_load_inventory with |coord_mapping|: the graph, the annotation, a
+ * row_diff annotation's anchors and fork successors, the .seqs the pair loads) and the graph's
+ * derived data (index_derived_files: its dummy-edge mask and Bloom filter, each stamped absent
+ * when it does not exist, so that one that appears counts as a change). A server takes them at
+ * start-up before any file of a pair is read.
+ */
+std::vector<PairFileStamp> pair_file_stamps(const std::string &graph,
+                                            const std::string &annotation, bool coord_mapping);
+/**
+ * "" while every file of |stamps| has the stamp taken, else the refusal of a load of the pair
+ * (|graph|, |annotation|) into RAM for a request, naming the first file that changed and how
+ * (GPT review 7 finding 4: an answer computed on other files would carry the start-up identity,
+ * certificates and record mapping): "The file '<path>' (<role>) of the pair ('<graph>',
+ * '<annotation>') changed on disk since the server started (<how>): a request does not load it
+ * into RAM, since the answer would carry the start-up identity and certificates; restart onto the
+ * new files, or send the request without in_ram", <how> one of "it is another file", "its size",
+ * "its modification time", "its status change time", "it is gone or cannot be read", "it
+ * appeared".
+ */
+std::string pair_files_changed(const std::vector<PairFileStamp> &stamps,
+                               const std::string &graph, const std::string &annotation);
+// that refusal's text for the file |path| (|role|) of the pair (|graph|, |annotation|), changed
+// as |how| states
+std::string changed_file_text(const std::string &path, const std::string &role,
+                              const std::string &graph, const std::string &annotation,
+                              const std::string &how);
+
+// {"error": |message|, "code": "index_changed"}: the refusal of a load of a pair into RAM for a
+// request once a file of the pair changed on disk since the server started (pair_files_changed's
+// text), or once the copy's column labels are not the resident's
+Json::Value index_changed_json(const std::string &message);
+// That refusal, thrown by the load (the owner's decision of 2026-11-11, asked by the async
+// service: a code a client can act on, the status the route's failed load has): /search and
+// /traverse answer 400 with its body written error first (error_first_json_text, as the intake
+// refusals; /traverse adds `usage` on a managed attempt), a /resolve or /pattern pair is refused
+// with it as its refusal block (`http_status` 400 beside `error` and `code`)
+class IndexChanged : public HttpError {
+  public:
+    explicit IndexChanged(const std::string &message);
+};
 
 } // namespace cli
 } // namespace mtg
