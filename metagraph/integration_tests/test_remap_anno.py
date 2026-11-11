@@ -223,6 +223,56 @@ class TestRemapAnnotation(TestingBase):
         self.assertNotEqual(res.returncode, 0)
         self.assertIn('other orientation', res.stderr.decode() + res.stdout.decode())
 
+    @parameterized.expand([
+        ('basic', 'brwt'),
+        ('basic', 'row_diff_brwt'),
+        ('primary', 'row_diff_brwt'),
+    ])
+    def test_row_map_from_extraction(self, mode, anno_repr):
+        """`transform --to-fasta --row-map` writes the row map that the remap computes."""
+        source = self.source if mode == 'basic' else self.primary_source
+        prefix = f'{self.tempdir.name}/extract_{mode}_{anno_repr}'
+        self._run_command(
+            f'{METAGRAPH} transform -p {NUM_THREADS} --to-fasta --row-map'
+            f' -o {prefix} {source}', 'Transform command', shell=True)
+        self.assertEqual(glob.glob(f'{self.tempdir.name}/**/bucket.*', recursive=True), [])
+        target = prefix + '.sshashdbg'
+        self._run_command(
+            f'{METAGRAPH} build -p {NUM_THREADS} --mode {mode} --graph sshash'
+            f' -k {K} -o {target} {prefix}.fasta.gz', 'Build command', shell=True)
+
+        self._annotate_graph(INPUT, source, prefix + '_anno', anno_repr,
+                             num_threads=NUM_THREADS)
+        anno = prefix + '_anno' + anno_file_extension[anno_repr]
+
+        # Match the rows by k-mer, as without a row map.
+        matched = prefix + '_matched'
+        res = self._remap(anno, matched, target, source=source)
+        self.assertEqual(res.returncode, 0, res.stderr.decode())
+        with open(matched + '.rowmap', 'rb') as f:
+            expected_row_map = f.read()
+        with open(prefix + '.rowmap', 'rb') as f:
+            self.assertEqual(expected_row_map, f.read())
+
+        # The remap accepts the row map written with the contigs.
+        res = self._remap(anno, prefix, target, source=source)
+        self.assertEqual(res.returncode, 0, res.stderr.decode())
+        with open(prefix + '.rowmap', 'rb') as f:
+            self.assertEqual(expected_row_map, f.read())
+        with open(matched + anno_file_extension[anno_repr], 'rb') as f:
+            expected = f.read()
+        with open(prefix + anno_file_extension[anno_repr], 'rb') as f:
+            self.assertEqual(expected, f.read())
+
+    def test_row_map_rejects_canonical(self):
+        prefix = self.tempdir.name + '/canonical'
+        self._build_graph(INPUT, prefix + '.dbg', K, 'succinct', 'canonical')
+        res = subprocess.run(
+            f'{METAGRAPH} transform --to-fasta --row-map -o {prefix} {prefix}.dbg',
+            shell=True, stdout=PIPE, stderr=PIPE)
+        self.assertNotEqual(res.returncode, 0)
+        self.assertIn('basic or primary', res.stderr.decode() + res.stdout.decode())
+
     def test_remap_rejects_mixed_modes(self):
         prefix = f'{self.tempdir.name}/mixed'
         self._annotate_graph(INPUT, self.source, prefix, 'brwt', num_threads=NUM_THREADS)

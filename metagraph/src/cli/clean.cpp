@@ -2,9 +2,11 @@
 
 #include <ips4o.hpp>
 
+#include "annotation/annotation_remap.hpp"
 #include "common/logger.hpp"
 #include "common/algorithms.hpp"
 #include "common/unix_tools.hpp"
+#include "common/utils/file_utils.hpp"
 #include "common/utils/template_utils.hpp"
 #include "common/threads/threading.hpp"
 #include "common/vectors/vector_algorithm.hpp"
@@ -45,6 +47,10 @@ int clean_graph(Config *config) {
     logger->trace("Loading graph...");
 
     auto graph = load_critical_dbg(files.at(0));
+    if (config->row_map && graph->get_mode() == graph::DeBruijnGraph::CANONICAL) {
+        logger->error("--row-map supports only graphs in basic or primary mode");
+        exit(1);
+    }
     // try loading k-mer counts
     auto node_weights = graph->load_extension<graph::NodeWeights>(files.at(0));
 
@@ -161,6 +167,29 @@ int clean_graph(Config *config) {
         uint64_t num_kmers = 0;
         std::string fasta_fname;
 
+        // An SSHash graph built from the written file numbers its k-mers in file
+        // order, so the row of every k-mer in that graph is known here.
+        std::unique_ptr<annot::RowMapWriter> row_map;
+        std::filesystem::path row_map_tmp_dir;
+        if (config->row_map) {
+            auto tmp_dir = config->tmp_dir.empty()
+                    ? std::filesystem::path(outfbase).remove_filename()
+                    : config->tmp_dir;
+            row_map_tmp_dir = utils::create_temp_dir(tmp_dir.empty() ? "./" : tmp_dir, "rowmap");
+            // in primary mode, an SSHash graph has a second node for every reverse complement
+            row_map = std::make_unique<annot::RowMapWriter>(graph->max_index(),
+                                                            2 * graph->max_index(),
+                                                            row_map_tmp_dir);
+        }
+        // `first` is the number of k-mers written before this contig
+        auto add_rows = [&](const auto &path, uint64_t first) {
+            if (row_map) {
+                for (auto node : path) {
+                    row_map->add(node - 1, ++first);
+                }
+            }
+        };
+
         if (node_weights) {
             if (!node_weights->is_compatible(*graph)) {
                 logger->error("k-mer counts are not compatible with the subgraph");
@@ -182,10 +211,15 @@ int clean_graph(Config *config) {
                 // smooth k-mer counts in the unitig
                 utils::smooth_vector(config->smoothing_window, &kmer_counts);
 
-                std::lock_guard<std::mutex> lock(seq_mutex);
-                writer.write(contig, kmer_counts);
-                num_bp += contig.size();
-                num_kmers += contig.size() - graph->get_k() + 1;
+                uint64_t first;
+                {
+                    std::lock_guard<std::mutex> lock(seq_mutex);
+                    writer.write(contig, kmer_counts);
+                    num_bp += contig.size();
+                    first = num_kmers;
+                    num_kmers += contig.size() - graph->get_k() + 1;
+                }
+                add_rows(path, first);
             }, get_num_threads());
 
             fasta_fname = writer.get_fasta_fname();
@@ -195,17 +229,43 @@ int clean_graph(Config *config) {
                                config->enumerate_out_sequences,
                                get_num_threads() > 1);
 
-            call_contigs([&](const std::string &contig, const auto &) {
-                std::lock_guard<std::mutex> lock(seq_mutex);
-                writer.write(contig);
-                num_bp += contig.size();
-                num_kmers += contig.size() - graph->get_k() + 1;
+            call_contigs([&](const std::string &contig, const auto &path) {
+                uint64_t first;
+                {
+                    std::lock_guard<std::mutex> lock(seq_mutex);
+                    writer.write(contig);
+                    num_bp += contig.size();
+                    first = num_kmers;
+                    num_kmers += contig.size() - graph->get_k() + 1;
+                }
+                add_rows(path, first);
             }, get_num_threads());
 
             fasta_fname = writer.get_fname();
         }
         logger->trace("Extracted {} bp of sequences with {} k-mers and wrote to {}",
                       num_bp, num_kmers, fasta_fname);
+
+        if (row_map) {
+            const std::string row_map_fname = outfbase + ".rowmap";
+            try {
+                row_map->write(row_map_fname,
+                               graph->get_mode() == graph::DeBruijnGraph::PRIMARY
+                                    ? 2 * num_kmers : num_kmers,
+                               get_num_threads());
+            } catch (const std::exception &e) {
+                logger->error("{}", e.what());
+                row_map.reset();
+                utils::remove_temp_dir(row_map_tmp_dir);
+                std::error_code ec;
+                std::filesystem::remove(row_map_fname, ec);
+                exit(1);
+            }
+            row_map.reset();
+            utils::remove_temp_dir(row_map_tmp_dir);
+            logger->trace("Row map for an SSHash graph built from {} saved to {}",
+                          fasta_fname, row_map_fname);
+        }
     };
 
     assert(config->count_slice_quantiles.size() >= 2);

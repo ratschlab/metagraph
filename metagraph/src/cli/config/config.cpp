@@ -373,6 +373,8 @@ Config::Config(int argc, char *argv[]) {
             unitigs = true;
         } else if (!strcmp(argv[i], "--primary-kmers")) {
             kmers_in_single_form = true;
+        } else if (!strcmp(argv[i], "--row-map")) {
+            row_map = true;
         } else if (!strcmp(argv[i], "--header")) {
             header = std::string(get_value(i++));
         } else if (!strcmp(argv[i], "--prune-tips")) {
@@ -648,6 +650,12 @@ Config::Config(int argc, char *argv[]) {
             || identity == RELAX_BRWT)
                     && outfbase.empty())
         print_usage_and_exit = true;
+
+    // 'transform --to-fasta' runs as CLEAN
+    if (row_map && !(identity == CLEAN && to_fasta)) {
+        std::cerr << "--row-map needs 'transform --to-fasta'" << std::endl;
+        print_usage_and_exit = true;
+    }
 
     if (identity == TRANSFORM_ANNOTATION && remap_graph.size()) {
         if (infbase.empty() || fnames.size() != 1) {
@@ -1221,6 +1229,9 @@ if (advanced) {
             fprintf(stderr, "\t   --to-adj-list \twrite adjacency list to file [off]\n");
             fprintf(stderr, "\t   --to-fasta \t\textract sequences from graph and dump to compressed FASTA file [off]\n");
             fprintf(stderr, "\t   --enumerate \t\tenumerate sequences in FASTA [off]\n");
+            fprintf(stderr, "\t   --row-map \t\twith --to-fasta, also write <OUT>.rowmap: the row map that\n");
+            fprintf(stderr, "\t             \t\t'transform_anno --remap-graph' needs for an SSHash graph built\n");
+            fprintf(stderr, "\t             \t\tfrom the written file [off]\n");
             fprintf(stderr, "\t   --initialize-bloom \tconstruct a Bloom filter for faster detection of non-existing k-mers [off]\n");
             fprintf(stderr, "\t   --unitigs \t\textract all unitigs from graph and dump to compressed FASTA file [off]\n");
 #if ! _PROTEIN_GRAPH

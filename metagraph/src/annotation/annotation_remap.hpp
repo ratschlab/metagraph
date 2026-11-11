@@ -2,8 +2,11 @@
 #define __ANNOTATION_REMAP_HPP__
 
 #include <filesystem>
+#include <fstream>
 #include <memory>
+#include <mutex>
 #include <string>
+#include <vector>
 
 #include <sdsl/int_vector.hpp>
 
@@ -44,6 +47,40 @@ void map_rows_to_graph(const graph::DeBruijnGraph &source,
                        const std::string &filename,
                        const std::filesystem::path &tmp_dir,
                        size_t num_threads = 1);
+
+/**
+ * Writes a row map file from pairs (source row, target node) added in any order,
+ * without holding the map in memory. Uses temporary files in `tmp_dir` of about
+ * twice the size of the result and removes them when destroyed.
+ */
+class RowMapWriter {
+  public:
+    // `max_target_node` is an upper bound on the target nodes passed to add().
+    RowMapWriter(uint64_t num_rows, uint64_t max_target_node,
+                 const std::filesystem::path &tmp_dir);
+    ~RowMapWriter();
+
+    // Thread-safe. Every source row can be added at most once.
+    void add(uint64_t row, uint64_t target_node);
+
+    // Write the map in the sdsl::int_vector<> format with entries wide enough
+    // for `target_max_index`. Rows that were not added get 0.
+    void write(const std::string &filename, uint64_t target_max_index, size_t num_threads = 1);
+
+  private:
+    struct Bucket {
+        std::mutex mutex;
+        std::string filename;
+        std::ofstream out;
+        std::vector<char> buffer;
+    };
+
+    const uint64_t num_rows_;
+    const uint64_t width_;
+    uint64_t bucket_bits_;
+    size_t record_size_;
+    std::vector<Bucket> buckets_;
+};
 
 /**
  * Check a saved row map against both graphs. Returns false if the row counts
