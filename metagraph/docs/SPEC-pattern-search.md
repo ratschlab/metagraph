@@ -4386,9 +4386,11 @@ the other pairs.
   server started (<how>): a request does not load it into RAM, since the answer would carry the start-up identity
   and certificates; restart onto the new files, or send the request without in_ram` (SPEC-multigraph-envelope.md
   §10 lists the roles and the hows), with `"code": "index_changed"` beside it in the refusal block (the owner's
-  decision of 2026-11-11; the loader's failures below have no code). The pair is still answered without `in_ram`
-  from the files it mapped at
-  start-up.
+  decision of 2026-11-11; the loader's failures below have no code). A copy whose annotation has other column labels
+  than the resident's (a check behind the stamps) is refused the same way, with the code and the text `The
+  annotation '<annotation_path>' loaded into RAM for the request has other column labels than the one the server
+  started with: restart onto the new files, or send the request without in_ram` (T4's review R3, N5). The pair is
+  still answered without `in_ram` from the files it mapped at start-up.
 - A load for the request that fails -- a file of the pair that cannot be read or that its loader refuses (truncated
   or corrupted), a `row_diff` annotation's anchors or fork successors (files beside the graph) that cannot be
   loaded, a graph and annotation that are not compatible -- is a failure of that pair while it is processed (§24.1):
