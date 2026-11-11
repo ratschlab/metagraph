@@ -1,26 +1,19 @@
 #include "traverse.hpp"
 
 #include <cmath>
-#include <fstream>
 #include <limits>
 #include <set>
-#include <sstream>
 
-#include "common/logger.hpp"
-#include "common/unix_tools.hpp"
 #include "graph/annotated_dbg.hpp"
 #include "graph/traversal/label_oracle.hpp"
 #include "graph/traversal/resolve.hpp"
 #include "graph/traversal/walker.hpp"
 #include "config/config.hpp"
-#include "load/load_annotated_graph.hpp"
-#include "server_utils.hpp"
 
 
 namespace mtg {
 namespace cli {
 
-using mtg::common::logger;
 using namespace mtg::graph;
 using namespace mtg::graph::traversal;
 
@@ -585,73 +578,6 @@ Json::Value process_resolve_request(const Json::Value &request,
     const std::vector<FrozenSeed> seeds = select_seeds(profile, req.sequence, req.policy,
                                                        oracle.regime() != Regime::BASIC);
     return profile_to_json(profile, &seeds);
-}
-
-Json::Value traverse_capabilities(const AnnotatedDBG &anno_graph, const TraverseLimits &limits) {
-    const LabelOracle oracle(anno_graph);
-    Json::Value c;
-    c["schema_version"] = 1;
-    c["k"] = uint_json(oracle.get_k());
-    c["regime"] = to_string(oracle.regime());
-    c["alphabet"] = oracle.graph().alphabet();
-    c["num_columns"] = uint_json(oracle.num_columns());
-    c["has_coordinates"] = oracle.has_coordinates();
-    c["has_coord_to_header"] = oracle.coord_to_header() != nullptr;
-    c["limits"]["max_time_ms"] = limits.max_time_ms;
-    c["limits"]["max_seeds"] = uint_json(limits.max_seeds);
-    c["limits"]["max_seed_bp"] = uint_json(limits.max_seed_bp);
-    c["limits"]["max_seed_labels"] = uint_json(kMaxSeedLabels);
-    c["limits"]["max_resolve_query_bp"] = uint_json(limits.max_resolve_query_bp);
-    return c;
-}
-
-int traverse_graph(Config *config) {
-    assert(config);
-    assert(config->fnames.size() == 1);
-
-    std::ifstream in(config->fnames[0]);
-    if (!in.is_open()) {
-        logger->error("Cannot open request file {}", config->fnames[0]);
-        return 1;
-    }
-    std::stringstream content;
-    content << in.rdbuf();
-
-    Json::Value request;
-    TraverseLimits limits;
-    try {
-        // refuse a malformed request before the index loads
-        request = parse_json_string(content.str());
-        limits = traverse_limits(*config);
-        if (config->traverse_resolve) {
-            parse_resolve_request(request, limits);
-        } else {
-            parse_traverse_request(request, limits);
-        }
-    } catch (const std::invalid_argument &e) {
-        logger->error("Invalid request: {}", e.what());
-        return 1;
-    }
-
-    Timer timer;
-    std::unique_ptr<AnnotatedDBG> anno_graph = initialize_annotated_dbg(*config);
-    logger->trace("Annotated graph loaded in {} sec", timer.elapsed());
-
-    try {
-        const Json::Value response = config->traverse_resolve
-            ? process_resolve_request(request, *anno_graph, limits)
-            : process_traverse_request(request, *anno_graph, limits);
-        Json::StreamWriterBuilder builder;
-        builder["indentation"] = "";
-        std::cout << Json::writeString(builder, response) << std::endl;
-    } catch (const std::invalid_argument &e) {
-        logger->error("Invalid request: {}", e.what());
-        return 1;
-    } catch (const std::exception &e) {
-        logger->error("{}", e.what());
-        return 1;
-    }
-    return 0;
 }
 
 } // namespace cli

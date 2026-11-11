@@ -3,25 +3,20 @@
 `/resolve` finds where a query sequence is supported by which labels and proposes seeds.
 `/traverse` extends seeds in the graph, following only the labels that carry them.
 
-Both are experimental: the schema may still change, and the routes are off unless the server
-is started with `--experimental-traverse`. They serve a single index (`-i` / `-a`), not a
-server started with a list of graphs.
+Both are experimental: the schema may still change. A server on a single index (`-i` / `-a`)
+serves them. A server started with a list of graphs does not.
 
 ```
-metagraph server_query -i graph.dbg -a annotation.annodbg --experimental-traverse
-
-metagraph traverse -i graph.dbg -a annotation.annodbg request.json            # a /traverse request
-metagraph traverse --resolve -i graph.dbg -a annotation.annodbg request.json  # a /resolve request
+metagraph server_query -i graph.dbg -a annotation.annodbg
 ```
 
 | Route | Method | |
 |---|---|---|
 | `/resolve` | POST | a support profile of a query, and optionally seeds selected from it |
 | `/traverse` | POST | the extension of one or more seeds |
-| `/traverse/capabilities` | GET | the index (`k`, regime, alphabet, header labels) and the server's limits |
 
-A request is a JSON object. A field the schema does not list is an error (HTTP 400; the CLI
-exits with status 1), so that a misspelled field is never ignored.
+A request is a JSON object. A field the schema does not list is an error (HTTP 400), so that
+a misspelled field is never ignored.
 
 ## Labels
 
@@ -29,7 +24,7 @@ A label is either an annotation **column** (for example a taxid or a file) or, o
 k-mer coordinates and a sequence header index (`annotate --index-header-coords`), one indexed
 **sequence** of a column, named by its FASTA **header** (for example an accession). A name that
 is both a column and a header, or the header of several sequences, is ambiguous: a request that
-names it is refused (HTTP 400). The server builds its header index when it starts.
+names it is refused (HTTP 400). The server builds its index of header names on first use.
 
 ## `/resolve`
 

@@ -233,8 +233,8 @@ jobs:
 
   # The traversal tests on the mini RefSeq index (scripts/traversal/fetch_mini_refseq.sh: 42
   # blaNDM-carrying RefSeq records in the format of the public refseq33m index, published as a
-  # pre-release of this repository): the MiniRefSeq unit tests, and the parity of `metagraph
-  # traverse` with the labeled-traversal prototype (traverse_parity.py, golden files in
+  # pre-release of this repository): the MiniRefSeq unit tests, and the parity of the
+  # /traverse and /resolve routes with the labeled-traversal prototype (traverse_parity.py, golden files in
   # tests/data/traverse_parity)
   mini-index-tests:
     if: inputs.alphabet == 'DNA' && inputs.build_type == 'Release' && inputs.compiler == 'g++-13' && inputs.build_static == 'OFF'

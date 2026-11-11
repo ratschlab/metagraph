@@ -368,7 +368,8 @@ TEST_F(MiniRefSeq, ExtendBlaNDMAndValidateAgainstSourceRecords) {
     EXPECT_GE(checked, 19u);
 }
 
-// the walker against the string model of the 42 source records (test_trie_reference.hpp)
+// the walker against the 42 source records: every record's own sequence beside the seed
+// (trie::header_claim in test_trie_reference.hpp)
 TEST_F(MiniRefSeq, WalkerAgainstTheSourceRecords) {
     std::vector<std::string> seqs, labels;
     for (auto &[name, seq] : read_records(kIndexDir + "/fasta")) {
@@ -423,8 +424,13 @@ TEST_F(MiniRefSeq, WalkerAgainstTheSourceRecords) {
                     got[{ walk.substr(0, e.at_bp), res.label_dict[e.label].name }] = e.reason;
                 }
             }
-            const trie::RefClaims expected = trie::claims(ix, carriers, seed_seq, arm, radius);
-            EXPECT_FALSE(expected.empty());
+            // a record is followed along its coordinates: its own sequence beside the seed
+            trie::RefClaims expected;
+            for (size_t r = 0; r < seqs.size(); ++r) {
+                if (carriers.count(labels[r]))
+                    trie::header_claim(ix, labels[r], seqs[r], seed_seq, arm, radius, &expected);
+            }
+            EXPECT_EQ(carriers.size(), expected.size());
             EXPECT_EQ(expected, got) << "arm " << to_string(arm) << " radius " << radius;
         }
     }

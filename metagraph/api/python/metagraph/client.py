@@ -160,7 +160,7 @@ class GraphClientJson:
                 timeout=None) -> JsonDict:
         """
         Where the labels support the sequence, and optionally the seeds selected from it
-        (experimental; a server started with --experimental-traverse, see traverse.md).
+        (experimental; a server on a single index, see traverse.md).
         Give exactly one of `labels` and `discover` (e.g. {'kind': 'header'}).
         """
         payload = {'sequence': sequence}

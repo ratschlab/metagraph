@@ -42,12 +42,6 @@ Json::Value process_traverse_request(const Json::Value &request,
 Json::Value process_resolve_request(const Json::Value &request,
                                     const graph::AnnotatedDBG &anno_graph,
                                     const TraverseLimits &limits);
-Json::Value traverse_capabilities(const graph::AnnotatedDBG &anno_graph,
-                                  const TraverseLimits &limits);
-
-// metagraph traverse [--resolve] -i GRAPH -a ANNOTATION REQUEST.json
-int traverse_graph(Config *config);
-
 } // namespace cli
 } // namespace mtg
 
