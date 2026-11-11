@@ -57,9 +57,8 @@ void SequenceGraph::serialize_extensions(const std::string &filename) const {
 node_index DeBruijnGraph::kmer_to_node(std::string_view kmer) const {
     assert(kmer.size() == get_k());
 
-    node_index node = npos;
-    map_to_nodes_sequentially(kmer, [&node](node_index i) { node = i; });
-    return node;
+    // a k-mer maps to exactly one node
+    return *node_range(kmer, true).begin();
 }
 
 // Check whether graph contains fraction of nodes from the sequence
@@ -71,20 +70,20 @@ bool DeBruijnGraph::find(std::string_view sequence,
     const size_t num_kmers = sequence.length() - get_k() + 1;
     const size_t max_kmers_missing = num_kmers * (1 - discovery_fraction);
     const size_t min_kmers_discovered = num_kmers - max_kmers_missing;
+    if (!min_kmers_discovered)
+        return true;
+
     size_t num_kmers_discovered = 0;
     size_t num_kmers_missing = 0;
 
-    map_to_nodes(sequence,
-        [&](node_index node) {
-            if (node) {
-                num_kmers_discovered++;
-            } else {
-                num_kmers_missing++;
-            }
-        },
-        [&]() { return num_kmers_missing > max_kmers_missing
-                        || num_kmers_discovered >= min_kmers_discovered; }
-    );
+    for (node_index node : node_range(sequence)) {
+        if (node) {
+            if (++num_kmers_discovered >= min_kmers_discovered)
+                return true;
+        } else if (++num_kmers_missing > max_kmers_missing) {
+            return false;
+        }
+    }
 
     return num_kmers_missing <= max_kmers_missing;
 }
@@ -537,30 +536,6 @@ size_t incoming_edge_rank(const SequenceGraph &graph,
     assert(done && "the edge must exist in graph");
 
     return edge_rank;
-}
-
-static void call_mapped_nodes(NodeRange&& nodes,
-                              const std::function<void(node_index)> &callback,
-                              const std::function<bool()> &terminate) {
-    for (node_index node : nodes) {
-        callback(node);
-        if (terminate())
-            return;
-    }
-}
-
-void SequenceGraph::map_to_nodes(std::string_view sequence,
-                                 const std::function<void(node_index)> &callback,
-                                 const std::function<bool()> &terminate) const {
-    if (!terminate())
-        call_mapped_nodes(node_range(sequence), callback, terminate);
-}
-
-void SequenceGraph::map_to_nodes_sequentially(std::string_view sequence,
-                                              const std::function<void(node_index)> &callback,
-                                              const std::function<bool()> &terminate) const {
-    if (!terminate())
-        call_mapped_nodes(node_range(sequence, true), callback, terminate);
 }
 
 static std::vector<node_index> collect_nodes(NodeRange&& nodes, size_t max_num_nodes) {

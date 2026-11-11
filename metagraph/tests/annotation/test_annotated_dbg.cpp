@@ -29,16 +29,13 @@ void check_labels(const AnnotatedDBG &anno_graph,
                   const std::vector<std::string> labels_present,
                   const std::vector<std::string> labels_not_present) {
     std::set<SequenceGraph::node_index> indices;
-    anno_graph.get_graph().map_to_nodes(
-        sequence,
-        [&](const auto &index) {
-            ASSERT_NE(SequenceGraph::npos, index);
-            indices.insert(index);
-            EXPECT_EQ(labels_present.size(), anno_graph.get_labels(index).size());
-            EXPECT_EQ(convert_to_set(labels_present),
-                      convert_to_set(anno_graph.get_labels(index)));
-        }
-    );
+    for (const auto index : map_to_nodes(anno_graph.get_graph(), sequence)) {
+        ASSERT_NE(SequenceGraph::npos, index);
+        indices.insert(index);
+        EXPECT_EQ(labels_present.size(), anno_graph.get_labels(index).size());
+        EXPECT_EQ(convert_to_set(labels_present),
+                  convert_to_set(anno_graph.get_labels(index)));
+    }
 
     for (const auto &label : labels_present) {
         std::set<SequenceGraph::node_index> cur_indices;
@@ -1920,10 +1917,10 @@ TEST(RowDiffDiskAnnotatorTest, LoadConsistentAcrossMmapSettings) {
 
     auto labels_per_node = [](const AnnotatedDBG &g, const std::string &seq) {
         std::vector<std::set<std::string>> result;
-        g.get_graph().map_to_nodes(seq, [&](auto idx) {
+        for (auto idx : map_to_nodes(g.get_graph(), seq)) {
             EXPECT_NE(SequenceGraph::npos, idx);
             result.push_back(convert_to_set(g.get_labels(idx)));
-        });
+        }
         return result;
     };
 
