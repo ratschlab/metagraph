@@ -59,6 +59,7 @@ int main(int argc, char *argv[]) {
             case Config::SERVER_QUERY:
                 return cli::run_server(config.get());
 
+
             case Config::COMPARE:
                 return cli::compare(config.get());
 
