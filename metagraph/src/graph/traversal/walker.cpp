@@ -30,6 +30,7 @@ const char* to_string(EndReason reason) {
     switch (reason) {
         case EndReason::DEAD_END: return "dead_end";
         case EndReason::LABEL_LOST: return "label_lost";
+        case EndReason::RECORD_END: return "record_end";
         case EndReason::BRANCH: return "branch";
         case EndReason::EDGE_REUSE: return "edge_reuse";
         case EndReason::EDGE_REUSE_RC: return "edge_reuse_rc";
@@ -60,12 +61,19 @@ constexpr char kSentinel = boss::BOSS::kSentinel;
 // the k-mers whose rows a derivation decodes at once; the narrowest of the first window
 // starts the intersection
 constexpr size_t kDeriveWindow = 64;
+// the rows the check of named seed labels decodes at once
+constexpr size_t kSeedBatchRows = 4096;
 
 // One live label on one path head
 struct Entry {
     LabelId label = 0;
     uint32_t branches = 0;
     EndReason reason = EndReason::DEAD_END;   // set when the label ends
+    // A HEADER label is followed in coordinate order: |coord| is the coordinate of the
+    // head's k-mer in the label's record and |step| (+1 or -1) what one step of this arm
+    // adds to it. A COLUMN label has step 0.
+    int8_t step = 0;
+    uint64_t coord = 0;
 };
 // sorted by label id
 using State = std::vector<Entry>;
@@ -78,6 +86,13 @@ std::vector<LabelId> labels_of(const State &state) {
     }
     return out;
 }
+
+// Where a HEADER label's record holds the seed: seed k-mer j at coordinate origin + dir * j
+// (dir -1: the record holds the seed's reverse complement). dir 0: nowhere.
+struct Place {
+    uint64_t origin = 0;
+    int8_t dir = 0;
+};
 
 // A live path head
 struct Item {
@@ -128,8 +143,10 @@ struct EdgeSegKeyHash {
 struct Cand {
     const Succ *succ = nullptr;
     std::string kmer;
-    State state;                    // the head's labels that carry the successor
-    bool skipped = false;           // a hairpin, not followed
+    State state;                    // the head's labels that may continue on the successor
+    State barred;                   // its COLUMN labels there that the walk rule stops
+    bool ruled = false;             // a COLUMN label is on the successor: the walk rule applies
+    bool skipped = false;           // a hairpin, not followed by COLUMN labels
     bool blocked = false;
     EndReason block_reason = EndReason::DEAD_END;
     EdgeKey edge { 0, 0 };
@@ -222,6 +239,8 @@ class Walker {
     std::string seed_upper_;
     std::vector<node_index> nodes_;
     tsl::hopscotch_set<node_index> seed_nodes_;
+    // per label of the dictionary: where a HEADER label's record holds the seed
+    std::vector<Place> places_;
     std::unique_ptr<LabelQuery> query_;
     std::array<ArmState, 2> arms_;
     uint64_t steps_total_ = 0;
@@ -235,6 +254,10 @@ class Walker {
 
     // seed phase
     void validate_seed();
+    void scan_named_labels(const std::vector<LabelRef> &refs,
+                           const std::vector<node_index> &keys,
+                           std::vector<std::vector<KmerInterval>> *runs,
+                           std::vector<Place> *places) const;
     void derive_seed_labels(const std::vector<node_index> &keys, std::vector<LabelRef> *refs);
     void init_arm(ArmState &arm);
 
@@ -257,12 +280,17 @@ class Walker {
     void censor_item(ArmState &arm, Item &item, EndReason reason);
 
     // the walk
+    // whether a HEADER label's record ends at the head's k-mer, in the walking direction
+    bool at_record_end(const Entry &e) const {
+        const std::pair<uint64_t, uint64_t> &record = query_->record_coords(e.label);
+        return e.coord == (e.step > 0 ? record.second : record.first);
+    }
     void run_level(ArmState &arm, uint64_t depth);
     void check_structure(ArmState &arm, const Item &item, Cand &c);
     std::optional<EndReason> cap_check(const ArmState &arm, size_t nf, size_t remaining);
     std::optional<EndReason> process_item(ArmState &arm, Item &item,
                                           const std::vector<Succ> &succs,
-                                          const LabelQuery::NodeHits *hits,
+                                          const LabelQuery::Hits *const *hits,
                                           size_t remaining_in_level);
     void stop_arm(ArmState &arm, EndReason reason, std::vector<Item> *items, size_t from);
     void stop_frontier(ArmState &arm, EndReason reason);
@@ -307,23 +335,34 @@ void Walker::validate_seed() {
         }
     }
 
+    places_.clear();
+    const std::vector<node_index> keys = map_to_nodes(graph_, seed_upper_);
+    assert(keys.size() == nodes_.size());
     std::vector<LabelRef> refs;
     if (seed_.labels.empty()) {
-        // every derived label carries every seed k-mer
-        derive_seed_labels(map_to_nodes(graph_, seed_upper_), &refs);
+        // every derived label carries the seed
+        derive_seed_labels(keys, &refs);
         result_.label_dict = refs;
     } else {
-        // a label that does not carry every seed k-mer is dropped, with the runs it carries
-        // (check_seed refused duplicates)
-        ResolveOptions options;
-        options.labels = seed_.labels;
-        SupportProfile profile = resolve_support(oracle_, seed_upper_, options);
+        // A label that does not carry the seed is dropped, with the runs of k-mers it is
+        // on (check_seed refused duplicates). A column carries the seed when it is on
+        // every k-mer, a record when it holds the k-mers at consecutive coordinates.
+        for (const auto &name : seed_.labels) {
+            refs.push_back(oracle_.resolve_label(name));
+        }
+        std::vector<std::vector<KmerInterval>> runs;
+        std::vector<Place> places;
+        scan_named_labels(refs, keys, &runs, &places);
         const KmerInterval whole { 0, nodes_.size() };
-        for (LabelProfile &lp : profile.labels) {
-            if (lp.runs.size() == 1 && lp.runs[0] == whole) {
-                result_.label_dict.push_back(std::move(lp.label));
+        for (size_t l = 0; l < refs.size(); ++l) {
+            const bool carries = refs[l].kind == LabelKind::HEADER
+                    ? places[l].dir != 0
+                    : runs[l].size() == 1 && runs[l][0] == whole;
+            if (carries) {
+                result_.label_dict.push_back(std::move(refs[l]));
+                places_.push_back(places[l]);
             } else {
-                result_.dropped_labels.push_back({ lp.label.name, std::move(lp.runs) });
+                result_.dropped_labels.push_back({ refs[l].name, std::move(runs[l]) });
             }
         }
         if (result_.label_dict.empty()) {
@@ -333,6 +372,7 @@ void Walker::validate_seed() {
         }
         result_.labels_supporting_total = result_.label_dict.size();
     }
+    assert(places_.size() == result_.label_dict.size());
 
     std::vector<std::string> names;
     for (const LabelRef &ref : result_.label_dict) {
@@ -343,9 +383,103 @@ void Walker::validate_seed() {
                                 && seed_.seed_id != result_.validated_seed_id;
 }
 
+// For every named label, the runs of seed k-mers it is on, and for a HEADER label where
+// its record holds the seed (Place). Every coordinate of the record at the first k-mer is
+// a candidate origin, read forwards and, in the canonical regimes, backwards; each next
+// k-mer keeps the origins whose next coordinate it holds. Of the places left, the one with
+// the lowest coordinate is taken (its origin forwards, its last k-mer's coordinate
+// backwards; forwards first when equal). So a seed and its reverse complement, which are
+// one seed in the canonical regimes, are placed on the same occurrence.
+void Walker::scan_named_labels(const std::vector<LabelRef> &refs,
+                               const std::vector<node_index> &keys,
+                               std::vector<std::vector<KmerInterval>> *runs,
+                               std::vector<Place> *places) const {
+    LabelQuery query(oracle_, refs);
+    runs->assign(refs.size(), {});
+    places->assign(refs.size(), Place());
+    // per header label, the candidate origins, ascending: forwards [0] and backwards [1]
+    std::vector<std::array<std::vector<uint64_t>, 2>> origins(refs.size());
+    for (size_t begin = 0; begin < keys.size(); begin += kSeedBatchRows) {
+        const size_t end = std::min(keys.size(), begin + kSeedBatchRows);
+        const std::vector<const LabelQuery::Hits*> hits = query.fetch_hits(
+                std::vector<node_index>(keys.begin() + begin, keys.begin() + end));
+        for (uint64_t j = begin; j < end; ++j) {
+            const LabelQuery::Hits &hit = *hits[j - begin];
+            for (LabelId l : hit.labels) {
+                std::vector<KmerInterval> &run = (*runs)[l];
+                if (!run.empty() && run.back().end == j) {
+                    run.back().end = j + 1;
+                } else {
+                    run.push_back(KmerInterval{ j, j + 1 });
+                }
+            }
+            auto it = hit.coords.begin();
+            for (LabelId l = 0; l < refs.size(); ++l) {
+                if (refs[l].kind != LabelKind::HEADER)
+                    continue;
+                // the label's coordinates at this k-mer
+                while (it != hit.coords.end() && it->label < l) {
+                    ++it;
+                }
+                const auto first = it;
+                while (it != hit.coords.end() && it->label == l) {
+                    ++it;
+                }
+                const auto last = it;
+                std::vector<uint64_t> &forwards = origins[l][0];
+                std::vector<uint64_t> &backwards = origins[l][1];
+                if (!j) {
+                    for (auto c = first; c != last; ++c) {
+                        forwards.push_back(c->coord);
+                        if (regime_ != Regime::BASIC)
+                            backwards.push_back(c->coord);
+                    }
+                    continue;
+                }
+                auto holds = [&](uint64_t coord) {
+                    return std::binary_search(first, last, LabelQuery::HeaderCoord{ l, coord });
+                };
+                forwards.erase(std::remove_if(forwards.begin(), forwards.end(),
+                                              [&](uint64_t o) { return !holds(o + j); }),
+                               forwards.end());
+                backwards.erase(std::remove_if(backwards.begin(), backwards.end(),
+                                               [&](uint64_t o) { return o < j || !holds(o - j); }),
+                                backwards.end());
+            }
+        }
+    }
+    // a backward origin is the place's highest coordinate (every one left is >= span)
+    const uint64_t span = keys.size() - 1;
+    for (size_t l = 0; l < refs.size(); ++l) {
+        const std::vector<uint64_t> &forwards = origins[l][0];
+        const std::vector<uint64_t> &backwards = origins[l][1];
+        if (!forwards.empty()
+                && (backwards.empty() || forwards.front() <= backwards.front() - span)) {
+            (*places)[l] = Place{ forwards.front(), 1 };
+        } else if (!backwards.empty()) {
+            (*places)[l] = Place{ backwards.front(), -1 };
+        }
+    }
+}
+
+// The permitted set of a seed without named labels. COLUMN labels: the columns on every
+// seed k-mer. HEADER labels: the records holding the seed's k-mers at consecutive
+// coordinates (k-mer j at origin + dir * j, see Place), each at its place with the lowest
+// coordinate, as scan_named_labels places a named record.
 void Walker::derive_seed_labels(const std::vector<node_index> &keys,
                                 std::vector<LabelRef> *refs) {
     using Key = std::pair<Column, uint64_t>;
+    // a candidate place of the seed in a column's coordinates
+    struct Spot {
+        Column column;
+        uint64_t origin;
+        int8_t dir;
+        // ascending column and origin
+        bool operator<(const Spot &o) const {
+            return std::make_tuple(column, origin, dir)
+                    < std::make_tuple(o.column, o.origin, o.dir);
+        }
+    };
 
     const LabelKind kind = strategy_.seed_label_kind.value_or(
             oracle_.coord_to_header() ? LabelKind::HEADER : LabelKind::COLUMN);
@@ -360,6 +494,9 @@ void Walker::derive_seed_labels(const std::vector<node_index> &keys,
 
     // the labels carrying every k-mer read so far, ascending
     std::vector<Key> live, next, cur;
+    // HEADER: the places consistent with every k-mer read so far, ascending
+    std::vector<Spot> spots, next_spots;
+    std::vector<uint64_t> sorted;
     size_t read = 0;
     for (size_t begin = 0; begin < keys.size(); begin += kDeriveWindow) {
         const size_t end = std::min(keys.size(), begin + kDeriveWindow);
@@ -419,45 +556,70 @@ void Walker::derive_seed_labels(const std::vector<node_index> &keys,
 
         for (size_t i : order) {
             const size_t r = row_of(i);
-            cur.clear();
             if (kind == LabelKind::COLUMN) {
+                cur.clear();
                 for (Column c : plain[r]) {
                     // after the first k-mer, keep only the live columns
                     if (!read || std::binary_search(live.begin(), live.end(), Key(c, 0)))
                         cur.emplace_back(c, 0);
                 }
-            } else {
+                std::sort(cur.begin(), cur.end());
+                cur.erase(std::unique(cur.begin(), cur.end()), cur.end());
+                if (!read) {
+                    live.swap(cur);
+                } else {
+                    next.clear();
+                    std::set_intersection(live.begin(), live.end(), cur.begin(), cur.end(),
+                                          std::back_inserter(next));
+                    live.swap(next);
+                }
+            } else if (!read) {
+                // every coordinate of the first k-mer read starts a place, in both
+                // directions in the canonical regimes
                 for (const auto &[c, coords] : tuples[r]) {
-                    // only the columns still live can contribute
-                    if (read && !std::binary_search(live.begin(), live.end(), Key(c, 0),
-                                                    [](const Key &a, const Key &b) {
-                                                        return a.first < b.first;
-                                                    })) {
-                        continue;
-                    }
                     if (!oracle_.has_header_records(c))
                         continue;  // no records, so no header labels
                     for (uint64_t coord : coords) {
-                        Key key(c, oracle_.map_coord(c, coord).first);
-                        // after the first k-mer, keep only the live records, so that a
-                        // repetitive k-mer cannot grow |cur| past |live|
-                        if (!read || std::binary_search(live.begin(), live.end(), key))
-                            cur.push_back(key);
+                        if (coord >= i)
+                            spots.push_back(Spot{ c, coord - i, 1 });
+                        if (regime_ != Regime::BASIC)
+                            spots.push_back(Spot{ c, coord + i, -1 });
                     }
                 }
-            }
-            std::sort(cur.begin(), cur.end());
-            cur.erase(std::unique(cur.begin(), cur.end()), cur.end());
-            if (!read) {
-                live.swap(cur);
+                std::sort(spots.begin(), spots.end());
             } else {
-                next.clear();
-                std::set_intersection(live.begin(), live.end(), cur.begin(), cur.end(),
-                                      std::back_inserter(next));
-                live.swap(next);
+                // keep the places whose coordinate for this k-mer its row holds, so that a
+                // repetitive k-mer cannot grow the candidates
+                next_spots.clear();
+                for (const auto &[c, coords] : tuples[r]) {
+                    auto spot = std::lower_bound(spots.begin(), spots.end(), c,
+                                                 [](const Spot &s, Column column) {
+                                                     return s.column < column;
+                                                 });
+                    if (spot == spots.end() || spot->column != c)
+                        continue;
+                    const uint64_t *coords_begin = coords.data();
+                    const uint64_t *coords_end = coords_begin + coords.size();
+                    if (!std::is_sorted(coords_begin, coords_end)) {
+                        sorted.assign(coords_begin, coords_end);
+                        std::sort(sorted.begin(), sorted.end());
+                        coords_begin = sorted.data();
+                        coords_end = coords_begin + sorted.size();
+                    }
+                    for ( ; spot != spots.end() && spot->column == c; ++spot) {
+                        if (spot->dir < 0 && spot->origin < i)
+                            continue;
+                        const uint64_t coord = spot->dir > 0 ? spot->origin + i
+                                                             : spot->origin - i;
+                        if (std::binary_search(coords_begin, coords_end, coord))
+                            next_spots.push_back(*spot);
+                    }
+                }
+                std::sort(next_spots.begin(), next_spots.end());
+                spots.swap(next_spots);
             }
             ++read;
-            if (live.empty()) {
+            if (kind == LabelKind::COLUMN ? live.empty() : spots.empty()) {
                 throw SeedDerivationError(SeedDerivationError::NO_CARRIER,
                                           "No label supports every k-mer of the seed (the "
                                           "permitted set derived from the seed is empty at "
@@ -475,6 +637,38 @@ void Walker::derive_seed_labels(const std::vector<node_index> &keys,
                         + " k-mers; raise bounds.time_budget_ms or name the labels explicitly",
                         strategy_.time_budget_ms, static_cast<double>(read));
             }
+        }
+    }
+
+    std::vector<Place> live_places;
+    if (kind == LabelKind::HEADER) {
+        // A place counts when it lies in one record. In the order of their lowest
+        // coordinate (the origin forwards, the last k-mer's coordinate backwards; every
+        // backward origin left is >= span) a record's places are together: its first is
+        // kept, forwards first when equal.
+        const uint64_t span = keys.size() - 1;
+        std::sort(spots.begin(), spots.end(), [span](const Spot &a, const Spot &b) {
+            return std::make_tuple(a.column, a.dir > 0 ? a.origin : a.origin - span, -a.dir)
+                    < std::make_tuple(b.column, b.dir > 0 ? b.origin : b.origin - span, -b.dir);
+        });
+        for (const Spot &spot : spots) {
+            const uint64_t other = spot.dir > 0 ? spot.origin + span : spot.origin - span;
+            const uint64_t seq_id = oracle_.map_coord(spot.column, spot.origin).first;
+            if (oracle_.map_coord(spot.column, other).first != seq_id)
+                continue;
+            const Key key(spot.column, seq_id);
+            if (!live.empty() && live.back() == key)
+                continue;
+            live.push_back(key);
+            live_places.push_back(Place{ spot.origin, spot.dir });
+        }
+        if (live.empty()) {
+            throw SeedDerivationError(SeedDerivationError::NO_CARRIER,
+                                      "No sequence record holds the k-mers of the seed at "
+                                      "consecutive coordinates (the permitted set derived "
+                                      "from the seed is empty)",
+                                      static_cast<double>(keys.size()),
+                                      static_cast<double>(read));
         }
     }
 
@@ -508,13 +702,15 @@ void Walker::derive_seed_labels(const std::vector<node_index> &keys,
         result_.labels_dropped = live.size() - strategy_.max_seed_labels;
         live.resize(strategy_.max_seed_labels);
     }
-    for (const Key &key : live) {
+    for (size_t i = 0; i < live.size(); ++i) {
+        const Key &key = live[i];
         LabelRef ref;
         ref.kind = kind;
         ref.column = key.first;
         ref.seq_id = kind == LabelKind::HEADER ? key.second : 0;
         ref.name = name_of(key);
         refs->push_back(std::move(ref));
+        places_.push_back(kind == LabelKind::HEADER ? live_places[i] : Place());
     }
 }
 
@@ -529,8 +725,24 @@ void Walker::init_arm(ArmState &arm) {
     root.node = arm.arm == Arm::RIGHT ? nodes_.back() : nodes_.front();
     root.kmer = arm.arm == Arm::RIGHT ? seed_upper_.substr(seed_upper_.size() - k_)
                                       : seed_upper_.substr(0, k_);
+    const uint64_t span = nodes_.size() - 1;
     for (LabelId l = 0; l < result_.label_dict.size(); ++l) {
-        root.state.push_back(Entry{ l, 0 });
+        Entry e;
+        e.label = l;
+        if (result_.label_dict[l].kind == LabelKind::HEADER) {
+            // the right arm starts at the seed's last k-mer and follows the record in its
+            // direction, the left arm at the first k-mer and against it
+            const Place &place = places_[l];
+            assert(place.dir);
+            if (arm.arm == Arm::RIGHT) {
+                e.coord = place.dir > 0 ? place.origin + span : place.origin - span;
+                e.step = place.dir;
+            } else {
+                e.coord = place.origin;
+                e.step = static_cast<int8_t>(-place.dir);
+            }
+        }
+        root.state.push_back(e);
     }
     root.segment = new_segment(arm, {}, 0, labels_of(root.state));
     arm.frontier.push_back(std::move(root));
@@ -775,7 +987,7 @@ std::optional<EndReason> Walker::cap_check(const ArmState &arm, size_t nf, size_
 
 std::optional<EndReason> Walker::process_item(ArmState &arm, Item &item,
                                               const std::vector<Succ> &succs,
-                                              const LabelQuery::NodeHits *hits,
+                                              const LabelQuery::Hits *const *hits,
                                               size_t remaining_in_level) {
     const uint64_t at = item.ext_bp;
     if (succs.empty()) {
@@ -792,24 +1004,52 @@ std::optional<EndReason> Walker::process_item(ArmState &arm, Item &item,
         Cand &c = cands[i];
         c.succ = &succs[i];
         succ_kmer(arm.arm, item.kmer, succs[i].ch, &c.kmer);
-        // both sorted by label
-        auto h = hits[i].begin();
+        // all sorted by label
+        const LabelQuery::Hits &hit = *hits[i];
+        auto h = hit.labels.begin();
+        auto hc = hit.coords.begin();
         for (const Entry &e : item.state) {
-            while (h != hits[i].end() && *h < e.label) {
-                ++h;
+            if (!e.step) {
+                // a column label: on the successor's row
+                while (h != hit.labels.end() && *h < e.label) {
+                    ++h;
+                }
+                if (h != hit.labels.end() && *h == e.label) {
+                    c.state.push_back(e);
+                    c.ruled = true;
+                }
+                continue;
             }
-            if (h != hits[i].end() && *h == e.label)
+            // a header label: the successor holding the record's next coordinate
+            if (at_record_end(e))
+                continue;
+            const LabelQuery::HeaderCoord next { e.label, e.step > 0 ? e.coord + 1
+                                                                      : e.coord - 1 };
+            // usually the entry after the one the previous label matched
+            if (hc != hit.coords.end() && *hc < next && ++hc != hit.coords.end() && *hc < next)
+                hc = std::lower_bound(hc, hit.coords.end(), next);
+            if (hc != hit.coords.end() && *hc == next) {
                 c.state.push_back(e);
+                c.state.back().coord = next.coord;
+            }
         }
-        check_structure(arm, item, c);
+        // The walk rule binds column labels only: where it forbids the successor, they
+        // are stopped and the header labels, finite by coordinate order, go on
+        if (c.ruled) {
+            check_structure(arm, item, c);
+            if (!c.admissible()) {
+                auto columns = std::stable_partition(c.state.begin(), c.state.end(),
+                                                     [](const Entry &e) { return e.step != 0; });
+                c.barred.assign(columns, c.state.end());
+                c.state.erase(columns, c.state.end());
+            }
+        }
     }
 
     // ---- per-lineage branching: a label on several admissible successors continues on
     // all of them within its branch allowance, else it ends on all of them (BRANCH)
     tsl::hopscotch_map<LabelId, uint32_t> continuations;
     for (const Cand &c : cands) {
-        if (!c.admissible())
-            continue;
         for (const Entry &e : c.state) {
             continuations[e.label]++;
         }
@@ -826,8 +1066,6 @@ std::optional<EndReason> Walker::process_item(ArmState &arm, Item &item,
     bool ambiguous = false;
     std::vector<Cand*> followed;
     for (Cand &c : cands) {
-        if (!c.admissible())
-            continue;
         if (!excluded.empty()) {
             c.state.erase(std::remove_if(c.state.begin(), c.state.end(), [&](const Entry &e) {
                 return excluded.count(e.label);
@@ -872,16 +1110,19 @@ std::optional<EndReason> Walker::process_item(ArmState &arm, Item &item,
         const LabelId l = src.label;
         bool continues = false, split_limited = false, hairpin = false;
         uint8_t blocked = 0;
-        for (const Cand &c : cands) {
-            const bool has = std::binary_search(c.state.begin(), c.state.end(), src,
+        auto has = [&](const State &state) {
+            return std::binary_search(state.begin(), state.end(), src,
                     [](const Entry &a, const Entry &b) { return a.label < b.label; });
-            if (!has)
-                continue;
-            continues |= c.followed;
-            split_limited |= c.split_limited;
-            hairpin |= c.skipped;
-            if (c.blocked)
-                blocked = std::max(blocked, block_rank(c.block_reason));
+        };
+        for (const Cand &c : cands) {
+            if (has(c.state)) {
+                continues |= c.followed;
+                split_limited |= c.split_limited;
+            } else if (has(c.barred)) {
+                hairpin |= c.skipped;
+                if (c.blocked)
+                    blocked = std::max(blocked, block_rank(c.block_reason));
+            }
         }
         if (continues)
             continue;
@@ -895,6 +1136,8 @@ std::optional<EndReason> Walker::process_item(ArmState &arm, Item &item,
                                                     : EndReason::EDGE_REUSE, "");
         } else if (hairpin) {
             end_label(arm, item, src, EndReason::DEAD_END, "hairpin");
+        } else if (src.step && at_record_end(src)) {
+            end_label(arm, item, src, EndReason::RECORD_END, "");
         } else {
             end_label(arm, item, src, EndReason::LABEL_LOST, "");
         }
@@ -914,7 +1157,9 @@ std::optional<EndReason> Walker::process_item(ArmState &arm, Item &item,
         Cand &c = *followed[0];
         arm.walk_seq[item.segment].push_back(c.succ->ch);
         arm.result.segments[item.segment].length_bp++;
-        record_edge(arm, item.segment, c);
+        // only column labels look edges up, and theirs is an admissible step
+        if (c.ruled && c.admissible())
+            record_edge(arm, item.segment, c);
         item.node = c.succ->node;
         item.kmer = std::move(c.kmer);
         item.ext_bp = at + 1;
@@ -932,7 +1177,8 @@ std::optional<EndReason> Walker::process_item(ArmState &arm, Item &item,
         split.children.push_back(child);
         arm.walk_seq[child].push_back(c->succ->ch);
         arm.result.segments[child].length_bp = 1;
-        record_edge(arm, child, *c);
+        if (c->ruled && c->admissible())
+            record_edge(arm, child, *c);
         Item ni;
         ni.segment = child;
         ni.node = c->succ->node;
@@ -1048,7 +1294,7 @@ void Walker::run_level(ArmState &arm, uint64_t depth) {
             keys.push_back(key_mapper_.key(s.node, kmer));
         }
     }
-    const std::vector<LabelQuery::NodeHits> hits = query_->fetch(keys);
+    const std::vector<const LabelQuery::Hits*> hits = query_->fetch_hits(keys);
 
     size_t offset = 0;
     for (size_t i = 0; i < items.size(); ++i) {
