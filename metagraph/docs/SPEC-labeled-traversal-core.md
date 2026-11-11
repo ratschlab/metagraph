@@ -564,7 +564,15 @@ table or of the setup's that does not fit is refused before anything is allocate
 and leaves the table as it was): the row is then not kept, or the pass stops before its first k-mer as when the
 setup's own charge does not fit. The record index grows inside a k-mer's accumulation, where no refusal is clean: its
 excess is charged as it is allocated, past M if need be, and the next k-mer does not fit (the budget refuses every
-charge past M), so the bound is passed by at most that one growth. With keys the seed does not favour nothing beyond
+charge past M), so the bound is passed by at most that one growth. Its size *(T4 review R1, the owner's question 2)*:
+with keys the seed does not favour, the model covers every growth (the lowest load at a growth, 0.82, is above the
+model's 0.8) and the excess is tsl's tail beside the old and the new buckets, about 4 KB past M. With keys chosen for
+a known seed, a growth allocates twice the table while the old one is held: at the default
+`--resolve-max-discover-labels` 1,000,000 the largest is 2^23 to 2^24 buckets of 32 B, 512 MiB new beside 256 MiB
+old against a model of about 100 MB, so M can be passed by about 512 MiB before the next k-mer stops the pass;
+without the label cap (0) a growth adds up to twice a table that is itself below M, a transient below 3M. Choosing
+such keys needs the process's seed, which is never stated, and 63 records at each size whose k-mers a query reaches
+colliding under it. With keys the seed does not favour nothing beyond
 the model is charged but a small table's tail (a few KB), so a memory stop moves only where the tables are small or
 the keys chosen; a stop can then depend on the process's seed, an answer cannot. The batch's key table (at most
 4,096 keys a batch) is not charged: tsl doubles a table on a full neighbourhood only at 10% load or above, so whatever
@@ -581,15 +589,14 @@ lowered `max_labels` and the discovery ranked more labels than it kept, the labe
 ranked past E. Ask for at most E labels and choose the seeds among them, or resolve with the seed's label named in
 labels" (a label the discovery never met gets the same words: the answer cannot tell the two apart). Under a stop,
 or a cut whose ranking is not exact, such a seed is not made rather than refused, its reason naming the clamp in
-the same words (§4.5). What a kept
-label costs, measured once (train 3, before the answer account)
-(the physical footprint, below): about 0.8-1.3 KB a kept label of one run (two fixtures, names of 7-8 characters;
-its name held twice, its JSON object, the written text of about 90-100 B), and about 750 B each further run of a kept
-label (its JSON array and about 40 B of text). **So per pair at the default flags: M charged, plus about 13 MiB for
-10,000 kept labels of one run each, plus about 750 B each further run of a kept label.** The kept labels' runs are
-not clamped: they are at most the runs the pass held (charged 32 B each within M), so a request whose kept labels
-have many runs each (a long query against records that differ from it every few hundred bases) could make the answer
-far larger than M (10,000 labels of 1,000 runs: about 7.5 GB). The answer account bounds it.
+the same words (§4.5). What a kept label cost, measured once in train 3, before the answer account (the physical
+footprint, below): about 0.8-1.3 KB a kept label of one run (two fixtures, names of 7-8 characters; its name held
+twice, its JSON object, the written text of about 90-100 B), and about 750 B each further run of a kept label (its
+JSON array and about 40 B of text). The kept labels' runs are not clamped: they are at most the runs the pass held
+(charged 32 B each within M), so a request whose kept labels have many runs each (a long query against records that
+differ from it every few hundred bases) made the answer far larger than M (10,000 labels of 1,000 runs: about
+7.5 GB). Since train 4 the answer account bounds it at M (below; T4 review R1, N2: this paragraph's measured bound,
+M plus what the kept labels cost, held before it).
 
 **The answer account** *(train 4, T4-L1; GPT review 7, finding 2: before, nothing after the pass was charged — the
 profile, the candidates, the selection, the JSON tree and its text)*. Once the pass is over, what the answer holds
@@ -618,7 +625,11 @@ charge that would pass M ends the request with **400**, nothing partial sent:
  "code": "resolve_answer_too_large", "max_memory_mb": 1024}
 ```
 
-its members in that order, the part in parentheses `profile`, `candidates`, `selection` or `answer`. The work ran:
+its members in that order, the part in parentheses `profile`, `candidates`, `selection` or `answer`. Its order
+against an explicit seed's 400s that only the work finds *(T4 review R1, N4)*: the profile and the candidates are
+priced at the end of the pass, and an explicit seed's pick before its checks, so `resolve_answer_too_large` comes
+before "Explicit seed label was not profiled" and a seed not fully present in the graph of that seed or any after
+it; a client that changes the request for its size can then meet that 400. The work ran:
 this is a refusal, not a stop, for the answer is priced after the work, and a discovery's kept labels are known
 only after its ranking (a part of its answer is not the answer of a prefix). On a multi-graph server that pair is a
 refused entry of a 200 envelope (SPEC-multigraph-envelope.md §1): its `refusal` holds the body's members and
@@ -4611,7 +4622,10 @@ test T24 runs in `build_tsan/` (`-DCMAKE_BUILD_TYPE=Threads`). One ASan run befo
 V7-A: a `max_support` round under the deadline, §4.5): `ResolveBounds.TheMaxSupportClipIsTheBases` (the binary-search
 clip against a brute-force reference over random profiles: the same seeds), `.AManyRunMaxSupportSelectionStopsInTime`
 (400 labels of about 2,500 runs, `max_seeds` 1,024: at least one reading every 4,096 runs of a round, and a deadline
-passing at the third reading stops the selection within an eighth of a round), `.TheSelectionReadsTheDeadline` (the
+passing at the first reading inside the first round stops the selection there, counted, not timed: T4 review R1, N9),
+`ResolveBounds.TheSetupTableIsChargedAsAllocated` (R1, N8: the pass's setup, `next_key_uses`, at 1 to 100,000 keys:
+each key's next use under a budget of exactly its charged peak, refused one byte below with nothing held; a small
+table's peak past its model; jemalloc's peak within the charged one), `.TheSelectionReadsTheDeadline` (the
 readings of a `max_support` selection counted); (GPT review 7, finding 2, §4.6): `ResolveBoundsTest.
 ExplicitLabelsStopAtAPrefix` (explicit labels on every annotation form and path under bounds swept in bytes: each
 stop by reason `memory` in phase `rows` exactly the resolve of the prefix with every label, never moving back; past

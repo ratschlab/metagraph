@@ -404,6 +404,16 @@ uint64_t selection_bytes(const SeedSelection &selection);
 uint64_t profile_held_bytes(const SupportProfile &profile);
 uint64_t candidates_held_bytes(const SupportProfile &profile);
 
+// The setup of resolve_support's pass over the rows (SPEC-labeled-traversal-core.md §4.6, the
+// tables' charge): the next occurrence of each of |keys| after it (|*next_use|, SIZE_MAX: none),
+// charged to |budget| with the transient table of the keys' last occurrences that finds them
+// (seeded; its model, 90 B a key, and its allocations beyond the model as they are made, a growth
+// that does not fit refused before it is allocated). false: it did not fit, nothing held and
+// |*next_use| empty; true: |budget| holds |*next_use|'s buffer, the caller's to release, and the
+// table's charge was released with the table
+bool next_key_uses(const std::vector<node_index> &keys, annot::matrix::DecodeBudget &budget,
+                   std::vector<size_t> *next_use);
+
 // The seed candidates of |profile| (SupportProfile::candidates, resolve_support's last step):
 // its labels' runs of at least |min_block_kmers| k-mers, identical runs grouped with their
 // labels in ascending order, longest first, then by most labels, then by begin. |answer| (null:

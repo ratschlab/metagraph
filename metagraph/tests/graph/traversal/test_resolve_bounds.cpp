@@ -1093,6 +1093,64 @@ TEST(ResolveBounds, ChosenNodeIndicesDoNotGrowTheTablesPastTheirCharge) {
 
 // ---- the tables' account (TableAccount, charged_table.hpp; SPEC §4.6; GPT review 7, finding 7)
 
+// The setup of the pass over the rows (next_key_uses; T4 review R1, N8): the next occurrence of
+// each key, found by a table of the keys' last occurrences charged at its model (90 B a key) and,
+// beyond it, as it is allocated. A budget of exactly what the setup held at its peak gives each
+// key's next use and leaves its buffer held; one byte less refuses it before anything is held. A
+// small table's allocations pass its model (tsl's tail of 61 buckets), so the refusal there is
+// the account's, not the model's; and jemalloc's peak is within the charged one
+TEST(ResolveBounds, TheSetupTableIsChargedAsAllocated) {
+    using annot::matrix::DecodeBudget;
+    using annot::matrix::buffer_bytes;
+    std::mt19937_64 rng(11);
+    for (size_t n : { size_t(1), size_t(10), size_t(1000), size_t(100'000) }) {
+        std::vector<node_index> keys;
+        for (size_t i = 0; i < n; ++i) {
+            keys.push_back(rng() % (n / 2 + 1) + 1);
+        }
+        std::vector<size_t> expected(n, std::numeric_limits<size_t>::max());
+        std::map<node_index, size_t> last;
+        for (size_t j = n; j-- > 0; ) {
+            if (last.count(keys[j]))
+                expected[j] = last[keys[j]];
+            last[keys[j]] = j;
+        }
+        const uint64_t next_use_bytes = buffer_bytes(n, sizeof(size_t));
+        DecodeBudget unbounded;
+        std::vector<size_t> next_use;
+#if USE_JEMALLOC
+        size_t sz = sizeof(uint64_t);
+        const bool peaks = !mallctl("thread.peak.reset", nullptr, nullptr, nullptr, 0);
+#endif
+        ASSERT_TRUE(next_key_uses(keys, unbounded, &next_use)) << n;
+#if USE_JEMALLOC
+        uint64_t heap_peak = 0;
+        if (peaks && !mallctl("thread.peak.read", &heap_peak, &sz, nullptr, 0) && heap_peak) {
+            EXPECT_LE(heap_peak, unbounded.peak()) << n;
+        }
+#endif
+        EXPECT_EQ(expected, next_use) << n;
+        // the next uses' buffer held for the pass, the table's charge released with it
+        EXPECT_EQ(next_use_bytes, unbounded.held()) << n;
+        const uint64_t peak = unbounded.peak();
+        EXPECT_GE(peak, next_use_bytes + n * 90) << n;
+        if (n <= 10) {
+            // tsl's tail: the account, not the model, decides
+            EXPECT_GT(peak, next_use_bytes + n * 90) << n;
+        }
+        DecodeBudget exact(peak);
+        std::vector<size_t> again;
+        ASSERT_TRUE(next_key_uses(keys, exact, &again)) << n;
+        EXPECT_EQ(expected, again) << n;
+        EXPECT_EQ(next_use_bytes, exact.held()) << n;
+        DecodeBudget short_one(peak - 1);
+        std::vector<size_t> none;
+        EXPECT_FALSE(next_key_uses(keys, short_one, &none)) << n;
+        EXPECT_TRUE(none.empty()) << n;
+        EXPECT_EQ(0u, short_one.held()) << n;
+    }
+}
+
 // A hash whose seed is known (0): keys can be chosen for it by inverting mix64 (V7-B's crafting)
 struct KnownSeedHash {
     size_t operator()(uint64_t key) const { return static_cast<size_t>(mix64(key)); }
@@ -1873,8 +1931,8 @@ TEST(ResolveBounds, TheMaxSupportClipIsTheBases) {
 // A tiny time budget stops a max_support selection of many runs inside its first round (V7-A:
 // the rounds are at most --resolve-max-explicit-seeds, but a round sweeps every run): the
 // deadline is read about once every kResolveCheckLabels runs swept, so a deadline passing at the
-// selection's second reading ends it within a few thousand steps, a small part of one round;
-// before, it was read once a round, after every run was clipped by every pick and swept
+// first reading inside the first round ends it within a few thousand steps, a small part of the
+// round; before, it was read once a round, after every run was clipped by every pick and swept
 TEST(ResolveBounds, AManyRunMaxSupportSelectionStopsInTime) {
     // 400 labels of about 2,500 runs each: about a million runs
     const SupportProfile profile = random_runs_profile(400, 10000, 2, 2, 2024);
@@ -1887,32 +1945,30 @@ TEST(ResolveBounds, AManyRunMaxSupportSelectionStopsInTime) {
     SelectionPolicy policy;
     policy.policy = SelectionPolicy::MAX_SUPPORT;
     policy.min_block_bp = kK;
-    auto timed = [&](size_t max_seeds, const std::function<void()> &check) {
+    auto run = [&](size_t max_seeds, const std::function<void()> &check) {
         policy.max_seeds = max_seeds;
-        const auto t0 = std::chrono::steady_clock::now();
         try {
             select_seeds(profile, query, policy, false, check);
         } catch (...) {}
-        return std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count();
     };
-    // no round: the runs gathered and sorted (read before the sort); three rounds, every reading
+    // no round: the runs gathered and sorted, read before the sort; three rounds, every reading
     // counted: at least one per kResolveCheckLabels runs clipped in each round
-    const double setup = timed(0, {});
     size_t calls = 0;
-    const double three_rounds = timed(3, [&]() { ++calls; });
-    const double round = (three_rounds - setup) / 3;
-    EXPECT_GE(calls, 3 * num_runs / kResolveCheckLabels);
-    // the deadline passes at the third reading, the first inside the first round: stopped
-    // there, a small part of the round (before, the next reading came after the whole round)
+    run(0, [&]() { ++calls; });
+    const size_t before_rounds = calls;
+    calls = 0;
+    run(3, [&]() { ++calls; });
+    EXPECT_GE(calls, before_rounds + 3 * num_runs / kResolveCheckLabels);
+    // the deadline passes at the first reading inside the first round: stopped there, a small
+    // part of the round (before, the next reading came after the whole round). Counted, not
+    // timed (T4 review R1, N9: wall times of separate runs are load-sensitive)
     struct Late {};
     calls = 0;
-    const double stopped = timed(1024, [&]() {
-        if (++calls == 3)
+    run(1024, [&]() {
+        if (++calls == before_rounds + 1)
             throw Late();
     });
-    EXPECT_EQ(3u, calls);
-    EXPECT_LT((stopped - setup) * 8, round) << stopped - setup << " s into the first round of "
-                                            << round << " s";
+    EXPECT_EQ(before_rounds + 1, calls);
 }
 
 // The route (process_resolve_request): under bounds.time_budget_ms the selection of as many

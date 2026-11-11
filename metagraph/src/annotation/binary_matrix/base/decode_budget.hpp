@@ -106,7 +106,8 @@ class DecodeBudget {
     }
     // Account for |bytes| that are held whether or not they fit (memory allocated where a
     // refusal is not possible, so that the account never under-counts it): held may pass the
-    // maximum, and every charge() is then refused until enough is released. Not a decode's
+    // maximum, and every charge() is then refused until enough is released. No decode uses it:
+    // a /resolve's record index does, growing inside a k-mer's accumulation (charged_table.hpp)
     void charge_beyond(uint64_t bytes) {
         held_ += bytes;
         peak_ = std::max(peak_, held_);

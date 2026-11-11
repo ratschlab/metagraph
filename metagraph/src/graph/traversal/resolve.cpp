@@ -244,10 +244,20 @@ std::vector<Row> anno_rows(const std::vector<node_index> &keys) {
     return rows;
 }
 
-// The heap of a std::string beyond its object (none within its small-string buffer, 15 bytes
-// at the least)
+// A std::string as the answer account prices it, the same on every platform (T4 review R1, N5:
+// from capacity() a name of up to 22 bytes, in place under libc++, was priced 32 B on macOS and
+// nothing on Linux): its object at libstdc++'s 32 B, and beyond it a buffer of its size and a
+// terminator at the allocator's class once it is longer than libstdc++'s 15 bytes in place
+// (libc++ keeps up to 22 in place: a name of 16 to 22 bytes is priced there although it holds
+// none). The account's names are copies, whose capacity is their size
+constexpr uint64_t kStringBytes = 32;
 uint64_t string_heap_bytes(const std::string &s) {
-    return s.capacity() > 15 ? annot::matrix::alloc_bytes(s.capacity() + 1) : 0;
+    return s.size() > 15 ? annot::matrix::alloc_bytes(s.size() + 1) : 0;
+}
+// sizeof(T) with each of its |strings| std::string members at kStringBytes
+template <class T>
+constexpr uint64_t priced_sizeof(uint64_t strings) {
+    return sizeof(T) + strings * (kStringBytes - sizeof(std::string));
 }
 
 // The modelled bytes of an accumulator (SupportProfile::memory_peak): its fixed part, its runs
@@ -307,6 +317,44 @@ using RecordKey = std::pair<Column, uint64_t>;
 using RecordIndex = tsl::hopscotch_map<RecordKey, uint64_t, SeededPairHash, std::equal_to<RecordKey>,
                                        ChargedAllocator<std::pair<RecordKey, uint64_t>>>;
 
+} // namespace
+
+bool next_key_uses(const std::vector<node_index> &keys, annot::matrix::DecodeBudget &budget,
+                   std::vector<size_t> *next_use) {
+    constexpr size_t kNever = std::numeric_limits<size_t>::max();
+    // the next occurrence of each key, and the table of the keys' last occurrences that builds
+    // it, held while it does
+    const uint64_t next_use_bytes = annot::matrix::buffer_bytes(keys.size(), kNextUseBytes);
+    const uint64_t setup_bytes = keys.size() * kLastOccurrenceBytes;
+    if (!budget.charge(next_use_bytes + setup_bytes))
+        return false;
+    next_use->assign(keys.size(), kNever);
+    // the table's model, charged above, and its allocations beyond it (GPT review 7, finding
+    // 7: tsl's tail of a small table, a growth at a low load that keys chosen for a known
+    // seed reach), refused before they are made. The account releases what it holds once
+    // the table, in the inner scope, is freed
+    TableAccount setup(budget, /* refuse */ true);
+    setup.adopt(setup_bytes);
+    try {
+        KeyPositions later(0, SeededHash(), std::equal_to<node_index>(),
+                           ChargedAllocator<std::pair<node_index, size_t>>(&setup));
+        for (size_t j = keys.size(); j-- > 0; ) {
+            auto [it, inserted] = later.try_emplace(keys[j], j);
+            if (!inserted) {
+                (*next_use)[j] = it->second;
+                it.value() = j;
+            }
+        }
+    } catch (const TableGrowthRefused &) {
+        std::vector<size_t>().swap(*next_use);
+        budget.release(next_use_bytes);
+        return false;
+    }
+    return true;
+}
+
+namespace {
+
 template <class RowT>
 uint64_t rows_bytes(const std::vector<RowT> &rows) {
     uint64_t bytes = 0;
@@ -355,41 +403,12 @@ size_t for_each_row(const std::vector<node_index> &keys, BatchSizer sizer, uint6
                     uint64_t *rows_held_peak = nullptr) {
     constexpr size_t kNever = std::numeric_limits<size_t>::max();
     *end_cause = PassEnd::COMPLETE;
-    // the next occurrence of each k-mer's key (kNever: none), held for the pass; the table of
-    // the keys' last occurrences that builds it, held while it does
+    // the next occurrence of each k-mer's key (kNever: none), held for the pass
     const uint64_t next_use_bytes = annot::matrix::buffer_bytes(keys.size(), kNextUseBytes);
-    const uint64_t setup_bytes = keys.size() * kLastOccurrenceBytes;
-    if (!budget.charge(next_use_bytes + setup_bytes)) {
+    std::vector<size_t> next_use;
+    if (!next_key_uses(keys, budget, &next_use)) {
         *end_cause = PassEnd::MEMORY;
         return 0;
-    }
-    std::vector<size_t> next_use(keys.size(), kNever);
-    {
-        // the table's model, charged above, and its allocations beyond it (GPT review 7, finding
-        // 7: tsl's tail of a small table, a growth at a low load that keys chosen for a known
-        // seed reach), refused before they are made. The account releases what it holds once
-        // the table, in the inner scope, is freed
-        TableAccount setup(budget, /* refuse */ true);
-        setup.adopt(setup_bytes);
-        bool refused = false;
-        try {
-            KeyPositions later(0, SeededHash(), std::equal_to<node_index>(),
-                               ChargedAllocator<std::pair<node_index, size_t>>(&setup));
-            for (size_t j = keys.size(); j-- > 0; ) {
-                auto [it, inserted] = later.try_emplace(keys[j], j);
-                if (!inserted) {
-                    next_use[j] = it->second;
-                    it.value() = j;
-                }
-            }
-        } catch (const TableGrowthRefused &) {
-            refused = true;
-        }
-        if (refused) {
-            budget.release(next_use_bytes);
-            *end_cause = PassEnd::MEMORY;
-            return 0;
-        }
     }
     // the rows kept for a later occurrence of their key (GPT review 6, #8: the table's buckets
     // outlive an entry's last use, so their charge is held until kept.drop() frees them)
@@ -1597,19 +1616,20 @@ uint64_t profile_bytes(const SupportProfile &p) {
 }
 
 // What a profile holds as the answer account prices it (AnswerAccount): its vectors at their
-// capacities, a name at its string's capacity beyond the object (the candidates apart:
+// capacities, a name beyond its object as string_heap_bytes prices it (the candidates apart:
 // candidates_held_bytes)
 uint64_t profile_held_bytes(const SupportProfile &p) {
     uint64_t bytes = sizeof(SupportProfile)
             + annot::matrix::buffer_bytes(p.graph_runs.capacity(), sizeof(KmerInterval))
-            + annot::matrix::buffer_bytes(p.labels.capacity(), sizeof(LabelProfile));
+            + annot::matrix::buffer_bytes(p.labels.capacity(), priced_sizeof<LabelProfile>(1));
     for (const LabelProfile &lp : p.labels) {
         bytes += string_heap_bytes(lp.label.name)
                + annot::matrix::buffer_bytes(lp.runs.capacity(), sizeof(KmerInterval))
                + annot::matrix::buffer_bytes(lp.trace_breaks.capacity(), sizeof(uint64_t));
     }
+    bytes += annot::matrix::buffer_bytes(p.unknown_labels.capacity(), kStringBytes);
     for (const std::string &name : p.unknown_labels) {
-        bytes += sizeof(std::string) + string_heap_bytes(name);
+        bytes += string_heap_bytes(name);
     }
     if (p.stop) {
         bytes += annot::matrix::buffer_bytes(p.stop->query_graph_runs.capacity(),
@@ -1724,7 +1744,7 @@ SeedSelection select_seeds(const SupportProfile &profile,
         uint64_t bytes = sizeof(Picked) + 2 * labels * sizeof(LabelId);
         if (names) {
             for (const std::string &name : *names) {
-                bytes += sizeof(std::string) + string_heap_bytes(name);
+                bytes += kStringBytes + string_heap_bytes(name);
             }
         }
         return bytes;
@@ -2045,10 +2065,11 @@ SeedSelection select_seeds(const SupportProfile &profile,
         // drops), the names not covering; the order's copy is freed with the seed done
         uint64_t names = 0;
         for (LabelId l : p.labels) {
-            names += sizeof(std::pair<std::string, LabelId>)
+            names += priced_sizeof<std::pair<std::string, LabelId>>(1)
                    + string_heap_bytes(profile.labels[l].label.name);
         }
-        const uint64_t frozen = sizeof(FrozenSeed) + 2 * 32
+        // (its id, sequence and dropped digest at kStringBytes)
+        const uint64_t frozen = priced_sizeof<FrozenSeed>(3) + 2 * 32
                 + annot::matrix::alloc_bytes(p.kmers.size() + profile.k) + names
                 + pick_bytes(0, &p.labels_not_covering);
         charge(frozen + names);
