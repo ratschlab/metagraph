@@ -29,6 +29,7 @@ TraverseLimits traverse_limits(const Config &config) {
     limits.max_time_ms = config.traverse_max_time_ms;
     limits.max_seeds = config.traverse_max_seeds;
     limits.max_seed_bp = config.traverse_max_seed_bp;
+    limits.max_resolve_query_bp = config.resolve_max_query_bp;
     return limits;
 }
 
@@ -454,15 +455,16 @@ struct ResolveRequest {
     SelectionPolicy policy;
 };
 
-ResolveRequest parse_resolve_request(const Json::Value &json) {
+ResolveRequest parse_resolve_request(const Json::Value &json, const TraverseLimits &limits) {
     ResolveRequest req;
     Strict s(json, "request");
     req.sequence = s.str("sequence", "");
     if (req.sequence.empty())
         throw InvalidRequest("request.sequence is required");
-    if (req.sequence.size() > kMaxResolveQueryBp) {
+    if (req.sequence.size() > limits.max_resolve_query_bp) {
         throw InvalidRequest("request.sequence: " + std::to_string(req.sequence.size())
-                             + " bp, over the limit of " + std::to_string(kMaxResolveQueryBp));
+                             + " bp, over the server's limit of "
+                             + std::to_string(limits.max_resolve_query_bp));
     }
     req.options.labels = s.strings("labels");
     if (req.options.labels.size() > kMaxSeedLabels) {
@@ -574,8 +576,8 @@ Json::Value process_traverse_request(const Json::Value &request,
 
 Json::Value process_resolve_request(const Json::Value &request,
                                     const AnnotatedDBG &anno_graph,
-                                    const TraverseLimits &) {
-    const ResolveRequest req = parse_resolve_request(request);
+                                    const TraverseLimits &limits) {
+    const ResolveRequest req = parse_resolve_request(request, limits);
     const LabelOracle oracle(anno_graph);
     const SupportProfile profile = resolve_support(oracle, req.sequence, req.options);
     if (!req.select)
@@ -599,7 +601,7 @@ Json::Value traverse_capabilities(const AnnotatedDBG &anno_graph, const Traverse
     c["limits"]["max_seeds"] = uint_json(limits.max_seeds);
     c["limits"]["max_seed_bp"] = uint_json(limits.max_seed_bp);
     c["limits"]["max_seed_labels"] = uint_json(kMaxSeedLabels);
-    c["limits"]["max_resolve_query_bp"] = uint_json(kMaxResolveQueryBp);
+    c["limits"]["max_resolve_query_bp"] = uint_json(limits.max_resolve_query_bp);
     return c;
 }
 
@@ -622,7 +624,7 @@ int traverse_graph(Config *config) {
         request = parse_json_string(content.str());
         limits = traverse_limits(*config);
         if (config->traverse_resolve) {
-            parse_resolve_request(request);
+            parse_resolve_request(request, limits);
         } else {
             parse_traverse_request(request, limits);
         }
