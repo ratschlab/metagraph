@@ -32,7 +32,8 @@
 #include "common/vectors/bit_vector_sd.hpp"
 #include "graph/annotated_dbg.hpp"
 #include "graph/representation/succinct/dbg_succinct.hpp"
-#include "graph/traversal/seeded_hash.hpp"
+#include "annotation/binary_matrix/base/hopscotch_layout.hpp"
+#include "common/hashers/seeded_hash.hpp"
 
 #if USE_JEMALLOC
 extern "C" int mallctl(const char *name, void *oldp, size_t *oldlenp, void *newp, size_t newlen);
@@ -1323,7 +1324,7 @@ TEST(RowDiffPathCache, BudgetedCostsDoNotDependOnTheCache) {
 // not kept; the aggregates are added to a row cached without them; trim() and clear()
 TEST(RowDiffPathCache, Generations) {
     using Cache = RowDiffCache<SetBits>;
-    using Layout = graph::traversal::HopscotchLayout<Cache::Table>;
+    using Layout = HopscotchLayout<Cache::Table>;
     Cache cache;
     EXPECT_FALSE(cache.enabled());
     cache.insert(1, SetBits{ 1, 2, 3 });
@@ -1443,8 +1444,8 @@ uint64_t bitreverse_20(uint64_t i) {
 template <class Hash>
 void check_bound_whatever_the_ids(const char *name) {
     using Cache = RowDiffCache<SetBits, Hash>;
-    using Layout = graph::traversal::HopscotchLayout<typename Cache::Table>;
-    const bool seeded = std::is_same<Hash, graph::traversal::SeededHash>::value;
+    using Layout = HopscotchLayout<typename Cache::Table>;
+    const bool seeded = std::is_same<Hash, common::SeededHash>::value;
     const uint64_t padding = 2 * Layout::array_bytes(1);
     struct Ids {
         const char *pattern;
@@ -1512,40 +1513,40 @@ void check_bound_whatever_the_ids(const char *name) {
 
 TEST(RowDiffPathCache, TheBoundHoldsWhateverTheRowIds) {
     check_bound_whatever_the_ids<std::hash<Row>>("identity hash");
-    check_bound_whatever_the_ids<graph::traversal::SeededHash>("seeded hash");
+    check_bound_whatever_the_ids<common::SeededHash>("seeded hash");
 }
 
 // An insert can double a table at tsl's threshold (90% load) and, when the neighbourhood of its
 // key's bucket is full, before it: the seeded tables did so from 82.5% load at the lowest
-// (seeded_hash.hpp, kHopscotchGrowthLoad 0.8). Every growth of a seeded table, over random and
+// (hopscotch_layout.hpp, kHopscotchGrowthLoad 0.8). Every growth of a seeded table, over random and
 // consecutive keys and many seeds, is one hopscotch_insert_can_grow foresaw, and what an insert
 // held while it ran is within the room hopscotch_insert_bytes states (R4 review, S1)
 TEST(RowDiffPathCache, EveryGrowthOfASeededTableIsForeseen) {
-    using Table = tsl::hopscotch_map<uint64_t, uint64_t, graph::traversal::SeededHash>;
-    using Layout = graph::traversal::HopscotchLayout<Table>;
+    using Table = tsl::hopscotch_map<uint64_t, uint64_t, common::SeededHash>;
+    using Layout = HopscotchLayout<Table>;
     // 8 buckets: no growth before the 6th entry (80% load), tsl's threshold at the 7th
     Table eight(8);
     ASSERT_EQ(8u, eight.bucket_count());
     for (uint64_t key = 0; key < 7; ++key) {
-        EXPECT_EQ(key >= 6, graph::traversal::hopscotch_insert_can_grow(eight)) << key;
-        EXPECT_EQ(key >= 6 ? graph::traversal::hopscotch_growth_bytes(eight)
+        EXPECT_EQ(key >= 6, hopscotch_insert_can_grow(eight)) << key;
+        EXPECT_EQ(key >= 6 ? hopscotch_growth_bytes(eight)
                            : Layout::node_bytes(),
-                  graph::traversal::hopscotch_insert_bytes(eight)) << key;
+                  hopscotch_insert_bytes(eight)) << key;
         eight.emplace(key, key);
     }
-    EXPECT_TRUE(graph::traversal::hopscotch_insert_can_grow(Table()));
+    EXPECT_TRUE(hopscotch_insert_can_grow(Table()));
     uint64_t growths = 0;
     for (uint64_t seed = 1; seed <= 40; ++seed) {
-        Table table(0, graph::traversal::SeededHash{ seed });
+        Table table(0, common::SeededHash{ seed });
         std::mt19937_64 rng(seed);
         for (uint64_t i = 0; i < (1u << 14); ++i) {
-            const bool can = graph::traversal::hopscotch_insert_can_grow(table);
-            const uint64_t room = graph::traversal::hopscotch_insert_bytes(table);
-            const uint64_t before = graph::traversal::hopscotch_held_bytes(table);
+            const bool can = hopscotch_insert_can_grow(table);
+            const uint64_t room = hopscotch_insert_bytes(table);
+            const uint64_t before = hopscotch_held_bytes(table);
             const size_t buckets = table.bucket_count();
             table.emplace(seed % 2 ? rng() : i, i);
             if (table.bucket_count() == buckets) {
-                EXPECT_LE(graph::traversal::hopscotch_held_bytes(table), before + room);
+                EXPECT_LE(hopscotch_held_bytes(table), before + room);
                 continue;
             }
             growths++;
@@ -1569,7 +1570,7 @@ TEST(RowDiffPathCache, EveryGrowthOfASeededTableIsForeseen) {
 template <class RowT>
 void check_a_generation_fills_its_table(const RowT &row, const char *name) {
     using Cache = RowDiffCache<RowT>;
-    using Layout = graph::traversal::HopscotchLayout<typename Cache::Table>;
+    using Layout = HopscotchLayout<typename Cache::Table>;
     const uint64_t bound = uint64_t(8) << 20;
     const uint64_t b = StoredRow<RowT>::bytes_of(row);
     // the largest table a generation affords: its doubling from half as many buckets, made at
@@ -1589,7 +1590,7 @@ void check_a_generation_fills_its_table(const RowT &row, const char *name) {
         ASSERT_LE(cache.bytes(), bound) << name;
     }
     // both generations at 80% load of the largest table
-    EXPECT_GE(most, 2 * size_t(float(top) * graph::traversal::kHopscotchGrowthLoad))
+    EXPECT_GE(most, 2 * size_t(float(top) * kHopscotchGrowthLoad))
         << name << ": tables of " << top << " buckets";
     EXPECT_LE(cache.peak_bytes, bound) << name;
 }
@@ -1606,7 +1607,7 @@ TEST(RowDiffPathCache, AGenerationFillsItsTable) {
 // trim() and clear() free them
 TEST(RowDiffPathCache, DroppedGenerationsReleaseTheirTables) {
     using Cache = RowDiffCache<SetBits>;
-    using Layout = graph::traversal::HopscotchLayout<Cache::Table>;
+    using Layout = HopscotchLayout<Cache::Table>;
     Cache cache;
     const uint64_t bound = uint64_t(4) << 20;
     cache.set_bound(bound);
@@ -1845,7 +1846,7 @@ TEST(RowDiffPathCache, FlatTupleRowsRoundTrip) {
     EXPECT_EQ(stored.bytes() + cache.table_bytes(), cache.bytes());
     // a tuple row's bucket: its key and entry, and the neighbourhood bitmap (176 B), and the
     // one-entry table's array: 2 buckets and the padding of a neighbourhood
-    EXPECT_EQ(graph::traversal::HopscotchLayout<RowDiffCache<RowTuples>::Table>::array_bytes(2),
+    EXPECT_EQ(HopscotchLayout<RowDiffCache<RowTuples>::Table>::array_bytes(2),
               cache.table_bytes());
     EXPECT_EQ(1u, cache.rows_inserted);
     EXPECT_EQ(stored.bytes(), cache.bytes_inserted);
@@ -1959,7 +1960,7 @@ TEST(RowDiffPathCache, AKeptRowIsCopiedWithinTheBound) {
     std::iota(wide.begin(), wide.end(), 0);
     const uint64_t b = row_copy_bytes(wide);
     // each generation's table: one entry, 2 buckets and the padding
-    const uint64_t table = graph::traversal::HopscotchLayout<
+    const uint64_t table = HopscotchLayout<
             RowDiffCache<SetBits>::Table>::array_bytes(2);
     ASSERT_LE(2 * (b + table), bound);
     ASSERT_GT(3 * b, bound);

@@ -13,8 +13,9 @@
 
 #include "annotation/binary_matrix/base/binary_matrix.hpp"
 #include "annotation/binary_matrix/base/decode_budget.hpp"
+#include "annotation/binary_matrix/base/hopscotch_layout.hpp"
 #include "annotation/int_matrix/base/int_matrix.hpp"
-#include "graph/traversal/seeded_hash.hpp"
+#include "common/hashers/seeded_hash.hpp"
 
 
 namespace mtg {
@@ -186,7 +187,7 @@ struct StoredRow<MultiIntMatrix::RowTuples> {
  * ones would hold that array beside their bound (74.7 MiB of heap for 63.9 MiB accounted at a
  * 64 MiB bound). Single-threaded, as the request that owns it.
  */
-template <class RowT, class Hash = graph::traversal::SeededHash>
+template <class RowT, class Hash = common::SeededHash>
 class RowDiffCache {
   public:
     using Row = BinaryMatrix::Row;
@@ -206,7 +207,7 @@ class RowDiffCache {
         bool has_path = false;
         PathAggregates path;
     };
-    // a generation's table (tests read its layout: graph::traversal::HopscotchLayout)
+    // a generation's table (tests read its layout: HopscotchLayout)
     using Table = tsl::hopscotch_map<Row, Entry, Hash>;
     // The bound: |max_bytes|, or less while |room| (when set) returns less: the bytes a
     // caller sharing one allotment with another cache leaves it (re-read at every insert)
@@ -223,8 +224,8 @@ class RowDiffCache {
     uint64_t bytes() const { return bytes_[0] + bytes_[1] + table_bytes(); }
     // the tables as they are, both generations: their bucket arrays and overflow nodes
     uint64_t table_bytes() const {
-        return graph::traversal::hopscotch_held_bytes(gen_[0])
-                + graph::traversal::hopscotch_held_bytes(gen_[1]);
+        return hopscotch_held_bytes(gen_[0])
+                + hopscotch_held_bytes(gen_[1]);
     }
     size_t size() const { return gen_[0].size() + gen_[1].size(); }
     // the tables' buckets, both generations (what the tests measure the tables by)
@@ -246,7 +247,7 @@ class RowDiffCache {
             return nullptr;
         // the row's bytes move with it, but the current table can double for it (the older
         // table keeps its buckets): moved only with room for what the insert can add
-        if (bytes() + graph::traversal::hopscotch_insert_bytes(gen_[0]) > limit())
+        if (bytes() + hopscotch_insert_bytes(gen_[0]) > limit())
             return &old->second;
         Entry entry = std::move(old.value());
         gen_[1].erase(old);
@@ -343,13 +344,13 @@ class RowDiffCache {
         // that its next insert cannot make (which left a generation of narrow rows at 45%
         // load of a table whose doubling did not fit half the bound: R4 review, S1)
         auto need = [&]() {
-            return b + graph::traversal::hopscotch_insert_bytes(gen_[0]);
+            return b + hopscotch_insert_bytes(gen_[0]);
         };
         auto generation = [&](size_t i) {
-            return bytes_[i] + graph::traversal::hopscotch_held_bytes(gen_[i]);
+            return bytes_[i] + hopscotch_held_bytes(gen_[i]);
         };
         // more than half the bound even in an empty generation: not kept
-        using Layout = graph::traversal::HopscotchLayout<Map>;
+        using Layout = HopscotchLayout<Map>;
         if (b + Layout::array_bytes(Layout::next_bucket_count(0)) + Layout::node_bytes()
                 > bound / 2) {
             rows_refused++;
@@ -438,7 +439,7 @@ class RowDiffCache {
     // cache held: when the table doubled, the older bucket array was held beside the new one
     // while the entries moved (the array of half the new count: the last doubling's)
     Entry* emplace_current(Row row, Entry &&entry) {
-        using Layout = graph::traversal::HopscotchLayout<Map>;
+        using Layout = HopscotchLayout<Map>;
         const size_t buckets = gen_[0].bucket_count();
         Entry *e = &gen_[0].emplace(row, std::move(entry)).first.value();
         uint64_t held = bytes();
