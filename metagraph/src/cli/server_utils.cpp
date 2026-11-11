@@ -647,14 +647,16 @@ bool peer_closed(int fd) {
 }
 
 std::string json_text(const Json::Value &value, bool compact, const std::function<void()> &check,
-                      double *max_gap_ms) {
+                      double *max_gap_ms, size_t reserve) {
     Json::StreamWriterBuilder builder;
     if (compact)
         builder["indentation"] = "";   // the traversal routes: half the bytes of the indented form
-    if (!check)
+    if (!check && !reserve)
         return Json::writeString(builder, value);
+    static const std::function<void()> kNoCheck = []() {};
     std::string out;
-    DeliveryChecks checks(out, check, kDeliveryCheckBytes, max_gap_ms);
+    out.reserve(reserve);
+    DeliveryChecks checks(out, check ? check : kNoCheck, kDeliveryCheckBytes, max_gap_ms);
     CheckedStringBuf buf(&out, &checks);
     std::ostream stream(&buf);
     // an exception of the check reaches the caller rather than setting badbit

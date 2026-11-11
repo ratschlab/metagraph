@@ -271,7 +271,8 @@ TEST_F(MiniRefSeq, ResolveDecodesEachRowOnceInBoundedBatches) {
                 LabelOracle reference_oracle(*anno_graph_);
                 const SupportProfile reference = resolve_support(reference_oracle, query, options);
                 ASSERT_FALSE(reference.labels.empty());
-                // the same labels given explicitly (their profile pass, LabelQuery's hits)
+                // the same labels given explicitly (on the row paths the discovery's pass since
+                // train 4, T4-L1, each k-mer's hits built from its row by LabelQuery)
                 ResolveOptions explicit_options;
                 explicit_options.support = support;
                 for (const auto &l : reference.labels) {
@@ -288,8 +289,6 @@ TEST_F(MiniRefSeq, ResolveDecodesEachRowOnceInBoundedBatches) {
                     for (uint64_t bytes : { uint64_t(1), kResolveBatchBytes }) {
                         for (uint64_t kept : { uint64_t(0), kResolveKeptBytes }) {
                             for (ResolveOptions *o : { &options, &explicit_options }) {
-                                if (o == &explicit_options && kept != kResolveKeptBytes)
-                                    continue;   // an explicit profile keeps no rows
                                 o->batch_rows = batch;
                                 o->batch_bytes = bytes;
                                 o->kept_bytes = kept;
@@ -319,9 +318,9 @@ TEST_F(MiniRefSeq, ResolveDecodesEachRowOnceInBoundedBatches) {
                                         EXPECT_EQ(1u, reads[i]) << i;
                                     }
                                 }
-                                // every distinct row once when the repeated ones can be kept
-                                // (an explicit profile always), at most once per k-mer else
-                                if (o == &explicit_options || kept == kResolveKeptBytes) {
+                                // every distinct row once when the repeated ones can be kept,
+                                // at most once per k-mer else (explicit labels as a discovery)
+                                if (kept == kResolveKeptBytes) {
                                     EXPECT_EQ(distinct, fetched) << batch << ' ' << bytes;
                                 } else {
                                     EXPECT_LE(fetched, present) << batch << ' ' << bytes;
@@ -337,7 +336,7 @@ TEST_F(MiniRefSeq, ResolveDecodesEachRowOnceInBoundedBatches) {
             }
         }
     }
-    EXPECT_EQ(2u * 4 * (3 * 2 * (2 + 1)), compared);
+    EXPECT_EQ(2u * 4 * (3 * 2 * (2 + 2)), compared);
 }
 
 // Permitted-range filtering: a query of header labels looks a coordinate up among the

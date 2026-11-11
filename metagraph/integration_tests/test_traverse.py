@@ -4014,8 +4014,9 @@ class TestResolveDiscoveryBounds(TestingBase):
     own (0 to 199) between flanks of its own, so that a header discovery of CORE meets every record,
     record i first at k-mer start_i (or a little before, where its flank ends as CORE does), and
     supports the k-mers from it on. Servers with the default
-    bounds (which bind on nothing here), with a label cap of 500 and with a memory bound of 1 MiB;
-    the CLI, which applies no bound, gives the uncut answers."""
+    bounds (which bind on nothing here), with a label cap of 500 and with a memory bound of 1 MiB
+    (also a multi-graph server of the one pair, train 4); the CLI, which applies no bound, gives the
+    uncut answers."""
 
     CORE_BP = 300
     RECORDS = 6000
@@ -4052,14 +4053,19 @@ class TestResolveDiscoveryBounds(TestingBase):
                          f'--index-header-coords -o {cls.anno_base} {" ".join(files)}',
                          'index-header-coords')
         cls.servers = {}
-        for name, flags in (('default', []), ('cap', ['--resolve-max-discover-labels', '500']),
-                            ('memory', ['--resolve-max-discover-memory-mb', '1'])):
+        csv = cls.tempdir.name + '/graphs.csv'
+        with open(csv, 'w') as f:
+            f.write(f'P,{cls.graph},{cls.anno}\n')
+        pair = ['-i', cls.graph, '-a', cls.anno]
+        for name, args in (('default', pair),
+                           ('cap', pair + ['--resolve-max-discover-labels', '500']),
+                           ('memory', pair + ['--resolve-max-discover-memory-mb', '1']),
+                           ('multi-memory', [csv, '--resolve-max-discover-memory-mb', '1'])):
             port = _free_port()
             log = open(f'{cls.tempdir.name}/server-{name}.log', 'w')
             process = subprocess.Popen(
-                shlex.split(METAGRAPH) + ['server_query', '-i', cls.graph, '-a', cls.anno,
-                                          '--port', str(port), '--address', '127.0.0.1',
-                                          '-p', '2'] + flags,
+                shlex.split(METAGRAPH) + ['server_query'] + args
+                + ['--port', str(port), '--address', '127.0.0.1', '-p', '2'],
                 stdout=log, stderr=subprocess.STDOUT)
             url = f'http://127.0.0.1:{port}'
             for _ in range(600):
@@ -4317,6 +4323,83 @@ class TestResolveDiscoveryBounds(TestingBase):
                 prefix = self._cli(self._discovery(self.core[:x + K - 1], 10, support))
                 for key in ('graph_runs', 'labels', 'labels_truncated', 'candidates'):
                     self.assertEqual(prefix[key], out[key], key)
+
+    # the 400 of an answer priced past --resolve-max-discover-memory-mb 1 (SPEC §4.6, the answer
+    # account), but for the part it names
+    ANSWER_TOO_LARGE = re.compile(
+        r'\{"error":"resolve: the answer would hold more than --resolve-max-discover-memory-mb 1 '
+        r'MiB \((profile|candidates|selection|answer)\): nothing partial is sent; ask for '
+        r'run_format \\"rle\\", a larger min_block_kmers, fewer labels or seeds, or a shorter '
+        r'sequence","code":"resolve_answer_too_large","max_memory_mb":1\}')
+
+    def test_explicit_labels_stop_under_the_memory_bound(self):
+        """--resolve-max-discover-memory-mb 1 bounds explicit labels too (train 4, T4-L1; GPT
+        review 7, finding 2: before, their pass was charged nowhere and never stopped): on the row
+        paths they are profiled by the discovery's pass, so a query whose pass does not fit stops
+        (reason memory, phase rows, no deadline), the answer the CLI's resolve of the prefix
+        before it, or, at the query's first k-mer, the statement that it cannot progress"""
+        names = ['s00000', 's00001', 's00002']
+        sequence = self.core * 70
+        for support in ('kmer', 'trace'):
+            with self.subTest(support=support):
+                request = {'sequence': sequence, 'labels': names, 'support': support}
+                out = self._post('memory', request)
+                stop = out['stop']
+                x = stop['resolved_kmers']
+                self.assertEqual(('rows', 'memory', 1, x, x),
+                                 (stop['phase'], stop['reason'], stop['max_memory_mb'],
+                                  out['num_kmers'], stop['remainder_from_bp']))
+                self.assertIn('--resolve-max-discover-memory-mb 1 ran out', stop['message'])
+                self.assertNotIn('limits', out)
+                self.assertEqual(names, [l['label'] for l in out['labels']])
+                if x == 0:
+                    self.assertIn('it cannot be resolved past base 0 under this bound',
+                                  stop['message'])
+                else:
+                    prefix = self._cli(dict(request, sequence=sequence[:x + K - 1]))
+                    for key in ('graph_runs', 'labels', 'candidates'):
+                        self.assertEqual(prefix[key], out[key], key)
+                # the default bound answers the whole query, as the CLI
+                served = self._post('default', request)
+                self.assertNotIn('stop', served)
+                self.assertEqual(self._untimed(self._cli(request)), self._untimed(served))
+
+    def test_an_answer_past_the_memory_bound_is_refused(self):
+        """The answer is priced before it is built against --resolve-max-discover-memory-mb
+        (train 4, T4-L1; GPT review 7, finding 2: before, nothing after the pass was charged):
+        every record's label explicitly (6,000 labels, about 1.5 KB each in the answer) is refused
+        400 resolve_answer_too_large under 1 MiB, its body error first, then the code and the
+        bound; on a multi-graph server the pair is refused with that body; 100 labels are
+        answered; the default bound and the CLI answer every label"""
+        names = sorted(self.starts)
+        request = {'sequence': self.core, 'labels': names}
+        url = self.servers['memory'][0]
+        ret = requests.post(url + '/resolve', data=json.dumps(request), timeout=600)
+        self.assertEqual(400, ret.status_code, ret.text[:500])
+        self.assertRegex(ret.text, self.ANSWER_TOO_LARGE)
+        self.assertEqual(len(ret.text), self.ANSWER_TOO_LARGE.match(ret.text).end())
+        # a multi-graph server: that pair refused, with the same body and its status
+        multi = requests.post(self.servers['multi-memory'][0] + '/resolve',
+                              data=json.dumps(dict(request, graph='P')), timeout=600)
+        self.assertEqual(200, multi.status_code, multi.text[:500])
+        envelope = multi.json()
+        self.assertEqual((0, 1), (envelope['answered'], envelope['refused']))
+        refusal = envelope['answers'][0]['refusal']
+        self.assertEqual(('refused', 400), (envelope['answers'][0]['outcome'],
+                                            refusal.pop('http_status')))
+        self.assertEqual(json.loads(ret.text), refusal)
+        # fewer labels fit (the pass's batches decoded smaller under the bound: work.memory_bytes
+        # apart, SPEC §4.6)
+        few = self._post('memory', dict(request, labels=names[:100]))
+        self.assertNotIn('stop', few)
+
+        def unworked(answer):
+            return self._untimed({k: v for k, v in answer.items() if k != 'work'})
+        self.assertEqual(unworked(self._cli(dict(request, labels=names[:100]))), unworked(few))
+        # the default bound and the CLI: every label
+        served = self._post('default', request)
+        self.assertEqual(len(names), len(served['labels']))
+        self.assertEqual(self._untimed(self._cli(request)), self._untimed(served))
 
 
 @unittest.skipUnless(_supports_traverse(), "`metagraph traverse` is not available in this build")

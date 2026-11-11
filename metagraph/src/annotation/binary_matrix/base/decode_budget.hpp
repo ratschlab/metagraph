@@ -91,10 +91,11 @@ class DecodeBudget {
           : max_(max_bytes) {}
 
     // Reserve |bytes| before they are allocated. false: nothing was reserved — held + bytes
-    // would exceed the maximum, or the test hook denied this charge.
+    // would exceed the maximum (or held already does, after a charge_beyond), or the test hook
+    // denied this charge.
     bool charge(uint64_t bytes) {
         const uint64_t ordinal = charges_++;
-        if ((deny && deny(ordinal)) || bytes > max_ - held_) {
+        if ((deny && deny(ordinal)) || held_ > max_ || bytes > max_ - held_) {
             refused_need_ = bytes > std::numeric_limits<uint64_t>::max() - held_
                 ? std::numeric_limits<uint64_t>::max() : held_ + bytes;
             return false;
@@ -102,6 +103,14 @@ class DecodeBudget {
         held_ += bytes;
         peak_ = std::max(peak_, held_);
         return true;
+    }
+    // Account for |bytes| that are held whether or not they fit (memory allocated where a
+    // refusal is not possible, so that the account never under-counts it): held may pass the
+    // maximum, and every charge() is then refused until enough is released. No decode uses it:
+    // a /resolve's record index does, growing inside a k-mer's accumulation (charged_table.hpp)
+    void charge_beyond(uint64_t bytes) {
+        held_ += bytes;
+        peak_ = std::max(peak_, held_);
     }
     void release(uint64_t bytes) {
         assert(bytes <= held_);

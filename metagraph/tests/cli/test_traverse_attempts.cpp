@@ -2935,6 +2935,12 @@ TEST(ServerRequest, TheResolveRouteWritesUnderItsGoneCheck) {
         EXPECT_EQ(200, answer_request("{}", encoding, 1, process, true,
                                       &connected.control).status);
         EXPECT_EQ(1u, asked);
+        // the answer's text: json_text's bytes, written into a buffer reserved to its exact
+        // size (T4 review R1, F3: no growth holds an old and a new buffer)
+        const std::string text = connected.control.write(big, {});
+        EXPECT_EQ(json_text(big, true), text);
+        EXPECT_EQ(compact_json_size(big), text.size());
+        EXPECT_LE(text.capacity(), text.size() + 32);
         // a client that left: nothing is written, before the deadline is read
         gone = true;
         ResolveWriting left([&]() { ++asked; return gone; }, std::chrono::hours(1), 1);

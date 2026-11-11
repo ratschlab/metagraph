@@ -1,8 +1,10 @@
 #ifndef __TRAVERSAL_RESOLVE_HPP__
 #define __TRAVERSAL_RESOLVE_HPP__
 
+#include <algorithm>
 #include <functional>
 #include <optional>
+#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -39,6 +41,74 @@ constexpr size_t kResolveFirstBatchRows = 64;
 constexpr size_t kResolveBatchRows = 4096;
 constexpr uint64_t kResolveBatchBytes = uint64_t(64) << 20;
 constexpr uint64_t kResolveKeptBytes = uint64_t(256) << 20;
+
+// A /resolve answer priced past its account (AnswerAccount): nothing partial is sent (the
+// server: 400 resolve_answer_too_large). |part| is what passed it: "profile", "candidates",
+// "selection" or "answer" (the JSON tree and its text)
+class AnswerTooLarge : public std::runtime_error {
+  public:
+    AnswerTooLarge(const std::string &part, uint64_t max_bytes)
+          : std::runtime_error("resolve: the answer would hold more than "
+                               "--resolve-max-discover-memory-mb "
+                               + std::to_string(max_bytes >> 20) + " MiB (" + part
+                               + "): nothing partial is sent; ask for run_format \"rle\", a "
+                               "larger min_block_kmers, fewer labels or seeds, or a shorter "
+                               "sequence"),
+            part_(part), max_bytes_(max_bytes) {}
+    const std::string& part() const { return part_; }
+    uint64_t max_bytes() const { return max_bytes_; }
+
+  private:
+    std::string part_;
+    uint64_t max_bytes_;
+};
+
+/**
+ * What a /resolve's answer holds once its pass is over (SPEC-labeled-traversal-core.md §4.6,
+ * GPT review 7, finding 2), each part priced BEFORE it is built: the profile (its labels with
+ * their names, runs and trace breaks, at their vectors' capacities), the candidates' grouping
+ * (kCandidateRunBytes a run grouped, then what the candidates hold), the selection (its scratch,
+ * each pick and each frozen seed as it is made) and the answer's JSON tree with its text (each
+ * label, candidate and seed before it is built: traverse.cpp, profile_to_json). A charge that
+ * would pass |max_bytes| throws AnswerTooLarge, so what the answer holds stays within it
+ * (the server: --resolve-max-discover-memory-mb, the bound of the pass before it). A model of the
+ * heap from sizes and element sizes, never a measurement
+ */
+class AnswerAccount {
+  public:
+    explicit AnswerAccount(uint64_t max_bytes) : max_(max_bytes) {}
+
+    void charge(uint64_t bytes, const char *part) {
+        if (bytes > max_ - held_)
+            throw AnswerTooLarge(part, max_);
+        held_ += bytes;
+        peak_ = std::max(peak_, held_);
+    }
+    // a part of the answer's JSON: |bytes| of its tree and |text| bytes of its text, both
+    // charged, the text counted (text()) for what is priced once the tree is complete
+    void charge_text(uint64_t bytes, uint64_t text, const char *part) {
+        charge(bytes + text, part);
+        text_ += text;
+    }
+    void release(uint64_t bytes) { held_ -= std::min(bytes, held_); }
+
+    uint64_t max_bytes() const { return max_; }
+    uint64_t held() const { return held_; }
+    uint64_t peak() const { return peak_; }
+    // the answer's text bytes charged so far (charge_text)
+    uint64_t text() const { return text_; }
+
+  private:
+    uint64_t max_;
+    uint64_t held_ = 0;
+    uint64_t peak_ = 0;
+    uint64_t text_ = 0;
+};
+
+// The answer account's price of a run grouped into candidates: at most a node of the grouping's
+// map (80 B) and twice a candidate (40 B) for a run of its own, and twice a label id. (A
+// max_support selection charges its scratch as it is allocated: select_seeds)
+constexpr uint64_t kCandidateRunBytes = 80 + 2 * 40 + 2 * 4;
 
 struct ResolveOptions {
     // exactly one of |labels| (explicit) or |discover| must be set
@@ -92,14 +162,20 @@ struct ResolveOptions {
     // all or none: the first k-mer whose new labels would make more than this many is the cut
     // k-mer, and no label first met there or later is tracked (SupportProfile::labels_capped)
     size_t discover_max_tracked = 0;
-    // |discover_max_memory|: the bytes the discovery's pass may hold (0: no bound), charged
-    // before they are allocated — the rows by the budget-aware reads, the rows kept for
-    // repeats, the label index, the accumulators (kDiscover*Bytes) and the pass's arrays. The
+    // |discover_max_memory|: the bytes the pass over the rows may hold (0: no bound) — a
+    // discovery's, and the explicit labels' on the row paths (T4-L1, GPT review 7, finding 2;
+    // the direct path's hits are at most 16 a k-mer) —, charged before they are allocated:
+    // the rows by the budget-aware reads, the rows kept for repeats, the label index, the
+    // accumulators (kDiscover*Bytes), an explicit k-mer's hits and the pass's arrays. The
     // pass decodes a batch in halves, gives up the rows kept and reads the next row alone
     // before it stops: only a k-mer whose row read alone, or whose accumulation, does not fit
     // beside the accumulators of the k-mers before it ends the work there (ResolveStop::MEMORY:
     // the resolve of the query's prefix before that k-mer)
     uint64_t discover_max_memory = 0;
+    // The account of what the answer holds after the pass (AnswerAccount; null: none, the
+    // CLI): the profile and the candidates are charged to it here, before the candidates are
+    // grouped. Not a request field
+    AnswerAccount *answer = nullptr;
 };
 
 // What a discovery charges against ResolveOptions::discover_max_memory for its accumulators
@@ -107,7 +183,8 @@ struct ResolveOptions {
 // (held in deques: no relocation), and of a header label its entry in the label index (a hash
 // table of 32 B buckets, seeded, taken to double at 80% load or above: its entry, the empty
 // buckets and the table before the growth while it is moved, hopscotch_entry_bytes in
-// seeded_hash.hpp; 112 B, a table at most 90% full, was short of what random records reach);
+// seeded_hash.hpp; 112 B, a table at most 90% full, was short of what random records reach; what
+// its allocations hold beyond that model is charged as they are made, GPT review 7, finding 7);
 // per run and per trace break twice the element (a vector at most twice its size); per chain
 // coordinate beyond those held inline its heap (charged as the vector's capacity grows). A model
 // of the heap, never a measurement
@@ -193,12 +270,14 @@ constexpr size_t kResolveCheckLabels = 4096;
 // profile is that of the query's first |resolved_kmers| k-mers (SupportProfile::num_kmers),
 // out of its |query_kmers|
 struct ResolveStop {
-    // ROWS: reading the present k-mers' rows (a discovery's pass, the explicit labels'
-    // priming) or before it; SUPPORT: the explicit labels' hits, k-mer by k-mer
+    // ROWS: reading the present k-mers' rows (a discovery's pass, the explicit labels' pass on
+    // the row paths) or before it; SUPPORT: the direct path's explicit labels' hits, k-mer by
+    // k-mer
     enum Phase { ROWS, SUPPORT };
     Phase phase = ROWS;
-    // TIME: the deadline (ResolveOptions::time_up); MEMORY: a discovery's memory bound
-    // (ResolveOptions::discover_max_memory, |max_memory| bytes; always in phase ROWS)
+    // TIME: the deadline (ResolveOptions::time_up); MEMORY: the pass's memory bound, a
+    // discovery's or the explicit labels' (ResolveOptions::discover_max_memory, |max_memory|
+    // bytes; always in phase ROWS)
     enum Reason { TIME, MEMORY };
     Reason reason = TIME;
     uint64_t max_memory = 0;
@@ -237,8 +316,8 @@ struct SupportProfile {
     // The modelled memory of the work at its largest (bytes; work.memory_bytes, SPEC §4.4 and
     // §7.2.2): what the request's structures held at once — the query's k-mers and keys, the
     // decoded rows of a batch with the rows kept for later occurrences, a discovery's or the
-    // explicit labels' accumulators, the explicit labels' primed hits and their fetch, and
-    // the profile — each priced from its sizes and element sizes (profile_bytes,
+    // explicit labels' accumulators, the largest explicit k-mer's hits (the direct path: its
+    // hits fetched, at once without a deadline), and the profile — each priced from its sizes and element sizes (profile_bytes,
     // selection_bytes), never from the allocator: it depends only on the index and the request
     // (and under a deadline on where the work stopped)
     uint64_t memory_peak = 0;
@@ -320,6 +399,31 @@ struct SeedSelection {
 // and label names
 uint64_t profile_bytes(const SupportProfile &profile);
 uint64_t selection_bytes(const SeedSelection &selection);
+// What a profile holds and what its candidates hold, as the answer account prices them
+// (AnswerAccount): their vectors at their capacities, names at their strings' capacities
+uint64_t profile_held_bytes(const SupportProfile &profile);
+uint64_t candidates_held_bytes(const SupportProfile &profile);
+
+// The setup of resolve_support's pass over the rows (SPEC-labeled-traversal-core.md §4.6, the
+// tables' charge): the next occurrence of each of |keys| after it (|*next_use|, SIZE_MAX: none),
+// charged to |budget| with the transient table of the keys' last occurrences that finds them
+// (seeded; its model, 90 B a key, and its allocations beyond the model as they are made, a growth
+// that does not fit refused before it is allocated). false: it did not fit, nothing held and
+// |*next_use| empty; true: |budget| holds |*next_use|'s buffer, the caller's to release, and the
+// table's charge was released with the table
+bool next_key_uses(const std::vector<node_index> &keys, annot::matrix::DecodeBudget &budget,
+                   std::vector<size_t> *next_use);
+
+// The seed candidates of |profile| (SupportProfile::candidates, resolve_support's last step):
+// its labels' runs of at least |min_block_kmers| k-mers, identical runs grouped with their
+// labels in ascending order, longest first, then by most labels, then by begin. |answer| (null:
+// none): the grouping charged before it is built (kCandidateRunBytes a run grouped), then
+// replaced by what the candidates hold (part "candidates"); the candidates are reserved, so
+// that no growth holds an old and a new buffer beside the grouping's map. |finishing| (unset:
+// none) is called with each label's index before its runs are grouped
+void group_candidates(SupportProfile *profile, uint64_t min_block_kmers,
+                      AnswerAccount *answer = nullptr,
+                      const std::function<void(size_t)> &finishing = {});
 
 // The order select_seeds lists the seeds in, as the capabilities state it (the `resolve`
 // block's seed_order, the multigraph block's resolve_seed_order; SPEC-labeled-traversal-core.md
@@ -329,15 +433,26 @@ uint64_t selection_bytes(const SeedSelection &selection);
 constexpr char kSeedOrder[] = "rank";
 
 // |check| (unset: none): the answer's deadline (ResolveOptions::finish_check), read every
-// kResolveCheckLabels steps of the selection -- an explicit seed and each of its labels, a run a
-// max_support round sweeps, a merged pick, a frozen seed and each of its labels, a pair of seeds
+// kResolveCheckLabels steps of the selection -- an explicit seed and each of its labels; a label
+// (with its runs) gathered for max_support and the runs before their sort; in a max_support
+// round a run clipped and each pick it meets, a candidate start swept, the round's runs once
+// before each of its sorts, a label (with its runs) checked for the winner; a merged
+// pick and the labels checked for it; a frozen seed and each of its labels, a pair of seeds
 // compared for overlaps -- and throwing to abandon it (GPT review 7, finding 1: the selection
-// was read only once it was done, after every overlapping pair was listed)
+// was read only once it was done, after every overlapping pair was listed; T4-L1: once per
+// max_support round, whose clip of every run by every pick was O(runs x picks))
+//
+// |answer| (null: none): the answer account (AnswerAccount), charged with the selection's
+// scratch before it is allocated (a max_support selection's gathered runs, twice; the round's
+// vector of clipped pieces each time it grows past them; a round's candidate starts, run ends
+// and Fenwick counts for its pieces, released with them), each pick before it is made and each frozen seed before it is built (its sequence, names, the
+// label order's copy of them, its overlaps), a selection passing it throwing AnswerTooLarge
 SeedSelection select_seeds(const SupportProfile &profile,
                            std::string_view query,
                            const SelectionPolicy &policy,
                            bool canonical_orientation,
-                           const std::function<void()> &check = {});
+                           const std::function<void()> &check = {},
+                           AnswerAccount *answer = nullptr);
 
 // What select_seeds refuses of an explicit selection that |query|'s length, k, |options|' labels
 // and |policy| decide alone: a seed's kmer_interval empty or out of range, a seed's label that

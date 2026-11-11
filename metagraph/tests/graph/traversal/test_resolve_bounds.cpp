@@ -5,9 +5,11 @@
 #include <functional>
 #include <filesystem>
 #include <fstream>
+#include <iostream>
 #include <iterator>
 #include <limits>
 #include <map>
+#include <optional>
 #include <random>
 #include <string>
 #include <tuple>
@@ -20,6 +22,7 @@
 #include "tests/annotation/test_annotated_dbg_helpers.hpp"
 
 #include "graph/traversal/resolve.hpp"
+#include "graph/traversal/charged_table.hpp"
 #include "graph/traversal/kept_rows.hpp"
 #include "graph/traversal/seeded_hash.hpp"
 #include "graph/annotated_dbg.hpp"
@@ -28,6 +31,16 @@
 #include "annotation/representation/annotation_matrix/static_annotators_def.hpp"
 #include "cli/traverse.hpp"
 #include "common/utils/file_utils.hpp"
+
+#if defined(__APPLE__)
+#include <malloc/malloc.h>
+#elif defined(__GLIBC__)
+#include <malloc.h>
+#endif
+
+#if USE_JEMALLOC
+extern "C" int mallctl(const char *name, void *oldp, size_t *oldlenp, void *newp, size_t newlen);
+#endif
 
 
 // The bounds of a /resolve discovery (SPEC-labeled-traversal-core.md §4.6, GPT review 5 #3):
@@ -1078,6 +1091,225 @@ TEST(ResolveBounds, ChosenNodeIndicesDoNotGrowTheTablesPastTheirCharge) {
     kept.drop();
 }
 
+// ---- the tables' account (TableAccount, charged_table.hpp; SPEC §4.6; GPT review 7, finding 7)
+
+// The setup of the pass over the rows (next_key_uses; T4 review R1, N8): the next occurrence of
+// each key, found by a table of the keys' last occurrences charged at its model (90 B a key) and,
+// beyond it, as it is allocated. A budget of exactly what the setup held at its peak gives each
+// key's next use and leaves its buffer held; one byte less refuses it before anything is held. A
+// small table's allocations pass its model (tsl's tail of 61 buckets), so the refusal there is
+// the account's, not the model's; and jemalloc's peak is within the charged one
+TEST(ResolveBounds, TheSetupTableIsChargedAsAllocated) {
+    using annot::matrix::DecodeBudget;
+    using annot::matrix::buffer_bytes;
+    std::mt19937_64 rng(11);
+    for (size_t n : { size_t(1), size_t(10), size_t(1000), size_t(100'000) }) {
+        std::vector<node_index> keys;
+        for (size_t i = 0; i < n; ++i) {
+            keys.push_back(rng() % (n / 2 + 1) + 1);
+        }
+        std::vector<size_t> expected(n, std::numeric_limits<size_t>::max());
+        std::map<node_index, size_t> last;
+        for (size_t j = n; j-- > 0; ) {
+            if (last.count(keys[j]))
+                expected[j] = last[keys[j]];
+            last[keys[j]] = j;
+        }
+        const uint64_t next_use_bytes = buffer_bytes(n, sizeof(size_t));
+        DecodeBudget unbounded;
+        std::vector<size_t> next_use;
+#if USE_JEMALLOC
+        size_t sz = sizeof(uint64_t);
+        const bool peaks = !mallctl("thread.peak.reset", nullptr, nullptr, nullptr, 0);
+#endif
+        ASSERT_TRUE(next_key_uses(keys, unbounded, &next_use)) << n;
+#if USE_JEMALLOC
+        uint64_t heap_peak = 0;
+        if (peaks && !mallctl("thread.peak.read", &heap_peak, &sz, nullptr, 0) && heap_peak) {
+            EXPECT_LE(heap_peak, unbounded.peak()) << n;
+        }
+#endif
+        EXPECT_EQ(expected, next_use) << n;
+        // the next uses' buffer held for the pass, the table's charge released with it
+        EXPECT_EQ(next_use_bytes, unbounded.held()) << n;
+        const uint64_t peak = unbounded.peak();
+        EXPECT_GE(peak, next_use_bytes + n * 90) << n;
+        if (n <= 10) {
+            // tsl's tail: the account, not the model, decides
+            EXPECT_GT(peak, next_use_bytes + n * 90) << n;
+        }
+        DecodeBudget exact(peak);
+        std::vector<size_t> again;
+        ASSERT_TRUE(next_key_uses(keys, exact, &again)) << n;
+        EXPECT_EQ(expected, again) << n;
+        EXPECT_EQ(next_use_bytes, exact.held()) << n;
+        DecodeBudget short_one(peak - 1);
+        std::vector<size_t> none;
+        EXPECT_FALSE(next_key_uses(keys, short_one, &none)) << n;
+        EXPECT_TRUE(none.empty()) << n;
+        EXPECT_EQ(0u, short_one.held()) << n;
+    }
+}
+
+// A hash whose seed is known (0): keys can be chosen for it by inverting mix64 (V7-B's crafting)
+struct KnownSeedHash {
+    size_t operator()(uint64_t key) const { return static_cast<size_t>(mix64(key)); }
+};
+
+uint64_t inverse_odd(uint64_t a) {
+    uint64_t x = a;
+    for (int i = 0; i < 6; ++i) {
+        x *= 2 - a * x;
+    }
+    return x;
+}
+
+// the key KnownSeedHash maps to |h|
+uint64_t unmix64(uint64_t h) {
+    static const uint64_t i1 = inverse_odd(0xFF51AFD7ED558CCDULL);
+    static const uint64_t i2 = inverse_odd(0xC4CEB9FE1A85EC53ULL);
+    h ^= h >> 33;
+    h *= i2;
+    h ^= h >> 33;
+    h *= i1;
+    h ^= h >> 33;
+    return h;
+}
+
+// Keys chosen for a known seed (V7-B): random keys to just past 10% of the buckets, then groups
+// of 63 whose hashes agree modulo the bucket count but differ in its next bit, so that tsl grows
+// the table on a full neighbourhood at a tenth of its load. |insert(key)| false ends the stream
+template <class Insert, class Buckets>
+void chosen_keys(size_t max_buckets, uint64_t seed, const Buckets &buckets, const Insert &insert) {
+    std::mt19937_64 rng(seed);
+    uint64_t group = 0;
+    while (buckets() < max_buckets) {
+        const size_t n = std::max<size_t>(buckets(), 1);
+        for (size_t i = 0; i < n / 10 + 2; ++i) {
+            if (!insert(rng()))
+                return;
+        }
+        const uint64_t low = rng() & (n - 1);
+        const size_t before = buckets();
+        for (uint64_t i = 0; i < 63 && buckets() == before; ++i) {
+            if (!insert(unmix64(low | ((i & 1) * n) | ((++group) << 40))))
+                return;
+        }
+    }
+}
+
+// The kept rows' table is charged as allocated beyond its model, whatever the keys: keys chosen
+// for the hash's seed double it at a tenth of its load, its buckets passing the model's
+// kEntryBytes an entry several times (V7-B: up to 8 times at a growth), and the budget holds
+// them all the same — at every step at least the table's buckets (with tsl's tail of 61) and its
+// overflow nodes, at every growth the old and the new buckets at once. Under a bound a growth
+// that does not fit is refused before it is made: the row is not kept (it stays with the
+// caller) and the budget never passes the bound. Before, the model alone was charged
+TEST(ResolveBounds, ChosenKeysCannotGrowTheKeptRowsPastTheirAccount) {
+    using annot::matrix::DecodeBudget;
+    using annot::matrix::alloc_bytes;
+    using Row = annot::matrix::BinaryMatrix::SetBitPositions;
+    using Kept = KeptRows<Row, uint64_t, KnownSeedHash>;
+    namespace hop = tsl::detail_hopscotch_hash;
+    constexpr uint64_t kBucket = sizeof(hop::hopscotch_bucket<Kept::Table::value_type, 62, false>);
+    auto table_bytes = [&](size_t buckets, size_t overflow) {
+        return (buckets ? alloc_bytes((buckets + 61) * kBucket) : 0)
+             + overflow * alloc_bytes(sizeof(Kept::Table::value_type) + 2 * sizeof(void*));
+    };
+    DecodeBudget budget;
+    double most_over_model = 0;
+    {
+        Kept kept(budget);
+        chosen_keys(1 << 16, 7, [&]() { return kept.bucket_count(); }, [&](uint64_t key) {
+            const size_t before = kept.bucket_count();
+            if (kept.contains(key))
+                return true;
+            Row row { 7 };
+            EXPECT_TRUE(kept.keep(key, row, 8, 0));
+            const uint64_t held = table_bytes(kept.bucket_count(), kept.overflow_size());
+            EXPECT_GE(budget.held(), held) << kept.size();
+            EXPECT_EQ(held, kept.account().held()) << kept.size();
+            if (kept.bucket_count() != before && before) {
+                // the growth: the old buckets and the new ones held at once
+                EXPECT_GE(budget.peak(), table_bytes(before, 0)
+                                         + table_bytes(kept.bucket_count(), 0)) << kept.size();
+                most_over_model = std::max(most_over_model,
+                        double(table_bytes(before, 0) + table_bytes(kept.bucket_count(), 0))
+                            / (kept.size() * Kept::kEntryBytes));
+            }
+            return true;
+        });
+        EXPECT_GE(kept.bucket_count(), size_t(1) << 16);
+        kept.drop();
+        EXPECT_EQ(0u, budget.held());
+    }
+    // the model alone was passed several times over
+    EXPECT_GT(most_over_model, 3.0);
+
+    // under a bound: a growth that does not fit is refused before it is made
+    for (uint64_t bound : { uint64_t(4) << 10, uint64_t(64) << 10, uint64_t(1) << 20 }) {
+        DecodeBudget small(bound);
+        Kept kept(small);
+        size_t refused = 0;
+        chosen_keys(1 << 20, 11, [&]() { return kept.bucket_count(); }, [&](uint64_t key) {
+            if (kept.contains(key))
+                return true;
+            Row row { 7 };
+            const size_t size = kept.size(), buckets = kept.bucket_count();
+            if (!kept.keep(key, row, 8, 0)) {
+                // nothing kept, the table as it was, the row still the caller's
+                EXPECT_EQ(size, kept.size());
+                EXPECT_EQ(buckets, kept.bucket_count());
+                EXPECT_EQ(Row { 7 }, row);
+                return ++refused < 3;
+            }
+            EXPECT_LE(small.held(), bound);
+            EXPECT_GE(small.held(), table_bytes(kept.bucket_count(), kept.overflow_size()));
+            return true;
+        });
+        EXPECT_GT(refused, 0u) << bound;
+        EXPECT_LE(small.peak(), bound) << bound;
+    }
+    // the smallest bound an entry's model fits in: its table's first buckets (63) do not
+    DecodeBudget one(Kept::kEntryBytes);
+    Kept first(one);
+    Row row { 1 };
+    EXPECT_FALSE(first.keep(1, row, 8, 0));
+    EXPECT_EQ(0u, first.size());
+    EXPECT_EQ(Kept::kEntryBytes, one.held());
+}
+
+// A table whose growth cannot be refused where it happens (the record index, inside a k-mer's
+// accumulation) is charged as allocated past the budget's maximum; the budget then refuses
+// every charge, so the next check stops, and freeing the table releases it all
+TEST(ResolveBounds, AnUnrefusedGrowthIsChargedPastTheMaximum) {
+    using annot::matrix::DecodeBudget;
+    using Table = tsl::hopscotch_map<uint64_t, uint64_t, KnownSeedHash, std::equal_to<uint64_t>,
+                                     ChargedAllocator<std::pair<uint64_t, uint64_t>>>;
+    DecodeBudget budget(64 << 10);
+    {
+        TableAccount account(budget, /* refuse */ false);
+        Table table(0, KnownSeedHash(), std::equal_to<uint64_t>(),
+                    ChargedAllocator<std::pair<uint64_t, uint64_t>>(&account));
+        uint64_t key = 0;
+        while (budget.held() <= budget.max_bytes()) {
+            table.emplace(key++, 0);
+        }
+        EXPECT_GT(budget.held(), budget.max_bytes());
+        EXPECT_EQ(account.held(), budget.held());
+        EXPECT_FALSE(budget.charge(1));
+        // the model covering the entries: what passed it is released, the rest held
+        account.cover_beyond(table.size() * hopscotch_entry_bytes(sizeof(Table::value_type)));
+        EXPECT_EQ(account.charged(), budget.held());
+        EXPECT_EQ(std::max(account.held(), account.covered()), account.charged());
+        Table(0, KnownSeedHash(), std::equal_to<uint64_t>(),
+              ChargedAllocator<std::pair<uint64_t, uint64_t>>(&account)).swap(table);
+        EXPECT_EQ(0u, account.held());
+    }
+    EXPECT_EQ(0u, budget.held());
+    EXPECT_TRUE(budget.charge(1));
+}
+
 // ---- the cap on a request's explicit label lists (--resolve-max-explicit-labels, SPEC §4.1)
 
 std::string refusal_of(const Json::Value &request, uint64_t cap) {
@@ -1527,7 +1759,10 @@ TEST(ResolveBounds, TheSelectionReadsTheDeadline) {
     }), Late);
     EXPECT_EQ(3u, calls);
 
-    // each max_support round sweeps every run (here 5,000 runs of one label: every round reads it)
+    // each max_support round sweeps every run (here 5,000 runs of one label), and reads the
+    // deadline inside it: a step a run clipped, a candidate start swept (about 10,000), the runs
+    // before each of its sorts, a label and its runs for the winner -- about 25,000 steps, six
+    // readings a round
     LabelProfile gapped;
     gapped.label.kind = LabelKind::COLUMN;
     gapped.label.name = "G";
@@ -1543,12 +1778,197 @@ TEST(ResolveBounds, TheSelectionReadsTheDeadline) {
     calls = 0;
     const SeedSelection swept = select_seeds(profile, query, rounds, false, [&]() { ++calls; });
     EXPECT_EQ(5u, swept.seeds.size());
-    EXPECT_EQ(5u, calls);
+    EXPECT_GE(calls, 5u * 5);
+    EXPECT_LE(calls, 5u * 7);
     calls = 0;
     EXPECT_THROW(select_seeds(profile, query, rounds, false, [&]() {
         if (++calls == 1)
             throw Late();
     }), Late);
+}
+
+// The max_support selection of the base (6872dd1fd), verbatim but for the deadline: each round
+// clips every run by every pick so far, then sweeps the candidate starts (the reference of
+// TheMaxSupportClipIsTheBases)
+std::vector<std::pair<KmerInterval, std::vector<LabelId>>>
+base_max_support(const SupportProfile &profile, size_t max_seeds, uint64_t min_kmers) {
+    struct Run { uint64_t begin, end; };
+    std::vector<Run> runs;
+    for (const auto &lp : profile.labels) {
+        for (const auto &run : lp.runs) {
+            if (run.size() >= min_kmers)
+                runs.push_back({ run.begin, run.end });
+        }
+    }
+    std::sort(runs.begin(), runs.end(), [](const Run &a, const Run &b) { return a.begin < b.begin; });
+    const std::vector<Run> all_runs = runs;
+    std::vector<KmerInterval> taken;
+    std::vector<std::pair<KmerInterval, std::vector<LabelId>>> picked;
+    while (picked.size() < max_seeds) {
+        runs.clear();
+        for (const Run &run : all_runs) {
+            uint64_t begin = run.begin;
+            for (const auto &t : taken) {
+                if (t.end <= begin || t.begin >= run.end)
+                    continue;
+                if (t.begin > begin && t.begin - begin >= min_kmers)
+                    runs.push_back({ begin, t.begin });
+                begin = std::max(begin, t.end);
+            }
+            if (begin < run.end && run.end - begin >= min_kmers)
+                runs.push_back({ begin, run.end });
+        }
+        if (runs.empty())
+            break;
+        // the best interval by brute force over the candidate starts and every end: the most
+        // runs containing it, then longer, then the smaller start
+        std::vector<uint64_t> starts;
+        for (const Run &run : runs) {
+            starts.push_back(run.begin);
+            if (run.end >= min_kmers)
+                starts.push_back(run.end - min_kmers);
+        }
+        std::sort(starts.begin(), starts.end());
+        starts.erase(std::unique(starts.begin(), starts.end()), starts.end());
+        std::optional<KmerInterval> best;
+        size_t best_count = 0;
+        for (uint64_t a : starts) {
+            if (a + min_kmers > profile.num_kmers)
+                break;
+            size_t count = 0;
+            uint64_t b = std::numeric_limits<uint64_t>::max();
+            for (const Run &run : runs) {
+                if (run.begin <= a && run.end >= a + min_kmers) {
+                    ++count;
+                    b = std::min(b, run.end);
+                }
+            }
+            if (!count)
+                continue;
+            const KmerInterval iv { a, b };
+            if (!best || count > best_count
+                    || (count == best_count && (iv.size() > best->size()
+                            || (iv.size() == best->size() && iv.begin < best->begin)))) {
+                best = iv;
+                best_count = count;
+            }
+        }
+        if (!best)
+            break;
+        std::vector<LabelId> labels;
+        for (LabelId l = 0; l < profile.labels.size(); ++l) {
+            for (const auto &run : profile.labels[l].runs) {
+                if (run.begin <= best->begin && run.end >= best->end) {
+                    labels.push_back(l);
+                    break;
+                }
+            }
+        }
+        taken.push_back(*best);
+        std::sort(taken.begin(), taken.end());
+        picked.emplace_back(*best, std::move(labels));
+    }
+    return picked;
+}
+
+// A random profile: |labels| labels, each with runs of 1 to |longest| k-mers separated by gaps
+// of 1 to |gap| k-mers, over |num_kmers| k-mers
+SupportProfile random_runs_profile(size_t labels, uint64_t num_kmers, uint64_t longest,
+                                   uint64_t gap, uint32_t seed) {
+    std::mt19937 gen(seed);
+    SupportProfile profile;
+    profile.k = kK;
+    profile.num_kmers = num_kmers;
+    profile.graph_runs = { { 0, num_kmers } };
+    for (size_t l = 0; l < labels; ++l) {
+        LabelProfile lp;
+        lp.label.kind = LabelKind::COLUMN;
+        lp.label.name = "L" + std::to_string(l);
+        uint64_t at = gen() % (gap + 1);
+        while (at < num_kmers) {
+            const uint64_t end = std::min(num_kmers, at + 1 + gen() % longest);
+            lp.runs.push_back({ at, end });
+            lp.kmers_supported += end - at;
+            at = end + 1 + gen() % gap;
+        }
+        profile.labels.push_back(std::move(lp));
+    }
+    return profile;
+}
+
+// The clip by a binary search into the picks (T4-L1) picks what the base's scan of every pick
+// picked: the same intervals with the same labels, on random profiles of many labels and runs
+TEST(ResolveBounds, TheMaxSupportClipIsTheBases) {
+    size_t compared = 0;
+    for (uint32_t seed = 0; seed < 30; ++seed) {
+        const uint64_t num_kmers = 40 + seed * 3;
+        const SupportProfile profile = random_runs_profile(1 + seed % 6, num_kmers,
+                                                           1 + seed % 13, 1 + seed % 5, seed);
+        const std::string query(num_kmers + kK - 1, 'A');
+        for (uint64_t min_bp : { kK, kK + 3, kK + 20 }) {
+            SelectionPolicy policy;
+            policy.policy = SelectionPolicy::MAX_SUPPORT;
+            policy.max_seeds = 1000;
+            policy.min_block_bp = min_bp;
+            const SeedSelection got = select_seeds(profile, query, policy, false);
+            const auto expected = base_max_support(profile, 1000, min_bp - kK + 1);
+            ASSERT_EQ(expected.size(), got.seeds.size()) << seed << " " << min_bp;
+            for (size_t i = 0; i < expected.size(); ++i) {
+                EXPECT_EQ(expected[i].first, got.seeds[i].kmers) << seed << " " << i;
+                std::vector<std::string> names;
+                for (LabelId l : expected[i].second) {
+                    names.push_back(profile.labels[l].label.name);
+                }
+                std::sort(names.begin(), names.end());
+                EXPECT_EQ(names, got.seeds[i].labels) << seed << " " << i;
+            }
+            compared += expected.size();
+        }
+    }
+    EXPECT_GT(compared, 500u);
+}
+
+// A tiny time budget stops a max_support selection of many runs inside its first round (V7-A:
+// the rounds are at most --resolve-max-explicit-seeds, but a round sweeps every run): the
+// deadline is read about once every kResolveCheckLabels runs swept, so a deadline passing at the
+// first reading inside the first round ends it within a few thousand steps, a small part of the
+// round; before, it was read once a round, after every run was clipped by every pick and swept
+TEST(ResolveBounds, AManyRunMaxSupportSelectionStopsInTime) {
+    // 400 labels of about 2,500 runs each: about a million runs
+    const SupportProfile profile = random_runs_profile(400, 10000, 2, 2, 2024);
+    size_t num_runs = 0;
+    for (const LabelProfile &lp : profile.labels) {
+        num_runs += lp.runs.size();
+    }
+    ASSERT_GT(num_runs, 800'000u);
+    const std::string query(profile.num_kmers + kK - 1, 'A');
+    SelectionPolicy policy;
+    policy.policy = SelectionPolicy::MAX_SUPPORT;
+    policy.min_block_bp = kK;
+    auto run = [&](size_t max_seeds, const std::function<void()> &check) {
+        policy.max_seeds = max_seeds;
+        try {
+            select_seeds(profile, query, policy, false, check);
+        } catch (...) {}
+    };
+    // no round: the runs gathered and sorted, read before the sort; three rounds, every reading
+    // counted: at least one per kResolveCheckLabels runs clipped in each round
+    size_t calls = 0;
+    run(0, [&]() { ++calls; });
+    const size_t before_rounds = calls;
+    calls = 0;
+    run(3, [&]() { ++calls; });
+    EXPECT_GE(calls, before_rounds + 3 * num_runs / kResolveCheckLabels);
+    // the deadline passes at the first reading inside the first round: stopped there, a small
+    // part of the round (before, the next reading came after the whole round). Counted, not
+    // timed (T4 review R1, N9: wall times of separate runs are load-sensitive)
+    struct Late {};
+    calls = 0;
+    run(1024, [&]() {
+        if (++calls == before_rounds + 1)
+            throw Late();
+    });
+    EXPECT_EQ(before_rounds + 1, calls);
 }
 
 // The route (process_resolve_request): under bounds.time_budget_ms the selection of as many
@@ -1616,6 +2036,557 @@ TEST(ResolveBoundsRoute, Sample38) {
     EXPECT_EQ("seeds: " + doc["body"]["error"].asString(),
               seeds_refusal_of(doc["request"], 10'000, cap));
     EXPECT_EQ("", seeds_refusal_of(doc["request"], 10'000, cap + 1));
+}
+
+// Sample 39 (SPEC-labeled-traversal-core.md §4.6, SPEC-multigraph-envelope.md §5; T4 review R1, S1), a
+// real run: an answer priced past --resolve-max-discover-memory-mb (1 on the recording server) on a
+// multi-graph server, that pair a refused entry of a 200 envelope with the route's own refusal body
+// and status, the other pair answered; the note states the single-graph server's 400 text, error first
+TEST(ResolveBoundsRoute, Sample39) {
+    const std::string path
+            = source_path("tests/data/multigraph_contract/39_resolve_answer_too_large.json");
+    std::ifstream in(path, std::ios::binary);
+    ASSERT_TRUE(in.good()) << path << " not found";
+    Json::Value doc;
+    std::string errors;
+    Json::CharReaderBuilder builder;
+    ASSERT_TRUE(Json::parseFromStream(builder, in, &doc, &errors)) << errors;
+    EXPECT_EQ(200, doc["status"].asInt());
+    const Json::Value &body = doc["body"];
+    EXPECT_EQ(1u, body["answered"].asUInt64());
+    EXPECT_EQ(1u, body["refused"].asUInt64());
+    EXPECT_EQ(doc["request"]["request_id"], body["request_id"]);
+    ASSERT_EQ(2u, body["answers"].size());
+    const Json::Value &entry = body["answers"][0];
+    EXPECT_EQ("refused", entry["outcome"].asString());
+    Json::Value refusal = entry["refusal"];
+    EXPECT_EQ((std::vector<std::string>{ "code", "error", "http_status", "max_memory_mb" }),
+              refusal.getMemberNames());
+    EXPECT_EQ(400, refusal["http_status"].asInt());
+    refusal.removeMember("http_status");
+    const uint64_t mb = refusal["max_memory_mb"].asUInt64();
+    EXPECT_EQ(1u, mb);
+    // the route's body for an answer that passed the bound at its part "answer"
+    const Json::Value route = cli::resolve_answer_too_large_json(AnswerTooLarge("answer", mb << 20));
+    EXPECT_EQ(compact(route), compact(refusal));
+    const std::string text = cli::error_first_json_text(route);
+    EXPECT_EQ(0u, text.rfind("{\"error\":", 0)) << text;
+    EXPECT_NE(std::string::npos, doc["note"].asString().find(text)) << text;
+    EXPECT_EQ("answered", body["answers"][1]["outcome"].asString());
+    EXPECT_EQ(0u, body["answers"][1]["labels"].size());
+}
+
+// ---- the explicit labels' pass and the answer account (T4-L1, GPT review 7, finding 2)
+
+// the names a discovery of every label of |c|'s kind finds on |r|'s query: the explicit labels
+std::vector<std::string> all_labels(LabelOracle &oracle, const std::string &q, const Case &c) {
+    ResolveOptions opts = discovery(c, kAll);
+    return names_of(resolve_support(oracle, q, opts));
+}
+
+ResolveOptions explicit_labels(const Case &c, const std::vector<std::string> &labels) {
+    ResolveOptions opts;
+    opts.labels = labels;
+    opts.support = c.support;
+    return opts;
+}
+
+// The explicit labels' pass on the row paths is a discovery's (for_each_row, charged to the
+// memory bound): under a bound that binds it stops at a k-mer, the answer exactly the resolve of
+// the query's prefix before it (reason memory, phase rows), the k-mer never moving back as the
+// bound grows; without a stop the profile is the unbounded one. Before, the explicit labels' rows
+// and hits were outside any account and never stopped
+TYPED_TEST(ResolveBoundsTest, ExplicitLabelsStopAtAPrefix) {
+    using Graph = typename TypeParam::first_type;
+    using Annotation = typename TypeParam::second_type;
+    const Records r = make_records<Graph, Annotation>(40, 5, 1919);
+    LabelOracle oracle(*r.anno, r.cth.get());
+    size_t stops = 0, cannot = 0;
+    for (const Case &c : kCases) {
+        const std::vector<std::string> labels = all_labels(oracle, r.q, c);
+        ASSERT_GT(labels.size(), 16u) << c.name() << ": not the row paths";
+        for (size_t rows : { size_t(7), kResolveBatchRows }) {
+            ResolveOptions opts = explicit_labels(c, labels);
+            opts.batch_rows = rows;
+            const SupportProfile plain = resolve_support(oracle, r.q, opts);
+            ASSERT_FALSE(plain.stop);
+            uint64_t last = 0;
+            bool ended = false;
+            for (uint64_t bound = 1024; !ended && bound < (uint64_t(64) << 20);
+                    bound += bound < 65536 ? 1024 : bound / 8) {
+                const std::string what = c.name() + " rows " + std::to_string(rows) + " bound "
+                        + std::to_string(bound);
+                ResolveOptions bounded = opts;
+                bounded.discover_max_memory = bound;
+                const SupportProfile got = resolve_support(oracle, r.q, bounded);
+                if (!got.stop) {
+                    expect_same_profile(plain, got, what);
+                    ended = true;
+                    break;
+                }
+                ++stops;
+                EXPECT_EQ(ResolveStop::MEMORY, got.stop->reason) << what;
+                EXPECT_EQ(ResolveStop::ROWS, got.stop->phase) << what;
+                EXPECT_EQ(bound, got.stop->max_memory) << what;
+                const uint64_t x = got.stop->resolved_kmers;
+                EXPECT_EQ(x, got.num_kmers) << what;
+                EXPECT_GE(x, last) << what;
+                last = x;
+                // every explicit label is profiled, the prefix's support
+                ASSERT_EQ(labels.size(), got.labels.size()) << what;
+                const uint64_t first = got.stop->query_graph_runs.front().begin;
+                EXPECT_EQ(x == first, got.stop->cannot_progress) << what;
+                cannot += got.stop->cannot_progress;
+                if (x == 0)
+                    continue;
+                const SupportProfile prefix
+                        = resolve_support(oracle, r.q.substr(0, x + kK - 1), opts);
+                expect_same_profile(prefix, got, what);
+            }
+            EXPECT_TRUE(ended) << c.name();
+        }
+    }
+    EXPECT_GT(stops, 50u);
+    EXPECT_GT(cannot, 0u);
+}
+
+// The explicit labels' pass holds one k-mer's hits at a time: under a deadline that never passes
+// and without one, and whatever the batches and the rows kept, the profile is the same; the
+// smallest bound that answers the whole query answers it as without a bound
+TYPED_TEST(ResolveBoundsTest, ExplicitLabelsHoldOneKmersHits) {
+    using Graph = typename TypeParam::first_type;
+    using Annotation = typename TypeParam::second_type;
+    const Records r = make_records<Graph, Annotation>(40, 5, 2020);
+    LabelOracle oracle(*r.anno, r.cth.get());
+    for (const Case &c : kCases) {
+        const std::vector<std::string> labels = all_labels(oracle, r.q, c);
+        const SupportProfile plain = resolve_support(oracle, r.q, explicit_labels(c, labels));
+        for (size_t rows : { size_t(1), size_t(3), size_t(64) }) {
+            for (uint64_t kept : { uint64_t(0), kResolveKeptBytes }) {
+                ResolveOptions opts = explicit_labels(c, labels);
+                opts.batch_rows = rows;
+                opts.kept_bytes = kept;
+                opts.time_up = []() { return false; };
+                const std::string what = c.name() + " rows " + std::to_string(rows);
+                expect_same_profile(plain, resolve_support(oracle, r.q, opts), what);
+            }
+        }
+        // the smallest bound that answers the whole query, bisected: above it every bound does
+        uint64_t lo = 1, hi = uint64_t(64) << 20;
+        while (lo + 1 < hi) {
+            ResolveOptions opts = explicit_labels(c, labels);
+            opts.discover_max_memory = (lo + hi) / 2;
+            (resolve_support(oracle, r.q, opts).stop ? lo : hi) = opts.discover_max_memory;
+        }
+        ResolveOptions opts = explicit_labels(c, labels);
+        opts.discover_max_memory = hi;
+        const SupportProfile got = resolve_support(oracle, r.q, opts);
+        ASSERT_FALSE(got.stop) << c.name();
+        expect_same_profile(plain, got, c.name());
+    }
+}
+
+// The answer's JSON is priced before each part is built (profile_to_json's answer account): an
+// account smaller than the price refuses it at that part (AnswerTooLarge), a larger one answers
+// it byte for byte as without an account, and the price covers what jsoncpp's tree and its text
+// hold (the allocator's live bytes, where they can be read)
+std::optional<int64_t> live_heap_bytes() {
+#if USE_JEMALLOC
+    uint64_t allocated = 0, deallocated = 0;
+    size_t sz = sizeof(uint64_t);
+    if (!mallctl("thread.allocated", &allocated, &sz, nullptr, 0)
+            && !mallctl("thread.deallocated", &deallocated, &sz, nullptr, 0)
+            && (allocated || deallocated)) {
+        return int64_t(allocated) - int64_t(deallocated);
+    }
+#endif
+#if defined(__APPLE__)
+    malloc_statistics_t stats;
+    malloc_zone_statistics(nullptr, &stats);
+    return int64_t(stats.size_in_use);
+#elif defined(__GLIBC__) && (__GLIBC__ > 2 || (__GLIBC__ == 2 && __GLIBC_MINOR__ >= 33))
+    return int64_t(mallinfo2().uordblks);
+#else
+    return std::nullopt;
+#endif
+}
+
+// A profile of |labels| labels of |runs| runs each (names of |name_bytes| bytes), its candidates
+// (a run of its own per label and one interval all share) and a selection of |seeds| seeds
+// naming every label, each overlapping the others
+std::pair<SupportProfile, SeedSelection> priced_profile(size_t labels, size_t runs,
+                                                        size_t name_bytes, size_t seeds,
+                                                        bool trace) {
+    SupportProfile p;
+    p.k = 31;
+    p.num_kmers = 3 * runs + 2000;
+    p.support = trace ? Support::TRACE : Support::KMER;
+    p.graph_runs = { { 0, p.num_kmers } };
+    for (size_t l = 0; l < labels; ++l) {
+        LabelProfile lp;
+        lp.label.kind = LabelKind::HEADER;
+        lp.label.name = std::string(name_bytes, 'a' + l % 26) + std::to_string(l);
+        for (size_t i = 0; i < runs; ++i) {
+            lp.runs.push_back({ 3 * i + l % 2, 3 * i + 2 });
+            if (trace)
+                lp.trace_breaks.push_back(3 * i + 1);
+        }
+        lp.runs.push_back({ 3 * runs + 7, 3 * runs + 1000 });
+        lp.kmers_supported = 2 * runs + 993;
+        p.labels.push_back(std::move(lp));
+    }
+    std::map<KmerInterval, std::vector<LabelId>> groups;
+    for (LabelId l = 0; l < labels; ++l) {
+        for (const auto &run : p.labels[l].runs) {
+            groups[run].push_back(l);
+        }
+    }
+    for (auto &[iv, ls] : groups) {
+        p.candidates.push_back({ iv, ls });
+    }
+    SeedSelection sel;
+    for (size_t i = 0; i < seeds; ++i) {
+        FrozenSeed seed;
+        seed.seed_id = "0123456789abcdef";
+        seed.sequence = std::string(1000, 'A');
+        seed.kmers = { 3 * runs + 7, 3 * runs + 977 };
+        for (const LabelProfile &lp : p.labels) {
+            seed.labels.push_back(lp.label.name);
+        }
+        seed.population.supporting_total = labels;
+        seed.population.included = labels;
+        for (size_t j = 0; j < seeds; ++j) {
+            if (j != i)
+                seed.overlaps_with.push_back(j);
+        }
+        sel.seeds.push_back(std::move(seed));
+    }
+    return { std::move(p), std::move(sel) };
+}
+
+// The answer as the route holds it after its account priced it (T4 review R1, F3): the tree, its
+// text written into a buffer reserved to its exact size (ResolveWriting), then without the tree
+// the gzip body (the traversal routes' level 1) and a copy of the body for the transport, or of
+// the text where nothing is compressed. The allocator's live bytes of the tree and text, and
+// jemalloc's peak over all of it, within the price (profile_to_json's, then charge_answer_text's);
+// the price within 1.15x of that peak on the shapes of many small elements (intervals, short
+// names: about 1.05x on macOS, whose maps are smaller than the model's), where three copies of
+// every text byte priced 1.15-1.4x. Long names are priced for the text and a copy of it at its
+// last growth beside it once the tree is freed: about 2x what a plain copy holds
+TEST(ResolveAnswer, ThePriceCoversTheTree) {
+    size_t measured = 0;
+    for (bool trace : { false, true }) {
+        for (const char *format : { "intervals", "rle" }) {
+            for (auto [labels, runs, name, seeds] : { std::make_tuple(2000, 3, 12, 2),
+                                                       std::make_tuple(20, 2000, 40, 0),
+                                                       std::make_tuple(300, 100, 100, 30),
+                                                       std::make_tuple(40, 2, 1100, 4) }) {
+                const auto [p, sel] = priced_profile(labels, runs, name, seeds, trace);
+                const std::string what = std::string(format) + (trace ? " trace " : " kmer ")
+                        + std::to_string(labels) + "x" + std::to_string(runs) + " names "
+                        + std::to_string(name);
+                const std::string plain = compact(cli::profile_to_json(p, &sel, format));
+                AnswerAccount account(uint64_t(1) << 40);
+                uint64_t tree_and_text = 0;
+                uint64_t peak = 0;
+                for (bool gzip : { true, false }) {
+#if USE_JEMALLOC
+                    size_t sz = sizeof(uint64_t);
+                    const bool peaks = !mallctl("thread.peak.reset", nullptr, nullptr, nullptr, 0);
+#endif
+                    const std::optional<int64_t> before = live_heap_bytes();
+                    AnswerAccount priced(uint64_t(1) << 40);
+                    {
+                        Json::Value out = cli::profile_to_json(p, &sel, format, nullptr, &priced);
+                        cli::charge_answer_text(&priced);
+                        std::string text = cli::json_text(out, true, {}, nullptr,
+                                                          cli::compact_json_size(out));
+                        const std::optional<int64_t> after = live_heap_bytes();
+                        if (before && after && *after > *before)
+                            tree_and_text = std::max<uint64_t>(tree_and_text, *after - *before);
+                        // the same answer as without an account
+                        EXPECT_EQ(plain, text) << what;
+                        out = Json::Value();
+                        std::string body = gzip ? cli::compress_string(text, 1, true)
+                                                : std::move(text);
+                        if (gzip)
+                            std::string().swap(text);
+                        const std::string transport = body;
+                        EXPECT_FALSE(transport.empty());
+                    }
+#if USE_JEMALLOC
+                    uint64_t got = 0;
+                    if (peaks && !mallctl("thread.peak.read", &got, &sz, nullptr, 0))
+                        peak = std::max(peak, got);
+#endif
+                    account = priced;
+                }
+                if (tree_and_text)
+                    ++measured;
+                // the text at least once in the price
+                EXPECT_GE(account.held(), plain.size()) << what;
+                EXPECT_GE(account.held(), tree_and_text) << what << ": priced " << account.held()
+                                                         << ", the heap held " << tree_and_text;
+                if (peak) {
+                    EXPECT_LE(peak, account.held()) << what << ": priced " << account.held()
+                                                    << ", jemalloc's peak " << peak;
+                    if (name <= 40 && std::string(format) == "intervals") {
+                        EXPECT_LE(account.held() * 100, peak * 115) << what << ": priced "
+                                << account.held() << ", jemalloc's peak " << peak;
+                    }
+                    std::cerr << what << ": priced " << account.held() << ", jemalloc's peak "
+                              << peak << " (x" << double(account.held()) / peak << ")"
+                              << std::endl;
+                }
+                // an account a byte short of the price refuses it, at the answer's part
+                AnswerAccount short_one(account.held() - 1);
+                try {
+                    cli::profile_to_json(p, &sel, format, nullptr, &short_one);
+                    cli::charge_answer_text(&short_one);
+                    ADD_FAILURE() << what << ": not refused";
+                } catch (const AnswerTooLarge &e) {
+                    EXPECT_EQ("answer", e.part()) << what;
+                }
+            }
+        }
+    }
+    if (!measured)
+        GTEST_SKIP() << "no allocator counters to compare the prices with";
+}
+
+// A max_support selection's scratch is charged as its rounds allocate it (T4 review R1, F1): a
+// round holds a piece for each part of a run that the picks clip, so long runs split by many
+// picks hold far more than one entry a gathered run, the price before. Here 100 labels with a run
+// over the whole query and three labels of short runs every 32 k-mers, every pick inside the long
+// runs: at every reading of the selection's check the heap the selection added is within what its
+// account holds then (a few KiB aside: the picks' and the claimed intervals' vectors), and the
+// selection is the one made without an account
+TEST(ResolveAnswer, TheSelectionChargesTheClippedPieces) {
+    SupportProfile profile;
+    profile.k = kK;
+    profile.num_kmers = 4000;
+    profile.graph_runs = { { 0, profile.num_kmers } };
+    for (size_t l = 0; l < 100; ++l) {
+        LabelProfile lp;
+        lp.label.kind = LabelKind::HEADER;
+        lp.label.name = "long" + std::to_string(l);
+        lp.runs.push_back({ 0, profile.num_kmers });
+        lp.kmers_supported = profile.num_kmers;
+        profile.labels.push_back(std::move(lp));
+    }
+    for (uint64_t offset : { 7, 17, 27 }) {
+        LabelProfile lp;
+        lp.label.kind = LabelKind::HEADER;
+        lp.label.name = "short" + std::to_string(offset);
+        for (uint64_t s = offset; s < profile.num_kmers; s += 32) {
+            lp.runs.push_back({ s, s + 1 });
+        }
+        lp.kmers_supported = lp.runs.size();
+        profile.labels.push_back(std::move(lp));
+    }
+    const std::string query(profile.num_kmers + kK - 1, 'A');
+    SelectionPolicy policy;
+    policy.policy = SelectionPolicy::MAX_SUPPORT;
+    policy.min_block_bp = kK;
+    policy.max_seeds = 250;
+    const SeedSelection plain = select_seeds(profile, query, policy, false);
+    ASSERT_EQ(250u, plain.seeds.size());
+
+    AnswerAccount account(uint64_t(1) << 40);
+    const std::optional<int64_t> base = live_heap_bytes();
+    int64_t worst = std::numeric_limits<int64_t>::min();
+    int64_t heap_at_worst = 0;
+    uint64_t held_at_worst = 0;
+    size_t readings = 0;
+    auto check = [&]() {
+        const std::optional<int64_t> now = live_heap_bytes();
+        if (!base || !now)
+            return;
+        ++readings;
+        const int64_t gap = (*now - *base) - int64_t(account.held());
+        if (gap > worst) {
+            worst = gap;
+            heap_at_worst = *now - *base;
+            held_at_worst = account.held();
+        }
+    };
+    const SeedSelection got = select_seeds(profile, query, policy, false, check, &account);
+    ASSERT_EQ(plain.seeds.size(), got.seeds.size());
+    for (size_t i = 0; i < got.seeds.size(); ++i) {
+        EXPECT_EQ(plain.seeds[i].kmers, got.seeds[i].kmers) << i;
+        EXPECT_EQ(plain.seeds[i].labels, got.seeds[i].labels) << i;
+    }
+    // the rounds' pieces: 100 long runs, each split by up to 250 picks
+    EXPECT_GT(account.peak(), 100u * 250 * sizeof(uint64_t) * 4);
+    if (!readings)
+        GTEST_SKIP() << "no allocator counters to compare the prices with";
+    EXPECT_GT(readings, 1000u);
+    EXPECT_LE(worst, 64 << 10) << "the heap held " << heap_at_worst << " B while the account held "
+                               << held_at_worst << " B";
+    std::cerr << "max_support selection: at its worst reading of " << readings << " the heap held "
+              << heap_at_worst << " B, the account " << held_at_worst << " B (peak "
+              << account.peak() << " B)" << std::endl;
+}
+
+// The candidates' grouping holds at most its price (T4 review R1, F2): kCandidateRunBytes a run
+// grouped covers the grouping's map node, a label id vector and the candidate, the candidates
+// reserved. Without the reserve, 2^17 + 1 runs of their own made the candidates' last growth hold
+// an old and a new buffer (3 x 40 B a run) beside the map, about 1.3x the price. The heap's peak
+// (jemalloc's thread.peak) within the account's; the candidates those of the base's grouping
+TEST(ResolveAnswer, TheGroupingIsPricedAboveItsPeak) {
+    SupportProfile profile;
+    profile.k = kK;
+    const size_t runs = (size_t(1) << 17) + 1;
+    profile.num_kmers = 2 * runs + 10;
+    profile.graph_runs = { { 0, profile.num_kmers } };
+    for (size_t l = 0; l < 64; ++l) {
+        LabelProfile lp;
+        lp.label.kind = LabelKind::HEADER;
+        lp.label.name = "r" + std::to_string(l);
+        profile.labels.push_back(std::move(lp));
+    }
+    for (size_t i = 0; i < runs; ++i) {
+        profile.labels[i % 64].runs.push_back({ 2 * i, 2 * i + 1 });
+    }
+    // and one run all labels share
+    for (LabelProfile &lp : profile.labels) {
+        lp.runs.push_back({ 2 * runs, 2 * runs + 5 });
+        lp.kmers_supported = lp.runs.size() + 4;
+    }
+    SupportProfile plain = profile;
+    group_candidates(&plain, 1);
+    ASSERT_EQ(runs + 1, plain.candidates.size());
+    EXPECT_EQ(64u, plain.candidates[0].labels.size());
+
+    AnswerAccount account(uint64_t(1) << 40);
+    size_t calls = 0;
+#if USE_JEMALLOC
+    size_t sz = sizeof(uint64_t);
+    if (mallctl("thread.peak.reset", nullptr, nullptr, nullptr, 0))
+        GTEST_SKIP() << "jemalloc without thread.peak";
+#endif
+    group_candidates(&profile, 1, &account, [&](size_t) { ++calls; });
+#if USE_JEMALLOC
+    uint64_t peak = 0;
+    mallctl("thread.peak.read", &peak, &sz, nullptr, 0);
+#endif
+    EXPECT_EQ(64u, calls);
+    ASSERT_EQ(plain.candidates.size(), profile.candidates.size());
+    for (size_t i = 0; i < plain.candidates.size(); ++i) {
+        ASSERT_EQ(plain.candidates[i].kmers, profile.candidates[i].kmers) << i;
+        ASSERT_EQ(plain.candidates[i].labels, profile.candidates[i].labels) << i;
+    }
+    // what the candidates hold after, the grouping's price before
+    EXPECT_EQ(candidates_held_bytes(profile), account.held());
+    EXPECT_EQ((runs + 64) * kCandidateRunBytes, account.peak());
+    // a smaller account refuses it at part "candidates", before anything is grouped
+    SupportProfile refused = plain;
+    refused.candidates.clear();
+    refused.candidates.shrink_to_fit();
+    AnswerAccount small((runs + 64) * kCandidateRunBytes - 1);
+    try {
+        group_candidates(&refused, 1, &small);
+        ADD_FAILURE() << "not refused";
+    } catch (const AnswerTooLarge &e) {
+        EXPECT_EQ("candidates", e.part());
+        EXPECT_TRUE(refused.candidates.empty());
+    }
+#if USE_JEMALLOC
+    if (!peak)
+        GTEST_SKIP() << "jemalloc is not the process allocator";
+    EXPECT_LE(peak, account.peak());
+    std::cerr << "grouping of " << runs + 1 << " runs: jemalloc peak " << peak
+              << ", charged peak " << account.peak() << std::endl;
+#else
+    GTEST_SKIP() << "needs jemalloc";
+#endif
+}
+
+// The route: an answer priced past --resolve-max-discover-memory-mb is refused, 400
+// resolve_answer_too_large with the bound (members error, code, max_memory_mb; the server writes
+// them in that order); the same request with its runs as rle strings and no candidates of single
+// k-mers, or under a larger bound, is answered as without a bound. Labels that differ from the
+// query every 12 bases have about a run a dozen k-mers: an answer of about 450 B a k-mer
+TEST(ResolveBoundsRoute, TheAnswerIsPricedBeforeItIsBuilt) {
+    const std::string q = random_seq(8000, 2121);
+    std::vector<std::string> seqs { q }, names { "A" };
+    std::mt19937 gen(2122);
+    for (size_t b = 0; b < 4; ++b) {
+        std::string s = q;
+        for (size_t i = gen() % 12; i < s.size(); i += 12) {
+            s[i] = s[i] == 'A' ? 'C' : 'A';
+        }
+        seqs.push_back(s);
+        names.push_back("B" + std::to_string(b));
+    }
+    auto anno = build_anno_graph<DBGSuccinct, annot::ColumnCompressed<>>(kK, seqs, names);
+    Json::Value request;
+    request["sequence"] = q;
+    for (const std::string &name : names) {
+        request["labels"].append(name);
+    }
+    const cli::ResolveTimeLimits none;
+    const cli::ResolveTimeLimits one_mib { 0, cli::kResolveFinalizeMs, 0, 1 };
+    const cli::ResolveTimeLimits large { 0, cli::kResolveFinalizeMs, 0, 1024 };
+    const Json::Value plain = cli::process_resolve_request(request, *anno, "r1", 0, nullptr,
+                                                           nullptr, none);
+    ASSERT_GT(compact(plain).size(), 100'000u);
+    try {
+        cli::process_resolve_request(request, *anno, "r1", 0, nullptr, nullptr, one_mib);
+        ADD_FAILURE() << "not refused";
+    } catch (const AnswerTooLarge &e) {
+        const Json::Value body = cli::resolve_answer_too_large_json(e);
+        EXPECT_EQ((std::vector<std::string>{ "code", "error", "max_memory_mb" }),
+                  body.getMemberNames());
+        EXPECT_EQ("resolve_answer_too_large", body["code"].asString());
+        EXPECT_EQ(1u, body["max_memory_mb"].asUInt64());
+        EXPECT_EQ("resolve: the answer would hold more than --resolve-max-discover-memory-mb 1 MiB ("
+                  + e.part() + "): nothing partial is sent; ask for run_format \"rle\", a larger "
+                  "min_block_kmers, fewer labels or seeds, or a shorter sequence",
+                  body["error"].asString());
+    }
+    EXPECT_EQ(compact(untimed(plain)),
+              compact(untimed(cli::process_resolve_request(request, *anno, "r1", 0, nullptr,
+                                                           nullptr, large))));
+    Json::Value small = request;
+    small["run_format"] = "rle";
+    small["min_block_kmers"] = 12;
+    EXPECT_EQ(compact(untimed(cli::process_resolve_request(small, *anno, "r1", 0, nullptr,
+                                                           nullptr, none))),
+              compact(untimed(cli::process_resolve_request(small, *anno, "r1", 0, nullptr,
+                                                           nullptr, one_mib))));
+}
+
+// The route's explicit labels on the row paths under the bound: a memory stop without a deadline,
+// stated as a discovery's (reason memory, max_memory_mb, the prefix), the message the memory
+// stop's
+TEST(ResolveBoundsRoute, AnExplicitLabelsMemoryStopIsStated) {
+    const Records r = make_records<DBGSuccinct, annot::ColumnCompressed<>>(40, 5, 2323);
+    const auto index = with_mapping(r);
+    LabelOracle oracle(*r.anno, r.cth.get());
+    Json::Value request;
+    request["sequence"] = r.q;
+    for (const std::string &name : all_labels(oracle, r.q, { LabelKind::HEADER, Support::KMER })) {
+        request["labels"].append(name);
+    }
+    // a bound of 1 MiB with the query repeated: its setup alone does not fit
+    std::string q = r.q;
+    while (q.size() < 20000) {
+        q += r.q;
+    }
+    request["sequence"] = q;
+    const cli::ResolveTimeLimits one_mib { 0, cli::kResolveFinalizeMs, 0, 1 };
+    const Json::Value out = cli::process_resolve_request(request, *index, "r1", 0, nullptr,
+                                                         nullptr, one_mib);
+    ASSERT_TRUE(out["stop"].isObject()) << compact(out).substr(0, 300);
+    EXPECT_EQ("memory", out["stop"]["reason"].asString());
+    EXPECT_EQ("rows", out["stop"]["phase"].asString());
+    EXPECT_EQ(1u, out["stop"]["max_memory_mb"].asUInt64());
+    EXPECT_EQ(out["num_kmers"], out["stop"]["resolved_kmers"]);
+    EXPECT_EQ(0u, out["stop"]["message"].asString().find(
+            "--resolve-max-discover-memory-mb 1 ran out while the annotation rows of the query's "
+            "k-mers were read: this answer is exactly the resolve of the sequence's first "));
+    EXPECT_FALSE(out.isMember("limits"));
 }
 
 } // namespace

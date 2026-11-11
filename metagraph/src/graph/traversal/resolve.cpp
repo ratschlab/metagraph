@@ -16,6 +16,7 @@
 #include <tsl/hopscotch_set.h>
 
 #include "graph/annotated_dbg.hpp"
+#include "graph/traversal/charged_table.hpp"
 #include "graph/traversal/kept_rows.hpp"
 #include "graph/traversal/seeded_hash.hpp"
 #include "annotation/binary_matrix/row_diff/row_diff.hpp"
@@ -243,6 +244,22 @@ std::vector<Row> anno_rows(const std::vector<node_index> &keys) {
     return rows;
 }
 
+// A std::string as the answer account prices it, the same on every platform (T4 review R1, N5:
+// from capacity() a name of up to 22 bytes, in place under libc++, was priced 32 B on macOS and
+// nothing on Linux): its object at libstdc++'s 32 B, and beyond it a buffer of its size and a
+// terminator at the allocator's class once it is longer than libstdc++'s 15 bytes in place
+// (libc++ keeps up to 22 in place: a name of 16 to 22 bytes is priced there although it holds
+// none). The account's names are copies, whose capacity is their size
+constexpr uint64_t kStringBytes = 32;
+uint64_t string_heap_bytes(const std::string &s) {
+    return s.size() > 15 ? annot::matrix::alloc_bytes(s.size() + 1) : 0;
+}
+// sizeof(T) with each of its |strings| std::string members at kStringBytes
+template <class T>
+constexpr uint64_t priced_sizeof(uint64_t strings) {
+    return sizeof(T) + strings * (kStringBytes - sizeof(std::string));
+}
+
 // The modelled bytes of an accumulator (SupportProfile::memory_peak): its fixed part, its runs
 // and trace breaks (the chain's live coordinates are a handful, in place)
 uint64_t support_bytes(const LabelSupport &s) {
@@ -269,9 +286,10 @@ uint64_t scratch_bytes(const std::vector<Coord> &scratch) {
     return scratch.capacity() * sizeof(Coord);
 }
 
-// What the budget has left (DecodeBudget::max_bytes() less what it holds)
+// What the budget has left (DecodeBudget::max_bytes() less what it holds; none once a table's
+// growth that could not be refused took it past its maximum: DecodeBudget::charge_beyond)
 uint64_t budget_left(const DecodeBudget &budget) {
-    return budget.max_bytes() - budget.held();
+    return budget.held() < budget.max_bytes() ? budget.max_bytes() - budget.held() : 0;
 }
 
 // How a pass over the rows (for_each_row) ended
@@ -284,14 +302,58 @@ enum class PassEnd {
 // The budget's charge per key of the pass's setup (the next occurrence of each k-mer, kept for
 // the pass) and of its transient hash table of the keys' last occurrences (seeded, 90 B a key:
 // hopscotch_entry_bytes; T3 review R2, F1 and N1: 80 B, a table at most 90% full, was short of
-// the 81.4 B a natural key set reached, and crafted node indices grew it to 604 B a key)
+// the 81.4 B a natural key set reached, and crafted node indices grew it to 604 B a key). The
+// setup's table is charged beyond that model as it is allocated (its TableAccount; GPT review 7,
+// finding 7); the batch's (in_batch) has no account (a null allocator: not charged)
 constexpr uint64_t kNextUseBytes = sizeof(size_t);
-using KeyPositions = tsl::hopscotch_map<node_index, size_t, SeededHash>;
+using KeyPositions = tsl::hopscotch_map<node_index, size_t, SeededHash, std::equal_to<node_index>,
+                                        ChargedAllocator<std::pair<node_index, size_t>>>;
 constexpr uint64_t kLastOccurrenceBytes
         = hopscotch_entry_bytes(sizeof(KeyPositions::value_type));
 // a discovery's index of the records it tracks (header labels): the record, its accumulator's
-// position (kDiscoverIndexEntryBytes an entry)
-using RecordIndex = tsl::hopscotch_map<std::pair<Column, uint64_t>, uint64_t, SeededPairHash>;
+// position (kDiscoverIndexEntryBytes an entry, and what its allocations hold beyond that, charged
+// through its TableAccount)
+using RecordKey = std::pair<Column, uint64_t>;
+using RecordIndex = tsl::hopscotch_map<RecordKey, uint64_t, SeededPairHash, std::equal_to<RecordKey>,
+                                       ChargedAllocator<std::pair<RecordKey, uint64_t>>>;
+
+} // namespace
+
+bool next_key_uses(const std::vector<node_index> &keys, annot::matrix::DecodeBudget &budget,
+                   std::vector<size_t> *next_use) {
+    constexpr size_t kNever = std::numeric_limits<size_t>::max();
+    // the next occurrence of each key, and the table of the keys' last occurrences that builds
+    // it, held while it does
+    const uint64_t next_use_bytes = annot::matrix::buffer_bytes(keys.size(), kNextUseBytes);
+    const uint64_t setup_bytes = keys.size() * kLastOccurrenceBytes;
+    if (!budget.charge(next_use_bytes + setup_bytes))
+        return false;
+    next_use->assign(keys.size(), kNever);
+    // the table's model, charged above, and its allocations beyond it (GPT review 7, finding
+    // 7: tsl's tail of a small table, a growth at a low load that keys chosen for a known
+    // seed reach), refused before they are made. The account releases what it holds once
+    // the table, in the inner scope, is freed
+    TableAccount setup(budget, /* refuse */ true);
+    setup.adopt(setup_bytes);
+    try {
+        KeyPositions later(0, SeededHash(), std::equal_to<node_index>(),
+                           ChargedAllocator<std::pair<node_index, size_t>>(&setup));
+        for (size_t j = keys.size(); j-- > 0; ) {
+            auto [it, inserted] = later.try_emplace(keys[j], j);
+            if (!inserted) {
+                (*next_use)[j] = it->second;
+                it.value() = j;
+            }
+        }
+    } catch (const TableGrowthRefused &) {
+        std::vector<size_t>().swap(*next_use);
+        budget.release(next_use_bytes);
+        return false;
+    }
+    return true;
+}
+
+namespace {
 
 template <class RowT>
 uint64_t rows_bytes(const std::vector<RowT> &rows) {
@@ -312,7 +374,9 @@ uint64_t rows_bytes(const std::vector<RowT> &rows) {
  * there (a deadline). What the request holds is one batch of rows and the rows kept.
  *
  * Every byte the pass holds is charged to |budget| (SPEC-labeled-traversal-core.md §4.6): its
- * setup (the next occurrence of each key, and the transient table that finds them), each batch
+ * setup (the next occurrence of each key, and the transient table that finds them: its model,
+ * and what its allocations hold beyond it, a growth that does not fit ending the pass before its
+ * first k-mer as the setup's own charge does), each batch
  * by |decode(keys, &rows, &held)| — the rows of |keys| into |rows|, OK with the budget holding
  * |held[r]| for row r and IRowDiff::output_bytes<RowT>(keys.size()) for the vectors, or
  * REFUSED with nothing held and nothing returned — and each row kept with its entry (KeptRows:
@@ -339,26 +403,13 @@ size_t for_each_row(const std::vector<node_index> &keys, BatchSizer sizer, uint6
                     uint64_t *rows_held_peak = nullptr) {
     constexpr size_t kNever = std::numeric_limits<size_t>::max();
     *end_cause = PassEnd::COMPLETE;
-    // the next occurrence of each k-mer's key (kNever: none), held for the pass; the table of
-    // the keys' last occurrences that builds it, held while it does
+    // the next occurrence of each k-mer's key (kNever: none), held for the pass
     const uint64_t next_use_bytes = annot::matrix::buffer_bytes(keys.size(), kNextUseBytes);
-    const uint64_t setup_bytes = keys.size() * kLastOccurrenceBytes;
-    if (!budget.charge(next_use_bytes + setup_bytes)) {
+    std::vector<size_t> next_use;
+    if (!next_key_uses(keys, budget, &next_use)) {
         *end_cause = PassEnd::MEMORY;
         return 0;
     }
-    std::vector<size_t> next_use(keys.size(), kNever);
-    {
-        KeyPositions later;
-        for (size_t j = keys.size(); j-- > 0; ) {
-            auto [it, inserted] = later.try_emplace(keys[j], j);
-            if (!inserted) {
-                next_use[j] = it->second;
-                it.value() = j;
-            }
-        }
-    }
-    budget.release(setup_bytes);
     // the rows kept for a later occurrence of their key (GPT review 6, #8: the table's buckets
     // outlive an entry's last use, so their charge is held until kept.drop() frees them)
     KeptRows<RowT, node_index> kept(budget);
@@ -369,7 +420,9 @@ size_t for_each_row(const std::vector<node_index> &keys, BatchSizer sizer, uint6
         budget.release(next_use_bytes);
     };
     // the batch's keys (not charged, SPEC §4.6: at most 4,096 keys, 0.3 MiB at its growth, the
-    // batch's vectors 0.16 MiB beside it; seeded, so that no key set grows it past that)
+    // batch's vectors 0.16 MiB beside it; seeded, so that no key set chosen without the seed
+    // grows it past that, and tsl doubles on a full neighbourhood only at 10% load or above, so
+    // whatever the keys it holds at most 2^16 buckets, 2.3 MiB at that growth with the old ones)
     KeyPositions in_batch;
     std::vector<node_index> batch_keys;
     std::vector<RowT> batch;
@@ -446,7 +499,7 @@ size_t for_each_row(const std::vector<node_index> &keys, BatchSizer sizer, uint6
             if (next_use[j] != kNever && next_use[j] >= end) {
                 const uint64_t bytes = annot::matrix::row_copy_bytes(row);
                 if (kept.bytes() + bytes <= kept_max
-                        && kept.keep(keys[j], std::move(row), bytes, held[r])) {
+                        && kept.keep(keys[j], row, bytes, held[r])) {
                     moved[r] = true;
                 }
             }
@@ -795,8 +848,14 @@ SupportProfile resolve_support(LabelOracle &oracle,
         std::vector<uint32_t> slot(by_column && index_fits ? oracle.num_columns() : 0, kNoSlot);
         std::vector<uint64_t> tracked_in(!by_column && index_fits ? oracle.num_columns() : 0, 0);
         // seeded (SeededPairHash): the records a query meets could otherwise be chosen to grow
-        // the table past its charge (kDiscoverIndexEntryBytes; T3 review R2, F1)
-        RecordIndex index;
+        // the table past its charge (kDiscoverIndexEntryBytes; T3 review R2, F1). Its model is
+        // charged with each label tracked (label_bytes, charge_row); what its allocations hold
+        // beyond it is charged as they are made (GPT review 7, finding 7), without refusal: the
+        // table grows inside a k-mer's accumulation, where no refusal is clean, so a growth
+        // that does not fit is charged past the maximum and the next k-mer does not fit
+        TableAccount index_account(budget, /* refuse */ false);
+        RecordIndex index(0, SeededPairHash(), std::equal_to<RecordKey>(),
+                          ChargedAllocator<std::pair<RecordKey, uint64_t>>(&index_account));
         static_assert(kDiscoverIndexEntryBytes
                       == hopscotch_entry_bytes(sizeof(RecordIndex::value_type)));
         std::deque<LabelSupport> found;
@@ -1001,14 +1060,21 @@ SupportProfile resolve_support(LabelOracle &oracle,
             return true;
         };
         // after a k-mer's accumulation: its new labels and growth, within what admit_row saw
-        // left (so the charge fits)
+        // left (so the charge fits), the index's model through its account (which then holds
+        // only what the index's allocations hold beyond the model). Only where they passed the
+        // model (a small table's tail, keys chosen for a known seed) can the rest not fit: it is
+        // then charged past the maximum, and the next k-mer stops the pass
         auto charge_row = [&](size_t labels_before, uint64_t scratch_before) {
-            const uint64_t bytes = (found.size() - labels_before) * label_bytes + grown
-                                 + (scratch_held() - scratch_before);
+            const uint64_t index_model = by_column
+                    ? 0 : (found.size() - labels_before) * kDiscoverIndexEntryBytes;
+            const uint64_t bytes = (found.size() - labels_before) * label_bytes - index_model
+                                 + grown + (scratch_held() - scratch_before);
             grown = 0;
-            const bool charged = budget.charge(bytes);
-            assert(charged && "within the bound admit_row checked");
-            (void)charged;
+            index_account.cover_beyond(index_model);
+            if (!budget.charge(bytes)) {
+                assert(index_account.extra() && "within the bound admit_row checked");
+                budget.charge_beyond(bytes);
+            }
         };
         const size_t used = !index_fits ? 0 : each_row(tuple_rows,
             [&](size_t j, const BinaryMatrix::SetBitPositions &row) {
@@ -1164,7 +1230,8 @@ SupportProfile resolve_support(LabelOracle &oracle,
             ranked.push_back({ with_coords ? found[at].traced : found[at].kmers, at, nullptr });
         }
         std::vector<uint32_t>().swap(slot);
-        RecordIndex().swap(index);
+        RecordIndex(0, SeededPairHash(), std::equal_to<RecordKey>(),
+                    ChargedAllocator<std::pair<RecordKey, uint64_t>>(&index_account)).swap(index);
         // More k-mers supported first, ties by the name the answer states (bytes: the column's name, or
         // the sequence's header), then by (column, seq_id) for a header that two columns hold.
         // A tie by column id let the index's numbering of its columns decide which of the
@@ -1295,12 +1362,17 @@ SupportProfile resolve_support(LabelOracle &oracle,
         // such a scan makes, in the same order, so the profiles are the same. A presence bitmap
         // of labels x k-mers would take 125 MB for 1,000 labels on 1 M k-mers; the accumulator's
         // runs are runs_of's of that bitmap
-        std::vector<LabelSupport> support(refs.size());
+        std::vector<LabelSupport> support;
         std::vector<Coord> scratch;
+        // what the k-mer's accumulation added to the runs, the trace breaks and the chains' heap
+        uint64_t grown = 0;
         auto scatter = [&](uint64_t i, const LabelQuery::NodeHits &node_hits) {
             for (const auto &h : node_hits) {
                 assert(h.label < refs.size());
                 LabelSupport &s = support[h.label];
+                const size_t runs = s.runs.size();
+                const size_t breaks = s.trace_breaks.size();
+                const uint64_t heap = chain_heap_bytes(s);
                 if (with_coords) {
                     // trace-consistent runs: a chain of coordinates increasing by one per
                     // k-mer. Column labels have coordinates in the column frame, header labels
@@ -1316,151 +1388,149 @@ SupportProfile resolve_support(LabelOracle &oracle,
                         continue;
                     s.add(i);
                 }
+                grown += (s.runs.size() - runs) * kDiscoverRunBytes
+                       + (s.trace_breaks.size() - breaks) * kDiscoverBreakBytes
+                       + (chain_heap_bytes(s) - heap);
             }
-        };
-        // The row paths under a deadline: the hits of the k-mers [scattered, end), whose keys
-        // the priming has all cached (no row is read: a fetch decodes only missing keys), in
-        // pieces of kResolveCheckKmers k-mers with the client checked between them
-        uint64_t scattered = 0;
-        std::vector<node_index> piece;
-        auto scatter_primed = [&](uint64_t end) {
-            for (uint64_t begin = scattered; begin < end; begin += kResolveCheckKmers) {
-                if (begin > scattered)
-                    checkpoint();
-                const uint64_t e = std::min<uint64_t>(end, begin + kResolveCheckKmers);
-                piece.assign(keys.begin() + begin, keys.begin() + e);
-                const auto hits = query_labels.fetch(piece);
-                for (uint64_t i = begin; i < e; ++i) {
-                    scatter(i, hits[i - begin]);
-                }
-            }
-            scattered = std::max(scattered, end);
         };
         // The deadline's first read: the labels are resolved (an unknown one refused), no row
         // is read yet. |resolved| is the end of the k-mers whose hits the query can give
         // without reading a row it has not read: all of them until a stop
-        const bool expired = poll();
-        resolved = profile.num_kmers;
         const std::string path = query_labels.access_path();
-        if (expired) {
-            // what the rows (or a direct read's cells) would have been read for: k-mers
-            // before the first present one need none
-            stopped = num_present > 0;
-            stop_phase = path != "direct" ? ResolveStop::ROWS : ResolveStop::SUPPORT;
-            resolved = num_present ? present_pos[0] : profile.num_kmers;
-        }
-        // The distinct keys' whole or tuple rows are decoded in batches and primed into the
-        // query (the hits a fetch builds from them, kept per key), so that the fetch below
-        // decodes nothing and the request holds one batch of rows at a time beside the hits —
-        // each row once, as the fetch decoded the distinct keys; direct cell reads hold no rows
-        if (path != "direct" && !expired) {
-            std::vector<node_index> distinct;
-            // under a deadline, the k-mer where each distinct key first occurs: the keys are
-            // primed in that order, so a stop after the first P of them has primed every k-mer
-            // before distinct_at[P] (a key occurring before it occurred first before it)
-            std::vector<uint64_t> distinct_at;
-            {
-                tsl::hopscotch_set<node_index, SeededHash> seen;
-                for (size_t j = 0; j < present_keys.size(); ++j) {
-                    if (seen.insert(present_keys[j]).second) {
-                        distinct.push_back(present_keys[j]);
-                        if (options.time_up)
-                            distinct_at.push_back(present_pos[j]);
+        if (path != "direct") {
+            // The row paths (T4-L1, GPT review 7, finding 2): the discovery's pass over the
+            // present k-mers' rows (for_each_row: batches, the rows of repeated k-mers kept for
+            // their later occurrences, the reads budget-aware where the annotation has them),
+            // every byte charged to |budget| (ResolveOptions::discover_max_memory): the
+            // accumulators' fixed part before the pass; a k-mer's hits built from its row
+            // within the budget (LabelQuery::hits_within: the hits a fetch of its key returns),
+            // scattered and freed; the most its accumulation can add (a run and a trace break a
+            // label, under trace each coordinate's place in a chain and the scratch's growth to
+            // the widest hit) checked before it and its growth charged after it. A k-mer whose
+            // row read alone, hits or accumulation do not fit beside what the k-mers before it
+            // hold stops the work there: the profile is that of the query's prefix before it.
+            // Before, every distinct row was read by the unbudgeted read and its hits kept for the
+            // whole request, and without a deadline one fetch copied every k-mer's hits at once
+            // (10 kbp x 10,000 labels: 3-5 GB, twice)
+            rows_expired = poll();
+            const uint64_t fixed_bytes = refs.size() * sizeof(LabelSupport);
+            const bool fits = budget.charge(fixed_bytes);
+            support.resize(fits ? refs.size() : 0);
+            // the largest k-mer's hits (SupportProfile::memory_peak)
+            uint64_t hits_peak = 0;
+            auto use_hits = [&](size_t j, const auto &row) {
+                LabelQuery::NodeHits hits;
+                if (!query_labels.hits_within(row, budget, &hits))
+                    return false;
+                const uint64_t hits_bytes = LabelQuery::held_bytes(hits);
+                uint64_t coords = 0;
+                size_t widest = 0;
+                if (with_coords) {
+                    for (const auto &h : hits) {
+                        coords += h.coords.size();
+                        widest = std::max(widest, h.coords.size());
                     }
                 }
-            }
-            BatchSizer sizer(options.batch_rows, options.batch_bytes);
-            std::vector<node_index> batch;
-            // the distinct keys (and under a deadline where each occurs first) beside the query
-            const uint64_t distinct_held = distinct.size() * sizeof(node_index)
-                                         + distinct_at.size() * sizeof(uint64_t);
-            for (size_t begin = 0; begin < distinct.size(); begin += batch.size()) {
-                batch.assign(distinct.begin() + begin,
-                             distinct.begin() + std::min(distinct.size(), begin + sizer.next));
-                // a batch of rows held while its hits are primed into the query
-                if (path == "tuples") {
-                    const auto rows = oracle.get_row_tuples(anno_rows(batch));
-                    query_labels.prime(batch, rows);
-                    sizer.done(rows);
-                    note_memory(distinct_held + rows_bytes(rows) + query_labels.cache_bytes()
-                                + supports_bytes(support));
-                } else {
-                    const auto rows = oracle.get_rows(anno_rows(batch));
-                    query_labels.prime(batch, rows);
-                    sizer.done(rows);
-                    note_memory(distinct_held + rows_bytes(rows) + query_labels.cache_bytes()
-                                + supports_bytes(support));
+                const uint64_t scratch_grows = with_coords
+                        ? (std::max<uint64_t>(widest, scratch.capacity()) - scratch.capacity())
+                                * sizeof(Coord)
+                        : 0;
+                const uint64_t most = hits.size() * (kDiscoverRunBytes + kDiscoverBreakBytes)
+                                    + coords * kDiscoverChainBytes + scratch_grows;
+                if (most > budget_left(budget)) {
+                    budget.release(hits_bytes);
+                    return false;
                 }
-                const size_t next = begin + batch.size();
-                if (options.time_up) {
-                    // every k-mer before distinct_at[next] has its key primed now (the whole
-                    // query after the last batch): their hits are scattered here, so that a
-                    // stop between batches keeps every row it read (a separate hits pass
-                    // would read the deadline again and cut the answer short of the rows
-                    // already primed)
-                    scatter_primed(next < distinct.size() ? distinct_at[next] : resolved);
-                }
-                // after the last batch the rows are all read, whatever the deadline says
-                if (poll() && next < distinct.size()) {
-                    stopped = true;
-                    stop_phase = ResolveStop::ROWS;
-                    resolved = distinct_at[next];
-                    break;
-                }
+                hits_peak = std::max(hits_peak, hits_bytes);
+                const uint64_t scratch_before = scratch_bytes(scratch);
+                grown = 0;
+                scatter(present_pos[j], hits);
+                const bool charged = budget.charge(grown + scratch_bytes(scratch) - scratch_before);
+                assert(charged && "within the bound checked before the accumulation");
+                (void)charged;
+                budget.release(hits_bytes);
+                return true;
+            };
+            const size_t used = !fits ? 0 : each_row(path == "tuples", use_hits, use_hits);
+            if (!fits)
+                pass_end = PassEnd::MEMORY;
+            // the pass at its largest: the next occurrence of every present k-mer, the rows held,
+            // the accumulators (at their end, where they are largest) and the largest k-mer's hits
+            note_memory(present_keys.size() * sizeof(size_t) + rows_held + supports_bytes(support)
+                        + hits_peak);
+            if (!fits)
+                support.resize(refs.size());
+            if (used < num_present) {
+                // the deadline or the memory bound ended the pass: the k-mers before the next
+                // present one are resolved, the labels' support that of the prefix
+                stopped = true;
+                stop_phase = ResolveStop::ROWS;
+                stop_reason = pass_end == PassEnd::MEMORY ? ResolveStop::MEMORY : ResolveStop::TIME;
+                cannot_progress = stop_reason == ResolveStop::MEMORY && used == 0;
+                resolved = present_pos[used];
+                num_present = used;
             }
-        }
-
-        if (!options.time_up) {
-            // no deadline: one fetch of every k-mer's hits
-            auto hits = query_labels.fetch(keys);
-            // every k-mer's hits held at once beside the query's cache of them
-            uint64_t hits_held = hits.size() * sizeof(hits[0]);
-            for (const auto &h : hits) {
-                hits_held += LabelQuery::held_bytes(h);
-            }
-            note_memory(hits_held + query_labels.cache_bytes());
-            checkpoint();
-            for (uint64_t i = 0; i < hits.size(); ++i) {
-                // a client gone is seen within a few thousand k-mers of the pass, not after it
-                if (i && i % kResolveCheckKmers == 0)
-                    checkpoint();
-                scatter(i, hits[i]);
-            }
-        } else if (path != "direct") {
-            // the row paths scattered their hits with the priming. Left, when the deadline
-            // passed before the first row: the k-mers before the first present one, absent
-            // from the graph, with no hits
-            scatter_primed(resolved);
         } else {
-            // Under a deadline the direct path's hits are fetched kResolveCheckKmers k-mers at a
-            // time, the deadline read before each piece but the first (read just before it): one
-            // fetch of the whole query is a piece no clock read can end — it reads every k-mer's
-            // cell of every label. A key's hits do not depend on the piece it is fetched in, so
-            // the profile is the one fetch's
-            for (uint64_t begin = 0; begin < resolved; begin += kResolveCheckKmers) {
-                if (begin && poll()) {
-                    // resolved: the k-mers before the first present one from |begin| on (any
-                    // between are absent); none before |resolved|, nothing was left to read
-                    const auto next = std::lower_bound(present_pos.begin(), present_pos.end(),
-                                                       begin);
-                    if (next != present_pos.end() && *next < resolved) {
-                        stopped = true;
-                        stop_phase = ResolveStop::SUPPORT;
-                        resolved = *next;
-                    }
-                    break;
+            support.resize(refs.size());
+            // The direct path (at most 16 columns, a plain column or BRWT annotation): its hits
+            // are at most 16 a k-mer, fetched cell by cell
+            const bool expired = poll();
+            resolved = profile.num_kmers;
+            if (expired) {
+                // what the cells would have been read for: k-mers before the first present one
+                // need none
+                stopped = num_present > 0;
+                stop_phase = ResolveStop::SUPPORT;
+                resolved = num_present ? present_pos[0] : profile.num_kmers;
+            }
+            std::vector<node_index> piece;
+            if (!options.time_up) {
+                // no deadline: one fetch of every k-mer's hits
+                auto hits = query_labels.fetch(keys);
+                // every k-mer's hits held at once beside the query's cache of them
+                uint64_t hits_held = hits.size() * sizeof(hits[0]);
+                for (const auto &h : hits) {
+                    hits_held += LabelQuery::held_bytes(h);
                 }
-                const uint64_t end = std::min<uint64_t>(resolved, begin + kResolveCheckKmers);
-                piece.assign(keys.begin() + begin, keys.begin() + end);
-                const auto hits = query_labels.fetch(piece);
-                for (uint64_t i = begin; i < end; ++i) {
-                    scatter(i, hits[i - begin]);
+                note_memory(hits_held + query_labels.cache_bytes());
+                checkpoint();
+                for (uint64_t i = 0; i < hits.size(); ++i) {
+                    // a client gone is seen within a few thousand k-mers of the pass, not after it
+                    if (i && i % kResolveCheckKmers == 0)
+                        checkpoint();
+                    scatter(i, hits[i]);
+                }
+            } else {
+                // Under a deadline the direct path's hits are fetched kResolveCheckKmers k-mers at a
+                // time, the deadline read before each piece but the first (read just before it): one
+                // fetch of the whole query is a piece no clock read can end — it reads every k-mer's
+                // cell of every label. A key's hits do not depend on the piece it is fetched in, so
+                // the profile is the one fetch's
+                for (uint64_t begin = 0; begin < resolved; begin += kResolveCheckKmers) {
+                    if (begin && poll()) {
+                        // resolved: the k-mers before the first present one from |begin| on (any
+                        // between are absent); none before |resolved|, nothing was left to read
+                        const auto next = std::lower_bound(present_pos.begin(), present_pos.end(),
+                                                           begin);
+                        if (next != present_pos.end() && *next < resolved) {
+                            stopped = true;
+                            stop_phase = ResolveStop::SUPPORT;
+                            resolved = *next;
+                        }
+                        break;
+                    }
+                    const uint64_t end = std::min<uint64_t>(resolved, begin + kResolveCheckKmers);
+                    piece.assign(keys.begin() + begin, keys.begin() + end);
+                    const auto hits = query_labels.fetch(piece);
+                    for (uint64_t i = begin; i < end; ++i) {
+                        scatter(i, hits[i - begin]);
+                    }
                 }
             }
+            // the accumulators at their end, beside the query's cache of hits
+            note_memory(supports_bytes(support) + query_labels.cache_bytes());
         }
         apply_stop();
-        // the accumulators at their end, beside the query's cache of hits
-        note_memory(supports_bytes(support) + query_labels.cache_bytes());
         for (LabelId l = 0; l < refs.size(); ++l) {
             finishing(l);
             LabelProfile &lp = profile.labels[l];
@@ -1471,20 +1541,49 @@ SupportProfile resolve_support(LabelOracle &oracle,
         }
     }
 
+    // ---- the answer account (§4.6, T4-L1): the profile as it is held, then its candidates
+    if (options.answer)
+        options.answer->charge(profile_held_bytes(profile), "profile");
+    group_candidates(&profile, options.min_block_kmers, options.answer, finishing);
+    // the profile, complete, beside the query
+    note_memory(profile_bytes(profile));
+    return profile;
+}
+
+void group_candidates(SupportProfile *profile, uint64_t min_block_kmers, AnswerAccount *answer,
+                      const std::function<void(size_t)> &finishing) {
+    // the grouping charged before it is built (kCandidateRunBytes a run grouped), replaced by
+    // what the candidates hold once it is done
+    uint64_t grouping = 0;
+    if (answer) {
+        for (const LabelProfile &lp : profile->labels) {
+            for (const auto &run : lp.runs) {
+                grouping += run.size() >= min_block_kmers;
+            }
+        }
+        grouping *= kCandidateRunBytes;
+        answer->charge(grouping, "candidates");
+    }
+
     // ---- seed candidates: identical maximal runs grouped
     std::map<KmerInterval, std::vector<LabelId>> groups;
-    for (LabelId l = 0; l < profile.labels.size(); ++l) {
-        finishing(l);
-        for (const auto &run : profile.labels[l].runs) {
-            if (run.size() >= options.min_block_kmers)
+    for (LabelId l = 0; l < profile->labels.size(); ++l) {
+        if (finishing)
+            finishing(l);
+        for (const auto &run : profile->labels[l].runs) {
+            if (run.size() >= min_block_kmers)
                 groups[run].push_back(l);
         }
     }
+    // reserved, so that the candidates never hold an old and a new buffer beside the map (T4
+    // review R1, F2: at their last growth 3 x 40 B a run of its own, beyond its price)
+    profile->candidates.reserve(groups.size());
     for (auto &[iv, labels] : groups) {
         std::sort(labels.begin(), labels.end());
-        profile.candidates.push_back({ iv, std::move(labels) });
+        profile->candidates.push_back({ iv, std::move(labels) });
     }
-    std::sort(profile.candidates.begin(), profile.candidates.end(),
+    std::map<KmerInterval, std::vector<LabelId>>().swap(groups);
+    std::sort(profile->candidates.begin(), profile->candidates.end(),
               [](const SeedCandidate &a, const SeedCandidate &b) {
                   if (a.kmers.size() != b.kmers.size())
                       return a.kmers.size() > b.kmers.size();
@@ -1492,9 +1591,11 @@ SupportProfile resolve_support(LabelOracle &oracle,
                       return a.labels.size() > b.labels.size();
                   return a.kmers.begin < b.kmers.begin;
               });
-    // the profile, complete, beside the query
-    note_memory(profile_bytes(profile));
-    return profile;
+    if (answer) {
+        answer->release(grouping);
+        // (within the grouping's price: a candidate and its label ids per run at most)
+        answer->charge(candidates_held_bytes(*profile), "candidates");
+    }
 }
 
 uint64_t profile_bytes(const SupportProfile &p) {
@@ -1511,6 +1612,37 @@ uint64_t profile_bytes(const SupportProfile &p) {
     }
     if (p.stop)
         bytes += p.stop->query_graph_runs.size() * sizeof(KmerInterval);
+    return bytes;
+}
+
+// What a profile holds as the answer account prices it (AnswerAccount): its vectors at their
+// capacities, a name beyond its object as string_heap_bytes prices it (the candidates apart:
+// candidates_held_bytes)
+uint64_t profile_held_bytes(const SupportProfile &p) {
+    uint64_t bytes = sizeof(SupportProfile)
+            + annot::matrix::buffer_bytes(p.graph_runs.capacity(), sizeof(KmerInterval))
+            + annot::matrix::buffer_bytes(p.labels.capacity(), priced_sizeof<LabelProfile>(1));
+    for (const LabelProfile &lp : p.labels) {
+        bytes += string_heap_bytes(lp.label.name)
+               + annot::matrix::buffer_bytes(lp.runs.capacity(), sizeof(KmerInterval))
+               + annot::matrix::buffer_bytes(lp.trace_breaks.capacity(), sizeof(uint64_t));
+    }
+    bytes += annot::matrix::buffer_bytes(p.unknown_labels.capacity(), kStringBytes);
+    for (const std::string &name : p.unknown_labels) {
+        bytes += string_heap_bytes(name);
+    }
+    if (p.stop) {
+        bytes += annot::matrix::buffer_bytes(p.stop->query_graph_runs.capacity(),
+                                             sizeof(KmerInterval));
+    }
+    return bytes;
+}
+
+uint64_t candidates_held_bytes(const SupportProfile &p) {
+    uint64_t bytes = annot::matrix::buffer_bytes(p.candidates.capacity(), sizeof(SeedCandidate));
+    for (const SeedCandidate &c : p.candidates) {
+        bytes += annot::matrix::buffer_bytes(c.labels.capacity(), sizeof(LabelId));
+    }
     return bytes;
 }
 
@@ -1582,15 +1714,6 @@ bool covers(const LabelProfile &lp, const KmerInterval &iv) {
     return false;
 }
 
-std::vector<LabelId> covering_labels(const SupportProfile &profile, const KmerInterval &iv) {
-    std::vector<LabelId> out;
-    for (LabelId l = 0; l < profile.labels.size(); ++l) {
-        if (covers(profile.labels[l], iv))
-            out.push_back(l);
-    }
-    return out;
-}
-
 struct Picked {
     KmerInterval kmers;
     std::vector<LabelId> labels;
@@ -1604,7 +1727,28 @@ SeedSelection select_seeds(const SupportProfile &profile,
                            std::string_view query,
                            const SelectionPolicy &policy_in,
                            bool canonical_orientation,
-                           const std::function<void()> &check) {
+                           const std::function<void()> &check,
+                           AnswerAccount *answer) {
+    // the answer account (AnswerAccount, T4-L1): |bytes| more before they are allocated
+    auto charge = [&](uint64_t bytes) {
+        if (answer)
+            answer->charge(bytes, "selection");
+    };
+    auto answer_release = [&](uint64_t bytes) {
+        if (answer)
+            answer->release(bytes);
+    };
+    // a pick as the account prices it: the object, its label ids (at twice their number) and
+    // the names it lists as not covering
+    auto pick_bytes = [](size_t labels, const std::vector<std::string> *names) {
+        uint64_t bytes = sizeof(Picked) + 2 * labels * sizeof(LabelId);
+        if (names) {
+            for (const std::string &name : *names) {
+                bytes += kStringBytes + string_heap_bytes(name);
+            }
+        }
+        return bytes;
+    };
     // the answer's deadline, read once the steps since the last reading reach
     // kResolveCheckLabels (resolve.hpp: a seed and its labels, a run swept, a pair compared)
     uint64_t steps = 0;
@@ -1615,6 +1759,16 @@ SeedSelection select_seeds(const SupportProfile &profile,
             next_check = steps + kResolveCheckLabels;
             check();
         }
+    };
+    // the labels with a run containing |iv|, a label and its runs a step
+    auto covering = [&](const KmerInterval &iv) {
+        std::vector<LabelId> out;
+        for (LabelId l = 0; l < profile.labels.size(); ++l) {
+            poll(1 + profile.labels[l].runs.size());
+            if (covers(profile.labels[l], iv))
+                out.push_back(l);
+        }
+        return out;
     };
     SeedSelection selection;
     selection.policy = policy_in;
@@ -1632,8 +1786,10 @@ SeedSelection select_seeds(const SupportProfile &profile,
                 if (cand.kmers.size() < min_kmers)
                     continue;
                 selection.num_eligible++;
-                if (picked.size() < policy.max_seeds)
+                if (picked.size() < policy.max_seeds) {
+                    charge(pick_bytes(cand.labels.size(), nullptr));
                     picked.push_back({ cand.kmers, cand.labels, {} });
+                }
             }
             break;
         }
@@ -1649,13 +1805,44 @@ SeedSelection select_seeds(const SupportProfile &profile,
             // endpoints, so a ranges over run starts and over (e - min_kmers).
             // This is O(R log R) per round for R runs, instead of scanning pairs.
             struct Run { uint64_t begin, end; };
-            std::vector<Run> runs;
+            // The scratch of the rounds, charged as it is allocated (T4 review R1, F1: priced
+            // once a run gathered, it missed that a round holds a piece for each part of a run
+            // the picks clip, P + 1 pieces of a run with P picks inside it): the gathered runs
+            // twice (the round's vector, reserved to them, and their sorted copy), the round's
+            // vector each time it grows past them (its new buffer beside the old one), and in a
+            // round its candidate starts, run ends and Fenwick counts for its pieces (charged
+            // before they are built, released with them). Held until the selection is frozen
+            uint64_t gathered = 0;
             for (const auto &lp : profile.labels) {
+                for (const auto &run : lp.runs) {
+                    gathered += run.size() >= min_kmers;
+                }
+            }
+            uint64_t scratch = 2 * annot::matrix::buffer_bytes(gathered, sizeof(Run));
+            charge(scratch);
+            std::vector<Run> runs;
+            runs.reserve(gathered);
+            for (const auto &lp : profile.labels) {
+                poll(1 + lp.runs.size());
                 for (const auto &run : lp.runs) {
                     if (run.size() >= min_kmers)
                         runs.push_back({ run.begin, run.end });
                 }
             }
+            // a piece of a round, the round's vector doubled first where it is full
+            auto push_piece = [&](uint64_t begin, uint64_t end) {
+                if (runs.size() == runs.capacity()) {
+                    const size_t grown = std::max<size_t>(64, 2 * runs.capacity());
+                    const uint64_t was = annot::matrix::buffer_bytes(runs.capacity(), sizeof(Run));
+                    const uint64_t bytes = annot::matrix::buffer_bytes(grown, sizeof(Run));
+                    charge(bytes);
+                    runs.reserve(grown);
+                    answer_release(was);
+                    scratch += bytes - was;
+                }
+                runs.push_back({ begin, end });
+            };
+            poll(runs.size());
             const std::vector<Run> all_runs = [&runs]() {
                 std::sort(runs.begin(), runs.end(),
                           [](const Run &a, const Run &b) { return a.begin < b.begin; });
@@ -1664,39 +1851,60 @@ SeedSelection select_seeds(const SupportProfile &profile,
 
             // intervals already claimed by a picked seed, as sorted disjoint ranges
             std::vector<KmerInterval> taken;
+            // what the account holds of the last round's own vectors
+            uint64_t round_bytes = 0;
 
             while (picked.size() < policy.max_seeds) {
-                // a round sweeps every run
-                poll(all_runs.size() + 1);
+                // a round sweeps every run: the deadline is read inside it, a step a run
+                // clipped (and a pick it meets), a candidate start swept, a label checked for
+                // the winner (and its runs), so that one round of many runs is no piece the
+                // deadline cannot end (T4-L1: a round of 3 M runs took about a second)
+                poll(1);
                 // Rebuild the runs with the claimed intervals subtracted, so later rounds
                 // see clipped runs and their endpoints. Reusing the original endpoints and
                 // merely rejecting overlapping intervals loses the best remaining interval
                 // (e.g. with A=[0,10), B=[0,5) and [0,5) taken, [5,10) is only reachable
-                // through the clipped run's own endpoints).
+                // through the clipped run's own endpoints). The picks are disjoint and sorted,
+                // so a run meets those from the first one ending after its begin, as long as
+                // they begin before its end (a binary search: scanning every pick for every
+                // run made a round O(runs x picks), the rounds O(runs x picks^2))
                 runs.clear();
                 for (const Run &run : all_runs) {
+                    poll(1);
                     uint64_t begin = run.begin;
-                    for (const auto &t : taken) {
-                        if (t.end <= begin || t.begin >= run.end)
-                            continue;
-                        if (t.begin > begin && t.begin - begin >= min_kmers)
-                            runs.push_back({ begin, t.begin });
-                        begin = std::max(begin, t.end);
+                    auto t = std::upper_bound(taken.begin(), taken.end(), run.begin,
+                                              [](uint64_t x, const KmerInterval &iv) {
+                                                  return x < iv.end;
+                                              });
+                    for ( ; t != taken.end() && t->begin < run.end; ++t) {
+                        poll(1);
+                        if (t->begin > begin && t->begin - begin >= min_kmers)
+                            push_piece(begin, t->begin);
+                        begin = std::max(begin, t->end);
                     }
                     if (begin < run.end && run.end - begin >= min_kmers)
-                        runs.push_back({ begin, run.end });
+                        push_piece(begin, run.end);
                 }
                 std::sort(runs.begin(), runs.end(),
                           [](const Run &a, const Run &b) { return a.begin < b.begin; });
                 if (runs.empty())
                     break;
 
+                // the round's candidate starts (two a piece at most), run ends and Fenwick
+                // counts, each reserved to its pieces
+                answer_release(round_bytes);
+                round_bytes = annot::matrix::buffer_bytes(2 * runs.size(), sizeof(uint64_t))
+                            + annot::matrix::buffer_bytes(runs.size(), sizeof(uint64_t))
+                            + annot::matrix::buffer_bytes(runs.size() + 1, sizeof(uint32_t));
+                charge(round_bytes);
                 std::vector<uint64_t> candidate_a;
+                candidate_a.reserve(2 * runs.size());
                 for (const auto &run : runs) {
                     candidate_a.push_back(run.begin);
                     if (run.end >= min_kmers)
                         candidate_a.push_back(run.end - min_kmers);
                 }
+                poll(runs.size());
                 std::sort(candidate_a.begin(), candidate_a.end());
                 candidate_a.erase(std::unique(candidate_a.begin(), candidate_a.end()),
                                   candidate_a.end());
@@ -1712,6 +1920,9 @@ SeedSelection select_seeds(const SupportProfile &profile,
                 for (const Run &run : runs) {
                     coords.push_back(run.end);
                 }
+                // (each of the round's three sorts, n log n of at most twice its runs, is a
+                // piece the deadline is read around, not inside)
+                poll(runs.size());
                 std::sort(coords.begin(), coords.end());
                 coords.erase(std::unique(coords.begin(), coords.end()), coords.end());
                 auto index_of = [&](uint64_t x) {
@@ -1721,6 +1932,7 @@ SeedSelection select_seeds(const SupportProfile &profile,
                 Fenwick ends(coords.size());
                 uint32_t inserted = 0;
                 for (uint64_t a : candidate_a) {
+                    poll(1);
                     while (next_run < runs.size() && runs[next_run].begin <= a) {
                         ends.add(index_of(runs[next_run].end), 1);
                         inserted++;
@@ -1749,13 +1961,16 @@ SeedSelection select_seeds(const SupportProfile &profile,
                 }
                 if (!best)
                     break;
-                best->labels = covering_labels(profile, best->kmers);
+                charge(pick_bytes(best_count, nullptr));
+                best->labels = covering(best->kmers);
                 assert(best->labels.size() == best_count);
                 taken.push_back(best->kmers);
                 std::sort(taken.begin(), taken.end());
                 picked.push_back(*best);
             }
             selection.num_eligible = picked.size();
+            // the rounds' scratch, freed with this block
+            answer_release(scratch + round_bytes);
             break;
         }
         case SelectionPolicy::EXPLICIT: {
@@ -1772,6 +1987,8 @@ SeedSelection select_seeds(const SupportProfile &profile,
                                                               profile.unknown_labels.end());
             for (const auto &ex : policy.explicit_seeds) {
                 poll(1 + ex.labels.size());
+                // (its names: the most it can list as not covering)
+                charge(pick_bytes(ex.labels.size(), &ex.labels));
                 if (ex.kmers.end > profile.num_kmers || ex.kmers.begin >= ex.kmers.end)
                     throw std::invalid_argument("Explicit seed interval out of range");
                 bool in_one_run = false;
@@ -1826,9 +2043,9 @@ SeedSelection select_seeds(const SupportProfile &profile,
                 KmerInterval common { std::max(m.kmers.begin, p.kmers.begin),
                                       std::min(m.kmers.end, p.kmers.end) };
                 if (common.size() >= min_kmers) {
-                    poll(profile.labels.size());
                     m.kmers = common;
-                    m.labels = covering_labels(profile, common);
+                    charge(2 * profile.labels.size() * sizeof(LabelId));
+                    m.labels = covering(common);
                     m.rank = std::min(m.rank, p.rank);
                     continue;
                 }
@@ -1843,6 +2060,19 @@ SeedSelection select_seeds(const SupportProfile &profile,
     // freeze
     for (auto &p : picked) {
         poll(1 + p.labels.size());
+        // the frozen seed before it is built: its object, id and digest, its sequence, its
+        // labels' names twice (the label order's copy of them, and the names it keeps or
+        // drops), the names not covering; the order's copy is freed with the seed done
+        uint64_t names = 0;
+        for (LabelId l : p.labels) {
+            names += priced_sizeof<std::pair<std::string, LabelId>>(1)
+                   + string_heap_bytes(profile.labels[l].label.name);
+        }
+        // (its id, sequence and dropped digest at kStringBytes)
+        const uint64_t frozen = priced_sizeof<FrozenSeed>(3) + 2 * 32
+                + annot::matrix::alloc_bytes(p.kmers.size() + profile.k) + names
+                + pick_bytes(0, &p.labels_not_covering);
+        charge(frozen + names);
         FrozenSeed seed;
         seed.kmers = p.kmers;
         seed.sequence = std::string(query.substr(p.kmers.begin, p.kmers.size() + profile.k - 1));
@@ -1895,11 +2125,15 @@ SeedSelection select_seeds(const SupportProfile &profile,
         std::sort(seed.labels.begin(), seed.labels.end());
         seed.seed_id = make_seed_id(policy.release_id, seed.sequence, canonical_orientation, seed.labels);
         selection.seeds.push_back(std::move(seed));
+        if (answer)
+            answer->release(names);
     }
 
-    // every ordered pair of seeds (a row of them at a time)
+    // every ordered pair of seeds (a row of them at a time; a row's indices at twice their
+    // number at most)
     for (size_t i = 0; i < selection.seeds.size(); ++i) {
         poll(selection.seeds.size());
+        charge(2 * selection.seeds.size() * sizeof(size_t));
         for (size_t j = 0; j < selection.seeds.size(); ++j) {
             if (i == j)
                 continue;

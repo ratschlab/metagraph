@@ -673,6 +673,16 @@ class LabelQuery {
     // longer run was read before the hits beside it were held; read alone beside them it may
     // not fit; a key that began its run fits again: the same read)
     bool reads_alone_within(node_index key, uint64_t left, uint64_t *need);
+    // The hits of one row the caller decoded — a whole row (ROWS or DIRECT access) or a tuple
+    // row (TUPLES access) — built as the budget-aware fetch builds them (the same hits as a
+    // fetch of its key), every buffer charged to |budget| before it is allocated: false, with
+    // nothing built and |budget| as on entry, when they do not fit; true with |budget| holding
+    // held_bytes(*hits), which the caller releases once it frees them. Nothing is cached and no
+    // counter but coords_mapped changes (/resolve's explicit labels' pass, T4-L1)
+    bool hits_within(const annot::matrix::BinaryMatrix::SetBitPositions &row,
+                     annot::matrix::DecodeBudget &budget, NodeHits *hits);
+    bool hits_within(const annot::matrix::MultiIntMatrix::RowTuples &row,
+                     annot::matrix::DecodeBudget &budget, NodeHits *hits);
     // what a copy of |hits| holds (the model of decode_budget.hpp)
     static uint64_t held_bytes(const NodeHits &hits);
     // why the last budgeted fetch was refused, and what the keys before the refused one held

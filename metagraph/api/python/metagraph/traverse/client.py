@@ -590,7 +590,14 @@ class TraverseClient:
         capabilities()['resolve']['max_explicit_seeds'], 1024 by default, 0 for none): more raise
         TraverseError 400 with the body {error, code: 'too_many_explicit_seeds',
         max_explicit_seeds}; a select.max_seeds above the cap is lowered to it and stated in
-        limits.clamped (SPEC §4.3)."""
+        limits.clamped (SPEC §4.3).
+
+        The discovery's memory bound (capabilities()['resolve']['discovery']['max_memory_mb'])
+        also bounds explicit labels on the row paths (the same stop with reason 'memory') and
+        what the answer holds (SPEC §4.6, the answer account): an answer priced past it raises
+        TraverseError 400 with the body {error, code: 'resolve_answer_too_large', max_memory_mb}
+        (nothing partial; run_format='rle', a larger min_block_kmers, fewer labels or seeds, or a
+        shorter sequence may fit)."""
         req = {'sequence': sequence}
         if labels is not None:
             req['labels'] = list(labels)

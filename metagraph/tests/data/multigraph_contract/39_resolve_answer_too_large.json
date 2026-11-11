@@ -1,0 +1,111 @@
+{
+ "route": "POST /resolve",
+ "status": 200,
+ "note": "T4-L1 (GPT review 7, finding 2; T4 review R1 S1; SPEC-labeled-traversal-core.md section 4.6): what a /resolve's answer holds after its pass (the profile, the candidates, the selection, the JSON tree and its text) is priced per pair, before it is built, against --resolve-max-discover-memory-mb (1,024 MiB by default, 1 on the recording server so that the sample stays short; 0 = none, the bound of the pass too). An answer priced past it is refused 400, nothing partial sent. The work ran, so this is a refusal, not a stop: a part of an answer is not the answer of a prefix. The part in parentheses names what passed the bound: profile, candidates, selection or answer. On a single-graph server the body is {error, code: \"resolve_answer_too_large\", max_memory_mb}, written in this order (error first): for this request {\"error\":\"resolve: the answer would hold more than --resolve-max-discover-memory-mb 1 MiB (answer): nothing partial is sent; ask for run_format \\\"rle\\\", a larger min_block_kmers, fewer labels or seeds, or a shorter sequence\",\"code\":\"resolve_answer_too_large\",\"max_memory_mb\":1}. The request_id is freed with it (GET /requests/svc-res-t4-39s then answered 404, and the same id runs again), as for every 400 that only the work can find (SPEC-multigraph-envelope.md section 5). On a multi-graph server, as here, that pair is a refused entry of a 200 envelope, refusal.http_status 400 and the members in the server's byte order (code, error, http_status, max_memory_mb); the other pairs are answered. The request is retained like any answered one: GET /requests/svc-res-t4-39 states it ended, reason answered, bact_other refused (its usage memory_bytes 0), and the same id gets 409. work.memory_bytes sums the answered entries only. The same request is refused the same way, so a client treats the code as final and changes the request: run_format \"rle\" writes a label's runs as one string, a few bytes a run against about 350 B as intervals. A real run on fixture pairs the binary built (bact_other: 40 records of a 2,000 bp query with a SNP every 32 bp, 62 runs of one k-mer each; bact_pseudomonadota: 3 records the query does not touch), each entry tagged with its sample pair and identity. The run was on macOS: timing.page_faults, stated where the platform reads it per thread (Linux), is absent, never 0.",
+ "request": {
+  "sequence": "TGGCTGACAATTGCGGAGCACAATGAAGTCGGTTTCCCCTGCTTCTGACGTTCAGATTAGCTCTGTTGCACGTGACCTCGATGGTTAAAGAAGACTCGATCTGGGATTCGGGCCCGAGACCTAGCTATGGCAACCAGTCCCGCTGTGGCCTATGTAGCACCGGAGAGCCTCCAGTCCCTCGAGCTACACGGCTATTGGAAGCAGCGCGCCCTTGTGCCGGAACCTTTGTACGGGTGTCTATGGACGGAAATTCTGCTCTCGTTAGTTTAGCTATCACAAACCGTTATAATTATAGATGCCTCATGATGACTAAGCTGGGCTCGCTTTAAAATCTGTAGGTGATTCGTACAACTATGATATGAGATTCATCACCGTGGCTAGAGGACAAGAAGGCTTTGGGTTACCTGCGCTATGCCTCTGATCGGATACATCCAACGTCGCAATCGTTTACCGGAAGCTCCAACAGCTCGCACGGAGGTACAATCGAACAATCCAATGGGGGCGCATTGCCAGAACCATGAGCGTTGGTCAGGCACAAGACTACCGCTTAACCGTTGACTGCTCTACGTCGGTAGATGCGTACATCATTCGTGACTTTGCGATTACTACAATGCAATTTTTAGAACTATGAGTCTCCCAACAGCTATCGAAGATGGTTTTGAAGCGCAATAAGTCAGACGACCACAGTGTTGCGATCTTTTAGCCTATCTGGTACGTCCCAACCCCCTGAGCATATTCCCACGGATATGAACAAGAAGACGAGAGCCGCGTCAACTAACGGAGAGCGTCTATGCGAGGTCCGTACTTATTGCAAATTCGAGTATGTAAAGGATGGCCAGGTACGAGTACTAAGGTTTCGGGCCACCTCACCTGGTTTCTCTTTAAAATCTCCTTTTCGGCGTTCTAGATACGAGAACGCTCAAGATCAATTATCTTAAGAATAGTATACTTGAGATCAGAAACAATACAATTGGCGCAAAAGTCCGCACCCACTAACAGCTACTCAGACCGGTCACCCCTCGTACGGATTACCCCCCGGCCCCTGTGTCGAAGGAGTATGGTAGCCTCGACATTCGGATCATAGGCGCATGTTTTATTAGCAGATCATATATTGATTGGACTCGCTTGCCAGACTTGAGGAATCGACAAGGACGTTAGTTTGAGTGCCAACTCCGACATACAAGGATGATGGACCGCATGTTTTTACCCCCCAATTTCAACCGAATAAGCATAAAAGGGTGGTGGTGCGCTTTCAAAGAGAAATAACTTCTGGGAGAGAGTGGAGACAGGGGAGCTCTTTGATTCTGGTGGCGTTGGGGAACCTACGCCTAGCCAGGCTGAAAGGTCCCGGGACCTCGGTTGGAGGCTGTACCGTATGCCAATAGGTCACCCTAGCCCTAGCCCTCCATGGCCATCCGATGGAGCATACCGGAGCGGCGACACGGTTGAATCTTAACTGGACATGCGTTGCCTGGGTCAGCTATCTTATGAACGCAAGCCAGTTTGTTGAAGAGTCTTGTCCAAGTGAGGGCGACGGATTAGTTGTGCCCATCCGGTCGTGTGAGTGACCCGGAGTACGCCGCCCTCCTCTTGGGCGATGTATGGACTTACTCTCACAAGTACATGTTGGCGGTCACCTAGATACCATTCTGGACATGGAAGGCTAGACGTCCACTAACCTAAACCACATCAACCAACAGTCACCTCGGAAGGATACTACTCGCGGGCTTGCAATCCCGTCTTCCCCGAAAACTGGCTAGGTACGCAGGGTGCCATGCGAGGACTTTACCATACTAGAGTCCACGCGGTCGAACTGTACTACATACCGCCAATCATTGTAACAACGCGGTTATTAAATGCACATCGTGGAGGGTTAATAGTGTCTCCGCCAGTCGGGGCAGATATAGGTGCTGGCGATCCCGGAGAAATAATTCGCGCTGACACTCCTAAAACAGGTGATTCCCTTGGGTTTTGGCCATCAGATCGATGACTGGTTGTCC",
+  "discover": {
+   "kind": "header",
+   "max_labels": 40
+  },
+  "request_id": "svc-res-t4-39"
+ },
+ "body": {
+  "envelope_version": 1,
+  "route": "/resolve",
+  "graphs": [
+   "bact_other",
+   "bact_pseudomonadota"
+  ],
+  "answered": 1,
+  "refused": 1,
+  "not_reached": [],
+  "unfinished": [],
+  "request_id": "svc-res-t4-39",
+  "server_instance": "7c1e0f3a9b24d6e8",
+  "deadline": {
+   "not_after_ms": null,
+   "finish_by_ms": null,
+   "effective_deadline_at": null,
+   "cutoff_at": null
+  },
+  "answers": [
+   {
+    "graph": "bact_other",
+    "graph_path": "/scratch/nvme8/refseq_r237/bact_other/graph.dbg",
+    "annotation_path": "/scratch/nvme8/refseq_r237/bact_other/annotation.row_diff_brwt_coord.annodbg",
+    "index_fp": "7bab0c8c0ce6d061cf5787419f9219e698cbb084f5de3935254bcd503149be7a",
+    "outcome": "refused",
+    "refusal": {
+     "code": "resolve_answer_too_large",
+     "error": "resolve: the answer would hold more than --resolve-max-discover-memory-mb 1 MiB (answer): nothing partial is sent; ask for run_format \"rle\", a larger min_block_kmers, fewer labels or seeds, or a shorter sequence",
+     "http_status": 400,
+     "max_memory_mb": 1
+    }
+   },
+   {
+    "graph": "bact_pseudomonadota",
+    "graph_path": "/scratch/nvme10/refseq_r237/bact_pseudomonadota/graph.dbg",
+    "annotation_path": "/scratch/nvme10/refseq_r237/bact_pseudomonadota/annotation.row_diff_brwt_coord.annodbg",
+    "index_fp": "c9a9c34fa17d947caa08350e41652ee3506ff27f4141ff1717eb959bbb5064dc",
+    "outcome": "answered",
+    "candidates": [],
+    "capabilities": {
+     "alphabet": "$ACGT",
+     "cost_models_available": [
+      "forbid",
+      "constant",
+      "table"
+     ],
+     "detail_levels": [
+      "summary",
+      "tree",
+      "full",
+      "graphlet"
+     ],
+     "direct_access": false,
+     "discovery_trace_scale": "traced",
+     "feature_level": 6,
+     "graphlet_format": 1,
+     "has_coord_to_header": true,
+     "has_coordinates": true,
+     "index_fp": "c9a9c34fa17d947caa08350e41652ee3506ff27f4141ff1717eb959bbb5064dc",
+     "index_meta_fp": "ba9c9d2378408a6a",
+     "index_ns": "refseq-r237-bact_pseudomonadota",
+     "k": 31,
+     "label_modes": [
+      "constrain",
+      "annotate"
+     ],
+     "num_labels": 142,
+     "regime": "basic",
+     "release": "refseq237",
+     "schema_version": 1,
+     "supports_trace": true
+    },
+    "graph_runs": [],
+    "k": 31,
+    "labels": [],
+    "labels_truncated": null,
+    "num_kmers": 1970,
+    "regime": "basic",
+    "release": "refseq237",
+    "support": "kmer",
+    "timing": {
+     "cpu_ms": 0.542583,
+     "elapsed_ms": 0.515208
+    },
+    "unknown_labels": [],
+    "work": {
+     "memory_bytes": 18007
+    }
+   }
+  ],
+  "timing": {
+   "elapsed_ms": 2.858292
+  },
+  "work": {
+   "memory_bytes": 18007
+  }
+ }
+}

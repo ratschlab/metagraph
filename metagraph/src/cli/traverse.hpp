@@ -258,6 +258,12 @@ class TooManyExplicitSeeds : public InvalidRequest {
 // error first (error_first_json_text), as the intake refusals (too_many_json_values_json)
 Json::Value too_many_explicit_seeds_json(const TooManyExplicitSeeds &e);
 
+// A /resolve answer priced past --resolve-max-discover-memory-mb (graph::traversal::
+// AnswerTooLarge; SPEC-labeled-traversal-core.md §4.6, GPT review 7, finding 2): {"error": its
+// message, "code": "resolve_answer_too_large", "max_memory_mb": the bound}, written error first
+// (error_first_json_text); the server answers it 400. Nothing partial is sent
+Json::Value resolve_answer_too_large_json(const graph::traversal::AnswerTooLarge &e);
+
 // Normalized strategy echo (what was actually used), resubmittable verbatim:
 // output.detail and output.timing come from the request, not from the Strategy
 Json::Value strategy_to_json(const graph::traversal::Strategy &strategy, const CostSpec &cost,
@@ -269,11 +275,21 @@ Json::Value seed_result_to_json(const graph::traversal::SeedResult &result,
                                 const graph::traversal::Strategy &strategy,
                                 const std::string &detail, bool timing);
 // |check|: read every graph::traversal::kResolveCheckLabels objects built (a /resolve's
-// deadline: it throws to abandon the answer)
+// deadline: it throws to abandon the answer). |answer| (null: none): the answer account, charged
+// with the tree and its text before each part is built (the prices in traverse.cpp: its heap and
+// its text's bytes, AnswerAccount::charge_text), throwing graph::traversal::AnswerTooLarge at
+// the part that passes it
 Json::Value profile_to_json(const graph::traversal::SupportProfile &profile,
                             const graph::traversal::SeedSelection *selection,
                             const std::string &run_format,
-                            const std::function<void()> &check = nullptr);
+                            const std::function<void()> &check = nullptr,
+                            graph::traversal::AnswerAccount *answer = nullptr);
+// Once the answer's tree is complete (process_resolve_request, after its last member): charges
+// |answer| (null: nothing) with its text's buffer at the allocator's class beyond the text's
+// bytes charged, and, where it holds less, with what the text holds once the tree is freed: the
+// text, its copy (the compressed body or the transport's, at its last growth up to three times
+// the text) and the compressor's state (SPEC-labeled-traversal-core.md §4.6)
+void charge_answer_text(graph::traversal::AnswerAccount *answer);
 // The `coordinates` block of GET /traverse/capabilities (feature level 6; not in the
 // per-request capabilities, which change only in their feature_level): whether this index
 // reports record coordinates (supports_trace), the knobs and the cap's default, the block
@@ -588,9 +604,11 @@ class ResolveDelivery {
 // whatever the client did as long as no registry entry records the request (a request refused
 // before it was admitted, or one without a request_id on a single-graph server); once |tracked|
 // answers true, ResponseControl::gone asks too, so that an entry records client_gone, not an
-// error that nobody received (SPEC-multigraph-envelope.md section 5). The route builds its
-// control only here (ServerRequest.TheResolveRouteWritesUnderItsGoneCheck). Not copyable:
-// |control| refers to the members
+// error that nobody received (SPEC-multigraph-envelope.md section 5). The answer's text is
+// written into a buffer reserved to its exact size (compact_json_size), the same bytes as
+// json_text's. The route builds its control only here
+// (ServerRequest.TheResolveRouteWritesUnderItsGoneCheck). Not copyable: |control| refers to the
+// members
 struct ResolveWriting {
     ResolveWriting(std::function<bool()> gone, std::chrono::milliseconds every,
                    int compression_level)
@@ -606,6 +624,11 @@ struct ResolveWriting {
             } catch (const ResolveDeadline &e) {
                 throw HttpError(503, resolve_deadline_body(e));
             }
+        };
+        // the answer's text reserved to its exact size, so that writing it holds the tree and
+        // the text once, as the answer account prices it (§4.6; T4 review R1, F3)
+        control.write = [](const Json::Value &result, const std::function<void()> &check) {
+            return json_text(result, true, check, nullptr, compact_json_size(result));
         };
     }
     ResolveWriting(const ResolveWriting&) = delete;

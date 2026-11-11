@@ -39,8 +39,10 @@ An entry is either the pair's single-graph answer with the tags merged in, or a 
   On `/traverse` the single-graph answer's `usage` moves to the envelope (it is the attempt's, and the attempt is
   the request's). The entry's `index_fp` equals the identity inside the answer (`capabilities.index_fp`).
 - refused: `{graph, graph_path, annotation_path, index_fp, outcome: "refused", refusal: {http_status, error,
-  code?, reason?, usage?}}`: what the pair alone would have been answered, or a `not_reached` / `unfinished`
-  outcome (section 4).
+  code?, reason?, usage?, max_memory_mb?}}`: what the pair alone would have been answered, or a `not_reached` /
+  `unfinished` outcome (section 4). `max_memory_mb` is a `/resolve` pair's 400 `resolve_answer_too_large` (its
+  answer priced past `--resolve-max-discover-memory-mb`, `SPEC-labeled-traversal-core.md` §4.6; train 4, T4-L1):
+  that pair is refused, the others answered.
 
 The capabilities routes (`GET /traverse/capabilities`, `GET /pattern/capabilities`) answer without a pair
 selection with the envelope over every pair (up to `max_graphs_without_selection`): `envelope_version`, `route`,
@@ -165,7 +167,7 @@ The answer keeps its upstream shape (a list of `{seq_description, results, ...}`
     stated whenever it lowers the budget, as on a single-graph server. A pair that finishes before the cutoff
     answers exactly its single-graph answer. A `/resolve` pair without a deadline (no `bounds.time_budget_ms`, no
     `finish_by_ms`) has no budget to cap and runs as its single-graph answer does (a deadline would change its
-    work: the explicit labels' hits fetched in pieces); it is told to stop at the cutoff. A pair that cannot stop
+    work: the direct path's explicit labels' hits fetched in pieces); it is told to stop at the cutoff. A pair that cannot stop
     by then (a load in progress, a step that reads no clock, a pair without a deadline) is `unfinished`.
 - A one-pair request (the selection holds one pair) runs inline, as its single-graph route does. The pair's own
   deadline, which starts when its work starts (after an in_ram load), is capped by `finish_by_ms` -
@@ -209,8 +211,9 @@ The answer keeps its upstream shape (a list of `{seq_description, results, ...}`
   `not_after_ms` gets 400. The seeds are checked in their order, the work's, which checks a seed's labels before
   the next seed: under a discovery the seeds after the first that names labels are checked by the work. An
   HTTP-level 400 never holds a `request_id`: one that only the work can find (a seed not fully present in the graph,
-  a seed label a discovery did not find, a fault of a seed after it, a `/pattern` the index cannot answer) frees the
-  id when it is answered, so `GET /requests/{id}` answers 404 and a retry runs. On a multi-graph server such a 400
+  a seed label a discovery did not find, a fault of a seed after it, a `/pattern` the index cannot answer, a
+  `/resolve` answer priced past `--resolve-max-discover-memory-mb`: `resolve_answer_too_large`, contract sample 39)
+  frees the id when it is answered, so `GET /requests/{id}` answers 404 and a retry runs. On a multi-graph server such a 400
   of one pair is a refused entry (`refusal.http_status` 400) of a 200 envelope: the request was answered, its id
   is retained like any answered request's (`GET /requests/{id}` states it ended, that pair `refused`), and a
   corrected request takes a new id. A fan-out is never forgotten because one of its pairs gave 400; only a 400 of
@@ -354,7 +357,9 @@ Its `graph_summary` states `headers_unique` (section 9) and `labels_disjoint` (s
 From H2 (train 3) the block also states `resolve_discovery`: `{"max_tracked_labels": n, "max_memory_mb": n,
 "max_answer_labels": n}`, the bounds of a `/resolve` discovery per pair (`--resolve-max-discover-labels`,
 `--resolve-max-discover-memory-mb`, `--resolve-max-discover-answer-labels`;
-integers, 0 for none; `SPEC-labeled-traversal-core.md` §4.6), as the `resolve` block's `discovery` states them, and
+integers, 0 for none; `SPEC-labeled-traversal-core.md` §4.6; from train 4, T4-L1, `max_memory_mb` is also the
+bound of the explicit labels' pass on the row paths and of each pair's answer account), as the `resolve` block's
+`discovery` states them, and
 `resolve_max_explicit_labels` (an integer, 0 = unlimited): the cap on a `/resolve`'s explicit label lists
 (`--resolve-max-explicit-labels`, `SPEC-labeled-traversal-core.md` §4.1), as the `resolve` block's
 `max_explicit_labels`; above it the whole request is refused 400, before any pair. And `resolve_max_explicit_seeds`
