@@ -224,22 +224,35 @@ class TestRemapAnnotation(TestingBase):
         self.assertIn('other orientation', res.stderr.decode() + res.stdout.decode())
 
     @parameterized.expand([
-        ('basic', 'brwt'),
-        ('basic', 'row_diff_brwt'),
-        ('primary', 'row_diff_brwt'),
+        ('basic', 'brwt', False),
+        ('basic', 'row_diff_brwt', False),
+        ('primary', 'row_diff_brwt', False),
+        ('basic', 'row_diff_brwt', True),
+        ('primary', 'row_diff_brwt', True),
     ])
-    def test_row_map_from_extraction(self, mode, anno_repr):
-        """`transform --to-fasta --row-map` writes the row map that the remap computes."""
+    def test_row_map_from_extraction(self, mode, anno_repr, convert):
+        """`transform --to-fasta --row-map` and `transform --graph sshash` write
+        the row map that the remap computes."""
         source = self.source if mode == 'basic' else self.primary_source
-        prefix = f'{self.tempdir.name}/extract_{mode}_{anno_repr}'
-        self._run_command(
-            f'{METAGRAPH} transform -p {NUM_THREADS} --to-fasta --row-map'
-            f' -o {prefix} {source}', 'Transform command', shell=True)
-        self.assertEqual(glob.glob(f'{self.tempdir.name}/**/bucket.*', recursive=True), [])
+        prefix = f'{self.tempdir.name}/extract_{mode}_{anno_repr}_{int(convert)}'
         target = prefix + '.sshashdbg'
-        self._run_command(
-            f'{METAGRAPH} build -p {NUM_THREADS} --mode {mode} --graph sshash'
-            f' -k {K} -o {target} {prefix}.fasta.gz', 'Build command', shell=True)
+        if convert:
+            self._run_command(
+                f'{METAGRAPH} transform -p {NUM_THREADS} --graph sshash'
+                f' -o {prefix} {source}', 'Transform command', shell=True)
+            self.assertEqual(glob.glob(f'{self.tempdir.name}/**/temp_convert_*', recursive=True), [])
+        else:
+            self._run_command(
+                f'{METAGRAPH} transform -p {NUM_THREADS} --to-fasta --row-map'
+                f' -o {prefix} {source}', 'Transform command', shell=True)
+            self._run_command(
+                f'{METAGRAPH} build -p {NUM_THREADS} --mode {mode} --graph sshash'
+                f' -k {K} -o {target} {prefix}.fasta.gz', 'Build command', shell=True)
+        self.assertEqual(glob.glob(f'{self.tempdir.name}/**/bucket.*', recursive=True), [])
+        # In primary mode, the SSHash graph also has a node for every reverse complement.
+        self.assertEqual(self._get_stats(target)['nodes (k)'],
+                         self._get_stats(self.target if mode == 'basic'
+                                         else self.primary_target)['nodes (k)'])
 
         self._annotate_graph(INPUT, source, prefix + '_anno', anno_repr,
                              num_threads=NUM_THREADS)
@@ -263,12 +276,17 @@ class TestRemapAnnotation(TestingBase):
             expected = f.read()
         with open(prefix + anno_file_extension[anno_repr], 'rb') as f:
             self.assertEqual(expected, f.read())
+        for query_mode in ['labels', 'matches']:
+            self.assertEqual(self._query(source, anno, query_mode),
+                             self._query(target, prefix + anno_file_extension[anno_repr],
+                                         query_mode))
 
-    def test_row_map_rejects_canonical(self):
+    @parameterized.expand(['--to-fasta --row-map', '--graph sshash'])
+    def test_row_map_rejects_canonical(self, flags):
         prefix = self.tempdir.name + '/canonical'
         self._build_graph(INPUT, prefix + '.dbg', K, 'succinct', 'canonical')
         res = subprocess.run(
-            f'{METAGRAPH} transform --to-fasta --row-map -o {prefix} {prefix}.dbg',
+            f'{METAGRAPH} transform {flags} -o {prefix}_out {prefix}.dbg',
             shell=True, stdout=PIPE, stderr=PIPE)
         self.assertNotEqual(res.returncode, 0)
         self.assertIn('basic or primary', res.stderr.decode() + res.stdout.decode())

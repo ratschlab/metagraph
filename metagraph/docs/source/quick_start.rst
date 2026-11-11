@@ -888,18 +888,24 @@ The row map is built in ``moved.rowmap`` and read from it without loading it who
 Building it needs temporary files of about twice its size, in the output directory or in the directory passed with ``--disk-swap``.
 Pass ``--disk-swap ""`` to build and keep the row map in memory instead, which avoids the temporary files.
 
-If the new graph is not built yet, write the row map together with the contigs.
-The remap then skips matching the rows::
+If the new graph is not built yet, convert the old graph with ``transform --graph sshash``.
+It writes the SSHash graph and the row map, so the remap skips matching the rows::
 
-    metagraph transform -v -p 36 --to-fasta --row-map -o moved graph.dbg
-    metagraph build -v -p 36 --graph sshash -k 31 -o moved moved.fasta.gz
+    metagraph transform -v -p 36 --graph sshash -o moved graph.dbg
     metagraph transform_anno -v -p 36 --remap-graph graph.dbg -i moved.sshashdbg \
                              -o moved annotation.row_diff_brwt.annodbg
 
-The first command writes ``moved.fasta.gz`` and ``moved.rowmap``.
-This row map is valid only for an SSHash graph built from exactly this file.
+The first command writes ``moved.sshashdbg`` and ``moved.rowmap``.
+It keeps the mode of the old graph, which must be ``basic`` or ``primary``.
+The contigs go to a temporary file in the output directory or in the directory passed with ``--disk-swap``.
+
+To build the SSHash graph in a separate step, for example on another machine, write the row map together with the contigs::
+
+    metagraph transform -v -p 36 --to-fasta --row-map -o moved graph.dbg
+    metagraph build -v -p 36 --graph sshash -k 31 -o moved moved.fasta.gz
+
+This row map is valid only for an SSHash graph built from exactly ``moved.fasta.gz``.
 For a graph in ``primary`` mode, build the SSHash graph with ``--mode primary``.
-Graphs in ``canonical`` mode are not supported.
 
 .. _query_index:
 

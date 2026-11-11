@@ -29,13 +29,7 @@ using mtg::seq_io::ExtendedFastaWriter;
 
 int clean_graph(Config *config) {
     assert(config);
-
-    const auto &files = config->fnames;
-
-    assert(files.size() == 1);
-    assert(config->outfbase.size());
-
-    config->min_count = std::max(1u, config->min_count);
+    assert(config->fnames.size() == 1);
 
     if (!config->to_fasta) {
         logger->error("Clean graph can be serialized only in form "
@@ -43,10 +37,24 @@ int clean_graph(Config *config) {
         exit(1);
     }
 
-    Timer timer;
     logger->trace("Loading graph...");
 
-    auto graph = load_critical_dbg(files.at(0));
+    return clean_graph(config, load_critical_dbg(config->fnames.at(0)));
+}
+
+int clean_graph(Config *config, std::shared_ptr<graph::DeBruijnGraph> graph) {
+    assert(config);
+
+    const auto &files = config->fnames;
+
+    assert(files.size() == 1);
+    assert(config->outfbase.size());
+    assert(config->to_fasta);
+
+    config->min_count = std::max(1u, config->min_count);
+
+    Timer timer;
+
     if (config->row_map && graph->get_mode() == graph::DeBruijnGraph::CANONICAL) {
         logger->error("--row-map supports only graphs in basic or primary mode");
         exit(1);
@@ -172,10 +180,10 @@ int clean_graph(Config *config) {
         std::unique_ptr<annot::RowMapWriter> row_map;
         std::filesystem::path row_map_tmp_dir;
         if (config->row_map) {
-            auto tmp_dir = config->tmp_dir.empty()
-                    ? std::filesystem::path(outfbase).remove_filename()
-                    : config->tmp_dir;
-            row_map_tmp_dir = utils::create_temp_dir(tmp_dir.empty() ? "./" : tmp_dir, "rowmap");
+            row_map_tmp_dir = utils::create_temp_dir(
+                    config->tmp_dir.empty() ? std::filesystem::path(outfbase).remove_filename()
+                                            : config->tmp_dir,
+                    "rowmap");
             // in primary mode, an SSHash graph has a second node for every reverse complement
             row_map = std::make_unique<annot::RowMapWriter>(graph->max_index(),
                                                             2 * graph->max_index(),

@@ -651,6 +651,12 @@ Config::Config(int argc, char *argv[]) {
                     && outfbase.empty())
         print_usage_and_exit = true;
 
+    if (identity == TRANSFORM && graph_type != SUCCINCT && graph_type != SSHASH) {
+        std::cerr << "transform can change the graph representation only with"
+                     " '--graph sshash'" << std::endl;
+        print_usage_and_exit = true;
+    }
+
     // 'transform --to-fasta' runs as CLEAN
     if (row_map && !(identity == CLEAN && to_fasta)) {
         std::cerr << "--row-map needs 'transform --to-fasta'" << std::endl;
@@ -1226,6 +1232,9 @@ if (advanced) {
             fprintf(stderr, "\t   --clear-dummy \terase all redundant dummy edges and build an edgemask for non-redundant [off]\n");
             fprintf(stderr, "\t   --prune-tips [INT] \tprune all dead ends shorter than this many k-mers [1]\n");
             fprintf(stderr, "\t   --state [STR] \tchange state of succinct graph: small / dynamic / stat / fast [stat]\n");
+            fprintf(stderr, "\t   --graph [STR] \tconvert the graph to another representation: sshash [off]\n");
+            fprintf(stderr, "\t                 \tAlso writes <OUT>.rowmap, the row map that 'transform_anno --remap-graph'\n");
+            fprintf(stderr, "\t                 \tneeds to move annotations to the new graph\n");
             fprintf(stderr, "\t   --to-adj-list \twrite adjacency list to file [off]\n");
             fprintf(stderr, "\t   --to-fasta \t\textract sequences from graph and dump to compressed FASTA file [off]\n");
             fprintf(stderr, "\t   --enumerate \t\tenumerate sequences in FASTA [off]\n");
