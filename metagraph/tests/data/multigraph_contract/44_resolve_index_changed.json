@@ -1,0 +1,167 @@
+{
+ "route": "POST /resolve",
+ "status": 200,
+ "note": "T4-L3 (GPT review 7, finding 4; SPEC-multigraph-envelope.md sections 1 and 10): on /resolve and /pattern a pair whose files changed on disk since the server started is refused alone, as every pair's failed load: its entry refused with refusal {error, code: \"index_changed\", http_status: 400} (sample 43 states the text), the other pair answered from a copy loaded into RAM for the request (timing.load_ms), the envelope 200. Nothing is reserved for the refused pair (it is refused before its memory wait) and its index is not touched; the same request without in_ram answers both pairs from the files they mapped at start-up. The code is the owner's decision of 2026-11-11, asked by the async service: before, the refusal block had no code. A real run: bact_pseudomonadota's annotation replaced by a copy of itself renamed over it, a graph-less header discovery of acc1's first 240 bp (as sample 30) with in_ram and a request_id; each entry tagged with its sample pair and identity, the text naming the sample pair's paths. The run was on macOS: timing.page_faults, stated where the platform reads it per thread (Linux), is absent, never 0.",
+ "request": {
+  "sequence": "CCGTGATGGTGATCGTAAACACGAACTTGGTCTTTCTCACTGAGCTAGCACGGGTTCTTACAACAACCAATCTAGTTGATTCCTTGTGTTTGTACTTAGCTCACTATATCATTAGGTGCTTAGCTCAATTTATGTACTGATTGCTTAAAGGAATATCATCTACGCTGGGATAGATGTTCAACATCGCGCAAAAGTGATGTCGATCGCGCAGTTATGCCACGCCGCATTCGGTACCTCGGT",
+  "discover": {
+   "kind": "header",
+   "max_labels": 2
+  },
+  "graphs": [
+   "bact_other",
+   "bact_pseudomonadota"
+  ],
+  "in_ram": true,
+  "request_id": "svc-res-l3-44"
+ },
+ "body": {
+  "envelope_version": 1,
+  "route": "/resolve",
+  "graphs": [
+   "bact_other",
+   "bact_pseudomonadota"
+  ],
+  "answered": 1,
+  "refused": 1,
+  "not_reached": [],
+  "unfinished": [],
+  "request_id": "svc-res-l3-44",
+  "server_instance": "7c1e0f3a9b24d6e8",
+  "deadline": {
+   "not_after_ms": null,
+   "finish_by_ms": null,
+   "effective_deadline_at": null,
+   "cutoff_at": null
+  },
+  "answers": [
+   {
+    "graph": "bact_other",
+    "graph_path": "/scratch/nvme8/refseq_r237/bact_other/graph.dbg",
+    "annotation_path": "/scratch/nvme8/refseq_r237/bact_other/annotation.row_diff_brwt_coord.annodbg",
+    "index_fp": "7bab0c8c0ce6d061cf5787419f9219e698cbb084f5de3935254bcd503149be7a",
+    "outcome": "answered",
+    "candidates": [
+     {
+      "bp_interval": [
+       0,
+       240
+      ],
+      "kmer_interval": [
+       0,
+       210
+      ],
+      "labels": [
+       "acc1",
+       "acc2"
+      ]
+     }
+    ],
+    "capabilities": {
+     "alphabet": "$ACGT",
+     "cost_models_available": [
+      "forbid",
+      "constant",
+      "table"
+     ],
+     "detail_levels": [
+      "summary",
+      "tree",
+      "full",
+      "graphlet"
+     ],
+     "direct_access": false,
+     "discovery_trace_scale": "traced",
+     "feature_level": 6,
+     "graphlet_format": 1,
+     "has_coord_to_header": true,
+     "has_coordinates": true,
+     "index_fp": "7bab0c8c0ce6d061cf5787419f9219e698cbb084f5de3935254bcd503149be7a",
+     "index_meta_fp": "a8c8bc34fa483400",
+     "index_ns": "refseq-r237-bact_other",
+     "k": 31,
+     "label_modes": [
+      "constrain",
+      "annotate"
+     ],
+     "num_labels": 95,
+     "regime": "basic",
+     "release": "refseq237",
+     "schema_version": 1,
+     "supports_trace": true
+    },
+    "graph_runs": [
+     [
+      0,
+      210
+     ]
+    ],
+    "k": 31,
+    "labels": [
+     {
+      "kind": "header",
+      "kmers_supported": 210,
+      "label": "acc1",
+      "runs": [
+       [
+        0,
+        210
+       ]
+      ]
+     },
+     {
+      "kind": "header",
+      "kmers_supported": 210,
+      "label": "acc2",
+      "runs": [
+       [
+        0,
+        210
+       ]
+      ]
+     }
+    ],
+    "labels_truncated": {
+     "dropped_full_length": 0,
+     "kept": 2,
+     "max_dropped_kmers": 90,
+     "min_kept_kmers": 210,
+     "tied_at_boundary": 2,
+     "tied_kept": 2,
+     "total": 3
+    },
+    "num_kmers": 210,
+    "regime": "basic",
+    "release": "refseq237",
+    "support": "kmer",
+    "timing": {
+     "cpu_ms": 0.377125,
+     "elapsed_ms": 0.36033400000000004,
+     "load_ms": 5.417917
+    },
+    "unknown_labels": [],
+    "work": {
+     "memory_bytes": 15083
+    }
+   },
+   {
+    "graph": "bact_pseudomonadota",
+    "graph_path": "/scratch/nvme10/refseq_r237/bact_pseudomonadota/graph.dbg",
+    "annotation_path": "/scratch/nvme10/refseq_r237/bact_pseudomonadota/annotation.row_diff_brwt_coord.annodbg",
+    "index_fp": "c9a9c34fa17d947caa08350e41652ee3506ff27f4141ff1717eb959bbb5064dc",
+    "outcome": "refused",
+    "refusal": {
+     "error": "The file '/scratch/nvme10/refseq_r237/bact_pseudomonadota/annotation.row_diff_brwt_coord.annodbg' (annotation) of the pair ('/scratch/nvme10/refseq_r237/bact_pseudomonadota/graph.dbg', '/scratch/nvme10/refseq_r237/bact_pseudomonadota/annotation.row_diff_brwt_coord.annodbg') changed on disk since the server started (it is another file): a request does not load it into RAM, since the answer would carry the start-up identity and certificates; restart onto the new files, or send the request without in_ram",
+     "code": "index_changed",
+     "http_status": 400
+    }
+   }
+  ],
+  "timing": {
+   "elapsed_ms": 6.667833
+  },
+  "work": {
+   "memory_bytes": 15083
+  }
+ }
+}

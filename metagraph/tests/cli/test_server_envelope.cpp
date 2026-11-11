@@ -699,3 +699,83 @@ TEST(ServerEnvelope, Sample25SearchCoordinateRowsAreTheWriters) {
     EXPECT_FALSE(cuts[0]["complete"].asBool());
     EXPECT_TRUE(cuts[1]["complete"].asBool());
 }
+
+
+// ---------------------------------------------------------------- a pair whose files changed
+
+namespace {
+
+// A reference sample's text as it is written, for the order of its members (a parsed
+// Json::Value keeps them sorted)
+std::string sample_text(const std::string &name) {
+    const std::string path = source_path("tests/data/multigraph_contract/" + name);
+    std::ifstream in(path, std::ios::binary);
+    EXPECT_TRUE(in.good()) << path << " not found";
+    return { std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>() };
+}
+
+// The refusal of sample pair B (bact_pseudomonadota) whose annotation was replaced by another
+// file since the server started, the paths the sample's tags state
+std::string changed_annotation_of_b() {
+    const std::string graph = "/scratch/nvme10/refseq_r237/bact_pseudomonadota/graph.dbg";
+    const std::string annotation = "/scratch/nvme10/refseq_r237/bact_pseudomonadota/"
+                                   "annotation.row_diff_brwt_coord.annodbg";
+    return changed_file_text(annotation, "annotation", graph, annotation, "it is another file");
+}
+
+} // namespace
+
+// Sample 43 (T4-L3, GPT review 7 finding 4; SPEC-multigraph-envelope.md section 10), a real run:
+// an in_ram /search refused for a pair whose annotation was replaced since the server started,
+// 400 with IndexChanged's body {error, code: "index_changed"} (the owner's decision of
+// 2026-11-11), written error first as the server writes it
+TEST(ServerEnvelope, Sample43SearchIndexChanged) {
+    const Json::Value s43 = sample("43_search_400_index_changed.json");
+    EXPECT_EQ("POST /search", s43["route"].asString());
+    EXPECT_EQ(400, s43["status"].asInt());
+    EXPECT_TRUE(s43["request"]["in_ram"].asBool());
+    const IndexChanged refusal(changed_annotation_of_b());
+    EXPECT_EQ(400, refusal.status());
+    EXPECT_EQ(text(refusal.body()), text(s43["body"]));
+    EXPECT_EQ((std::vector<std::string> { "code", "error" }), s43["body"].getMemberNames());
+    // error first in the sample, as in the server's text
+    EXPECT_EQ(0u, refusal.text().find("{\"error\":"));
+    const std::string raw = sample_text("43_search_400_index_changed.json");
+    const size_t at = raw.find("\"body\": {");
+    ASSERT_NE(std::string::npos, at);
+    EXPECT_LT(raw.find("\"error\":", at), raw.find("\"code\":", at));
+}
+
+// Sample 44 (T4-L3, GPT review 7 finding 4; SPEC-multigraph-envelope.md sections 1 and 10), a
+// real run: on /resolve the changed pair is refused alone, its refusal block IndexChanged's body
+// with http_status 400; the other pair answered from a copy loaded into RAM for the request
+TEST(ServerEnvelope, Sample44ResolveIndexChanged) {
+    const Json::Value s44 = sample("44_resolve_index_changed.json");
+    EXPECT_EQ("POST /resolve", s44["route"].asString());
+    EXPECT_EQ(200, s44["status"].asInt());
+    EXPECT_TRUE(s44["request"]["in_ram"].asBool());
+    const Json::Value &body = s44["body"];
+    const Json::Value built = rebuilt_post_envelope(body);
+    EXPECT_EQ(text(body), text(built));
+    EXPECT_EQ(1u, built["answered"].asUInt());
+    EXPECT_EQ(1u, built["refused"].asUInt());
+    // a refusal of its own: no pair named not reached or unfinished
+    EXPECT_EQ(Json::Value(Json::arrayValue), built["not_reached"]);
+    EXPECT_EQ(Json::Value(Json::arrayValue), built["unfinished"]);
+    const Json::Value &other = built["answers"][0];
+    EXPECT_EQ("bact_other", other["graph"].asString());
+    EXPECT_EQ("answered", other["outcome"].asString());
+    EXPECT_LT(0, other["timing"]["load_ms"].asDouble());
+    const Json::Value &changed = built["answers"][1];
+    EXPECT_EQ("bact_pseudomonadota", changed["graph"].asString());
+    EXPECT_EQ("refused", changed["outcome"].asString());
+    const IndexChanged refusal(changed_annotation_of_b());
+    Json::Value block = refusal.body();
+    block["http_status"] = refusal.status();
+    EXPECT_EQ(text(block), text(changed["refusal"]));
+    const SelectedPair pair = pair_of_entry(changed);
+    EXPECT_EQ(text(changed), text(envelope_entry_refused(pair, changed["index_fp"].asString(),
+                                                         refusal.status(), refusal.body())));
+    // the envelope's account is the answered pair's
+    EXPECT_EQ(other["work"]["memory_bytes"].asUInt64(), built["work"]["memory_bytes"].asUInt64());
+}

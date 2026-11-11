@@ -128,6 +128,22 @@ def changed_file_refusal(path, role, graph, annotation, how):
             f"files, or send the request without in_ram")
 
 
+def index_changed(text):
+    """The body of that refusal (the owner's decision of 2026-11-11): the text and the code
+    index_changed, written error first on /search and /traverse"""
+    return {'error': text, 'code': 'index_changed'}
+
+
+def assert_index_changed(test, response, text, usage=False):
+    """|response| is the 400 of a changed pair on /search or /traverse: {error, code} (with
+    `usage` on a managed /traverse), its text starting with the error, as the intake refusals'"""
+    test.assertEqual(400, response.status_code, response.text[:2000])
+    body = response.json()
+    test.assertEqual(['error', 'code'] + (['usage'] if usage else []), list(body), response.text)
+    test.assertEqual(index_changed(text), {k: body[k] for k in ('error', 'code')})
+    test.assertTrue(response.text.startswith('{"error":'), response.text[:200])
+
+
 def revcomp(s):
     return s[::-1].translate(str.maketrans('ACGT', 'TGCA'))
 
@@ -2745,9 +2761,10 @@ class TestMultiGraphServer(TestingBase):
         """A pair whose annotation cannot be read any more after start-up (chmod 000; the resident
         index, mapped at start-up, still answers): an `in_ram` request on it is answered, not the
         process ended. Since train 4 the chmod changes the file's status change time, so the load
-        is refused before the memory wait (GPT review 7 finding 4) with the changed-file text:
-        /pattern's pair refused (400, no code, the request 200, and so /resolve's), /traverse 400
-        with it --, no memory reserved for it, and the server lives: the pair without in_ram,
+        is refused before the memory wait (GPT review 7 finding 4) with the changed-file text and
+        the code index_changed: /pattern's pair refused (400, the request 200, and so /resolve's),
+        /traverse 400 with it, error first (with usage on a managed attempt) --, no memory
+        reserved for it, and the server lives: the pair without in_ram,
         the other pair with it (above the cap: served resident), and a copy of the same files
         under another name (kleb2) with it, which proves that no refused request kept a
         reservation (the cap holds one copy). Readable again, the pair stays refused (the stamp
@@ -2790,9 +2807,7 @@ class TestMultiGraphServer(TestingBase):
             self.assertEqual(route, body['route'])
             entry = body['answers'][0]
             self.assertEqual(('kleb', 'refused'), (entry['graph'], entry['outcome']), entry)
-            self.assertEqual({'http_status', 'error'}, set(entry['refusal']), entry)
-            self.assertEqual((400, refusal), (entry['refusal']['http_status'],
-                                              entry['refusal']['error']))
+            self.assertEqual(dict(index_changed(refusal), http_status=400), entry['refusal'])
 
         try:
             os.chmod(anno, 0)
@@ -2801,15 +2816,11 @@ class TestMultiGraphServer(TestingBase):
             # /pattern: the pair refused with the text, the request answered
             refused_entry(server.post('pattern', dict(p, in_ram=True)), '/pattern')
             # /traverse: 400 with the text; with usage on a managed attempt
-            ret = server.post('traverse', dict(t, in_ram=True))
-            self.assertEqual(400, ret.status_code, ret.text[:2000])
-            self.assertEqual({'error': refusal}, ret.json())
+            assert_index_changed(self, server.post('traverse', dict(t, in_ram=True)), refusal)
             ret = server.post('traverse', dict(t, in_ram=True, attempt_id='in-ram-unreadable'))
-            self.assertEqual(400, ret.status_code, ret.text[:2000])
-            self.assertEqual({'error', 'usage'}, set(ret.json()))
-            self.assertEqual(refusal, ret.json()['error'])
+            assert_index_changed(self, ret, refusal, usage=True)
             self.assertEqual('error', ret.json()['usage']['reason'])
-            # /resolve: the pair refused with the text (400, no code), the envelope 200
+            # /resolve: the pair refused with the text and the code (400), the envelope 200
             refused_entry(server.post('resolve', dict(r, in_ram=True)), '/resolve')
             log = server.text()
             # refused before any load: no loader ran, nothing was loaded into RAM
@@ -3860,17 +3871,13 @@ class TestRecordMappingAtLoad(TestingBase):
             # the .seqs replaced (the files in another order): refused, naming it
             replace(os.path.join(self.d, 'swapped.seqs'), seqs)
             failed = server.post('search', dict(query, in_ram=True))
-            self.assertEqual(400, failed.status_code, failed.text)
-            self.assertEqual({'error': changed_file_refusal(seqs, 'coord_to_header', self.graph,
-                                                            anno, 'it is another file')},
-                             failed.json())
+            assert_index_changed(self, failed, changed_file_refusal(
+                    seqs, 'coord_to_header', self.graph, anno, 'it is another file'))
             # the annotation replaced by one of three columns: refused, naming the annotation
             replace(os.path.join(self.d, 'three.column_coord.annodbg'), anno)
             failed = server.post('search', dict(query, in_ram=True))
-            self.assertEqual(400, failed.status_code, failed.text)
-            self.assertEqual({'error': changed_file_refusal(anno, 'annotation', self.graph,
-                                                            anno, 'it is another file')},
-                             failed.json())
+            assert_index_changed(self, failed, changed_file_refusal(
+                    anno, 'annotation', self.graph, anno, 'it is another file'))
             # the server runs on, its resident pair answering as before
             self.assertIsNone(server.process.poll())
             again = server.post('search', query)
@@ -3885,7 +3892,8 @@ class TestRecordMappingAtLoad(TestingBase):
         """GPT review 7 finding 4 (V7-B's f4_replace.py and f4_graph.py): a request's load of a
         pair into RAM (`in_ram`, a multi-graph server on --mmap with --mem-cap-gb) is refused
         once any file of the pair changed on disk since the server started, on /search,
-        /traverse, /resolve and /pattern, with the route's failed-load answer naming the file:
+        /traverse, /resolve and /pattern, with the route's failed-load status (400), the text
+        naming the file and the code index_changed (the owner's decision of 2026-11-11):
         - the graph rebuilt with one base of b1 changed (the same node count): the copy answered
           200 with other coordinates, silently wrong (V7-B);
         - the annotation and its .seqs replaced by a consistent rebuild of the files in another
@@ -3975,11 +3983,11 @@ class TestRecordMappingAtLoad(TestingBase):
                     change(graph, anno, seqs)
                     refusal = changed_file_refusal(graph if role == 'graph' else anno, role,
                                                    graph, anno, how)
-                    failed = server.post('search', dict(query, in_ram=True))
-                    self.assertEqual((400, {'error': refusal}), (failed.status_code,
-                                                                 failed.json()))
-                    ret = server.post('traverse', dict(bodies['traverse'], in_ram=True))
-                    self.assertEqual((400, {'error': refusal}), (ret.status_code, ret.json()))
+                    assert_index_changed(self, server.post('search', dict(query, in_ram=True)),
+                                         refusal)
+                    assert_index_changed(self, server.post('traverse', dict(bodies['traverse'],
+                                                                            in_ram=True)),
+                                         refusal)
                     for route in ('resolve', 'pattern'):
                         ret = server.post(route, dict(bodies[route], in_ram=True))
                         self.assertEqual(200, ret.status_code, ret.text[:2000])
@@ -3987,7 +3995,7 @@ class TestRecordMappingAtLoad(TestingBase):
                         self.assertEqual((0, 1), (body['answered'], body['refused']), body)
                         entry = body['answers'][0]
                         self.assertEqual('refused', entry['outcome'], entry)
-                        self.assertEqual({'http_status': 400, 'error': refusal},
+                        self.assertEqual(dict(index_changed(refusal), http_status=400),
                                          entry['refusal'])
                     # resident requests answer from the files mapped at start-up
                     again = server.post('search', query)

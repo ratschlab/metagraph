@@ -1810,3 +1810,29 @@ TEST(MultiGraphInRam, PairFileStampsNameTheFileThatChanged) {
     EXPECT_EQ(refusal(seqs, "coord_to_header", "its size"),
               pair_files_changed(stamps, pair.graph, pair.annotation));
 }
+
+// The refusal of a changed pair carries the code index_changed (the owner's decision of
+// 2026-11-11, asked by the async service): 400, the body {"error": the text, "code":
+// "index_changed"}, written error first as the intake refusals (/search, /traverse); its body is
+// a /resolve or /pattern pair's refusal block (http_status beside it, samples 43 and 44)
+TEST(MultiGraphInRam, AChangedPairIsRefusedWithTheCodeIndexChanged) {
+    const std::string text = changed_file_text("d/anno.annodbg", "annotation", "d/graph.dbg",
+                                               "d/anno.annodbg", "it is another file");
+    EXPECT_EQ("The file 'd/anno.annodbg' (annotation) of the pair ('d/graph.dbg', "
+              "'d/anno.annodbg') changed on disk since the server started (it is another "
+              "file): a request does not load it into RAM, since the answer would carry the "
+              "start-up identity and certificates; restart onto the new files, or send the "
+              "request without in_ram", text);
+    const IndexChanged refusal(text);
+    EXPECT_EQ(400, refusal.status());
+    EXPECT_EQ(text, refusal.what());
+    Json::Value body(Json::objectValue);
+    body["error"] = text;
+    body["code"] = "index_changed";
+    EXPECT_EQ(body, refusal.body());
+    EXPECT_EQ(body, index_changed_json(text));
+    EXPECT_EQ("{\"error\":\"" + text + "\",\"code\":\"index_changed\"}", refusal.text());
+    // an HttpError, which the routes answer with its status and text
+    const HttpError &as_http = refusal;
+    EXPECT_EQ(refusal.text(), as_http.text());
+}

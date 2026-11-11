@@ -800,11 +800,13 @@ int run_server(Config *config) {
     // since start-up (GPT review 7 finding 4): its answer would carry the start-up identity
     // (index_fp, index_meta_fp), the start-up certificates (headers_unique, labels_disjoint,
     // seqs_order, composite_fp) and the resident record mapping, and a replaced graph answered
-    // silently wrong. Thrown as a load that fails: the route's 400 with the refusal's text
+    // silently wrong. Thrown as IndexChanged: the route's 400 with the refusal's text and the
+    // code index_changed (the owner's decision of 2026-11-11), logged for the operator
     auto refuse_changed_pair = [&](const GraphPair &pair) {
         if (std::string why = pair_files_changed(pair_stamps.at(pair), pair.first, pair.second);
                 !why.empty()) {
-            throw std::runtime_error(why);
+            logger->warn("[Server] in_ram refused: {}", why);
+            throw IndexChanged(why);
         }
     };
     // A copy of |pair| loaded into RAM for one request: with the resident pair's record mapping
@@ -823,7 +825,7 @@ int run_server(Config *config) {
         refuse_changed_pair(pair);
         if (copy->get_annotator().get_label_encoder().get_labels()
                 != resident.get_annotator().get_label_encoder().get_labels()) {
-            throw std::runtime_error(fmt::format(
+            throw IndexChanged(fmt::format(
                     "The annotation '{}' loaded into RAM for the request has other column labels "
                     "than the one the server started with: restart onto the new files, or send "
                     "the request without in_ram", pair.second));
@@ -1774,6 +1776,10 @@ int run_server(Config *config) {
                 result.answered = true;
             } catch (const PairNotStarted &) {
                 result.not_started = true;
+            } catch (const IndexChanged &e) {
+                // a pair whose files changed since start-up (in_ram): its refusal block is the
+                // refusal's body, code index_changed beside the text
+                refused(e.status(), e.body());
             } catch (const PatternRefusal &e) {
                 logger->warn("[Server] Request {}: pair ({}, {}) of '{}' refused ({} {}): {}",
                              request_id, pair.first, pair.second, selected.name, e.status(),
@@ -2576,6 +2582,15 @@ int run_server(Config *config) {
                 Json::Value body = e.body();
                 body["usage"] = attempt->usage_json("error");
                 throw HttpError(400, std::move(body));
+            } catch (const IndexChanged &e) {
+                // a pair whose files changed since start-up (in_ram): its code kept, written
+                // error first, with the usage of a managed request
+                if (!attempt->managed())
+                    throw;
+                Json::Value body = e.body();
+                body["usage"] = attempt->usage_json("error");
+                std::string text = error_first_json_text(body);
+                throw HttpError(400, std::move(body), std::move(text));
             } catch (const std::exception &e) {
                 if (!attempt->managed())
                     throw;

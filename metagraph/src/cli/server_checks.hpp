@@ -806,6 +806,25 @@ std::vector<PairFileStamp> pair_file_stamps(const std::string &graph,
  */
 std::string pair_files_changed(const std::vector<PairFileStamp> &stamps,
                                const std::string &graph, const std::string &annotation);
+// that refusal's text for the file |path| (|role|) of the pair (|graph|, |annotation|), changed
+// as |how| states
+std::string changed_file_text(const std::string &path, const std::string &role,
+                              const std::string &graph, const std::string &annotation,
+                              const std::string &how);
+
+// {"error": |message|, "code": "index_changed"}: the refusal of a load of a pair into RAM for a
+// request once a file of the pair changed on disk since the server started (pair_files_changed's
+// text), or once the copy's column labels are not the resident's
+Json::Value index_changed_json(const std::string &message);
+// That refusal, thrown by the load (the owner's decision of 2026-11-11, asked by the async
+// service: a code a client can act on, the status the route's failed load has): /search and
+// /traverse answer 400 with its body written error first (error_first_json_text, as the intake
+// refusals; /traverse adds `usage` on a managed attempt), a /resolve or /pattern pair is refused
+// with it as its refusal block (`http_status` 400 beside `error` and `code`)
+class IndexChanged : public HttpError {
+  public:
+    explicit IndexChanged(const std::string &message);
+};
 
 } // namespace cli
 } // namespace mtg

@@ -1910,14 +1910,31 @@ std::string pair_files_changed(const std::vector<PairFileStamp> &stamps,
                 : now->size != f.stamp->size ? "its size"
                 : now->mtime_ns != f.stamp->mtime_ns ? "its modification time"
                 : "its status change time";
-        return fmt::format("The file '{}' ({}) of the pair ('{}', '{}') changed on disk since the "
-                           "server started ({}): a request does not load it into RAM, since the "
-                           "answer would carry the start-up identity and certificates; restart "
-                           "onto the new files, or send the request without in_ram", f.path,
-                           f.role, graph, annotation, how);
+        return changed_file_text(f.path, f.role, graph, annotation, how);
     }
     return "";
 }
+
+std::string changed_file_text(const std::string &path, const std::string &role,
+                              const std::string &graph, const std::string &annotation,
+                              const std::string &how) {
+    return fmt::format("The file '{}' ({}) of the pair ('{}', '{}') changed on disk since the "
+                       "server started ({}): a request does not load it into RAM, since the "
+                       "answer would carry the start-up identity and certificates; restart onto "
+                       "the new files, or send the request without in_ram", path, role, graph,
+                       annotation, how);
+}
+
+Json::Value index_changed_json(const std::string &message) {
+    Json::Value body(Json::objectValue);
+    body["error"] = message;
+    body["code"] = "index_changed";
+    return body;
+}
+
+IndexChanged::IndexChanged(const std::string &message)
+      : HttpError(400, index_changed_json(message),
+                  error_first_json_text(index_changed_json(message))) {}
 
 } // namespace cli
 } // namespace mtg

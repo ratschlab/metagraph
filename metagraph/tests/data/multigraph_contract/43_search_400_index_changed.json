@@ -1,0 +1,18 @@
+{
+ "route": "POST /search",
+ "status": 400,
+ "note": "T4-L3 (GPT review 7, finding 4; SPEC-multigraph-envelope.md section 10): a request that loads a pair into RAM (in_ram, on a multi-graph server running on --mmap with --mem-cap-gb above 0) is refused once any file of the pair changed on disk since the server started: the graph, the annotation, a row_diff annotation's anchors and fork successors, the .seqs it loaded, the graph's mask and Bloom filter, each stamped at start-up (device, inode, size, modification time and status change time: a rewrite that restores the size and modification time is caught too). An answer computed on the new files would carry the start-up identity and certificates. /search answers 400 {error, code: \"index_changed\"}, written in this order (error first, as the intake refusals), the whole request failing as any load of it that fails; /traverse answers the same body, with usage beside it on a managed attempt. The code is the owner's decision of 2026-11-11, asked by the async service; the status is the route's failed load. Restart the server onto the new files, or send the request without in_ram: the pair still answers from the files it mapped at start-up. A server on --mem-cap-gb 0 (staging) loads no copy and never answers it. <how> is one of \"it is another file\", \"its size\", \"its modification time\", \"its status change time\", \"it is gone or cannot be read\", \"it appeared\"; <role> one of graph, annotation, row_diff_anchors, row_diff_fork_succ, coord_to_header, graph_mask, graph_bloom. A real run: bact_pseudomonadota's annotation replaced by a copy of itself renamed over it; the text names the sample pair's paths, as every sample's tags (the run's named the fixture copies).",
+ "request": {
+  "FASTA": ">q1\nCCGTGATGGTGATCGTAAACACGAACTTGGTCTTTCTCACTGAGCTAGCACGGGTTCTTACAACAACCAATCTAGTTGATTCCTTGTGTTTGTACTTAGCTCACTATATCATTAGGTGCTTAGCTCAATTTATGTACTGATTGCTTAAAGGAATATCATCTACGCTGGGATAGATGTTCAACATCGCGCAAAAGTGATGTCGATCGCGCAGTTATGCCACGCCGCATTCGGTACCTCGGT\n",
+  "top_labels": 2,
+  "graphs": [
+   "bact_other",
+   "bact_pseudomonadota"
+  ],
+  "in_ram": true
+ },
+ "body": {
+  "error": "The file '/scratch/nvme10/refseq_r237/bact_pseudomonadota/annotation.row_diff_brwt_coord.annodbg' (annotation) of the pair ('/scratch/nvme10/refseq_r237/bact_pseudomonadota/graph.dbg', '/scratch/nvme10/refseq_r237/bact_pseudomonadota/annotation.row_diff_brwt_coord.annodbg') changed on disk since the server started (it is another file): a request does not load it into RAM, since the answer would carry the start-up identity and certificates; restart onto the new files, or send the request without in_ram",
+  "code": "index_changed"
+ }
+}

@@ -40,7 +40,9 @@ An entry is either the pair's single-graph answer with the tags merged in, or a 
   the request's). The entry's `index_fp` equals the identity inside the answer (`capabilities.index_fp`).
 - refused: `{graph, graph_path, annotation_path, index_fp, outcome: "refused", refusal: {http_status, error,
   code?, reason?, usage?}}`: what the pair alone would have been answered, or a `not_reached` / `unfinished`
-  outcome (section 4).
+  outcome (section 4). `code` where the refusal has one: the pair's own (a `/pattern` refusal's), `not_reached` or
+  `unfinished` (section 4), `index_changed` for a pair whose files changed on disk since the server started, refused
+  an `in_ram` load (section 10, sample 44).
 
 The capabilities routes (`GET /traverse/capabilities`, `GET /pattern/capabilities`) answer without a pair
 selection with the envelope over every pair (up to `max_graphs_without_selection`): `envelope_version`, `route`,
@@ -641,15 +643,21 @@ A changed pair is refused, never answered from the new files under the start-up 
 `index_meta_fp`, `server_instance`), certificates (`headers_unique`, `labels_disjoint`, `seqs_order`,
 `composite_fp`) and record mapping. Before train 4 a replaced annotation was answered from its own records while
 `headers_unique` stated the start-up value (a header the rebuild shared with another pair went unstated), and a
-replaced graph answered 200 with wrong coordinates. The refusal is the route's failed-load answer: `/search` 400
-`{"error": "<text>"}`, `/traverse` 400 `{"error": "<text>"}` (`usage` beside it on a managed attempt), `/resolve`
-and `/pattern` the pair's entry `refused` with `refusal: {"http_status": 400, "error": "<text>"}` (no `code`), the
-text `The file '<path>' (<role>) of the pair ('<graph>', '<annotation>') changed on disk since the server started
-(<how>): a request does not load it into RAM, since the answer would carry the start-up identity and certificates;
-restart onto the new files, or send the request without in_ram`, `<role>` one of `graph`, `annotation`,
-`row_diff_anchors`, `row_diff_fork_succ`, `coord_to_header`, `graph_mask`, `graph_bloom`, `<how>` one of `it is
-another file`, `its size`, `its modification time`, `its status change time`, `it is gone or cannot be read`, `it
-appeared`. Nothing is reserved for a pair refused before its memory wait. Requests without `in_ram`, and pairs
+replaced graph answered 200 with wrong coordinates. The refusal has the route's failed-load status and the code
+`index_changed` (the owner's decision of 2026-11-11, asked by the async service; before, it had no code): `/search`
+400 `{"error": "<text>", "code": "index_changed"}` (sample 43), `/traverse` 400 the same (`usage` beside them on a
+managed attempt), both written in this order (error first, as the intake refusals), `/resolve` and `/pattern` the
+pair's entry `refused` with `refusal: {"http_status": 400, "error": "<text>", "code": "index_changed"}`, the other
+pairs answered and the envelope 200 (sample 44). The text: `The file '<path>' (<role>) of the pair ('<graph>',
+'<annotation>') changed on disk since the server started (<how>): a request does not load it into RAM, since the
+answer would carry the start-up identity and certificates; restart onto the new files, or send the request without
+in_ram`, `<role>` one of `graph`, `annotation`, `row_diff_anchors`, `row_diff_fork_succ`, `coord_to_header`,
+`graph_mask`, `graph_bloom`, `<how>` one of `it is another file`, `its size`, `its modification time`, `its status
+change time`, `it is gone or cannot be read`, `it appeared`. A copy whose labels differ from the resident's is
+refused the same way, with the code (a check behind the stamps, which no copy of the stamped files fails): `The
+annotation '<annotation>' loaded into RAM for the request has other column labels than the one the server started
+with: restart onto the new files, or send the request without in_ram`. Nothing is reserved for a pair refused
+before its memory wait. Requests without `in_ram`, and pairs
 served from the resident index (above `--mem-cap-gb`, or on a server that loaded its graphs into RAM), answer from
 the files mapped at start-up as before; a server on `--mem-cap-gb 0` (staging) loads no copy, so nothing changes
 there. The search cache needs no generation in its key: no answer is computed on other files. A load that fails
