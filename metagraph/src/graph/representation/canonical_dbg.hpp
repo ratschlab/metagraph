@@ -47,9 +47,10 @@ class CanonicalDBG : public DBGWrapper<DeBruijnGraph> {
     /**
      * Methods from DeBruijnGraph
      */
-    // Map the k-mers of |sequence| to nodes: forward k-mers of the base graph
-    // first, then reverse-complement ones. If not |sequential|, the latter map
-    // to the nodes of their reverse complements in the base graph
+    // Map the k-mers of |sequence| to nodes, in the order of the sequence.
+    // A k-mer of the base graph maps to its node there. Otherwise, a k-mer
+    // whose reverse complement is in the base graph maps to the reverse
+    // complement node, or, if not |sequential|, to that base graph node
     virtual std::unique_ptr<NodeStream> node_stream(std::string_view sequence,
                                                     bool sequential) const override final;
 
