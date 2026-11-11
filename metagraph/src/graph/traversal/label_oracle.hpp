@@ -107,11 +107,13 @@ class LabelOracle {
 /**
  * Batched membership of a fixed set of permitted labels at annotation keys. Column
  * labels are read from whole rows; header labels (one sequence of a column) from tuple
- * rows, a coordinate counting for a label when it falls into that label's sequence.
- * Results are cached per key, up to |max_cache_size| keys, then the cache is cleared. A
- * batch with more keys than that is answered without caching it. On a row-diff
- * annotation, the decoded rows are kept too (RowDiffCache), so that the rows of the next
- * step of a walk are decoded from them.
+ * rows, a coordinate counting for a label when it falls into that label's sequence. For
+ * header labels the coordinates themselves are kept too (Hits::coords), so that a walk
+ * can follow a record in coordinate order instead of by membership.
+ * Results are cached per key, up to |max_cache_size| keys (and 16 header coordinates per
+ * key on average), then the cache is cleared. A batch with more keys than that is
+ * answered without caching it. On a row-diff annotation, the decoded rows are kept too
+ * (RowDiffCache), so that the rows of the next step of a walk are decoded from them.
  */
 class LabelQuery {
   public:
@@ -124,8 +126,35 @@ class LabelQuery {
                std::vector<LabelRef> labels,
                size_t max_cache_size = 1'000'000);
 
+    // A coordinate of a HEADER label's sequence record
+    struct HeaderCoord {
+        LabelId label;
+        uint64_t coord;
+        bool operator==(const HeaderCoord &o) const {
+            return label == o.label && coord == o.coord;
+        }
+        bool operator<(const HeaderCoord &o) const {
+            return label != o.label ? label < o.label : coord < o.coord;
+        }
+    };
+    struct Hits {
+        // the permitted labels present at the key, ascending
+        NodeHits labels;
+        // for the HEADER labels among them, the coordinates of the key that fall into the
+        // label's record, ascending by (label, coordinate)
+        std::vector<HeaderCoord> coords;
+    };
+
     // Hits for every annotation key (npos yields no hits).
     std::vector<NodeHits> fetch(const std::vector<node_index> &keys);
+    // The same with the header coordinates, without copying them: the pointers are valid
+    // until the next fetch() or fetch_hits().
+    std::vector<const Hits*> fetch_hits(const std::vector<node_index> &keys);
+
+    // The first and last coordinate of a HEADER label's record ({ 0, 0 } for a COLUMN label)
+    const std::pair<uint64_t, uint64_t>& record_coords(LabelId label) const {
+        return record_coords_[label];
+    }
 
   private:
     struct HeaderRange {
@@ -135,16 +164,18 @@ class LabelQuery {
     };
 
     void read_hits(const std::vector<node_index> &keys,
-                   tsl::hopscotch_map<node_index, NodeHits> *out);
+                   tsl::hopscotch_map<node_index, Hits> *out);
     void hits_from_row(const annot::matrix::BinaryMatrix::SetBitPositions &row,
-                       NodeHits *hits) const;
+                       Hits *hits) const;
     void hits_from_tuples(const annot::matrix::MultiIntMatrix::RowTuples &row,
-                          NodeHits *hits) const;
+                          Hits *hits) const;
 
     const LabelOracle &oracle_;
     std::vector<LabelRef> labels_;
     bool tuples_ = false;
     size_t max_cache_size_;
+    // per label, the coordinate range of its record
+    std::vector<std::pair<uint64_t, uint64_t>> record_coords_;
 
     // column -> label id for COLUMN labels
     tsl::hopscotch_map<Column, LabelId> column_labels_;
@@ -153,7 +184,13 @@ class LabelQuery {
     // mapped to its sequence
     tsl::hopscotch_map<Column, std::vector<HeaderRange>> header_ranges_;
 
-    tsl::hopscotch_map<node_index, NodeHits> cache_;
+    tsl::hopscotch_map<node_index, Hits> cache_;
+    // the header coordinates held by |cache_|: a repetitive k-mer has many per label, so
+    // the cache is bounded by them as well as by its keys
+    size_t cached_coords_ = 0;
+    // the hits of a batch too large to cache, kept until the next fetch
+    tsl::hopscotch_map<node_index, Hits> uncached_;
+    const Hits empty_ {};
     annot::matrix::RowDiffCache<annot::matrix::BinaryMatrix::SetBitPositions> row_cache_;
     annot::matrix::RowDiffCache<annot::matrix::MultiIntMatrix::RowTuples> tuple_cache_;
 };
