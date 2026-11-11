@@ -524,6 +524,7 @@ std::vector<Spot> Walker::find_spots(const std::vector<node_index> &keys,
                                      const std::vector<RecordRange> *within) const {
     using RowTuples = annot::matrix::MultiIntMatrix::RowTuples;
     std::vector<Spot> spots, next_spots;
+    std::vector<uint64_t> sorted;
     auto permitted = [&](Column column, uint64_t coord) {
         if (!within)
             return true;
@@ -565,14 +566,22 @@ std::vector<Spot> Walker::find_spots(const std::vector<node_index> &keys,
                                                  [](const Spot &s, Column column) {
                                                      return s.column < column;
                                                  });
-                    // every tuple matrix keeps the coordinates of an entry ascending
-                    assert(std::is_sorted(coords.begin(), coords.end()));
+                    // The tuple matrices keep the coordinates of an entry ascending, but
+                    // the interface does not promise it: sort a row that is not
+                    const uint64_t *coords_begin = coords.data();
+                    const uint64_t *coords_end = coords_begin + coords.size();
+                    if (!std::is_sorted(coords_begin, coords_end)) {
+                        sorted.assign(coords_begin, coords_end);
+                        std::sort(sorted.begin(), sorted.end());
+                        coords_begin = sorted.data();
+                        coords_end = coords_begin + sorted.size();
+                    }
                     for ( ; spot != spots.end() && spot->column == c; ++spot) {
                         if (spot->dir < 0 && spot->origin < i)
                             continue;
                         const uint64_t coord = spot->dir > 0 ? spot->origin + i
                                                              : spot->origin - i;
-                        if (std::binary_search(coords.begin(), coords.end(), coord))
+                        if (std::binary_search(coords_begin, coords_end, coord))
                             next_spots.push_back(*spot);
                     }
                 }
