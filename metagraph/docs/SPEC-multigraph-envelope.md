@@ -803,6 +803,15 @@ length and the select supports' inner layout and values (the train-3 verificatio
 load or a lookup. Every file of that verification's fuzz corpus (76,618 runs) that crashed is now refused, plain and
 mapped, and every valid `.seqs` loads as before (the 11 r237 copies among them, the same output).
 
+The check's memory (T4's review R3, S5): it reads one column at a time onto the heap, the column's high part and the
+inner vectors of its two select supports, also on `--mmap`, where sdsl's own load of them maps the file and
+allocates nothing, and frees them before the next column. That is about 3 bits per record of the column plus its
+select samples, held while the column is checked: measured +0.2 to 4 MiB peak on the r237 copies' loads (the most
+on the largest, bact_pseudomonadota, plain and `--mmap`), and about 250 to 300 MB for a single-column `.seqs` of
+6 x 10^8 records (UniParc's size), small beside that column's header strings (24 to 32 bytes each). Its time is
+linear in the file: each word of the high part read once, each stored select value checked once (+0 to 10 % CPU
+on the r237 copies' loads).
+
 A load does not check the low part's values (the low bits of each position) or a header's text. A corrupt low value
 maps a coordinate to another record of its column, or states a wrong k-mer count for a record, without reading outside
 the column. One header's or label's stated length can be allocated up to the bytes left in the file before its read
