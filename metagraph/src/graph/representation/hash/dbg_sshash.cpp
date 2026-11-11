@@ -378,12 +378,6 @@ DBGSSHash::node_stream(std::string_view sequence, bool sequential) const {
     }, dict_);
 }
 
-void DBGSSHash::map_to_nodes(std::string_view sequence,
-                             const std::function<void(node_index)>& callback,
-                             const std::function<bool()>& terminate) const {
-    call_streamed_nodes(sequence, false, callback, terminate);
-}
-
 DBGSSHash::node_index DBGSSHash::reverse_complement(node_index node) const {
     if (node == npos)
         return npos;
@@ -413,12 +407,6 @@ DBGSSHash::node_index DBGSSHash::get_base_node(node_index node) const {
 
 uint64_t DBGSSHash::num_nodes() const {
     return mode_ != CANONICAL ? dict_size() : dict_size() * 2;
-}
-
-void DBGSSHash::map_to_nodes_sequentially(std::string_view sequence,
-                                          const std::function<void(node_index)>& callback,
-                                          const std::function<bool()>& terminate) const {
-    call_streamed_nodes(sequence, true, callback, terminate);
 }
 
 DBGSSHash::node_index DBGSSHash::traverse(node_index node, char next_char) const {
