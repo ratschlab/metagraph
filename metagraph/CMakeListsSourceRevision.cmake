@@ -5,7 +5,10 @@
 #   -DSOURCE_DIR=<the metagraph directory> -DOUTPUT=<the C++ source to write> [-DGIT_EXECUTABLE=<git>]
 # It writes OUTPUT only when its text changes, so that an unchanged state recompiles nothing.
 #
-#   commit: `git rev-parse --verify HEAD`, else "unknown" (git absent, no checkout)
+#   commit: `git rev-parse --verify HEAD`, else "unknown" (git absent, no checkout, or a checkout that does
+#           not hold this source: SOURCE_DIR is not its metagraph/ directory tracking this script; a
+#           tarball of the sources unpacked inside another repository would otherwise state that
+#           repository's commit, R4 review N1)
 #   state:  "dirty" when the checkout differs from the commit in anything the build can read:
 #             - a tracked change anywhere in the repository, a submodule at another commit or with
 #               changed content (`git status --porcelain --untracked-files=no`), or
@@ -24,10 +27,16 @@ if(NOT git)
   set(git "${source_revision_git}")
 endif()
 if(git)
+  # the checkout git finds holds this source: its metagraph/ directory, which tracks this script
+  execute_process(COMMAND "${git}" -C "${SOURCE_DIR}" ls-files --error-unmatch --full-name
+                          -- CMakeListsSourceRevision.cmake
+                  RESULT_VARIABLE rc_own OUTPUT_VARIABLE own ERROR_QUIET
+                  OUTPUT_STRIP_TRAILING_WHITESPACE)
   execute_process(COMMAND "${git}" -C "${SOURCE_DIR}" rev-parse --verify HEAD
                   RESULT_VARIABLE rc OUTPUT_VARIABLE head ERROR_QUIET
                   OUTPUT_STRIP_TRAILING_WHITESPACE)
-  if(rc EQUAL 0 AND head MATCHES "^[0-9a-f]+$")
+  if(rc_own EQUAL 0 AND own STREQUAL "metagraph/CMakeListsSourceRevision.cmake"
+     AND rc EQUAL 0 AND head MATCHES "^[0-9a-f]+$")
     set(commit "${head}")
     # (--no-optional-locks: the build only reads the checkout, not even git's index refresh)
     execute_process(COMMAND "${git}" --no-optional-locks -C "${SOURCE_DIR}" status

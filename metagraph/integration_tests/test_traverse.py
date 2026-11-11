@@ -218,8 +218,11 @@ class TestTraverseCLI(TestTraverseBase):
         untracked files outside src (a build directory at the root, test output) leave it
         clean (nothing compiles them); a tracked change is dirty, and clean again once undone;
         an untracked file under src is dirty, an ignored one too (CMake compiles every
-        src/*.cpp); outside a repository both are unknown. An unchanged state does not rewrite
-        the generated source (nothing recompiles)."""
+        src/*.cpp); outside a repository both are unknown, and so in a repository that does not
+        hold the source (its metagraph/ directory tracking the script): a copy of the sources,
+        such as a tarball, unpacked inside another repository states no commit, not that
+        repository's (R4 review, N1). An unchanged state does not rewrite the generated source
+        (nothing recompiles)."""
         cmake, git = shutil.which('cmake'), shutil.which('git')
         if not cmake or not git:
             self.skipTest('cmake or git is not on the PATH')
@@ -255,6 +258,7 @@ class TestTraverseCLI(TestTraverseBase):
         write(os.path.join(root, '.gitignore'), 'metagraph/build*\nmetagraph/**/build*\n')
         write(os.path.join(source, 'src', 'cli', 'a.cpp'), 'int a() { return 1; }\n')
         write(os.path.join(source, 'CMakeLists.txt'), '# sources: src/*.cpp\n')
+        shutil.copy(script, os.path.join(source, 'CMakeListsSourceRevision.cmake'))
         git_run('init', '-q')
         git_run('add', '-A')
         git_run('commit', '-q', '-m', 'one')
@@ -296,6 +300,15 @@ class TestTraverseCLI(TestTraverseBase):
         outside = os.path.join(d, 'plain')
         os.makedirs(os.path.join(outside, 'src'))
         self.assertEqual(('unknown', 'unknown'), state(outside))
+        # a copy of the sources inside another repository (untracked there, at its metagraph/
+        # or deeper), and a source directory that is not the repository's metagraph/: unknown
+        for unpacked in (os.path.join(root, 'metagraph-0.5.2', 'metagraph'),
+                         os.path.join(root, 'build-traversal', 'unpacked', 'metagraph')):
+            shutil.copytree(source, unpacked, ignore=shutil.ignore_patterns('build'))
+            self.assertEqual(('unknown', 'unknown'), state(unpacked), unpacked)
+        git_run('mv', 'metagraph', 'sources')
+        git_run('commit', '-q', '-m', 'moved')
+        self.assertEqual(('unknown', 'unknown'), state(os.path.join(root, 'sources')))
 
     def test_resolve_header_labels(self):
         """resolve reports per-accession support and groups identical runs."""
