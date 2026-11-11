@@ -566,8 +566,10 @@ std::vector<Spot> Walker::find_spots(const std::vector<node_index> &keys,
                                                  [](const Spot &s, Column column) {
                                                      return s.column < column;
                                                  });
+                    if (coords.empty())
+                        continue;
                     // The tuple matrices keep the coordinates of an entry ascending, but
-                    // the interface does not promise it: sort a row that is not
+                    // the interface does not promise it: an unsorted row is sorted first
                     const uint64_t *coords_begin = coords.data();
                     const uint64_t *coords_end = coords_begin + coords.size();
                     if (!std::is_sorted(coords_begin, coords_end)) {
