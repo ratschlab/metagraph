@@ -901,8 +901,11 @@ class Walker {
     // allotment, dictionary labels named but not charged yet — observed wherever it is held
     // and before any check after it can throw
     void observe_soft(uint64_t scratch, uint64_t dictionary = 0);
-    // the same for the seed phase, which runs before the account exists
+    // the same for the seed phase, which runs before the account exists (its label references'
+    // names beside |scratch|, seed_names_)
     void observe_seed_scratch(uint64_t scratch);
+    // what label references hold as the seed phase observes them: each LabelRef and its name
+    static uint64_t names_held(const std::vector<LabelRef> &refs);
     // ---- the budget-aware annotation reads (DESIGN-traverse-graphlet.md §14.1;
     // LabelOracle::decode_charged()): what a read may hold — the budget minus the admitted
     // account and what the level's fetch holds beyond it (|level_soft_|); a DecodeBudget of
@@ -935,6 +938,9 @@ class Walker {
     // what a dictionary label costs the account: its LabelRef and summaries, its name
     // retained twice, and its delivery in the requested detail
     uint64_t label_bytes(LabelId id, const LabelRef &label) const;
+    // its part that grows with the name (the account's names share): the name's copies and its
+    // delivery
+    uint64_t label_name_bytes(LabelId id, const LabelRef &label) const;
     uint64_t dictionary_bytes(size_t *named) const;
     // what the dictionary built so far holds (its labels and names in every copy, the
     // query's or recorder's cache), its delivery apart: held before the depth-0 admission
@@ -1009,6 +1015,9 @@ class Walker {
     bool record_coords_ = false;
     size_t coord_cap_ = 16;
     uint64_t coord_account_ = 0;
+    // the account's names share (ResourceAccount::names): what charge_dictionary and init_budgets
+    // charge for names, never released (a compacted annotate dictionary keeps its charges)
+    uint64_t name_account_ = 0;
 
     std::array<uint8_t, 256> code_ {};
     size_t bits_ = 2;
@@ -1037,6 +1046,11 @@ class Walker {
     // memory stop states with its demand (ResourceStop::allotted)
     uint64_t allotted_ = 0;
     size_t dict_charged_ = 0;        // dictionary labels charged (annotate grows it)
+    // What the seed phase's label references hold (their names in one copy, as names_held
+    // counts them) from when they are resolved or derived until the dictionary built from them
+    // is admitted: observed beside the seed phase's scratch (observe_seed_scratch), so that a
+    // seed whose names alone pass the budget states that excess before anything can fail it
+    uint64_t seed_names_ = 0;
     size_t max_lookahead_ = kMaxLookahead;
     uint64_t next_check_ = kWorkCheckInterval;
     // the widest annotation row fetched so far (entries, and coordinates under trace):
@@ -1200,6 +1214,11 @@ void Walker::validate_seed() {
     bool all_supported = false;
     if (seed_.labels.empty()) {
         all_supported = derive_seed_labels(keys, &seed_refs, &hits);
+        // the derived references hold their names (from the index: one copy each), observed
+        // before anything can fail the seed (an extra label's refusal after a partial
+        // derivation, a stop in the walk's first read: T4 review R2, finding 1)
+        seed_names_ = names_held(seed_refs);
+        observe_seed_scratch(0);
         if (result_.derivation_partial && record_coords_) {
             // a set derived from part of the seed (a partial derivation) was not followed over
             // the whole seed: no label's occurrences of the seed are known (under trace its
@@ -1253,10 +1272,19 @@ void Walker::validate_seed() {
             throw SeedLabelsNotInGraph("none of the seed's labels is in this graph: " + names,
                                        unknown);
         }
+        // the references now hold the names (one copy of the request's): observed now, before the
+        // validation's first read can fail the seed (a refused read or a paced stop inside the
+        // first chunk comes before that chunk's observation: T4 review R2, finding 1), and with
+        // every fetch call's rows below
+        seed_names_ = names_held(seed_refs);
+        observe_seed_scratch(0);
         // AUTO with a budget or without: a plain brwt or column annotation is read cell by cell
-        // for at most 16 labels, charged under the budget-aware reads (LabelQuery::decode_cells)
-        LabelQuery validation(oracle_, seed_refs, trace_);
+        // for at most 16 labels, charged under the budget-aware reads (LabelQuery::decode_cells).
+        // The query takes the references by move and hands them back: a copy would hold every
+        // name once more while the hits are fetched
+        LabelQuery validation(oracle_, std::move(seed_refs), trace_);
         hits = fetch_seed_hits(validation, keys);
+        seed_refs = validation.release_labels();
     }
     if (request_of_ref.empty()) {
         // derived: the derived labels take the given ones' place in the request's order
@@ -1270,7 +1298,6 @@ void Walker::validate_seed() {
 
     // request index (seed labels, then extra) -> dictionary id, UINT32_MAX if dropped
     std::vector<LabelId> dict_of_request(num_request_seed + strategy_.extra.size(), UINT32_MAX);
-    std::vector<std::string> kept_names;
     // Per-label support, gathered in ONE sweep over the k-mers that scatters every hit
     // into its label's run list — O(hits), the size of the data, the shape resolve.cpp
     // uses — instead of looking each label up at each k-mer (which was O(L*M*log L)
@@ -1320,13 +1347,16 @@ void Walker::validate_seed() {
             result_.dropped_labels.push_back(std::move(dropped));
         }
     };
+    // Every reference is MOVED into the dictionary or into its dropped label, so that the names
+    // stay one copy (a copy into the dictionary, another kept for the seed id and the seed id's
+    // own by-value copy held them up to four times: E5b's sweep, 121 MiB beyond the account)
+    result_.label_dict.reserve(num_refs);
     for (LabelId l = 0; l < num_refs; ++l) {
         drop_absent_before(request_of_ref[l]);
         const bool all = all_supported || supported_kmers[l] == keys.size();
         if (all && chain_ok[l]) {
             dict_of_request[request_of_ref[l]] = result_.label_dict.size();
-            result_.label_dict.push_back(seed_refs[l]);
-            kept_names.push_back(seed_refs[l].name);
+            result_.label_dict.push_back(std::move(seed_refs[l]));
             if (trace_) {
                 SmallVector<Coord> right(live[l].begin(), live[l].end());
                 SmallVector<Coord> left;
@@ -1350,7 +1380,7 @@ void Walker::validate_seed() {
             }
         } else {
             DroppedLabel dropped;
-            dropped.name = seed_refs[l].name;
+            dropped.name = std::move(seed_refs[l].name);
             dropped.reason = "seed_unsupported";
             dropped.runs = std::move(runs[l]);
             result_.dropped_labels.push_back(std::move(dropped));
@@ -1402,9 +1432,15 @@ void Walker::validate_seed() {
         // (labels_supporting_total > |labels|) read as "nothing supports this seed".
         result_.labels_supporting_total = result_.num_seed_labels;
     }
-    // the seed id is defined over the case-mapped sequence (§4.3 / §6.1)
+    // the seed id is defined over the case-mapped sequence (§4.3 / §6.1), over the kept labels'
+    // names (views of the dictionary's, handed over: make_seed_id sorts its own vector)
+    std::vector<std::string_view> kept_names;
+    kept_names.reserve(result_.label_dict.size());
+    for (const LabelRef &ref : result_.label_dict) {
+        kept_names.push_back(ref.name);
+    }
     result_.validated_seed_id = make_seed_id(release_id_, seed_upper_,
-                                             regime_ != Regime::BASIC, kept_names);
+                                             regime_ != Regime::BASIC, std::move(kept_names));
     result_.seed_id_mismatch = !seed_.seed_id.empty()
                                 && seed_.seed_id != result_.validated_seed_id;
 
@@ -2553,6 +2589,7 @@ void Walker::fail_seed(ResourceStop::Resource resource, double used, double dema
     account.row_diff_uncounted = budgeted_ && !decode_charged_ && oracle_.row_diff();
     account.dependency_rows = decode_charged_ && oracle_.row_diff();
     account.coordinates = coord_account_;
+    account.names = name_account_;
     account.allotted = allotted_;
     const size_t labels = annotate_ ? (recorder_ ? recorder_->labels().size() : 0)
                                     : result_.label_dict.size();
@@ -3433,17 +3470,23 @@ void Walker::init_budgets() {
     // what the output repeats from the request and the index besides the dictionary: the
     // seed_id and the dropped seed labels with their names and presence runs, each name
     // priced as delivered (escaped) in the requested detail
-    base_ += seed_.seed_id.size() + (d.name ? d.name(seed_.seed_id, DeliveryCosts::Name::SEED_ID) : 0);
+    // (each name's bytes and delivery are also the account's names share, name_account_)
+    auto name_part = [&](const std::string &name, DeliveryCosts::Name use) {
+        const uint64_t bytes = name.size() + (d.name ? d.name(name, use) : 0);
+        name_account_ += bytes;
+        return bytes;
+    };
+    base_ += name_part(seed_.seed_id, DeliveryCosts::Name::SEED_ID);
     for (const DroppedLabel &dl : result_.dropped_labels) {
-        base_ += 2 * sizeof(DroppedLabel) + dl.name.size() + dl.reason.size()
+        base_ += 2 * sizeof(DroppedLabel) + dl.reason.size()
                + dl.runs.size() * (2 * sizeof(dl.runs[0]) + d.dropped_run) + d.dropped
-               + (d.name ? d.name(dl.name, DeliveryCosts::Name::DROPPED_LABEL) : 0);
+               + name_part(dl.name, DeliveryCosts::Name::DROPPED_LABEL);
     }
     // a label absent from the annotation is also listed in the result's unknown_labels, its
     // name delivered once more beside the dropped label's
     for (const std::string &name : result_.unknown_labels) {
-        base_ += sizeof(std::string) + name.size() + d.dropped
-               + (d.name ? d.name(name, DeliveryCosts::Name::DROPPED_LABEL) : 0);
+        base_ += sizeof(std::string) + d.dropped
+               + name_part(name, DeliveryCosts::Name::DROPPED_LABEL);
     }
     if (mem_limit_) {
         // Fixed allotments of the budget for the caches, which then evict within them:
@@ -3455,6 +3498,7 @@ void Walker::init_budgets() {
         allotted_ = cache_allotment_ + lookahead;
         assert(allotted_ == memory_allotments(mem_limit_));
         base_ += allotted_;
+        // (a constrain seed's query is built after the depth-0 admission, and bounded then)
         if (query_)
             query_->set_max_cache_bytes(cache_allotment_);
         if (recorder_)
@@ -3504,12 +3548,16 @@ void Walker::enable_path_cache() {
 }
 
 uint64_t Walker::label_bytes(LabelId id, const LabelRef &label) const {
+    return m_.label + label_name_bytes(id, label);
+}
+
+uint64_t Walker::label_name_bytes(LabelId id, const LabelRef &label) const {
     // a seed label's name is written twice by detail full (label_dict and seed.labels),
     // an extra or recorded label's once: the serialiser layer knows, and prices the escaping
     const DeliveryCosts &d = strategy_.delivery;
     const auto use = !annotate_ && id < result_.num_seed_labels ? DeliveryCosts::Name::SEED_LABEL
                                                                 : DeliveryCosts::Name::LABEL;
-    return m_.label + label.name.size() * m_.label_name + (d.name ? d.name(label.name, use) : 0);
+    return label.name.size() * m_.label_name + (d.name ? d.name(label.name, use) : 0);
 }
 
 void Walker::charge_dictionary() {
@@ -3518,7 +3566,9 @@ void Walker::charge_dictionary() {
     // dictionary (constrain) and the roots' labels (annotate) are admitted at depth 0
     const std::vector<LabelRef> &dict = annotate_ ? recorder_->labels() : result_.label_dict;
     for (; dict_charged_ < dict.size(); ++dict_charged_) {
-        base_ += label_bytes(dict_charged_, dict[dict_charged_]);
+        const uint64_t name = label_name_bytes(dict_charged_, dict[dict_charged_]);
+        base_ += m_.label + name;
+        name_account_ += name;
     }
     note_peak();
 }
@@ -3804,6 +3854,7 @@ void Walker::write_meter() const noexcept {
     m.soft_excess = overshoot_;
     m.walked = true;
     m.memory_coordinates = coord_account_;
+    m.memory_names = name_account_;
 }
 
 EndReason Walker::note_stop(const ArmState &arm, const Item *head,
@@ -3906,9 +3957,13 @@ uint64_t Walker::dictionary_bytes(size_t *named) const {
 
 uint64_t Walker::dictionary_held() const {
     const std::vector<LabelRef> &dict = annotate_ ? recorder_->labels() : result_.label_dict;
-    uint64_t bytes = annotate_ ? recorder_->cache_bytes() : query_->cache_bytes();
+    uint64_t bytes = annotate_ ? recorder_->cache_bytes() : query_ ? query_->cache_bytes() : 0;
+    // A constrain dictionary holds its names once until its walk's query copies them, which
+    // seed_phase builds only once the depth-0 state is admitted; the account prices both copies
+    // (m_.label_name) from the start
+    const uint64_t copies = annotate_ || query_ ? m_.label_name : 1;
     for (const LabelRef &label : dict) {
-        bytes += m_.label - strategy_.delivery.label + label.name.size() * m_.label_name;
+        bytes += m_.label - strategy_.delivery.label + label.name.size() * copies;
     }
     return bytes;
 }
@@ -3938,11 +3993,21 @@ void Walker::observe_seed_scratch(uint64_t scratch) {
     if (!mem_limit_)
         return;
     // The seed phase runs before the account exists: what it holds is the seed (charged
-    // with the depth-0 state, see init_budgets) and the rows it decodes (soft)
+    // with the depth-0 state, see init_budgets), the rows it decodes and, once resolved or
+    // derived, its label references' names (seed_names_), both soft
     const uint64_t seed = seed_upper_.size() * 2 + nodes_.size() * (sizeof(node_index) + 64);
-    const uint64_t held = seed + scratch;
+    const uint64_t soft = scratch + seed_names_;
+    const uint64_t held = seed + soft;
     if (held > mem_limit_)
-        overshoot_ = std::max(overshoot_, std::min(scratch, held - mem_limit_));
+        overshoot_ = std::max(overshoot_, std::min(soft, held - mem_limit_));
+}
+
+uint64_t Walker::names_held(const std::vector<LabelRef> &refs) {
+    uint64_t bytes = 0;
+    for (const LabelRef &ref : refs) {
+        bytes += sizeof(LabelRef) + ref.name.size();
+    }
+    return bytes;
 }
 
 uint64_t Walker::allowance() const {
@@ -5098,7 +5163,7 @@ void Walker::run_level(ArmState &arm, uint64_t depth) {
     // understate a larger seed's text) nor add text to the estimate
     if (control_ && control_->progress) {
         const uint64_t account = accounted();
-        control_->progress(without_allotments(account, allotted_), coord_account_);
+        control_->progress(without_allotments(account, allotted_), coord_account_, name_account_);
     }
 }
 
@@ -6403,11 +6468,8 @@ void Walker::seed_phase() {
         const LabelKind kind = strategy_.seed_label_kind.value_or(
                 oracle_.coord_to_header() ? LabelKind::HEADER : LabelKind::COLUMN);
         recorder_ = std::make_unique<LabelRecorder>(oracle_, kind, strategy_.max_labels_per_node);
-    } else {
-        // AUTO, as without a budget: the budget-aware fetch reads a plain brwt or column
-        // annotation cell by cell for at most 16 labels, charged (LabelQuery::decode_cells)
-        query_ = std::make_unique<LabelQuery>(oracle_, result_.label_dict, trace_);
     }
+    // (a constrain seed's query, the dictionary's second copy, is built after the admission below)
     scratch_.init(result_.label_dict.size());
     label_stamp_.assign(result_.label_dict.size(), 0);
     init_budgets();
@@ -6429,10 +6491,12 @@ void Walker::seed_phase() {
     if (annotate_)
         charge_dictionary();
     // What the depth-0 state holds whatever its admission decides — the dictionary's labels
-    // with their names in every copy, the query's or recorder's cache — is observed before
+    // with their names in every copy that exists, the recorder's cache — is observed before
     // the admission can fail the seed: a seed the budget does not hold still built it, and
     // its failure states that excess (twelve names of 1 MB under 1 MiB would otherwise state
-    // memory_bound_soft 0). Within the budget it is no excess.
+    // memory_bound_soft 0). Within the budget it is no excess. The references' names are the
+    // dictionary's now (dictionary_held counts them)
+    seed_names_ = 0;
     observe_seed_scratch(dictionary_held());
     // ---- ADMIT the depth-0 state (§14) like any head: the dictionary and both roots,
     // each reserved with what ending and delivering it costs. A result complete to 0 bp
@@ -6443,6 +6507,16 @@ void Walker::seed_phase() {
     // only as the soft overshoot.
     if (mem_limit_ && accounted() > mem_limit_)
         fail_depth0(accounted());
+    if (!annotate_) {
+        // The walk's query copies the dictionary (its second copy, which the account has priced
+        // since init_budgets: m_.label_name): built once the depth-0 state is admitted, so that a
+        // seed whose dictionary the budget does not hold fails holding its names once, not twice.
+        // AUTO, as without a budget: the budget-aware fetch reads a plain brwt or column
+        // annotation cell by cell for at most 16 labels, charged (LabelQuery::decode_cells)
+        query_ = std::make_unique<LabelQuery>(oracle_, result_.label_dict, trace_);
+        if (mem_limit_)
+            query_->set_max_cache_bytes(cache_allotment_);
+    }
 }
 
 SeedDerivationError Walker::partial_derivation_failure() const {
@@ -6618,6 +6692,7 @@ SeedResult Walker::run() {
     account.row_diff_uncounted = budgeted_ && !decode_charged_ && oracle_.row_diff();
     account.dependency_rows = decode_charged_ && oracle_.row_diff();
     account.coordinates = coord_account_;
+    account.names = name_account_;
     account.allotted = allotted_;
     result_.coordinates_recorded = record_coords_;
     // before the arms' results move into the seed's

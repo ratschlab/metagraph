@@ -604,6 +604,10 @@ class LabelQuery {
                size_t max_cache_size = 1'000'000);
 
     const std::vector<LabelRef>& labels() const { return labels_; }
+    // The labels handed back (moved out, names and all): a query whose caller still holds the
+    // labels after its reads (the seed validation's) need not copy them. The query is not used
+    // afterwards.
+    std::vector<LabelRef> release_labels() { return std::move(labels_); }
     // which accessor is used: "direct", "rows" or "tuples"
     const char* access_path() const;
 

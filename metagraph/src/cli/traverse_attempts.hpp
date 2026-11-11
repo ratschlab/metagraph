@@ -227,6 +227,25 @@ constexpr double kReserveMargin = 1.25;
 // ratio would understate a coordinate-heavy seed's text up to 4 times, DESIGN §18.8, M2)
 constexpr uint64_t kCoordinateAccountPerTextByte = 12;
 
+// The same for the names share of a seed's account (ResourceAccount::names: every charge that
+// grows with a name's bytes — a dictionary label's name copies and delivery, a dropped or unknown
+// label's name and delivery, the seed_id echo): every byte of a name's text costs at least this
+// many account bytes, whatever the name. A name of n bytes, escaped to J bytes in JSON (J <= 6n: a
+// control character), held h times and written c times, is charged h n + c (n + 32 + 3 (J + 2))
+// and writes c (J + 2): 3 + (h n + c (n + 32)) / (c (J + 2)) > 3 + (h + c) / (6 c) >= 10/3 per
+// text byte, the least at control characters (seed labels h = c = 2; dropped, unknown and the
+// seed_id h = c = 1); plain names 5 (seed labels, dropped) to 6 (extra and recorded labels: h = 2,
+// c = 1). A graphlet writes a name once, percent-escaped to P (only '%', line feed and carriage
+// return are: P <= 3n) and JSON-escaped to J(P) (front-coded: at most that), charged
+// h n + P + 3 J(P): (h + 19) / 6 >= 10/3 per text byte at the other control characters (raw in the
+// record, 6 bytes each in JSON), h + 4 for plain names (T4 review R2, finding 2: not 4.5). An
+// unknown label's copy in a graphlet's JSON summary (unknown_labels, quoted JSON) is priced as its
+// X record: with that record the pair costs less than 3 per text byte only for a name of one byte
+// or none (at most 6 account bytes short). The reserve estimates the names' text with it, not with
+// the measured ratio of the rest of the output (a compact result's ratio, 100 and more, would
+// understate a name-heavy seed's text 20 times: GPT review 7 F10)
+constexpr uint64_t kNameAccountPerTextByte = 3;
+
 // a seed's text (or a response) of at least this many bytes measures a delivery rate (smaller
 // ones are dominated by fixed costs)
 constexpr uint64_t kMeasuredTextBytes = 1 << 20;
@@ -361,8 +380,9 @@ class Attempt {
     // bound - max(allowance / 2, reserve), the reserve being kReserveMargin times the time to
     // build and compress what the response will hold — the text of the seeds finished so far
     // (exact, written as each was built) and of the seed being walked (its modelled account
-    // less its coordinate share / the account per text byte of the requested detail, plus the
-    // coordinate share / kCoordinateAccountPerTextByte) — at the stated rates, or the build
+    // less its coordinate and names shares / the account per text byte of the requested detail,
+    // plus the coordinate share / kCoordinateAccountPerTextByte and the names share /
+    // kNameAccountPerTextByte) — at the stated rates, or the build
     // rate measured on this attempt's own seeds, plus the time from the walk-until to the
     // walk's end (delivery_stop_ms, or this server's measured stop latency). The handler's
     // thread: each moves the walk-until.
@@ -372,8 +392,9 @@ class Attempt {
     const std::string& delivery_detail() const { return detail_; }
     // the seed being walked holds |account| modelled bytes (without a memory budget's cache
     // allotments, which write no text), |coordinates| of them its record coordinates' share
-    // (ResourceAccount::coordinates; 0 without output.coordinates), at every level's end
-    void progress(uint64_t account, uint64_t coordinates = 0);
+    // (ResourceAccount::coordinates; 0 without output.coordinates) and |names| its names share
+    // (ResourceAccount::names), at every level's end
+    void progress(uint64_t account, uint64_t coordinates = 0, uint64_t names = 0);
     // a seed's result was written as |text_bytes| of text, built in |build_seconds|, from a
     // walk whose modelled account ended at |account| bytes (0: no walk, a failed seed; as
     // progress states it, without the budget's cache allotments: the seed's final_bytes), of
@@ -382,7 +403,8 @@ class Attempt {
     // that a request with coordinates measures what the same walk without them would (their
     // ratio would lower the estimate of every later attempt without them)
     void note_delivered(uint64_t text_bytes, double build_seconds, uint64_t account = 0,
-                        uint64_t coordinate_account = 0, uint64_t coordinate_text = 0);
+                        uint64_t coordinate_account = 0, uint64_t coordinate_text = 0,
+                        uint64_t names_account = 0, uint64_t names_text = 0);
     // what this server measured before the attempt started: it replaces the configured rates
     // and ratios (a measurement of the attempt's own seeds replaces it when more conservative)
     void set_measured(const DeliveryMeasurements &measured);
@@ -549,6 +571,7 @@ class Attempt {
     uint64_t delivered_bytes_ = 0;                    // the text of the seeds finished
     uint64_t walking_account_ = 0;                    // the seed being walked, its account
     uint64_t walking_coordinates_ = 0;                // ... and its coordinate share
+    uint64_t walking_names_ = 0;                      // ... and its names share
     double measured_build_mbps_ = 0;                  // this attempt's own (0: none yet)
     DeliveryMeasurements server_;                     // set_measured
     // the lowest walk-until a poll checked (the handler's thread writes it; usage reads it) and

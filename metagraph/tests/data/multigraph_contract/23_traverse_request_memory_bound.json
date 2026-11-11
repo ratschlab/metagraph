@@ -492,7 +492,7 @@
       ],
       "limitations": [
        {
-        "effect": "the memory budget is enforced on the walker's modelled state, this response's output and the annotation reads (rows and coordinates are charged before they are held; a read not fitting is refused whole); held beyond the admitted account, able to exceed the budget: a level's keys and rows until its heads are done, the seed phase's intersection, hits, dictionary, a failed result's echo of seed_id (observed: the largest excess, MiB, rounded up) and, not observed, an index-wide header lookup, two more copies of the label names (at most twice the seed's labels x the longest) and the dictionary's first table and growth copy (1.5 KB)",
+        "effect": "the memory budget is enforced on the walker's modelled state, this response's output and the annotation reads (rows and coordinates are charged before they are held; a read not fitting is refused whole); held beyond the admitted account, able to exceed the budget: a level's keys and rows until its heads are done, the seed phase's intersection, hits, label names, dictionary, a failed result's echo of seed_id (observed: the largest excess, MiB, rounded up) and, not observed, an index-wide header lookup and the dictionary's first table and growth copy (1.5 KB)",
         "kind": "memory_bound_soft",
         "knob": "bounds.max_memory_mb",
         "limit": 1,
@@ -817,7 +817,7 @@
       ],
       "limitations": [
        {
-        "effect": "the memory budget is enforced on the walker's modelled state, this response's output and the annotation reads (rows and coordinates are charged before they are held; a read not fitting is refused whole); held beyond the admitted account, able to exceed the budget: a level's keys and rows until its heads are done, the seed phase's intersection, hits, dictionary, a failed result's echo of seed_id (observed: the largest excess, MiB, rounded up) and, not observed, an index-wide header lookup, two more copies of the label names (at most twice the seed's labels x the longest) and the dictionary's first table and growth copy (1.5 KB)",
+        "effect": "the memory budget is enforced on the walker's modelled state, this response's output and the annotation reads (rows and coordinates are charged before they are held; a read not fitting is refused whole); held beyond the admitted account, able to exceed the budget: a level's keys and rows until its heads are done, the seed phase's intersection, hits, label names, dictionary, a failed result's echo of seed_id (observed: the largest excess, MiB, rounded up) and, not observed, an index-wide header lookup and the dictionary's first table and growth copy (1.5 KB)",
         "kind": "memory_bound_soft",
         "knob": "bounds.max_memory_mb",
         "limit": 1,
@@ -890,7 +890,7 @@
         "observed": 2
        },
        {
-        "effect": "the memory budget is enforced on the walker's modelled state, this response's output and the annotation reads (rows and coordinates are charged before they are held; a read not fitting is refused whole); held beyond the admitted account, able to exceed the budget: a level's keys and rows until its heads are done, the seed phase's intersection, hits, dictionary, a failed result's echo of seed_id (observed: the largest excess, MiB, rounded up) and, not observed, an index-wide header lookup, two more copies of the label names (at most twice the seed's labels x the longest) and the dictionary's first table and growth copy (1.5 KB)",
+        "effect": "the memory budget is enforced on the walker's modelled state, this response's output and the annotation reads (rows and coordinates are charged before they are held; a read not fitting is refused whole); held beyond the admitted account, able to exceed the budget: a level's keys and rows until its heads are done, the seed phase's intersection, hits, label names, dictionary, a failed result's echo of seed_id (observed: the largest excess, MiB, rounded up) and, not observed, an index-wide header lookup and the dictionary's first table and growth copy (1.5 KB)",
         "kind": "memory_bound_soft",
         "knob": "bounds.max_memory_mb",
         "limit": 1,

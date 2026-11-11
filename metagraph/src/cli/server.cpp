@@ -2382,8 +2382,9 @@ int run_server(Config *config) {
         control.on_written = [&](int status, std::optional<size_t> bytes) {
             // the longest read or head piece of any /traverse walk (deadline_check), and the
             // slowest build rate and smallest account per text byte measured on its large seeds
-            // (the delivery reserve; the latter without the record coordinates' share, so
-            // that an output with them measures what the same output without them would)
+            // (the delivery reserve; the latter without the record coordinates' share and the
+            // names share, each with its exact text, so that an output with them measures what
+            // the same output without them would: Attempt::note_delivered)
             attempts.note_uninterruptible(attempt->max_uninterruptible_ms());
             attempts.note_uninterruptible(attempt->max_delivery_gap_ms());
             attempts.note_build_rate(attempt->own_build_mbps());

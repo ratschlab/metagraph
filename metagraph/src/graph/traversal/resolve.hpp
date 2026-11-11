@@ -468,11 +468,12 @@ void check_explicit_seeds(const LabelOracle &oracle,
                           const SelectionPolicy &policy);
 
 // seed_id = hex FNV-1a-64 over release, the case-mapped canonical sequence and the
-// length-prefixed sorted labels
+// length-prefixed sorted labels. |labels| are views (sorted here, the names not copied: a seed
+// of many long names held them once more as a by-value copy)
 std::string make_seed_id(const std::string &release_id,
                          std::string_view sequence,
                          bool canonical_orientation,
-                         std::vector<std::string> labels);
+                         std::vector<std::string_view> labels);
 
 uint64_t fnv1a64(std::string_view data, uint64_t hash = 0xcbf29ce484222325ULL);
 static constexpr uint64_t kFnvOffsetBasis = 0xcbf29ce484222325ULL;

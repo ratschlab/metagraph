@@ -1782,26 +1782,25 @@ static Json::Value memory_bound_soft(const Strategy &st, const ResourceAccount &
                       uint_json((account.soft_overshoot + (1 << 20) - 1) >> 20),
                       account.decode_charged
                       // (at most 640 bytes, kEffect: every limitation's effect is priced at
-                      // that width; 634 here.) Not observed beside the header lookup and the
-                      // dictionary's first table: the seed phase's two further copies of its
-                      // label names (its resolved references and the names kept for the result;
-                      // the dictionary's two are observed), bounded by twice the seed's labels x
-                      // the longest name, not by the budget: a derived set has at most
-                      // max_seed_labels labels, an explicit list as many as the request body
-                      // holds (E5b's sweep: 121 MiB beyond the account and the observed excess for
-                      // 4,096 names of 12,000 B under 64 MiB). The seed's cost dictionary below
-                      // (dict) copies an explicit list once more, outside the account like the
-                      // parsed request: bounded by the request body (SPEC §5)
+                      // that width.) The seed phase's label names are observed: its references
+                      // (resolved or derived, one copy of each name, moved into the dictionary
+                      // or a dropped label) from when they exist, and the dictionary in the
+                      // copies it holds, its walk's query (the second) built only once the
+                      // depth-0 state is admitted (Walker::seed_phase; E5b's sweep had measured
+                      // 121 MiB beyond the account and the observed excess for 4,096 names of
+                      // 12,000 B under 64 MiB, from two copies nothing observed). Not observed:
+                      // the header lookup and the dictionary's first table. The request's own
+                      // names (the parsed request, and the seed's cost dictionary's views of
+                      // them) are outside the account, bounded by the request body (SPEC §5)
                       ? "the memory budget is enforced on the walker's modelled state, this "
                         "response's output and the annotation reads (rows and coordinates are "
                         "charged before they are held; a read not fitting is refused whole); "
                         "held beyond the admitted account, able to exceed the budget: a level's "
                         "keys and rows until its heads are done, the seed phase's intersection, "
-                        "hits, dictionary, a failed result's echo of seed_id (observed: the "
-                        "largest excess, MiB, rounded up) and, not observed, an index-wide header "
-                        "lookup, two more copies of the label names (at most twice the seed's "
-                        "labels x the longest) and the dictionary's first table and "
-                        "growth copy (1.5 KB)"
+                        "hits, label names, dictionary, a failed result's echo of seed_id "
+                        "(observed: the largest excess, MiB, rounded up) and, not observed, an "
+                        "index-wide header lookup and the dictionary's first table and growth "
+                        "copy (1.5 KB)"
                       : "the memory budget is enforced on the walker's modelled state and on "
                         "this response's output, admitted per head; the annotation rows the "
                         "seed phase and each level decode (with an annotate dictionary's "
@@ -1979,6 +1978,40 @@ static uint64_t compact_size(const Json::Value &v, const std::function<void()> &
 uint64_t compact_json_size(const Json::Value &v) {
     uint64_t values = 0;
     return compact_size(v, {}, &values);
+}
+
+uint64_t names_text_bytes(const SeedResult &r, const Strategy &st, bool graphlet) {
+    // a string as the JSON text holds it, quoted
+    auto quoted = [](std::string_view s) { return json_escaped_size(s) + 2; };
+    // seed.seed_id (a graphlet's JSON summary holds it too)
+    uint64_t bytes = quoted(r.seed_id);
+    if (st.drop_labels_not_in_graph) {
+        for (const std::string &name : r.unknown_labels) {
+            bytes += quoted(name);
+        }
+    }
+    if (!graphlet) {
+        for (size_t i = 0; i < r.label_dict.size(); ++i) {
+            bytes += (i < r.num_seed_labels ? 2 : 1) * quoted(r.label_dict[i].name);
+        }
+        for (const DroppedLabel &d : r.dropped_labels) {
+            bytes += quoted(d.name);
+        }
+        return bytes;
+    }
+    // the L records' names as the writer front-codes them (its prefix length and the space apart),
+    // and the X records' names, percent-escaped, inside the graphlet's JSON string
+    static const std::string kNone;
+    const std::string *previous = nullptr;
+    for (const LabelRef &l : r.label_dict) {
+        const std::string coded = mgt::front_code(previous ? *previous : kNone, l.name);
+        bytes += json_escaped_size(std::string_view(coded).substr(coded.find(' ') + 1));
+        previous = &l.name;
+    }
+    for (const DroppedLabel &d : r.dropped_labels) {
+        bytes += json_escaped_size(mgt::pct_escape(d.name));
+    }
+    return bytes;
 }
 
 uint64_t coordinates_text_bytes(const Json::Value &result, const std::function<void()> &check) {
@@ -4582,8 +4615,9 @@ DeliveryCosts delivery_costs(const std::string &detail, bool sequences, uint64_t
 // up in one hash map built per seed, O(|dict| + |entries|) (two linear scans of |dict| per entry
 // made a table of E entries over D names cost 2 E D string comparisons, review 5 #6); with the
 // server's caps (max_explicit_labels, max_extra_labels, max_cost_entries) a seed's
-// preprocessing is a few milliseconds at most, and a stop is seen between seeds and in the walk
-LabelChangeCost make_cost(const CostSpec &spec, const std::vector<std::string> &dict) {
+// preprocessing is a few milliseconds at most, and a stop is seen between seeds and in the walk.
+// |dict| views the request's names (a per-seed copy of an explicit list held every name once more)
+LabelChangeCost make_cost(const CostSpec &spec, const std::vector<std::string_view> &dict) {
     switch (spec.model) {
         case CostSpec::FORBID:
             return LabelChangeCost::forbid();
@@ -5560,8 +5594,8 @@ Json::Value process_traverse_request(const Json::Value &json,
         // account is 20-73 times its text (872 bytes for 12-44), the rest of the output's
         // 115-129, so the reserve prices that share at its own bound
         // (kCoordinateAccountPerTextByte)
-        control.progress = [attempt](uint64_t account, uint64_t coordinates) {
-            attempt->progress(account, coordinates);
+        control.progress = [attempt](uint64_t account, uint64_t coordinates, uint64_t names) {
+            attempt->progress(account, coordinates, names);
         };
     }
     DeliveryScope delivery(attempt);
@@ -5577,7 +5611,7 @@ Json::Value process_traverse_request(const Json::Value &json,
     // estimates; |coordinates|: its record coordinates' share, which the ratio leaves out with
     // the exact text it wrote (coordinates_text_bytes, counted before the tree is freed)
     auto append = [&](Json::Value &&rj, double built_seconds, uint64_t account = 0,
-                      uint64_t coordinates = 0) {
+                      uint64_t coordinates = 0, uint64_t names = 0, uint64_t names_text = 0) {
         if (!texts) {
             results.append(std::move(rj));
             return;
@@ -5592,7 +5626,7 @@ Json::Value process_traverse_request(const Json::Value &json,
         rj = Json::Value();
         if (attempt) {
             attempt->note_delivered(texts->texts.back().size(), built_seconds + written.elapsed(),
-                                    account, coordinates, coordinate_text);
+                                    account, coordinates, coordinate_text, names, names_text);
         }
     };
     // how the request's seeds read the annotation (LabelOracle::reads_charged): what a seed's
@@ -5744,7 +5778,8 @@ Json::Value process_traverse_request(const Json::Value &json,
             if (attempt)
                 attempt->seed_delivered(i, outcome, seed_timer.elapsed() * 1000);
         };
-        std::vector<std::string> dict = seed.labels;
+        // the seed's dictionary as the cost table names it: views of the request's names
+        std::vector<std::string_view> dict(seed.labels.begin(), seed.labels.end());
         dict.insert(dict.end(), req.strategy.extra.begin(), req.strategy.extra.end());
         LabelChangeCost cost = make_cost(req.cost, dict);
         // the output's floats are priced at the widest the seed's costs and the time budgets
@@ -5841,8 +5876,13 @@ Json::Value process_traverse_request(const Json::Value &json,
                        without_allotments(r.account.memory_final, r.account.allotted));
             const std::string outcome = rj["outcome"]["walks"].asString();
             // the delivery reserve's sample: the walk's account at its end without the
-            // budget's cache allotments (final_bytes), as the walk's progress states it
-            append(std::move(rj), seconds, meter.memory_final, meter.memory_coordinates);
+            // budget's cache allotments (final_bytes), as the walk's progress states it, with
+            // its coordinate and names shares (the names' exact text counted from the result)
+            const uint64_t names_text = attempt && texts
+                                      ? names_text_bytes(r, req.strategy, req.detail == "graphlet")
+                                      : 0;
+            append(std::move(rj), seconds, meter.memory_final, meter.memory_coordinates,
+                   meter.memory_names, names_text);
             delivered(outcome);
         } catch (const SeedDerivationError &e) {
             // The permitted set could not be derived from THIS seed (nothing carries it

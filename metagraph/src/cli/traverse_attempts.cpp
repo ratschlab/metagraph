@@ -362,14 +362,17 @@ double Attempt::reserve_ms() const {
         build_mbps = prefer_measured(server_.build_mbps, measured_build_mbps_);
     const double compress_mbps = server_.compress_mbps > 0 ? server_.compress_mbps
                                                            : settings_.delivery_compress_mbps;
-    // the walked seed's text, estimated from its account: its record coordinates' share at
-    // their own bound (kCoordinateAccountPerTextByte), the rest at the ratio in use. Without
-    // coordinates the share is 0 and the estimate is the one before the split
+    // the walked seed's text, estimated from its account: its record coordinates' share and its
+    // names share at their own bounds (kCoordinateAccountPerTextByte, kNameAccountPerTextByte),
+    // the rest at the ratio in use. Without coordinates and names the shares are 0 and the
+    // estimate is the one before the split
     const uint64_t coordinates = std::min(walking_coordinates_, walking_account_);
+    const uint64_t names = std::min(walking_names_, walking_account_ - coordinates);
     const double walking
-        = std::ceil(static_cast<double>(walking_account_ - coordinates) / ratio_locked())
+        = std::ceil(static_cast<double>(walking_account_ - coordinates - names) / ratio_locked())
         + std::ceil(static_cast<double>(coordinates)
-                    / static_cast<double>(kCoordinateAccountPerTextByte));
+                    / static_cast<double>(kCoordinateAccountPerTextByte))
+        + std::ceil(static_cast<double>(names) / static_cast<double>(kNameAccountPerTextByte));
     // MB/s are bytes per microsecond: x 1000 bytes per ms. With a margin for rates that vary
     // between responses, and the time the walk takes to end once its walk-until passed (it
     // stops at its next poll, then finalises the stopped seed), the configured one or the
@@ -421,37 +424,44 @@ void Attempt::set_delivery_detail(const std::string &detail) {
     update_walk_until_locked();
 }
 
-void Attempt::progress(uint64_t account, uint64_t coordinates) {
+void Attempt::progress(uint64_t account, uint64_t coordinates, uint64_t names) {
     std::lock_guard<std::mutex> lock(mutex_);
     walking_account_ = account;
     walking_coordinates_ = coordinates;
+    walking_names_ = names;
     update_walk_until_locked();
 }
 
 void Attempt::note_delivered(uint64_t text_bytes, double build_seconds, uint64_t account,
-                             uint64_t coordinate_account, uint64_t coordinate_text) {
+                             uint64_t coordinate_account, uint64_t coordinate_text,
+                             uint64_t names_account, uint64_t names_text) {
     std::lock_guard<std::mutex> lock(mutex_);
     delivered_bytes_ += text_bytes;
     walking_account_ = 0;
     walking_coordinates_ = 0;
+    walking_names_ = 0;
     // the build rate over the whole text: the coordinates' is built like the rest
     if (text_bytes >= kMeasuredTextBytes && build_seconds > 0) {
         const double mbps = static_cast<double>(text_bytes) / build_seconds / 1e6;
         measured_build_mbps_ = measured_build_mbps_ > 0 ? std::min(measured_build_mbps_, mbps)
                                                         : mbps;
     }
-    // The ratio of the rest of the output: the coordinate share's account and its exact text
-    // both left out, so that the sample is the one the same walk without coordinates gives,
-    // and measured only on a rest of at least kMeasuredTextBytes of text or of at least
-    // kMeasuredAccountBytes of account (a seed whose text is mostly coordinates measures no
-    // ratio, like a small seed; a detail of a text byte per more than 896 account bytes is
-    // measured on its seeds of a large account, which would never write 1 MiB). Without
-    // coordinates both are 0 and the sample is the whole output's
-    if (account > coordinate_account && text_bytes > coordinate_text
-            && (text_bytes - coordinate_text >= kMeasuredTextBytes
-                || account - coordinate_account >= kMeasuredAccountBytes)) {
-        const double ratio = static_cast<double>(account - coordinate_account)
-                           / static_cast<double>(text_bytes - coordinate_text);
+    // The ratio of the rest of the output: the coordinate share's and the names share's account
+    // and their exact text left out, so that the sample is the one the same walk without
+    // coordinates and names gives (a name-heavy seed measured with its names would bring the
+    // ratio down to theirs, about 6, and overstate every later seed's rest many times), and
+    // measured only on a rest of at least kMeasuredTextBytes of text or of at least
+    // kMeasuredAccountBytes of account (a seed whose text is mostly coordinates or names
+    // measures no ratio, like a small seed; a detail of a text byte per more than 896 account
+    // bytes is measured on its seeds of a large account, which would never write 1 MiB).
+    // Without coordinates and names the shares are 0 and the sample is the whole output's
+    const uint64_t shares_account = coordinate_account + names_account;
+    const uint64_t shares_text = coordinate_text + names_text;
+    if (account > shares_account && text_bytes > shares_text
+            && (text_bytes - shares_text >= kMeasuredTextBytes
+                || account - shares_account >= kMeasuredAccountBytes)) {
+        const double ratio = static_cast<double>(account - shares_account)
+                           / static_cast<double>(text_bytes - shares_text);
         own_ratio_ = own_ratio_ > 0 ? std::min(own_ratio_, ratio) : ratio;
     }
     update_walk_until_locked();

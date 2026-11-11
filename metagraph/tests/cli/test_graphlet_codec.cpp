@@ -4305,9 +4305,11 @@ TEST(Stage2ReviewRound3, WorkStopsStateTheirLargestCharge) {
     }
 }
 
-// The depth-0 state builds its label dictionary (names in each LabelRef and again in the
-// query) before its admission, so what the dictionary holds is observed first: otherwise a seed
-// the admission failed would report memory_bound_soft 0 with twelve names of 1 MB under 1 MiB.
+// The depth-0 state builds its label dictionary (names in each LabelRef, and in annotate mode
+// again in the recorder) before its admission, so what the dictionary holds is observed first:
+// otherwise a seed the admission failed would report memory_bound_soft 0 with twelve names of
+// 1 MB under 1 MiB. A constrain seed's query (the names' second copy) is built only once the
+// depth-0 state is admitted (T4-L2, GPT review 7 F3): a seed the admission fails held them once.
 TEST(Stage2ReviewRound3, FailedAdmissionStatesTheDictionaryItHeld) {
     std::vector<std::pair<std::string, std::string>> records;
     for (size_t i = 0; i < 6; ++i) {
@@ -4329,9 +4331,20 @@ TEST(Stage2ReviewRound3, FailedAdmissionStatesTheDictionaryItHeld) {
             FAIL() << to_string(mode) << ": six names of 200 KB fit 1 MiB";
         } catch (const SeedBudgetError &e) {
             EXPECT_EQ(ResourceStop::MEMORY, e.stop().resource) << to_string(mode);
-            // the names alone, held twice (the LabelRef and the query's or recorder's copy)
-            EXPECT_GE(e.account().soft_overshoot, 2 * 6 * 200'000u - (uint64_t(1) << 20))
-                << to_string(mode);
+            if (mode == LabelMode::ANNOTATE) {
+                // the names alone, held twice (the recorder's and the dictionary's)
+                EXPECT_GE(e.account().soft_overshoot, 2 * 6 * 200'000u - (uint64_t(1) << 20))
+                    << to_string(mode);
+            } else {
+                // once: the walk's query is not built for a seed its budget does not admit
+                EXPECT_GE(e.account().soft_overshoot, 6 * 200'000u - (uint64_t(1) << 20))
+                    << to_string(mode);
+                EXPECT_LT(e.account().soft_overshoot, 2 * 6 * 200'000u - (uint64_t(1) << 20))
+                    << to_string(mode);
+            }
+            // the account prices both copies whatever was built: the same demand in both modes'
+            // statement of what the depth-0 state needs
+            EXPECT_GT(e.stop().demand, 2 * 6 * 200'000.0) << to_string(mode);
         }
     }
 }
@@ -6360,7 +6373,7 @@ TEST(GraphletAttempt, ReserveEstimatesTheTextWithoutTheAllotments) {
             st.max_memory_bytes = mb << 20;
             std::vector<std::pair<uint64_t, uint64_t>> seen;
             AttemptControl control;
-            control.progress = [&seen](uint64_t account, uint64_t coordinates) {
+            control.progress = [&seen](uint64_t account, uint64_t coordinates, uint64_t) {
                 seen.emplace_back(account, coordinates);
             };
             LabelOracle oracle(*c.anno);
@@ -6414,10 +6427,13 @@ TEST(GraphletAttempt, ReserveEstimatesTheTextWithoutTheAllotments) {
         // the budget does not bind
         ASSERT_TRUE(usage["per_seed"][0]["stopped_by"].isNull()) << what << compact_json(usage);
         // the ratio is the walk's own account (the same at every budget) per byte of its
-        // text (under a budget a little longer: its memory_bound_soft limitation)
+        // text (under a budget a little longer: its memory_bound_soft limitation), both without
+        // the names share (the label F and the seed_id echo: a few hundred account bytes and a
+        // few bytes of text, T4-L2)
         const uint64_t final_bytes = usage["per_seed"][0]["final_bytes"].asUInt64();
-        EXPECT_EQ(static_cast<double>(final_bytes) / static_cast<double>(texts.texts[0].size()),
-                  attempt->own_account_per_text_byte()) << what;
+        const double whole = static_cast<double>(final_bytes)
+                           / static_cast<double>(texts.texts[0].size());
+        EXPECT_NEAR(whole, attempt->own_account_per_text_byte(), whole * 1e-4) << what;
         if (!mb) {
             plain_final = final_bytes;
         } else {
@@ -8149,4 +8165,370 @@ TEST(ResolveDeadline, CapabilitiesBlock) {
     EXPECT_EQ("SPEC-labeled-traversal-core.md section 4.5", t["rule"].asString());
     EXPECT_EQ(0u, resolve_capabilities_json({ 0, kResolveFinalizeMs })["time_budget"]
                           ["max_time_ms"].asUInt64());
+}
+
+
+/*************** the seed phase's label names in the held bound (T4-L2, GPT review 7 F3) ********/
+
+// make_seed_id reads views of the kept labels' names (the seed phase held them once more as its
+// by-value copy, and once more per name as the length-prefixed concatenation it hashed): every
+// seed id is the one the by-value form gave
+TEST(GraphletHeldBound, SeedIdsReadViewsOfTheNames) {
+    auto by_value = [](const std::string &release, std::string seq, bool canonical,
+                       std::vector<std::string> labels) {
+        // make_seed_id before T4-L2, for an upper-case sequence
+        if (canonical) {
+            std::string rc(seq);
+            ::reverse_complement(rc);
+            if (rc < seq)
+                seq = rc;
+        }
+        std::sort(labels.begin(), labels.end());
+        uint64_t h = fnv1a64(release);
+        h = fnv1a64("\t", h);
+        h = fnv1a64(seq, h);
+        h = fnv1a64("\t", h);
+        for (const auto &l : labels) {
+            h = fnv1a64(std::to_string(l.size()) + ":" + l, h);
+        }
+        return hex64(h);
+    };
+    std::mt19937 rng(20261110);
+    for (size_t round = 0; round < 60; ++round) {
+        std::vector<std::string> labels;
+        const size_t n = rng() % 12;
+        for (size_t i = 0; i < n; ++i) {
+            std::string name(rng() % 3 ? rng() % 40 : 3000 + rng() % 9000, 'a');
+            for (char &c : name) {
+                c = "ACGT:,\t\n_xy9"[rng() % 12];
+            }
+            labels.push_back(std::move(name));
+        }
+        if (n > 1 && round % 5 == 0)
+            labels.push_back(labels[0]);
+        const std::string seq = random_seq(20 + rng() % 40, 9000 + round);
+        const std::string release = round % 3 ? "r" + std::to_string(round) : "";
+        for (bool canonical : { false, true }) {
+            const std::vector<std::string_view> views(labels.begin(), labels.end());
+            EXPECT_EQ(by_value(release, seq, canonical, labels),
+                      make_seed_id(release, seq, canonical, views)) << round;
+        }
+    }
+    // the pinned values of test_resolve.cpp's and test_walker.cpp's checks still hold
+    EXPECT_EQ(make_seed_id("r1", "ACGTT", true, { "b", "a" }),
+              make_seed_id("r1", "AACGT", true, { "a", "b" }));
+    EXPECT_NE(make_seed_id("", "ACGTT", false, { "a,b" }),
+              make_seed_id("", "ACGTT", false, { "a", "b" }));
+}
+
+// The seed phase observes its label references' names from when they exist: an explicit list's
+// from its resolution, before the validation's first read, so a seed stopped there states them in
+// its excess (at the base the excess counted only the validation's hits and the names were held
+// twice, the validation query's copy beside the references)
+TEST(GraphletHeldBound, SeedPhaseObservesItsResolvedNames) {
+    std::vector<std::pair<std::string, std::string>> records;
+    std::vector<std::string> names;
+    for (size_t i = 0; i < 6; ++i) {
+        names.push_back("N" + std::to_string(i) + std::string(200'000, 'x'));
+        records.emplace_back(names.back(), "AAAC");
+    }
+    const HeaderIndexCase idx = header_index(3, records);
+    LabelOracle oracle(*idx.anno, idx.cth.get());
+    Strategy st;
+    st.direction = Strategy::RIGHT;
+    st.max_extension_bp = 1;
+    st.max_memory_bytes = uint64_t(1) << 20;
+    st.delivery = delivery_costs("graphlet", true);
+    // without a stop the seed fails at depth 0, its dictionary (the six names) not admitted
+    try {
+        traverse_seed(oracle, seed_of("AAA", names), st, LabelChangeCost::forbid());
+        FAIL() << "six names of 200 KB fit 1 MiB";
+    } catch (const SeedBudgetError &e) {
+        EXPECT_EQ(ResourceStop::MEMORY, e.stop().resource);
+        EXPECT_GE(e.account().soft_overshoot, 6 * 200'000u - (uint64_t(1) << 20));
+    }
+    // stopped at the seed phase's first poll (the validation's first charge, after its read)
+    InjectedStop inject(0, ExternalStop::CANCELLED);
+    try {
+        traverse_seed(oracle, seed_of("AAA", names), st, LabelChangeCost::forbid(), "",
+                      nullptr, &inject.control);
+        FAIL() << "a cancel at the first poll lets no seed phase end";
+    } catch (const SeedBudgetError &e) {
+        EXPECT_EQ(ResourceStop::CANCELLED, e.stop().resource);
+        EXPECT_EQ(1u, inject.calls);
+        // the six names once (their references), beside the seed and the validation's hits
+        EXPECT_GE(e.account().soft_overshoot, 6 * 200'000u - (uint64_t(1) << 20));
+        EXPECT_LT(e.account().soft_overshoot, 2 * 6 * 200'000u - (uint64_t(1) << 20));
+        EXPECT_EQ(e.account().soft_overshoot, inject.meter.soft_excess);
+    }
+}
+
+// The references' names are observed before the validation's first read can fail the seed (T4
+// review R2, finding 1): a refusal of that read — here injected at every seed-phase charge, so that
+// the seed's one k-mer, read alone, is refused — fails the seed with the six names in its excess.
+// Observed only with the first chunk's rows (after the read), they were in no statement of a seed
+// refused or stopped inside that chunk
+TEST(GraphletHeldBound, FirstValidationReadRefusedStatesTheNames) {
+    // six columns named by 200 KB (a plain column annotation: budget-aware, the six labels read
+    // cell by cell)
+    std::vector<std::string> names, seqs;
+    for (size_t i = 0; i < 6; ++i) {
+        names.push_back("N" + std::to_string(i) + std::string(200'000, 'x'));
+        seqs.push_back("AAAC");
+    }
+    auto anno = test::build_anno_graph<DBGSuccinct, annot::ColumnCompressed<>>(3, seqs, names);
+    LabelOracle oracle(*anno);
+    ASSERT_TRUE(oracle.decode_charged());
+    Strategy st;
+    st.direction = Strategy::RIGHT;
+    st.max_extension_bp = 1;
+    st.max_memory_bytes = uint64_t(1) << 20;
+    st.delivery = delivery_costs("graphlet", true);
+    size_t denied = 0;
+    WalkerHooks deny;
+    deny.deny_decode = [&](const DecodeCharge &d) {
+        if (d.where != DecodeCharge::SEED)
+            return false;
+        ++denied;
+        return true;
+    };
+    try {
+        traverse_seed(oracle, seed_of("AAA", names), st, LabelChangeCost::forbid(), "", &deny);
+        FAIL() << "a refused validation read lets no seed phase end";
+    } catch (const SeedBudgetError &e) {
+        EXPECT_GT(denied, 0u);
+        EXPECT_EQ(ResourceStop::MEMORY, e.stop().resource);
+        EXPECT_STREQ("annotation_decode", e.stop().phase);
+        EXPECT_TRUE(e.stop().injected);
+        EXPECT_GE(e.account().soft_overshoot, 6 * 200'000u - (uint64_t(1) << 20));
+        EXPECT_LT(e.account().soft_overshoot, 2 * 6 * 200'000u - (uint64_t(1) << 20));
+    }
+}
+
+
+/*************** the names' share of the delivery reserve (T4-L2, GPT review 7 F10) ***************/
+
+namespace {
+
+// one graph: a fan of 800 paths under one label (a compact result: hundreds of account bytes per text
+// byte, the tree's) and 48 records of one sequence under 48 labels named by 20,000 characters (a
+// name-heavy result: its names are most of its text)
+struct NameHeavyGraph {
+    std::string fan_seed;
+    std::string named;
+    std::shared_ptr<graph::AnnotatedDBG> anno;
+    NameHeavyGraph() {
+        fan_seed = random_seq(40, 3100);
+        std::vector<std::string> seqs, labels;
+        for (size_t i = 0; i < 800; ++i) {
+            seqs.push_back(fan_seed + random_seq(1300, 3200 + i));
+            labels.push_back("F");
+        }
+        named = random_seq(400, 4100);
+        for (size_t i = 0; i < 48; ++i) {
+            seqs.push_back(named);
+            labels.push_back("N" + std::to_string(i) + "_" + random_seq(20'000, 5000 + i));
+        }
+        anno = test::build_anno_graph<DBGSuccinct, annot::ColumnCompressed<>>(31, seqs, labels);
+    }
+};
+
+const char *kFanStrategy = R"({"direction": "right",
+    "branching": {"on_reconverge": "keep", "max_label_branches": "unlimited",
+                  "max_splits_per_path": "unlimited"},
+    "bounds": {"max_extension_bp": 1400, "max_live_paths": 100000, "max_paths": 100000,
+               "max_steps": 100000000, "max_output_bp": 100000000}})";
+const char *kNamedStrategy = R"({"direction": "both", "labels": {"max_seed_labels": 4096},
+                                 "bounds": {"max_extension_bp": 300}})";
+
+// the strategy as process_traverse_request walks it in |detail| (its delivery priced so)
+Strategy walked_strategy(const char *json, const std::string &detail) {
+    Strategy st = strategy_of(json);
+    st.delivery = delivery_costs(detail, true);
+    return st;
+}
+
+// a seed walked as the server walks it: its last published account with its coordinate and names
+// shares, its meter and its result
+struct WalkedForReserve {
+    uint64_t account = 0, coordinates = 0, names = 0;
+    AttemptMeter meter;
+    SeedResult r;
+};
+
+WalkedForReserve walk_for_reserve(const graph::AnnotatedDBG &anno, const Seed &seed,
+                                  const Strategy &st) {
+    WalkedForReserve w;
+    AttemptControl control;
+    control.progress = [&w](uint64_t account, uint64_t coordinates, uint64_t names) {
+        w.account = account;
+        w.coordinates = coordinates;
+        w.names = names;
+    };
+    control.meter = &w.meter;
+    LabelOracle oracle(anno);
+    w.r = traverse_seed(oracle, seed, st, LabelChangeCost::forbid(), "", nullptr, &control);
+    return w;
+}
+
+// the results' texts as the server writes them (process_traverse_request under an attempt)
+std::vector<std::string> server_texts(const graph::AnnotatedDBG &anno, const std::vector<Seed> &seeds,
+                                      const char *strategy, const std::string &detail,
+                                      std::shared_ptr<Attempt> *attempt_out = nullptr) {
+    Json::Value request = request_of(seeds, strategy, detail);
+    for (size_t i = 0; i < seeds.size(); ++i) {
+        if (!seeds[i].seed_id.empty())
+            request["seeds"][Json::ArrayIndex(i)]["seed_id"] = seeds[i].seed_id;
+    }
+    request["attempt_id"] = "t-names";
+    AttemptSettings settings;
+    auto attempt = std::make_shared<Attempt>(0, std::chrono::system_clock::time_point(), settings,
+                                             "inst", true);
+    ResultTexts texts;
+    process_traverse_request(request, anno, "", {}, nullptr, attempt.get(), &texts);
+    if (attempt_out)
+        *attempt_out = attempt;
+    return texts.texts;
+}
+
+} // namespace
+
+// GPT review 7 F10 (review 6 #15): a compact result sets the attempt's ratio (hundreds of account
+// bytes per text byte), then a name-heavy seed is walked. Its names share is estimated at
+// kNameAccountPerTextByte, the rest at that ratio, so the reserve covers the text it writes; at the
+// base the whole account was estimated at the compact ratio, a small part of the text here, and on a
+// server the name-heavy delivery overran the bound (503 deadline; T4-L2's f10 reproduction)
+TEST(GraphletAttempt, ReserveCoversANameHeavySeedAfterACompactOne) {
+    const NameHeavyGraph g;
+    for (const std::string detail : { "full", "graphlet" }) {
+        const Seed fan_seed = seed_of(g.fan_seed, { "F" });
+        const Seed named_seed = seed_of(g.named.substr(100, 100));
+        // the server's texts of both seeds, and the ratio the compact one measured
+        std::shared_ptr<Attempt> served;
+        const std::vector<std::string> texts = server_texts(*g.anno, { fan_seed }, kFanStrategy,
+                                                            detail, &served);
+        const std::vector<std::string> named_texts = server_texts(*g.anno, { named_seed },
+                                                                  kNamedStrategy, detail);
+        ASSERT_EQ(1u, texts.size());
+        ASSERT_EQ(1u, named_texts.size());
+        ASSERT_GT(texts[0].size(), kMeasuredTextBytes) << detail;
+        const double ratio = served->own_account_per_text_byte();
+        EXPECT_GT(ratio, 20) << detail;
+        // the name-heavy walk's published shares
+        const WalkedForReserve named = walk_for_reserve(*g.anno, named_seed,
+                                                        walked_strategy(kNamedStrategy, detail));
+        ASSERT_EQ(48u, named.r.label_dict.size()) << detail;
+        const double text = static_cast<double>(named_texts[0].size());
+        const uint64_t names_text = names_text_bytes(named.r, walked_strategy(kNamedStrategy, detail),
+                                                     detail == "graphlet");
+        // the names are most of its text and of its account, and their share bounds their text
+        EXPECT_GT(static_cast<double>(names_text), 0.75 * text) << detail;
+        EXPECT_GT(4 * named.names, 3 * named.meter.memory_final) << detail;
+        EXPECT_EQ(named.names, named.meter.memory_names) << detail;
+        EXPECT_GE(named.names, kNameAccountPerTextByte * names_text) << detail;
+
+        // a server that measured the compact ratio for this detail
+        DeliveryMeasurements measured;
+        measured.account_per_text_byte[detail] = ratio;
+        AttemptSettings settings;
+        auto a = std::make_shared<Attempt>(0, std::chrono::system_clock::time_point(), settings,
+                                           "inst", true);
+        a->set_measured(measured);
+        a->set_delivery_detail(detail);
+        a->set_bound(1, 30'000);
+        a->progress(named.account, named.coordinates, named.names);
+        auto reserve_for = [&](double walking) {
+            return kReserveMargin * (walking / (settings.delivery_compress_mbps * 1000)
+                                     + walking / (settings.delivery_build_mbps * 1000))
+                 + settings.delivery_stop_ms;
+        };
+        EXPECT_GE(a->reserve_ms(), reserve_for(text)) << detail;
+        // conservative, not absurd: at most 2.5 times the text (plain names write a text byte per 5 to
+        // 6 account bytes of their share, priced at 3; a graphlet front-codes them)
+        EXPECT_LE(a->reserve_ms(), reserve_for(2.5 * text)) << detail;
+        // the base's estimate, the whole account at the compact ratio: under a fifth of the text
+        EXPECT_LT(static_cast<double>(named.account - named.coordinates) / ratio, text / 5) << detail;
+    }
+}
+
+// The names' text the reserve's ratio sample leaves out is the result's exact text of those names: in
+// JSON the result less the same result with every such name emptied; in a graphlet the L records'
+// front-coded and the X records' names as the server's text holds them, with the JSON summary's
+// seed_id; the names share's account bounds it
+TEST(GraphletAttempt, NamesTextIsExact) {
+    const NameHeavyGraph g;
+    auto emptied = [](SeedResult r) {
+        for (LabelRef &l : r.label_dict) {
+            l.name.clear();
+        }
+        for (DroppedLabel &d : r.dropped_labels) {
+            d.name.clear();
+        }
+        for (std::string &name : r.unknown_labels) {
+            name.clear();
+        }
+        r.seed_id.clear();
+        return r;
+    };
+    // the named seed derived, then named explicitly with one label that does not support it (a
+    // dropped label) under a seed_id with characters JSON escapes
+    std::vector<Seed> seeds { seed_of(g.named.substr(100, 100)) };
+    {
+        const WalkedForReserve derived = walk_for_reserve(*g.anno, seeds[0],
+                                                          walked_strategy(kNamedStrategy, "full"));
+        std::vector<std::string> names;
+        for (const LabelRef &l : derived.r.label_dict) {
+            names.push_back(l.name);
+        }
+        names.push_back("F");
+        Seed explicit_seed = seed_of(g.named.substr(100, 100), names);
+        explicit_seed.seed_id = "id\twith \"quotes\" %\n";
+        seeds.push_back(explicit_seed);
+    }
+    for (const std::string detail : { "summary", "tree", "full", "graphlet" }) {
+        for (size_t i = 0; i < seeds.size(); ++i) {
+            const std::string what = detail + " seed " + std::to_string(i);
+            const Strategy st = walked_strategy(kNamedStrategy, detail);
+            const WalkedForReserve w = walk_for_reserve(*g.anno, seeds[i], st);
+            if (i) {
+                ASSERT_EQ(1u, w.r.dropped_labels.size()) << what;
+            }
+            const uint64_t names_text = names_text_bytes(w.r, st, detail == "graphlet");
+            EXPECT_GE(w.meter.memory_names, kNameAccountPerTextByte * names_text) << what;
+            const std::vector<std::string> texts = server_texts(*g.anno, { seeds[i] }, kNamedStrategy,
+                                                                detail);
+            ASSERT_EQ(1u, texts.size()) << what;
+            EXPECT_LE(names_text, texts[0].size()) << what;
+            if (detail != "graphlet") {
+                const SeedResult e = emptied(w.r);
+                EXPECT_EQ(compact_json(seed_result_to_json(w.r, st, detail, false)).size()
+                                  - compact_json(seed_result_to_json(e, st, detail, false)).size(),
+                          names_text - names_text_bytes(e, st, false)) << what;
+                continue;
+            }
+            // the graphlet as the server wrote it: its L records' last field (the front-coded name)
+            // and its X records' (the dropped label's name), escaped once more in the JSON string
+            const Json::Value rj = parse_json(texts[0]);
+            ASSERT_TRUE(rj["graphlet"].isString()) << what;
+            std::istringstream lines(rj["graphlet"].asString());
+            uint64_t expected = json_escaped_size(w.r.seed_id) + 2;
+            size_t named_records = 0;
+            for (std::string line; std::getline(lines, line); ) {
+                if (line.rfind("L ", 0) == 0) {
+                    // L <c|h> <column> <seq_id> <prefix_len> <suffix>
+                    size_t at = 0;
+                    for (int f = 0; f < 5; ++f) {
+                        at = line.find(' ', at) + 1;
+                    }
+                    expected += json_escaped_size(std::string_view(line).substr(at));
+                    ++named_records;
+                } else if (line.rfind("X ", 0) == 0) {
+                    expected += json_escaped_size(std::string_view(line).substr(line.rfind(' ') + 1));
+                    ++named_records;
+                }
+            }
+            EXPECT_EQ(w.r.label_dict.size() + w.r.dropped_labels.size(), named_records) << what;
+            EXPECT_EQ(expected, names_text) << what;
+        }
+    }
 }

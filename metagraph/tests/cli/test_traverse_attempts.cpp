@@ -1372,6 +1372,69 @@ TEST(GraphletAttempt, ReserveCountsCoordinateText) {
     EXPECT_EQ(kCoordinateAccountPerTextByte, r["coordinate_account_per_text_byte"].asUInt64());
 }
 
+// The delivery reserve's names share (T4-L2, GPT review 7 F10): the walked seed's names share
+// (ResourceAccount::names) is estimated at kNameAccountPerTextByte, its coordinate share at
+// kCoordinateAccountPerTextByte, the rest at the ratio in use; the ratio sample leaves the names
+// share's account and its exact text out, as the coordinates'
+TEST(GraphletAttempt, ReservePricesNamesApart) {
+    FakeClock clock;
+    AttemptSettings s = settings_with(&clock);
+    s.allowance_ms = 10'000;
+    s.delivery_compress_mbps = 50;     // 50,000 bytes per ms
+    s.delivery_build_mbps = 5;         // 5,000 bytes per ms
+    s.delivery_stop_ms = 100;
+    s.account_per_text_byte_json = 20;
+    auto reserve = [](double text) { return 1.25 * (text / 5e4 + text / 5e3) + 100; };
+    AttemptRegistry registry(s);
+    auto a = attempt_of(registry, "names");
+    a->set_delivery_detail("full");
+    a->set_bound(2, 30'000);
+    // 1e6 bytes of text at 20, 1e5 of coordinates at 12, 3e5 of names at 3
+    a->progress(20 * 1'000'000ull + 12 * 100'000ull + 3 * 300'000ull, 12 * 100'000ull,
+                3 * 300'000ull);
+    EXPECT_NEAR(reserve(1'400'000), a->reserve_ms(), 1e-9);
+    // the same account without a names share: its names at 20 (the base's estimate)
+    a->progress(20 * 1'000'000ull + 12 * 100'000ull + 3 * 300'000ull, 12 * 100'000ull);
+    EXPECT_NEAR(reserve(1'145'000), a->reserve_ms(), 1e-9);
+    // each share rounded up apart; a names share larger than what the coordinates leave of the
+    // account (never reported) is taken as that
+    a->progress(41, 13, 4);
+    EXPECT_NEAR(reserve(2 + 2 + 2), a->reserve_ms(), 1e-9);
+    a->progress(30, 12, 1000);
+    EXPECT_NEAR(reserve(1 + 6), a->reserve_ms(), 1e-9);
+    // a compact seed's ratio (100) then a name-heavy seed (its account mostly names): its names are
+    // estimated at 3, not at 100
+    a->note_delivered(2'000'000, 0, 100 * 2'000'000ull);
+    EXPECT_EQ(100.0, a->own_account_per_text_byte());
+    a->progress(100 * 100'000ull + 6 * 4'000'000ull, 0, 6 * 4'000'000ull);
+    EXPECT_NEAR(1.25 * ((2e6 + 100'000 + 8e6) / 5e4 + (100'000 + 8e6) / 5e3) + 100, a->reserve_ms(),
+                1e-6);
+    // the ratio sample leaves the names share's account and its exact text out: 3 MB of text of
+    // which 1 MB names (6 MB of account), from 80 x 2 MB + 6 MB
+    auto b = attempt_of(registry, "names-sample");
+    b->set_delivery_detail("full");
+    b->set_bound(1, 30'000);
+    b->note_delivered(3'000'000, 0, 80 * 2'000'000ull + 6'000'000, 0, 0, 6'000'000, 1'000'000);
+    EXPECT_EQ(80.0, b->own_account_per_text_byte());
+    // with coordinates too: both shares left out
+    auto c = attempt_of(registry, "names-and-coordinates");
+    c->set_delivery_detail("full");
+    c->set_bound(1, 30'000);
+    c->note_delivered(3'500'000, 0, 80 * 2'000'000ull + 6'000'000 + 9'000'000, 9'000'000, 500'000,
+                      6'000'000, 1'000'000);
+    EXPECT_EQ(80.0, c->own_account_per_text_byte());
+    // a rest below measured_text_bytes measures no ratio, even in a large text of names
+    auto d = attempt_of(registry, "names-heavy");
+    d->set_delivery_detail("full");
+    d->set_bound(1, 30'000);
+    d->note_delivered(2'000'000, 0, 30 * 500'000ull + 6 * 1'500'000ull, 0, 0, 6 * 1'500'000ull,
+                      1'500'000);
+    // (at the base the names were in the sample: 12 here, against the rest's own 30, and every
+    // later seed's rest would have been estimated 2.5 times too large)
+    EXPECT_EQ(0.0, d->own_account_per_text_byte());
+    EXPECT_EQ(3u, kNameAccountPerTextByte);
+}
+
 // An attempt with record coordinates feeds the server's measured ratio with the sample the same
 // walk without them gives (their account and their exact text left out), so a later attempt
 // without coordinates reads the same measured_account_per_text_byte, and walks to the same

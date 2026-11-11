@@ -3946,7 +3946,9 @@ class TestTraverseResolveRegression(TestTraverseBase):
                                      bool(effects), json.dumps(request)[:300])
                     for effect in effects:
                         self.assertIn('charged before they are held', effect)
-                        self.assertIn("at most twice the seed's labels x the longest", effect)
+                        # the seed phase's label names observed (T4-L2, GPT review 7 F3)
+                        self.assertIn("hits, label names, dictionary", effect)
+                        self.assertNotIn("copies of the label names", effect)
                 answers.append((ret.status_code, self._untimed(text)))
             self.assertEqual(answers[0], answers[1], json.dumps(request)[:300])
             compared += 1

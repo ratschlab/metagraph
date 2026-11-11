@@ -89,9 +89,11 @@ class TestDecodeStop(unittest.TestCase):
         self.assertEqual((None, 'bounds.max_memory_mb', 1), (soft[0].arm, soft[0].knob, soft[0].limit))
         self.assertIn('charged before they are held', soft[0].effect)
         self.assertIn("keys and rows until its heads are done", soft[0].effect)
-        # and what it does not observe, with its bound (E5b: the seed phase's further name copies)
+        # the seed phase's label names among what it observes (T4-L2, GPT review 7 F3: the two
+        # name copies it once left unobserved are gone), and what it still does not observe
+        self.assertIn("hits, label names, dictionary", soft[0].effect)
         self.assertIn("not observed", soft[0].effect)
-        self.assertIn("at most twice the seed's labels x the longest", soft[0].effect)
+        self.assertNotIn("copies of the label names", soft[0].effect)
 
     def test_an_agent_sees_the_phase(self):
         with tempfile.TemporaryDirectory() as tmp:
