@@ -1334,13 +1334,13 @@ class TestMultiGraphServer(TestingBase):
 
     def _pair_times(self, server, request):
         """The time (s) a one-pair /resolve of |request| takes on |server| now: on b_big (its
-        whole work, which also warms its pages) and then on a_kleb"""
-        times = {}
-        for graph in ('b_big', 'a_kleb'):
+        whole work; the shorter of two, the first warming its pages) and then on a_kleb"""
+        def one(graph):
             started = time.time()
             self.post_to(server, 'resolve', dict(request, graphs=[graph]))
-            times[graph] = time.time() - started
-        return times['a_kleb'], times['b_big']
+            return time.time() - started
+        big = min(one('b_big'), one('b_big'))
+        return one('a_kleb'), big
 
     def _wait_ended(self, server, request_id, timeout=120):
         """GET /requests/{request_id} until it states the request ended"""
@@ -1545,8 +1545,9 @@ class TestMultiGraphServer(TestingBase):
         burst of load: b_big refused (the CI flake of 2026-11-09/10). The cutoff now comes at
         twice a_kleb's time plus a third of b_big's work: b_big gets about a third of its work,
         well past its mapping and short of its end. A request whose b_big still ends by a
-        timing outcome (refused, or answered complete) is sent once more, under a new
-        request_id, with the window scaled; the outcomes are stated if the last one fails."""
+        timing outcome is sent again, up to five times, each under a new request_id: after a
+        refusal with a later cutoff, after a complete answer with an earlier one, between the
+        two once both are seen (bisected); the outcomes are stated if the last one fails."""
         server = self._cutoff_server('finish', '--traverse-clock-skew-ms', '500',
                                      '--request-retention', '1')
         try:
@@ -1555,7 +1556,9 @@ class TestMultiGraphServer(TestingBase):
             kleb_s, big_s = self._pair_times(server, request)
             cutoff_ms = max(750, int(1000 * (2 * kleb_s + big_s / 3)))
             tries = []
-            for attempt in range(3):
+            # cutoffs that refused b_big (too early) and that let it complete (too late)
+            early, late = None, None
+            for attempt in range(5):
                 rid = f'it-finish-a{attempt + 1}'
                 window_ms = cutoff_ms + 750
                 finish_by = int(time.time() * 1000) + window_ms
@@ -1578,7 +1581,14 @@ class TestMultiGraphServer(TestingBase):
                     break
                 # b_big refused (its first poll past its budget, or a_kleb past the cutoff):
                 # more time; b_big answered complete (its work done before the cutoff): less
-                cutoff_ms = int(cutoff_ms * (1.6 if big.get('outcome') != 'answered' else 0.6))
+                if big.get('outcome') != 'answered':
+                    early = cutoff_ms
+                else:
+                    late = cutoff_ms
+                if early and late:
+                    cutoff_ms = int((early * late) ** 0.5)
+                else:
+                    cutoff_ms = max(300, int(cutoff_ms * (1.6 if late is None else 0.5)))
             where = f'measured a_kleb {kleb_s:.3f} s, b_big {big_s:.3f} s; tries {tries}'
             # by the effective deadline (the writer refuses a later envelope, 503), not after
             # b_big's whole work
@@ -1599,7 +1609,7 @@ class TestMultiGraphServer(TestingBase):
             self.assertIsNone(kleb['stop'])
             # b_big: stopped by time before the cutoff, the resolve of a prefix; both caps
             # stated, the cutoff's last (the budget it ran under)
-            self.assertEqual('time', big['stop']['reason'], where)
+            self.assertEqual('time', (big['stop'] or {}).get('reason'), where)
             self.assertLess(big['stop']['resolved_kmers'], big['stop']['query_kmers'])
             clamped = big['limits']['clamped']
             self.assertEqual(['bounds.time_budget_ms'] * 2, [c['field'] for c in clamped])
