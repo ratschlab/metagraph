@@ -140,6 +140,14 @@ int clean_graph(Config *config, std::shared_ptr<graph::DeBruijnGraph> graph,
 
     timer.reset();
 
+    // The degrees in the source graph are those in the SSHash graph only if all
+    // k-mers of a basic graph are written: no subgraph, no k-mer counts to filter
+    // by, no pruned tips.
+    auto *dbg_succ = dynamic_cast<const graph::DBGSuccinct*>(graph.get());
+    if (!dbg_succ || node_weights || config->min_tip_size > 1
+            || graph->get_mode() != graph::DeBruijnGraph::BASIC)
+        succ_pred = nullptr;
+
     auto call_clean_contigs = [&](auto callback, size_t num_threads) {
         if (config->min_unitig_median_kmer_abundance != 1) {
             assert(node_weights);
@@ -192,13 +200,6 @@ int clean_graph(Config *config, std::shared_ptr<graph::DeBruijnGraph> graph,
         }
         const graph::boss::BOSS *boss = nullptr;
         const bit_vector *boss_mask = nullptr;
-        // The degrees in the source graph are those in the SSHash graph only if all
-        // k-mers of a basic graph are written: no subgraph, no k-mer counts to filter
-        // by, no pruned tips.
-        auto *dbg_succ = dynamic_cast<const graph::DBGSuccinct*>(graph.get());
-        if (!dbg_succ || node_weights || config->min_tip_size > 1
-                || graph->get_mode() != graph::DeBruijnGraph::BASIC)
-            succ_pred = nullptr;
         if (succ_pred) {
             boss = &dbg_succ->get_boss();
             boss_mask = dbg_succ->get_mask();
