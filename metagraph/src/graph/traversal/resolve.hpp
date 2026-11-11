@@ -395,6 +395,17 @@ uint64_t selection_bytes(const SeedSelection &selection);
 uint64_t profile_held_bytes(const SupportProfile &profile);
 uint64_t candidates_held_bytes(const SupportProfile &profile);
 
+// The seed candidates of |profile| (SupportProfile::candidates, resolve_support's last step):
+// its labels' runs of at least |min_block_kmers| k-mers, identical runs grouped with their
+// labels in ascending order, longest first, then by most labels, then by begin. |answer| (null:
+// none): the grouping charged before it is built (kCandidateRunBytes a run grouped), then
+// replaced by what the candidates hold (part "candidates"); the candidates are reserved, so
+// that no growth holds an old and a new buffer beside the grouping's map. |finishing| (unset:
+// none) is called with each label's index before its runs are grouped
+void group_candidates(SupportProfile *profile, uint64_t min_block_kmers,
+                      AnswerAccount *answer = nullptr,
+                      const std::function<void(size_t)> &finishing = {});
+
 // The order select_seeds lists the seeds in, as the capabilities state it (the `resolve`
 // block's seed_order, the multigraph block's resolve_seed_order; SPEC-labeled-traversal-core.md
 // §4.3): "rank" since 01c05323b -- longest_first picks merged where they overlap, a merged seed

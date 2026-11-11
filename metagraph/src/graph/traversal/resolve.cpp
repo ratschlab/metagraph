@@ -1522,36 +1522,49 @@ SupportProfile resolve_support(LabelOracle &oracle,
         }
     }
 
-    // ---- the answer account (§4.6, T4-L1): the profile as it is held, then the candidates'
-    // grouping before it is built (kCandidateRunBytes a run grouped), replaced by what the
-    // candidates hold once it is done
-    uint64_t grouping = 0;
-    if (options.answer) {
+    // ---- the answer account (§4.6, T4-L1): the profile as it is held, then its candidates
+    if (options.answer)
         options.answer->charge(profile_held_bytes(profile), "profile");
-        for (const LabelProfile &lp : profile.labels) {
+    group_candidates(&profile, options.min_block_kmers, options.answer, finishing);
+    // the profile, complete, beside the query
+    note_memory(profile_bytes(profile));
+    return profile;
+}
+
+void group_candidates(SupportProfile *profile, uint64_t min_block_kmers, AnswerAccount *answer,
+                      const std::function<void(size_t)> &finishing) {
+    // the grouping charged before it is built (kCandidateRunBytes a run grouped), replaced by
+    // what the candidates hold once it is done
+    uint64_t grouping = 0;
+    if (answer) {
+        for (const LabelProfile &lp : profile->labels) {
             for (const auto &run : lp.runs) {
-                grouping += run.size() >= options.min_block_kmers;
+                grouping += run.size() >= min_block_kmers;
             }
         }
         grouping *= kCandidateRunBytes;
-        options.answer->charge(grouping, "candidates");
+        answer->charge(grouping, "candidates");
     }
 
     // ---- seed candidates: identical maximal runs grouped
     std::map<KmerInterval, std::vector<LabelId>> groups;
-    for (LabelId l = 0; l < profile.labels.size(); ++l) {
-        finishing(l);
-        for (const auto &run : profile.labels[l].runs) {
-            if (run.size() >= options.min_block_kmers)
+    for (LabelId l = 0; l < profile->labels.size(); ++l) {
+        if (finishing)
+            finishing(l);
+        for (const auto &run : profile->labels[l].runs) {
+            if (run.size() >= min_block_kmers)
                 groups[run].push_back(l);
         }
     }
+    // reserved, so that the candidates never hold an old and a new buffer beside the map (T4
+    // review R1, F2: at their last growth 3 x 40 B a run of its own, beyond its price)
+    profile->candidates.reserve(groups.size());
     for (auto &[iv, labels] : groups) {
         std::sort(labels.begin(), labels.end());
-        profile.candidates.push_back({ iv, std::move(labels) });
+        profile->candidates.push_back({ iv, std::move(labels) });
     }
     std::map<KmerInterval, std::vector<LabelId>>().swap(groups);
-    std::sort(profile.candidates.begin(), profile.candidates.end(),
+    std::sort(profile->candidates.begin(), profile->candidates.end(),
               [](const SeedCandidate &a, const SeedCandidate &b) {
                   if (a.kmers.size() != b.kmers.size())
                       return a.kmers.size() > b.kmers.size();
@@ -1559,14 +1572,11 @@ SupportProfile resolve_support(LabelOracle &oracle,
                       return a.labels.size() > b.labels.size();
                   return a.kmers.begin < b.kmers.begin;
               });
-    if (options.answer) {
-        options.answer->release(grouping);
+    if (answer) {
+        answer->release(grouping);
         // (within the grouping's price: a candidate and its label ids per run at most)
-        options.answer->charge(candidates_held_bytes(profile), "candidates");
+        answer->charge(candidates_held_bytes(*profile), "candidates");
     }
-    // the profile, complete, beside the query
-    note_memory(profile_bytes(profile));
-    return profile;
 }
 
 uint64_t profile_bytes(const SupportProfile &p) {

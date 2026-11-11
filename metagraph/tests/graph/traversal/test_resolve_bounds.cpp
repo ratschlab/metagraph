@@ -2288,6 +2288,80 @@ TEST(ResolveAnswer, TheSelectionChargesTheClippedPieces) {
               << account.peak() << " B)" << std::endl;
 }
 
+// The candidates' grouping holds at most its price (T4 review R1, F2): kCandidateRunBytes a run
+// grouped covers the grouping's map node, a label id vector and the candidate, the candidates
+// reserved. Without the reserve, 2^17 + 1 runs of their own made the candidates' last growth hold
+// an old and a new buffer (3 x 40 B a run) beside the map, about 1.3x the price. The heap's peak
+// (jemalloc's thread.peak) within the account's; the candidates those of the base's grouping
+TEST(ResolveAnswer, TheGroupingIsPricedAboveItsPeak) {
+    SupportProfile profile;
+    profile.k = kK;
+    const size_t runs = (size_t(1) << 17) + 1;
+    profile.num_kmers = 2 * runs + 10;
+    profile.graph_runs = { { 0, profile.num_kmers } };
+    for (size_t l = 0; l < 64; ++l) {
+        LabelProfile lp;
+        lp.label.kind = LabelKind::HEADER;
+        lp.label.name = "r" + std::to_string(l);
+        profile.labels.push_back(std::move(lp));
+    }
+    for (size_t i = 0; i < runs; ++i) {
+        profile.labels[i % 64].runs.push_back({ 2 * i, 2 * i + 1 });
+    }
+    // and one run all labels share
+    for (LabelProfile &lp : profile.labels) {
+        lp.runs.push_back({ 2 * runs, 2 * runs + 5 });
+        lp.kmers_supported = lp.runs.size() + 4;
+    }
+    SupportProfile plain = profile;
+    group_candidates(&plain, 1);
+    ASSERT_EQ(runs + 1, plain.candidates.size());
+    EXPECT_EQ(64u, plain.candidates[0].labels.size());
+
+    AnswerAccount account(uint64_t(1) << 40);
+    size_t calls = 0;
+#if USE_JEMALLOC
+    size_t sz = sizeof(uint64_t);
+    if (mallctl("thread.peak.reset", nullptr, nullptr, nullptr, 0))
+        GTEST_SKIP() << "jemalloc without thread.peak";
+#endif
+    group_candidates(&profile, 1, &account, [&](size_t) { ++calls; });
+#if USE_JEMALLOC
+    uint64_t peak = 0;
+    mallctl("thread.peak.read", &peak, &sz, nullptr, 0);
+#endif
+    EXPECT_EQ(64u, calls);
+    ASSERT_EQ(plain.candidates.size(), profile.candidates.size());
+    for (size_t i = 0; i < plain.candidates.size(); ++i) {
+        ASSERT_EQ(plain.candidates[i].kmers, profile.candidates[i].kmers) << i;
+        ASSERT_EQ(plain.candidates[i].labels, profile.candidates[i].labels) << i;
+    }
+    // what the candidates hold after, the grouping's price before
+    EXPECT_EQ(candidates_held_bytes(profile), account.held());
+    EXPECT_EQ((runs + 64) * kCandidateRunBytes, account.peak());
+    // a smaller account refuses it at part "candidates", before anything is grouped
+    SupportProfile refused = plain;
+    refused.candidates.clear();
+    refused.candidates.shrink_to_fit();
+    AnswerAccount small((runs + 64) * kCandidateRunBytes - 1);
+    try {
+        group_candidates(&refused, 1, &small);
+        ADD_FAILURE() << "not refused";
+    } catch (const AnswerTooLarge &e) {
+        EXPECT_EQ("candidates", e.part());
+        EXPECT_TRUE(refused.candidates.empty());
+    }
+#if USE_JEMALLOC
+    if (!peak)
+        GTEST_SKIP() << "jemalloc is not the process allocator";
+    EXPECT_LE(peak, account.peak());
+    std::cerr << "grouping of " << runs + 1 << " runs: jemalloc peak " << peak
+              << ", charged peak " << account.peak() << std::endl;
+#else
+    GTEST_SKIP() << "needs jemalloc";
+#endif
+}
+
 // The route: an answer priced past --resolve-max-discover-memory-mb is refused, 400
 // resolve_answer_too_large with the bound (members error, code, max_memory_mb; the server writes
 // them in that order); the same request with its runs as rle strings and no candidates of single
