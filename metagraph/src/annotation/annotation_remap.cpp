@@ -75,24 +75,24 @@ static void match_rows(const DeBruijnGraph &source,
         uint64_t missing = 0;
         uint64_t repeated = 0;
         size_t i = 0;
-        target.map_to_nodes_sequentially(sequence, [&](node_index target_node) {
+        for (node_index target_node : target.node_range(sequence, true)) {
             node_index source_node = path.at(i++);
             if (!target_node) {
                 ++missing;
-                return;
+                continue;
             }
             if (target_node > num_kmers) {
                 ++num_flipped;
-                return;
+                continue;
             }
             if (fetch_and_set_bit(found.data(), target_node - 1, true,
                                   std::memory_order_relaxed)) {
                 ++repeated;
-                return;
+                continue;
             }
             store(source_node - 1, target_node);
             ++mapped;
-        });
+        }
         num_mapped += mapped;
         num_missing += missing;
         num_repeated += repeated;

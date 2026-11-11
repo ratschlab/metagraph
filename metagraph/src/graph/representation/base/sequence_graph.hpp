@@ -52,15 +52,6 @@ class SequenceGraph {
     virtual std::unique_ptr<NodeStream> node_stream(std::string_view sequence,
                                                     bool sequential) const = 0;
 
-    // Callback forms of node_range(sequence) and node_range(sequence, true):
-    // run callback for each node until the termination condition is satisfied
-    void map_to_nodes(std::string_view sequence,
-                      const std::function<void(node_index)> &callback,
-                      const std::function<bool()> &terminate = [](){ return false; }) const;
-    void map_to_nodes_sequentially(std::string_view sequence,
-                                   const std::function<void(node_index)> &callback,
-                                   const std::function<bool()> &terminate = [](){ return false; }) const;
-
     // Given a node index, call the target nodes of all edges outgoing from it.
     virtual void adjacent_outgoing_nodes(node_index node,
                                          const std::function<void(node_index)> &callback) const = 0;
