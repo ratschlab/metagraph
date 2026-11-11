@@ -25,6 +25,7 @@
 #include "graph/traversal/charged_table.hpp"
 #include "graph/traversal/kept_rows.hpp"
 #include "graph/traversal/seeded_hash.hpp"
+#include "annotation/binary_matrix/base/hopscotch_layout.hpp"
 #include "graph/annotated_dbg.hpp"
 #include "annotation/coord_to_header.hpp"
 #include "annotation/representation/column_compressed/annotate_column_compressed.hpp"
@@ -1308,6 +1309,49 @@ TEST(ResolveBounds, AnUnrefusedGrowthIsChargedPastTheMaximum) {
     }
     EXPECT_EQ(0u, budget.held());
     EXPECT_TRUE(budget.charge(1));
+}
+
+// The two counts of a hopscotch table's heap are one count (train 4 assembly): a table charged
+// through its allocator (TableAccount, as a /resolve discovery's tables are, T4-L1) holds after
+// every insert what its capacity states (annot::matrix::hopscotch_held_bytes, as the row-diff
+// path cache counts its tables, T4-L4): its bucket array with tsl's tail and its overflow nodes,
+// each at its size class. Random keys under the seeded hash, keys chosen for a known seed (tables
+// doubled at a tenth of their load) and keys that all share one bucket (the overflow list)
+template <class Hash, class Keys>
+size_t expect_one_count_of_the_table(const Hash &hash, const Keys &keys, const char *name) {
+    using annot::matrix::hopscotch_held_bytes;
+    using Value = std::pair<uint64_t, uint64_t>;
+    using Table = tsl::hopscotch_map<uint64_t, uint64_t, Hash, std::equal_to<uint64_t>,
+                                     ChargedAllocator<Value>>;
+    annot::matrix::DecodeBudget budget;
+    TableAccount account(budget, /* refuse */ true);
+    Table table(0, hash, std::equal_to<uint64_t>(), ChargedAllocator<Value>(&account));
+    EXPECT_EQ(hopscotch_held_bytes(table), account.held()) << name;
+    size_t inserts = 0;
+    keys([&]() { return table.bucket_count(); }, [&](uint64_t key) {
+        table.emplace(key, 0);
+        ++inserts;
+        EXPECT_EQ(hopscotch_held_bytes(table), account.held()) << name << ", " << table.size();
+        return !::testing::Test::HasFailure();
+    });
+    EXPECT_GT(inserts, 0u) << name;
+    return table.overflow_size();
+}
+
+TEST(ResolveBounds, TheTableAccountAndTheTableLayoutCountATableAlike) {
+    struct OneBucket {
+        size_t operator()(uint64_t) const { return 0; }
+    };
+    expect_one_count_of_the_table(SeededHash(), [](auto, auto insert) {
+        std::mt19937_64 rng(5);
+        for (size_t i = 0; i < 200'000 && insert(rng()); ++i) {}
+    }, "random keys, seeded");
+    expect_one_count_of_the_table(KnownSeedHash(), [](auto buckets, auto insert) {
+        chosen_keys(1 << 16, 3, buckets, insert);
+    }, "keys chosen for a known seed");
+    EXPECT_LT(1'000u, expect_one_count_of_the_table(OneBucket(), [](auto, auto insert) {
+        for (uint64_t key = 0; key < 2'000 && insert(key); ++key) {}
+    }, "one bucket"));
 }
 
 // ---- the cap on a request's explicit label lists (--resolve-max-explicit-labels, SPEC §4.1)
