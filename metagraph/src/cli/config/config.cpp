@@ -446,8 +446,6 @@ Config::Config(int argc, char *argv[]) {
                 traverse_max_time_ms = -1;   // refused below
         } else if (!strcmp(argv[i], "--traverse-max-seeds")) {
             traverse_max_seeds = parse_limit(get_value(i++));
-        } else if (!strcmp(argv[i], "--traverse-max-seed-bp")) {
-            traverse_max_seed_bp = parse_limit(get_value(i++));
         } else if (!strcmp(argv[i], "--resolve-max-query-bp")) {
             resolve_max_query_bp = parse_limit(get_value(i++));
         } else if (!strcmp(argv[i], "--cache-size")) {
@@ -651,9 +649,9 @@ Config::Config(int argc, char *argv[]) {
 
     if (identity == SERVER_QUERY
             && (!std::isfinite(traverse_max_time_ms) || !(traverse_max_time_ms > 0)
-                || !traverse_max_seeds || !traverse_max_seed_bp || !resolve_max_query_bp)) {
-        std::cerr << "Error: --traverse-max-time-ms, --traverse-max-seeds, --traverse-max-seed-bp"
-                     " and --resolve-max-query-bp must be positive and finite" << std::endl;
+                || !traverse_max_seeds || !resolve_max_query_bp)) {
+        std::cerr << "Error: --traverse-max-time-ms, --traverse-max-seeds and"
+                     " --resolve-max-query-bp must be positive and finite" << std::endl;
         print_usage_and_exit = true;
     }
 
@@ -1563,7 +1561,6 @@ if (advanced) {
             fprintf(stderr, "\n\tA server on a single index (-i, -a) also serves /resolve and /traverse (experimental):\n");
             fprintf(stderr, "\t   --traverse-max-time-ms [FLOAT] \tthe most time one seed's walk may take [30000]\n");
             fprintf(stderr, "\t   --traverse-max-seeds [INT] \tthe most seeds a traversal request may hold [10]\n");
-            fprintf(stderr, "\t   --traverse-max-seed-bp [INT] \tthe longest seed a traversal request may hold [10000]\n");
             fprintf(stderr, "\t   --resolve-max-query-bp [INT] \tthe longest query a /resolve request may hold [1000000]\n");
         } break;
 

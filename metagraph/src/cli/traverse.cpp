@@ -21,7 +21,6 @@ TraverseLimits traverse_limits(const Config &config) {
     TraverseLimits limits;
     limits.max_time_ms = config.traverse_max_time_ms;
     limits.max_seeds = config.traverse_max_seeds;
-    limits.max_seed_bp = config.traverse_max_seed_bp;
     limits.max_resolve_query_bp = config.resolve_max_query_bp;
     return limits;
 }
@@ -204,10 +203,9 @@ TraverseRequest parse_traverse_request(const Json::Value &json, const TraverseLi
         seed.sequence = ss.str("sequence", "");
         if (seed.sequence.empty())
             throw InvalidRequest(ss.child("sequence") + " is required");
-        if (seed.sequence.size() > limits.max_seed_bp) {
+        if (seed.sequence.size() > kMaxSeedBp) {
             throw InvalidRequest(ss.child("sequence") + ": " + std::to_string(seed.sequence.size())
-                                 + " bp, over the server's limit of "
-                                 + std::to_string(limits.max_seed_bp));
+                                 + " bp, over the limit of " + std::to_string(kMaxSeedBp));
         }
         // omitted: derive the permitted set from the seed; an empty array reads like "no
         // label permitted" and is refused
@@ -231,8 +229,6 @@ TraverseRequest parse_traverse_request(const Json::Value &json, const TraverseLi
     st.time_budget_ms = limits.max_time_ms;
     if (s.has("strategy")) {
         Strict t(s.raw("strategy"), "request.strategy");
-        if (t.uint("schema_version", 1) != 1)
-            throw InvalidRequest("request.strategy.schema_version: only version 1 is supported");
         st.direction = t.enumeration<Strategy::Direction>("direction", Strategy::BOTH,
             { { "both", Strategy::BOTH }, { "left", Strategy::LEFT }, { "right", Strategy::RIGHT } });
         if (t.has("labels")) {
@@ -275,7 +271,6 @@ TraverseRequest parse_traverse_request(const Json::Value &json, const TraverseLi
 
 Json::Value strategy_to_json(const Strategy &st) {
     Json::Value j;
-    j["schema_version"] = 1;
     j["direction"] = st.direction == Strategy::BOTH ? "both"
                    : st.direction == Strategy::LEFT ? "left" : "right";
     j["labels"]["max_seed_labels"] = uint_json(st.max_seed_labels);
@@ -552,7 +547,6 @@ Json::Value process_traverse_request(const Json::Value &request,
         check_seed(oracle, seed);
     }
     Json::Value out;
-    out["schema_version"] = 1;
     out["strategy"] = strategy_to_json(req.strategy);
     Json::Value results(Json::arrayValue);
     for (const Seed &seed : req.seeds) {

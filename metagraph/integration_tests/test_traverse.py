@@ -2,6 +2,7 @@ import json
 import os
 import random
 import shlex
+import socket
 import subprocess
 import time
 import unittest
@@ -56,7 +57,11 @@ class TraverseServer(TraverseFixture):
         super().setUpClass()
         cls.host = '127.0.0.1'
         os.environ['NO_PROXY'] = cls.host
-        cls.server, cls.port = start_server(cls.graph, cls.annotation, cls.host, 4567,
+        # the test classes run in parallel: each server gets a port that is free now
+        with socket.socket() as s:
+            s.bind((cls.host, 0))
+            port = s.getsockname()[1]
+        cls.server, cls.port = start_server(cls.graph, cls.annotation, cls.host, port,
                                             cls.server_flags)
         # the server answers 503 while it loads: wait until it answers
         deadline = time.time() + 60
@@ -66,7 +71,7 @@ class TraverseServer(TraverseFixture):
                     break
             except requests.RequestException:
                 pass
-            if time.time() > deadline:
+            if cls.server.poll() is not None or time.time() > deadline:
                 cls.server.kill()
                 raise RuntimeError(f'The server on port {cls.port} did not get ready')
             time.sleep(0.05)
@@ -93,7 +98,6 @@ class TraverseServer(TraverseFixture):
 class TestTraverse(TraverseServer):
     def test_fork(self):
         out = self._traverse({'seeds': [{'seed_id': 'x', 'sequence': self.X, 'labels': ['A', 'B']}]})
-        self.assertEqual(1, out['schema_version'])
         result = out['results'][0]
         self.assertEqual(['A', 'B'], result['seed']['labels'])
         self.assertFalse(result['seed']['labels_from_seed'])
@@ -215,13 +219,14 @@ class TestTraverseBranchLimit(TraverseServer):
 class TestTraverseLimits(TraverseServer):
     """The server's limits of a request."""
     mode = 'basic'
-    server_flags = '--traverse-max-seeds 2 --traverse-max-seed-bp 50 --resolve-max-query-bp 50'
+    server_flags = '--traverse-max-seeds 2 --resolve-max-query-bp 50'
 
     def test_limits(self):
         short = self.X[:50]
         self.assertEqual(200, self._post('traverse', {'seeds': [{'sequence': short}] * 2}).status_code)
         self.assertEqual(400, self._post('traverse', {'seeds': [{'sequence': short}] * 3}).status_code)
-        self.assertEqual(400, self._post('traverse', {'seeds': [{'sequence': self.X}]}).status_code)
+        # a seed over the fixed 10,000 bp limit
+        self.assertEqual(400, self._post('traverse', {'seeds': [{'sequence': 'A' * 10001}]}).status_code)
         self.assertEqual(200, self._post('resolve', {'sequence': short, 'labels': ['A']}).status_code)
         self.assertEqual(400, self._post('resolve', {'sequence': self.X, 'labels': ['A']}).status_code)
 

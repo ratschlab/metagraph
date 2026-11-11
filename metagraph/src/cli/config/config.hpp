@@ -95,10 +95,9 @@ class Config {
     unsigned long long RA_ivbuffer_size = 16'384; // in B
     double server_cache_size = 1.0; // server query cache, in GB (default 1 GB; 0 disables)
     // server_query: bounds of a /traverse request. Its time budget is clamped to the first,
-    // its seeds and their length are refused beyond the others
+    // more seeds than the second are refused
     double traverse_max_time_ms = 30'000;
     size_t traverse_max_seeds = 10;
-    uint64_t traverse_max_seed_bp = 10'000;
     // the longest query of a /resolve request
     uint64_t resolve_max_query_bp = 1'000'000;
     unsigned int min_tip_size = 1;
