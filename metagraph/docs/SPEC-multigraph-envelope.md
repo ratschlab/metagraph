@@ -646,8 +646,12 @@ status change time then; T4's review R3, S4, measured on both). A plain read doe
 access time update leaves the status change time alone. The residual: a directory on the path renamed away and
 back, a symlink on the path retargeted and back, or a
 mount over a file and its unmount, within one copy's load (each keeps every stamped file's inode and status change
-time; closing it needs an fstat of the descriptors the loaders open), and a change within the file system clock's
-granularity (a few ms on Linux) of the file's previous change.
+time; closing it needs an fstat of the descriptors the loaders open), a change within the file system clock's
+granularity (a few ms on Linux) of the file's previous change, a write through a shared writable mapping of the file
+to a page already dirty when it was stamped (Linux sets the status change time at the first write fault after the
+page's writeback, not at every store), and a network file system whose attribute cache answers the stat with the
+times it held before the change (T4's review R3, N2). Each takes a writer of the index files while the server runs
+on them, or an index on a network file system.
 
 A changed pair is refused, never answered from the new files under the start-up identity (`index_fp`,
 `index_meta_fp`, `server_instance`), certificates (`headers_unique`, `labels_disjoint`, `seqs_order`,
