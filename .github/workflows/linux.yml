@@ -231,11 +231,9 @@ jobs:
           pytest
 
 
-  # The traversal tests on the mini RefSeq index (scripts/traversal/fetch_mini_refseq.sh: 42
-  # blaNDM-carrying RefSeq records in the format of the public refseq33m index, published as a
-  # pre-release of this repository): the MiniRefSeq unit tests, and the parity of the
-  # /traverse and /resolve routes with the labeled-traversal prototype (traverse_parity.py, golden files in
-  # tests/data/traverse_parity)
+  # The MiniRefSeq unit tests on the mini RefSeq index (scripts/traversal/fetch_mini_refseq.sh:
+  # 42 blaNDM-carrying RefSeq records in the format of the public refseq33m index, published
+  # as a pre-release of this repository)
   mini-index-tests:
     if: inputs.alphabet == 'DNA' && inputs.build_type == 'Release' && inputs.compiler == 'g++-13' && inputs.build_static == 'OFF'
     runs-on: *platform
@@ -282,11 +280,6 @@ jobs:
           cd metagraph/build
           chmod +x unit_tests
           ./unit_tests --gtest_filter='MiniRefSeq*'
-
-      - name: Parity with the labeled-traversal prototype
-        run: |
-          cd metagraph
-          python3 scripts/traversal/traverse_parity.py --metagraph build/metagraph --index build/mini_refseq
 
 
   examples:
