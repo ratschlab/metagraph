@@ -1925,6 +1925,8 @@ class TestQueryPositionsHeldSparsely(TestingBase):
         in_target = self.record_length - self.k + 1
         for i in range(self.num_records_values):
             self.assertEqual(f'/{in_target}:{i * self.k}-0', values[f'rec{i}'], i)
+        # a coordinate list (24 bytes) per k-mer and record
+        self.assertGreater(self.num_records_values * num_kmers * 24, 1024 ** 3)
         self.assertLess(peak, self.max_peak_bytes)
 
 

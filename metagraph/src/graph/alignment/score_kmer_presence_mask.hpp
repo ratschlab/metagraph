@@ -2,6 +2,7 @@
 #define __SCORE_KMER_PRESENCE_MASK_HPP__
 
 #include <cstdint>
+#include <functional>
 #include <utility>
 #include <vector>
 #include <sdsl/int_vector.hpp>
@@ -28,14 +29,18 @@ int32_t score_kmer_presence_mask(size_t k,
                                  int32_t match_score = 1,
                                  int32_t mismatch_score = 2);
 
+// Calls its argument with (begin, end) for each run of present k-mers, in ascending order
+using CallPresentRuns
+        = std::function<void(const std::function<void(size_t, size_t)> &)>;
+
 /**
  * score_kmer_presence_mask of the mask of |size| k-mers whose present k-mers are the runs
- * [first, second) of |present_runs| (ascending, none empty and no two adjacent): the same
- * score, computed from the runs in O(runs), without the mask.
+ * [begin, end) |call_present_runs| gives (ascending, none empty and no two adjacent): the
+ * same score, computed from the runs in O(runs), without the mask.
  */
 int32_t score_kmer_presence_mask(size_t k,
                                  size_t size,
-                                 const std::vector<std::pair<size_t, size_t>> &present_runs,
+                                 const CallPresentRuns &call_present_runs,
                                  int32_t match_score = 1,
                                  int32_t mismatch_score = 2);
 

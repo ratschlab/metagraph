@@ -15,10 +15,11 @@
 
 
 // The values per query position of a search's rows, held where a row matches (PresenceRuns,
-// CountRuns, PositionCoords; train 5a X2): they stand for the vectors of the query's k-mers the
-// queries returned before, and every output written from them (the x/o mask, the counts' runs,
-// the coordinate ranges, the BIGSI score, the full strings of --verbose-output) is the one the
-// vectors gave, byte for byte.
+// CountRuns, PositionCoords; train 5a X2) while that takes fewer bytes than the vectors of the
+// query's k-mers the queries returned before, as those vectors otherwise: never more bytes than
+// the vectors. Every output written from them (the x/o mask, the counts' runs, the coordinate
+// ranges, the BIGSI score, the full strings of --verbose-output) is the one the vectors gave,
+// byte for byte, in either form.
 
 namespace mtg::test {
 namespace {
@@ -26,6 +27,33 @@ namespace {
 using graph::PresenceRuns;
 using graph::CountRuns;
 using graph::PositionCoords;
+
+// The runs a value gives, and the score from them
+std::vector<std::pair<size_t, size_t>> runs_of(const PresenceRuns &mask) {
+    std::vector<std::pair<size_t, size_t>> runs;
+    mask.call_runs([&](size_t begin, size_t end) { runs.emplace_back(begin, end); });
+    return runs;
+}
+
+std::vector<std::tuple<size_t, size_t, size_t>> runs_of(const CountRuns &counts) {
+    std::vector<std::tuple<size_t, size_t, size_t>> runs;
+    counts.call_runs([&](size_t begin, size_t end, size_t value) {
+        runs.emplace_back(begin, end, value);
+    });
+    return runs;
+}
+
+std::vector<size_t> positions_of(const PositionCoords &coords) {
+    std::vector<size_t> positions;
+    coords.call_positions([&](size_t i, const auto &) { positions.push_back(i); });
+    return positions;
+}
+
+int32_t score_of(size_t k, const PresenceRuns &mask) {
+    return graph::align::score_kmer_presence_mask(k, mask.size, [&](const auto &callback) {
+        mask.call_runs(callback);
+    });
+}
 
 // The writers of the vectors as the queries returned them (cli/query.cpp before the runs):
 // the counts' runs "i=v" / "i-j=v" of one nonzero value
@@ -99,19 +127,20 @@ TEST(AnnotatedSearchPositions, PresenceRunsStandForTheirMask) {
             ASSERT_EQ(size, runs.size);
             ASSERT_EQ(mask, runs.to_dense());
             ASSERT_EQ(sdsl::util::cnt_one_bits(mask), runs.count());
-            // canonical: none empty, ascending, no two adjacent
-            for (size_t r = 0; r < runs.runs.size(); ++r) {
-                ASSERT_LT(runs.runs[r].first, runs.runs[r].second);
+            ASSERT_LE(runs.heap_bytes(), PresenceRuns::dense_bytes(size));
+            // maximal: none empty, ascending, no two adjacent
+            const auto mask_runs = runs_of(runs);
+            for (size_t r = 0; r < mask_runs.size(); ++r) {
+                ASSERT_LT(mask_runs[r].first, mask_runs[r].second);
                 if (r) {
-                    ASSERT_LT(runs.runs[r - 1].second, runs.runs[r].first);
+                    ASSERT_LT(mask_runs[r - 1].second, mask_runs[r].first);
                 }
             }
             // the outputs: the x/o mask, the full string, the score for every k
             ASSERT_EQ(cli::encode_presence_mask(mask), cli::encode_presence_mask(runs));
             ASSERT_EQ(sdsl::util::to_string(mask), sdsl::util::to_string(runs.to_dense()));
             for (size_t k : { 1, 2, 3, 4, 5, 11, 31, 63 }) {
-                ASSERT_EQ(graph::align::score_kmer_presence_mask(k, mask),
-                          graph::align::score_kmer_presence_mask(k, runs.size, runs.runs))
+                ASSERT_EQ(graph::align::score_kmer_presence_mask(k, mask), score_of(k, runs))
                     << "k " << k;
             }
         }
@@ -119,20 +148,25 @@ TEST(AnnotatedSearchPositions, PresenceRunsStandForTheirMask) {
 }
 
 TEST(AnnotatedSearchPositions, PresenceRunsAddedInOrder) {
-    PresenceRuns runs(10);
-    runs.add(0);
-    runs.add(1);
-    runs.add(3);
-    runs.add_run(4, 6);
-    runs.add_run(6, 6);
-    runs.add(9);
-    EXPECT_EQ((std::vector<std::pair<size_t, size_t>>{ { 0, 2 }, { 3, 6 }, { 9, 10 } }),
-              runs.runs);
-    EXPECT_EQ(6u, runs.count());
-    EXPECT_EQ("x2o1x3o3x1", cli::encode_presence_mask(runs));
+    // 10 positions: three runs (24 bytes) take more than the mask's word (8 bytes): the mask;
+    // 1000 positions: the runs
+    for (size_t size : { 10, 1000 }) {
+        PresenceRuns runs(size);
+        runs.add(0);
+        runs.add(1);
+        runs.add(3);
+        runs.add_run(4, 6);
+        runs.add_run(6, 6);
+        runs.add(9);
+        EXPECT_EQ((std::vector<std::pair<size_t, size_t>>{ { 0, 2 }, { 3, 6 }, { 9, 10 } }),
+                  runs_of(runs));
+        EXPECT_EQ(size == 10, runs.is_dense());
+        EXPECT_EQ(6u, runs.count());
+        EXPECT_EQ(size == 10 ? "x2o1x3o3x1" : "x2o1x3o3x1o990", cli::encode_presence_mask(runs));
+    }
     EXPECT_EQ("o7", cli::encode_presence_mask(PresenceRuns(7)));
     EXPECT_EQ("", cli::encode_presence_mask(PresenceRuns()));
-    EXPECT_EQ(0, graph::align::score_kmer_presence_mask(31, 0, {}));
+    EXPECT_EQ(0, score_of(31, PresenceRuns()));
 }
 
 TEST(AnnotatedSearchPositions, CountRunsStandForTheirValues) {
@@ -163,9 +197,10 @@ TEST(AnnotatedSearchPositions, CountRunsStandForTheirValues) {
             ASSERT_EQ(static_cast<size_t>(std::count_if(values.begin(), values.end(),
                                                         [](size_t v) { return v > 0; })),
                       runs.count());
-            for (const auto &run : runs.runs) {
-                ASSERT_LT(run.begin, run.end);
-                ASSERT_LT(0u, run.value);
+            ASSERT_LE(runs.heap_bytes(), CountRuns::dense_bytes(size));
+            for (const auto &[begin, end, value] : runs_of(runs)) {
+                ASSERT_LT(begin, end);
+                ASSERT_LT(0u, value);
             }
             ASSERT_EQ(dense_count_runs(values), cli::count_run_strings(runs));
         }
@@ -179,8 +214,9 @@ TEST(AnnotatedSearchPositions, CountRunsStandForTheirValues) {
     runs.add(4, 5);
     runs.add(5, 5);
     runs.add(7, 1);
-    EXPECT_EQ((std::vector<CountRuns::Run>{ { 0, 2, 2 }, { 3, 4, 2 }, { 4, 6, 5 }, { 7, 8, 1 } }),
-              runs.runs);
+    EXPECT_EQ((std::vector<std::tuple<size_t, size_t, size_t>>{
+                      { 0, 2, 2 }, { 3, 4, 2 }, { 4, 6, 5 }, { 7, 8, 1 } }),
+              runs_of(runs));
     EXPECT_EQ((std::vector<std::string>{ "0-1=2", "3=2", "4-5=5", "7=1" }),
               cli::count_run_strings(runs));
 }
@@ -224,6 +260,7 @@ TEST(AnnotatedSearchPositions, PositionCoordsStandForTheirCoordinates) {
                                                         [](const auto &v) { return !v.empty(); })),
                       coords.count());
             ASSERT_EQ(cli::collapse_coord_ranges(values), cli::collapse_coord_ranges(coords));
+            ASSERT_LE(coords.heap_bytes(), PositionCoords::dense_bytes(size));
         }
     }
     // coordinates added one by one: a position's in their order, a new position after it
@@ -233,7 +270,7 @@ TEST(AnnotatedSearchPositions, PositionCoordsStandForTheirCoordinates) {
     coords.add(2, 8);
     coords.add(2, 10);
     coords.add(4, 3);
-    EXPECT_EQ((std::vector<std::pair<size_t, size_t>>{ { 1, 3 }, { 4, 5 } }), coords.runs);
+    EXPECT_EQ((std::vector<size_t>{ 1, 2, 4 }), positions_of(coords));
     EXPECT_EQ((std::vector<SmallVector<uint64_t>>{ {}, { 7, 9 }, { 8, 10 }, {}, { 3 }, {} }),
               coords.to_dense());
     EXPECT_EQ((std::vector<std::string>{ "1-7-8", "1-9-10", "4-3" }),
@@ -447,20 +484,19 @@ TEST(AnnotatedSearchPositions, ManyRecordsOneMatchEach) {
         const size_t i = std::stoul(label.substr(1));
         EXPECT_EQ(1u, count);
         EXPECT_EQ(num_kmers, mask.size);
-        ASSERT_EQ(1u, mask.runs.size());
-        EXPECT_EQ(std::make_pair(i * k, i * k + 1), mask.runs[0]);
+        EXPECT_FALSE(mask.is_dense());
+        EXPECT_EQ((std::vector<std::pair<size_t, size_t>>{ { i * k, i * k + 1 } }), runs_of(mask));
         const std::string before = i ? fmt::format("o{}", i * k) : "";
         const size_t after = num_kmers - i * k - 1;
         EXPECT_EQ(before + "x1" + (after ? fmt::format("o{}", after) : ""),
                   cli::encode_presence_mask(mask));
         EXPECT_EQ(cli::encode_presence_mask(mask.to_dense()), cli::encode_presence_mask(mask));
-        EXPECT_EQ(graph::align::score_kmer_presence_mask(k, mask.to_dense()),
-                  graph::align::score_kmer_presence_mask(k, mask.size, mask.runs));
+        EXPECT_EQ(graph::align::score_kmer_presence_mask(k, mask.to_dense()), score_of(k, mask));
 
         const auto &[count_label, matched, values] = counts[r];
         EXPECT_EQ(label, count_label);
-        ASSERT_EQ(1u, values.runs.size());
-        EXPECT_EQ((CountRuns::Run{ i * k, i * k + 1, 1 }), values.runs[0]);
+        EXPECT_EQ((std::vector<std::tuple<size_t, size_t, size_t>>{ { i * k, i * k + 1, 1 } }),
+                  runs_of(values));
         EXPECT_EQ(std::vector<std::string>{ fmt::format("{}=1", i * k) },
                   cli::count_run_strings(values));
 
@@ -470,6 +506,169 @@ TEST(AnnotatedSearchPositions, ManyRecordsOneMatchEach) {
         ASSERT_EQ(1u, positions.count());
         EXPECT_EQ(std::vector<std::string>{ fmt::format("{}-0", i * k) },
                   cli::collapse_coord_ranges(positions));
+    }
+}
+
+// Built position by position, each value holds no more bytes than its vector at every step:
+// its runs while they take fewer bytes, the vector once they would take more (isolated
+// positions every |step|; counts changing at every position; coordinates at every position);
+// its outputs are the vector's in either form
+TEST(AnnotatedSearchPositions, FormsNeverHoldMoreThanTheirVectors) {
+    for (size_t size : { 1, 2, 3, 63, 64, 65, 127, 128, 129, 1000, 5000 }) {
+        for (size_t step : { 1, 2, 3, 8, 31, 64, 65, 200 }) {
+            SCOPED_TRACE(::testing::Message() << size << " step " << step);
+            PresenceRuns mask(size);
+            CountRuns counts(size);
+            CountRuns changing(size);
+            PositionCoords coords(size);
+            sdsl::bit_vector dense_mask(size, false);
+            std::vector<size_t> dense_counts(size, 0);
+            std::vector<size_t> dense_changing(size, 0);
+            std::vector<SmallVector<uint64_t>> dense_coords(size);
+            auto check_bytes = [&]() {
+                ASSERT_LE(mask.heap_bytes(), PresenceRuns::dense_bytes(size));
+                ASSERT_LE(counts.heap_bytes(), CountRuns::dense_bytes(size));
+                ASSERT_LE(changing.heap_bytes(), CountRuns::dense_bytes(size));
+                ASSERT_LE(coords.heap_bytes(), PositionCoords::dense_bytes(size));
+            };
+            for (size_t i = 0; i < size; i += step) {
+                mask.add(i);
+                dense_mask[i] = true;
+                counts.add(i, 7);
+                dense_counts[i] = 7;
+                changing.add(i, 1 + i % 2);
+                dense_changing[i] = 1 + i % 2;
+                coords.add(i, 3 * i);
+                coords.add(i, 3 * i + 1);
+                dense_coords[i] = { 3 * i, 3 * i + 1 };
+                check_bytes();
+            }
+            mask.shrink();
+            counts.shrink();
+            changing.shrink();
+            coords.shrink();
+            check_bytes();
+
+            // the vector where the runs would take more bytes: isolated positions (one run
+            // for a step of 1), counts changing at every position of a step of 1
+            const size_t runs = step == 1 ? 1 : (size + step - 1) / step;
+            const size_t changes = step == 1 ? size : runs;
+            EXPECT_EQ(runs * sizeof(PresenceRuns::Run) > PresenceRuns::dense_bytes(size),
+                      mask.is_dense());
+            EXPECT_EQ(runs * sizeof(CountRuns::Run) > CountRuns::dense_bytes(size),
+                      counts.is_dense());
+            EXPECT_EQ(changes * sizeof(CountRuns::Run) > CountRuns::dense_bytes(size),
+                      changing.is_dense());
+
+            ASSERT_EQ(dense_mask, mask.to_dense());
+            ASSERT_EQ(dense_counts, counts.to_dense());
+            ASSERT_EQ(dense_changing, changing.to_dense());
+            ASSERT_EQ(dense_coords, coords.to_dense());
+            EXPECT_EQ(PresenceRuns(dense_mask), mask);
+            EXPECT_EQ(CountRuns(dense_changing), changing);
+            EXPECT_EQ(PositionCoords(dense_coords), coords);
+            EXPECT_EQ(sdsl::util::cnt_one_bits(dense_mask), mask.count());
+            EXPECT_EQ(sdsl::util::cnt_one_bits(dense_mask), changing.count());
+            EXPECT_EQ(sdsl::util::cnt_one_bits(dense_mask), coords.count());
+            EXPECT_EQ(cli::encode_presence_mask(dense_mask), cli::encode_presence_mask(mask));
+            for (size_t k : { 1, 11, 31 }) {
+                EXPECT_EQ(graph::align::score_kmer_presence_mask(k, dense_mask), score_of(k, mask));
+            }
+            EXPECT_EQ(dense_count_runs(dense_counts), cli::count_run_strings(counts));
+            EXPECT_EQ(dense_count_runs(dense_changing), cli::count_run_strings(changing));
+            EXPECT_EQ(cli::collapse_coord_ranges(dense_coords), cli::collapse_coord_ranges(coords));
+        }
+    }
+}
+
+// A query that repeats a k-mer every record starts with, each repeat followed by a separator
+// (the k-mers across it are in no record): every record is matched at every repeat, positions
+// apart, so its runs of matched positions take more bytes than its mask's bits and it holds
+// its mask: never more bytes than the vector, the same outputs. Its counts and coordinates
+// keep their runs, which take fewer bytes than their vectors. With and without a record
+// mapping (the column-label path).
+TEST(AnnotatedSearchPositions, PeriodicRowsHeldWithinTheirVectors) {
+    std::mt19937 rng(48);
+    const size_t k = 11;
+    const std::string prefix = random_sequence(rng, k);
+    std::vector<CoordinateRecord> records;
+    for (size_t i = 0; i < 40; ++i) {
+        std::string suffix = random_sequence(rng, 20);
+        if (suffix[0] == 'T')
+            suffix[0] = 'A';
+        records.push_back({ prefix + suffix, "F" + std::to_string(i % 3), "r" + std::to_string(i) });
+    }
+    const size_t repeats = 300;
+    std::string query;
+    for (size_t m = 0; m < repeats; ++m) {
+        query += prefix + "T";
+    }
+    const size_t num_kmers = query.size() - k + 1;
+    const size_t top = std::numeric_limits<size_t>::max();
+    for (bool by_record : { true, false }) {
+        SCOPED_TRACE(::testing::Message() << "by_record " << by_record);
+        auto index = coordinate_test_graph(k, records, false, false, false, by_record);
+        const auto masks = index->get_top_label_signatures(query, top, 0, 0);
+        const auto counts = index->get_kmer_counts(query, top, 0, 0);
+        const auto coords = index->get_kmer_coordinates(query, top, 0, 0);
+        ASSERT_EQ(by_record ? records.size() : 3u, masks.size());
+        ASSERT_EQ(masks.size(), counts.size());
+        ASSERT_EQ(masks.size(), coords.size());
+        for (const auto &[label, count, mask] : masks) {
+            EXPECT_EQ(repeats, count) << label;
+            EXPECT_EQ(repeats, runs_of(mask).size()) << label;
+            EXPECT_TRUE(mask.is_dense()) << label;
+            EXPECT_LE(mask.heap_bytes(), PresenceRuns::dense_bytes(num_kmers)) << label;
+            const sdsl::bit_vector dense_mask = mask.to_dense();
+            EXPECT_EQ(cli::encode_presence_mask(dense_mask), cli::encode_presence_mask(mask));
+            EXPECT_EQ(graph::align::score_kmer_presence_mask(k, dense_mask), score_of(k, mask));
+        }
+        for (const auto &[label, count, values] : counts) {
+            EXPECT_FALSE(values.is_dense()) << label;
+            EXPECT_LE(values.heap_bytes(), CountRuns::dense_bytes(num_kmers)) << label;
+            EXPECT_EQ(dense_count_runs(values.to_dense()), cli::count_run_strings(values));
+        }
+        for (const auto &[label, count, positions, length] : coords) {
+            EXPECT_FALSE(positions.is_dense()) << label;
+            EXPECT_LE(positions.heap_bytes(), PositionCoords::dense_bytes(num_kmers)) << label;
+            EXPECT_EQ(cli::collapse_coord_ranges(positions.to_dense()),
+                      cli::collapse_coord_ranges(positions));
+        }
+        check_positions(*index, k, records, query, by_record);
+    }
+}
+
+// A query of one k-mer repeated (a homopolymer): its positions share one row, which every
+// record (column) holding it gets as one run of all positions, with the record's occurrences
+TEST(AnnotatedSearchPositions, RepeatedKmerOneRunPerRecord) {
+    std::mt19937 rng(50);
+    const size_t k = 9;
+    std::vector<CoordinateRecord> records;
+    for (size_t i = 0; i < 30; ++i) {
+        records.push_back({ random_sequence(rng, 15) + std::string(k + i % 3, 'A')
+                                + random_sequence(rng, 15),
+                            "F" + std::to_string(i % 2), "r" + std::to_string(i) });
+    }
+    const std::string query(k + 500, 'A');
+    const size_t num_kmers = query.size() - k + 1;
+    const size_t top = std::numeric_limits<size_t>::max();
+    for (bool by_record : { true, false }) {
+        SCOPED_TRACE(::testing::Message() << "by_record " << by_record);
+        auto index = coordinate_test_graph(k, records, false, false, false, by_record);
+        const auto masks = index->get_top_label_signatures(query, top, 0, 0);
+        const auto counts = index->get_kmer_counts(query, top, 0, 0);
+        ASSERT_EQ(by_record ? records.size() : 2u, masks.size());
+        for (const auto &[label, count, mask] : masks) {
+            EXPECT_EQ((std::vector<std::pair<size_t, size_t>>{ { 0, num_kmers } }), runs_of(mask))
+                << label;
+        }
+        for (const auto &[label, count, values] : counts) {
+            const auto runs = runs_of(values);
+            ASSERT_EQ(1u, runs.size()) << label;
+            EXPECT_EQ(0u, std::get<0>(runs[0]));
+            EXPECT_EQ(num_kmers, std::get<1>(runs[0]));
+        }
+        check_positions(*index, k, records, query, by_record);
     }
 }
 

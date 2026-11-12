@@ -1,7 +1,9 @@
 #ifndef __ANNOTATED_DBG_HPP__
 #define __ANNOTATED_DBG_HPP__
 
+#include <algorithm>
 #include <cassert>
+#include <cstdint>
 #include <functional>
 #include <memory>
 #include <mutex>
@@ -125,21 +127,28 @@ search_top_n(const std::vector<size_t> &scores,
 
 /**
  * The values per query position of one row a search returns (get_top_label_signatures,
- * get_kmer_counts, get_kmer_coordinates), held only at the positions the row matches: a
- * value of the query's |size| k-mers per row would make a search's memory the rows returned
- * times the query's k-mers. Each is built by adding positions in ascending order and stands
- * for the vector of |size| values that to_dense() returns (absent positions: false, 0 or no
- * coordinates).
+ * get_kmer_counts, get_kmer_coordinates). Each stands for the vector of the query's |size|
+ * k-mers that to_dense() returns (absent positions: false, 0 or no coordinates) and is built
+ * by adding positions in ascending order. It holds the positions the row matches only (a
+ * vector of |size| values per row made a search's memory the rows returned times the query's
+ * k-mers) while that takes fewer bytes than the vector, and the vector (the dense form)
+ * otherwise: its buffers never grow beyond dense_bytes(size), the bytes of the vector's
+ * values, so a row never holds more than the vector held. Its runs take 32-bit positions; a
+ * query of 2^32 k-mers or more is held densely from the start.
  */
 
-// The k-mer presence mask of a row: the runs [first, second) of the positions it matches,
-// ascending, none empty and no two adjacent
+// The k-mer presence mask of a row: the runs [begin, end) of the positions it matches,
+// ascending, none empty and no two adjacent; or the mask itself
 struct PresenceRuns {
+    struct Run {
+        uint32_t begin;
+        uint32_t end;
+    };
+
     size_t size = 0;
-    std::vector<std::pair<size_t, size_t>> runs;
 
     PresenceRuns() = default;
-    explicit PresenceRuns(size_t size) : size(size) {}
+    explicit PresenceRuns(size_t size);
     explicit PresenceRuns(const sdsl::bit_vector &mask);
 
     // marks |position|, at or after the last position marked
@@ -147,112 +156,273 @@ struct PresenceRuns {
     // marks the positions [begin, end), at or after the last position marked
     void add_run(size_t begin, size_t end) {
         assert(begin <= end && end <= size);
-        assert(runs.empty() || begin >= runs.back().second);
         if (begin == end)
             return;
-        if (!runs.empty() && runs.back().second == begin) {
-            runs.back().second = end;
+        if (dense_form_) {
+            mark(begin, end);
+            return;
+        }
+        assert(runs_.empty() || begin >= runs_.back().end);
+        if (!runs_.empty() && runs_.back().end == begin) {
+            runs_.back().end = end;
+        } else if (runs_.size() < runs_.capacity() || grow()) {
+            runs_.push_back({ static_cast<uint32_t>(begin), static_cast<uint32_t>(end) });
         } else {
-            runs.emplace_back(begin, end);
+            to_dense_form();
+            mark(begin, end);
         }
     }
+    // calls |callback(begin, end)| for the runs of marked positions, ascending, maximal
+    template <class Callback>
+    void call_runs(const Callback &callback) const;
     // the number of positions marked
     size_t count() const;
     sdsl::bit_vector to_dense() const;
+    // whether the mask is held (the runs would take more bytes)
+    bool is_dense() const { return dense_form_; }
+    // the bytes of the buffers held, at most dense_bytes(size)
+    size_t heap_bytes() const;
+    // the bytes of the mask's words
+    static size_t dense_bytes(size_t size) { return (size + 63) / 64 * sizeof(uint64_t); }
+    // releases the runs' spare capacity (after the last position is added)
+    void shrink() { runs_.shrink_to_fit(); }
 
-    bool operator==(const PresenceRuns &other) const = default;
+    // the same size and the same positions marked, in either form
+    bool operator==(const PresenceRuns &other) const;
+
+  private:
+    std::vector<Run> runs_;
+    sdsl::bit_vector dense_;
+    bool dense_form_ = false;
+
+    // room for one more run within dense_bytes(size); false if there is none
+    bool grow();
+    void to_dense_form();
+    void mark(size_t begin, size_t end);
 };
 
 // The k-mer counts of a row: the runs [begin, end) of one nonzero value, ascending, none empty
-// and no two adjacent runs of one value
+// and no two adjacent runs of one value; or the counts themselves
 struct CountRuns {
     struct Run {
-        size_t begin;
-        size_t end;
-        size_t value;
-
-        bool operator==(const Run &other) const = default;
+        uint32_t begin;
+        uint32_t end;
+        uint64_t value;
     };
 
     size_t size = 0;
-    std::vector<Run> runs;
 
     CountRuns() = default;
-    explicit CountRuns(size_t size) : size(size) {}
+    explicit CountRuns(size_t size);
     explicit CountRuns(const std::vector<size_t> &values);
 
     // sets |position| to |value|, at or after the last position set; a zero is no value
-    void add(size_t position, size_t value) {
-        assert(position < size);
-        assert(runs.empty() || position >= runs.back().end);
-        if (!value)
+    void add(size_t position, size_t value) { add_run(position, position + 1, value); }
+    // sets the positions [begin, end) to |value|, at or after the last position set
+    void add_run(size_t begin, size_t end, size_t value) {
+        assert(begin <= end && end <= size);
+        if (begin == end || !value)
             return;
-        if (!runs.empty() && runs.back().end == position && runs.back().value == value) {
-            ++runs.back().end;
+        if (dense_form_) {
+            std::fill(dense_.begin() + begin, dense_.begin() + end, value);
+            return;
+        }
+        assert(runs_.empty() || begin >= runs_.back().end);
+        if (!runs_.empty() && runs_.back().end == begin && runs_.back().value == value) {
+            runs_.back().end = end;
+        } else if (runs_.size() < runs_.capacity() || grow()) {
+            runs_.push_back({ static_cast<uint32_t>(begin), static_cast<uint32_t>(end), value });
         } else {
-            runs.push_back({ position, position + 1, value });
+            to_dense_form();
+            std::fill(dense_.begin() + begin, dense_.begin() + end, value);
         }
     }
+    // calls |callback(begin, end, value)| for the runs of one nonzero value, ascending, maximal
+    template <class Callback>
+    void call_runs(const Callback &callback) const;
     // the number of positions with a value
     size_t count() const;
     std::vector<size_t> to_dense() const;
+    // whether the counts are held (the runs would take more bytes)
+    bool is_dense() const { return dense_form_; }
+    // the bytes of the buffers held, at most dense_bytes(size)
+    size_t heap_bytes() const;
+    // the bytes of the counts
+    static size_t dense_bytes(size_t size) { return size * sizeof(size_t); }
+    // releases the runs' spare capacity (after the last position is added)
+    void shrink() { runs_.shrink_to_fit(); }
 
-    bool operator==(const CountRuns &other) const = default;
+    // the same size and the same values, in either form
+    bool operator==(const CountRuns &other) const;
+
+  private:
+    std::vector<Run> runs_;
+    std::vector<size_t> dense_;
+    bool dense_form_ = false;
+
+    bool grow();
+    void to_dense_form();
 };
 
-// The k-mer coordinates of a row: the runs [first, second) of consecutive positions with
-// coordinates, ascending, none empty and no two adjacent, and the coordinates of each of
-// these positions in their order (|coords|, one entry per position in |runs|, none empty)
+// The k-mer coordinates of a row: the runs [begin, end) of consecutive positions with
+// coordinates, ascending, none empty and no two adjacent, and the coordinates of each of these
+// positions in their order (one entry per position in the runs, none empty); or the
+// coordinates of every position
 struct PositionCoords {
     using Coords = SmallVector<uint64_t>;
+    struct Run {
+        uint32_t begin;
+        uint32_t end;
+    };
 
     size_t size = 0;
-    std::vector<std::pair<size_t, size_t>> runs;
-    std::vector<Coords> coords;
 
     PositionCoords() = default;
-    explicit PositionCoords(size_t size) : size(size) {}
+    explicit PositionCoords(size_t size);
     explicit PositionCoords(const std::vector<Coords> &values);
 
     // appends |coord| to the coordinates of |position|, at or after the last position with
     // coordinates
     void add(size_t position, uint64_t coord) {
         assert(position < size);
-        assert(runs.empty() || position + 1 >= runs.back().second);
-        if (!runs.empty() && runs.back().second == position + 1) {
-            coords.back().push_back(coord);
+        if (dense_form_) {
+            dense_[position].push_back(coord);
             return;
         }
-        open(position);
-        coords.emplace_back();
-        coords.back().push_back(coord);
+        assert(runs_.empty() || position + 1 >= runs_.back().end);
+        if (!runs_.empty() && runs_.back().end == position + 1) {
+            coords_.back().push_back(coord);
+            return;
+        }
+        if (!open(position)) {
+            dense_[position].push_back(coord);
+            return;
+        }
+        coords_.emplace_back();
+        coords_.back().push_back(coord);
     }
     // sets the coordinates of |position|, after the last position with coordinates; no
     // coordinates are no value
     void add(size_t position, Coords&& position_coords) {
         assert(position < size);
-        assert(runs.empty() || position >= runs.back().second);
         if (position_coords.empty())
             return;
-        open(position);
-        coords.push_back(std::move(position_coords));
+        if (dense_form_) {
+            dense_[position] = std::move(position_coords);
+            return;
+        }
+        assert(runs_.empty() || position >= runs_.back().end);
+        if (!open(position)) {
+            dense_[position] = std::move(position_coords);
+            return;
+        }
+        coords_.push_back(std::move(position_coords));
     }
+    // calls |callback(position, coords)| for the positions with coordinates, ascending
+    template <class Callback>
+    void call_positions(const Callback &callback) const;
     // the number of positions with coordinates
-    size_t count() const { return coords.size(); }
+    size_t count() const;
     std::vector<Coords> to_dense() const;
+    // whether the coordinates of every position are held (the runs would take more bytes)
+    bool is_dense() const { return dense_form_; }
+    // the bytes of the buffers held but the coordinates' own (equal in both forms), at most
+    // dense_bytes(size)
+    size_t heap_bytes() const;
+    // the bytes of a coordinate list per position
+    static size_t dense_bytes(size_t size) { return size * sizeof(Coords); }
+    // releases the spare capacity (after the last position is added)
+    void shrink() {
+        runs_.shrink_to_fit();
+        coords_.shrink_to_fit();
+    }
 
-    bool operator==(const PositionCoords &other) const = default;
+    // the same size and the same coordinates, in either form
+    bool operator==(const PositionCoords &other) const;
 
   private:
-    // a new position after the last one with coordinates
-    void open(size_t position) {
-        if (!runs.empty() && runs.back().second == position) {
-            ++runs.back().second;
-        } else {
-            runs.emplace_back(position, position + 1);
-        }
-    }
+    std::vector<Run> runs_;
+    std::vector<Coords> coords_;
+    std::vector<Coords> dense_;
+    bool dense_form_ = false;
+
+    // a new position after the last one with coordinates, with room for its coordinates;
+    // false if the runs and the coordinates would take more than dense_bytes(size): then the
+    // coordinates of every position are held from now on
+    bool open(size_t position);
+    void to_dense_form();
 };
+
+template <class Callback>
+void PresenceRuns::call_runs(const Callback &callback) const {
+    if (!dense_form_) {
+        for (const Run &run : runs_) {
+            callback(run.begin, run.end);
+        }
+        return;
+    }
+    // the runs of ones of the mask, a 64-bit word at a time (the bits after |size| are zeros)
+    const uint64_t *words = dense_.data();
+    const size_t num_words = (size + 63) / 64;
+    size_t i = 0;
+    while (i < size) {
+        size_t w = i / 64;
+        uint64_t bits = words[w] & (~uint64_t(0) << (i % 64));
+        while (!bits) {
+            if (++w == num_words)
+                return;
+            bits = words[w];
+        }
+        const size_t begin = w * 64 + __builtin_ctzll(bits);
+        if (begin >= size)
+            return;
+        bits = ~words[w] & (~uint64_t(0) << (begin % 64));
+        while (!bits && ++w < num_words) {
+            bits = ~words[w];
+        }
+        const size_t end = bits ? std::min(size, w * 64 + __builtin_ctzll(bits)) : size;
+        callback(begin, end);
+        i = end;
+    }
+}
+
+template <class Callback>
+void CountRuns::call_runs(const Callback &callback) const {
+    if (!dense_form_) {
+        for (const Run &run : runs_) {
+            callback(run.begin, run.end, run.value);
+        }
+        return;
+    }
+    for (size_t i = 0; i < size; ) {
+        const size_t value = dense_[i];
+        size_t end = i + 1;
+        while (end < size && dense_[end] == value) {
+            ++end;
+        }
+        if (value)
+            callback(i, end, value);
+        i = end;
+    }
+}
+
+template <class Callback>
+void PositionCoords::call_positions(const Callback &callback) const {
+    if (!dense_form_) {
+        size_t c = 0;
+        for (const Run &run : runs_) {
+            for (size_t i = run.begin; i < run.end; ++i) {
+                callback(i, coords_[c++]);
+            }
+        }
+        assert(c == coords_.size());
+        return;
+    }
+    for (size_t i = 0; i < size; ++i) {
+        if (!dense_[i].empty())
+            callback(i, dense_[i]);
+    }
+}
 
 
 class AnnotatedSequenceGraph {
