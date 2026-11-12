@@ -129,8 +129,7 @@ void check_invariants(const ArmResult &arm) {
 std::string serialize(const SeedResult &r) {
     std::ostringstream os;
     // without labels_from_seed and its counters: a derived run is compared with a named one
-    os << r.validated_seed_id << '|' << r.seed_id_mismatch << '|' << r.length_bp << '|'
-       << r.num_kmers << '|';
+    os << r.length_bp << '|' << r.num_kmers << '|';
     for (const LabelRef &l : r.label_dict) {
         os << to_string(l.kind) << ':' << l.name << ';';
     }
@@ -210,8 +209,6 @@ TYPED_TEST(WalkerTest, Linear) {
         auto res = run(*anno, seed, { "A" });
         ASSERT_EQ(1u, res.label_dict.size());
         EXPECT_TRUE(res.dropped_labels.empty());
-        EXPECT_EQ(16u, res.validated_seed_id.size());
-        EXPECT_FALSE(res.seed_id_mismatch);
         EXPECT_EQ(40u, res.length_bp);
         EXPECT_EQ(30u, res.num_kmers);
 
@@ -260,17 +257,6 @@ TYPED_TEST(WalkerTest, Linear) {
         }
         auto lc = run(*anno, lower, { "A" });
         EXPECT_EQ(serialize(res), serialize(lc));
-        EXPECT_EQ(make_seed_id(seed, mode != DeBruijnGraph::BASIC, { "A" }), lc.validated_seed_id);
-        LabelOracle oracle(*anno);
-        Seed s;
-        s.sequence = lower;
-        s.labels = { "A" };
-        s.seed_id = res.validated_seed_id;
-        EXPECT_FALSE(traverse_seed(oracle, s, Strategy()).seed_id_mismatch);
-        s.seed_id = "0000000000000000";
-        auto mismatch = traverse_seed(oracle, s, Strategy());
-        EXPECT_TRUE(mismatch.seed_id_mismatch);
-        EXPECT_EQ("0000000000000000", mismatch.seed_id);
     }
 }
 
@@ -805,7 +791,6 @@ TYPED_TEST(WalkerTest, SeedValidation) {
         ASSERT_EQ(1u, res.label_dict.size());
         EXPECT_EQ("B", res.label_dict[0].name);
         EXPECT_EQ(1u, res.labels_supporting_total);
-        EXPECT_EQ(make_seed_id(seed, mode != DeBruijnGraph::BASIC, { "B" }), res.validated_seed_id);
         EXPECT_EQ(f.Y.substr(5), spell_path(res.arms[kRight], res.arms[kRight].paths[0]));
 
         try {
@@ -896,7 +881,6 @@ TYPED_TEST(WalkerTest, Determinism) {
         // the label order of the request changes the ids, not the walk
         auto a = run(*anno, X, { "A", "B", "C" }, strategy(1));
         auto c = run(*anno, X, { "C", "B", "A" }, strategy(1));
-        EXPECT_EQ(a.validated_seed_id, c.validated_seed_id);
         EXPECT_EQ(a.arms[kRight].paths.size(), c.arms[kRight].paths.size());
         EXPECT_EQ(a.arms[kRight].steps, c.arms[kRight].steps);
     }
@@ -1411,7 +1395,6 @@ TEST(WalkerRecord, ASeedAndItsReverseComplementTakeTheSamePlace) {
                                                         std::vector<std::string>{} }) {
             auto fwd = run(*anno, S, labels);
             auto bwd = run(*anno, rc(S), labels);
-            EXPECT_EQ(fwd.validated_seed_id, bwd.validated_seed_id);
             ASSERT_EQ(1u, fwd.label_dict.size()) << mode;
             ASSERT_EQ(1u, bwd.label_dict.size()) << mode;
             for (const SeedResult *res : { &fwd, &bwd }) {

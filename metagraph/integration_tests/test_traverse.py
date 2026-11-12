@@ -96,12 +96,10 @@ class TraverseServer(TraverseFixture):
 @parameterized_class(('mode',), input_values=[(mode,) for mode in GRAPH_MODES])
 class TestTraverse(TraverseServer):
     def test_fork(self):
-        out = self._traverse({'seeds': [{'seed_id': 'x', 'sequence': self.X, 'labels': ['A', 'B']}]})
+        out = self._traverse({'seeds': [{'sequence': self.X, 'labels': ['A', 'B']}]})
         result = out['results'][0]
         self.assertEqual(['A', 'B'], result['seed']['labels'])
         self.assertFalse(result['seed']['labels_from_seed'])
-        self.assertEqual(16, len(result['seed']['validated_seed_id']))
-        self.assertTrue(result['seed']['seed_id_mismatch'])
 
         right = result['arms']['right']
         self.assertEqual('complete', right['status'])
@@ -141,24 +139,21 @@ class TestTraverse(TraverseServer):
             self.assertEqual(10, len(flank))
 
     def test_resolve(self):
-        out = self._traverse({'sequence': self.X + self.P, 'discover': {},
-                              'select': {'min_block_bp': len(self.X + self.P), 'max_seeds': 1}},
-                             'resolve')
+        query = self.X + self.P
+        out = self._traverse({'sequence': query, 'discover': {}}, 'resolve')
         self.assertEqual(K, out['k'])
         names = {label['label']: label for label in out['labels']}
         self.assertEqual({'A', 'B'}, set(names))
-        n = len(self.X + self.P) - K + 1
+        n = len(query) - K + 1
+        self.assertEqual(n, out['num_kmers'])
         self.assertEqual([[0, n]], names['A']['runs'])
-        seeds = out['selection']['seeds']
-        self.assertEqual(1, len(seeds))
-        self.assertEqual(['A'], seeds[0]['labels'])
-        self.assertEqual(self.X + self.P, seeds[0]['sequence'])
+        self.assertNotIn('selection', out)
 
-        # the selected seed is valid /traverse input, with its id
-        traversed = self._traverse({'seeds': [{'seed_id': seeds[0]['seed_id'],
-                                               'sequence': seeds[0]['sequence'],
-                                               'labels': seeds[0]['labels']}]})
-        self.assertFalse(traversed['results'][0]['seed']['seed_id_mismatch'])
+        # the query with the labels on all its k-mers is valid /traverse input
+        whole = [label['label'] for label in out['labels'] if label['runs'] == [[0, n]]]
+        self.assertEqual(['A'], whole)
+        traversed = self._traverse({'seeds': [{'sequence': query, 'labels': whole}]})
+        self.assertEqual(['A'], traversed['results'][0]['seed']['labels'])
 
     def test_invalid_requests(self):
         for request in [
@@ -174,6 +169,10 @@ class TestTraverse(TraverseServer):
         ]:
             self.assertEqual(400, self._post('traverse', request).status_code, request)
         self.assertEqual(400, self._post('resolve', {'sequence': self.X}).status_code)
+        # seed selection is no longer a part of /resolve
+        res = self._post('resolve', {'sequence': self.X, 'discover': {}, 'select': {}})
+        self.assertEqual(400, res.status_code)
+        self.assertIn('unknown field', res.text)
 
 
 @parameterized_class(('mode',), input_values=[(mode,) for mode in GRAPH_MODES])

@@ -16,7 +16,7 @@ It has two server routes:
      - Answer
    * - ``/resolve``
      - POST
-     - which labels contain which part of a query, and seeds to start from
+     - which labels contain which part of a query
    * - ``/traverse``
      - POST
      - the extension of one or more seeds to the left and to the right
@@ -36,23 +36,23 @@ misspelled field is never ignored.
 Example
 -------
 
-Find a seed for a query and the records that contain it:
+Find the records that contain a query:
 
 .. code-block:: text
 
     curl -s http://localhost:5555/resolve -d '{
       "sequence": "ATGGAATTGCCC...",
-      "discover": {"kind": "header"},
-      "select": {"max_seeds": 1}
+      "discover": {"kind": "header"}
     }'
 
-Then extend that seed by 2,000 bp on each side. Take ``seed_id``, ``sequence`` and ``labels``
-from ``selection.seeds[0]`` of the first answer:
+Then extend the query by 2,000 bp on each side. Use the query as the seed's ``sequence``. For
+its ``labels``, take the names in ``labels`` of the first answer whose ``runs`` cover the whole
+query:
 
 .. code-block:: text
 
     curl -s http://localhost:5555/traverse -d '{
-      "seeds": [{"seed_id": "4c1f...", "sequence": "ATGGAATTGCCC...",
+      "seeds": [{"sequence": "ATGGAATTGCCC...",
                  "labels": ["NZ_CM008882.1"]}],
       "strategy": {"bounds": {"max_extension_bp": 2000}}
     }'
@@ -94,8 +94,7 @@ Interval
 
     {
       "sequence": "ATGGAATTGCCC...",
-      "discover": {"max_labels": 1000, "kind": "header"},
-      "select": {"max_seeds": 10, "min_block_bp": 0, "max_labels_per_seed": 1000}
+      "discover": {"max_labels": 1000, "kind": "header"}
     }
 
 .. list-table::
@@ -119,26 +118,6 @@ Interval
    * - ``discover.kind``
      - ``column`` or ``header``.
      - ``column``
-   * - ``select``
-     - Also select seeds. See below.
-     - none
-   * - ``select.max_seeds``
-     - Select at most this many seeds, at most 1000.
-     - 10
-   * - ``select.min_block_bp``
-     - Each seed is at least this long, and at least k.
-     - 0
-   * - ``select.max_labels_per_seed``
-     - Keep at most this many labels per seed. The response counts the dropped labels and lists them when there are at most 1000.
-     - 1000
-
-Seed selection picks intervals of the query one at a time. The first seed is the interval that
-lies inside the runs of the most labels. Each further seed is the interval that lies inside the
-runs of the most labels that have no seed yet. Selection stops when every label has a seed, at
-``max_seeds`` seeds, or when no interval of ``min_block_bp`` is left.
-
-When a seed has more labels than ``max_labels_per_seed``, the kept ones depend only on the
-label names. The same request therefore keeps the same labels every time.
 
 The response:
 
@@ -149,12 +128,7 @@ The response:
       "graph_runs": [[0, 783]],
       "labels": [{"label": "NZ_CM008882.1", "kind": "header", "kmers_supported": 783,
                   "runs": [[0, 783]]}],
-      "labels_truncated": null,
-      "selection": {
-        "seeds": [{"seed_id": "4c1f...", "sequence": "ATGG...", "kmer_interval": [0, 783],
-                   "labels": ["NZ_CM008882.1"],
-                   "label_population": {"supporting_total": 1, "dropped_count": 0}}]
-      }
+      "labels_truncated": null
     }
 
 - ``graph_runs`` are the intervals of query k-mers that are in the graph.
@@ -162,14 +136,12 @@ The response:
 - With ``discover``, ``labels_truncated`` gives how many labels were kept and how many were
   found.
 - ``discover`` leaves out ambiguous names, which ``/traverse`` would refuse.
-- ``selection.seeds`` lists the seeds in the order they were picked. Seeds can overlap.
-- With ``select.min_block_bp`` set to the query's length, the one seed is the whole query. Its
-  labels are those on all its k-mers. When no label is on all of them, there is no seed.
 
-A selected seed can be sent to ``/traverse`` as it is, with its ``seed_id``. One difference
-remains. ``/resolve`` checks the seed's k-mers one by one. ``/traverse`` keeps a header label only
-when its record holds them at consecutive coordinates. ``/traverse`` drops a record that holds
-them out of order and reports it in ``dropped_labels``. A seed left without a label reports
+Choosing seeds from this profile is left to the caller. A part of the query can be sent to
+``/traverse`` as a seed, with the labels whose runs cover it. One difference remains.
+``/resolve`` checks the seed's k-mers one by one. ``/traverse`` keeps a header label only when
+its record holds them at consecutive coordinates. ``/traverse`` drops a record that holds them
+out of order and reports it in ``dropped_labels``. A seed left without a label reports
 ``no_carrier``.
 
 ``/traverse``
@@ -179,7 +151,7 @@ them out of order and reports it in ``dropped_labels``. A seed left without a la
 
     {
       "seeds": [
-        {"seed_id": "4c1f...", "sequence": "ATGGAATTGCCC...", "labels": ["NZ_CM008882.1", "562"]}
+        {"sequence": "ATGGAATTGCCC...", "labels": ["NZ_CM008882.1", "562"]}
       ],
       "strategy": {
         "direction": "both",
@@ -198,9 +170,6 @@ them out of order and reports it in ``dropped_labels``. A seed left without a la
    * - ``seeds``
      - At most ``--traverse-max-seeds`` seeds. Each is at most 10,000 bp long.
      - required
-   * - ``seeds[].seed_id``
-     - Your id for the seed. The response says whether it equals the id the server computes.
-     - none
    * - ``seeds[].labels``
      - The labels to follow, at most 100,000. Without it, the server takes the labels on every k-mer of the seed.
      - taken from the seed
@@ -297,7 +266,6 @@ The response
       "results": [
         {
           "seed": {
-            "seed_id": "4c1f...", "validated_seed_id": "4c1f...", "seed_id_mismatch": false,
             "length_bp": 813, "num_kmers": 783,
             "labels": ["NZ_CM008882.1"],
             "labels_from_seed": false, "labels_supporting_total": 1,
@@ -327,11 +295,11 @@ The response
       ]
     }
 
+``results`` holds one entry per seed, in the order of the request.
+
 The seed:
 
 - ``seed.labels`` holds the names of the labels the walk follows.
-- ``validated_seed_id`` is the id the server computes from the seed and its labels. ``/resolve``
-  gives the same id. ``seed_id_mismatch`` says whether your ``seed_id`` differs from it.
 - ``labels_dropped`` counts the labels taken from the seed beyond ``max_seed_labels``.
 - ``dropped_labels`` lists the named labels that are not on every k-mer of the seed.
 
@@ -357,7 +325,7 @@ walked.
 
 .. code-block:: json
 
-    {"seed": {"seed_id": "...", "length_bp": 813, "labels_from_seed": true},
+    {"seed": {"length_bp": 813, "labels_from_seed": true},
      "error": {"cause": "no_carrier", "message": "...", "limit": 783, "observed": 412}}
 
 .. list-table::

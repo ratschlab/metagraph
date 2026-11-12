@@ -1,8 +1,5 @@
 #include "gtest/gtest.h"
 
-#include <fmt/format.h>
-#include <folly/hash/FnvHash.h>
-
 #include <algorithm>
 #include <map>
 #include <random>
@@ -64,8 +61,6 @@ TYPED_TEST(ResolveTest, ThreeStatesAndRuns) {
                                     }) {
         auto anno = build_anno_graph<Graph, Annotation>(kK, { a_graph, b_seq }, { "A", "B" }, mode);
         LabelOracle oracle(*anno);
-        const bool canonical = mode != DeBruijnGraph::BASIC;
-
         ResolveOptions opts;
         opts.labels = { "A", "B" };
         auto profile = resolve_support(oracle, q, opts);
@@ -86,36 +81,6 @@ TYPED_TEST(ResolveTest, ThreeStatesAndRuns) {
         // B: k-mers fully inside q[100,200): starts 100..189
         EXPECT_EQ(iv({ {100, 190} }), B.runs);
         EXPECT_EQ(90u, B.kmers_supported);
-
-
-        // the shared [100,110) carries both labels, so one seed covers them
-        SelectionPolicy pol;
-        pol.max_seeds = 3;
-        auto sel = select_seeds(profile, q, pol, canonical);
-        ASSERT_EQ(1u, sel.size());
-        EXPECT_EQ((KmerInterval{ 100, 110 }), sel[0].kmers);
-        EXPECT_EQ((std::vector<std::string>{ "A", "B" }), sel[0].labels);
-        EXPECT_EQ(q.substr(100, 10 + kK - 1), sel[0].sequence);
-        EXPECT_EQ(16u, sel[0].seed_id.size());
-
-        // max_support with overlap: A and B both cover [100,110)
-        pol = SelectionPolicy();
-        pol.max_seeds = 1;
-        sel = select_seeds(profile, q, pol, canonical);
-        ASSERT_EQ(1u, sel.size());
-        EXPECT_EQ((KmerInterval{ 100, 110 }), sel[0].kmers);
-        EXPECT_EQ((std::vector<std::string>{ "A", "B" }), sel[0].labels);
-        EXPECT_EQ(2u, sel[0].population.supporting_total);
-
-        // max_labels_per_seed drops deterministically and reports the drop
-        pol.max_seeds = 1;
-        pol.max_labels_per_seed = 1;
-        sel = select_seeds(profile, q, pol, canonical);
-        ASSERT_EQ(1u, sel.size());
-        EXPECT_EQ(1u, sel[0].labels.size());
-        EXPECT_EQ(1u, sel[0].population.dropped_count);
-        EXPECT_EQ(1u, sel[0].population.dropped.size());
-        EXPECT_EQ(sel[0].labels, select_seeds(profile, q, pol, canonical)[0].labels);
 
         // agreement with the signature API for the labels present
         auto sigs = anno->get_top_label_signatures(q, 10, 0.0, 0.0);
@@ -197,97 +162,6 @@ TYPED_TEST(ResolveTest, DiscoverySortsBySupport) {
     ASSERT_EQ(2u, profile.labels.size());
     EXPECT_EQ("X", profile.labels[0].label.name);
     EXPECT_EQ("W", profile.labels[1].label.name);
-}
-
-// max_support at many labels: a synthetic profile whose runs end at jittered positions. The
-// breadth-optimal block is the prefix every label covers
-TEST(Resolve, MaxSupportScalesWithManyLabels) {
-    const size_t num_labels = 1000;
-    const uint64_t num_kmers = 5000;
-    SupportProfile profile;
-    profile.k = kK;
-    profile.num_kmers = num_kmers;
-    profile.graph_runs = iv({ {0, num_kmers} });
-    std::mt19937 gen(7);
-    for (size_t i = 0; i < num_labels; ++i) {
-        LabelProfile lp;
-        lp.label.column = static_cast<Column>(i);
-        lp.label.name = "L" + std::to_string(i);
-        // every label covers [0, 1000); each ends somewhere in [1000, 5000)
-        uint64_t end = 1000 + gen() % (num_kmers - 1000);
-        lp.runs = iv({ {0, end} });
-        lp.kmers_supported = end;
-        profile.labels.push_back(lp);
-    }
-
-    SelectionPolicy policy;
-    policy.max_seeds = 1;
-    policy.min_block_bp = kK;   // min_kmers == 1
-    const std::string query(num_kmers + kK - 1, 'A');
-    auto selection = select_seeds(profile, query, policy, false);
-    ASSERT_EQ(1u, selection.size());
-    uint64_t smallest_end = num_kmers;
-    for (const auto &lp : profile.labels) {
-        smallest_end = std::min(smallest_end, lp.runs[0].end);
-    }
-    EXPECT_EQ((KmerInterval{ 0, smallest_end }), selection[0].kmers);
-    EXPECT_EQ(num_labels, selection[0].labels.size());
-
-    // a length floor trades labels for length
-    policy.min_block_bp = 3000 + kK - 1;
-    auto longer = select_seeds(profile, query, policy, false);
-    ASSERT_EQ(1u, longer.size());
-    EXPECT_GE(longer[0].kmers.size(), 3000u);
-    EXPECT_LT(longer[0].labels.size(), num_labels);
-    for (const auto &name : longer[0].labels) {
-        const auto &lp = *std::find_if(profile.labels.begin(), profile.labels.end(),
-                                       [&](const LabelProfile &x) { return x.label.name == name; });
-        EXPECT_GE(lp.runs[0].end, longer[0].kmers.end);
-    }
-}
-
-// Later seeds count only the labels without a seed, and may overlap earlier seeds: with
-// A=[0,10), B=D=[0,6), C=[5,10) and seeds of at least 2 k-mers, [0,6) carries A, B and D,
-// and C then gets [5,10), which overlaps it
-TEST(Resolve, SeedsCoverTheLabels) {
-    SupportProfile profile;
-    profile.k = kK;
-    profile.num_kmers = 10;
-    for (auto [name, begin, end] : { std::tuple<const char*, uint64_t, uint64_t>{ "A", 0, 10 },
-                                     std::tuple<const char*, uint64_t, uint64_t>{ "B", 0, 6 },
-                                     std::tuple<const char*, uint64_t, uint64_t>{ "C", 5, 10 },
-                                     std::tuple<const char*, uint64_t, uint64_t>{ "D", 0, 6 } }) {
-        LabelProfile lp;
-        lp.label.column = static_cast<Column>(profile.labels.size());
-        lp.label.name = name;
-        lp.runs = iv({ { begin, end } });
-        lp.kmers_supported = end - begin;
-        profile.labels.push_back(lp);
-    }
-
-    SelectionPolicy policy;
-    policy.max_seeds = 10;
-    policy.min_block_bp = kK + 1;      // min_kmers == 2
-    auto sel = select_seeds(profile, std::string(10 + kK - 1, 'A'), policy, false);
-    ASSERT_EQ(2u, sel.size());         // every label has a seed: picking stops
-    EXPECT_EQ((KmerInterval{ 0, 6 }), sel[0].kmers);
-    EXPECT_EQ((std::vector<std::string>{ "A", "B", "D" }), sel[0].labels);
-    EXPECT_EQ((KmerInterval{ 5, 10 }), sel[1].kmers);
-    EXPECT_EQ((std::vector<std::string>{ "A", "C" }), sel[1].labels);
-}
-
-// seed ids: canonical orientation and label order do not change the id
-TEST(Resolve, SeedId) {
-    std::string s = "ACGTTGCAAGT";
-    std::string rc = "ACTTGCAACGT";
-    EXPECT_EQ(make_seed_id(s, true, { "b", "a" }), make_seed_id(rc, true, { "a", "b" }));
-    EXPECT_NE(make_seed_id(s, false, { "a" }), make_seed_id(rc, false, { "a" }));
-    // length-prefixed labels: {"a,b"} != {"a","b"}
-    EXPECT_NE(make_seed_id(s, false, { "a,b" }), make_seed_id(s, false, { "a", "b" }));
-    // the id of the labeled-traversal prototype for the same seed (no release name)
-    using folly::hash::fnva64;
-    EXPECT_EQ(fmt::format("{:016x}", fnva64("1:a", fnva64("\t", fnva64(s, fnva64("\t"))))),
-              make_seed_id(s, false, { "a" }));
 }
 
 

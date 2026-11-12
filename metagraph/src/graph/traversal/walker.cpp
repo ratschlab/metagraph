@@ -345,7 +345,6 @@ void Walker::validate_seed() {
                              + encode_presence_mask(present), nodes_.size(),
                              sdsl::util::cnt_one_bits(present));
     }
-    result_.seed_id = seed_.seed_id;
     result_.length_bp = seq.size();
     result_.num_kmers = nodes_.size();
 
@@ -423,14 +422,6 @@ void Walker::validate_seed() {
         result_.labels_supporting_total = result_.label_dict.size();
     }
     assert(places_.size() == result_.label_dict.size());
-
-    std::vector<std::string> names;
-    for (const LabelRef &ref : result_.label_dict) {
-        names.push_back(ref.name);
-    }
-    result_.validated_seed_id = make_seed_id(seed_upper_, regime_ != Regime::BASIC, names);
-    result_.seed_id_mismatch = !seed_.seed_id.empty()
-                                && seed_.seed_id != result_.validated_seed_id;
 }
 
 // The rows of the seed's k-mers, read a window at a time and handed to |consume|(i, row,
