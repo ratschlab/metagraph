@@ -174,6 +174,10 @@ struct LabelEnd {
     // why a DEAD_END: "hairpin" (the label's only continuation was a skipped hairpin);
     // otherwise empty
     const char *text = "";
+    // how many successors the node has in the graph, where the walk looked at them: unset
+    // at an end by the extension length or by a cap that stopped the arm, set at an end by
+    // the split limit
+    std::optional<size_t> successors;
 };
 
 struct Segment {
@@ -218,6 +222,7 @@ struct CapTrigger {
     // what the cap compared at the trip, which exceeded its limit (steps, bases, paths,
     // live paths, or elapsed milliseconds)
     double demand = 0;
+    size_t segment = 0;              // the segment of that head
 };
 
 struct ArmResult {
@@ -227,6 +232,7 @@ struct ArmResult {
     bool requested = true;
     Status status = COMPLETE;
     size_t frontier_live_paths = 0;  // heads below the extension length when stopped
+    size_t frontier_live_labels = 0; // distinct labels on those heads
     std::optional<CapTrigger> cap_trigger;
     // Every admissible walk of at most complete_to_bp bases from the seed boundary is in
     // |segments|, and every path that ended before it ended for the reported reason.
