@@ -226,7 +226,7 @@ class TestTraverseBranchLimit(TraverseServer):
             self.assertEqual({self.P, self.Q}, flanks, branches)
 
 
-class TestTraverseGraphList(TraverseServer):
+class GraphListServer(TraverseServer):
     """A server on a list of graphs: record A is in the graph `one`, record B in `two`."""
     mode = 'basic'
 
@@ -258,6 +258,8 @@ class TestTraverseGraphList(TraverseServer):
             port += 1
         raise RuntimeError("Couldn't start server")
 
+
+class TestTraverseGraphList(GraphListServer):
     def _flanks(self, walk):
         right = walk['arms']['right']
         return [''.join(right['segments'][s]['sequence'] for s in path['segments'])

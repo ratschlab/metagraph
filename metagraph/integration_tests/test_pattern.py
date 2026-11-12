@@ -6,7 +6,7 @@ import unittest
 from parameterized import parameterized_class
 
 from base import PROTEIN_MODE, METAGRAPH, start_server
-from test_traverse import TraverseServer, GRAPH_MODES, K, random_seq
+from test_traverse import GraphListServer, TraverseServer, GRAPH_MODES, K, random_seq
 
 IUPAC = {'A': 'A', 'C': 'C', 'G': 'G', 'T': 'T', 'R': 'AG', 'Y': 'CT', 'S': 'CG', 'W': 'AT',
          'K': 'GT', 'M': 'AC', 'B': 'CGT', 'D': 'AGT', 'H': 'ACT', 'V': 'ACG', 'N': 'ACGT'}
@@ -226,6 +226,41 @@ class TestPatternHashGraph(PatternServer):
         res = self._post('pattern', {'patterns': [{'sequence': 'ACGT'}]})
         self.assertEqual(400, res.status_code)
         self.assertIn('succinct', res.text)
+
+
+@unittest.skipIf(PROTEIN_MODE, 'The patterns of these tests are DNA')
+class TestPatternGraphList(GraphListServer):
+    def _pattern(self, request):
+        res = self._post('pattern', request)
+        self.assertEqual(200, res.status_code, res.text)
+        return res.json()
+
+    def test_every_graph_is_searched(self):
+        # X is in both graphs and P in the graph `one`
+        patterns = [self.X[40:52], self.P[10:22]]
+        out = self._pattern({'patterns': [{'sequence': p} for p in patterns]})
+        self.assertEqual(['results'], list(out))
+        for pattern, result, in_two in zip(patterns, out['results'], [True, False]):
+            self.assertEqual(len(pattern), result['length'])
+            self.assertEqual(['one', 'two'], [found['graph'] for found in result['graphs']])
+            for found, present in zip(result['graphs'], [True, in_two]):
+                self.assertTrue(found['complete'])
+                contexts = [(c['kmer'], c['offset'], c['strand']) for c in found['contexts']]
+                self.assertEqual({'min': len(contexts), 'max': len(contexts)}, found['count'])
+                self.assertEqual(present, len(contexts) > 0)
+                for kmer, offset, strand in contexts:
+                    self.assertEqual('+', strand)
+                    self.assertEqual(pattern, kmer[offset:offset + len(pattern)])
+
+    def test_selected_graphs(self):
+        patterns = [{'sequence': self.X[40:52]}]
+        found = self._pattern({'patterns': patterns, 'graphs': ['two']})['results'][0]['graphs']
+        self.assertEqual(['two'], [graph['graph'] for graph in found])
+        for request in [{'patterns': patterns, 'graphs': ['three']},
+                        {'patterns': patterns, 'graphs': 'two'},
+                        {'patterns': patterns, 'graph': 'two'},
+                        {'patterns': [{'sequence': self.X[:K + 1]}]}]:
+            self.assertEqual(400, self._post('pattern', request).status_code, request)
 
 
 if __name__ == '__main__':

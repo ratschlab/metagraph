@@ -28,6 +28,8 @@ A server on a single index serves the route:
 
     metagraph server_query -i graph.dbg -a annotation.annodbg
 
+So does a server started with a list of graphs. See `A list of graphs`_.
+
 The graph must be succinct (``.dbg``). The server refuses the route on another graph with
 HTTP 400.
 
@@ -59,6 +61,42 @@ Example
     }
 
 To get the labels of the k-mers found, send them to ``/search``.
+
+A list of graphs
+----------------
+
+A server started with a list of graphs searches every selected graph. The ``graphs`` field
+selects them by name, as in ``/search``:
+
+.. code-block:: json
+
+    {
+      "graphs": ["bacteria", "plants"],
+      "patterns": [{"sequence": "ACGTNNRYACGT"}]
+    }
+
+Without ``graphs``, the server searches every graph of a list with at most 10 names. A longer
+list needs the field. A name can hold several graphs. All of them are searched.
+
+Each entry of ``results`` then holds ``graphs``, with one object per searched graph:
+
+.. code-block:: json
+
+    {
+      "results": [
+        {"id": 0, "length": 12,
+         "graphs": [
+           {"graph": "bacteria", "count": {"min": 37, "max": 37}, "complete": true, "contexts": [...]},
+           {"graph": "plants", "count": {"min": 0, "max": 0}, "complete": true, "contexts": []}
+         ]}
+      ]
+    }
+
+An object has the name of its ``graph`` and the fields ``count``, ``complete``, ``stop`` and
+``contexts`` of `The response`_. The answer has no ``k``, ``mode`` and ``mask``.
+
+The graphs are searched one after another. They share the bounds of the request. The server
+refuses a pattern longer than the k of a searched graph with HTTP 400.
 
 Terms
 -----

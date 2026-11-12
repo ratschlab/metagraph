@@ -168,5 +168,33 @@ Json::Value process_pattern_request(const Json::Value &request,
     return out;
 }
 
+Json::Value process_pattern_request(const Json::Value &request,
+                                    const std::vector<PatternGraph> &graphs,
+                                    double max_time_ms) {
+    Strict root(request, "request");
+    const PatternRequest parsed = parse_pattern_request(root, max_time_ms);
+    root.has("graphs");  // the server selected |graphs| by it
+    root.done();
+
+    // one budget for all patterns and graphs of the request
+    boss::SearchBudget budget(kMaxPatternSteps, parsed.time_budget);
+
+    Json::Value out;
+    out["results"] = Json::arrayValue;
+    for (const auto &[id, sequence] : parsed.patterns) {
+        Json::Value &result = out["results"].append(Json::objectValue);
+        result["id"] = id;
+        result["length"] = static_cast<Json::UInt64>(sequence.size());
+        result["graphs"] = Json::arrayValue;
+        for (const PatternGraph &graph : graphs) {
+            Json::Value found = search_pattern(get_dbg_succ(*graph.graph), sequence,
+                                               parsed.max_contexts, &budget);
+            found["graph"] = graph.name;
+            result["graphs"].append(std::move(found));
+        }
+    }
+    return out;
+}
+
 } // namespace cli
 } // namespace mtg

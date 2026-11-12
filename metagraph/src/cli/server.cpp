@@ -684,28 +684,41 @@ int run_server(Config *config) {
                                                config->pattern_max_time_ms);
             });
     } else {
-        // a list of graphs: the graphs are selected as in /search, and each one is walked
-        server.resource["^/traverse$"]["POST"] = [&](shared_ptr<HttpServer::Response> response,
-                                                    shared_ptr<HttpServer::Request> request) {
-            size_t request_id = num_requests++;
-            process_request(response, request, request_id, [&, request_id](const std::string &content) {
-                const Json::Value json = parse_json_string(content);
-                if (!json.isObject())
-                    throw std::invalid_argument("The request must be a JSON object");
-                if (json.isMember("graphs") && !json["graphs"].isArray())
-                    throw std::invalid_argument("'graphs' must be an array of graph names");
-                std::vector<std::string> names = filter_graphs_from_list(indexes, json, request_id);
-                std::sort(names.begin(), names.end());
-                std::vector<TraverseIndex> selected;
-                for (const std::string &name : names) {
-                    for (const auto &files : indexes.at(name)) {
-                        selected.push_back({ name, graphs_cache.at(files).get() });
+        // a list of graphs: the graphs are selected as in /search, and each one is processed
+        auto list_route = [&](const auto &process) {
+            return [&, process](shared_ptr<HttpServer::Response> response,
+                                shared_ptr<HttpServer::Request> request) {
+                size_t request_id = num_requests++;
+                process_request(response, request, request_id, [&, request_id](const std::string &content) {
+                    const Json::Value json = parse_json_string(content);
+                    if (!json.isObject())
+                        throw std::invalid_argument("The request must be a JSON object");
+                    if (json.isMember("graphs") && !json["graphs"].isArray())
+                        throw std::invalid_argument("'graphs' must be an array of graph names");
+                    std::vector<std::string> names = filter_graphs_from_list(indexes, json, request_id);
+                    std::sort(names.begin(), names.end());
+                    std::vector<TraverseIndex> selected;
+                    for (const std::string &name : names) {
+                        for (const auto &files : indexes.at(name)) {
+                            selected.push_back({ name, graphs_cache.at(files).get() });
+                        }
                     }
-                }
-                return Json::writeString(Json::StreamWriterBuilder(),
-                    process_traverse_request(json, selected, traverse_bounds, graphs_pool));
-            });
+                    return Json::writeString(Json::StreamWriterBuilder(), process(json, selected));
+                });
+            };
         };
+        server.resource["^/traverse$"]["POST"] = list_route(
+            [&](const Json::Value &request, const std::vector<TraverseIndex> &selected) {
+                return process_traverse_request(request, selected, traverse_bounds, graphs_pool);
+            });
+        server.resource["^/pattern$"]["POST"] = list_route(
+            [&](const Json::Value &request, const std::vector<TraverseIndex> &selected) {
+                std::vector<PatternGraph> graphs;
+                for (const TraverseIndex &index : selected) {
+                    graphs.push_back({ index.graph, &index.anno_graph->get_graph() });
+                }
+                return process_pattern_request(request, graphs, config->pattern_max_time_ms);
+            });
     }
 
     server.default_resource["GET"] = [&](shared_ptr<HttpServer::Response> response,
