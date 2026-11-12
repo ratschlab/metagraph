@@ -4,6 +4,10 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
+#include <random>
+#include <set>
+
 
 namespace {
 
@@ -553,5 +557,207 @@ TEST(DBGSuccinct, CallNodesEmptyGraphManyThreads) {
                       8);
     EXPECT_EQ(0u, num_nodes);
 }
+
+#if ! _PROTEIN_GRAPH
+
+// (k-mer, offset)
+typedef std::set<std::pair<DBGSuccinct::node_index, size_t>> Contexts;
+
+const std::chrono::milliseconds kNoTimeLimit(1'000'000);
+
+std::string random_sequence(std::mt19937 &gen, size_t length, const std::string &alphabet) {
+    std::string s(length, 'A');
+    for (char &c : s) {
+        c = alphabet[gen() % alphabet.size()];
+    }
+    return s;
+}
+
+// The graph without a mask. Sequences shorter than 2k put dummy source k-mers in range.
+std::unique_ptr<DBGSuccinct> random_graph(std::mt19937 &gen, size_t k, DeBruijnGraph::Mode mode,
+                                          size_t num_sequences = 6) {
+    std::vector<std::string> sequences;
+    for (size_t i = 0; i < num_sequences; ++i) {
+        sequences.push_back(random_sequence(gen, k + gen() % (2 * k), "ACGT"));
+    }
+    if (mode == DeBruijnGraph::PRIMARY) {
+        DBGSuccinct canonical(k, DeBruijnGraph::CANONICAL);
+        for (const std::string &sequence : sequences) {
+            canonical.add_sequence(sequence);
+        }
+        sequences.clear();
+        canonical.call_sequences([&](const std::string &contig, const auto &) {
+            sequences.push_back(contig);
+        }, 1, true);
+    }
+    auto graph = std::make_unique<DBGSuccinct>(k, mode);
+    for (const std::string &sequence : sequences) {
+        graph->add_sequence(sequence);
+    }
+    return graph;
+}
+
+// scan the spelling of every edge, and skip the dummy k-mers
+Contexts brute_force(const DBGSuccinct &graph, const boss::Pattern &pattern) {
+    const boss::BOSS &boss = graph.get_boss();
+    Contexts contexts;
+    for (uint64_t i = 1; i <= boss.num_edges(); ++i) {
+        std::string kmer = boss.get_node_str(i) + boss.decode(boss.get_W(i) % boss.alph_size);
+        if (kmer.find('$') != std::string::npos)
+            continue;
+
+        for (size_t offset = 0; offset + pattern.size() <= kmer.size(); ++offset) {
+            bool match = true;
+            for (size_t j = 0; j < pattern.size(); ++j) {
+                match &= (pattern[j] >> boss.encode(kmer[offset + j])) & 1;
+            }
+            if (match)
+                contexts.emplace(i, offset);
+        }
+    }
+    return contexts;
+}
+
+// check the list and the count of a pattern against the scan
+void test_pattern(const DBGSuccinct &graph, const std::string &sequence) {
+    SCOPED_TRACE("k: " + std::to_string(graph.get_k()) + ", pattern: " + sequence
+                    + (graph.get_mask() ? ", mask" : ", no mask"));
+    boss::Pattern pattern = boss::parse_pattern(graph.get_boss(), sequence);
+    Contexts expected = brute_force(graph, pattern);
+
+    Contexts contexts;
+    boss::SearchBudget list_budget(1'000'000, kNoTimeLimit);
+    EXPECT_TRUE(graph.call_pattern_contexts(pattern, &list_budget,
+        [&](DBGSuccinct::node_index node, const std::string &kmer, size_t offset) {
+            EXPECT_EQ(graph.get_node_sequence(node), kmer);
+            EXPECT_TRUE(contexts.emplace(node, offset).second) << "a context called twice";
+        }
+    ));
+    EXPECT_EQ(expected, contexts);
+
+    uint64_t min, max;
+    boss::SearchBudget count_budget(1'000'000, kNoTimeLimit);
+    EXPECT_TRUE(graph.count_pattern(pattern, &count_budget, &min, &max));
+    if (graph.get_mask()) {
+        EXPECT_EQ(expected.size(), min);
+        EXPECT_EQ(expected.size(), max);
+    } else {
+        // without a mask the count is exact at offset 0
+        EXPECT_EQ(min, static_cast<uint64_t>(std::count_if(expected.begin(), expected.end(),
+            [](const auto &context) { return !context.second; }
+        )));
+        EXPECT_LE(expected.size(), max);
+    }
+}
+
+void test_patterns(DeBruijnGraph::Mode mode) {
+    std::mt19937 gen(1);
+    for (size_t k : { 2, 3, 4, 6, 9 }) {
+        for (size_t i = 0; i < 4; ++i) {
+            auto graph = random_graph(gen, k, mode);
+            std::vector<std::string> patterns;
+            for (size_t length = 1; length <= k; ++length) {
+                patterns.push_back(std::string(length, 'N'));
+                for (size_t j = 0; j < 3; ++j) {
+                    patterns.push_back(random_sequence(gen, length, "ACGT"));
+                    patterns.push_back(random_sequence(gen, length, "ACGTRYSWKMBDHVN"));
+                }
+            }
+            for (const std::string &pattern : patterns) {
+                test_pattern(*graph, pattern);
+            }
+            graph->mask_dummy_kmers(1, false);
+            for (const std::string &pattern : patterns) {
+                test_pattern(*graph, pattern);
+            }
+        }
+    }
+}
+
+TEST(DBGSuccinct, PatternBasic) {
+    test_patterns(DeBruijnGraph::BASIC);
+}
+
+TEST(DBGSuccinct, PatternCanonical) {
+    test_patterns(DeBruijnGraph::CANONICAL);
+}
+
+TEST(DBGSuccinct, PatternPrimary) {
+    test_patterns(DeBruijnGraph::PRIMARY);
+}
+
+TEST(DBGSuccinct, PatternDummySourceKmers) {
+    // k-mers of the graph: ACGT, CGTA. Dummy source k-mers: $$$A, $$AC, $ACG.
+    DBGSuccinct graph(4);
+    graph.add_sequence("ACGTA");
+    for (bool mask : { false, true }) {
+        if (mask)
+            graph.mask_dummy_kmers(1, false);
+
+        boss::Pattern pattern = boss::parse_pattern(graph.get_boss(), "AC");
+        std::vector<std::pair<std::string, size_t>> contexts;
+        boss::SearchBudget budget(1'000, kNoTimeLimit);
+        EXPECT_TRUE(graph.call_pattern_contexts(pattern, &budget,
+            [&](auto, const std::string &kmer, size_t offset) {
+                contexts.emplace_back(kmer, offset);
+            }
+        ));
+        EXPECT_EQ((std::vector<std::pair<std::string, size_t>>{ { "ACGT", 0 } }), contexts);
+
+        uint64_t min, max;
+        EXPECT_TRUE(graph.count_pattern(pattern, &budget, &min, &max));
+        EXPECT_EQ(1u, min);
+        // $$AC and $ACG are candidates without a mask
+        EXPECT_EQ(mask ? 1u : 3u, max);
+    }
+}
+
+TEST(DBGSuccinct, PatternManyMaskedEdges) {
+    // more than 10,000 masked edges in the range of all edges, and fewer in the others
+    std::mt19937 gen(2);
+    auto graph = random_graph(gen, 12, DeBruijnGraph::BASIC, 2'000);
+    graph->mask_dummy_kmers(1, false);
+    ASSERT_LT(10'000u, graph->max_index() - graph->num_nodes());
+
+    for (const std::string sequence : { "A", "R", "N", "AC", "ACN" }) {
+        boss::Pattern pattern = boss::parse_pattern(graph->get_boss(), sequence);
+        uint64_t expected = brute_force(*graph, pattern).size();
+        uint64_t min, max;
+        boss::SearchBudget budget(10'000'000, kNoTimeLimit);
+        EXPECT_TRUE(graph->count_pattern(pattern, &budget, &min, &max));
+        EXPECT_LE(min, expected) << sequence;
+        EXPECT_LE(expected, max) << sequence;
+        // one symbol that is not N: its masked edges are too many to visit
+        if (sequence == "A" || sequence == "R") {
+            EXPECT_LT(min, max) << sequence;
+        } else {
+            EXPECT_EQ(min, max) << sequence;
+        }
+    }
+}
+
+TEST(DBGSuccinct, PatternStepBound) {
+    std::mt19937 gen(3);
+    for (bool mask : { false, true }) {
+        auto graph = random_graph(gen, 9, DeBruijnGraph::BASIC);
+        if (mask)
+            graph->mask_dummy_kmers(1, false);
+
+        boss::Pattern pattern = boss::parse_pattern(graph->get_boss(), "NN");
+        uint64_t min, max;
+        boss::SearchBudget count_budget(5, kNoTimeLimit);
+        EXPECT_FALSE(graph->count_pattern(pattern, &count_budget, &min, &max));
+        EXPECT_STREQ("max_steps", count_budget.stop());
+
+        size_t called = 0;
+        boss::SearchBudget list_budget(5, kNoTimeLimit);
+        EXPECT_FALSE(graph->call_pattern_contexts(pattern, &list_budget,
+            [&](auto, const std::string &, size_t) { ++called; }
+        ));
+        EXPECT_GE(5u, called);
+    }
+}
+
+#endif // ! _PROTEIN_GRAPH
 
 } // namespace

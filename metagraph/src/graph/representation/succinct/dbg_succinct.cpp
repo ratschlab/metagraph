@@ -439,6 +439,68 @@ void DBGSuccinct
     }
 }
 
+bool DBGSuccinct::count_pattern(const boss::Pattern &pattern,
+                                boss::SearchBudget *budget,
+                                uint64_t *min,
+                                uint64_t *max) const {
+    // the most masked edges of a range that are visited to make its count exact
+    const uint64_t kMaxMaskedVisits = 10'000;
+
+    *min = 0;
+    *max = 0;
+    return boss::call_pattern_ranges(*boss_graph_, pattern,
+        [&](BOSS::edge_index rl, BOSS::edge_index ru, size_t offset, boss::SymbolSet symbols) {
+            uint64_t count = boss::count_edges(*boss_graph_, rl, ru, symbols);
+            if (!valid_edges_) {
+                *max += count;
+                // only a k-mer read in full is known to hold no sentinel
+                if (!offset)
+                    *min += count;
+                return;
+            }
+
+            uint64_t first = valid_edges_->rank0(rl - 1);
+            uint64_t masked = valid_edges_->rank0(ru) - first;
+            if (symbols == boss::all_symbols(*boss_graph_)) {
+                // every edge with the sentinel is masked
+                count = ru - rl + 1 - masked;
+            } else if (masked > kMaxMaskedVisits) {
+                *min += count - std::min(count, masked);
+                *max += count;
+                return;
+            } else {
+                for (uint64_t i = 1; i <= masked && budget->step(); ++i) {
+                    BOSS::edge_index edge = valid_edges_->select0(first + i);
+                    count -= (symbols >> (boss_graph_->get_W(edge) % boss_graph_->alph_size)) & 1;
+                }
+            }
+            *min += count;
+            *max += count;
+        },
+        budget
+    );
+}
+
+bool DBGSuccinct::call_pattern_contexts(
+            const boss::Pattern &pattern,
+            boss::SearchBudget *budget,
+            const std::function<void(node_index, const std::string&, size_t)> &callback) const {
+    return boss::call_pattern_ranges(*boss_graph_, pattern,
+        [&](BOSS::edge_index rl, BOSS::edge_index ru, size_t offset, boss::SymbolSet symbols) {
+            boss::call_edges(*boss_graph_, rl, ru, symbols, [&](BOSS::edge_index i) {
+                if (!in_graph(i))
+                    return;
+
+                std::string kmer = get_node_sequence(i);
+                // a dummy source k-mer starts with the sentinel
+                if (kmer[0] != BOSS::kSentinel)
+                    callback(i, kmer, offset);
+            }, budget);
+        },
+        budget
+    );
+}
+
 void DBGSuccinct::traverse(node_index start,
                            const char *begin,
                            const char *end,

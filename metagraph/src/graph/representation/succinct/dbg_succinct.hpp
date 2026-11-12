@@ -5,6 +5,7 @@
 #include "kmer/kmer_bloom_filter.hpp"
 #include "graph/representation/base/sequence_graph.hpp"
 #include "boss.hpp"
+#include "boss_pattern.hpp"
 
 
 namespace mtg {
@@ -76,6 +77,24 @@ class DBGSuccinct : public DeBruijnGraph {
             std::function<void(node_index, uint64_t /* match length */)> callback,
             size_t min_match_length = 1,
             size_t max_num_allowed_matches = std::numeric_limits<size_t>::max()) const;
+
+    // Count the pairs of a k-mer and an offset at which the k-mer holds |pattern|, of 1 to
+    // k symbols. The count is between |min| and |max|. It is exact with a mask, unless a
+    // range holds too many masked edges to visit. Without a mask, |max| includes the dummy
+    // source k-mers whose real symbols hold the pattern.
+    // Returns false if |budget| stopped the search. |min| then counts what was found.
+    bool count_pattern(const boss::Pattern &pattern,
+                       boss::SearchBudget *budget,
+                       uint64_t *min,
+                       uint64_t *max) const;
+
+    // Call every such pair, with the k-mer spelled. Dummy k-mers are not called.
+    // Returns false if |budget| stopped the search.
+    bool call_pattern_contexts(const boss::Pattern &pattern,
+                               boss::SearchBudget *budget,
+                               const std::function<void(node_index,
+                                                        const std::string& /* k-mer */,
+                                                        size_t /* offset */)> &callback) const;
 
     // Given a starting node, traverse the graph forward following the edge
     // sequence delimited by begin and end. Terminate the traversal if terminate()
