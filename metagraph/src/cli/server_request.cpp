@@ -2,11 +2,18 @@
 
 #include <stdexcept>
 
+#include "server_utils.hpp"
+
 
 namespace mtg {
 namespace cli {
 
 SearchRequest parse_search_request(const Json::Value &json, const Config &server_config) {
+    // "graphs" and "in_ram" are read by the server. Older Python clients send "count_labels"
+    check_request_fields(json, { "FASTA", "align", "discovery_fraction", "min_exact_match",
+                                 "max_num_nodes_per_seq_char", "top_labels", "query_coords",
+                                 "query_counts", "with_signature", "abundance_sum", "graphs",
+                                 "in_ram", "count_labels" });
     if (json["FASTA"].isNull())
         throw std::invalid_argument("Missing or null 'FASTA' field. Provide input sequences in FASTA format.");
 

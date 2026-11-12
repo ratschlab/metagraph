@@ -98,6 +98,8 @@ Json::Value process_align_request(const std::string &received_message,
                                   const graph::DeBruijnGraph &graph,
                                   const Config &config_orig) {
     Json::Value json = parse_json_string(received_message);
+    check_request_fields(json, { "FASTA", "max_alternative_alignments", "min_exact_match",
+                                 "max_num_nodes_per_seq_char" });
 
     const auto &fasta = json["FASTA"];
 

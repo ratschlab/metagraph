@@ -84,14 +84,6 @@ class Strict {
         return x;
     }
 
-    bool boolean(const char *key, bool def) {
-        if (!has(key))
-            return def;
-        if (!value_[key].isBool())
-            throw InvalidRequest(child(key) + ": expected true or false");
-        return value_[key].asBool();
-    }
-
     std::vector<std::string> strings(const char *key) {
         std::vector<std::string> out;
         if (!has(key))
