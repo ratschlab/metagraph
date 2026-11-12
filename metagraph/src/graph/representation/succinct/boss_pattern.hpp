@@ -18,8 +18,9 @@ typedef uint32_t SymbolSet;
 // One set per position. The sentinel is in no set.
 typedef std::vector<SymbolSet> Pattern;
 
-// Read a pattern. A DNA graph takes the 15 IUPAC codes in any case. A protein graph takes
-// its residues, and X for any. Throws std::invalid_argument on another character.
+// Read a pattern. A DNA graph takes the 15 IUPAC codes in any case. On a case-sensitive
+// DNA graph a code stands for bases of its own case. A protein graph takes its residues,
+// and X for any. Throws std::invalid_argument on another character.
 Pattern parse_pattern(const BOSS &boss, std::string_view sequence);
 
 #if ! _PROTEIN_GRAPH
@@ -63,7 +64,7 @@ bool call_edges(const BOSS &boss, BOSS::edge_index rl, BOSS::edge_index ru, Symb
  * with that offset, and its symbol is in |symbols|. All such edges of a range hold the
  * pattern, except that the symbols left of the pattern were not read when |offset| > 0:
  * they may hold the sentinel of a dummy source k-mer.
- * Returns false if |budget| stopped the search or the callback.
+ * Returns false if |budget| stopped the search.
  */
 bool call_pattern_ranges(const BOSS &boss,
                          const Pattern &pattern,

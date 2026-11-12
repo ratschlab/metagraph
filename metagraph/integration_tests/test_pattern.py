@@ -198,7 +198,7 @@ class TestPatternLimits(PatternServer):
         self.assertEqual('time_budget', result['stop'])
 
     def test_malformed_limit(self):
-        for limit in ['0', '-1', 'inf', '1s']:
+        for limit in ['0', '-1', 'inf', '1s', "''"]:
             command = (f'{METAGRAPH} server_query -i {self.graph} -a {self.annotation}'
                        f' --port {self.port + 1} --pattern-max-time-ms {limit}')
             res = subprocess.run(shlex.split(command), stdout=subprocess.PIPE,

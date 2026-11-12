@@ -33,6 +33,12 @@ const std::pair<char, const char*> kIupac[] = {
 Pattern parse_pattern(const BOSS &boss, std::string_view sequence) {
     Pattern pattern;
     for (char c : sequence) {
+#if _DNA_CASE_SENSITIVE_GRAPH
+        // the alphabet holds both cases: a code stands for bases of its own case
+        const bool lower = std::islower(static_cast<unsigned char>(c));
+#else
+        const bool lower = false;
+#endif
         c = std::toupper(static_cast<unsigned char>(c));
         SymbolSet set = 0;
 #if _PROTEIN_GRAPH
@@ -44,7 +50,7 @@ Pattern parse_pattern(const BOSS &boss, std::string_view sequence) {
 #else
         for (const auto &[code, bases] : kIupac) {
             for (const char *b = bases; code == c && *b; ++b) {
-                set |= SymbolSet(1) << boss.encode(*b);
+                set |= SymbolSet(1) << boss.encode(lower ? std::tolower(*b) : *b);
             }
         }
 #endif

@@ -17,7 +17,7 @@ It has one server route:
      - Answer
    * - ``/pattern``
      - POST
-     - the number of k-mers that contain each pattern, and the k-mers when they are few
+     - the number of contexts of each pattern, and the contexts when they are few
 
 The route is experimental. Its request and response fields can change in a later release
 without notice.
@@ -52,7 +52,7 @@ Example
       "k": 31, "mode": "basic", "mask": false,
       "results": [
         {"id": "p1", "length": 12,
-         "count": {"min": 37, "max": 37},
+         "count": {"min": 1, "max": 1},
          "complete": true,
          "contexts": [
            {"kmer": "TTGACGTAAGCACGTACCGGTTAACCGGTAC", "offset": 3, "strand": "+"}
@@ -223,7 +223,8 @@ How exact a count is
      - ``min`` counts what was found. ``max`` is ``null``.
 
 So a mask only changes the counts above ``max_contexts``. A list is the same with and without
-it.
+it, when the search completes in both cases. Counting with a mask can take more steps, so a
+search near its budget can stop with a mask and complete without one.
 
 For even k, a k-mer can equal its own reverse complement. On a basic or primary graph such a
 k-mer contains the pattern on both strands. A list holds it with the strand ``+`` only. A
