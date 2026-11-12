@@ -671,7 +671,6 @@ int run_server(Config *config) {
                 });
             };
         };
-        server.resource["^/resolve$"]["POST"] = traverse_route(process_resolve_request);
         server.resource["^/traverse$"]["POST"] = traverse_route(process_traverse_request);
     }
 

@@ -6,7 +6,7 @@ Labeled traversal (experimental)
 Labeled traversal extends a sequence in the graph along the labels that contain it. Use it to
 get the flanks of a gene in each record or sample that carries the gene.
 
-It has two server routes:
+It has one server route:
 
 .. list-table::
    :header-rows: 1
@@ -14,17 +14,14 @@ It has two server routes:
    * - Route
      - Method
      - Answer
-   * - ``/resolve``
-     - POST
-     - which labels contain which part of a query
    * - ``/traverse``
      - POST
      - the extension of one or more seeds to the left and to the right
 
-Both routes are experimental. Their request and response fields can change in a later release
+The route is experimental. Its request and response fields can change in a later release
 without notice.
 
-A server on a single index serves both routes. A server started with a list of graphs does not.
+A server on a single index serves the route. A server started with a list of graphs does not.
 
 .. code-block:: text
 
@@ -36,18 +33,24 @@ misspelled field is never ignored.
 Example
 -------
 
-Find the records that contain a query:
+Find the records that contain a query with ``/search`` and ``with_signature``:
 
 .. code-block:: text
 
-    curl -s http://localhost:5555/resolve -d '{
-      "sequence": "ATGGAATTGCCC...",
-      "discover": {"kind": "header"}
+    curl -s http://localhost:5555/search -d '{
+      "FASTA": ">query\nATGGAATTGCCC...",
+      "with_signature": true,
+      "discovery_fraction": 0
     }'
+
+Each entry of ``results`` names a record in ``sample`` and gives its ``kmer_count``, the
+number of query k-mers in that record. Its ``signature.presence_mask`` lists runs of k-mers
+along the query, ``x`` for present and ``o`` for absent. For example, ``x423o31x329`` means
+423 k-mers present, then 31 absent, then 329 present.
 
 Then extend the query by 2,000 bp on each side. Use the query as the seed's ``sequence``. A
 seed is at most 10,000 bp long, so send a part of a longer query. For the seed's ``labels``,
-take the names of the entries in the answer's ``labels`` whose ``runs`` cover the whole seed:
+take the records that hold every k-mer of the seed. Their mask is a single ``x`` run:
 
 .. code-block:: text
 
@@ -56,6 +59,11 @@ take the names of the entries in the answer's ``labels`` whose ``runs`` cover th
                  "labels": ["NZ_CM008882.1"]}],
       "strategy": {"bounds": {"max_extension_bp": 2000}}
     }'
+
+One difference remains. ``/search`` checks the seed's k-mers one by one. ``/traverse`` keeps
+a header label only when its record holds them at consecutive coordinates. ``/traverse`` drops
+a record that holds them out of order and reports it in ``dropped_labels``. A seed left
+without a label reports ``no_carrier``.
 
 Terms
 -----
@@ -85,64 +93,7 @@ Path, segment
     arm is a tree. A segment is one unbranched piece of that tree.
 
 Interval
-    A half-open range of k-mer positions ``[begin, end)`` in the query or seed.
-
-``/resolve``
-------------
-
-.. code-block:: json
-
-    {
-      "sequence": "ATGGAATTGCCC...",
-      "discover": {"max_labels": 1000, "kind": "header"}
-    }
-
-.. list-table::
-   :header-rows: 1
-
-   * - Field
-     - Meaning
-     - Default
-   * - ``sequence``
-     - The query. It is at most ``--resolve-max-query-bp`` long, 1,000,000 bp unless set.
-     - required
-   * - ``labels``
-     - The labels to report on, at most 100,000. Give either ``labels`` or ``discover``.
-     - none
-   * - ``discover``
-     - Find the labels instead of naming them. Give either ``labels`` or ``discover``.
-     - none
-   * - ``discover.max_labels``
-     - Keep this many labels, those on the most k-mers first. The order is the one ``/search`` uses with ``with_signature``.
-     - 1000
-   * - ``discover.kind``
-     - ``column`` or ``header``.
-     - ``column``
-
-The response:
-
-.. code-block:: json
-
-    {
-      "k": 31, "regime": "basic", "num_kmers": 783,
-      "graph_runs": [[0, 783]],
-      "labels": [{"label": "NZ_CM008882.1", "kind": "header", "kmers_supported": 783,
-                  "runs": [[0, 783]]}],
-      "labels_truncated": null
-    }
-
-- ``graph_runs`` are the intervals of query k-mers that are in the graph.
-- A label's ``runs`` are the longest intervals of k-mers that carry the label.
-- With ``discover``, ``labels_truncated`` gives how many labels were kept and how many were
-  found.
-- ``discover`` leaves out ambiguous names, which ``/traverse`` would refuse.
-
-Choosing seeds from this profile is left to the caller. A part of the query can be sent to
-``/traverse`` as a seed, with the labels whose runs cover it. One difference remains.
-``/resolve`` checks the seed's k-mers one by one. ``/traverse`` keeps a header label only when
-its record holds them at consecutive coordinates. ``/traverse`` drops a record that holds them
-out of order and reports it in ``dropped_labels``. A seed left without a label reports
-``no_carrier``.
+    A half-open range of k-mer positions ``[begin, end)`` in the seed.
 
 ``/traverse``
 -------------

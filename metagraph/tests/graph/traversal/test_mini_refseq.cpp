@@ -110,23 +110,23 @@ class MiniRefSeq : public ::testing::Test {
         ASSERT_FALSE(query_.empty());
     }
 
-    SupportProfile discover_headers(const std::string &query) const {
-        ResolveOptions options;
-        options.discover = true;
-        options.discover_kind = LabelKind::HEADER;
-        options.discover_max_labels = 100;
-        return resolve_support(*oracle_, query, options);
+    // the records with a k-mer of |query|, as /search with signatures reports them:
+    // (accession, k-mers of the query in the record, presence mask over the query's k-mers)
+    std::vector<std::tuple<std::string, size_t, sdsl::bit_vector>>
+    header_signatures(const std::string &query) const {
+        size_t total = 0;
+        auto signatures = anno_graph_->get_top_label_signatures(query, 1000, 0.0, 0.0, &total, true);
+        EXPECT_EQ(total, signatures.size());
+        return signatures;
     }
 
     // the whole blaNDM gene as a seed, with the 19 accessions on all its k-mers as labels
     Seed blandm_seed() const {
         Seed seed;
         seed.sequence = query_;
-        const SupportProfile profile = discover_headers(query_);
-        const std::vector<KmerInterval> whole { { 0, profile.num_kmers } };
-        for (const LabelProfile &label : profile.labels) {
-            if (label.runs == whole)
-                seed.labels.push_back(label.label.name);
+        for (const auto &[name, count, mask] : header_signatures(query_)) {
+            if (count == mask.size())
+                seed.labels.push_back(name);
         }
         EXPECT_FALSE(seed.labels.empty());
         return seed;
@@ -157,48 +157,42 @@ TEST_F(MiniRefSeq, IndexShape) {
     EXPECT_THROW(oracle_->resolve_label("NZ_DOES_NOT_EXIST.1"), std::invalid_argument);
 }
 
-TEST_F(MiniRefSeq, DiscoverBlaNDMCarriers) {
-    auto profile = discover_headers(query_);
-    EXPECT_EQ(31u, profile.k);
-    EXPECT_EQ(813u - 31 + 1, profile.num_kmers);     // 783 k-mers
-    ASSERT_EQ(1u, profile.graph_runs.size());
-    EXPECT_EQ((KmerInterval{ 0, 783 }), profile.graph_runs[0]);
-
+// the profiles of the gene's carriers, named, are their signatures of /search
+TEST_F(MiniRefSeq, NamedCarriersGiveTheSignatureRuns) {
+    const auto signatures = header_signatures(query_);
     // 25 accessions carry at least one k-mer; 19 carry the whole gene
-    EXPECT_EQ(25u, profile.labels.size());
+    EXPECT_EQ(25u, signatures.size());
+    std::vector<std::string> names;
     size_t full = 0;
-    for (const auto &label : profile.labels) {
-        EXPECT_EQ(LabelKind::HEADER, label.label.kind);
-        full += label.kmers_supported == 783;
+    for (const auto &[name, count, mask] : signatures) {
+        EXPECT_EQ(813u - 31 + 1, mask.size());       // 783 k-mers
+        full += count == 783;
+        names.push_back(name);
     }
     EXPECT_EQ(19u, full);
-    for (size_t i = 1; i < profile.labels.size(); ++i) {
-        EXPECT_GE(profile.labels[i - 1].kmers_supported, profile.labels[i].kmers_supported);
-    }
-    auto it = std::find_if(profile.labels.begin(), profile.labels.end(),
-                           [](const LabelProfile &l) { return l.label.name == "NZ_CM008882.1"; });
-    ASSERT_NE(profile.labels.end(), it);
-    EXPECT_EQ((std::vector<KmerInterval>{ { 0, 783 } }), it->runs);
 
-    // the same labels named explicitly give the same profiles
-    ResolveOptions named;
-    for (const auto &l : profile.labels) {
-        named.labels.push_back(l.label.name);
-    }
-    auto explicit_ = resolve_support(*oracle_, query_, named);
-    ASSERT_EQ(profile.labels.size(), explicit_.labels.size());
-    for (size_t i = 0; i < profile.labels.size(); ++i) {
-        EXPECT_EQ(profile.labels[i].runs, explicit_.labels[i].runs) << profile.labels[i].label.name;
+    auto profile = resolve_support(*oracle_, query_, names);
+    EXPECT_EQ(31u, profile.k);
+    EXPECT_EQ(783u, profile.num_kmers);
+    ASSERT_EQ(1u, profile.graph_runs.size());
+    EXPECT_EQ((KmerInterval{ 0, 783 }), profile.graph_runs[0]);
+    ASSERT_EQ(signatures.size(), profile.labels.size());
+    for (size_t i = 0; i < signatures.size(); ++i) {
+        const auto &[name, count, mask] = signatures[i];
+        EXPECT_EQ(LabelKind::HEADER, profile.labels[i].label.kind);
+        EXPECT_EQ(count, profile.labels[i].kmers_supported) << name;
+        EXPECT_EQ(runs_of(mask.size(), [&](uint64_t j) { return mask[j]; }),
+                  profile.labels[i].runs) << name;
     }
 }
 
 // the hits of header labels are the coordinates in their sequences, mapped one by one
 TEST_F(MiniRefSeq, HeaderHitsFilterRequestedRanges) {
-    const SupportProfile discovered = discover_headers(query_);
-    ASSERT_GE(discovered.labels.size(), 12u);
+    const auto signatures = header_signatures(query_);
+    ASSERT_GE(signatures.size(), 12u);
     std::vector<LabelRef> refs;
     for (size_t i = 0; i < 12; ++i) {
-        refs.push_back(discovered.labels[i].label);
+        refs.push_back(oracle_->resolve_label(std::get<0>(signatures[i])));
     }
     std::vector<node_index> keys;
     std::vector<Row> rows;
@@ -225,16 +219,14 @@ TEST_F(MiniRefSeq, HeaderHitsFilterRequestedRanges) {
 }
 
 TEST_F(MiniRefSeq, PartialCarrierRunsMatchPresenceMask) {
-    ResolveOptions options;
-    options.labels = { "NZ_MOIC01000010.1" };        // x231o31x167o31x323 on refseq33m
-    auto profile = resolve_support(*oracle_, query_, options);
+    // x231o31x167o31x323 on refseq33m
+    auto profile = resolve_support(*oracle_, query_, { "NZ_MOIC01000010.1" });
     ASSERT_EQ(1u, profile.labels.size());
     EXPECT_EQ((std::vector<KmerInterval>{ { 0, 231 }, { 262, 429 }, { 460, 783 } }),
               profile.labels[0].runs);
     EXPECT_EQ(721u, profile.labels[0].kmers_supported);
 
-    options.labels = { "562" };                      // Escherichia coli
-    auto column_profile = resolve_support(*oracle_, query_, options);
+    auto column_profile = resolve_support(*oracle_, query_, { "562" });   // Escherichia coli
     ASSERT_EQ(1u, column_profile.labels.size());
     EXPECT_EQ(LabelKind::COLUMN, column_profile.labels[0].label.kind);
     EXPECT_GE(column_profile.labels[0].kmers_supported, 721u);
@@ -244,16 +236,16 @@ TEST_F(MiniRefSeq, PartialCarrierRunsMatchPresenceMask) {
 TEST_F(MiniRefSeq, ForwardStrandOnly) {
     std::string rc = query_;
     ::reverse_complement(rc);
-    auto forward = discover_headers(query_);
-    auto reverse = discover_headers(rc);
-    EXPECT_EQ(25u, forward.labels.size());
-    EXPECT_EQ(17u, reverse.labels.size());
+    auto forward = header_signatures(query_);
+    auto reverse = header_signatures(rc);
+    EXPECT_EQ(25u, forward.size());
+    EXPECT_EQ(17u, reverse.size());
     std::set<std::string> fw, rv;
-    for (const auto &l : forward.labels) {
-        fw.insert(l.label.name);
+    for (const auto &l : forward) {
+        fw.insert(std::get<0>(l));
     }
-    for (const auto &l : reverse.labels) {
-        rv.insert(l.label.name);
+    for (const auto &l : reverse) {
+        rv.insert(std::get<0>(l));
     }
     std::vector<std::string> both;
     std::set_intersection(fw.begin(), fw.end(), rv.begin(), rv.end(), std::back_inserter(both));
@@ -407,28 +399,15 @@ TEST_F(MiniRefSeq, WalkerAgainstTheSourceRecords) {
     }
 }
 
-// the request layer on the real index: a /resolve and a /traverse of the gene with the labels
-// on all its k-mers
-TEST_F(MiniRefSeq, ResolveThenTraverseRequests) {
+// the request layer on the real index: a /traverse of the gene with the labels on all its
+// k-mers
+TEST_F(MiniRefSeq, TraverseRequest) {
     cli::TraverseLimits limits;
-    Json::Value resolve;
-    resolve["sequence"] = query_;
-    resolve["discover"]["kind"] = "header";
-    const Json::Value profile = cli::process_resolve_request(resolve, *anno_graph_, limits);
     Json::Value labels(Json::arrayValue);
-    for (const Json::Value &label : profile["labels"]) {
-        const Json::Value &runs = label["runs"];
-        if (runs.size() == 1 && runs[0][0].asUInt64() == 0
-                && runs[0][1].asUInt64() == profile["num_kmers"].asUInt64())
-            labels.append(label["label"]);
+    for (const std::string &label : blandm_seed().labels) {
+        labels.append(label);
     }
     EXPECT_EQ(19u, labels.size());
-
-    // seed selection is not a part of /resolve
-    Json::Value with_select = resolve;
-    with_select["select"]["max_seeds"] = 1;
-    EXPECT_THROW(cli::process_resolve_request(with_select, *anno_graph_, limits),
-                 cli::InvalidRequest);
 
     Json::Value traverse;
     traverse["seeds"][0]["sequence"] = query_;

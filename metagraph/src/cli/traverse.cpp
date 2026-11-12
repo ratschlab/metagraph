@@ -21,7 +21,6 @@ TraverseLimits traverse_limits(const Config &config) {
     TraverseLimits limits;
     limits.max_time_ms = config.traverse_max_time_ms;
     limits.max_seeds = config.traverse_max_seeds;
-    limits.max_resolve_query_bp = config.resolve_max_query_bp;
     return limits;
 }
 
@@ -428,69 +427,6 @@ Json::Value failed_seed_to_json(const Seed &seed, const SeedDerivationError &e) 
 }
 
 
-/********************************* /resolve **********************************/
-
-struct ResolveRequest {
-    std::string sequence;
-    ResolveOptions options;
-};
-
-ResolveRequest parse_resolve_request(const Json::Value &json, const TraverseLimits &limits) {
-    ResolveRequest req;
-    Strict s(json, "request");
-    req.sequence = s.str("sequence", "");
-    if (req.sequence.empty())
-        throw InvalidRequest("request.sequence is required");
-    if (req.sequence.size() > limits.max_resolve_query_bp) {
-        throw InvalidRequest("request.sequence: " + std::to_string(req.sequence.size())
-                             + " bp, over the server's limit of "
-                             + std::to_string(limits.max_resolve_query_bp));
-    }
-    req.options.labels = s.strings("labels");
-    if (req.options.labels.size() > kMaxSeedLabels) {
-        throw InvalidRequest("request.labels: " + std::to_string(req.options.labels.size())
-                             + " labels, over the limit of " + std::to_string(kMaxSeedLabels));
-    }
-    if (s.has("discover")) {
-        Strict d(s.raw("discover"), "request.discover");
-        req.options.discover = true;
-        req.options.discover_max_labels = d.uint("max_labels", 1000, 1, kMaxSeedLabels);
-        req.options.discover_kind = d.enumeration<LabelKind>("kind", LabelKind::COLUMN,
-            { { "column", LabelKind::COLUMN }, { "header", LabelKind::HEADER } });
-        d.done();
-    }
-    if (req.options.labels.empty() == !req.options.discover)
-        throw InvalidRequest("request: specify exactly one of 'labels' or 'discover'");
-    s.done();
-    return req;
-}
-
-Json::Value profile_to_json(const SupportProfile &p) {
-    Json::Value j;
-    j["k"] = uint_json(p.k);
-    j["regime"] = to_string(p.regime);
-    j["num_kmers"] = uint_json(p.num_kmers);
-    j["graph_runs"] = runs_json(p.graph_runs);
-    Json::Value labels(Json::arrayValue);
-    for (const LabelProfile &l : p.labels) {
-        Json::Value lj;
-        lj["label"] = l.label.name;
-        lj["kind"] = to_string(l.label.kind);
-        lj["kmers_supported"] = uint_json(l.kmers_supported);
-        lj["runs"] = runs_json(l.runs);
-        labels.append(std::move(lj));
-    }
-    j["labels"] = std::move(labels);
-    if (p.labels_truncated) {
-        Json::Value &t = j["labels_truncated"];
-        t["kept"] = uint_json(p.labels_truncated->kept);
-        t["total"] = uint_json(p.labels_truncated->total);
-    } else {
-        j["labels_truncated"] = Json::Value::null;
-    }
-    return j;
-}
-
 } // namespace
 
 
@@ -516,15 +452,6 @@ Json::Value process_traverse_request(const Json::Value &request,
     }
     out["results"] = std::move(results);
     return out;
-}
-
-Json::Value process_resolve_request(const Json::Value &request,
-                                    const AnnotatedDBG &anno_graph,
-                                    const TraverseLimits &limits) {
-    const ResolveRequest req = parse_resolve_request(request, limits);
-    const LabelOracle oracle(anno_graph);
-    const SupportProfile profile = resolve_support(oracle, req.sequence, req.options);
-    return profile_to_json(profile);
 }
 
 } // namespace cli

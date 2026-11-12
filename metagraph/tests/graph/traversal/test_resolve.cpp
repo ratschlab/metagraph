@@ -61,9 +61,7 @@ TYPED_TEST(ResolveTest, ThreeStatesAndRuns) {
                                     }) {
         auto anno = build_anno_graph<Graph, Annotation>(kK, { a_graph, b_seq }, { "A", "B" }, mode);
         LabelOracle oracle(*anno);
-        ResolveOptions opts;
-        opts.labels = { "A", "B" };
-        auto profile = resolve_support(oracle, q, opts);
+        auto profile = resolve_support(oracle, q, { "A", "B" });
         EXPECT_EQ(190u, profile.num_kmers);
         EXPECT_EQ(kK, profile.k);
 
@@ -102,66 +100,17 @@ TYPED_TEST(ResolveTest, ThreeStatesAndRuns) {
     }
 }
 
-// discovery with truncation keeps the top labels by k-mers, ties by column id
-TYPED_TEST(ResolveTest, DiscoverTruncation) {
+// requests that are refused
+TYPED_TEST(ResolveTest, Validation) {
     using Graph = typename TypeParam::first_type;
     using Annotation = typename TypeParam::second_type;
     std::string q = random_seq(100, 5);
-    // X, Y, Z carry the whole query; W carries half
-    auto anno = build_anno_graph<Graph, Annotation>(kK, { q, q, q, q.substr(0, 50) },
-                                                    { "X", "Y", "Z", "W" }, DeBruijnGraph::BASIC);
-    LabelOracle oracle(*anno);
-    ResolveOptions opts;
-    opts.discover = true;
-    opts.discover_max_labels = 2;
-    auto profile = resolve_support(oracle, q, opts);
-    ASSERT_TRUE(profile.labels_truncated.has_value());
-    EXPECT_EQ(2u, profile.labels_truncated->kept);
-    EXPECT_EQ(4u, profile.labels_truncated->total);
-    ASSERT_EQ(2u, profile.labels.size());
-    Column cx = anno->get_annotator().get_label_encoder().encode("X");
-    Column cy = anno->get_annotator().get_label_encoder().encode("Y");
-    EXPECT_EQ(std::min(cx, cy), profile.labels[0].label.column);
-    EXPECT_EQ(std::max(cx, cy), profile.labels[1].label.column);
-
-    opts.discover_max_labels = 10;
-    profile = resolve_support(oracle, q, opts);
-    EXPECT_FALSE(profile.labels_truncated.has_value());
-    ASSERT_EQ(4u, profile.labels.size());
-    EXPECT_EQ("W", profile.labels[3].label.name);
-    EXPECT_EQ(40u, profile.labels[3].kmers_supported);
-
-    // validation
-    ResolveOptions bad;
-    EXPECT_THROW(resolve_support(oracle, q, bad), std::invalid_argument);
-    bad.labels = { "nope" };
-    EXPECT_THROW(resolve_support(oracle, q, bad), std::invalid_argument);
-    bad.discover = true;
-    EXPECT_THROW(resolve_support(oracle, q, bad), std::invalid_argument);
-    ResolveOptions headers;
-    headers.discover = true;
-    headers.discover_kind = LabelKind::HEADER;
-    EXPECT_THROW(resolve_support(oracle, q, headers), std::invalid_argument);  // no CoordToHeader
-    EXPECT_THROW(resolve_support(oracle, q.substr(0, kK - 1), opts), std::invalid_argument);
-}
-
-// discovered labels are sorted by support, whatever their column order
-TYPED_TEST(ResolveTest, DiscoverySortsBySupport) {
-    using Graph = typename TypeParam::first_type;
-    using Annotation = typename TypeParam::second_type;
-    std::string q = random_seq(100, 7);
-    // W, the first column, carries half of the query; X carries all of it
-    auto anno = build_anno_graph<Graph, Annotation>(kK, { q.substr(0, 50), q }, { "W", "X" },
+    auto anno = build_anno_graph<Graph, Annotation>(kK, { q, q.substr(0, 50) }, { "X", "W" },
                                                     DeBruijnGraph::BASIC);
-    const auto &encoder = anno->get_annotator().get_label_encoder();
-    ASSERT_LT(encoder.encode("W"), encoder.encode("X"));
     LabelOracle oracle(*anno);
-    ResolveOptions opts;
-    opts.discover = true;
-    auto profile = resolve_support(oracle, q, opts);
-    ASSERT_EQ(2u, profile.labels.size());
-    EXPECT_EQ("X", profile.labels[0].label.name);
-    EXPECT_EQ("W", profile.labels[1].label.name);
+    EXPECT_THROW(resolve_support(oracle, q, {}), std::invalid_argument);
+    EXPECT_THROW(resolve_support(oracle, q, { "nope" }), std::invalid_argument);
+    EXPECT_THROW(resolve_support(oracle, q.substr(0, kK - 1), { "X" }), std::invalid_argument);
 }
 
 
@@ -174,7 +123,7 @@ typedef ::testing::Types<
 TYPED_TEST_SUITE(ResolveCoordTest, ResolveCoordTypes);
 
 // header labels: acc1 = L + R + M + R (repeat R twice) and acc2 = R, both in column F
-TYPED_TEST(ResolveCoordTest, HeaderLabelsAndDiscovery) {
+TYPED_TEST(ResolveCoordTest, HeaderLabels) {
     using Graph = typename TypeParam::first_type;
     using Annotation = typename TypeParam::second_type;
     std::string L = random_seq(40, 1), R = random_seq(40, 2), M = random_seq(40, 3);
@@ -188,9 +137,7 @@ TYPED_TEST(ResolveCoordTest, HeaderLabelsAndDiscovery) {
     LabelOracle oracle(*anno);
 
     std::string q = R + M + R;
-    ResolveOptions opts;
-    opts.labels = { "acc1", "acc2", "F" };
-    auto profile = resolve_support(oracle, q, opts);
+    auto profile = resolve_support(oracle, q, { "acc1", "acc2", "F" });
     ASSERT_EQ(3u, profile.labels.size());
     EXPECT_TRUE(profile.labels[0].label.kind == LabelKind::HEADER);
     EXPECT_EQ(iv({ {0, q.size() - kK + 1} }), profile.labels[0].runs);     // acc1
@@ -199,26 +146,13 @@ TYPED_TEST(ResolveCoordTest, HeaderLabelsAndDiscovery) {
     EXPECT_TRUE(profile.labels[2].label.kind == LabelKind::COLUMN);
     EXPECT_EQ(iv({ {0, q.size() - kK + 1} }), profile.labels[2].runs);     // column F
 
-    // header discovery gives the same profiles
-    ResolveOptions disc;
-    disc.discover = true;
-    disc.discover_kind = LabelKind::HEADER;
-    auto discovered = resolve_support(oracle, q, disc);
-    ASSERT_EQ(2u, discovered.labels.size());
-    EXPECT_EQ("acc1", discovered.labels[0].label.name);
-    EXPECT_EQ(profile.labels[0].runs, discovered.labels[0].runs);
-    EXPECT_EQ("acc2", discovered.labels[1].label.name);
-    EXPECT_EQ(60u, discovered.labels[1].kmers_supported);
-    EXPECT_EQ(profile.labels[1].runs, discovered.labels[1].runs);
-
     // an unknown header
-    opts.labels = { "acc3" };
-    EXPECT_THROW(resolve_support(oracle, q, opts), std::invalid_argument);
+    EXPECT_THROW(resolve_support(oracle, q, { "acc3" }), std::invalid_argument);
 }
 
-// The explicit profiles of a few hundred labels are the discovery's, and a label absent from
-// the query has none
-TYPED_TEST(ResolveCoordTest, ExplicitLabelsGiveTheDiscoverysProfiles) {
+// The profiles of a few hundred named labels are those of the signature API, and a label
+// absent from the query has none
+TYPED_TEST(ResolveCoordTest, NamedLabelsGiveTheSignatureProfiles) {
     using Graph = typename TypeParam::first_type;
     using Annotation = typename TypeParam::second_type;
     const std::string R = random_seq(40, 21), M = random_seq(40, 22);
@@ -243,22 +177,18 @@ TYPED_TEST(ResolveCoordTest, ExplicitLabelsGiveTheDiscoverysProfiles) {
     auto anno = build_anno_graph<Graph, Annotation>(kK, seqs, labels, DeBruijnGraph::BASIC, true);
     LabelOracle oracle(*anno);
 
-    ResolveOptions disc;
-    disc.discover = true;
-    const SupportProfile discovered = resolve_support(oracle, q, disc);
-    ResolveOptions opts;
-    opts.labels = labels;
-    const SupportProfile explicit_ = resolve_support(oracle, q, opts);
+    const SupportProfile explicit_ = resolve_support(oracle, q, labels);
     ASSERT_EQ(labels.size(), explicit_.labels.size());
     std::map<std::string, const LabelProfile *> by_name;
     for (const LabelProfile &lp : explicit_.labels) {
         by_name[lp.label.name] = &lp;
     }
-    ASSERT_GT(discovered.labels.size(), 200u);
-    for (const LabelProfile &d : discovered.labels) {
-        const LabelProfile &e = *by_name.at(d.label.name);
-        EXPECT_EQ(d.runs, e.runs) << d.label.name;
-        EXPECT_EQ(d.kmers_supported, e.kmers_supported) << d.label.name;
+    const auto signatures = anno->get_top_label_signatures(q, labels.size(), 0.0, 0.0);
+    ASSERT_GT(signatures.size(), 200u);
+    for (const auto &[name, count, mask] : signatures) {
+        const LabelProfile &e = *by_name.at(name);
+        EXPECT_EQ(runs_of(mask.size(), [&](uint64_t i) { return mask[i]; }), e.runs) << name;
+        EXPECT_EQ(count, e.kmers_supported) << name;
     }
     const LabelProfile &absent = *by_name.at("absent");
     EXPECT_TRUE(absent.runs.empty());

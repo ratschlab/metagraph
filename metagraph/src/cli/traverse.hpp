@@ -21,7 +21,6 @@ class Config;
 struct TraverseLimits {
     double max_time_ms = 30'000;     // a seed's time budget is clamped to it
     size_t max_seeds = 10;
-    uint64_t max_resolve_query_bp = 1'000'000;   // the longest /resolve query
 };
 TraverseLimits traverse_limits(const Config &config);
 
@@ -40,9 +39,6 @@ class InvalidRequest : public std::invalid_argument {
 Json::Value process_traverse_request(const Json::Value &request,
                                      const graph::AnnotatedDBG &anno_graph,
                                      const TraverseLimits &limits);
-Json::Value process_resolve_request(const Json::Value &request,
-                                    const graph::AnnotatedDBG &anno_graph,
-                                    const TraverseLimits &limits);
 } // namespace cli
 } // namespace mtg
 

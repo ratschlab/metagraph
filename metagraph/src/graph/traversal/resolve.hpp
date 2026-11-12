@@ -1,7 +1,6 @@
 #ifndef __TRAVERSAL_RESOLVE_HPP__
 #define __TRAVERSAL_RESOLVE_HPP__
 
-#include <optional>
 #include <string>
 #include <string_view>
 #include <tuple>
@@ -27,25 +26,10 @@ struct KmerInterval {
     }
 };
 
-struct ResolveOptions {
-    // exactly one of |labels| (explicit) or |discover| must be set
-    std::vector<std::string> labels;
-    bool discover = false;
-    size_t discover_max_labels = 1000;
-    LabelKind discover_kind = LabelKind::COLUMN;
-};
-
 struct LabelProfile {
     LabelRef label;
     uint64_t kmers_supported = 0;
     std::vector<KmerInterval> runs;          // maximal support runs
-};
-
-// A discovery that found more labels than |discover_max_labels| keeps those supporting the
-// most k-mers (ties: smaller column, then sequence id)
-struct LabelTruncation {
-    size_t kept = 0;
-    size_t total = 0;
 };
 
 struct SupportProfile {
@@ -54,14 +38,13 @@ struct SupportProfile {
     Regime regime = Regime::BASIC;
     std::vector<KmerInterval> graph_runs;    // runs of k-mers present in the graph
     std::vector<LabelProfile> labels;
-    std::optional<LabelTruncation> labels_truncated;
 };
 
-// Resolve where |query| is supported by which labels. No traversal.
-// Throws std::invalid_argument for unknown labels or invalid options.
+// Resolve where |query| is supported by each of |labels|. No traversal.
+// Throws std::invalid_argument for unknown labels, no labels or a query shorter than k.
 SupportProfile resolve_support(const LabelOracle &oracle,
                                std::string_view query,
-                               const ResolveOptions &options);
+                               const std::vector<std::string> &labels);
 
 // |sequence| in the case the graph stores (upper case unless the build is case-sensitive)
 std::string in_graph_case(std::string_view sequence);

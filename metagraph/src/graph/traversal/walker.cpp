@@ -374,9 +374,7 @@ void Walker::validate_seed() {
         // A label that does not carry the seed is dropped, with the runs of k-mers it is
         // on (check_seed refused duplicates). A column carries the seed when it is on
         // every k-mer, a record when it also holds the k-mers at consecutive coordinates.
-        ResolveOptions options;
-        options.labels = seed_.labels;
-        SupportProfile profile = resolve_support(oracle_, seed_upper_, options);
+        SupportProfile profile = resolve_support(oracle_, seed_upper_, seed_.labels);
         const KmerInterval whole { 0, nodes_.size() };
         auto on_every_kmer = [&](const LabelProfile &lp) {
             return lp.runs.size() == 1 && lp.runs[0] == whole;
