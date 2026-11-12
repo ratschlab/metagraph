@@ -34,9 +34,9 @@ void NodeFirstCache::call_incoming_edges(edge_index edge,
     );
 }
 
-void NodeFirstCache::call_incoming_kmers(node_index node,
-                                         const IncomingEdgeCallback &callback) const {
+DeBruijnGraph::Edges NodeFirstCache::incoming_kmers(node_index node) const {
     assert(dbg_succ_.in_graph(node));
+    Edges edges;
 
     edge_index edge = node;
 
@@ -44,9 +44,10 @@ void NodeFirstCache::call_incoming_kmers(node_index node,
         [&](edge_index prev_edge) {
             node_index prev = prev_edge;
             if (dbg_succ_.in_graph(prev))
-                callback(prev, get_first_char(prev_edge, edge));
+                edges.emplace_back(prev, get_first_char(prev_edge, edge));
         }
     );
+    return edges;
 }
 
 bool NodeFirstCache::is_compatible(const SequenceGraph &graph, bool verbose) const {

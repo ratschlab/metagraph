@@ -373,15 +373,15 @@ void DefaultColumnExtender
             }
             assert(hint == graph_->get_node_sequence(node));
 
-            canonical->call_outgoing_kmers(node, hint, [&](node_index next, char c) {
+            for (auto [next, c] : canonical->outgoing_kmers(node, hint)) {
                 if (c != boss::BOSS::kSentinel)
                     callback(next, c, 0);
-            });
+            }
         } else {
-            graph_->call_outgoing_kmers(node, [&](node_index next, char c) {
+            for (auto [next, c] : graph_->outgoing_kmers(node)) {
                 if (c != boss::BOSS::kSentinel)
                     callback(next, c, 0);
-            });
+            }
         }
     }
 }

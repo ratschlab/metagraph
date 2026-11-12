@@ -120,21 +120,22 @@ inline void call_outgoing(const BOSS &boss,
     }
 }
 
-void DBGSuccinct::call_outgoing_kmers(node_index node,
-                                      const OutgoingEdgeCallback &callback) const {
+DeBruijnGraph::Edges DBGSuccinct::outgoing_kmers(node_index node) const {
     assert(in_graph(node));
+    Edges edges;
 
     call_outgoing(*boss_graph_, node, [&](auto i) {
         auto next = i;
         if (in_graph(next))
-            callback(next, boss_graph_->decode(boss_graph_->get_W(i)
+            edges.emplace_back(next, boss_graph_->decode(boss_graph_->get_W(i)
                                 % boss_graph_->alph_size));
     });
+    return edges;
 }
 
-void DBGSuccinct::call_incoming_kmers(node_index node,
-                                      const IncomingEdgeCallback &callback) const {
+DeBruijnGraph::Edges DBGSuccinct::incoming_kmers(node_index node) const {
     assert(in_graph(node));
+    Edges edges;
 
     auto edge = node;
 
@@ -146,7 +147,7 @@ void DBGSuccinct::call_incoming_kmers(node_index node,
 
             auto prev = incoming_boss_edge;
             if (in_graph(prev)) {
-                callback(prev,
+                edges.emplace_back(prev,
                     boss_graph_->decode(
                         boss_graph_->get_minus_k_value(incoming_boss_edge, get_k() - 2).first
                     )
@@ -154,22 +155,24 @@ void DBGSuccinct::call_incoming_kmers(node_index node,
             }
         }
     );
+    return edges;
 }
 
-void DBGSuccinct::adjacent_outgoing_nodes(node_index node,
-                                          const std::function<void(node_index)> &callback) const {
+DeBruijnGraph::Nodes DBGSuccinct::adjacent_outgoing_nodes(node_index node) const {
     assert(in_graph(node));
+    Nodes nodes;
 
     call_outgoing(*boss_graph_, node, [&](auto i) {
         auto next = i;
         if (in_graph(next))
-            callback(next);
+            nodes.push_back(next);
     });
+    return nodes;
 }
 
-void DBGSuccinct::adjacent_incoming_nodes(node_index node,
-                                          const std::function<void(node_index)> &callback) const {
+DeBruijnGraph::Nodes DBGSuccinct::adjacent_incoming_nodes(node_index node) const {
     assert(in_graph(node));
+    Nodes nodes;
 
     auto edge = node;
 
@@ -181,9 +184,10 @@ void DBGSuccinct::adjacent_incoming_nodes(node_index node,
 
             auto prev = incoming_boss_edge;
             if (in_graph(prev))
-                callback(prev);
+                nodes.push_back(prev);
         }
     );
+    return nodes;
 }
 
 void DBGSuccinct::call_nodes(const std::function<void(node_index)> &callback,

@@ -1,6 +1,7 @@
 #ifndef __SEQUENCE_GRAPH_HPP__
 #define __SEQUENCE_GRAPH_HPP__
 
+#include "common/vector.hpp"
 #include "common/vectors/bit_vector.hpp"
 #include "graph/representation/base/node_stream.hpp"
 
@@ -52,12 +53,12 @@ class SequenceGraph {
     virtual std::unique_ptr<NodeStream> node_stream(std::string_view sequence,
                                                     bool sequential) const = 0;
 
-    // Given a node index, call the target nodes of all edges outgoing from it.
-    virtual void adjacent_outgoing_nodes(node_index node,
-                                         const std::function<void(node_index)> &callback) const = 0;
-    // Given a node index, call the source nodes of all edges incoming to it.
-    virtual void adjacent_incoming_nodes(node_index node,
-                                         const std::function<void(node_index)> &callback) const = 0;
+    typedef SmallVector<node_index, 4> Nodes;
+
+    // The target nodes of all edges outgoing from |node|
+    virtual Nodes adjacent_outgoing_nodes(node_index node) const = 0;
+    // The source nodes of all edges incoming to |node|
+    virtual Nodes adjacent_incoming_nodes(node_index node) const = 0;
 
     virtual void call_nodes(const std::function<void(node_index)> &callback,
                             const std::function<bool()> &terminate = [](){ return false; },
@@ -217,22 +218,18 @@ class DeBruijnGraph : public SequenceGraph {
 
     virtual node_index kmer_to_node(std::string_view kmer) const;
 
-    using OutgoingEdgeCallback = std::function<void(node_index /* target_kmer */,
-                                                    char /* last_target_char */)>;
-    virtual void call_outgoing_kmers(node_index kmer,
-                                     const OutgoingEdgeCallback &callback) const = 0;
+    // A neighbour of a node and the character on the edge to it
+    typedef SmallVector<std::pair<node_index, char>, 4> Edges;
 
-    using IncomingEdgeCallback = std::function<void(node_index /* source_kmer */,
-                                                    char /* first_source_char */)>;
-    virtual void call_incoming_kmers(node_index kmer,
-                                     const IncomingEdgeCallback &callback) const = 0;
+    // The target nodes of all edges outgoing from |kmer|, each with the last
+    // character of the target k-mer
+    virtual Edges outgoing_kmers(node_index kmer) const = 0;
+    // The source nodes of all edges incoming to |kmer|, each with the first
+    // character of the source k-mer
+    virtual Edges incoming_kmers(node_index kmer) const = 0;
 
-    // Given a node index, call the target nodes of all edges outgoing from it.
-    virtual void adjacent_outgoing_nodes(node_index node,
-                                         const std::function<void(node_index)> &callback) const override;
-    // Given a node index, call the source nodes of all edges incoming to it.
-    virtual void adjacent_incoming_nodes(node_index node,
-                                         const std::function<void(node_index)> &callback) const override;
+    virtual Nodes adjacent_outgoing_nodes(node_index node) const override;
+    virtual Nodes adjacent_incoming_nodes(node_index node) const override;
 
     // Check whether graph contains fraction of nodes from the sequence
     virtual bool find(std::string_view sequence, double discovery_fraction = 1) const;

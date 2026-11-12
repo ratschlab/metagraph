@@ -52,10 +52,10 @@ std::vector<uint64_t> random_traversal_numbers(const DeBruijnGraph &graph,
         numbers.push_back(dis(gen));
         for (size_t j = 1; j < path_size && numbers.size() < size; ++j) {
             bool found = false;
-            graph.adjacent_outgoing_nodes(numbers.back(), [&](auto next) {
+            for (auto next : graph.adjacent_outgoing_nodes(numbers.back())) {
                 found = true;
                 numbers.push_back(next);
-            });
+            }
             if (!found)
                 break;
         }

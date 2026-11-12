@@ -55,30 +55,22 @@ class CanonicalDBG : public DBGWrapper<DeBruijnGraph> {
                                                     bool sequential) const override final;
 
     // Given a node index, call the target nodes of all edges outgoing from it.
-    virtual void adjacent_outgoing_nodes(node_index node,
-                                         const std::function<void(node_index)> &callback) const override final;
+    virtual Nodes adjacent_outgoing_nodes(node_index node) const override final;
 
     // Given a node index, call the source nodes of all edges incoming to it.
-    virtual void adjacent_incoming_nodes(node_index node,
-                                         const std::function<void(node_index)> &callback) const override final;
+    virtual Nodes adjacent_incoming_nodes(node_index node) const override final;
 
-    virtual void call_outgoing_kmers(node_index kmer,
-                                     const OutgoingEdgeCallback &callback) const override final {
-        call_outgoing_kmers(kmer, get_node_sequence(kmer), callback);
+    virtual Edges outgoing_kmers(node_index kmer) const override final {
+        return outgoing_kmers(kmer, get_node_sequence(kmer));
     }
 
-    virtual void call_incoming_kmers(node_index kmer,
-                                     const IncomingEdgeCallback &callback) const override final {
-        call_incoming_kmers(kmer, get_node_sequence(kmer), callback);
+    virtual Edges incoming_kmers(node_index kmer) const override final {
+        return incoming_kmers(kmer, get_node_sequence(kmer));
     }
 
-    void call_outgoing_kmers(node_index kmer,
-                             const std::string &spelling_hint,
-                             const OutgoingEdgeCallback &callback) const;
-
-    void call_incoming_kmers(node_index kmer,
-                             const std::string &spelling_hint,
-                             const IncomingEdgeCallback &callback) const;
+    // |spelling_hint| is the sequence of |kmer|
+    Edges outgoing_kmers(node_index kmer, const std::string &spelling_hint) const;
+    Edges incoming_kmers(node_index kmer, const std::string &spelling_hint) const;
 
     virtual void call_sequences(const CallPath &callback,
                                 size_t num_threads = 1,

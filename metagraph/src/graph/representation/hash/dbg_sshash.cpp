@@ -608,70 +608,70 @@ template void DBGSSHash::call_incoming_kmers_with_rc<false>(
         node_index,
         const std::function<void(node_index, char, bool)>&) const;
 
-void DBGSSHash::call_outgoing_kmers(node_index node,
-                                    const OutgoingEdgeCallback& callback) const {
+DeBruijnGraph::Edges DBGSSHash::outgoing_kmers(node_index node) const {
+    Edges edges;
     if (mode_ != BASIC) {
         call_outgoing_kmers_with_rc<true>(node, [&](node_index next, char c, bool revcompl) {
-            callback(revcompl ? reverse_complement(next) : next, c);
+            edges.emplace_back(revcompl ? reverse_complement(next) : next, c);
         });
     } else {
         call_outgoing_kmers_with_rc<false>(node, [&](node_index next, char c, bool) {
-            callback(next, c);
+            edges.emplace_back(next, c);
         });
     }
+    return edges;
 }
 
-void DBGSSHash::adjacent_outgoing_nodes(node_index node,
-                                        const std::function<void(node_index)>& callback) const {
+DeBruijnGraph::Nodes DBGSSHash::adjacent_outgoing_nodes(node_index node) const {
+    Nodes nodes;
     if (mode_ != BASIC) {
         adjacent_outgoing_nodes_with_rc<true>(node, [&](node_index next, bool revcompl) {
-            callback(revcompl ? reverse_complement(next) : next);
+            nodes.push_back(revcompl ? reverse_complement(next) : next);
         });
     } else {
         adjacent_outgoing_nodes_with_rc<false>(node, [&](node_index next, bool) {
-            callback(next);
+            nodes.push_back(next);
         });
     }
+    return nodes;
 }
 
-void DBGSSHash::call_incoming_kmers(node_index node,
-                                    const IncomingEdgeCallback& callback) const {
+DeBruijnGraph::Edges DBGSSHash::incoming_kmers(node_index node) const {
+    Edges edges;
     if (mode_ != BASIC) {
         call_incoming_kmers_with_rc<true>(node, [&](node_index prev, char c, bool revcompl) {
-            callback(revcompl ? reverse_complement(prev) : prev, c);
+            edges.emplace_back(revcompl ? reverse_complement(prev) : prev, c);
         });
     } else {
         call_incoming_kmers_with_rc<false>(node, [&](node_index prev, char c, bool) {
-            callback(prev, c);
+            edges.emplace_back(prev, c);
         });
     }
+    return edges;
 }
 
-void DBGSSHash::adjacent_incoming_nodes(node_index node,
-                                        const std::function<void(node_index)>& callback) const {
+DeBruijnGraph::Nodes DBGSSHash::adjacent_incoming_nodes(node_index node) const {
+    Nodes nodes;
     if (mode_ != BASIC) {
         adjacent_incoming_nodes_with_rc<true>(node, [&](node_index prev, bool revcompl) {
-            callback(revcompl ? reverse_complement(prev) : prev);
+            nodes.push_back(revcompl ? reverse_complement(prev) : prev);
         });
     } else {
         adjacent_incoming_nodes_with_rc<false>(node, [&](node_index prev, bool) {
-            callback(prev);
+            nodes.push_back(prev);
         });
     }
+    return nodes;
 }
 
 size_t DBGSSHash::outdegree(node_index node) const {
     assert(in_graph(node));
-    size_t res = 0;
-    adjacent_outgoing_nodes(node, [&](node_index) { ++res; });
-    return res;
+    return adjacent_outgoing_nodes(node).size();
 }
 
 size_t DBGSSHash::indegree(node_index node) const {
     assert(in_graph(node));
-    size_t res = 0;
-    adjacent_incoming_nodes(node, [&](node_index) { ++res; });
-    return res;
+    return adjacent_incoming_nodes(node).size();
 }
 
 void DBGSSHash::call_nodes(const std::function<void(node_index)>& callback,

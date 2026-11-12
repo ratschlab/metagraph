@@ -28,11 +28,11 @@ node_index row_diff_successor(const graph::DeBruijnGraph &graph,
     } else {
         assert(rd_succ.size());
         node_index succ = graph::DeBruijnGraph::npos;
-        graph.adjacent_outgoing_nodes(node, [&](node_index adjacent_node) {
+        for (node_index adjacent_node : graph.adjacent_outgoing_nodes(node)) {
             if (rd_succ[adjacent_node]) {
                 succ = adjacent_node;
             }
-        });
+        }
         assert(graph.in_graph(succ) && "a row diff successor must exist");
         return succ;
     }

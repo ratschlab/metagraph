@@ -31,11 +31,9 @@ class DBGSuccinct : public DeBruijnGraph {
     virtual node_index traverse_back(node_index node, char prev_char) const override final;
 
     // Given a node index, call the target nodes of all edges outgoing from it.
-    virtual void adjacent_outgoing_nodes(node_index node,
-                                         const std::function<void(node_index)> &callback) const override final;
+    virtual Nodes adjacent_outgoing_nodes(node_index node) const override final;
     // Given a node index, call the source nodes of all edges incoming to it.
-    virtual void adjacent_incoming_nodes(node_index node,
-                                         const std::function<void(node_index)> &callback) const override final;
+    virtual Nodes adjacent_incoming_nodes(node_index node) const override final;
 
     virtual void call_nodes(const std::function<void(node_index)> &callback,
                             const std::function<bool()> &terminate = [](){ return false; },
@@ -89,9 +87,9 @@ class DBGSuccinct : public DeBruijnGraph {
                           const std::function<void(node_index)> &callback,
                           const std::function<bool()> &terminate = [](){ return false; }) const override final;
 
-    virtual void call_outgoing_kmers(node_index, const OutgoingEdgeCallback&) const override final;
+    virtual Edges outgoing_kmers(node_index node) const override final;
 
-    virtual void call_incoming_kmers(node_index, const IncomingEdgeCallback&) const override final;
+    virtual Edges incoming_kmers(node_index node) const override final;
 
     virtual size_t outdegree(node_index) const override final;
     virtual bool has_single_outgoing(node_index) const override final;

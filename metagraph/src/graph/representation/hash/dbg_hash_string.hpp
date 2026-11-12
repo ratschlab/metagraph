@@ -22,9 +22,9 @@ class DBGHashString : public DeBruijnGraph {
     std::unique_ptr<NodeStream> node_stream(std::string_view sequence,
                                             bool sequential) const;
 
-    void call_outgoing_kmers(node_index node, const OutgoingEdgeCallback &callback) const;
+    Edges outgoing_kmers(node_index node) const;
 
-    void call_incoming_kmers(node_index node, const IncomingEdgeCallback &callback) const;
+    Edges incoming_kmers(node_index node) const;
 
     // Traverse the outgoing edge
     node_index traverse(node_index node, char next_char) const;

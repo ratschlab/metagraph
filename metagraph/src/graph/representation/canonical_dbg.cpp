@@ -154,22 +154,23 @@ CanonicalDBG::node_stream(std::string_view sequence, bool sequential) const {
                            [this](node_index node) { return get_base_node(node); });
 }
 
-void CanonicalDBG::call_outgoing_kmers(node_index node,
-                                       const std::string &spelling_hint,
-                                       const OutgoingEdgeCallback &callback) const {
+DeBruijnGraph::Edges CanonicalDBG::outgoing_kmers(node_index node,
+                                                  const std::string &spelling_hint) const {
     assert(node);
     assert(node <= offset_ * 2);
+
+    Edges edges;
 
     if (node > offset_) {
         std::string rc_hint = spelling_hint;
         ::reverse_complement(rc_hint.begin(), rc_hint.end());
-        call_incoming_kmers(node - offset_, rc_hint, [&](node_index next, char c) {
+        for (auto [next, c] : incoming_kmers(node - offset_, rc_hint)) {
             c = complement(c);
             assert(c == boss::BOSS::kSentinel
                 || traverse(node, c) == reverse_complement(next));
-            callback(reverse_complement(next), c);
-        });
-        return;
+            edges.emplace_back(reverse_complement(next), c);
+        }
+        return edges;
     }
 
     // includes `$` for DBGSuccinct
@@ -179,21 +180,21 @@ void CanonicalDBG::call_outgoing_kmers(node_index node,
     // "- has_sentinel_" because there can't be a dummy sink with another non-dummy edge
     size_t max_num_edges_left = children.size() - has_sentinel_;
 
-    graph_->call_outgoing_kmers(node, [&](node_index next, char c) {
+    for (auto [next, c] : graph_->outgoing_kmers(node)) {
         assert(has_sentinel_ || c != boss::BOSS::kSentinel);
         assert(c == boss::BOSS::kSentinel || traverse(node, c) == next);
 
         // don't call dummy sink, it will be handled in the adjacent strand below
         if (c != boss::BOSS::kSentinel) {
-            callback(next, c);
+            edges.emplace_back(next, c);
             --max_num_edges_left;
         }
 
         children[alphabet_encoder_[c]] = next;
-    });
+    }
 
     if (!max_num_edges_left)
-        return;
+        return edges;
 
     // jump to the other strand and check incoming k-mers and jump back
     adjacent_outgoing_rc_strand(node, spelling_hint, [&](node_index next, char c) {
@@ -227,7 +228,7 @@ void CanonicalDBG::call_outgoing_kmers(node_index node,
         assert(c == boss::BOSS::kSentinel || traverse(node, c) == next);
 
         if (c != boss::BOSS::kSentinel) {
-            callback(next, c);
+            edges.emplace_back(next, c);
             children[s] = next;
             --max_num_edges_left;
         }
@@ -235,27 +236,30 @@ void CanonicalDBG::call_outgoing_kmers(node_index node,
 
     if (has_sentinel_ && children[alphabet_encoder_[boss::BOSS::kSentinel]]
             && max_num_edges_left + 1 == alphabet.size()) {
-        callback(children[alphabet_encoder_[boss::BOSS::kSentinel]],
-                 boss::BOSS::kSentinel);
+        edges.emplace_back(children[alphabet_encoder_[boss::BOSS::kSentinel]],
+                           boss::BOSS::kSentinel);
     }
+
+    return edges;
 }
 
-void CanonicalDBG::call_incoming_kmers(node_index node,
-                                       const std::string &spelling_hint,
-                                       const IncomingEdgeCallback &callback) const {
+DeBruijnGraph::Edges CanonicalDBG::incoming_kmers(node_index node,
+                                                  const std::string &spelling_hint) const {
     assert(node);
     assert(node <= offset_ * 2);
+
+    Edges edges;
 
     if (node > offset_) {
         std::string rc_hint = spelling_hint;
         ::reverse_complement(rc_hint.begin(), rc_hint.end());
-        call_outgoing_kmers(node - offset_, rc_hint, [&](node_index prev, char c) {
+        for (auto [prev, c] : outgoing_kmers(node - offset_, rc_hint)) {
             c = complement(c);
             assert(c == boss::BOSS::kSentinel
                 || traverse_back(node, c) == reverse_complement(prev));
-            callback(reverse_complement(prev), c);
-        });
-        return;
+            edges.emplace_back(reverse_complement(prev), c);
+        }
+        return edges;
     }
 
     // includes `$` for DBGSuccinct
@@ -264,27 +268,22 @@ void CanonicalDBG::call_incoming_kmers(node_index node,
     SmallVector<node_index> parents(alphabet.size(), npos);
     // "- has_sentinel_" because there can't be a dummy sink with another non-dummy edge
     size_t max_num_edges_left = parents.size() - has_sentinel_;
-    auto incoming_kmer_callback = [&](node_index prev, char c) {
+    for (auto [prev, c] : get_dbg_succ(*graph_) ? get_cache().incoming_kmers(node)
+                                                : graph_->incoming_kmers(node)) {
         assert(has_sentinel_ || c != boss::BOSS::kSentinel);
         assert(c == boss::BOSS::kSentinel || traverse_back(node, c) == prev);
 
         // don't call dummy source, it will be handled in the adjacent strand below
         if (c != boss::BOSS::kSentinel) {
-            callback(prev, c);
+            edges.emplace_back(prev, c);
             --max_num_edges_left;
         }
 
         parents[alphabet_encoder_[c]] = prev;
-    };
-
-    if (get_dbg_succ(*graph_)) {
-        get_cache().call_incoming_kmers(node, incoming_kmer_callback);
-    } else {
-        graph_->call_incoming_kmers(node, incoming_kmer_callback);
     }
 
     if (!max_num_edges_left)
-        return;
+        return edges;
 
     adjacent_incoming_rc_strand(node, spelling_hint, [&](node_index prev, char c) {
         assert(prev <= offset_);
@@ -316,7 +315,7 @@ void CanonicalDBG::call_incoming_kmers(node_index node,
         assert(c == boss::BOSS::kSentinel || traverse_back(node, c) == prev);
 
         if (c != boss::BOSS::kSentinel) {
-            callback(prev, c);
+            edges.emplace_back(prev, c);
             parents[s] = prev;
             --max_num_edges_left;
         }
@@ -324,81 +323,63 @@ void CanonicalDBG::call_incoming_kmers(node_index node,
 
     if (has_sentinel_ && parents[alphabet_encoder_[boss::BOSS::kSentinel]]
             && max_num_edges_left + 1 == alphabet.size()) {
-        callback(parents[alphabet_encoder_[boss::BOSS::kSentinel]],
-                 boss::BOSS::kSentinel);
+        edges.emplace_back(parents[alphabet_encoder_[boss::BOSS::kSentinel]],
+                           boss::BOSS::kSentinel);
     }
+
+    return edges;
 }
 
-void CanonicalDBG
-::adjacent_incoming_nodes(node_index node,
-                          const std::function<void(node_index)> &callback) const {
+DeBruijnGraph::Nodes CanonicalDBG::adjacent_incoming_nodes(node_index node) const {
     assert(node);
     assert(node <= offset_ * 2);
 
+    Nodes nodes;
     if (node > offset_) {
-        adjacent_outgoing_nodes(node - offset_, [&](node_index prev) {
-            callback(reverse_complement(prev));
-        });
+        for (node_index prev : adjacent_outgoing_nodes(node - offset_)) {
+            nodes.push_back(reverse_complement(prev));
+        }
     } else {
-        call_incoming_kmers(node, [&](node_index prev, char) { callback(prev); });
+        for (auto [prev, c] : incoming_kmers(node)) {
+            nodes.push_back(prev);
+        }
     }
+    return nodes;
 }
 
-void CanonicalDBG
-::adjacent_outgoing_nodes(node_index node,
-                          const std::function<void(node_index)> &callback) const {
+DeBruijnGraph::Nodes CanonicalDBG::adjacent_outgoing_nodes(node_index node) const {
     assert(node);
     assert(node <= offset_ * 2);
 
+    Nodes nodes;
     if (node > offset_) {
-        adjacent_incoming_nodes(node - offset_, [&](node_index next) {
-            callback(reverse_complement(next));
-        });
+        for (node_index next : adjacent_incoming_nodes(node - offset_)) {
+            nodes.push_back(reverse_complement(next));
+        }
     } else {
-        call_outgoing_kmers(node, [&](node_index next, char) { callback(next); });
+        for (auto [next, c] : outgoing_kmers(node)) {
+            nodes.push_back(next);
+        }
     }
+    return nodes;
 }
 
 bool CanonicalDBG::has_multiple_outgoing(node_index node) const {
-    bool found = false;
-    try {
-        adjacent_outgoing_nodes(node, [&](node_index) {
-            if (found)
-                throw early_term();
-
-            found = true;
-        });
-    } catch (const early_term&) {
-        return true;
-    }
-
-    return false;
+    return adjacent_outgoing_nodes(node).size() > 1;
 }
 
 bool CanonicalDBG::has_single_incoming(node_index node) const {
-    size_t count = 0;
-    try {
-        adjacent_incoming_nodes(node, [&](node_index) {
-            if (++count > 1)
-                throw early_term();
-        });
-    } catch (const early_term&) {}
-
-    return count == 1;
+    return adjacent_incoming_nodes(node).size() == 1;
 }
 
 size_t CanonicalDBG::outdegree(node_index node) const {
     // TODO: better implementation
-    size_t outdegree = 0;
-    adjacent_outgoing_nodes(node, [&](node_index) { ++outdegree; });
-    return outdegree;
+    return adjacent_outgoing_nodes(node).size();
 }
 
 size_t CanonicalDBG::indegree(node_index node) const {
     // TODO: better implementation
-    size_t indegree = 0;
-    adjacent_incoming_nodes(node, [&](node_index) { ++indegree; });
-    return indegree;
+    return adjacent_incoming_nodes(node).size();
 }
 
 void CanonicalDBG::call_sequences(const CallPath &callback,

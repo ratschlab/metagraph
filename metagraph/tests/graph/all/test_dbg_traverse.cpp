@@ -109,83 +109,73 @@ TYPED_TEST(DeBruijnGraphTest, CallOutgoingEdges) {
         // AAA -> AAA
         // AAA -> AAC
         std::set<char> set = { 'A', 'C' };
-        graph->call_outgoing_kmers(it,
-            [&](auto i, char c) {
-                ASSERT_TRUE(set.count(c))
-                    << k
-                    << "\n" << c
-                    << "\n" << graph->get_node_sequence(it)
-                    << "\n" << graph->get_node_sequence(i);
-                set.erase(c);
-                EXPECT_EQ(i, graph->traverse(it, c));
-            }
-        );
+        for (auto [i, c] : graph->outgoing_kmers(it)) {
+            ASSERT_TRUE(set.count(c))
+                << k
+                << "\n" << c
+                << "\n" << graph->get_node_sequence(it)
+                << "\n" << graph->get_node_sequence(i);
+            set.erase(c);
+            EXPECT_EQ(i, graph->traverse(it, c));
+        }
         ASSERT_TRUE(set.empty());
 
         it = graph->traverse(it, 'C');
         // AAC -> ACC
         set = { 'C', };
-        graph->call_outgoing_kmers(it,
-            [&](auto i, char c) {
-                ASSERT_TRUE(set.count(c))
-                    << k
-                    << "\n" << c
-                    << "\n" << graph->get_node_sequence(it)
-                    << "\n" << graph->get_node_sequence(i);
-                set.erase(c);
-                EXPECT_EQ(i, graph->traverse(it, c));
-            }
-        );
+        for (auto [i, c] : graph->outgoing_kmers(it)) {
+            ASSERT_TRUE(set.count(c))
+                << k
+                << "\n" << c
+                << "\n" << graph->get_node_sequence(it)
+                << "\n" << graph->get_node_sequence(i);
+            set.erase(c);
+            EXPECT_EQ(i, graph->traverse(it, c));
+        }
         ASSERT_TRUE(set.empty());
 
         it = graph->kmer_to_node(std::string(k, 'C'));
         // CCC -> CCC
         // CCC -> CCG
         set = { 'C', 'G' };
-        graph->call_outgoing_kmers(it,
-            [&](auto i, char c) {
-                ASSERT_TRUE(set.count(c))
-                    << k
-                    << "\n" << c
-                    << "\n" << graph->get_node_sequence(it)
-                    << "\n" << graph->get_node_sequence(i);
-                set.erase(c);
-                EXPECT_EQ(i, graph->traverse(it, c));
-            }
-        );
+        for (auto [i, c] : graph->outgoing_kmers(it)) {
+            ASSERT_TRUE(set.count(c))
+                << k
+                << "\n" << c
+                << "\n" << graph->get_node_sequence(it)
+                << "\n" << graph->get_node_sequence(i);
+            set.erase(c);
+            EXPECT_EQ(i, graph->traverse(it, c));
+        }
         ASSERT_TRUE(set.empty());
 
         it = graph->traverse(it, 'G');
         // CCG -> CGG
         set = { 'G', };
-        graph->call_outgoing_kmers(it,
-            [&](auto i, char c) {
-                ASSERT_TRUE(set.count(c))
-                    << k
-                    << "\n" << c
-                    << "\n" << graph->get_node_sequence(it)
-                    << "\n" << graph->get_node_sequence(i);
-                set.erase(c);
-                EXPECT_EQ(i, graph->traverse(it, c));
-            }
-        );
+        for (auto [i, c] : graph->outgoing_kmers(it)) {
+            ASSERT_TRUE(set.count(c))
+                << k
+                << "\n" << c
+                << "\n" << graph->get_node_sequence(it)
+                << "\n" << graph->get_node_sequence(i);
+            set.erase(c);
+            EXPECT_EQ(i, graph->traverse(it, c));
+        }
         ASSERT_TRUE(set.empty());
 
         it = graph->kmer_to_node("C" + std::string(k - 1, 'G'));
         // CGG -> {}
         set = {};
-        graph->call_outgoing_kmers(it,
-            [&](auto i, char c) {
-                ASSERT_TRUE(set.count(c))
-                    << k
-                    << "\n" << c
-                    << "\n" << graph->get_node_sequence(it)
-                    << "\n" << graph->get_node_sequence(i);
-                set.erase(c);
-                EXPECT_EQ(i, graph->traverse(it, c))
-                    << graph->get_node_sequence(i) << '\n' << c;
-            }
-        );
+        for (auto [i, c] : graph->outgoing_kmers(it)) {
+            ASSERT_TRUE(set.count(c))
+                << k
+                << "\n" << c
+                << "\n" << graph->get_node_sequence(it)
+                << "\n" << graph->get_node_sequence(i);
+            set.erase(c);
+            EXPECT_EQ(i, graph->traverse(it, c))
+                << graph->get_node_sequence(i) << '\n' << c;
+        }
         ASSERT_TRUE(set.empty());
 
         // GGG does not exist
@@ -207,84 +197,74 @@ TYPED_TEST(DeBruijnGraphTest, CallIncomingEdges) {
         it = graph->kmer_to_node('C' + std::string(k - 1, 'G'));
         // CCG <- CGG
         std::set<char> set = { 'C' };
-        graph->call_incoming_kmers(it,
-            [&](auto i, char c) {
-                ASSERT_TRUE(set.count(c))
-                    << k
-                    << "\n" << c
-                    << "\n" << graph->get_node_sequence(it)
-                    << "\n" << graph->get_node_sequence(i);
-                set.erase(c);
-                EXPECT_EQ(i, graph->traverse_back(it, c));
-            }
-        );
+        for (auto [i, c] : graph->incoming_kmers(it)) {
+            ASSERT_TRUE(set.count(c))
+                << k
+                << "\n" << c
+                << "\n" << graph->get_node_sequence(it)
+                << "\n" << graph->get_node_sequence(i);
+            set.erase(c);
+            EXPECT_EQ(i, graph->traverse_back(it, c));
+        }
         ASSERT_TRUE(set.empty());
 
         it = graph->kmer_to_node(std::string(k - 1, 'C') + 'G');
         // ACC <- CCG
         // CCC <- CCG
         set = { 'A', 'C' };
-        graph->call_incoming_kmers(it,
-            [&](auto i, char c) {
-                ASSERT_TRUE(set.count(c))
-                    << k
-                    << "\n" << c
-                    << "\n" << graph->get_node_sequence(it)
-                    << "\n" << graph->get_node_sequence(i);
-                set.erase(c);
-                EXPECT_EQ(i, graph->traverse_back(it, c));
-            }
-        );
+        for (auto [i, c] : graph->incoming_kmers(it)) {
+            ASSERT_TRUE(set.count(c))
+                << k
+                << "\n" << c
+                << "\n" << graph->get_node_sequence(it)
+                << "\n" << graph->get_node_sequence(i);
+            set.erase(c);
+            EXPECT_EQ(i, graph->traverse_back(it, c));
+        }
         ASSERT_TRUE(set.empty());
 
         it = graph->traverse_back(it, 'C');
         // CCC <- CCC
         // ACC <- CCC
         set = { 'C', 'A' };
-        graph->call_incoming_kmers(it,
-            [&](auto i, char c) {
-                ASSERT_TRUE(set.count(c))
-                    << k
-                    << "\n" << c
-                    << "\n" << graph->get_node_sequence(it)
-                    << "\n" << graph->get_node_sequence(i);
-                set.erase(c);
-                EXPECT_EQ(i, graph->traverse_back(it, c));
-            }
-        );
+        for (auto [i, c] : graph->incoming_kmers(it)) {
+            ASSERT_TRUE(set.count(c))
+                << k
+                << "\n" << c
+                << "\n" << graph->get_node_sequence(it)
+                << "\n" << graph->get_node_sequence(i);
+            set.erase(c);
+            EXPECT_EQ(i, graph->traverse_back(it, c));
+        }
         ASSERT_TRUE(set.empty());
 
         it = graph->traverse_back(it, 'A');
         // AAC <- ACC
         set = { 'A' };
-        graph->call_incoming_kmers(it,
-            [&](auto i, char c) {
-                ASSERT_TRUE(set.count(c))
-                    << k
-                    << "\n" << c
-                    << "\n" << graph->get_node_sequence(it)
-                    << "\n" << graph->get_node_sequence(i);
-                set.erase(c);
-                EXPECT_EQ(i, graph->traverse_back(it, c));
-            }
-        );
+        for (auto [i, c] : graph->incoming_kmers(it)) {
+            ASSERT_TRUE(set.count(c))
+                << k
+                << "\n" << c
+                << "\n" << graph->get_node_sequence(it)
+                << "\n" << graph->get_node_sequence(i);
+            set.erase(c);
+            EXPECT_EQ(i, graph->traverse_back(it, c));
+        }
         ASSERT_TRUE(set.empty());
 
         it = graph->kmer_to_node(std::string(k - 1, 'A') + 'C');
         // {} <- AAC
         set = {};
-        graph->call_incoming_kmers(it,
-            [&](auto i, char c) {
-                ASSERT_TRUE(set.count(c))
-                    << k
-                    << "\n" << c
-                    << "\n" << graph->get_node_sequence(it)
-                    << "\n" << graph->get_node_sequence(i);
-                set.erase(c);
-                EXPECT_EQ(i, graph->traverse(it, c))
-                    << graph->get_node_sequence(i) << '\n' << c;
-            }
-        );
+        for (auto [i, c] : graph->incoming_kmers(it)) {
+            ASSERT_TRUE(set.count(c))
+                << k
+                << "\n" << c
+                << "\n" << graph->get_node_sequence(it)
+                << "\n" << graph->get_node_sequence(i);
+            set.erase(c);
+            EXPECT_EQ(i, graph->traverse(it, c))
+                << graph->get_node_sequence(i) << '\n' << c;
+        }
         ASSERT_TRUE(set.empty());
 
         // AAA does not exist
@@ -307,7 +287,9 @@ TYPED_TEST(DeBruijnGraphTest, OutgoingAdjacent) {
             EXPECT_EQ(it, i);
         }
         ASSERT_NE(DeBruijnGraph::npos, it);
-        graph->adjacent_outgoing_nodes(it, [&](auto i) { adjacent_nodes.push_back(i); });
+        for (auto i : graph->adjacent_outgoing_nodes(it)) {
+            adjacent_nodes.push_back(i);
+        }
         ASSERT_EQ(2u, adjacent_nodes.size());
         EXPECT_EQ(
             convert_to_set(std::vector<SequenceGraph::node_index>{ it, graph->traverse(it, 'C') }),
@@ -317,7 +299,9 @@ TYPED_TEST(DeBruijnGraphTest, OutgoingAdjacent) {
 
         // AC, AAAAC
         it = graph->traverse(it, 'C');
-        graph->adjacent_outgoing_nodes(it, [&](auto i) { adjacent_nodes.push_back(i); });
+        for (auto i : graph->adjacent_outgoing_nodes(it)) {
+            adjacent_nodes.push_back(i);
+        }
         auto outset = convert_to_set(std::vector<SequenceGraph::node_index>{ graph->traverse(it, 'C') });
         if (k == 2) {
             outset.insert(graph->traverse(it, 'G'));
@@ -335,7 +319,9 @@ TYPED_TEST(DeBruijnGraphTest, OutgoingAdjacent) {
             EXPECT_EQ(it, i);
         }
         ASSERT_NE(DeBruijnGraph::npos, it);
-        graph->adjacent_outgoing_nodes(it, [&](auto i) { adjacent_nodes.push_back(i); });
+        for (auto i : graph->adjacent_outgoing_nodes(it)) {
+            adjacent_nodes.push_back(i);
+        }
         ASSERT_EQ(2u, adjacent_nodes.size());
         EXPECT_EQ(
             convert_to_set(std::vector<SequenceGraph::node_index>{
@@ -348,7 +334,9 @@ TYPED_TEST(DeBruijnGraphTest, OutgoingAdjacent) {
 
         // CG, CCCCG
         it = graph->traverse(it, 'G');
-        graph->adjacent_outgoing_nodes(it, [&](auto i) { adjacent_nodes.push_back(i); });
+        for (auto i : graph->adjacent_outgoing_nodes(it)) {
+            adjacent_nodes.push_back(i);
+        }
         ASSERT_EQ(1u, adjacent_nodes.size());
         EXPECT_EQ(
             convert_to_set(std::vector<SequenceGraph::node_index>{ graph->traverse(it, 'G') }),
@@ -362,7 +350,9 @@ TYPED_TEST(DeBruijnGraphTest, OutgoingAdjacent) {
             EXPECT_EQ(it, i);
         }
         ASSERT_NE(DeBruijnGraph::npos, it);
-        graph->adjacent_outgoing_nodes(it, [&](auto i) { adjacent_nodes.push_back(i); });
+        for (auto i : graph->adjacent_outgoing_nodes(it)) {
+            adjacent_nodes.push_back(i);
+        }
         ASSERT_EQ(1u, adjacent_nodes.size());
         EXPECT_EQ(
             convert_to_set(std::vector<SequenceGraph::node_index>{ graph->traverse(it, 'G') }),
@@ -382,7 +372,9 @@ TYPED_TEST(DeBruijnGraphTest, IncomingAdjacent) {
 
         // AA, AAAAA
         auto it = graph->kmer_to_node(std::string(k, 'A'));
-        graph->adjacent_incoming_nodes(it, [&](auto i) { adjacent_nodes.push_back(i); });
+        for (auto i : graph->adjacent_incoming_nodes(it)) {
+            adjacent_nodes.push_back(i);
+        }
         ASSERT_EQ(1u, adjacent_nodes.size());
         EXPECT_EQ(
             convert_to_set(std::vector<DeBruijnGraph::node_index>{ it }),
@@ -392,7 +384,9 @@ TYPED_TEST(DeBruijnGraphTest, IncomingAdjacent) {
 
         // AC, AAAAC
         it = graph->traverse(it, 'C');
-        graph->adjacent_incoming_nodes(it, [&](auto i) { adjacent_nodes.push_back(i); });
+        for (auto i : graph->adjacent_incoming_nodes(it)) {
+            adjacent_nodes.push_back(i);
+        }
         ASSERT_EQ(1u, adjacent_nodes.size());
         EXPECT_EQ(
             convert_to_set(std::vector<DeBruijnGraph::node_index>{ graph->traverse_back(it, 'A') }),
@@ -402,7 +396,9 @@ TYPED_TEST(DeBruijnGraphTest, IncomingAdjacent) {
 
         // CC, CCCCC
         it = graph->kmer_to_node(std::string(k, 'C'));
-        graph->adjacent_incoming_nodes(it, [&](auto i) { adjacent_nodes.push_back(i); });
+        for (auto i : graph->adjacent_incoming_nodes(it)) {
+            adjacent_nodes.push_back(i);
+        }
         ASSERT_EQ(2u, adjacent_nodes.size());
         EXPECT_EQ(
             convert_to_set(std::vector<DeBruijnGraph::node_index>{
@@ -415,7 +411,9 @@ TYPED_TEST(DeBruijnGraphTest, IncomingAdjacent) {
 
         // CG, CCCCG
         it = graph->traverse(it, 'G');
-        graph->adjacent_incoming_nodes(it, [&](auto i) { adjacent_nodes.push_back(i); });
+        for (auto i : graph->adjacent_incoming_nodes(it)) {
+            adjacent_nodes.push_back(i);
+        }
         ASSERT_EQ(2u, adjacent_nodes.size());
         EXPECT_EQ(
             convert_to_set(std::vector<DeBruijnGraph::node_index>{
@@ -428,7 +426,9 @@ TYPED_TEST(DeBruijnGraphTest, IncomingAdjacent) {
 
         // GG, GGGGG
         it = graph->kmer_to_node(std::string(k, 'G'));
-        graph->adjacent_incoming_nodes(it, [&](auto i) { adjacent_nodes.push_back(i); });
+        for (auto i : graph->adjacent_incoming_nodes(it)) {
+            adjacent_nodes.push_back(i);
+        }
         ASSERT_EQ(2u, adjacent_nodes.size());
         EXPECT_EQ(
             convert_to_set(std::vector<DeBruijnGraph::node_index>{

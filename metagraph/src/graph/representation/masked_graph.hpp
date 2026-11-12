@@ -51,18 +51,14 @@ class MaskedDeBruijnGraph : public DBGWrapper<DeBruijnGraph> {
                                                     bool sequential) const override;
 
     // Given a node index, call the target nodes of all edges outgoing from it.
-    virtual void adjacent_outgoing_nodes(node_index node,
-                                         const std::function<void(node_index)> &callback) const override;
+    virtual Nodes adjacent_outgoing_nodes(node_index node) const override;
 
-    virtual void call_outgoing_kmers(node_index kmer,
-                                     const OutgoingEdgeCallback &callback) const override;
+    virtual Edges outgoing_kmers(node_index kmer) const override;
 
-    virtual void call_incoming_kmers(node_index kmer,
-                                     const IncomingEdgeCallback &callback) const override;
+    virtual Edges incoming_kmers(node_index kmer) const override;
 
     // Given a node index, call the source nodes of all edges incoming to it.
-    virtual void adjacent_incoming_nodes(node_index node,
-                                         const std::function<void(node_index)> &callback) const override;
+    virtual Nodes adjacent_incoming_nodes(node_index node) const override;
 
     virtual void call_sequences(const CallPath &callback,
                                 size_t num_threads = 1,

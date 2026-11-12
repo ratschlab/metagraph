@@ -46,11 +46,9 @@ class DBGHashOrderedImpl : public DBGHashOrdered::DBGHashOrderedInterface {
     std::unique_ptr<NodeStream> node_stream(std::string_view sequence,
                                             bool sequential) const;
 
-    void call_outgoing_kmers(node_index node,
-                             const OutgoingEdgeCallback &callback) const;
+    Edges outgoing_kmers(node_index node) const;
 
-    void call_incoming_kmers(node_index node,
-                             const IncomingEdgeCallback &callback) const;
+    Edges incoming_kmers(node_index node) const;
 
     // Traverse the outgoing edge
     node_index traverse(node_index node, char next_char) const;
@@ -194,9 +192,9 @@ DBGHashOrderedImpl<KMER>::node_stream(std::string_view sequence, bool sequential
 }
 
 template <typename KMER>
-void DBGHashOrderedImpl<KMER>::call_outgoing_kmers(node_index node,
-                                                   const OutgoingEdgeCallback &callback) const {
+DeBruijnGraph::Edges DBGHashOrderedImpl<KMER>::outgoing_kmers(node_index node) const {
     assert(in_graph(node));
+    Edges edges;
 
     const auto &kmer = get_kmer(node);
 
@@ -206,14 +204,15 @@ void DBGHashOrderedImpl<KMER>::call_outgoing_kmers(node_index node,
 
         auto next = get_index(next_kmer);
         if (next != npos)
-            callback(next, c);
+            edges.emplace_back(next, c);
     }
+    return edges;
 }
 
 template <typename KMER>
-void DBGHashOrderedImpl<KMER>::call_incoming_kmers(node_index node,
-                                                   const IncomingEdgeCallback &callback) const {
+DeBruijnGraph::Edges DBGHashOrderedImpl<KMER>::incoming_kmers(node_index node) const {
     assert(in_graph(node));
+    Edges edges;
 
     const auto &kmer = get_kmer(node);
 
@@ -223,8 +222,9 @@ void DBGHashOrderedImpl<KMER>::call_incoming_kmers(node_index node,
 
         auto prev = get_index(prev_kmer);
         if (prev != npos)
-            callback(prev, c);
+            edges.emplace_back(prev, c);
     }
+    return edges;
 }
 
 template <typename KMER>
