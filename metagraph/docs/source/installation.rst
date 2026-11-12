@@ -62,7 +62,7 @@ Prerequisites
 Before compiling MetaGraph, install the following dependencies:
 
 - cmake 3.19 or higher
-- GNU GCC, LLVM Clang, or AppleClang with a C++20-capable standard library
+- GNU GCC 13 or newer, LLVM Clang, or AppleClang with a C++20-capable standard library
 - bzip2
 
 *Optional:*
@@ -85,8 +85,8 @@ Before compiling MetaGraph, install the following dependencies:
     .. group-tab:: Ubuntu / Debian
 
         On **Ubuntu** or **Debian**, install the development packages below.
-        Use a release providing CMake 3.19+ and a C++20 compiler and standard library;
-        otherwise install a newer toolchain first::
+        The default ``g++`` is GCC 13 or newer from Ubuntu 24.04 and Debian 13 on.
+        On older releases, install ``g++-13`` or newer and set ``CC`` and ``CXX`` to it::
 
             sudo apt-get install g++ cmake libbz2-dev libjemalloc-dev libboost-all-dev automake autoconf libdeflate-dev liblzma-dev
 

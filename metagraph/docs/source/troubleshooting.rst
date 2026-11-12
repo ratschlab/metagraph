@@ -14,7 +14,7 @@ See :ref:`installation` for platform-specific troubleshooting.
 
 - **Conda dependency conflict:** Try a fresh environment with the channels and priority in :ref:`installation`.
 - **Missing Docker image:** Pull it with ``docker pull ghcr.io/ratschlab/metagraph:master``.
-- **Unsupported C++ features:** Use a compiler and standard library supporting C++20, as required by the source build.
+- **Unsupported C++ features:** Use GCC 13 or newer, or Clang, with a standard library supporting C++20, as required by the source build.
 
 Memory Issues
 =============
