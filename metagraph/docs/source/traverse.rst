@@ -7,11 +7,14 @@ Labeled traversal (experimental)
 
    This page describes the two routes as the ``master`` branch serves them. The server of the
    ``gr/labeled-traversal`` branch, which the staging service runs, answers them in another way
-   in several places. For example, it also serves them on a list of graphs, it has
-   ``GET /traverse/capabilities``, and it resolves a name that is both a column and a header to
-   the column. Its routes are specified in ``metagraph/docs/SPEC-labeled-traversal-core.md``
-   and ``metagraph/docs/SPEC-multigraph-envelope.md``. Where the two differ, those
-   specifications describe the staging server.
+   in several places. It also serves them on a list of graphs. It has
+   ``GET /traverse/capabilities``, graphlet output, cancellation and budgets. It walks a header
+   label by membership unless the request sets ``support`` to ``trace``, and it resolves a name
+   that is both a column and a header to the column. Several limits and their defaults differ
+   too. Its routes are specified in ``metagraph/docs/SPEC-labeled-traversal-core.md`` and
+   ``metagraph/docs/SPEC-multigraph-envelope.md``, its graphlet output in
+   ``metagraph/docs/DESIGN-traverse-graphlet.md``. Where this page and those documents differ,
+   the documents describe the staging server.
 
 Labeled traversal extends a sequence in the graph along the labels that contain it. Use it to
 get the flanks of a gene in each record or sample that carries the gene.
