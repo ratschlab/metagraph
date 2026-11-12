@@ -1,6 +1,9 @@
 #include "traverse.hpp"
 
+#include <algorithm>
 #include <cmath>
+#include <exception>
+#include <future>
 #include <limits>
 #include <set>
 
@@ -8,6 +11,7 @@
 #include "graph/traversal/label_oracle.hpp"
 #include "graph/traversal/resolve.hpp"
 #include "graph/traversal/walker.hpp"
+#include "common/threads/threading.hpp"
 #include "config/config.hpp"
 
 
@@ -441,6 +445,120 @@ Json::Value process_traverse_request(const Json::Value &request,
             // a property of the seed and the data: the other seeds are still walked
             results.append(failed_seed_to_json(seed, e));
         }
+    }
+    out["results"] = std::move(results);
+    return out;
+}
+
+namespace {
+
+// What one index of a multi-graph server gives for a request
+struct IndexWalks {
+    // per seed: its walk or its error, or null when the index gives nothing for the seed
+    std::vector<Json::Value> walks;
+    // per seed and named label: whether the index has the label
+    std::vector<std::vector<bool>> known;
+    // per seed: whether the seed is shorter than the index's k
+    std::vector<bool> too_short;
+};
+
+IndexWalks walk_index(const TraverseRequest &req, const TraverseIndex &index) {
+    const LabelOracle oracle(*index.anno_graph);
+    IndexWalks out;
+    for (const Seed &named : req.seeds) {
+        out.known.emplace_back();
+        Json::Value &walk = out.walks.emplace_back();
+        // the index follows the labels it has
+        Seed seed;
+        seed.sequence = named.sequence;
+        for (const std::string &name : named.labels) {
+            out.known.back().push_back(oracle.find_column(name) || oracle.find_header(name));
+            if (out.known.back().back())
+                seed.labels.push_back(name);
+        }
+        out.too_short.push_back(seed.sequence.size() < oracle.get_k());
+        // an index without the seed or its labels gives nothing, like a search without hits
+        if ((named.labels.size() && seed.labels.empty()) || out.too_short.back())
+            continue;
+        try {
+            // a malformed seed or an ambiguous label refuses the request
+            check_seed(oracle, seed);
+            walk = seed_result_to_json(traverse_seed(oracle, seed, req.strategy));
+        } catch (const SeedNotInGraph &) {
+            continue;
+        } catch (const SeedDerivationError &e) {
+            if (e.cause() == SeedDerivationError::NO_CARRIER)
+                continue;
+            walk = failed_seed_to_json(seed, e);
+        }
+        walk["graph"] = index.graph;
+    }
+    return out;
+}
+
+} // namespace
+
+Json::Value process_traverse_request(const Json::Value &request,
+                                     const std::vector<TraverseIndex> &indexes,
+                                     const TraverseLimits &limits,
+                                     ThreadPool &pool) {
+    // the server has read the selection
+    Json::Value fields = request;
+    if (fields.isObject())
+        fields.removeMember("graphs");
+    const TraverseRequest req = parse_traverse_request(fields, limits);
+
+    std::vector<IndexWalks> walked(indexes.size());
+    // the tasks refer to this frame: they are waited for before it is left, also on a throw
+    struct Pending {
+        std::vector<std::shared_future<std::exception_ptr>> futures;
+        ~Pending() {
+            for (auto &future : futures)
+                future.wait();
+        }
+    } pending;
+    auto &futures = pending.futures;
+    // once a task runs, recording its future must not allocate
+    futures.reserve(indexes.size());
+    for (size_t i = 0; i < indexes.size(); ++i) {
+        futures.push_back(pool.enqueue([&, i]() {
+            try {
+                walked[i] = walk_index(req, indexes[i]);
+            } catch (...) {
+                return std::current_exception();
+            }
+            return std::exception_ptr();
+        }));
+    }
+    std::exception_ptr failed;
+    for (auto &future : futures) {
+        if (auto e = future.get(); e && !failed)
+            failed = e;
+    }
+    if (failed)
+        std::rethrow_exception(failed);
+
+    Json::Value out;
+    out["strategy"] = strategy_to_json(req.strategy);
+    Json::Value results(Json::arrayValue);
+    for (size_t s = 0; s < req.seeds.size(); ++s) {
+        if (std::all_of(walked.begin(), walked.end(),
+                        [&](const IndexWalks &w) { return w.too_short[s]; }))
+            throw std::invalid_argument("Seed shorter than k");
+        const std::vector<std::string> &labels = req.seeds[s].labels;
+        for (size_t l = 0; l < labels.size(); ++l) {
+            if (std::none_of(walked.begin(), walked.end(),
+                             [&](const IndexWalks &w) { return w.known[s][l]; })) {
+                throw std::invalid_argument("Label not found in the selected graphs: '"
+                                            + labels[l] + "'");
+            }
+        }
+        Json::Value walks(Json::arrayValue);
+        for (IndexWalks &w : walked) {
+            if (!w.walks[s].isNull())
+                walks.append(std::move(w.walks[s]));
+        }
+        results.append(Json::objectValue)["walks"] = std::move(walks);
     }
     out["results"] = std::move(results);
     return out;

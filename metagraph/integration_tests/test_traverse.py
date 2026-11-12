@@ -55,13 +55,13 @@ class TraverseServer(TraverseFixture):
     def setUpClass(cls):
         super().setUpClass()
         cls.host = '127.0.0.1'
+        cls._prepare()
         os.environ['NO_PROXY'] = cls.host
         # the test classes run in parallel: each server gets a port that is free now
         with socket.socket() as s:
             s.bind((cls.host, 0))
             port = s.getsockname()[1]
-        cls.server, cls.port = start_server(cls.graph, cls.annotation, cls.host, port,
-                                            cls.server_flags)
+        cls.server, cls.port = cls._start_server(port)
         # the server answers 503 while it loads: wait until it answers
         deadline = time.time() + 60
         while True:
@@ -74,6 +74,14 @@ class TraverseServer(TraverseFixture):
                 cls.server.kill()
                 raise RuntimeError(f'The server on port {cls.port} did not get ready')
             time.sleep(0.05)
+
+    @classmethod
+    def _prepare(cls):
+        """Whatever the server needs, built before its port is chosen."""
+
+    @classmethod
+    def _start_server(cls, port):
+        return start_server(cls.graph, cls.annotation, cls.host, port, cls.server_flags)
 
     @classmethod
     def tearDownClass(cls):
@@ -165,6 +173,7 @@ class TestTraverse(TraverseServer):
             {'seeds': [{'sequence': self.X}], 'strategy': {'branching': {'max_label_branches': -1}}},
             {'seeds': [{'sequence': self.X}] * 11},
             {'seeds': [{'sequence': self.X}], 'graph': 'x'},
+            {'seeds': [{'sequence': self.X}], 'graphs': ['x']},  # no list of graphs here
         ]:
             self.assertEqual(400, self._post('traverse', request).status_code, request)
         # there is no /resolve route
@@ -195,6 +204,78 @@ class TestTraverseBranchLimit(TraverseServer):
             flanks = {''.join(right['segments'][s]['sequence'] for s in p['segments'])
                       for p in right['paths']}
             self.assertEqual({self.P, self.Q}, flanks, branches)
+
+
+class TestTraverseGraphList(TraverseServer):
+    """A server on a list of graphs: record A is in the graph `one`, record B in `two`."""
+    mode = 'basic'
+
+    @classmethod
+    def _prepare(cls):
+        rows = []
+        for name, record, flank in [('one', 'A', cls.P), ('two', 'B', cls.Q)]:
+            base = f'{cls.tempdir.name}/{name}'
+            with open(base + '.fa', 'w') as f:
+                f.write(f'>{record}\n{cls.X + flank}\n')
+            cls._build_graph(base + '.fa', base + '.dbg', K, 'succinct', mode=cls.mode)
+            cls._annotate_graph(base + '.fa', base + '.dbg', base, 'column')
+            rows.append(f'{name},{base}.dbg,{base}.column.annodbg\n')
+        with open(cls.tempdir.name + '/graphs.csv', 'w') as f:
+            f.writelines(rows)
+
+    @classmethod
+    def _start_server(cls, port):
+        # as start_server: a server that exits at once lost its port to another test
+        for _ in range(100):
+            command = [METAGRAPH, 'server_query', cls.tempdir.name + '/graphs.csv',
+                       '--port', str(port), '--address', cls.host, '-p', '2']
+            process = subprocess.Popen(command, stdout=subprocess.DEVNULL,
+                                       stderr=subprocess.DEVNULL)
+            try:
+                process.wait(timeout=1)
+            except subprocess.TimeoutExpired:
+                return process, port
+            port += 1
+        raise RuntimeError("Couldn't start server")
+
+    def _flanks(self, walk):
+        right = walk['arms']['right']
+        return [''.join(right['segments'][s]['sequence'] for s in path['segments'])
+                for path in right['paths']]
+
+    def test_every_graph_is_walked(self):
+        out = self._traverse({'seeds': [{'sequence': self.X, 'labels': ['A', 'B']},
+                                        {'sequence': self.X}]})
+        # each graph follows the labels it has
+        for result in out['results']:
+            walks = result['walks']
+            self.assertEqual(['one', 'two'], [walk['graph'] for walk in walks])
+            self.assertEqual([['A'], ['B']], [walk['seed']['labels'] for walk in walks])
+            self.assertEqual([[self.P], [self.Q]], [self._flanks(walk) for walk in walks])
+
+    def test_selected_graphs(self):
+        seeds = [{'sequence': self.X}]
+        walks = self._traverse({'seeds': seeds, 'graphs': ['two']})['results'][0]['walks']
+        self.assertEqual(['two'], [walk['graph'] for walk in walks])
+        for graphs in [['three'], 'two']:
+            res = self._post('traverse', {'seeds': seeds, 'graphs': graphs})
+            self.assertEqual(400, res.status_code, graphs)
+        # a seed shorter than k in every graph
+        self.assertEqual(400, self._post('traverse', {'seeds': [{'sequence': self.X[:K - 1]}]}).status_code)
+
+    def test_graph_without_the_seed_or_its_labels(self):
+        out = self._traverse({'seeds': [
+            {'sequence': self.X, 'labels': ['A']},  # no graph but `one` has the label
+            {'sequence': self.P[:40]},              # no graph but `one` has the seed
+            {'sequence': self.Q[:20] + self.P[:20]},
+        ]})
+        self.assertEqual([['one'], ['one'], []],
+                         [[walk['graph'] for walk in result['walks']] for result in out['results']])
+
+    def test_label_in_no_selected_graph(self):
+        res = self._post('traverse', {'seeds': [{'sequence': self.X, 'labels': ['A', 'C']}]})
+        self.assertEqual(400, res.status_code)
+        self.assertIn("'C'", res.text)
 
 
 class TestTraverseLimits(TraverseServer):

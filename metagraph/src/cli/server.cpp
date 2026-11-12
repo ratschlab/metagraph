@@ -654,7 +654,7 @@ int run_server(Config *config) {
         });
     };
 
-    // the traversal routes serve a single index: their bounds outlive this block
+    // the bounds of the traversal route outlive this block
     const TraverseLimits traverse_bounds = traverse_limits(*config);
     auto traverse_index = [&]() -> const AnnotatedDBG& {
         if (anno_graph.wait_for(0s) != std::future_status::ready)
@@ -673,7 +673,33 @@ int run_server(Config *config) {
                 });
             };
         };
-        server.resource["^/traverse$"]["POST"] = traverse_route(process_traverse_request);
+        server.resource["^/traverse$"]["POST"] = traverse_route(
+            [](const Json::Value &request, const AnnotatedDBG &index, const TraverseLimits &limits) {
+                return process_traverse_request(request, index, limits);
+            });
+    } else {
+        // a list of graphs: the graphs are selected as in /search, and each one is walked
+        server.resource["^/traverse$"]["POST"] = [&](shared_ptr<HttpServer::Response> response,
+                                                    shared_ptr<HttpServer::Request> request) {
+            size_t request_id = num_requests++;
+            process_request(response, request, request_id, [&, request_id](const std::string &content) {
+                const Json::Value json = parse_json_string(content);
+                if (!json.isObject())
+                    throw std::invalid_argument("The request must be a JSON object");
+                if (json.isMember("graphs") && !json["graphs"].isArray())
+                    throw std::invalid_argument("'graphs' must be an array of graph names");
+                std::vector<std::string> names = filter_graphs_from_list(indexes, json, request_id);
+                std::sort(names.begin(), names.end());
+                std::vector<TraverseIndex> selected;
+                for (const std::string &name : names) {
+                    for (const auto &files : indexes.at(name)) {
+                        selected.push_back({ name, graphs_cache.at(files).get() });
+                    }
+                }
+                return Json::writeString(Json::StreamWriterBuilder(),
+                    process_traverse_request(json, selected, traverse_bounds, graphs_pool));
+            });
+        };
     }
 
     server.default_resource["GET"] = [&](shared_ptr<HttpServer::Response> response,
