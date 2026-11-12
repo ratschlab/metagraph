@@ -130,6 +130,22 @@ class TestTraverse(TraverseServer):
         self.assertEqual(1, len(left['paths']))
         self.assertEqual(0, left['paths'][0]['length_bp'])
 
+    def test_split_limit(self):
+        seeds = [{'sequence': self.X, 'labels': ['A', 'B']}]
+        out = self._traverse({'seeds': seeds})
+        self.assertEqual(64, out['strategy']['branching']['max_splits_per_path'])
+        # no split allowed: the path ends at the fork
+        out = self._traverse({'seeds': seeds, 'strategy': {'branching': {'max_splits_per_path': 0}}})
+        right = out['results'][0]['arms']['right']
+        self.assertEqual('truncated', right['status'])
+        self.assertEqual(['max_splits_per_path'], [path['path_reason'] for path in right['paths']])
+        out = self._traverse({'seeds': seeds,
+                              'strategy': {'branching': {'max_splits_per_path': 'unlimited'}}})
+        self.assertEqual('unlimited', out['strategy']['branching']['max_splits_per_path'])
+        right = out['results'][0]['arms']['right']
+        self.assertEqual('complete', right['status'])
+        self.assertEqual(2, len(right['paths']))
+
     def test_derived_labels_direction_and_bounds(self):
         out = self._traverse({
             'seeds': [{'sequence': self.X}],
@@ -174,6 +190,7 @@ class TestTraverse(TraverseServer):
             {'seeds': [{'sequence': self.X, 'label': ['A']}]},
             {'seeds': [{'sequence': self.X, 'labels': ['C']}]},
             {'seeds': [{'sequence': self.X}], 'strategy': {'branching': {'max_label_branches': -1}}},
+            {'seeds': [{'sequence': self.X}], 'strategy': {'branching': {'max_splits_per_path': 'none'}}},
             {'seeds': [{'sequence': self.X}] * 11},
             {'seeds': [{'sequence': self.X}], 'graph': 'x'},
             {'seeds': [{'sequence': self.X}], 'graphs': ['x']},  # no list of graphs here

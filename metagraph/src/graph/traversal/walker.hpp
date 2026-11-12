@@ -82,7 +82,7 @@ const char* to_string(EndReason reason);
 struct Strategy {
     enum Direction { BOTH, LEFT, RIGHT };
 
-    // "no limit" for max_label_branches
+    // "no limit" for max_label_branches and max_splits_per_path
     static constexpr size_t kUnlimited = std::numeric_limits<size_t>::max();
 
     Direction direction = BOTH;
@@ -101,8 +101,10 @@ struct Strategy {
     uint64_t max_extension_bp = 5000;
     double time_budget_ms = 30'000;
 
-    // Safety caps. Not request fields: they keep a request within bounded memory.
+    // How many times a path may split (kUnlimited: the caps below bound the walk)
     size_t max_splits_per_path = 64;
+
+    // Safety caps. Not request fields: they keep a request within bounded memory.
     uint64_t max_steps = 1'000'000;
     size_t max_live_paths = 1000;
     size_t max_paths = 10'000;

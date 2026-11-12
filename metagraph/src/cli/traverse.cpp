@@ -236,15 +236,20 @@ TraverseRequest parse_traverse_request(const Json::Value &json, const TraverseLi
         }
         if (t.has("branching")) {
             Strict b(t.raw("branching"), "request.strategy.branching");
-            if (b.has("max_label_branches")) {
-                const Json::Value &v = b.raw("max_label_branches");
+            // a number in range, or "unlimited"
+            auto limit = [&](const char *key, size_t &value) {
+                if (!b.has(key))
+                    return;
+                const Json::Value &v = b.raw(key);
                 if (v.isString() && v.asString() == "unlimited") {
-                    st.max_label_branches = Strategy::kUnlimited;
+                    value = Strategy::kUnlimited;
                 } else {
                     // anything else, null included, must be a number in range
-                    st.max_label_branches = b.uint("max_label_branches", 0, 0, 1'000'000);
+                    value = b.uint(key, 0, 0, 1'000'000);
                 }
-            }
+            };
+            limit("max_label_branches", st.max_label_branches);
+            limit("max_splits_per_path", st.max_splits_per_path);
             b.done();
         }
         if (t.has("bounds")) {
@@ -268,8 +273,11 @@ Json::Value strategy_to_json(const Strategy &st) {
                    : st.direction == Strategy::LEFT ? "left" : "right";
     j["labels"]["max_seed_labels"] = uint_json(st.max_seed_labels);
     j["labels"]["seed_label_kind"] = st.seed_label_kind ? to_string(*st.seed_label_kind) : "auto";
-    j["branching"]["max_label_branches"] = st.max_label_branches == Strategy::kUnlimited
-        ? Json::Value("unlimited") : uint_json(st.max_label_branches);
+    auto limit_json = [](size_t value) {
+        return value == Strategy::kUnlimited ? Json::Value("unlimited") : uint_json(value);
+    };
+    j["branching"]["max_label_branches"] = limit_json(st.max_label_branches);
+    j["branching"]["max_splits_per_path"] = limit_json(st.max_splits_per_path);
     j["bounds"]["max_extension_bp"] = uint_json(st.max_extension_bp);
     j["bounds"]["time_budget_ms"] = st.time_budget_ms;
     return j;
