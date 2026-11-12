@@ -110,6 +110,14 @@ class TestAPIRaw(TestAPIBase):
         self.assertEqual(response.status_code, 400)
         self.assertIn('does not support graph filtering', response.json()['error'])
 
+    def test_api_raw_unknown_field(self):
+        fasta = ">query\nAATAAAGGTGTGAGATAACCCCAGCGGTGCCAGGATCCGTGCA"
+        for cmd in ['search', 'align']:
+            self.assertEqual(200, self.raw_post_request(cmd, json.dumps({'FASTA': fasta})).status_code)
+            ret = self.raw_post_request(cmd, json.dumps({'FASTA': fasta, 'discovery_fracton': 0.1}))
+            self.assertEqual(ret.status_code, 400)
+            self.assertIn("Unknown field 'discovery_fracton'", ret.json()['error'])
+
     def test_api_raw_incomplete_json(self):
         ret = self.raw_post_request('search',
             '{"FASTA": ">query\\nAATAAAGGTGTGAGATAACCCCAGCGGTGCCAGGATCCGTGCA", "discovery_fraction": 0.1,')
