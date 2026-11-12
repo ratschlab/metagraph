@@ -2635,7 +2635,8 @@ TEST(ResolveAnswer, TheGroupingIsPricedAboveItsPeak) {
     uint64_t peak = 0;
     mallctl("thread.peak.read", &peak, &sz, nullptr, 0);
 #endif
-    EXPECT_EQ(64u, calls);
+    // a reading per label, then per group (T5a-X1: the groups' pass reads too)
+    EXPECT_EQ(64u + plain.candidates.size(), calls);
     ASSERT_EQ(plain.candidates.size(), profile.candidates.size());
     for (size_t i = 0; i < plain.candidates.size(); ++i) {
         ASSERT_EQ(plain.candidates[i].kmers, profile.candidates[i].kmers) << i;

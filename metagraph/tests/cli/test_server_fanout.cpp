@@ -646,9 +646,10 @@ TEST(ServerFanout, AnInlinePairStartsPastTheCutoff) {
 }
 
 // The spec states what an inline pair does (GPT A-Q1, A-Q2), and the fan-out does it: started,
-// it is answered past the cutoff (its own deadline ends it, never the cutoff), and its entry is
-// the request's as soon as it ends; before it starts, an in_ram load past its wait limit is not
-// started and the pair is refused 503 not_reached (NoLoadPastTheWaitLimit)
+// it is answered past the cutoff (its own deadline ends it, never the cutoff; a /resolve without
+// a deadline is told to stop at its own work cutoff: ABudgetLessInlinePairStopsAtItsCutoff), and
+// its entry is the request's as soon as it ends; before it starts, an in_ram load past its wait
+// limit is not started and the pair is refused 503 not_reached (NoLoadPastTheWaitLimit)
 TEST(ServerFanout, TheSpecStatesTheInlinePairRule) {
     const std::vector<SelectedPair> pairs { kPairs[0] };
     auto entry = entry_of(pairs);
@@ -684,7 +685,13 @@ TEST(ServerFanout, TheSpecStatesTheInlinePairRule) {
             "route does.",
             "is capped by `finish_by_ms` - clock_skew_allowance_ms, never by the work cutoff",
             "a load in progress is not interrupted; once the pair has started it is never "
-            "`not_reached` or `unfinished` by the cutoff",
+            "`not_reached` by the request's cutoff, nor `unfinished` by it but for a `/resolve` "
+            "pair without a deadline (the next bullet): it ends by its own deadline",
+            "A one-pair `/resolve` without a deadline (no `bounds.time_budget_ms`, no "
+            "`finish_by_ms`) has no deadline of its own and is told to stop at its own work "
+            "cutoff instead",
+            "With a deadline (either field) the previous bullet holds: the pair ends by its "
+            "deadline, 503 `deadline` past it",
             "its envelope, answered or refused, is written as soon as the pair ends",
             "nothing is loaded and its entry is refused 503 `not_reached`",
             "`metagraph query --query-mode labels`",

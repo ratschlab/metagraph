@@ -424,7 +424,8 @@ bool next_key_uses(const std::vector<node_index> &keys, annot::matrix::DecodeBud
 // none): the grouping charged before it is built (kCandidateRunBytes a run grouped), then
 // replaced by what the candidates hold (part "candidates"); the candidates are reserved, so
 // that no growth holds an old and a new buffer beside the grouping's map. |finishing| (unset:
-// none) is called with each label's index before its runs are grouped
+// none) is called with each label's index before its runs are grouped, then with each group's
+// index before it becomes a candidate
 void group_candidates(SupportProfile *profile, uint64_t min_block_kmers,
                       AnswerAccount *answer = nullptr,
                       const std::function<void(size_t)> &finishing = {});

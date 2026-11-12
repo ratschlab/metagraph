@@ -176,22 +176,19 @@ The answer keeps its upstream shape (a list of `{seq_description, results, ...}`
     stated whenever it lowers the budget, as on a single-graph server. A pair that finishes before the cutoff
     answers exactly its single-graph answer. A `/resolve` pair without a deadline (no `bounds.time_budget_ms`, no
     `finish_by_ms`) has no budget to cap and runs as its single-graph answer does (a deadline would change its
-    work: the direct path's explicit labels' hits fetched in pieces); it is told to stop at the cutoff, and its
-    work ends at its next reading of the request's stop: between row batches, and after the work every 4,096
-    labels, selection steps or answer objects (SPEC-labeled-traversal-core.md §4.5; T5a-X1, Fable review
-    2026-11-12: before, nothing after the row pass read the stop, so the selection of a pair without a deadline
-    held its pool thread to its end, minutes at the caps). A pair that cannot stop
-    by then (a load in progress, a step that reads no clock, a pair without a deadline) is `unfinished`.
+    work: the direct path's explicit labels' hits fetched in pieces); with no time-limited answer to give, it is
+    `unfinished` at the cutoff and told to stop there. Its work ends at its next reading of the request's stop:
+    between row batches, and after the work every 4,096 labels, groups, selection steps or answer objects; a
+    piece that reads none (SPEC-labeled-traversal-core.md §4.5 lists them under "Not polled", with their times at
+    the caps) delays that to its end (T5a-X1, Fable review 2026-11-12: before, nothing after the row pass read
+    the stop, so the selection of a pair without a deadline held its pool thread to its end, minutes at the
+    caps). A pair that cannot stop by the cutoff (a load in progress, a step that reads no clock) is `unfinished`
+    too.
 - A one-pair request (the selection holds one pair) runs inline, as its single-graph route does. The pair's own
   deadline, which starts when its work starts (after an in_ram load), is capped by `finish_by_ms` -
   clock_skew_allowance_ms, never by the work cutoff; a load in progress is not interrupted; once the pair has
-  started it is never `not_reached` or `unfinished` by the cutoff, it ends by its own deadline (a `/resolve` pair
-  without a deadline — no `bounds.time_budget_ms`, no `finish_by_ms` — has none and is told to stop at its own
-  work cutoff instead: once the span of the request's work cutoff, the server maximum less the finalisation
-  reserve, has passed since its work started; its work ends at its next reading of the stop, and if it has not
-  finished by then the pair is `unfinished`, reason `cutoff`, with the pooled pair's refusal and text. T5a-X1,
-  Fable review 2026-11-12: before, nothing ended such a pair's work, which held its HTTP thread for minutes at
-  the caps; a pair that finishes by then answers as before); and its envelope,
+  started it is never `not_reached` by the request's cutoff, nor `unfinished` by it but for a `/resolve` pair
+  without a deadline (the next bullet): it ends by its own deadline; and its envelope,
   answered or refused, is written as soon as the pair ends (a refused pair's envelope is bound by the transport cap
   only, so it can be written after `finish_by_ms`). Before it starts, an in_ram load is not started once its wait
   limit has passed (`finish_by_ms` - clock_skew_allowance_ms, else the transport cap) or its client has left:
@@ -199,6 +196,14 @@ The answer keeps its upstream shape (a list of `{seq_description, results, ...}`
   above), unless its files changed since start-up: then it is refused 400 `index_changed` (section 10).
   `not_after_ms` refuses it as in a fan-out. The envelope's `deadline` states the request's instants as for
   any request.
+- A one-pair `/resolve` without a deadline (no `bounds.time_budget_ms`, no `finish_by_ms`) has no deadline of its
+  own and is told to stop at its own work cutoff instead: once the span of the request's work cutoff (the server
+  maximum less the finalisation reserve) has passed since its work started, its work ends at its next reading of
+  the stop, as a pooled pair's does (above, with the same delays), and if it has not finished by then the pair is
+  `unfinished`, reason `cutoff`, with the pooled pair's refusal and text; a pair that finishes by then answers as
+  before. With a deadline (either field) the previous bullet holds: the pair ends by its deadline, 503 `deadline`
+  past it (T5a-X1, Fable review 2026-11-12: before, nothing ended such a pair's work, which held its HTTP thread
+  for minutes at the caps).
 - `deadline.effective_deadline_at` and `deadline.cutoff_at` are stated only when the request gives `not_after_ms`
   or `finish_by_ms` (samples 01 and 02 give neither); otherwise they are null, the cutoff applying all the same.
 - The 899 s transport cap bounds every answer.

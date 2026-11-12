@@ -4324,11 +4324,17 @@ class TestResolveSelectionStops(TestingBase):
     The fixture, a_long, is R1's probe A2 shape (T4 review) at 10 kbp: LONG labels of one run
     over the whole query and three labels of one 31-mer every 32 k-mers (from k-mer 7, 17 and
     27), so that each of the selection's picks splits every long run: about 1,000 rounds of up to
-    LONG x 1,000 pieces, seconds of work after a row pass of a tenth of a second. b_small and
-    c_small hold 2 kbp of other sequence each (the query is absent: resolved at once)."""
+    LONG x 1,000 pieces, seconds of work after a row pass of a tenth of a second (the whole
+    selection about 8 s on an idle laptop core, so that the bounds below, 3.5 s past the
+    instant a stop is due, leave room for a loaded host and still fail the base, which runs
+    the selection to its end). b_small and c_small hold 2 kbp of other sequence each (the
+    query is absent: resolved at once)."""
 
     maxDiff = None
-    LONG = 200
+    LONG = 400
+    # how long after the instant its stop is due a pair may still work: its next reading, on
+    # a loaded host (the selection's readings come every few milliseconds here)
+    LATE_S = 3.5
 
     @classmethod
     def setUpClass(cls):
@@ -4416,14 +4422,16 @@ class TestResolveSelectionStops(TestingBase):
             took = time.time() - started
             self.assertEqual([('b_small', 'answered'), ('c_small', 'answered')],
                              [(a['graph'], a['outcome']) for a in following['answers']])
-            self.assertLess(took, 1.25)
+            # at once: two pairs resolved in milliseconds, after a_long's last reading (before,
+            # they were not reached at their own cutoff)
+            self.assertLess(took, 3.0)
             entry = self.wait_ended(server, 'x1-pooled')
             self.assertEqual('ended', entry['state'])
             p_long = entry['pairs'][0]
             self.assertEqual(('a_long', 'ended', 'unfinished'),
                              (p_long['graph'], p_long['state'], p_long['outcome']))
             # its worker ended within a reading of the cutoff, not after its selection
-            self.assertLess(p_long['usage']['elapsed_ms'], 1250 + 2500)
+            self.assertLess(p_long['usage']['elapsed_ms'], 1250 + 1000 * self.LATE_S)
         finally:
             server.stop()
 
@@ -4446,7 +4454,7 @@ class TestResolveSelectionStops(TestingBase):
                              out['unfinished'])
             self.assertEqual(NO_DEADLINE, out['deadline'])
             self.assertGreater(took, 1.0)
-            self.assertLess(took, 1.25 + 2.5)
+            self.assertLess(took, 1.25 + self.LATE_S)
             registry = self.wait_ended(server, 'x1-inline')
             self.assertEqual(('ended', 'answered'), (registry['state'], registry['reason']))
             (pair,) = registry['pairs']
@@ -4460,6 +4468,35 @@ class TestResolveSelectionStops(TestingBase):
             self.assertEqual(untimed(dict(self.cli_resolve('a_long', self.request(select=False)),
                                           unknown_labels=[])),
                              untimed({k: v for k, v in answer.items() if k not in TAGS}))
+        finally:
+            server.stop()
+
+    def test_a_one_pair_resolve_with_a_deadline_ends_by_it(self):
+        """The other side of the gate: a one-pair /resolve with a deadline, finish_by_ms or
+        bounds.time_budget_ms, is not told to stop at its work cutoff. Past the span of the
+        cutoff (1,250 ms) it works on and ends by its own deadline, here the server's maximum
+        (1,500 ms) for both, refused 503 deadline, not unfinished (SPEC-multigraph-envelope.md
+        section 4)."""
+        server = self.server('gate', 1500)
+        try:
+            for name, deadline in (
+                    ('finish_by_ms', lambda: {'finish_by_ms': int(time.time() * 1000) + 60000}),
+                    ('time_budget_ms', lambda: {'bounds': {'time_budget_ms': 60000}})):
+                started = time.time()
+                out = self.post_to(server, 'resolve', dict(self.request(), graphs=['a_long'],
+                                                           **deadline()))
+                took = time.time() - started
+                (entry,) = out['answers']
+                self.assertEqual(('a_long', 'refused'), (entry['graph'], entry['outcome']), name)
+                refusal = entry['refusal']
+                self.assertEqual((503, 'deadline'), (refusal['http_status'], refusal['code']),
+                                 name)
+                self.assertIn('could not be built and written within bounds.time_budget_ms',
+                              refusal['error'], name)
+                self.assertEqual(([], 0, 1), (out['unfinished'], out['answered'], out['refused']),
+                                 name)
+                self.assertGreater(took, 1.25, name)
+                self.assertLess(took, 1.5 + self.LATE_S, name)
         finally:
             server.stop()
 
@@ -4498,7 +4535,7 @@ class TestResolveSelectionStops(TestingBase):
                 # working when its client left (a second in), ended right after
                 self.assertGreater(usage['elapsed_ms'], 900, name)
                 self.assertGreater(usage['cpu_ms'], 200, name)
-                self.assertLess(usage['elapsed_ms'], 1000 + 2500, name)
+                self.assertLess(usage['elapsed_ms'], 1000 + 1000 * self.LATE_S, name)
         finally:
             server.stop()
 
