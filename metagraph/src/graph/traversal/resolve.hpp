@@ -40,7 +40,8 @@ struct SupportProfile {
     std::vector<LabelProfile> labels;
 };
 
-// Resolve where |query| is supported by each of |labels|. No traversal.
+// Where |query| is supported by each of |labels|: the walker's check of a seed's named
+// labels. No traversal.
 // Throws std::invalid_argument for unknown labels, no labels or a query shorter than k.
 SupportProfile resolve_support(const LabelOracle &oracle,
                                std::string_view query,
