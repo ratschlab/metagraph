@@ -49,6 +49,27 @@ using StringGenerator = std::function<void(std::function<void(const std::string 
 std::vector<std::string>
 collapse_coord_ranges(const std::vector<SmallVector<uint64_t>> &tuples);
 
+/**
+ * collapse_coord_ranges of the coordinates per query position |coords| stands for (a position
+ * without coordinates ends every range open), computed from the positions with coordinates.
+ */
+std::vector<std::string>
+collapse_coord_ranges(const graph::PositionCoords &coords);
+
+/**
+ * Encode a k-mer presence mask as alternating x<len>o<len>... runs (x = ones, o = zeros),
+ * the trailing zeros included: 11100110 -> x3o2x2o1. The mask is given as a bit vector or as
+ * its runs of ones (PresenceRuns), which give the same string.
+ */
+std::string encode_presence_mask(const sdsl::bit_vector &mask);
+std::string encode_presence_mask(const graph::PresenceRuns &mask);
+
+/**
+ * The runs of one nonzero value of k-mer counts per query position, "<i>=<v>" for a run of
+ * one position and "<i>-<j>=<v>" otherwise, in order (the runs of zeros left out).
+ */
+std::vector<std::string> count_run_strings(const graph::CountRuns &counts);
+
 
 // Simple struct to wrap a query sequence
 struct QuerySequence {
@@ -79,12 +100,14 @@ class SeqSearchResult {
     typedef std::string Label;
     typedef std::vector<Label> LabelVec;
     typedef std::vector<std::pair<Label, size_t>> LabelCountVec;
-    typedef std::vector<std::tuple<Label, size_t, sdsl::bit_vector>> LabelSigVec;
-    typedef std::vector<std::tuple<Label, size_t, std::vector<size_t>>> LabelCountAbundancesVec;
+    // the values per query position held where a label matches (PresenceRuns, CountRuns,
+    // PositionCoords), written out as the vectors they stand for
+    typedef std::vector<std::tuple<Label, size_t, graph::PresenceRuns>> LabelSigVec;
+    typedef std::vector<std::tuple<Label, size_t, graph::CountRuns>> LabelCountAbundancesVec;
     // (label, num_kmer_matches, kmer_coordinates, num_kmers_in_target). The last
     // element is 0 when no CoordToHeader mapping is loaded (the label refers to
     // a whole annotation column rather than a single indexed sequence).
-    typedef std::vector<std::tuple<Label, size_t, std::vector<SmallVector<uint64_t>>, size_t>> LabelCountCoordsVec;
+    typedef std::vector<std::tuple<Label, size_t, graph::PositionCoords, size_t>> LabelCountCoordsVec;
 
     typedef std::variant<LabelVec,
                          LabelCountVec,

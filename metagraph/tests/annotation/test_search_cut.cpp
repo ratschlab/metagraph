@@ -19,6 +19,7 @@
 #include "../test_helpers.hpp"
 #include "../graph/all/test_dbg_helpers.hpp"
 #include "test_annotated_dbg_helpers.hpp"
+#include "dense_search_values.hpp"
 
 #include "annotation/coord_to_header.hpp"
 #include "annotation/int_matrix/csr_matrix/csr_matrix.hpp"
@@ -647,7 +648,7 @@ TEST(SearchCut, CountsTieBrokenByMedianAbundance) {
     EXPECT_EQ(num_kmers, matches[0].second);
     check_cut(cut);
 
-    auto counts = index->get_kmer_counts(sequence, 1, 0.0, 0.0, &cut);
+    auto counts = dense(index->get_kmer_counts(sequence, 1, 0.0, 0.0, &cut));
     ASSERT_EQ(1u, counts.size());
     EXPECT_EQ("b_high", std::get<0>(counts[0]));
     EXPECT_EQ(num_kmers, std::get<1>(counts[0]));

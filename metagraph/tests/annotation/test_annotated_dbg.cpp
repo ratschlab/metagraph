@@ -16,6 +16,7 @@
 
 #include "annotation/annotation_converters.hpp"
 #include "test_annotated_dbg_helpers.hpp"
+#include "dense_search_values.hpp"
 
 
 namespace {
@@ -1286,7 +1287,7 @@ TYPED_TEST(AnnotatedDBGWithNTest, get_top_label_signatures) {
             percentages.emplace_back(0.0);
 
             for (size_t j = 1; j <= results[i].size(); ++j) {
-                auto label_counts = anno_graph->get_top_label_signatures(sequences[i], j);
+                auto label_counts = dense(anno_graph->get_top_label_signatures(sequences[i], j));
                 std::sort(label_counts.begin(), label_counts.end(), comp);
                 ASSERT_GE(j, label_counts.size());
 #if _DNA_GRAPH
@@ -1312,11 +1313,11 @@ TYPED_TEST(AnnotatedDBGWithNTest, get_top_label_signatures) {
                         continue;
 #endif
 
-                    auto label_counts = anno_graph->get_top_label_signatures(
+                    auto label_counts = dense(anno_graph->get_top_label_signatures(
                         sequences[i],
                         j,
                         percentages[m] + 1e-9
-                    );
+                    ));
                     ASSERT_GE(j, label_counts.size());
                     std::sort(label_counts.begin(), label_counts.end(), comp);
                     EXPECT_EQ(VectorSignature(results[i].begin(), results[i].begin() + m),
@@ -1331,11 +1332,11 @@ TYPED_TEST(AnnotatedDBGWithNTest, get_top_label_signatures) {
                     continue;
 #endif
 
-                auto label_counts = anno_graph->get_top_label_signatures(
+                auto label_counts = dense(anno_graph->get_top_label_signatures(
                     sequences[i],
                     results[i].size() + 1,
                     percentages[m] + 1e-9
-                );
+                ));
                 ASSERT_GE(results[i].size() + 1, label_counts.size());
                 std::sort(label_counts.begin(), label_counts.end(), comp);
                 EXPECT_EQ(VectorSignature(results[i].begin(), results[i].begin() + m),
@@ -1350,22 +1351,22 @@ TYPED_TEST(AnnotatedDBGWithNTest, get_top_label_signatures) {
             size_t i = 2;
             size_t m = 2;
             for (size_t j = 2; j <= results[i].size(); ++j) {
-                auto label_counts = anno_graph->get_top_label_signatures(
+                auto label_counts = dense(anno_graph->get_top_label_signatures(
                     sequences[i],
                     j,
                     percentages[m] + 1e-9
-                );
+                ));
                 ASSERT_GE(j, label_counts.size());
                 std::sort(label_counts.begin(), label_counts.end(), comp);
                 EXPECT_EQ(VectorSignature(results[i].begin(), results[i].begin() + m - 1),
                           label_counts) << k << " " << i << " " << j << " " << m;
             }
 
-            auto label_counts = anno_graph->get_top_label_signatures(
+            auto label_counts = dense(anno_graph->get_top_label_signatures(
                 sequences[i],
                 results[i].size() + 1,
                 percentages[m] + 1e-9
-            );
+            ));
             ASSERT_GE(results[i].size() + 1, label_counts.size());
             std::sort(label_counts.begin(), label_counts.end(), comp);
             EXPECT_EQ(VectorSignature(results[i].begin(), results[i].begin() + m - 1),
@@ -1514,7 +1515,7 @@ TYPED_TEST(AnnotatedDBGNoNTest, get_top_label_signatures) {
             percentages.emplace_back(0.0);
 
             for (size_t j = 1; j <= results[i].size(); ++j) {
-                auto label_counts = anno_graph->get_top_label_signatures(sequences[i], j);
+                auto label_counts = dense(anno_graph->get_top_label_signatures(sequences[i], j));
                 std::sort(label_counts.begin(), label_counts.end(), comp);
                 ASSERT_GE(j, label_counts.size());
                 if (k == 1 && i == 2 && j == 2) {
@@ -1534,11 +1535,11 @@ TYPED_TEST(AnnotatedDBGNoNTest, get_top_label_signatures) {
                     if (k == 1 && i == 2 && m == 2)
                         continue;
 
-                    auto label_counts = anno_graph->get_top_label_signatures(
+                    auto label_counts = dense(anno_graph->get_top_label_signatures(
                         sequences[i],
                         j,
                         percentages[m] + 1e-9
-                    );
+                    ));
                     ASSERT_GE(j, label_counts.size());
                     std::sort(label_counts.begin(), label_counts.end(), comp);
                     EXPECT_EQ(VectorSignature(results[i].begin(), results[i].begin() + m),
@@ -1551,11 +1552,11 @@ TYPED_TEST(AnnotatedDBGNoNTest, get_top_label_signatures) {
                 if (k == 1 && i == 2 && m == 2)
                     continue;
 
-                auto label_counts = anno_graph->get_top_label_signatures(
+                auto label_counts = dense(anno_graph->get_top_label_signatures(
                     sequences[i],
                     results[i].size() + 1,
                     percentages[m] + 1e-9
-                );
+                ));
                 ASSERT_GE(results[i].size() + 1, label_counts.size());
                 std::sort(label_counts.begin(), label_counts.end(), comp);
                 EXPECT_EQ(VectorSignature(results[i].begin(), results[i].begin() + m),
@@ -1569,22 +1570,22 @@ TYPED_TEST(AnnotatedDBGNoNTest, get_top_label_signatures) {
             size_t i = 2;
             size_t m = 2;
             for (size_t j = 2; j <= results[i].size(); ++j) {
-                auto label_counts = anno_graph->get_top_label_signatures(
+                auto label_counts = dense(anno_graph->get_top_label_signatures(
                     sequences[i],
                     j,
                     percentages[m] + 1e-9
-                );
+                ));
                 ASSERT_GE(j, label_counts.size());
                 std::sort(label_counts.begin(), label_counts.end(), comp);
                 EXPECT_EQ(VectorSignature(results[i].begin(), results[i].begin() + m - 1),
                           label_counts) << k << " " << i << " " << j << " " << m;
             }
 
-            auto label_counts = anno_graph->get_top_label_signatures(
+            auto label_counts = dense(anno_graph->get_top_label_signatures(
                 sequences[i],
                 results[i].size() + 1,
                 percentages[m] + 1e-9
-            );
+            ));
             ASSERT_GE(results[i].size() + 1, label_counts.size());
             std::sort(label_counts.begin(), label_counts.end(), comp);
             EXPECT_EQ(VectorSignature(results[i].begin(), results[i].begin() + m - 1),

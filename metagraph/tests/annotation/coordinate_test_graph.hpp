@@ -14,10 +14,13 @@ struct CoordinateRecord { std::string sequence, column, header; };
 
 // Small real coordinate-matrix fixture, with adjacent records in each column.
 // |verified_order|: its record mapping states its column labels and was checked against the
-// annotation, as a load of a .seqs written since H4 (CoordToHeader::column_order_verified)
+// annotation, as a load of a .seqs written since H4 (CoordToHeader::column_order_verified).
+// |record_mapping| false: no record mapping (a coordinate index without a .seqs, whose labels
+// are its columns and whose coordinates are the column's, its records concatenated)
 inline std::unique_ptr<graph::AnnotatedDBG>
 coordinate_test_graph(size_t k, const std::vector<CoordinateRecord> &records,
-                      bool row_diff = false, bool brwt = false, bool verified_order = false) {
+                      bool row_diff = false, bool brwt = false, bool verified_order = false,
+                      bool record_mapping = true) {
     using namespace annot::matrix;
     auto graph = std::make_shared<graph::DBGSuccinct>(k);
     annot::LabelEncoder<> encoder;
@@ -149,6 +152,8 @@ coordinate_test_graph(size_t k, const std::vector<CoordinateRecord> &records,
                 throw std::logic_error("Unexpected coordinate in row-diff fixture");
         }
     }
+    if (!record_mapping)
+        return std::make_unique<graph::AnnotatedDBG>(graph, std::move(annotation));
     auto mapping = std::make_unique<annot::CoordToHeader>(std::move(headers), std::move(counts));
     if (verified_order) {
         const auto &labels = annotation->get_label_encoder().get_labels();

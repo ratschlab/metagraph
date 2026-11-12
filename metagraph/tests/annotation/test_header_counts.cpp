@@ -3,6 +3,7 @@
 
 #include "gtest/gtest.h"
 #include "coordinate_test_graph.hpp"
+#include "dense_search_values.hpp"
 
 namespace mtg::test {
 namespace {
@@ -64,8 +65,8 @@ TEST(HeaderCounts, MatchesCoordinatesForThresholdsLimitsAndRepeats) {
         for (double discovery : {0., 0.5, 1.}) {
             for (double presence : {0., 0.5, 1.}) {
                 // every record above the thresholds
-                auto all = graph->get_kmer_coordinates(query, std::numeric_limits<size_t>::max(),
-                                                       discovery, presence);
+                auto all = dense(graph->get_kmer_coordinates(
+                        query, std::numeric_limits<size_t>::max(), discovery, presence));
                 for (size_t top : {size_t(0), size_t(1), size_t(2), size_t(100)}) {
                     // the top N by the score reported, with the counts by the coordinates
                     // matched (the contract's order: a record is not selected by its k-mer
@@ -75,7 +76,7 @@ TEST(HeaderCounts, MatchesCoordinatesForThresholdsLimitsAndRepeats) {
                                   graph->get_top_labels(query, top, discovery, presence, weighted));
                     }
                     // without the counts, the records and the order get_kmer_coordinates returns
-                    auto coords = graph->get_kmer_coordinates(query, top, discovery, presence);
+                    auto coords = dense(graph->get_kmer_coordinates(query, top, discovery, presence));
                     std::vector<std::pair<std::string, size_t>> expected;
                     for (const auto &[label, count, positions, length] : coords)
                         expected.emplace_back(label, count);
@@ -112,7 +113,7 @@ TEST(HeaderCounts, BRWTRowsAndRepeatedQueryPositions) {
     for (bool row_diff : {false, true}) {
         auto graph = coordinate_test_graph(3, records, row_diff, true);
         for (const auto &query : {"ACGACGACGTT", "ACGTT", "TTTTACG"}) {
-            auto coords = graph->get_kmer_coordinates(query, 100, 0, 0);
+            auto coords = dense(graph->get_kmer_coordinates(query, 100, 0, 0));
             for (bool weighted : {false, true}) {
                 std::vector<std::pair<std::string, size_t>> expected;
                 for (const auto &[label, count, positions, length] : coords) {
@@ -158,7 +159,7 @@ TEST(HeaderCounts, OneHeaderInTwoColumnsTiedAtTheCut) {
     graph::SearchCut cut;
 
     // top 1, without the counts: column 0's record (one coordinate per position)
-    EXPECT_EQ((Counts{{"same", 2, {1, 1}}}), graph->get_kmer_counts("ACGT", 1, 0, 0, &cut));
+    EXPECT_EQ((Counts{{"same", 2, {1, 1}}}), dense(graph->get_kmer_counts("ACGT", 1, 0, 0, &cut)));
     EXPECT_EQ(1u, cut.returned);
     EXPECT_FALSE(cut.complete);
     EXPECT_EQ(2u, cut.nth_score);
@@ -167,7 +168,7 @@ TEST(HeaderCounts, OneHeaderInTwoColumnsTiedAtTheCut) {
     EXPECT_EQ((Pairs{{"same", 2}}), graph->get_top_labels("ACGT", 1, 0, 0, false, &cut));
     EXPECT_EQ(2u, cut.tied);
     EXPECT_EQ(1u, cut.tied_returned);
-    auto coords = graph->get_kmer_coordinates("ACGT", 1, 0, 0, &cut);
+    auto coords = dense(graph->get_kmer_coordinates("ACGT", 1, 0, 0, &cut));
     ASSERT_EQ(1u, coords.size());
     EXPECT_EQ("same", std::get<0>(coords[0]));
     EXPECT_EQ(2u, std::get<1>(coords[0]));
@@ -179,7 +180,7 @@ TEST(HeaderCounts, OneHeaderInTwoColumnsTiedAtTheCut) {
 
     // top 2: both records, column 0's first; nothing cut
     EXPECT_EQ((Counts{{"same", 2, {1, 1}}, {"same", 2, {2, 2}}}),
-              graph->get_kmer_counts("ACGT", 2, 0, 0, &cut));
+              dense(graph->get_kmer_counts("ACGT", 2, 0, 0, &cut)));
     EXPECT_EQ(2u, cut.returned);
     EXPECT_TRUE(cut.complete);
 
@@ -222,9 +223,9 @@ TEST(HeaderCounts, PositionalResultsMatchCoordinatesAcrossBackends) {
                             SCOPED_TRACE(::testing::Message() << row_diff << ' ' << brwt
                                          << ' ' << query << ' ' << discovery << ' '
                                          << presence << ' ' << top);
-                            auto coords = graph->get_kmer_coordinates(query, top, discovery, presence);
-                            decltype(graph->get_kmer_counts(query, top, discovery, presence)) expected_counts;
-                            decltype(graph->get_top_label_signatures(query, top, discovery, presence)) expected_masks;
+                            auto coords = dense(graph->get_kmer_coordinates(query, top, discovery, presence));
+                            decltype(dense(graph->get_kmer_counts(query, top, discovery, presence))) expected_counts;
+                            decltype(dense(graph->get_top_label_signatures(query, top, discovery, presence))) expected_masks;
                             for (const auto &[label, count, positions, length] : coords) {
                                 std::vector<size_t> counts;
                                 sdsl::bit_vector mask(positions.size(), 0);
@@ -235,8 +236,8 @@ TEST(HeaderCounts, PositionalResultsMatchCoordinatesAcrossBackends) {
                                 expected_counts.emplace_back(label, count, std::move(counts));
                                 expected_masks.emplace_back(label, count, std::move(mask));
                             }
-                            EXPECT_EQ(expected_counts, graph->get_kmer_counts(query, top, discovery, presence));
-                            EXPECT_EQ(expected_masks, graph->get_top_label_signatures(query, top, discovery, presence));
+                            EXPECT_EQ(expected_counts, dense(graph->get_kmer_counts(query, top, discovery, presence)));
+                            EXPECT_EQ(expected_masks, dense(graph->get_top_label_signatures(query, top, discovery, presence)));
                         }
                     }
                 }
@@ -250,14 +251,14 @@ TEST(HeaderCounts, PositionalResultsPreserveGapsAndRepeatedKmers) {
                                           {"ACGTTT", "F", "second"}});
     // Query positions are ACG, CGN, GNN, NNN, NNA, NAC, ACG.
     const std::string query = "ACGNNNACG";
-    auto counts = graph->get_kmer_counts(query, 100, 0, 0);
+    auto counts = dense(graph->get_kmer_counts(query, 100, 0, 0));
     std::sort(counts.begin(), counts.end());
     ASSERT_EQ(counts.size(), 2u);
     EXPECT_EQ((std::tuple<std::string, size_t, std::vector<size_t>>{
         "first", 2, {3, 0, 0, 0, 0, 0, 3}}), counts[0]);
     EXPECT_EQ((std::tuple<std::string, size_t, std::vector<size_t>>{
         "second", 2, {1, 0, 0, 0, 0, 0, 1}}), counts[1]);
-    const auto signatures = graph->get_top_label_signatures(query, 100, 0, 0);
+    const auto signatures = dense(graph->get_top_label_signatures(query, 100, 0, 0));
     ASSERT_EQ(signatures.size(), 2u);
     for (const auto &[label, count, mask] : signatures) {
         EXPECT_EQ(count, 2u);

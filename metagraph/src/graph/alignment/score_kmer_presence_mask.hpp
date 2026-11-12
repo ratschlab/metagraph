@@ -2,6 +2,8 @@
 #define __SCORE_KMER_PRESENCE_MASK_HPP__
 
 #include <cstdint>
+#include <utility>
+#include <vector>
 #include <sdsl/int_vector.hpp>
 
 
@@ -23,6 +25,17 @@ namespace align {
  */
 int32_t score_kmer_presence_mask(size_t k,
                                  const sdsl::bit_vector &kmer_presence_mask,
+                                 int32_t match_score = 1,
+                                 int32_t mismatch_score = 2);
+
+/**
+ * score_kmer_presence_mask of the mask of |size| k-mers whose present k-mers are the runs
+ * [first, second) of |present_runs| (ascending, none empty and no two adjacent): the same
+ * score, computed from the runs in O(runs), without the mask.
+ */
+int32_t score_kmer_presence_mask(size_t k,
+                                 size_t size,
+                                 const std::vector<std::pair<size_t, size_t>> &present_runs,
                                  int32_t match_score = 1,
                                  int32_t mismatch_score = 2);
 

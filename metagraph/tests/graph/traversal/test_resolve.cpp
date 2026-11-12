@@ -15,6 +15,7 @@
 #include "tests/test_helpers.hpp"
 #include "tests/graph/all/test_dbg_helpers.hpp"
 #include "tests/annotation/test_annotated_dbg_helpers.hpp"
+#include "tests/annotation/dense_search_values.hpp"
 
 #include "graph/traversal/resolve.hpp"
 #include "graph/annotated_dbg.hpp"
@@ -196,7 +197,7 @@ TYPED_TEST(ResolveTest, ThreeStatesAndRuns) {
         EXPECT_FALSE(sel.seeds[0].population.dropped_digest.empty());
 
         // oracle agreement with the signature API for the labels present
-        auto sigs = anno->get_top_label_signatures(q, 10, 0.0, 0.0);
+        auto sigs = dense(anno->get_top_label_signatures(q, 10, 0.0, 0.0));
         for (const auto &[label, count, mask] : sigs) {
             const auto &lp = label == "A" ? A : B;
             EXPECT_EQ(count, lp.kmers_supported);
