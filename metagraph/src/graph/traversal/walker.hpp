@@ -174,8 +174,9 @@ struct LabelEnd {
     // why a DEAD_END: "hairpin" (the label's only continuation was a skipped hairpin);
     // otherwise empty
     const char *text = "";
-    // how many successors the node has in the graph, where the walk looked at them (not at
-    // an end by the extension length or a cap)
+    // how many successors the node has in the graph, where the walk looked at them: unset
+    // at an end by the extension length or by a cap that stopped the arm, set at an end by
+    // the split limit
     std::optional<size_t> successors;
 };
 

@@ -323,7 +323,7 @@ An arm:
   distinct labels on them.
 - An event's ``successors`` is the number of successors the node has in the graph, whatever
   their labels. It is absent where the walk did not look at them: at the extension length, and
-  where a bound stopped the arm.
+  where a bound stopped the arm. An end by the split limit states it.
 
 A seed whose labels cannot be determined gets an error in its place. The other seeds are still
 walked.
