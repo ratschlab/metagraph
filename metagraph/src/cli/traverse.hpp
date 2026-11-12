@@ -3,9 +3,13 @@
 
 #include <cstdint>
 #include <stdexcept>
+#include <string>
+#include <vector>
 
 #include <json/json.h>
 
+
+class ThreadPool;
 
 namespace mtg {
 
@@ -39,6 +43,20 @@ class InvalidRequest : public std::invalid_argument {
 Json::Value process_traverse_request(const Json::Value &request,
                                      const graph::AnnotatedDBG &anno_graph,
                                      const TraverseLimits &limits);
+
+// One index of a server started with a list of graphs
+struct TraverseIndex {
+    std::string graph;  // its name in the list
+    const graph::AnnotatedDBG *anno_graph;
+};
+
+// The same request on several indexes, walked in |pool|. Each seed gets one walk per index
+// that holds the seed and at least one of its labels.
+Json::Value process_traverse_request(const Json::Value &request,
+                                     const std::vector<TraverseIndex> &indexes,
+                                     const TraverseLimits &limits,
+                                     ThreadPool &pool);
+
 } // namespace cli
 } // namespace mtg
 

@@ -21,11 +21,13 @@ It has one server route:
 The route is experimental. Its request and response fields can change in a later release
 without notice.
 
-A server on a single index serves the route. A server started with a list of graphs does not.
+A server on a single index serves the route:
 
 .. code-block:: text
 
     metagraph server_query -i graph.dbg -a annotation.annodbg
+
+So does a server started with a list of graphs. See `A list of graphs`_.
 
 A request is a JSON object. The server refuses a field it does not know with HTTP 400, so a
 misspelled field is never ignored.
@@ -65,6 +67,49 @@ One difference remains. ``/search`` checks the seed's k-mers one by one. ``/trav
 a header label only when its record holds them at consecutive coordinates. ``/traverse`` drops
 a record that holds them out of order and reports it in ``dropped_labels``. A seed left
 without a label reports ``no_carrier``.
+
+A list of graphs
+----------------
+
+A server started with a list of graphs walks every selected graph. The ``graphs`` field selects
+them by name, as in ``/search``:
+
+.. code-block:: json
+
+    {
+      "graphs": ["bacteria", "plants"],
+      "seeds": [{"sequence": "ATGGAATTGCCC...", "labels": ["NZ_CM008882.1"]}]
+    }
+
+Without ``graphs``, the server walks every graph of a list with at most 10 names. A longer list
+needs the field. A name can hold several graphs. All of them are walked.
+
+Each entry of ``results`` then holds ``walks`` instead of one walk:
+
+.. code-block:: json
+
+    {
+      "strategy": {...},
+      "results": [
+        {"walks": [
+          {"graph": "bacteria", "seed": {...}, "label_dict": [...], "arms": {...}, "elapsed_ms": 12.5}
+        ]}
+      ]
+    }
+
+A walk has the fields of `The response`_ and the name of its ``graph``. ``walks`` holds one walk
+per graph that has the seed and at least one of its labels. Each graph follows the labels it
+has. A graph adds no walk in these cases:
+
+- A k-mer of the seed is not in the graph.
+- The graph has none of the named labels.
+- No label is on every k-mer of the seed.
+
+``walks`` is empty when no graph adds a walk. Any other error of a seed is listed as a walk with
+an ``error``.
+
+The server refuses a named label that no selected graph has with HTTP 400. The time budget
+applies to each walk. The graphs are walked in parallel.
 
 Terms
 -----
