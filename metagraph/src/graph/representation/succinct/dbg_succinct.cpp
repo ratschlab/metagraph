@@ -469,10 +469,15 @@ bool DBGSuccinct::count_pattern(const boss::Pattern &pattern,
                 *max += count;
                 return;
             } else {
-                for (uint64_t i = 1; i <= masked && budget->step(); ++i) {
-                    BOSS::edge_index edge = valid_edges_->select0(first + i);
+                uint64_t visited = 0;
+                for ( ; visited < masked && budget->step(); ++visited) {
+                    BOSS::edge_index edge = valid_edges_->select0(first + visited + 1);
                     count -= (symbols >> (boss_graph_->get_W(edge) % boss_graph_->alph_size)) & 1;
                 }
+                // a stopped scan leaves masked edges that may be among the counted ones
+                *min += count - std::min(count, masked - visited);
+                *max += count;
+                return;
             }
             *min += count;
             *max += count;
