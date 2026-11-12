@@ -767,11 +767,27 @@ TYPED_TEST(WalkerTest, SplitLimit) {
             EXPECT_EQ(0u, e->at_bp);
             EXPECT_EQ(EndReason::MAX_SPLITS, e->reason);
         }
-        for (size_t limit : { size_t(1), Strategy::kUnlimited }) {
+        st.max_splits_per_path = 1;
+        auto one = run(*anno, X, { "A", "B" }, st);
+        EXPECT_EQ(2u, one.arms[kRight].paths.size());
+        EXPECT_EQ(ArmResult::COMPLETE, one.arms[kRight].status);
+
+        // two forks in a row: the path of A and B splits from C after X and again after Y
+        auto c = fork_blocks(7);
+        const std::string &Y = c[0], &R = c[1], &T = c[2];
+        auto two = build_anno_graph<Graph, Annotation>(
+                kK, { X + P + Y + R, X + P + Y + T, X + Q }, { "A", "B", "C" }, mode);
+        st.max_splits_per_path = 1;
+        auto cut = run(*two, X, { "A", "B", "C" }, st);
+        check_invariants(cut.arms[kRight]);
+        EXPECT_EQ(ArmResult::TRUNCATED, cut.arms[kRight].status);
+        EXPECT_EQ(P.size() + Y.size(), cut.arms[kRight].complete_to_bp);
+        for (size_t limit : { size_t(2), Strategy::kUnlimited }) {
             st.max_splits_per_path = limit;
-            auto one = run(*anno, X, { "A", "B" }, st);
-            EXPECT_EQ(2u, one.arms[kRight].paths.size());
-            EXPECT_EQ(ArmResult::COMPLETE, one.arms[kRight].status);
+            auto all = run(*two, X, { "A", "B", "C" }, st);
+            check_invariants(all.arms[kRight]);
+            EXPECT_EQ(ArmResult::COMPLETE, all.arms[kRight].status) << mode;
+            EXPECT_EQ(3u, all.arms[kRight].paths.size()) << mode;
         }
     }
 }

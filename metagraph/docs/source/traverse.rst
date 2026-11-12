@@ -248,8 +248,8 @@ forbid, the column labels of the path end and its header labels go on.
 Column labels have been walked on test data only. Every traversal run on the staging server so
 far named records.
 
-**Bounds.** Fixed limits bound the work for one seed, besides the extension length and the time
-budget:
+**Bounds.** These limits bound the work for one seed, besides the extension length and the time
+budget. The first two lines are fixed:
 
 - 1,000,000 steps. Reaching this limit, or the time budget, stops the whole seed.
 - 1000 live paths and 10,000 paths per arm. Reaching one of these limits stops that arm.
