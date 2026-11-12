@@ -498,9 +498,9 @@ void call_hull_sequences(const DeBruijnGraph &full_dbg,
     kmer.erase(kmer.begin());
     kmer.push_back('$');
     std::vector<HullPathContext> paths_to_extend;
-    full_dbg.call_outgoing_kmers(node, [&](node_index next_node, char c) {
+    for (auto [next_node, c] : full_dbg.outgoing_kmers(node)) {
         if (c == '$')
-            return;
+            continue;
 
         kmer.back() = c;
         assert(full_dbg.kmer_to_node(kmer) == next_node);
@@ -514,7 +514,7 @@ void call_hull_sequences(const DeBruijnGraph &full_dbg,
         } else {
             callback(kmer, std::vector<node_index>{ next_node });
         }
-    });
+    }
 
     while (paths_to_extend.size()) {
         HullPathContext hull_path = std::move(paths_to_extend.back());
@@ -529,13 +529,13 @@ void call_hull_sequences(const DeBruijnGraph &full_dbg,
 
         bool extend = true;
         while (extend && full_dbg.has_single_outgoing(path.back())) {
-            full_dbg.call_outgoing_kmers(path.back(), [&](auto node, char c) {
+            for (auto [node, c] : full_dbg.outgoing_kmers(path.back())) {
                 if (c == '$')
-                    return;
+                    continue;
 
                 path.push_back(node);
                 seq.push_back(c);
-            });
+            }
             depth++;
             extend = continue_traversal(seq, path.back(), depth, fork_count);
         }
@@ -557,9 +557,9 @@ void call_hull_sequences(const DeBruijnGraph &full_dbg,
         seq.push_back('$');
 
         // schedule further traversals
-        full_dbg.call_outgoing_kmers(node, [&](node_index next_node, char c) {
+        for (auto [next_node, c] : full_dbg.outgoing_kmers(node)) {
             if (c == '$')
-                return;
+                continue;
 
             seq.back() = c;
             assert(full_dbg.kmer_to_node(seq) == next_node);
@@ -573,7 +573,7 @@ void call_hull_sequences(const DeBruijnGraph &full_dbg,
             } else {
                 callback(seq, std::vector<node_index>{ next_node });
             }
-        });
+        }
     }
 }
 
@@ -765,23 +765,19 @@ void add_hull_contigs(const DeBruijnGraph &full_dbg,
                 // adjacent to it.
                 std::string kmer = contig.substr(j, full_dbg.get_k());
                 // forward expansion from the incoming nodes
-                batch_graph.adjacent_incoming_nodes(batch_graph.kmer_to_node(kmer),
-                    [&](node_index next) {
-                        call_hull_sequences(full_dbg, batch_graph.get_node_sequence(next),
-                                            callback, continue_traversal);
-                    }
-                );
+                for (node_index next : batch_graph.adjacent_incoming_nodes(batch_graph.kmer_to_node(kmer))) {
+                    call_hull_sequences(full_dbg, batch_graph.get_node_sequence(next),
+                                        callback, continue_traversal);
+                }
                 if (batch_graph.get_mode() == DeBruijnGraph::CANONICAL) {
                     // In canonical graphs, (incoming to forward) is equivalent
                     // to (outgoing from rev-comp), so the following code invokes
                     // backward expansion.
                     reverse_complement(kmer);
-                    batch_graph.adjacent_incoming_nodes(batch_graph.kmer_to_node(kmer),
-                        [&](node_index next) {
-                            call_hull_sequences(full_dbg, batch_graph.get_node_sequence(next),
-                                                callback, continue_traversal);
-                        }
-                    );
+                    for (node_index next : batch_graph.adjacent_incoming_nodes(batch_graph.kmer_to_node(kmer))) {
+                        call_hull_sequences(full_dbg, batch_graph.get_node_sequence(next),
+                                            callback, continue_traversal);
+                    }
                 }
                 // TODO: For non-canonical graphs, also expand backwards from
                 //       the outgoing nodes?

@@ -289,9 +289,9 @@ std::shared_ptr<const bit_vector> get_last(const graph::DeBruijnGraph &graph) {
         std::atomic_thread_fence(std::memory_order_release);
         graph.call_nodes([&](node_index v) {
             std::pair<char, node_index> last = { '\0', graph::DeBruijnGraph::npos };
-            graph.call_outgoing_kmers(v, [&](node_index u, char c) {
+            for (auto [u, c] : graph.outgoing_kmers(v)) {
                 last = std::max(last, std::pair{ c, u });
-            });
+            }
 
             if (last.second != graph::DeBruijnGraph::npos)
                 set_bit(last_bv.data(), last.second, true, std::memory_order_relaxed);
@@ -347,10 +347,10 @@ std::shared_ptr<const bit_vector> route_at_forks(const graph::DeBruijnGraph &gra
             auto get_first_parent = [&](node_index v) {
                 std::pair<char, node_index> first_in_edge { 127, graph::DeBruijnGraph::npos };
                 size_t indegree = 0;
-                graph.call_incoming_kmers(v, [&](node_index prev, char c) {
+                for (auto [prev, c] : graph.incoming_kmers(v)) {
                     first_in_edge = std::min(first_in_edge, std::make_pair(c, prev));
                     ++indegree;
-                });
+                }
 
                 auto [c, p] = first_in_edge;
 
@@ -531,13 +531,13 @@ void build_pred_succ(const graph::DeBruijnGraph &graph,
                 }
 
                 if (rd_succ[i]) {
-                    graph.adjacent_incoming_nodes(i, [&](auto pred) {
+                    for (auto pred : graph.adjacent_incoming_nodes(i)) {
                         if (dummy && (*dummy)[pred]) {
-                            return;
+                            continue;
                         }
                         pred_buf.push_back(to_row(pred));
                         pred_boundary_buf.push_back(0);
-                    });
+                    }
                 }
             }
 

@@ -51,7 +51,9 @@ coordinate_test_graph(size_t k, const std::vector<CoordinateRecord> &records,
             if (!graph->has_single_outgoing(node))
                 return;
             uint64_t next = 0;
-            graph->adjacent_outgoing_nodes(node, [&](auto n) { next = n; });
+            for (auto n : graph->adjacent_outgoing_nodes(node)) {
+                next = n;
+            }
             if (next <= node)
                 return; // strictly increasing paths cannot form anchor-free cycles
             anchors[node - 1] = 0;

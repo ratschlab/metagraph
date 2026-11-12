@@ -52,10 +52,10 @@ std::vector<uint64_t> random_traversal_numbers(const DeBruijnGraph &graph,
         numbers.push_back(dis(gen));
         for (size_t j = 1; j < path_size && numbers.size() < size; ++j) {
             bool found = false;
-            graph.adjacent_outgoing_nodes(numbers.back(), [&](auto next) {
+            for (auto next : graph.adjacent_outgoing_nodes(numbers.back())) {
                 found = true;
                 numbers.push_back(next);
-            });
+            }
             if (!found)
                 break;
         }
@@ -132,18 +132,18 @@ static void BM_BOSS_##NAME(benchmark::State& state) { \
     size_t i = 0; \
     for (auto _ : state) { \
         DeBruijnGraph::node_index node = indexes[i++ % size]; \
-        graph->OPERATION(node, [](auto node, char c) { \
-            benchmark::DoNotOptimize(node); \
+        for (auto [next, c] : graph->OPERATION(node)) { \
+            benchmark::DoNotOptimize(next); \
             benchmark::DoNotOptimize(c); \
-        }); \
+        } \
     } \
 } \
 BENCHMARK(BM_BOSS_##NAME) -> Unit(benchmark::kMicrosecond); \
 
-DEFINE_BOSS_PATH_BENCHMARK(call_outgoing_kmers_path, call_outgoing_kmers, false, false);
-DEFINE_BOSS_PATH_BENCHMARK(call_outgoing_kmers_bwdcache_path, call_outgoing_kmers, true, false);
-DEFINE_BOSS_PATH_BENCHMARK(call_outgoing_kmers_rcindex_path, call_outgoing_kmers, false, true);
-DEFINE_BOSS_PATH_BENCHMARK(call_outgoing_kmers_bwdcache_rcindex_path, call_outgoing_kmers, true, true);
+DEFINE_BOSS_PATH_BENCHMARK(outgoing_kmers_path, outgoing_kmers, false, false);
+DEFINE_BOSS_PATH_BENCHMARK(outgoing_kmers_bwdcache_path, outgoing_kmers, true, false);
+DEFINE_BOSS_PATH_BENCHMARK(outgoing_kmers_rcindex_path, outgoing_kmers, false, true);
+DEFINE_BOSS_PATH_BENCHMARK(outgoing_kmers_bwdcache_rcindex_path, outgoing_kmers, true, true);
 
 
 static void BM_BOSS_get_W_and_fwd(benchmark::State &state) {

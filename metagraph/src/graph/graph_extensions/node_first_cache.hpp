@@ -11,13 +11,13 @@ namespace mtg {
 namespace graph {
 
 // This cache stores intermediate results from BOSS bwd calls to speed up calls
-// to call_incoming_kmers in DBGSuccinct. In addition, it caches the indices
+// to incoming_kmers in DBGSuccinct. In addition, it caches the indices
 // corresponding to the reverse complements of the k-1 prefixes and suffixes of
 // each traversed node.
 class NodeFirstCache : public SequenceGraph::GraphExtension {
   public:
     using node_index = typename SequenceGraph::node_index;
-    using IncomingEdgeCallback = DeBruijnGraph::IncomingEdgeCallback;
+    using Edges = DeBruijnGraph::Edges;
     using edge_index = boss::BOSS::edge_index;
 
     NodeFirstCache(const DBGSuccinct &graph, size_t cache_size = 100'000)
@@ -28,7 +28,7 @@ class NodeFirstCache : public SequenceGraph::GraphExtension {
     char get_first_char(edge_index node, edge_index child_hint = 0) const;
 
     void call_incoming_edges(edge_index node, const boss::BOSS::Call<edge_index> &callback) const;
-    void call_incoming_kmers(node_index node, const IncomingEdgeCallback &callback) const;
+    Edges incoming_kmers(node_index node) const;
 
     edge_index get_prefix_rc(edge_index node, const std::string &spelling) const;
     edge_index get_suffix_rc(edge_index node, const std::string &spelling) const;
