@@ -98,7 +98,7 @@ Intervals are half-open k-mer intervals ``[begin, end)``. ``graph_runs`` are the
 are the maximal runs of k-mers it carries. With discovery, ``labels_truncated`` states how many
 labels were kept of how many found. Discovery leaves out names that ``/traverse`` would refuse
 as ambiguous: a column that is also a header, or a header of several records. So a selected
-seed is valid ``/traverse`` input as it stands, with its ``seed_id``. Seeds are listed in the order they were picked and may overlap. With ``select.min_block_bp`` set to the query's length, the one seed is the whole query, carried by the labels on all its k-mers. When no label carries all of them, there is no seed.
+seed is valid ``/traverse`` input as it stands, with its ``seed_id``. ``/resolve`` checks the seed's k-mers one by one, while ``/traverse`` keeps a header label only when its record holds them at consecutive coordinates. A record that holds them out of order is dropped there and reported in ``dropped_labels``, and a seed left without a label reports ``no_carrier``. Seeds are listed in the order they were picked and may overlap. With ``select.min_block_bp`` set to the query's length, the one seed is the whole query, carried by the labels on all its k-mers. When no label carries all of them, there is no seed.
 
 ``/traverse``
 -------------
@@ -258,9 +258,10 @@ The response
   smaller of it and its reverse complement) and its sorted labels: the id ``/resolve`` gives.
 - A derived set over ``max_seed_labels`` states how many labels it dropped
   (``labels_dropped``).
-- A segment's ``sequence`` is in natural orientation on both arms; on the left arm a
-  segment's bases precede its children's. ``from_bp`` is the distance of its first base from
-  the seed boundary.
+- A segment's ``sequence`` is in natural orientation on both arms. On the right arm a
+  segment's bases precede its children's. On the left arm they follow its children's, since
+  the children lie further from the seed. ``from_bp`` is the distance from the seed boundary
+  at which the segment starts: its first base on the right arm, its last on the left.
 - A path is a leaf of the tree: ``segments`` from the root, ``length_bp`` from the seed, and
   the labels reaching its end with their reasons (``branches``: how many times the label took
   several successors). ``path_reason`` is set when a bound ended the path.
