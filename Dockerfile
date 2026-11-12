@@ -1,6 +1,6 @@
 ARG CODE_BASE="/opt/metagraph"
 
-FROM ubuntu:22.04 AS metagraph_dev_env
+FROM ubuntu:24.04 AS metagraph_dev_env
 
 # Build toolchain for the image and for local development.
 
@@ -8,7 +8,7 @@ RUN export DEBIAN_FRONTEND="noninteractive" && apt-get update && apt-get install
     autoconf \
     automake \
     ccache \
-    g++-11 \
+    g++-13 \
     git \
     cmake \
     make \
@@ -22,8 +22,8 @@ RUN export DEBIAN_FRONTEND="noninteractive" && apt-get update && apt-get install
 
 WORKDIR /opt
 ENV LD_LIBRARY_PATH=/usr/local/lib
-ENV CC=/usr/bin/gcc-11
-ENV CXX=/usr/bin/g++-11
+ENV CC=/usr/bin/gcc-13
+ENV CXX=/usr/bin/g++-13
 
 RUN mkdir -p /opt/metagraph/build_docker /opt/ccache_docker
 RUN chmod o+rwx /opt/metagraph /opt/ccache_docker

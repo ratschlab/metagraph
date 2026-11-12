@@ -31,37 +31,17 @@ jobs:
       matrix:
         alphabet: [DNA, Protein]
         build_type: [Debug, Release]
-        compiler: [g++-11, g++-12, g++-13]
+        compiler: [g++-13]
         build_static: [OFF, ON]
         with_avx: [OFF, ON]
         include:
-          - compiler: g++-11
-            cxx: g++-11
-            cc: gcc-11
-
-          - compiler: g++-12
-            cxx: g++-12
-            cc: gcc-12
-
           - compiler: g++-13
             cxx: g++-13
             cc: gcc-13
 
         exclude:
-          - alphabet: Protein
-            compiler: g++-11
-          - alphabet: Protein
-            compiler: g++-12
-          - compiler: g++-11
-            build_static: ON
-          - compiler: g++-12
-            build_static: ON
           - build_type: Debug
             build_static: ON
-          - build_type: Debug
-            compiler: g++-11
-          - build_type: Debug
-            compiler: g++-12
           - with_avx: OFF
             build_static: OFF
 
