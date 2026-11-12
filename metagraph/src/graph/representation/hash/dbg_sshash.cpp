@@ -196,7 +196,8 @@ DBGSSHash::DBGSSHash(const std::string& input_filename,
                      size_t k,
                      Mode mode,
                      size_t num_chars,
-                     double ram_limit_gb)
+                     double ram_limit_gb,
+                     std::pair<sdsl::bit_vector, sdsl::bit_vector> *succ_pred)
     : DBGSSHash(k, mode) {
     if (k <= 1)
         throw std::domain_error("k must be at least 2");
@@ -261,6 +262,22 @@ DBGSSHash::DBGSSHash(const std::string& input_filename,
     utils::remove_temp_dir(tmp_dir);
 
     num_nodes_ = dict_size();
+
+    if (succ_pred) {
+        if (succ_pred->first.size() != num_nodes_ + 1 || succ_pred->second.size() != num_nodes_ + 1)
+            throw std::invalid_argument("succ/pred bitmaps do not match the SSHash graph");
+#ifndef NDEBUG
+        auto [succ, pred, has_duplicates] = generate_succ_pred(*this, num_nodes_);
+        assert(!has_duplicates);
+        for (uint64_t i = 0; i <= num_nodes_; ++i) {
+            assert(succ[i] == succ_pred->first[i]);
+            assert(pred[i] == succ_pred->second[i]);
+        }
+#endif
+        succ_is_next_ = bit_vector_smart(std::move(succ_pred->first));
+        pred_is_prev_ = bit_vector_smart(std::move(succ_pred->second));
+        return;
+    }
 
     bool has_duplicates;
     std::tie(succ_is_next_, pred_is_prev_, has_duplicates) = generate_succ_pred(*this, num_nodes_);
@@ -378,12 +395,6 @@ DBGSSHash::node_stream(std::string_view sequence, bool sequential) const {
     }, dict_);
 }
 
-void DBGSSHash::map_to_nodes(std::string_view sequence,
-                             const std::function<void(node_index)>& callback,
-                             const std::function<bool()>& terminate) const {
-    call_streamed_nodes(sequence, false, callback, terminate);
-}
-
 DBGSSHash::node_index DBGSSHash::reverse_complement(node_index node) const {
     if (node == npos)
         return npos;
@@ -413,12 +424,6 @@ DBGSSHash::node_index DBGSSHash::get_base_node(node_index node) const {
 
 uint64_t DBGSSHash::num_nodes() const {
     return mode_ != CANONICAL ? dict_size() : dict_size() * 2;
-}
-
-void DBGSSHash::map_to_nodes_sequentially(std::string_view sequence,
-                                          const std::function<void(node_index)>& callback,
-                                          const std::function<bool()>& terminate) const {
-    call_streamed_nodes(sequence, true, callback, terminate);
 }
 
 DBGSSHash::node_index DBGSSHash::traverse(node_index node, char next_char) const {

@@ -84,7 +84,9 @@ void check_protein_nodes(const DBGSSHash &graph, const std::string &sequence,
     const size_t k = graph.get_k();
     EXPECT_EQ(sequence.size() - k + 1, graph.num_nodes());
     std::vector<uint64_t> nodes;
-    graph.map_to_nodes_sequentially(sequence, [&](auto node) { nodes.push_back(node); });
+    for (auto node : map_to_nodes_sequentially(graph, sequence)) {
+        nodes.push_back(node);
+    }
     ASSERT_EQ(expected_nodes, nodes);
     for (size_t i = 0; i < nodes.size(); ++i) {
         ASSERT_NE(0u, nodes[i]);
@@ -107,7 +109,9 @@ TEST_F(DBGSSHashInput, ProteinPackedWordConstructionAndRoundTrip) {
         const size_t expected_width = k <= 12 ? 0 : k <= 25 ? 1 : 2;
         EXPECT_EQ(expected_width, graph.data().index());
         std::vector<uint64_t> nodes;
-        graph.map_to_nodes_sequentially(sequence, [&](auto node) { nodes.push_back(node); });
+        for (auto node : map_to_nodes_sequentially(graph, sequence)) {
+            nodes.push_back(node);
+        }
         check_protein_nodes(graph, sequence, nodes);
 
         std::stringstream bytes;

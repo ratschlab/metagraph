@@ -27,24 +27,6 @@ class DBGHashFast : public DeBruijnGraph {
         hash_dbg_->add_sequence(sequence, on_insertion);
     }
 
-    // Traverse graph mapping sequence to the graph nodes
-    // and run callback for each node until the termination condition is satisfied
-    void map_to_nodes(std::string_view sequence,
-                      const std::function<void(node_index)> &callback,
-                      const std::function<bool()> &terminate = [](){ return false; }) const override final {
-        hash_dbg_->map_to_nodes(sequence, callback, terminate);
-    }
-
-    // Traverse graph mapping sequence to the graph nodes
-    // and run callback for each node until the termination condition is satisfied.
-    // Guarantees that nodes are called in the same order as the input sequence.
-    // In canonical mode, non-canonical k-mers are NOT mapped to canonical ones
-    void map_to_nodes_sequentially(std::string_view sequence,
-                                   const std::function<void(node_index)> &callback,
-                                   const std::function<bool()> &terminate = [](){ return false; }) const override final {
-        hash_dbg_->map_to_nodes_sequentially(sequence, callback, terminate);
-    }
-
     std::unique_ptr<NodeStream> node_stream(std::string_view sequence,
                                             bool sequential) const override final {
         return hash_dbg_->node_stream(sequence, sequential);

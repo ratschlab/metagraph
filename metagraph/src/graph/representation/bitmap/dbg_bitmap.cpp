@@ -35,30 +35,13 @@ DBGBitmap::DBGBitmap(DBGBitmapConstructor *builder) : DBGBitmap(2) {
 }
 
 
-void DBGBitmap::map_to_nodes(std::string_view sequence,
-                             const std::function<void(node_index)> &callback,
-                             const std::function<bool()> &terminate) const {
-    for (const auto &[kmer, valid] : sequence_to_kmers(sequence, mode_ == CANONICAL)) {
-        if (terminate())
-            return;
-
-        callback(valid ? to_node(kmer) : npos);
-    }
-}
-
-// Traverse graph mapping sequence to the graph nodes
-// and run callback for each node until the termination condition is satisfied.
-// Guarantees that nodes are called in the same order as the input sequence.
-// In canonical mode, non-canonical k-mers are NOT mapped to canonical ones
-void DBGBitmap::map_to_nodes_sequentially(std::string_view sequence,
-                                          const std::function<void(node_index)> &callback,
-                                          const std::function<bool()> &terminate) const {
-    for (const auto &[kmer, valid] : sequence_to_kmers(sequence)) {
-        if (terminate())
-            return;
-
-        callback(valid ? to_node(kmer) : npos);
-    }
+std::unique_ptr<NodeStream>
+DBGBitmap::node_stream(std::string_view sequence, bool sequential) const {
+    auto kmers = sequence_to_kmers(sequence, !sequential && mode_ == CANONICAL);
+    size_t size = kmers.size();
+    return make_node_stream(size, [this, kmers = std::move(kmers)](size_t i) {
+        return kmers[i].second ? to_node(kmers[i].first) : npos;
+    });
 }
 
 DBGBitmap::node_index

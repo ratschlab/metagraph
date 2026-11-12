@@ -600,14 +600,14 @@ std::unique_ptr<AnnotatedDBG> counts_index(const std::string &sequence, size_t k
                                            const std::vector<uint64_t> &abundances) {
     auto graph = build_graph_batch<DBGHashOrdered>(k, { sequence });
     Vector<CSRMatrix::RowValues> rows(graph->max_index());
-    graph->map_to_nodes(sequence, [&](DeBruijnGraph::node_index node) {
+    for (DeBruijnGraph::node_index node : graph->node_range(sequence)) {
         auto &row = rows[AnnotatedDBG::graph_to_anno_index(node)];
         row.clear();
         for (size_t j = 0; j < labels.size(); ++j) {
             if (abundances[j])
                 row.emplace_back(j, abundances[j]);
         }
-    });
+    }
     annot::LabelEncoder<std::string> encoder;
     for (const auto &label : labels) {
         encoder.insert_and_encode(label);

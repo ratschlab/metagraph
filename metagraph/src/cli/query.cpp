@@ -728,7 +728,7 @@ void add_nodes_with_suffix_matches(const DBGSuccinct &full_dbg,
             assert(node == full_dbg.kmer_to_node(kmer));
 
             if (full_dbg.get_mode() == DeBruijnGraph::CANONICAL)
-                full_dbg.map_to_nodes(kmer, [&](node_index cn) { node = cn; });
+                node = *full_dbg.node_range(kmer).begin();
 
             added_nodes.emplace_back(std::move(kmer), node);
         };
@@ -777,12 +777,8 @@ void add_hull_contigs(const DeBruijnGraph &full_dbg,
         auto callback = [&](const std::string &sequence,
                             const std::vector<node_index> &path) {
             added_paths.emplace_back(sequence, path);
-            if (full_dbg.get_mode() == DeBruijnGraph::CANONICAL) {
-                added_paths.back().second.resize(0);
-                full_dbg.map_to_nodes(sequence,
-                    [&](node_index cn) { added_paths.back().second.push_back(cn); }
-                );
-            }
+            if (full_dbg.get_mode() == DeBruijnGraph::CANONICAL)
+                added_paths.back().second = map_to_nodes(full_dbg, sequence);
         };
         auto continue_traversal = [&](std::string_view seq,
                                       node_index last_node,
@@ -1043,9 +1039,10 @@ construct_query_graph(const AnnotatedDBG &full_anno_graph,
     #pragma omp parallel for num_threads(num_threads) schedule(dynamic, chunk_size)
     for (size_t i = 0; i < contigs.size(); ++i) {
         contigs[i].second.reserve(contigs[i].first.length() - graph_init->get_k() + 1);
-        full_dbg.map_to_nodes(contigs[i].first,
-                              [&](node_index node) { contigs[i].second.push_back(node);
-                                                     num_found_kmers += node != DeBruijnGraph::npos; });
+        for (node_index node : full_dbg.node_range(contigs[i].first)) {
+            contigs[i].second.push_back(node);
+            num_found_kmers += node != DeBruijnGraph::npos;
+        }
         num_kmers += contigs[i].second.size();
     }
     logger->trace("[Query graph construction] Contigs mapped to the full graph [threads: {}, contigs: {}, chunk_size: {}] (found {} / {} k-mers) in {} sec",
@@ -1119,9 +1116,9 @@ construct_query_graph(const AnnotatedDBG &full_anno_graph,
         std::vector<uint64_t> path(nodes_in_full.size());
         size_t j = 0;
         // nodes in the query graph hull may overlap
-        graph->map_to_nodes(contig, [&](node_index node) {
+        for (node_index node : graph->node_range(contig)) {
             path[j++] = node;
-        });
+        }
         assert(j == nodes_in_full.size());
 
         #pragma omp critical

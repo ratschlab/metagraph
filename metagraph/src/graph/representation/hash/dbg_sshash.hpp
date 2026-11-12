@@ -40,22 +40,15 @@ class DBGSSHash : public DeBruijnGraph {
               size_t k,
               Mode mode = BASIC,
               size_t num_chars = 0,
-              double ram_limit_gb = 0);
+              double ram_limit_gb = 0,
+              // succ_is_next and pred_is_prev (num k-mers + 1 bits each) to move
+              // from if the caller already knows them, e.g., from another graph
+              std::pair<sdsl::bit_vector, sdsl::bit_vector> *succ_pred = nullptr);
 
     // SequenceGraph overrides
     void add_sequence(
             std::string_view sequence,
             const std::function<void(node_index)>& on_insertion = [](node_index) {}) override;
-
-    void map_to_nodes(
-            std::string_view sequence,
-            const std::function<void(node_index)>& callback,
-            const std::function<bool()>& terminate = []() { return false; }) const override;
-
-    void map_to_nodes_sequentially(
-            std::string_view sequence,
-            const std::function<void(node_index)>& callback,
-            const std::function<bool()>& terminate = []() { return false; }) const override;
 
     std::unique_ptr<NodeStream> node_stream(std::string_view sequence,
                                             bool sequential) const override;

@@ -717,10 +717,10 @@ ColumnMedians AnnotatedDBG::source_tie_medians(std::string_view sequence) const 
     return [this, sequence](const std::vector<Column> &columns) {
         const AnnotatedDBG &source = *abundance_source_;
         VectorMap<row_index, size_t> source_counts;
-        source.get_graph().map_to_nodes(sequence, [&](node_index i) {
+        for (node_index i : source.get_graph().node_range(sequence)) {
             if (i > 0)
                 source_counts[graph_to_anno_index(i)]++;
-        });
+        }
         return abundance_medians(*source.abundance_matrix(), source_counts.values_container(),
                                  columns, source.get_annotator().num_labels(),
                                  kMedianRowsPerRead);
@@ -942,7 +942,7 @@ AnnotatedDBG::get_header_results(std::string_view sequence, size_t num_top_label
         VectorMap<row_index, Positions> counts;
         counts.reserve(num_kmers);
         size_t position = 0;
-        dbg_.map_to_nodes(sequence, [&](node_index node) {
+        for (node_index node : dbg_.node_range(sequence)) {
             if (node) {
                 auto &positions = counts[graph_to_anno_index(node)];
                 if constexpr (std::is_same_v<Values, size_t>) {
@@ -953,7 +953,7 @@ AnnotatedDBG::get_header_results(std::string_view sequence, size_t num_top_label
                 ++num_present;
             }
             ++position;
-        });
+        }
         index_counts = to_vector(std::move(counts));
     } // the hash table is released before the rows are decoded
     const size_t min_count = get_min_count(discovery_fraction, presence_fraction,

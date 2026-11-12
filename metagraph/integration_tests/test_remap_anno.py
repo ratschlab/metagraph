@@ -223,6 +223,134 @@ class TestRemapAnnotation(TestingBase):
         self.assertNotEqual(res.returncode, 0)
         self.assertIn('other orientation', res.stderr.decode() + res.stdout.decode())
 
+    @parameterized.expand([
+        ('basic', 'brwt', False),
+        ('basic', 'row_diff_brwt', False),
+        ('primary', 'row_diff_brwt', False),
+        ('basic', 'row_diff_brwt', True),
+        ('primary', 'row_diff_brwt', True),
+    ])
+    def test_row_map_from_extraction(self, mode, anno_repr, convert):
+        """`transform --to-fasta --row-map` and `transform --graph sshash` write
+        the row map that the remap computes."""
+        source = self.source if mode == 'basic' else self.primary_source
+        prefix = f'{self.tempdir.name}/extract_{mode}_{anno_repr}_{int(convert)}'
+        target = prefix + '.sshashdbg'
+        if convert:
+            self._run_command(
+                f'{METAGRAPH} transform -p {NUM_THREADS} --graph sshash'
+                f' -o {prefix} {source}', 'Transform command', shell=True)
+            self.assertEqual(glob.glob(f'{self.tempdir.name}/**/temp_convert_*', recursive=True), [])
+        else:
+            self._run_command(
+                f'{METAGRAPH} transform -p {NUM_THREADS} --to-fasta --row-map'
+                f' -o {prefix} {source}', 'Transform command', shell=True)
+            self._run_command(
+                f'{METAGRAPH} build -p {NUM_THREADS} --mode {mode} --graph sshash'
+                f' -k {K} -o {target} {prefix}.fasta.gz', 'Build command', shell=True)
+        self.assertEqual(glob.glob(f'{self.tempdir.name}/**/bucket.*', recursive=True), [])
+        # In primary mode, the SSHash graph also has a node for every reverse complement.
+        self.assertEqual(self._get_stats(target)['nodes (k)'],
+                         self._get_stats(self.target if mode == 'basic'
+                                         else self.primary_target)['nodes (k)'])
+
+        self._annotate_graph(INPUT, source, prefix + '_anno', anno_repr,
+                             num_threads=NUM_THREADS)
+        anno = prefix + '_anno' + anno_file_extension[anno_repr]
+
+        # Match the rows by k-mer, as without a row map.
+        matched = prefix + '_matched'
+        res = self._remap(anno, matched, target, source=source)
+        self.assertEqual(res.returncode, 0, res.stderr.decode())
+        with open(matched + '.rowmap', 'rb') as f:
+            expected_row_map = f.read()
+        with open(prefix + '.rowmap', 'rb') as f:
+            self.assertEqual(expected_row_map, f.read())
+
+        # The remap accepts the row map written with the contigs.
+        res = self._remap(anno, prefix, target, source=source)
+        self.assertEqual(res.returncode, 0, res.stderr.decode())
+        with open(prefix + '.rowmap', 'rb') as f:
+            self.assertEqual(expected_row_map, f.read())
+        with open(matched + anno_file_extension[anno_repr], 'rb') as f:
+            expected = f.read()
+        with open(prefix + anno_file_extension[anno_repr], 'rb') as f:
+            self.assertEqual(expected, f.read())
+        for query_mode in ['labels', 'matches']:
+            self.assertEqual(self._query(source, anno, query_mode),
+                             self._query(target, prefix + anno_file_extension[anno_repr],
+                                         query_mode))
+
+    @parameterized.expand([
+        ('plain', False, 1, '', ''),
+        ('plain_threads', False, NUM_THREADS, '', ''),
+        ('masked', True, 1, '', ''),
+        ('masked_threads', True, NUM_THREADS, '', ''),
+        # extractions that do not write the whole graph
+        ('pruned', False, NUM_THREADS, '', '--prune-tips 30'),
+        ('counts', False, NUM_THREADS, '--count-kmers', ''),
+        ('filtered', False, NUM_THREADS, '--count-kmers', '--min-count 2'),
+    ])
+    def test_convert_basic_succinct(self, name, clear_dummy, num_threads, build_flags, flags):
+        """A basic succinct graph converts to the SSHash graph that a build from
+        its contigs gives. Debug builds also compare the succ/pred bitmaps taken
+        from the succinct graph with the ones SSHash computes."""
+        prefix = f'{self.tempdir.name}/basic_{name}'
+        self._build_graph(INPUT, prefix + '.dbg', K, 'succinct', 'basic', build_flags)
+        source = prefix + '.dbg'
+        if clear_dummy:
+            self._run_command(
+                f'{METAGRAPH} transform -p {NUM_THREADS} --clear-dummy'
+                f' -o {prefix}_masked {source}', 'Transform command', shell=True)
+            source = prefix + '_masked.dbg'
+        self._run_command(
+            f'{METAGRAPH} transform -p {num_threads} --graph sshash {flags}'
+            f' -o {prefix}_converted {source}', 'Transform command', shell=True)
+        self._run_command(
+            f'{METAGRAPH} transform -p {num_threads} --to-fasta {flags}'
+            f' -o {prefix}_contigs {source}', 'Transform command', shell=True)
+        self._run_command(
+            f'{METAGRAPH} build -p {NUM_THREADS} --mode basic --graph sshash'
+            f' -k {K} -o {prefix}_built.sshashdbg {prefix}_contigs.fasta.gz',
+            'Build command', shell=True)
+
+        # the unitigs of an SSHash graph follow from its succ/pred bitmaps
+        unitigs = []
+        for graph in [f'{prefix}_converted', f'{prefix}_built']:
+            self._run_command(
+                f'{METAGRAPH} transform -p {NUM_THREADS} --to-fasta --unitigs'
+                f' -o {graph}_unitigs {graph}.sshashdbg', 'Transform command', shell=True)
+            with gzip.open(f'{graph}_unitigs.fasta.gz', 'rt') as f:
+                unitigs.append(sorted(line for line in f if not line.startswith('>')))
+        self.assertEqual(unitigs[0], unitigs[1])
+        self.assertGreater(len(unitigs[0]), 0)
+
+    @parameterized.expand(['--to-fasta --row-map', '--graph sshash'])
+    def test_row_map_rejects_canonical(self, flags):
+        prefix = self.tempdir.name + '/canonical'
+        self._build_graph(INPUT, prefix + '.dbg', K, 'succinct', 'canonical')
+        res = subprocess.run(
+            f'{METAGRAPH} transform {flags} -o {prefix}_out {prefix}.dbg',
+            shell=True, stdout=PIPE, stderr=PIPE)
+        self.assertNotEqual(res.returncode, 0)
+        self.assertIn('basic or primary', res.stderr.decode() + res.stdout.decode())
+
+    @parameterized.expand([
+        ('--graph sshash --to-fasta', '--to-fasta --row-map'),
+        ('--graph sshash --initialize-bloom', 'cannot be combined'),
+        ('--graph sshash --clear-dummy', 'cannot be combined'),
+        ('--graph sshash --to-adj-list', 'cannot be combined'),
+        ('--graph sshash --mode primary', 'keeps the mode'),
+        ('--graph hash', 'only with'),
+    ])
+    def test_convert_rejects_options(self, flags, message):
+        out = self.tempdir.name + '/rejected'
+        res = subprocess.run(f'{METAGRAPH} transform {flags} -o {out} {self.source}',
+                             shell=True, stdout=PIPE, stderr=PIPE)
+        self.assertNotEqual(res.returncode, 0)
+        self.assertIn(message, res.stderr.decode() + res.stdout.decode())
+        self.assertEqual(glob.glob(out + '*'), [])
+
     def test_remap_rejects_mixed_modes(self):
         prefix = f'{self.tempdir.name}/mixed'
         self._annotate_graph(INPUT, self.source, prefix, 'brwt', num_threads=NUM_THREADS)

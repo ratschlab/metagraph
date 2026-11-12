@@ -728,10 +728,10 @@ TEST(ResolveTraceDiscovery, RanksByTracedKmers) {
     const uint64_t n = q.size() - kK + 1;
     // the annotation rows of the query's k-mers, in the query's order (each once)
     std::vector<uint64_t> rows;
-    graph->map_to_nodes(q, [&](node_index i) {
+    for (node_index i : graph->node_range(q)) {
         ASSERT_NE(DeBruijnGraph::npos, i);
         rows.push_back(AnnotatedDBG::graph_to_anno_index(i));
-    });
+    }
     ASSERT_EQ(n, rows.size());
     ASSERT_EQ(n, std::set<uint64_t>(rows.begin(), rows.end()).size());
     const uint64_t num_rows = graph->max_index();

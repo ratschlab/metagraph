@@ -35,11 +35,11 @@ coordinate_test_graph(size_t k, const std::vector<CoordinateRecord> &records,
     for (const auto &record : records) {
         auto col = encoder.encode(record.column);
         size_t pos = 0;
-        graph->map_to_nodes_sequentially(record.sequence, [&](auto node) {
+        for (auto node : map_to_nodes_sequentially(*graph, record.sequence)) {
             if (node)
                 coords[col][node - 1].push_back(offsets[col] + pos);
             ++pos;
-        });
+        }
         offsets[col] += pos;
         headers[col].push_back(record.header);
         counts[col].push_back(pos);

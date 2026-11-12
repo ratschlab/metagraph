@@ -321,7 +321,9 @@ std::optional<CoordinateProbe> find_probe(const graph::DeBruijnGraph &dbg,
         const size_t end = from_end ? num_kmers - done : std::min(num_kmers, done + step);
         const std::string_view stretch = sequence.substr(begin, end - begin + k - 1);
         bool found = false;
-        dbg.map_to_nodes(stretch, [&](auto node) { found |= node != graph::DeBruijnGraph::npos; });
+        for (auto node : dbg.node_range(stretch)) {
+            found |= node != graph::DeBruijnGraph::npos;
+        }
         if (found)
             return CoordinateProbe { std::string(stretch), coordinate + begin };
     }
@@ -338,11 +340,11 @@ int64_t check_probe(const graph::AnnotatedDBG &anno_graph,
     std::vector<std::pair<uint64_t, Row>> found;
     uint64_t position = 0;
     // as the coordinates were annotated and as queries map (canonical nodes on a canonical graph)
-    anno_graph.get_graph().map_to_nodes(probe.sequence, [&](auto node) {
+    for (auto node : anno_graph.get_graph().node_range(probe.sequence)) {
         if (node != graph::DeBruijnGraph::npos)
             found.emplace_back(probe.first + position, graph::AnnotatedDBG::graph_to_anno_index(node));
         ++position;
-    });
+    }
     if (found.size() > 2)
         found.erase(found.begin() + 1, found.end() - 1);
     for (const auto &[coordinate, row] : found) {

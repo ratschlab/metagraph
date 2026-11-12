@@ -311,9 +311,9 @@ TEST(construct_query_graph, counts_annotation_binary_slice_reads_tie_medians) {
     // abundance returns "b_high"
     auto graph = test::build_graph_batch<graph::DBGHashOrdered>(k, { sequence });
     Vector<annot::matrix::CSRMatrix::RowValues> rows(graph->max_index());
-    graph->map_to_nodes(sequence, [&](graph::DeBruijnGraph::node_index node) {
+    for (graph::DeBruijnGraph::node_index node : graph->node_range(sequence)) {
         rows[graph::AnnotatedDBG::graph_to_anno_index(node)] = { { 0, 1 }, { 1, 100 } };
-    });
+    }
     annot::LabelEncoder<std::string> encoder;
     encoder.insert_and_encode("a_low");
     encoder.insert_and_encode("b_high");
@@ -508,13 +508,13 @@ void check_batched_parity(graph::DeBruijnGraph::Mode graph_mode, CountsForm form
         std::vector<std::tuple<size_t, uint64_t, std::string>> rows;
         for (size_t j = 0; j < labels.size(); ++j) {
             std::vector<uint64_t> values;
-            graph->map_to_nodes(query, [&](graph::DeBruijnGraph::node_index node) {
+            for (graph::DeBruijnGraph::node_index node : graph->node_range(query)) {
                 if (!node)
-                    return;
+                    continue;
                 std::string kmer = graph->get_node_sequence(node);
                 if (uint64_t v = value(j, kmer))
                     values.push_back(v);
-            });
+            }
             if (values.size())
                 rows.emplace_back(values.size(), graph::lower_median(values), labels[j]);
         }

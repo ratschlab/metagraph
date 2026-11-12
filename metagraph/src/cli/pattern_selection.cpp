@@ -262,8 +262,10 @@ TestedContext PatternRetrieval::tested_context(const Context &c) const {
     if (m.mode == GraphMode::CANONICAL) {
         // the canonical k-mer's row (the route's context_json names it alike)
         key = DeBruijnGraph::npos;
-        graph.map_to_nodes(graph.get_node_sequence(c.node),
-                           [&](DeBruijnGraph::node_index n) { key = n; });
+        const std::string kmer = graph.get_node_sequence(c.node);
+        for (DeBruijnGraph::node_index n : graph.node_range(kmer)) {
+            key = n;
+        }
     }
     const uint64_t num_rows = m.oracle.anno_graph().get_annotator().num_objects();
     t.key = key != DeBruijnGraph::npos && AnnotatedDBG::graph_to_anno_index(key) < num_rows
