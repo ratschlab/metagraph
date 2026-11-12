@@ -15,6 +15,7 @@ import platform
 import re
 import shutil
 import psutil
+import sys
 
 
 """Test graph construction"""
@@ -1808,6 +1809,123 @@ class TestLoadErrorMessages(TestingBase):
             self._assert_error_line_mentions_permissions(stderr, unreadable)
         finally:
             os.chmod(unreadable, 0o644)
+
+
+# Runs a command with its stdout to a file and prints its return code and peak resident set
+# size in bytes (getrusage of the waited-for child: KiB on Linux, bytes on macOS)
+PEAK_RSS = """
+import resource, subprocess, sys
+with open(sys.argv[1], 'wb') as out:
+    rc = subprocess.run(sys.argv[2:], stdout=out, stderr=subprocess.DEVNULL).returncode
+peak = resource.getrusage(resource.RUSAGE_CHILDREN).ru_maxrss
+print(rc, peak if sys.platform == 'darwin' else peak * 1024)
+"""
+
+
+class TestQueryPositionsHeldSparsely(TestingBase):
+    """The per-position query modes (signature, counts, coords) on a coordinate index with a
+    record mapping (.seqs, r237's form) hold each returned record's values at the positions it
+    matches only (train 5a X2): a query of many records' first k-mers returns every record,
+    each matched at one position, so a value of the query's k-mers per record would need more
+    than 1 GiB in each mode; the query stays far below and writes every record's value."""
+    k = 31
+    record_length = 60
+    num_records = 16700        # signature: 16,700 records x 517,670 k-mers / 8 > 1 GiB
+    num_records_values = 2500  # counts, coords: 2,500 x 77,470 k-mers x 8 B (or more) > 1 GiB
+    max_peak_bytes = 512 * 1024 ** 2
+
+    @classmethod
+    def setUpClass(cls):
+        import random
+        cls.tempdir = TemporaryDirectory()
+        rng = random.Random(5)
+        # a record's first base differs from the base after the previous record's first k-mer,
+        # so that the query's k-mers across the junction do not continue the previous record
+        cls.records = []
+        for _ in range(cls.num_records):
+            record = ''.join(rng.choice('ACGT') for _ in range(cls.record_length))
+            if cls.records and record[0] == cls.records[-1][cls.k]:
+                record = ('A' if record[0] != 'A' else 'C') + record[1:]
+            cls.records.append(record)
+        cls.fasta = cls.tempdir.name + '/records.fa'
+        with open(cls.fasta, 'w') as f:
+            for i, record in enumerate(cls.records):
+                f.write(f'>rec{i}\n{record}\n')
+        # one query of every record's first k-mer, one of the first records' only
+        cls.queries = {}
+        for name, n in (('all', cls.num_records), ('first', cls.num_records_values)):
+            cls.queries[name] = cls.tempdir.name + f'/query_{name}.fa'
+            with open(cls.queries[name], 'w') as f:
+                f.write('>q\n' + ''.join(record[:cls.k] for record in cls.records[:n]) + '\n')
+
+        cls.graph = cls.tempdir.name + '/graph' + graph_file_extension['succinct']
+        cls.anno_base = cls.tempdir.name + '/annotation'
+        cls.anno = cls.anno_base + anno_file_extension['row_diff_brwt_coord']
+        cls._build_graph(cls.fasta, cls.tempdir.name + '/graph', cls.k, 'succinct', 'basic')
+        cls._annotate_graph(cls.fasta, cls.graph, cls.anno_base, 'row_diff_brwt_coord',
+                            anno_type='filename')
+        res = subprocess.run([f'{METAGRAPH} annotate --anno-filename --index-header-coords '
+                              f'-i {cls.graph} -o {cls.anno_base} {cls.fasta}'],
+                             shell=True, stdout=PIPE, stderr=PIPE)
+        assert res.returncode == 0, res.stderr.decode()
+        assert os.path.exists(cls.anno_base + '.seqs')
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.tempdir.cleanup()
+
+    def _query(self, mode, query, num_records):
+        out = self.tempdir.name + f'/out_{mode}.tsv'
+        command = [METAGRAPH, 'query', '--query-mode', mode, '--min-kmers-fraction-label', '0',
+                   '--num-top-labels', str(num_records), '-i', self.graph, '-a', self.anno,
+                   self.queries[query]]
+        res = subprocess.run([sys.executable, '-c', PEAK_RSS, out] + command,
+                             stdout=PIPE, stderr=PIPE)
+        self.assertEqual(res.returncode, 0, res.stderr.decode())
+        rc, peak = (int(x) for x in res.stdout.decode().split())
+        self.assertEqual(rc, 0)
+        with open(out) as f:
+            lines = f.read().splitlines()
+        self.assertEqual(1, len(lines))
+        fields = lines[0].split('\t')
+        self.assertEqual(['0', 'q'], fields[:2])
+        # every record once, each matched at the position of its first k-mer
+        values = {}
+        for field in fields[2:]:
+            label, value = field[1:].split('>', 1)
+            self.assertNotIn(label, values)
+            values[label] = value
+        self.assertEqual(num_records, len(values))
+        num_kmers = num_records * self.k - self.k + 1
+        print(f'[ {mode} ] {num_records} records x {num_kmers} k-mers: peak RSS '
+              f'{peak / 1024 ** 2:.0f} MiB', flush=True)
+        return values, num_kmers, peak
+
+    def test_signature(self):
+        values, num_kmers, peak = self._query('signature', 'all', self.num_records)
+        for i in range(self.num_records):
+            position = i * self.k
+            after = num_kmers - position - 1
+            mask = (f'o{position}' if position else '') + 'x1' + (f'o{after}' if after else '')
+            count, presence, score = values[f'rec{i}'][1:].split(':')
+            self.assertEqual(('1', mask), (count, presence), i)
+            int(score)
+        self.assertGreater(self.num_records * num_kmers / 8, 1024 ** 3)
+        self.assertLess(peak, self.max_peak_bytes)
+
+    def test_counts(self):
+        values, num_kmers, peak = self._query('counts', 'first', self.num_records_values)
+        for i in range(self.num_records_values):
+            self.assertEqual(f':{i * self.k}=1', values[f'rec{i}'], i)
+        self.assertGreater(self.num_records_values * num_kmers * 8, 1024 ** 3)
+        self.assertLess(peak, self.max_peak_bytes)
+
+    def test_coords(self):
+        values, num_kmers, peak = self._query('coords', 'first', self.num_records_values)
+        in_target = self.record_length - self.k + 1
+        for i in range(self.num_records_values):
+            self.assertEqual(f'/{in_target}:{i * self.k}-0', values[f'rec{i}'], i)
+        self.assertLess(peak, self.max_peak_bytes)
 
 
 if __name__ == '__main__':

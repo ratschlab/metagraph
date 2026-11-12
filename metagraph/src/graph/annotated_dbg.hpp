@@ -123,6 +123,138 @@ search_top_n(const std::vector<size_t> &scores,
              SearchCut *cut);
 
 
+/**
+ * The values per query position of one row a search returns (get_top_label_signatures,
+ * get_kmer_counts, get_kmer_coordinates), held only at the positions the row matches: a
+ * value of the query's |size| k-mers per row would make a search's memory the rows returned
+ * times the query's k-mers. Each is built by adding positions in ascending order and stands
+ * for the vector of |size| values that to_dense() returns (absent positions: false, 0 or no
+ * coordinates).
+ */
+
+// The k-mer presence mask of a row: the runs [first, second) of the positions it matches,
+// ascending, none empty and no two adjacent
+struct PresenceRuns {
+    size_t size = 0;
+    std::vector<std::pair<size_t, size_t>> runs;
+
+    PresenceRuns() = default;
+    explicit PresenceRuns(size_t size) : size(size) {}
+    explicit PresenceRuns(const sdsl::bit_vector &mask);
+
+    // marks |position|, at or after the last position marked
+    void add(size_t position) { add_run(position, position + 1); }
+    // marks the positions [begin, end), at or after the last position marked
+    void add_run(size_t begin, size_t end) {
+        assert(begin <= end && end <= size);
+        assert(runs.empty() || begin >= runs.back().second);
+        if (begin == end)
+            return;
+        if (!runs.empty() && runs.back().second == begin) {
+            runs.back().second = end;
+        } else {
+            runs.emplace_back(begin, end);
+        }
+    }
+    // the number of positions marked
+    size_t count() const;
+    sdsl::bit_vector to_dense() const;
+
+    bool operator==(const PresenceRuns &other) const = default;
+};
+
+// The k-mer counts of a row: the runs [begin, end) of one nonzero value, ascending, none empty
+// and no two adjacent runs of one value
+struct CountRuns {
+    struct Run {
+        size_t begin;
+        size_t end;
+        size_t value;
+
+        bool operator==(const Run &other) const = default;
+    };
+
+    size_t size = 0;
+    std::vector<Run> runs;
+
+    CountRuns() = default;
+    explicit CountRuns(size_t size) : size(size) {}
+    explicit CountRuns(const std::vector<size_t> &values);
+
+    // sets |position| to |value|, at or after the last position set; a zero is no value
+    void add(size_t position, size_t value) {
+        assert(position < size);
+        assert(runs.empty() || position >= runs.back().end);
+        if (!value)
+            return;
+        if (!runs.empty() && runs.back().end == position && runs.back().value == value) {
+            ++runs.back().end;
+        } else {
+            runs.push_back({ position, position + 1, value });
+        }
+    }
+    // the number of positions with a value
+    size_t count() const;
+    std::vector<size_t> to_dense() const;
+
+    bool operator==(const CountRuns &other) const = default;
+};
+
+// The k-mer coordinates of a row: the runs [first, second) of consecutive positions with
+// coordinates, ascending, none empty and no two adjacent, and the coordinates of each of
+// these positions in their order (|coords|, one entry per position in |runs|, none empty)
+struct PositionCoords {
+    using Coords = SmallVector<uint64_t>;
+
+    size_t size = 0;
+    std::vector<std::pair<size_t, size_t>> runs;
+    std::vector<Coords> coords;
+
+    PositionCoords() = default;
+    explicit PositionCoords(size_t size) : size(size) {}
+    explicit PositionCoords(const std::vector<Coords> &values);
+
+    // appends |coord| to the coordinates of |position|, at or after the last position with
+    // coordinates
+    void add(size_t position, uint64_t coord) {
+        assert(position < size);
+        assert(runs.empty() || position + 1 >= runs.back().second);
+        if (!runs.empty() && runs.back().second == position + 1) {
+            coords.back().push_back(coord);
+            return;
+        }
+        open(position);
+        coords.emplace_back();
+        coords.back().push_back(coord);
+    }
+    // sets the coordinates of |position|, after the last position with coordinates; no
+    // coordinates are no value
+    void add(size_t position, Coords&& position_coords) {
+        assert(position < size);
+        assert(runs.empty() || position >= runs.back().second);
+        if (position_coords.empty())
+            return;
+        open(position);
+        coords.push_back(std::move(position_coords));
+    }
+    // the number of positions with coordinates
+    size_t count() const { return coords.size(); }
+    std::vector<Coords> to_dense() const;
+
+    bool operator==(const PositionCoords &other) const = default;
+
+  private:
+    // a new position after the last one with coordinates
+    void open(size_t position) {
+        if (!runs.empty() && runs.back().second == position) {
+            ++runs.back().second;
+        } else {
+            runs.emplace_back(position, position + 1);
+        }
+    }
+};
+
+
 class AnnotatedSequenceGraph {
   public:
     typedef std::string Label;
@@ -267,8 +399,12 @@ class AnnotatedDBG : public AnnotatedSequenceGraph {
                    bool with_kmer_counts = false,
                    SearchCut *cut = nullptr) const;
 
+    // The per-position queries below hold each row's values only where it matches
+    // (PresenceRuns, CountRuns, PositionCoords): their memory and time grow with the
+    // (row, position) matches, not with the rows returned times the query's k-mers.
+
     // returns tuples (label, num_kmer_matches, kmer_abundances)
-    std::vector<std::tuple<Label, size_t, std::vector<size_t>>>
+    std::vector<std::tuple<Label, size_t, CountRuns>>
     get_kmer_counts(std::string_view sequence,
                     size_t num_top_labels,
                     double discovery_fraction,
@@ -279,14 +415,14 @@ class AnnotatedDBG : public AnnotatedSequenceGraph {
     // num_kmers_in_target is 0 when no CoordToHeader mapping is loaded (the
     // label refers to a whole annotation column rather than a single indexed
     // sequence).
-    std::vector<std::tuple<Label, size_t, std::vector<SmallVector<uint64_t>>, size_t>>
+    std::vector<std::tuple<Label, size_t, PositionCoords, size_t>>
     get_kmer_coordinates(std::string_view sequence,
                          size_t num_top_labels,
                          double discovery_fraction,
                          double presence_fraction,
                          SearchCut *cut = nullptr) const;
 
-    std::vector<std::tuple<Label, size_t, sdsl::bit_vector>>
+    std::vector<std::tuple<Label, size_t, PresenceRuns>>
     get_top_label_signatures(std::string_view sequence,
                              size_t num_top_labels,
                              double discovery_fraction = 0.0,
@@ -299,7 +435,7 @@ class AnnotatedDBG : public AnnotatedSequenceGraph {
     // positions it stands for): (header, k-mer matches, value), the records ranked by the
     // score reported (the coordinates matched with |with_kmer_counts|, the k-mer matches
     // otherwise) in the C5 order. Values: the score (size_t), the coordinates matched per query
-    // position (std::vector<size_t>) or whether any is matched there (sdsl::bit_vector)
+    // position (CountRuns) or whether any is matched there (PresenceRuns)
     template <class Values>
     std::vector<std::tuple<Label, size_t, Values>>
     get_header_results(std::string_view sequence, size_t num_top_labels,
