@@ -458,6 +458,8 @@ struct IndexWalks {
     std::vector<Json::Value> walks;
     // per seed and named label: whether the index has the label
     std::vector<std::vector<bool>> known;
+    // per seed: whether the seed is shorter than the index's k
+    std::vector<bool> too_short;
 };
 
 IndexWalks walk_index(const TraverseRequest &req, const TraverseIndex &index) {
@@ -474,9 +476,9 @@ IndexWalks walk_index(const TraverseRequest &req, const TraverseIndex &index) {
             if (out.known.back().back())
                 seed.labels.push_back(name);
         }
+        out.too_short.push_back(seed.sequence.size() < oracle.get_k());
         // an index without the seed or its labels gives nothing, like a search without hits
-        if ((named.labels.size() && seed.labels.empty())
-                || seed.sequence.size() < oracle.get_k())
+        if ((named.labels.size() && seed.labels.empty()) || out.too_short.back())
             continue;
         try {
             // a malformed seed or an ambiguous label refuses the request
@@ -507,7 +509,15 @@ Json::Value process_traverse_request(const Json::Value &request,
     const TraverseRequest req = parse_traverse_request(fields, limits);
 
     std::vector<IndexWalks> walked(indexes.size());
-    std::vector<std::shared_future<std::exception_ptr>> futures;
+    // the tasks refer to this frame: they are waited for before it is left, also on a throw
+    struct Pending {
+        std::vector<std::shared_future<std::exception_ptr>> futures;
+        ~Pending() {
+            for (auto &future : futures)
+                future.wait();
+        }
+    } pending;
+    auto &futures = pending.futures;
     // once a task runs, recording its future must not allocate
     futures.reserve(indexes.size());
     for (size_t i = 0; i < indexes.size(); ++i) {
@@ -520,7 +530,6 @@ Json::Value process_traverse_request(const Json::Value &request,
             return std::exception_ptr();
         }));
     }
-    // the tasks refer to this frame: wait for all of them before leaving it
     std::exception_ptr failed;
     for (auto &future : futures) {
         if (auto e = future.get(); e && !failed)
@@ -533,6 +542,9 @@ Json::Value process_traverse_request(const Json::Value &request,
     out["strategy"] = strategy_to_json(req.strategy);
     Json::Value results(Json::arrayValue);
     for (size_t s = 0; s < req.seeds.size(); ++s) {
+        if (std::all_of(walked.begin(), walked.end(),
+                        [&](const IndexWalks &w) { return w.too_short[s]; }))
+            throw std::invalid_argument("Seed shorter than k");
         const std::vector<std::string> &labels = req.seeds[s].labels;
         for (size_t l = 0; l < labels.size(); ++l) {
             if (std::none_of(walked.begin(), walked.end(),

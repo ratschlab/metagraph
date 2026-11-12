@@ -105,11 +105,13 @@ has. A graph adds no walk in these cases:
 - The graph has none of the named labels.
 - No label is on every k-mer of the seed.
 
-``walks`` is empty when no graph adds a walk. Any other error of a seed is listed as a walk with
-an ``error``.
+``walks`` is empty when no graph adds a walk. When a graph cannot determine the labels of a
+seed for another cause, its walk holds the ``error`` instead (``too_wide``, ``time_budget``,
+``ambiguous_header``).
 
-The server refuses a named label that no selected graph has with HTTP 400. The time budget
-applies to each walk. The graphs are walked in parallel.
+The server refuses a named label that no selected graph has with HTTP 400. A malformed seed and
+an ambiguous label fail the whole request, as on a single index. The time budget applies to each
+walk. The graphs are walked in parallel.
 
 Terms
 -----

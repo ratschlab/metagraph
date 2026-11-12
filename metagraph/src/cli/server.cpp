@@ -686,6 +686,8 @@ int run_server(Config *config) {
                 const Json::Value json = parse_json_string(content);
                 if (!json.isObject())
                     throw std::invalid_argument("The request must be a JSON object");
+                if (json.isMember("graphs") && !json["graphs"].isArray())
+                    throw std::invalid_argument("'graphs' must be an array of graph names");
                 std::vector<std::string> names = filter_graphs_from_list(indexes, json, request_id);
                 std::sort(names.begin(), names.end());
                 std::vector<TraverseIndex> selected;

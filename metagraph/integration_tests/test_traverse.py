@@ -55,6 +55,7 @@ class TraverseServer(TraverseFixture):
     def setUpClass(cls):
         super().setUpClass()
         cls.host = '127.0.0.1'
+        cls._prepare()
         os.environ['NO_PROXY'] = cls.host
         # the test classes run in parallel: each server gets a port that is free now
         with socket.socket() as s:
@@ -73,6 +74,10 @@ class TraverseServer(TraverseFixture):
                 cls.server.kill()
                 raise RuntimeError(f'The server on port {cls.port} did not get ready')
             time.sleep(0.05)
+
+    @classmethod
+    def _prepare(cls):
+        """Whatever the server needs, built before its port is chosen."""
 
     @classmethod
     def _start_server(cls, port):
@@ -206,7 +211,7 @@ class TestTraverseGraphList(TraverseServer):
     mode = 'basic'
 
     @classmethod
-    def _start_server(cls, port):
+    def _prepare(cls):
         rows = []
         for name, record, flank in [('one', 'A', cls.P), ('two', 'B', cls.Q)]:
             base = f'{cls.tempdir.name}/{name}'
@@ -217,10 +222,21 @@ class TestTraverseGraphList(TraverseServer):
             rows.append(f'{name},{base}.dbg,{base}.column.annodbg\n')
         with open(cls.tempdir.name + '/graphs.csv', 'w') as f:
             f.writelines(rows)
-        command = [METAGRAPH, 'server_query', cls.tempdir.name + '/graphs.csv',
-                   '--port', str(port), '--address', cls.host, '-p', '2']
-        return subprocess.Popen(command, stdout=subprocess.DEVNULL,
-                                stderr=subprocess.DEVNULL), port
+
+    @classmethod
+    def _start_server(cls, port):
+        # as start_server: a server that exits at once lost its port to another test
+        for _ in range(100):
+            command = [METAGRAPH, 'server_query', cls.tempdir.name + '/graphs.csv',
+                       '--port', str(port), '--address', cls.host, '-p', '2']
+            process = subprocess.Popen(command, stdout=subprocess.DEVNULL,
+                                       stderr=subprocess.DEVNULL)
+            try:
+                process.wait(timeout=1)
+            except subprocess.TimeoutExpired:
+                return process, port
+            port += 1
+        raise RuntimeError("Couldn't start server")
 
     def _flanks(self, walk):
         right = walk['arms']['right']
@@ -241,7 +257,11 @@ class TestTraverseGraphList(TraverseServer):
         seeds = [{'sequence': self.X}]
         walks = self._traverse({'seeds': seeds, 'graphs': ['two']})['results'][0]['walks']
         self.assertEqual(['two'], [walk['graph'] for walk in walks])
-        self.assertEqual(400, self._post('traverse', {'seeds': seeds, 'graphs': ['three']}).status_code)
+        for graphs in [['three'], 'two']:
+            res = self._post('traverse', {'seeds': seeds, 'graphs': graphs})
+            self.assertEqual(400, res.status_code, graphs)
+        # a seed shorter than k in every graph
+        self.assertEqual(400, self._post('traverse', {'seeds': [{'sequence': self.X[:K - 1]}]}).status_code)
 
     def test_graph_without_the_seed_or_its_labels(self):
         out = self._traverse({'seeds': [
