@@ -878,6 +878,13 @@ class FanoutState {
             stop.store(true, std::memory_order_release);
             return true;
         }
+        // an inline pair told to stop at its work cutoff (PairControl::stop_at_cutoff), after
+        // its client: a client gone is not answered, a pair past its cutoff is unfinished
+        if (inline_run && inline_stop_at && now() >= *inline_stop_at) {
+            inline_cut = true;
+            stop.store(true, std::memory_order_release);
+            return true;
+        }
         return false;
     }
 
@@ -966,6 +973,11 @@ class FanoutState {
                                                  "index"
                                                : "it waited for the memory to load its index");
                 }
+            } else if (result.aborted && inline_cut) {
+                // an inline pair that stopped at its work cutoff (stop_at_cutoff): unfinished,
+                // as a pooled pair still working at the cutoff (SPEC-multigraph-envelope.md
+                // section 4), its envelope written
+                unfinished_locked(i);
             } else if (result.aborted) {
                 slot.aborted = true;
                 slot.resolved = true;
@@ -1037,6 +1049,10 @@ class FanoutState {
     PairJob job;
     const bool inline_run;
     std::function<bool()> inline_gone;
+    // an inline pair's stop instant (PairControl::stop_at_cutoff), and whether its stop came
+    // from it: the inline worker's own (the handler's thread), set and read there only
+    std::optional<SteadyClock::time_point> inline_stop_at;
+    bool inline_cut = false;
     std::atomic<bool> stop { false };
     std::mutex mutex;
     std::condition_variable changed;
@@ -1082,6 +1098,15 @@ std::optional<SteadyClock::time_point> PairControl::deadline_cap() const {
     // finish_by_ms (less the skew allowance): each pair keeps its own budget, which starts when
     // it starts (section 4), capped by it as a single-graph request is
     return state_->settings.deadlines.finish;
+}
+
+void PairControl::stop_at_cutoff() {
+    // the span of the request's work cutoff, from now: an inline pair's time limits start with
+    // its work, after its in_ram load (section 4); a pooled pair is stopped by its handler
+    if (!state_->inline_run)
+        return;
+    const RequestDeadlines &d = state_->settings.deadlines;
+    state_->inline_stop_at = state_->now() + (d.cutoff - d.arrival);
 }
 
 std::optional<SteadyClock::time_point> PairControl::cutoff_cap() const {

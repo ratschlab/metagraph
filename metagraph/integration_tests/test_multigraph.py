@@ -4292,5 +4292,216 @@ class TestLabelsDisjoint(TestingBase):
         self.assertEqual('verified', caps['pair_summary']['seqs_order'])
 
 
+def request_then_leave(port, route, body, after_s, timeout=120):
+    """POST /route (body: a dict, sent as JSON), then after |after_s| seconds half-close the
+    connection (a client that leaves: the server treats a half-close as gone) and read until the
+    server closes it: the bytes it sent."""
+    payload = json.dumps(body).encode()
+    head = (f'POST /{route} HTTP/1.1\r\nHost: localhost\r\nContent-Type: application/json\r\n'
+            f'Content-Length: {len(payload)}\r\nConnection: close\r\n\r\n').encode()
+    with socket.create_connection(('127.0.0.1', port), timeout=timeout) as s:
+        s.sendall(head + payload)
+        time.sleep(after_s)
+        s.shutdown(socket.SHUT_WR)
+        received = b''
+        while True:
+            part = s.recv(65536)
+            if not part:
+                return received
+            received += part
+
+
+@unittest.skipIf(PROTEIN_MODE, "the fixture is DNA")
+class TestResolveSelectionStops(TestingBase):
+    """A /resolve without bounds.time_budget_ms and finish_by_ms has no deadline: its max_support
+    selection and its answer's build end on the request's stop instead (T5a-X1, Fable review
+    2026-11-12; SPEC-labeled-traversal-core.md §4.5, SPEC-multigraph-envelope.md section 4):
+    the fan-out's stop at its work cutoff for a pooled pair, its own work cutoff for a one-pair
+    request (inline), and a client that leaves. Before, nothing after the row pass read the stop:
+    the selection ran to its end, on a pool thread after the pair had been answered unfinished,
+    or on the HTTP thread with no cutoff at all.
+
+    The fixture, a_long, is R1's probe A2 shape (T4 review) at 10 kbp: LONG labels of one run
+    over the whole query and three labels of one 31-mer every 32 k-mers (from k-mer 7, 17 and
+    27), so that each of the selection's picks splits every long run: about 1,000 rounds of up to
+    LONG x 1,000 pieces, seconds of work after a row pass of a tenth of a second. b_small and
+    c_small hold 2 kbp of other sequence each (the query is absent: resolved at once)."""
+
+    maxDiff = None
+    LONG = 200
+
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        rng = random.Random(20261112)
+        cls.query = ''.join(rng.choice('ACGT') for _ in range(10000))
+        d = cls.tempdir.name
+        cls.pairs = {}
+        fastas = {'a_long': [(f'full{i}', cls.query) for i in range(cls.LONG)]
+                            + [(f'div{off}', cls.query[s:s + K])
+                               for off in (7, 17, 27)
+                               for s in range(off, len(cls.query) - K + 1, 32)],
+                  'b_small': [('small_b', ''.join(rng.choice('ACGT') for _ in range(2000)))],
+                  'c_small': [('small_c', ''.join(rng.choice('ACGT') for _ in range(2000)))]}
+        for name, records in fastas.items():
+            out = os.path.join(d, name)
+            os.makedirs(out)
+            fasta = os.path.join(out, 'records.fa')
+            with open(fasta, 'w') as f:
+                for header, seq in records:
+                    f.write(f'>{header}\n{seq}\n')
+            cls._run_command(f'{METAGRAPH} build -p 4 --mode basic --graph succinct --state stat '
+                             f'-k {K} -o {out}/graph {fasta}', f'build {name}')
+            cls._annotate_graph([fasta], f'{out}/graph.dbg', f'{out}/anno', 'column',
+                                anno_type='header')
+            cls.pairs[name] = (f'{out}/graph.dbg', f'{out}/anno.column.annodbg')
+            assert all(os.path.exists(p) for p in cls.pairs[name]), cls.pairs[name]
+        cls.csv = os.path.join(d, 'graphs.csv')
+        with open(cls.csv, 'w') as f:
+            for name, (graph, anno) in cls.pairs.items():
+                f.write(f'{name},{graph},{anno}\n')
+
+    def request(self, select=True):
+        r = {'sequence': self.query, 'discover': {'max_labels': 1000}}
+        if select:
+            r['select'] = {'policy': 'max_support', 'max_seeds': 1024}
+        return r
+
+    def server(self, name, max_time_ms):
+        """-p 1 (one pool thread) and four HTTP threads; a budget-less /resolve's work cutoff is
+        |max_time_ms| (--traverse-max-time-ms) less the reserve 250 ms after its arrival"""
+        return Server([self.csv, '--http-threads', '4', '--traverse-max-time-ms',
+                       str(max_time_ms)],
+                      os.path.join(self.tempdir.name, f'server_{name}.log'), threads=1)
+
+    def post_to(self, server, route, payload, status=200):
+        ret = server.post(route, payload)
+        self.assertEqual(status, ret.status_code, ret.text[:2000])
+        return ret.json()
+
+    def wait_ended(self, server, request_id, timeout=120):
+        """GET /requests/{request_id} until it states the request ended"""
+        deadline = time.time() + timeout
+        while True:
+            ret = server.get(f'requests/{request_id}')
+            self.assertEqual(200, ret.status_code, ret.text[:2000])
+            if ret.json()['state'] == 'ended' or time.time() > deadline:
+                return ret.json()
+            time.sleep(0.05)
+
+    def assert_cut(self, entry, graph):
+        self.assertEqual((graph, 'refused'), (entry['graph'], entry['outcome']))
+        refusal = entry['refusal']
+        self.assertEqual({'http_status': 503, 'code': 'unfinished', 'reason': 'cutoff'},
+                         {k: refusal[k] for k in ('http_status', 'code', 'reason')})
+        self.assertIn("had not finished at the request's work cutoff", refusal['error'])
+        self.assertEqual('stopping', refusal['usage']['state'])
+
+    def test_a_pooled_pair_frees_its_thread_at_the_cutoff(self):
+        """On one pool thread a_long is unfinished at the cutoff (1,250 ms) and b_small, queued
+        behind it, not reached; a_long's worker ends right after the cutoff, so that a following
+        two-pair request is answered at once (before, the thread stayed in the selection for its
+        whole length and the following request's pairs were not reached at its own cutoff)."""
+        server = self.server('pooled', 1500)
+        try:
+            out = self.post_to(server, 'resolve', dict(self.request(), graphs=['a_long', 'b_small'],
+                                                       request_id='x1-pooled'))
+            long_, small = out['answers']
+            self.assert_cut(long_, 'a_long')
+            self.assertEqual(('b_small', 'not_reached'),
+                             (small['graph'], small['refusal']['code']))
+            started = time.time()
+            following = self.post_to(server, 'resolve', dict(self.request(),
+                                                             graphs=['b_small', 'c_small']))
+            took = time.time() - started
+            self.assertEqual([('b_small', 'answered'), ('c_small', 'answered')],
+                             [(a['graph'], a['outcome']) for a in following['answers']])
+            self.assertLess(took, 1.25)
+            entry = self.wait_ended(server, 'x1-pooled')
+            self.assertEqual('ended', entry['state'])
+            p_long = entry['pairs'][0]
+            self.assertEqual(('a_long', 'ended', 'unfinished'),
+                             (p_long['graph'], p_long['state'], p_long['outcome']))
+            # its worker ended within a reading of the cutoff, not after its selection
+            self.assertLess(p_long['usage']['elapsed_ms'], 1250 + 2500)
+        finally:
+            server.stop()
+
+    def test_a_one_pair_resolve_ends_at_its_cutoff(self):
+        """A one-pair request runs inline, on the HTTP thread: told to stop at its work cutoff
+        (from its work's start), it is unfinished there, its envelope written (before, it ran to
+        the end of its selection, with no cutoff). A request that finishes before its cutoff
+        answers as before: the single-graph answer on the pair's files."""
+        server = self.server('inline', 1500)
+        try:
+            started = time.time()
+            out = self.post_to(server, 'resolve', dict(self.request(), graphs=['a_long'],
+                                                       request_id='x1-inline'))
+            took = time.time() - started
+            (entry,) = out['answers']
+            self.assert_cut(entry, 'a_long')
+            self.assertIn('GET /requests/x1-inline', entry['refusal']['error'])
+            self.assertEqual((0, 1), (out['answered'], out['refused']))
+            self.assertEqual([{k: entry[k] for k in ('graph', 'graph_path', 'annotation_path')}],
+                             out['unfinished'])
+            self.assertEqual(NO_DEADLINE, out['deadline'])
+            self.assertGreater(took, 1.0)
+            self.assertLess(took, 1.25 + 2.5)
+            registry = self.wait_ended(server, 'x1-inline')
+            self.assertEqual(('ended', 'answered'), (registry['state'], registry['reason']))
+            (pair,) = registry['pairs']
+            self.assertEqual(('ended', 'unfinished'), (pair['state'], pair['outcome']))
+            # a request that finishes by its cutoff: the single-graph answer (no deadline: no
+            # limits, no stop) with the unknown_labels of a multi-graph server's pair
+            quick = self.post_to(server, 'resolve', dict(self.request(select=False),
+                                                         graphs=['a_long']))
+            (answer,) = quick['answers']
+            self.assertEqual('answered', answer['outcome'])
+            self.assertEqual(untimed(dict(self.cli_resolve('a_long', self.request(select=False)),
+                                          unknown_labels=[])),
+                             untimed({k: v for k, v in answer.items() if k not in TAGS}))
+        finally:
+            server.stop()
+
+    def cli_resolve(self, pair, request):
+        """`metagraph traverse --resolve` on the pair's files: the answer a single-graph server
+        gives"""
+        path = os.path.join(self.tempdir.name, f'resolve_{pair}.json')
+        with open(path, 'w') as f:
+            json.dump(request, f)
+        graph, anno = self.pairs[pair]
+        res = subprocess.run(shlex.split(METAGRAPH) + ['traverse', '--resolve', '--json', '-i',
+                                                       graph, '-a', anno, path],
+                             stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        self.assertEqual(0, res.returncode, res.stderr.decode()[-2000:])
+        return json.loads(res.stdout.decode().strip().split('\n')[-1])
+
+    def test_a_client_gone_ends_the_selection(self):
+        """A client that leaves a second into the request (its selection running; no cutoff
+        within the test: --traverse-max-time-ms 120000): its work ends at the next reading,
+        nothing is written, and GET /requests states the end soon after (before, the selection
+        ran to its end), one pair inline and two pooled."""
+        server = self.server('gone', 120000)
+        try:
+            for name, graphs in (('inline', ['a_long']), ('pooled', ['a_long', 'b_small'])):
+                request_id = f'x1-gone-{name}'
+                body = dict(self.request(), graphs=graphs, request_id=request_id)
+                self.assertEqual(b'', request_then_leave(server.port, 'resolve', body, 1.0))
+                entry = self.wait_ended(server, request_id)
+                self.assertEqual(('ended', 'client_gone'), (entry['state'], entry['reason']),
+                                 name)
+                self.assertEqual({'status': None, 'bytes': None, 'written': False},
+                                 entry['response'], name)
+                p_long = entry['pairs'][0]
+                self.assertEqual(('a_long', 'ended'), (p_long['graph'], p_long['state']), name)
+                usage = p_long['usage']
+                # working when its client left (a second in), ended right after
+                self.assertGreater(usage['elapsed_ms'], 900, name)
+                self.assertGreater(usage['cpu_ms'], 200, name)
+                self.assertLess(usage['elapsed_ms'], 1000 + 2500, name)
+        finally:
+            server.stop()
+
+
 if __name__ == '__main__':
     unittest.main()

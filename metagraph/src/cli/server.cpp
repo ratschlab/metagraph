@@ -2079,8 +2079,11 @@ int run_server(Config *config) {
         // server's maximum, process_resolve_request) and, pooled, by the work cutoff, stated
         // only when that cap stopped its work (the owner's decision of 2026-11-01); a pair
         // without a deadline (no budget, no finish_by_ms) has no budget to cap and is told to
-        // stop at the cutoff (at the server's maximum)
-        PairJob job = [&, json, in_ram, request_id, writing](PairControl &control) {
+        // stop at the cutoff (at the server's maximum): pooled by the fan-out's stop, inline at
+        // its own work cutoff (T5a-X1), its work abandoned at its next reading
+        const bool without_deadline = !req.time_budget_ms && !handles.finish_by_ms;
+        PairJob job = [&, json, in_ram, request_id, writing,
+                       without_deadline](PairControl &control) {
             PairResult result;
             const SelectedPair &selected = control.pair();
             const GraphPair &pair = selected.pair;
@@ -2102,6 +2105,11 @@ int run_server(Config *config) {
                 // a pooled pair's budget is capped at the work cutoff, stated when it binds
                 if (const auto cut = control.cutoff_cap())
                     pair_delivery->set_cutoff_cap(*cut);
+                // an inline pair without a deadline is told to stop at its work cutoff, from
+                // its work's start (SPEC-multigraph-envelope.md section 4): no time limit ends
+                // its work otherwise (unfinished then, as a pooled pair at the cutoff)
+                if (control.inline_run() && without_deadline)
+                    control.stop_at_cutoff();
                 // the pair answers for the labels it holds and lists the others
                 // (unknown_labels, SPEC-multigraph-envelope.md section 2)
                 Json::Value out = process_resolve_request(

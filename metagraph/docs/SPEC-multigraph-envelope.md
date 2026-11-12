@@ -185,7 +185,13 @@ The answer keeps its upstream shape (a list of `{seq_description, results, ...}`
 - A one-pair request (the selection holds one pair) runs inline, as its single-graph route does. The pair's own
   deadline, which starts when its work starts (after an in_ram load), is capped by `finish_by_ms` -
   clock_skew_allowance_ms, never by the work cutoff; a load in progress is not interrupted; once the pair has
-  started it is never `not_reached` or `unfinished` by the cutoff, it ends by its own deadline; and its envelope,
+  started it is never `not_reached` or `unfinished` by the cutoff, it ends by its own deadline (a `/resolve` pair
+  without a deadline — no `bounds.time_budget_ms`, no `finish_by_ms` — has none and is told to stop at its own
+  work cutoff instead: once the span of the request's work cutoff, the server maximum less the finalisation
+  reserve, has passed since its work started; its work ends at its next reading of the stop, and if it has not
+  finished by then the pair is `unfinished`, reason `cutoff`, with the pooled pair's refusal and text. T5a-X1,
+  Fable review 2026-11-12: before, nothing ended such a pair's work, which held its HTTP thread for minutes at
+  the caps; a pair that finishes by then answers as before); and its envelope,
   answered or refused, is written as soon as the pair ends (a refused pair's envelope is bound by the transport cap
   only, so it can be written after `finish_by_ms`). Before it starts, an in_ram load is not started once its wait
   limit has passed (`finish_by_ms` - clock_skew_allowance_ms, else the transport cap) or its client has left:

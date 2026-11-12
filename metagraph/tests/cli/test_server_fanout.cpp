@@ -693,6 +693,110 @@ TEST(ServerFanout, TheSpecStatesTheInlinePairRule) {
     }
 }
 
+// An inline pair whose work has no deadline of its own (a /resolve without
+// bounds.time_budget_ms and finish_by_ms) is told to stop at its work cutoff, from its work's
+// start (PairControl::stop_at_cutoff; T5a-X1, Fable review 2026-11-12: before, nothing ended its
+// work, which held its HTTP thread for minutes at the caps): stopped() answers true once the
+// span of the request's cutoff has passed since then, and the work it then abandons is
+// unfinished, reason cutoff, the pooled pair's refusal, its envelope written (no client gone).
+// A pair that finishes before then answers; a client gone stays a client gone
+TEST(ServerFanout, ABudgetLessInlinePairStopsAtItsCutoff) {
+    const std::vector<SelectedPair> pairs { kPairs[0] };
+    {
+        auto entry = entry_of(pairs, std::string("req-inline"));
+        // the cutoff 250 ms after the arrival (300 less the reserve 50); the work starts 100 ms
+        // after the arrival (an in_ram load, say), so it is told to stop 350 ms after it
+        const RequestDeadlines d = deadlines_now(300);
+        double told_ms = 0;
+        FanoutOutcome out = run_fanout(settings_of(pairs, d), entry, [&](PairControl &control) {
+            EXPECT_TRUE(control.start_running());
+            std::this_thread::sleep_for(100ms);
+            const auto started = SteadyClock::now();
+            control.stop_at_cutoff();
+            // (bounded: a pair never told to stop fails the test rather than hang it)
+            while (!control.stopped() && SteadyClock::now() < started + 10s)
+                std::this_thread::sleep_for(1ms);
+            told_ms = std::chrono::duration<double, std::milli>(SteadyClock::now()
+                                                                - started).count();
+            PairResult r;
+            r.aborted = true;
+            r.memory_bytes = 5;
+            return r;
+        }, not_launched);
+        EXPECT_GE(told_ms, 240);
+        EXPECT_LT(told_ms, 5000);
+        EXPECT_GT(SteadyClock::now(), d.cutoff + 90ms);
+        EXPECT_FALSE(out.client_gone);
+        ASSERT_EQ(1u, out.entries.size());
+        EXPECT_EQ("refused", out.entries[0]["outcome"].asString());
+        const Json::Value &cut = out.entries[0]["refusal"];
+        EXPECT_EQ(kUnfinishedMembers, members(cut));
+        EXPECT_EQ(503, cut["http_status"].asInt());
+        EXPECT_EQ("unfinished", cut["code"].asString());
+        EXPECT_EQ("cutoff", cut["reason"].asString());
+        EXPECT_EQ("stopping", cut["usage"]["state"].asString());
+        EXPECT_GE(cut["usage"]["elapsed_ms"].asDouble(), 300);
+        EXPECT_NE(std::string::npos,
+                  cut["error"].asString().find("had not finished at the request's work cutoff"));
+        EXPECT_NE(std::string::npos, cut["error"].asString().find("GET /requests/req-inline"));
+        // the envelope lists it as unfinished (sample 03's shape)
+        EnvelopeContext context;
+        context.request_id = "req-inline";
+        context.server_instance = "inst";
+        context.deadline = d.json();
+        const Json::Value envelope = post_envelope("/resolve", { "a" }, out.entries, context, 1);
+        EXPECT_EQ(0u, envelope["answered"].asUInt());
+        EXPECT_EQ(1u, envelope["refused"].asUInt());
+        ASSERT_EQ(1u, envelope["unfinished"].size());
+        EXPECT_EQ(envelope_pair_ref(kPairs[0]), envelope["unfinished"][0]);
+        const Json::Value sample_refusal
+                = sample("03_resolve_envelope_cutoff.json")["body"]["answers"][2]["refusal"];
+        EXPECT_EQ(members(sample_refusal), members(cut));
+        // the registry: the pair ended unfinished with its final usage, the request with its
+        // response
+        entry->response(200, 10);
+        EXPECT_TRUE(entry->ended());
+        const Json::Value j = entry->json(3600);
+        EXPECT_EQ("ended", j["state"].asString());
+        EXPECT_EQ("answered", j["reason"].asString());
+        EXPECT_EQ("ended", j["pairs"][0]["state"].asString());
+        EXPECT_EQ("unfinished", j["pairs"][0]["outcome"].asString());
+        EXPECT_EQ(5u, j["pairs"][0]["usage"]["memory_bytes"].asUInt64());
+        wait_for_workers();
+    }
+    {
+        // a pair that finishes before its cutoff answers (not stopped)
+        auto entry = entry_of(pairs);
+        FanoutOutcome out = run_fanout(settings_of(pairs, deadlines_now(60'000)), entry,
+            [&](PairControl &control) {
+                EXPECT_TRUE(control.start_running());
+                control.stop_at_cutoff();
+                EXPECT_FALSE(control.stopped());
+                return answered(control);
+            }, not_launched);
+        EXPECT_FALSE(out.client_gone);
+        ASSERT_EQ(1u, out.entries.size());
+        EXPECT_EQ("answered", out.entries[0]["outcome"].asString());
+        wait_for_workers();
+    }
+    {
+        // its client gone, also past the cutoff: nothing is answered (as before)
+        auto entry = entry_of(pairs);
+        FanoutSettings s = settings_of(pairs, deadlines_now(0));
+        s.gone = []() { return true; };
+        FanoutOutcome out = run_fanout(s, entry, [&](PairControl &control) {
+            EXPECT_TRUE(control.start_running());
+            control.stop_at_cutoff();
+            PairResult r;
+            r.aborted = control.stopped();
+            EXPECT_TRUE(r.aborted);
+            return r;
+        }, not_launched);
+        EXPECT_TRUE(out.client_gone);
+        wait_for_workers();
+    }
+}
+
 // E4's test: one completed pair beside a sibling blocked waiting for the memory to load its
 // index, under a short route budget and a later finish_by_ms: at the cutoff (from the
 // effective deadline, not finish_by's) the completed answer survives and the sibling is

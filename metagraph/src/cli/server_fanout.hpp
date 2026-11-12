@@ -446,6 +446,16 @@ class PairControl {
     // ResolveDelivery::set_cutoff_cap). A pair that cannot stop by then (a load, an
     // uninterruptible step) is unfinished as before
     std::optional<SteadyClock::time_point> cutoff_cap() const;
+    // An inline pair whose work has no deadline of its own (a /resolve without
+    // bounds.time_budget_ms and finish_by_ms, whose work no time limit ends) is told to stop at
+    // its work cutoff (SPEC-multigraph-envelope.md section 4; T5a-X1): from now, its work's
+    // start (after an in_ram load, as every time limit of an inline pair), once the span of the
+    // request's work cutoff (its arrival to its cutoff: the server's maximum, less the
+    // finalisation reserve) has passed, stopped() answers true; work it then abandons
+    // (PairResult::aborted) is unfinished, reason cutoff, as a pooled pair's at the cutoff. A
+    // client gone is read first and stays a client gone. Nothing for a pooled pair (its handler
+    // stops it at the cutoff)
+    void stop_at_cutoff();
 
   private:
     std::shared_ptr<FanoutState> state_;
