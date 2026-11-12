@@ -133,7 +133,7 @@ class TestTraverse(TraverseServer):
     def test_split_limit(self):
         seeds = [{'sequence': self.X, 'labels': ['A', 'B']}]
         out = self._traverse({'seeds': seeds})
-        self.assertEqual(64, out['strategy']['branching']['max_splits_per_path'])
+        self.assertEqual('unlimited', out['strategy']['branching']['max_splits_per_path'])
         # no split allowed: the path ends at the fork
         out = self._traverse({'seeds': seeds, 'strategy': {'branching': {'max_splits_per_path': 0}}})
         right = out['results'][0]['arms']['right']
