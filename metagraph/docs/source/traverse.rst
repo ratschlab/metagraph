@@ -50,7 +50,8 @@ along the query, ``x`` for present and ``o`` for absent. For example, ``x423o31x
 
 Then extend the query by 2,000 bp on each side. Use the query as the seed's ``sequence``. A
 seed is at most 10,000 bp long, so send a part of a longer query. For the seed's ``labels``,
-take the records that hold every k-mer of the seed. Their mask is a single ``x`` run:
+take the records that hold every k-mer of the seed. In their mask, the seed's k-mers lie
+within one ``x`` run. When the seed is the whole query, the mask is a single ``x`` run:
 
 .. code-block:: text
 
