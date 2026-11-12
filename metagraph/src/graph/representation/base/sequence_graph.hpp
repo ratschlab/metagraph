@@ -4,6 +4,7 @@
 #include "common/vector.hpp"
 #include "common/vectors/bit_vector.hpp"
 #include "graph/representation/base/node_stream.hpp"
+#include "kmer/alphabets.hpp"
 
 #include <vector>
 #include <string>
@@ -53,7 +54,9 @@ class SequenceGraph {
     virtual std::unique_ptr<NodeStream> node_stream(std::string_view sequence,
                                                     bool sequential) const = 0;
 
-    typedef SmallVector<node_index, 4> Nodes;
+    // A node has at most one neighbour per character, so these never allocate
+    static constexpr size_t kMaxNeighbours = kmer::alphabets::kBOSSSigma;
+    typedef SmallVector<node_index, kMaxNeighbours> Nodes;
 
     // The target nodes of all edges outgoing from |node|
     virtual Nodes adjacent_outgoing_nodes(node_index node) const = 0;
@@ -219,7 +222,7 @@ class DeBruijnGraph : public SequenceGraph {
     virtual node_index kmer_to_node(std::string_view kmer) const;
 
     // A neighbour of a node and the character on the edge to it
-    typedef SmallVector<std::pair<node_index, char>, 4> Edges;
+    typedef SmallVector<std::pair<node_index, char>, kMaxNeighbours> Edges;
 
     // The target nodes of all edges outgoing from |kmer|, each with the last
     // character of the target k-mer
