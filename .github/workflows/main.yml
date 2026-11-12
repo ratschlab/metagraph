@@ -38,6 +38,10 @@ jobs:
           - compiler: g++-13
             cxx: g++-13
             cc: gcc-13
+          # newer compilers: one build each
+          - { compiler: g++-14, cxx: g++-14, cc: gcc-14, alphabet: DNA, build_type: Release, build_static: OFF, with_avx: ON }
+          - { compiler: g++-15, cxx: g++-15, cc: gcc-15, alphabet: DNA, build_type: Release, build_static: OFF, with_avx: ON }
+          - { compiler: g++-16, cxx: g++-16, cc: gcc-16, alphabet: DNA, build_type: Release, build_static: OFF, with_avx: ON }
 
         exclude:
           - build_type: Debug
