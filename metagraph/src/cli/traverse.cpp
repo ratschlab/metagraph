@@ -280,10 +280,12 @@ Json::Value arm_to_json(const ArmResult &arm) {
     j["status"] = status_name(arm.status);
     j["complete_to_bp"] = uint_json(arm.complete_to_bp);
     j["frontier_remaining"]["live_paths"] = uint_json(arm.frontier_live_paths);
+    j["frontier_remaining"]["live_labels"] = uint_json(arm.frontier_live_labels);
     if (arm.cap_trigger) {
         j["cap_trigger"]["reason"] = to_string(arm.cap_trigger->reason);
         j["cap_trigger"]["at_bp"] = uint_json(arm.cap_trigger->at_bp);
         j["cap_trigger"]["demand"] = arm.cap_trigger->demand;
+        j["cap_trigger"]["segment"] = uint_json(arm.cap_trigger->segment);
     }
 
     Json::Value segments(Json::arrayValue);
@@ -307,6 +309,8 @@ Json::Value arm_to_json(const ArmResult &arm) {
             ej["type"] = "label_end";
             ej["label"] = e.label;
             ej["reason"] = reason_name(e.reason, e.text);
+            if (e.successors)
+                ej["successors"] = uint_json(*e.successors);
             events.append(std::move(ej));
         }
         sj["events"] = std::move(events);

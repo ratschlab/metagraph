@@ -277,11 +277,12 @@ The response
             "right": {
               "status": "complete",
               "complete_to_bp": 5000,
-              "frontier_remaining": {"live_paths": 0},
+              "frontier_remaining": {"live_paths": 0, "live_labels": 0},
               "segments": [
                 {"id": 0, "parents": [], "from_bp": 0, "length_bp": 1200, "sequence": "GCAT...",
                  "labels": [0], "labels_at_end": [0],
-                 "events": [{"at_bp": 1200, "type": "label_end", "label": 0, "reason": "record_end"}]}
+                 "events": [{"at_bp": 1200, "type": "label_end", "label": 0, "reason": "record_end",
+                             "successors": 1}]}
               ],
               "splits": [],
               "paths": [{"id": 0, "segments": [0], "length_bp": 1200,
@@ -317,7 +318,12 @@ An arm:
 - A split has the kind ``divergence`` when its labels part. It has the kind ``ambiguous`` when
   one label goes on along several children.
 - ``cap_trigger`` gives the ``reason``, ``at_bp`` and ``demand`` of the bound that stopped a
-  ``truncated`` arm.
+  ``truncated`` arm, and the ``segment`` of the first path it stopped.
+- ``frontier_remaining`` counts the paths a bound stopped before the extension length, and the
+  distinct labels on them.
+- An event's ``successors`` is the number of successors the node has in the graph, whatever
+  their labels. It is absent where the walk did not look at them: at the extension length, and
+  where a bound stopped the arm.
 
 A seed whose labels cannot be determined gets an error in its place. The other seeds are still
 walked.

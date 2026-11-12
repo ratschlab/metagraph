@@ -302,7 +302,8 @@ class Walker {
     void mark_ancestors(ArmState &arm, size_t segment);
     bool is_ancestor_or_self(const ArmState &arm, size_t anc, size_t segment) const;
     void record_edge(ArmState &arm, size_t segment, const Cand &c);
-    void end_label(ArmState &arm, Item &item, Entry &e, EndReason reason, const char *text);
+    void end_label(ArmState &arm, Item &item, Entry &e, EndReason reason, const char *text,
+                   std::optional<size_t> successors = std::nullopt);
     void finish_path(ArmState &arm, Item &item, std::optional<EndReason> path_reason);
     void censor_item(ArmState &arm, Item &item, EndReason reason);
 
@@ -875,10 +876,10 @@ void Walker::record_edge(ArmState &arm, size_t segment, const Cand &c) {
 }
 
 void Walker::end_label(ArmState &arm, Item &item, Entry &e, EndReason reason,
-                       const char *text) {
+                       const char *text, std::optional<size_t> successors) {
     e.reason = reason;
     arm.result.segments[item.segment].label_ends.push_back(
-            LabelEnd{ item.ext_bp, e.label, reason, text });
+            LabelEnd{ item.ext_bp, e.label, reason, text, successors });
 }
 
 // |item| is a leaf: every label on it has ended
@@ -981,7 +982,7 @@ std::optional<EndReason> Walker::process_item(ArmState &arm, Item &item,
     const uint64_t at = item.ext_bp;
     if (succs.empty()) {
         for (Entry &e : item.state) {
-            end_label(arm, item, e, EndReason::DEAD_END, "");
+            end_label(arm, item, e, EndReason::DEAD_END, "", succs.size());
         }
         finish_path(arm, item, std::nullopt);
         return std::nullopt;
@@ -1083,7 +1084,8 @@ std::optional<EndReason> Walker::process_item(ArmState &arm, Item &item,
         split_capped = true;
         if (!arm.result.cap_trigger) {
             arm.result.cap_trigger = CapTrigger{ EndReason::MAX_SPLITS, at,
-                                                 static_cast<double>(item.splits + 1) };
+                                                 static_cast<double>(item.splits + 1),
+                                                 item.segment };
         }
         arm.boundary = std::min(arm.boundary, at);
         arm.result.status = ArmResult::TRUNCATED;
@@ -1116,19 +1118,19 @@ std::optional<EndReason> Walker::process_item(ArmState &arm, Item &item,
         if (continues)
             continue;
         if (excluded.count(l)) {
-            end_label(arm, item, src, EndReason::BRANCH, "");
+            end_label(arm, item, src, EndReason::BRANCH, "", succs.size());
         } else if (split_limited) {
-            end_label(arm, item, src, EndReason::MAX_SPLITS, "");
+            end_label(arm, item, src, EndReason::MAX_SPLITS, "", succs.size());
         } else if (blocked) {
             end_label(arm, item, src, blocked == 3 ? EndReason::REACHED_SEED
                                      : blocked == 2 ? EndReason::EDGE_REUSE_RC
-                                                    : EndReason::EDGE_REUSE, "");
+                                                    : EndReason::EDGE_REUSE, "", succs.size());
         } else if (hairpin) {
-            end_label(arm, item, src, EndReason::DEAD_END, "hairpin");
+            end_label(arm, item, src, EndReason::DEAD_END, "hairpin", succs.size());
         } else if (src.step && at_record_end(src)) {
-            end_label(arm, item, src, EndReason::RECORD_END, "");
+            end_label(arm, item, src, EndReason::RECORD_END, "", succs.size());
         } else {
-            end_label(arm, item, src, EndReason::LABEL_LOST, "");
+            end_label(arm, item, src, EndReason::LABEL_LOST, "", succs.size());
         }
     }
 
@@ -1190,19 +1192,29 @@ void Walker::stop_arm(ArmState &arm, EndReason reason, std::vector<Item> *items,
         return;
     const uint64_t radius = strategy_.max_extension_bp;
     size_t live = 0;
+    tsl::hopscotch_set<LabelId> live_labels;
+    auto count_live = [&](const Item &item) {
+        if (item.ext_bp >= radius)
+            return;
+        live++;
+        for (const Entry &e : item.state) {
+            live_labels.insert(e.label);
+        }
+    };
     for (const Item &item : arm.next) {
-        live += item.ext_bp < radius;
+        count_live(item);
     }
     if (items) {
         for (size_t j = from; j < items->size(); ++j) {
-            live += (*items)[j].ext_bp < radius;
+            count_live((*items)[j]);
         }
     }
     const Item &first = items && from < items->size() ? (*items)[from] : arm.next.front();
     if (!arm.result.cap_trigger)
-        arm.result.cap_trigger = CapTrigger{ reason, first.ext_bp, cap_demand_ };
+        arm.result.cap_trigger = CapTrigger{ reason, first.ext_bp, cap_demand_, first.segment };
     arm.boundary = std::min(arm.boundary, first.ext_bp);
     arm.result.frontier_live_paths = live;
+    arm.result.frontier_live_labels = live_labels.size();
     arm.result.status = ArmResult::TRUNCATED;
     auto censor = [&](Item &item) {
         censor_item(arm, item, item.ext_bp >= radius ? EndReason::MAX_EXTENSION : reason);

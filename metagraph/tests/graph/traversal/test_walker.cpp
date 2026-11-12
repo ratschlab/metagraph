@@ -646,6 +646,16 @@ TYPED_TEST(WalkerTest, Caps) {
             EXPECT_EQ(EndReason::MAX_STEPS, arm.cap_trigger->reason);
             EXPECT_EQ(arm.cap_trigger->at_bp, arm.complete_to_bp);
             EXPECT_EQ(1u, arm.frontier_live_paths);
+            EXPECT_EQ(1u, arm.frontier_live_labels);
+            // the stopped head's segment is a leaf
+            ASSERT_LT(arm.cap_trigger->segment, arm.segments.size());
+            EXPECT_TRUE(arm.segments[arm.cap_trigger->segment].children.empty());
+            // a bound ended the label: the node's successors were not looked at
+            for (const Segment &s : arm.segments) {
+                for (const LabelEnd &e : s.label_ends) {
+                    EXPECT_FALSE(e.successors.has_value());
+                }
+            }
             ASSERT_EQ(1u, arm.paths.size());
             EXPECT_EQ(EndReason::MAX_STEPS, *arm.paths[0].path_reason);
             EXPECT_EQ(1u, count_ends(arm, EndReason::MAX_STEPS));
@@ -766,6 +776,8 @@ TYPED_TEST(WalkerTest, SplitLimit) {
             ASSERT_NE(nullptr, e);
             EXPECT_EQ(0u, e->at_bp);
             EXPECT_EQ(EndReason::MAX_SPLITS, e->reason);
+            // the fork has both successors
+            EXPECT_EQ(std::optional<size_t>(2), e->successors);
         }
         st.max_splits_per_path = 1;
         auto one = run(*anno, X, { "A", "B" }, st);

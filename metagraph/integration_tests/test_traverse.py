@@ -119,6 +119,9 @@ class TestTraverse(TraverseServer):
             self.assertEqual(len(flank), path['length_bp'])
             self.assertEqual(1, len(path['end_labels']))
             self.assertEqual('dead_end', path['end_labels'][0]['reason'])
+            # the label ends at a node without successors
+            events = right['segments'][path['segments'][-1]]['events']
+            self.assertEqual([0], [event['successors'] for event in events])
             flanks[result['label_dict'][path['end_labels'][0]['label']]['name']] = flank
         self.assertEqual({'A': self.P, 'B': self.Q}, flanks)
 
