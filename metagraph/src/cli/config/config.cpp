@@ -37,6 +37,17 @@ constexpr unsigned int kDefaultBuildK = kPacked64Capacity;
 constexpr unsigned int kDefaultBuildK = kPacked64Capacity - (kPacked64Capacity % 2 == 0);
 #endif
 
+// A limit given as a whole number. Anything else reads as 0, which the limit checks refuse
+static uint64_t parse_limit(const std::string &value) {
+    if (value.empty() || value.find_first_not_of("0123456789") != std::string::npos)
+        return 0;
+    try {
+        return std::stoull(value);
+    } catch (const std::exception &) {
+        return 0;
+    }
+}
+
 void print_welcome_message() {
     fprintf(stderr, "#############################\n");
     fprintf(stderr, "### Welcome to MetaGraph! ###\n");
@@ -423,6 +434,20 @@ Config::Config(int argc, char *argv[]) {
             relax_arity_brwt = atoi(get_value(i++));
         } else if (!strcmp(argv[i], "--RA-ivbuff-size")) {
             RA_ivbuffer_size = atoll(get_value(i++));
+        } else if (!strcmp(argv[i], "--traverse-max-time-ms")) {
+            const std::string value = get_value(i++);
+            size_t end = 0;
+            try {
+                traverse_max_time_ms = std::stod(value, &end);
+            } catch (const std::exception &) {
+                end = 0;
+            }
+            if (end != value.size())
+                traverse_max_time_ms = -1;   // refused below
+        } else if (!strcmp(argv[i], "--traverse-max-seeds")) {
+            traverse_max_seeds = parse_limit(get_value(i++));
+        } else if (!strcmp(argv[i], "--resolve-max-query-bp")) {
+            resolve_max_query_bp = parse_limit(get_value(i++));
         } else if (!strcmp(argv[i], "--cache-size")) {
             std::string value = get_value(i++);
             size_t end = 0;
@@ -621,6 +646,14 @@ Config::Config(int argc, char *argv[]) {
 
     if (identity == QUERY && infbase_annotators.size() != 1)
         print_usage_and_exit = true;
+
+    if (identity == SERVER_QUERY
+            && (!std::isfinite(traverse_max_time_ms) || !(traverse_max_time_ms > 0)
+                || !traverse_max_seeds || !resolve_max_query_bp)) {
+        std::cerr << "Error: --traverse-max-time-ms, --traverse-max-seeds and"
+                     " --resolve-max-query-bp must be positive and finite" << std::endl;
+        print_usage_and_exit = true;
+    }
 
     if (identity == SERVER_QUERY
             && (fnames.size() > 1
@@ -1525,7 +1558,12 @@ if (advanced) {
             fprintf(stderr, "\n\t   --num-top-labels [INT] \tmaximum number of top labels per query by default [10'000]\n");
             fprintf(stderr, "\t   --no-coord-mapping \t\tquery without mapping coords to sequence headers even if the .seqs index exists [off]\n");
             fprintf(stderr, "\t   --mem-cap-gb [FLOAT] \tmemory in GB available for the server to load graphs for queries into RAM [0]\n");
+            fprintf(stderr, "\n\tA server on a single index (-i, -a) also serves /resolve and /traverse (experimental):\n");
+            fprintf(stderr, "\t   --traverse-max-time-ms [FLOAT] \tthe most time one seed's walk may take [30000]\n");
+            fprintf(stderr, "\t   --traverse-max-seeds [INT] \tthe most seeds a traversal request may hold [10]\n");
+            fprintf(stderr, "\t   --resolve-max-query-bp [INT] \tthe longest query a /resolve request may hold [1000000]\n");
         } break;
+
     }
 
     fprintf(stderr, "\nGeneral options:\n");

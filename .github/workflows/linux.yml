@@ -231,6 +231,57 @@ jobs:
           pytest
 
 
+  # The MiniRefSeq unit tests on the mini RefSeq index (scripts/traversal/fetch_mini_refseq.sh:
+  # 42 blaNDM-carrying RefSeq records in the format of the public refseq33m index, published
+  # as a pre-release of this repository)
+  mini-index-tests:
+    if: inputs.alphabet == 'DNA' && inputs.build_type == 'Release' && inputs.compiler == 'g++-13' && inputs.build_static == 'OFF'
+    runs-on: *platform
+    needs: [build]
+
+    env: *linux-build-env
+
+    name: Mini-index Tests
+
+    defaults: *linux-shell-defaults
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - *install-linux-deps
+
+      - *download-build-artifacts
+
+      - *recreate-metagraph-symlink
+
+      - name: Restore the mini index
+        id: mini-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: ~/.cache/metagraph-test-data
+          key: test-data-mini-refseq-bea44d60
+
+      - name: Fetch the mini index
+        run: |
+          export METAGRAPH_TEST_DATA="$HOME/.cache/metagraph-test-data"
+          metagraph/scripts/traversal/fetch_mini_refseq.sh metagraph/build/mini_refseq
+
+      - name: Save the mini index
+        if: steps.mini-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: ~/.cache/metagraph-test-data
+          key: test-data-mini-refseq-bea44d60
+
+      - name: Unit tests on the mini index
+        env:
+          METAGRAPH_REQUIRE_MINI_REFSEQ: 1
+        run: |
+          cd metagraph/build
+          chmod +x unit_tests
+          ./unit_tests --gtest_filter='MiniRefSeq*'
+
+
   examples:
     runs-on: *platform
 

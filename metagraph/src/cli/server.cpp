@@ -20,6 +20,7 @@
 #include "server_utils.hpp"
 #include "server_cache.hpp"
 #include "server_request.hpp"
+#include "traverse.hpp"
 #include "cli/load/load_annotation.hpp"
 
 
@@ -650,6 +651,29 @@ int run_server(Config *config) {
             return Json::writeString(Json::StreamWriterBuilder(), root);
         });
     };
+
+    // the traversal routes serve a single index: their bounds outlive this block
+    const TraverseLimits traverse_bounds = traverse_limits(*config);
+    auto traverse_index = [&]() -> const AnnotatedDBG& {
+        if (anno_graph.wait_for(0s) != std::future_status::ready)
+            throw CurrentlyInitializingError();
+        return *anno_graph.get();
+    };
+    if (config->fnames.empty()) {
+        auto traverse_route = [&](const auto &process) {
+            return [&, process](shared_ptr<HttpServer::Response> response,
+                                shared_ptr<HttpServer::Request> request) {
+                process_request(response, request, num_requests++, [&](const std::string &content) {
+                    // a server still loading answers 503 before the body is parsed
+                    const AnnotatedDBG &index = traverse_index();
+                    return Json::writeString(Json::StreamWriterBuilder(),
+                        process(parse_json_string(content), index, traverse_bounds));
+                });
+            };
+        };
+        server.resource["^/resolve$"]["POST"] = traverse_route(process_resolve_request);
+        server.resource["^/traverse$"]["POST"] = traverse_route(process_traverse_request);
+    }
 
     server.default_resource["GET"] = [&](shared_ptr<HttpServer::Response> response,
                                         shared_ptr<HttpServer::Request> request) {
