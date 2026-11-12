@@ -124,6 +124,20 @@ class CanonicalDBG : public DBGWrapper<DeBruijnGraph> {
     // extension is not available
     mutable std::unique_ptr<NodeFirstCache> fallback_cache_;
 
+    // Callback forms of the neighbour methods. The callback can throw to stop early
+    template <class Callback>
+    void call_outgoing_kmers(node_index node,
+                             const std::string &spelling_hint,
+                             const Callback &callback) const;
+    template <class Callback>
+    void call_incoming_kmers(node_index node,
+                             const std::string &spelling_hint,
+                             const Callback &callback) const;
+    template <class Callback>
+    void call_outgoing_nodes(node_index node, const Callback &callback) const;
+    template <class Callback>
+    void call_incoming_nodes(node_index node, const Callback &callback) const;
+
     // Find incoming nodes that are on the reverse complement strand of node
     void adjacent_incoming_rc_strand(node_index node,
                                      const std::string &spelling_hint,
