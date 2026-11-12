@@ -101,8 +101,9 @@ struct Strategy {
     uint64_t max_extension_bp = 5000;
     double time_budget_ms = 30'000;
 
-    // How many times a path may split (kUnlimited: the caps below bound the walk)
-    size_t max_splits_per_path = 64;
+    // How many times a path may split. Unlimited by default: each split adds a path, so
+    // max_paths bounds the splits as well.
+    size_t max_splits_per_path = kUnlimited;
 
     // Safety caps. Not request fields: they keep a request within bounded memory.
     uint64_t max_steps = 1'000'000;
