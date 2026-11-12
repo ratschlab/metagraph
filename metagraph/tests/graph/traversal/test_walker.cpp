@@ -767,10 +767,12 @@ TYPED_TEST(WalkerTest, SplitLimit) {
             EXPECT_EQ(0u, e->at_bp);
             EXPECT_EQ(EndReason::MAX_SPLITS, e->reason);
         }
-        st.max_splits_per_path = 1;
-        auto one = run(*anno, X, { "A", "B" }, st);
-        EXPECT_EQ(2u, one.arms[kRight].paths.size());
-        EXPECT_EQ(ArmResult::COMPLETE, one.arms[kRight].status);
+        for (size_t limit : { size_t(1), Strategy::kUnlimited }) {
+            st.max_splits_per_path = limit;
+            auto one = run(*anno, X, { "A", "B" }, st);
+            EXPECT_EQ(2u, one.arms[kRight].paths.size());
+            EXPECT_EQ(ArmResult::COMPLETE, one.arms[kRight].status);
+        }
     }
 }
 

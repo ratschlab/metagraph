@@ -184,6 +184,9 @@ Interval
    * - ``branching.max_label_branches``
      - How many times a column label can go on along more than one successor. An integer up to 1,000,000, or ``"unlimited"``.
      - 0
+   * - ``branching.max_splits_per_path``
+     - How many times one path can split. An integer up to 1,000,000, or ``"unlimited"``. Raise it for a seed with many labels, where the labels part often.
+     - 64
    * - ``bounds.max_extension_bp``
      - How far each arm extends.
      - 5000
@@ -250,7 +253,8 @@ budget:
 
 - 1,000,000 steps. Reaching this limit, or the time budget, stops the whole seed.
 - 1000 live paths and 10,000 paths per arm. Reaching one of these limits stops that arm.
-- 64 splits per path. Reaching this limit ends that path only.
+- ``max_splits_per_path`` splits per path, 64 unless the request sets it. Reaching this limit ends
+  that path only.
 
 Any of these limits marks the arm ``truncated``. ``complete_to_bp`` is then the extension up to
 which every walk is present.
