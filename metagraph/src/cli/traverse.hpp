@@ -274,11 +274,11 @@ Json::Value strategy_to_json(const graph::traversal::Strategy &strategy, const C
 Json::Value seed_result_to_json(const graph::traversal::SeedResult &result,
                                 const graph::traversal::Strategy &strategy,
                                 const std::string &detail, bool timing);
-// |check|: read every graph::traversal::kResolveCheckLabels objects built (a /resolve's
-// deadline: it throws to abandon the answer). |answer| (null: none): the answer account, charged
-// with the tree and its text before each part is built (the prices in traverse.cpp: its heap and
-// its text's bytes, AnswerAccount::charge_text), throwing graph::traversal::AnswerTooLarge at
-// the part that passes it
+// |check|: read every graph::traversal::kResolveCheckLabels objects built (a /resolve's stop
+// and deadline: it throws to abandon the answer). |answer| (null: none): the answer account,
+// charged with the tree and its text before each part is built (the prices in traverse.cpp: its
+// heap and its text's bytes, AnswerAccount::charge_text), throwing
+// graph::traversal::AnswerTooLarge at the part that passes it
 Json::Value profile_to_json(const graph::traversal::SupportProfile &profile,
                             const graph::traversal::SeedSelection *selection,
                             const std::string &run_format,

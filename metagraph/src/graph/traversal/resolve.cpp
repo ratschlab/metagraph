@@ -673,10 +673,15 @@ SupportProfile resolve_support(LabelOracle &oracle,
     ResolveStop::Phase stop_phase = ResolveStop::ROWS;
     ResolveStop::Reason stop_reason = ResolveStop::TIME;
     bool cannot_progress = false;
-    // the loops over the labels after the work: the answer's time, every kResolveCheckLabels
+    // the loops over the labels after the work, every kResolveCheckLabels: the request's stop
+    // first, as poll reads it before the deadline (a client gone, a fan-out's cutoff: without
+    // a deadline nothing else ends these loops, T5a-X1), then the answer's time
     auto finishing = [&](size_t i) {
-        if (options.finish_check && i && i % kResolveCheckLabels == 0)
-            options.finish_check();
+        if (i && i % kResolveCheckLabels == 0) {
+            checkpoint();
+            if (options.finish_check)
+                options.finish_check();
+        }
     };
     profile.num_kmers = query.size() - profile.k + 1;
     checkpoint();

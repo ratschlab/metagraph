@@ -128,8 +128,12 @@ struct ResolveOptions {
     uint64_t min_block_kmers = 1;
 
     // Polled between the phases of resolve_support() (before and after the discovery read,
-    // before and after the support fetch): true abandons the request, throwing |abandon|'s
-    // exception — the server's check that the client is still connected. Not a request field.
+    // before and after the support fetch, between row batches) and, after the work, with
+    // |finish_check| in the loops over the labels (and the server's selection and answer build,
+    // process_resolve_request): true abandons the request, throwing |abandon|'s exception — the
+    // server's check that the client is still connected, and on a multi-graph server the
+    // fan-out's stop (its work cutoff). Read with or without a deadline (T5a-X1: without one
+    // nothing else ended the loops after the work). Not a request field.
     std::function<bool()> stop;
     std::function<void()> abandon;
     // The work deadline of a request with bounds.time_budget_ms (unset: no deadline, and the
@@ -143,9 +147,9 @@ struct ResolveOptions {
     // field.
     std::function<bool()> time_up;
     // Read every kResolveCheckLabels labels of the loops after the work (a discovery's ranking
-    // and naming, the profiles, the candidates' grouping): throws to abandon a request whose
-    // answer can no longer be built and written in time (the server: 503 deadline). Not a
-    // request field.
+    // and naming, the profiles, the candidates' grouping), after |stop|: throws to abandon a
+    // request whose answer can no longer be built and written in time (the server: 503
+    // deadline). Not a request field.
     std::function<void()> finish_check;
     // the batches the rows are decoded in: at most |batch_rows| rows, sized to about
     // |batch_bytes|, and the bound of the rows a discovery keeps for repeated k-mers (tests
@@ -261,9 +265,9 @@ struct LabelCap {
 // milliseconds, and a check (a peek on its socket, a clock read) costs nothing beside that
 constexpr uint64_t kResolveCheckKmers = 4096;
 
-// The loops over the labels after a /resolve's work read ResolveOptions::finish_check once in
-// this many labels: a label's step there is a few allocations (its name, its runs), so the
-// answer's time is read within a few milliseconds of it
+// The loops over the labels after a /resolve's work read ResolveOptions::stop and finish_check
+// once in this many labels: a label's step there is a few allocations (its name, its runs), so
+// the answer's time (and a stop) is read within a few milliseconds of it
 constexpr size_t kResolveCheckLabels = 4096;
 
 // Where a deadline (ResolveOptions::time_up) ended a /resolve's work, and how far it got: the
@@ -432,7 +436,9 @@ void group_candidates(SupportProfile *profile, uint64_t min_block_kmers,
 // explicit seeds in the request's order
 constexpr char kSeedOrder[] = "rank";
 
-// |check| (unset: none): the answer's deadline (ResolveOptions::finish_check), read every
+// |check| (unset: none): the request's stop and the answer's deadline (the server's: the
+// request's ResolveOptions::stop, abandoning it, then its finish_check; T5a-X1: before, the
+// deadline alone, so that nothing ended the selection of a request without one), read every
 // kResolveCheckLabels steps of the selection -- an explicit seed and each of its labels; a label
 // (with its runs) gathered for max_support and the runs before their sort; in a max_support
 // round a run clipped and each pick it meets, a candidate start swept, the round's runs once

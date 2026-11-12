@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <map>
+#include <optional>
 #include <random>
 #include <set>
 #include <stdexcept>
@@ -1148,6 +1149,70 @@ TEST(Resolve, FinishCheckIsReadInTheLoopsOverTheLabels) {
                 continue;
             opts.finish_check = []() { throw std::runtime_error("late"); };
             EXPECT_THROW(resolve_support(oracle, q, opts), std::runtime_error) << discover;
+        }
+    }
+}
+
+// The loops over the labels after the work read ResolveOptions::stop at each of finish_check's
+// readings, before it, with or without a deadline (T5a-X1: before, only the work's phases read
+// it, so nothing ended these loops for a request without a deadline): the stop is read once
+// more per reading than without labels to loop over, and a stop that comes up during a loop
+// abandons the request at the loop's next reading
+TEST(Resolve, TheStopIsReadInTheLoopsOverTheLabels) {
+    const std::string q = random_seq(200, 51);
+    struct Abandoned {};
+    // the stop's readings beyond finish_check's: the work's phases, the same for every n
+    std::optional<size_t> phases[2];
+    for (size_t n : { kResolveCheckLabels, kResolveCheckLabels + 1,
+                      2 * kResolveCheckLabels + 10 }) {
+        std::vector<std::string> seqs, labels;
+        for (size_t i = 0; i < n; ++i) {
+            seqs.push_back(q.substr(i % 150, 40));
+            labels.push_back("L" + std::to_string(i));
+        }
+        auto anno = build_anno_graph<DBGSuccinct, annot::ColumnCompressed<>>(kK, seqs, labels);
+        LabelOracle oracle(*anno);
+        const size_t per_loop = (n - 1) / kResolveCheckLabels;
+        for (bool discover : { true, false }) {
+            ResolveOptions opts;
+            if (discover) {
+                opts.discover = true;
+                opts.discover_max_labels = labels.size();
+            } else {
+                opts.labels = labels;
+            }
+            size_t checks = 0;
+            size_t stops = 0;
+            bool armed = false;
+            opts.finish_check = [&]() { checks++; };
+            opts.stop = [&]() { stops++; return armed; };
+            opts.abandon = []() { throw Abandoned(); };
+            const SupportProfile profile = resolve_support(oracle, q, opts);
+            EXPECT_EQ(labels.size(), profile.labels.size());
+            EXPECT_EQ((discover ? 5 : 2) * per_loop, checks) << discover << " " << n;
+            ASSERT_GE(stops, checks);
+            if (!phases[discover])
+                phases[discover] = stops - checks;
+            EXPECT_EQ(*phases[discover], stops - checks) << discover << " " << n;
+            // the same profile without a stop: it is only read
+            ResolveOptions plain = opts;
+            plain.stop = nullptr;
+            plain.abandon = nullptr;
+            plain.finish_check = nullptr;
+            const SupportProfile unchecked = resolve_support(oracle, q, plain);
+            ASSERT_EQ(unchecked.labels.size(), profile.labels.size());
+            for (size_t l = 0; l < profile.labels.size(); ++l) {
+                EXPECT_EQ(unchecked.labels[l].label.name, profile.labels[l].label.name);
+                EXPECT_EQ(unchecked.labels[l].runs, profile.labels[l].runs);
+            }
+            if (per_loop < 2)
+                continue;
+            // the stop comes up at the first loop reading (after the stop was read there): the
+            // loop's next reading abandons the request, one finish_check reading in
+            checks = 0;
+            opts.finish_check = [&]() { checks++; armed = true; };
+            EXPECT_THROW(resolve_support(oracle, q, opts), Abandoned) << discover;
+            EXPECT_EQ(1u, checks) << discover;
         }
     }
 }
