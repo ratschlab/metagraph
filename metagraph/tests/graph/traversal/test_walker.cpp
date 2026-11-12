@@ -250,7 +250,7 @@ TYPED_TEST(WalkerTest, Linear) {
         ASSERT_EQ(1u, only_right.arms[kRight].paths.size());
         EXPECT_EQ(S.substr(100), spell_path(only_right.arms[kRight], only_right.arms[kRight].paths[0]));
 
-        // a lower-case seed maps the same way and gets the same seed id
+        // a lower-case seed maps the same way and gives the same result
         std::string lower = seed;
         for (char &c : lower) {
             c = std::tolower(c);

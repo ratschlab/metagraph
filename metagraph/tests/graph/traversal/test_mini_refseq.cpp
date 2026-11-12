@@ -424,6 +424,12 @@ TEST_F(MiniRefSeq, ResolveThenTraverseRequests) {
     }
     EXPECT_EQ(19u, labels.size());
 
+    // seed selection is not a part of /resolve
+    Json::Value with_select = resolve;
+    with_select["select"]["max_seeds"] = 1;
+    EXPECT_THROW(cli::process_resolve_request(with_select, *anno_graph_, limits),
+                 cli::InvalidRequest);
+
     Json::Value traverse;
     traverse["seeds"][0]["sequence"] = query_;
     traverse["seeds"][0]["labels"] = labels;

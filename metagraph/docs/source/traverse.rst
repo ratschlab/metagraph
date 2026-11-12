@@ -45,9 +45,9 @@ Find the records that contain a query:
       "discover": {"kind": "header"}
     }'
 
-Then extend the query by 2,000 bp on each side. Use the query as the seed's ``sequence``. For
-its ``labels``, take the names in ``labels`` of the first answer whose ``runs`` cover the whole
-query:
+Then extend the query by 2,000 bp on each side. Use the query as the seed's ``sequence``. A
+seed is at most 10,000 bp long, so send a part of a longer query. For the seed's ``labels``,
+take the names of the entries in the answer's ``labels`` whose ``runs`` cover the whole seed:
 
 .. code-block:: text
 
