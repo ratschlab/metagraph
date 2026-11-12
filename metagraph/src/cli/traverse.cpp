@@ -6354,6 +6354,23 @@ Json::Value process_resolve_request(
         }
     }
 
+    // The loops after the work -- the selection (select_seeds) and the answer's build
+    // (profile_to_json), as resolve_support's own loops over the labels -- read the request's
+    // stop and then its deadline every kResolveCheckLabels steps: a stop abandons the request
+    // there (nothing is answered: a client gone, or a pair the fan-out decided at its cutoff),
+    // with or without a deadline (T5a-X1, Fable review 2026-11-12: a request without one read
+    // nothing in its selection, whose max_support rounds run for minutes on a pool or handler
+    // thread). Only read: the selection and the answer do not depend on it
+    std::function<void()> after_work;
+    if (req.options.stop || req.options.finish_check) {
+        after_work = [&req]() {
+            if (req.options.stop && req.options.stop() && req.options.abandon)
+                req.options.abandon();
+            if (req.options.finish_check)
+                req.options.finish_check();
+        };
+    }
+
     LabelOracle oracle(anno_graph);
     if (admit) {
         // the request's own refusals come before its admission (a 400 never registers a
@@ -6394,12 +6411,13 @@ Json::Value process_resolve_request(
                                                               max_labels_requested,
                                                               req.options.discover_max_labels,
                                                               profile));
-            // under a deadline the selection reads it as the answer's other loops do (every
-            // kResolveCheckLabels steps): past it, the 503 deadline (GPT review 7, finding 1)
+            // the selection reads the stop and the deadline as the answer's other loops do
+            // (every kResolveCheckLabels steps): a stop abandons it, past the deadline the 503
+            // deadline (GPT review 7, finding 1; T5a-X1)
             if (not_made.empty()) {
                 selection = select_seeds(profile, req.sequence, req.policy,
                                          oracle.regime() != Regime::BASIC,
-                                         req.options.finish_check, req.options.answer);
+                                         after_work, req.options.answer);
             }
         }
     } catch (const std::invalid_argument &e) {
@@ -6418,10 +6436,10 @@ Json::Value process_resolve_request(
         throw InvalidRequest(message);
     }
     // and once the selection is done (or none was made)
-    if (req.options.finish_check)
-        req.options.finish_check();
+    if (after_work)
+        after_work();
     Json::Value out = profile_to_json(profile, selection ? &*selection : nullptr, req.run_format,
-                                      req.options.finish_check, req.options.answer);
+                                      after_work, req.options.answer);
     if (!not_made.empty()) {
         out["selection"] = Json::Value();
         // a stop states it in its message (below); a cut by the label cap alone in its own

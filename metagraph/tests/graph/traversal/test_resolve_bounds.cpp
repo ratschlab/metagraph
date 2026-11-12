@@ -2060,6 +2060,127 @@ TEST(ResolveBoundsRoute, ATimeStopInTheSelectionIsTheDeadline) {
     EXPECT_LT(reads + 200, reads_all);
 }
 
+// R1's probe A2 shape (T4 review): |full| labels of one run over the whole query and three
+// labels of one-k-mer runs, every 32 k-mers from k-mer 7, 17 and 27, so that every max_support
+// pick splits each long run (a round of the selection holds about full x picks pieces)
+std::unique_ptr<AnnotatedDBG> splitting_index(const std::string &q, size_t full) {
+    std::vector<std::string> seqs, labels;
+    for (size_t i = 0; i < full; ++i) {
+        seqs.push_back(q);
+        labels.push_back("full" + std::to_string(i));
+    }
+    for (uint64_t off : { 7, 17, 27 }) {
+        for (uint64_t s = off; s + kK <= q.size(); s += 32) {
+            seqs.push_back(q.substr(s, kK));
+            labels.push_back("div" + std::to_string(off));
+        }
+    }
+    return build_anno_graph<DBGSuccinct, annot::ColumnCompressed<>>(kK, seqs, labels);
+}
+
+Json::Value max_support_request(const std::string &q) {
+    Json::Value request;
+    request["sequence"] = q;
+    request["discover"]["max_labels"] = 1000;
+    request["select"]["policy"] = "max_support";
+    request["select"]["max_seeds"] = 1024;
+    return request;
+}
+
+// The route (process_resolve_request) without a deadline: its selection reads the request's
+// stop (a client gone; a multi-graph server's fan-out stop at its cutoff) every
+// kResolveCheckLabels steps, and a stop that comes up while it runs abandons the request at
+// the next reading, nothing answered (T5a-X1, Fable review 2026-11-12: before, a request without
+// a deadline read nothing in its selection, whose rounds ran to their end, minutes at the caps,
+// on the thread of a pair the fan-out had answered unfinished). An answer that no stop ends is
+// the one without a stop predicate
+TEST(ResolveBoundsRoute, AStopInTheSelectionAbandonsTheRequest) {
+    const std::string q = random_seq(1000, 2311);
+    const auto anno = splitting_index(q, 200);
+    const cli::ResolveTimeLimits limits { 0, cli::kResolveFinalizeMs, 0, 0, 0, 0, 1024 };
+    const Json::Value request = max_support_request(q);
+    uint64_t reads = 0;
+    uint64_t gone_from = std::numeric_limits<uint64_t>::max();
+    const std::function<bool()> gone = [&]() { return ++reads >= gone_from; };
+    auto run = [&](const Json::Value &r) {
+        reads = 0;
+        return cli::process_resolve_request(r, *anno, "r1", 0, nullptr, gone, limits);
+    };
+    // the readings without a selection: the work's, and one where the selection would be
+    Json::Value unselected = request;
+    unselected.removeMember("select");
+    run(unselected);
+    const uint64_t before = reads;
+    // the whole selection, read by the stop throughout; the answer is the one without a stop
+    const Json::Value all = run(request);
+    const uint64_t reads_all = reads;
+    const uint64_t picks = all["selection"]["counts"]["selected"].asUInt64();
+    EXPECT_GT(picks, 150u);
+    EXPECT_GT(reads_all, before + 100);
+    const Json::Value unread = cli::process_resolve_request(request, *anno, "r1", 0, nullptr,
+                                                            nullptr, limits);
+    EXPECT_EQ(compact(untimed(unread)), compact(untimed(all)));
+    // the stop comes up at the selection's third reading: abandoned there, nothing answered
+    gone_from = before + 2;
+    try {
+        run(request);
+        ADD_FAILURE() << "not stopped";
+    } catch (const graph::traversal::AttemptAborted &) {}
+    EXPECT_EQ(gone_from, reads);
+    EXPECT_LT(reads + 100, reads_all);
+    // the same within a round: the round's next reading ends it (each reading one of a run
+    // clipped, a candidate start swept, a label checked for the winner: about every
+    // kResolveCheckLabels pieces of a round of about 200 x picks)
+    gone_from = (before + reads_all) / 2;
+    EXPECT_THROW(run(request), graph::traversal::AttemptAborted);
+    EXPECT_EQ(gone_from, reads);
+}
+
+// The answer's build (profile_to_json) reads the request's stop every kResolveCheckLabels
+// objects (labels, candidates, seeds), after the reading once the selection is done: a request
+// without a deadline reads it there as many times more than its work does (T5a-X1: before,
+// once after the work and never in the build)
+TEST(ResolveBoundsRoute, TheAnswerBuildReadsTheStop) {
+    const std::string q = random_seq(200, 51);
+    const size_t n = 2 * kResolveCheckLabels + 10;
+    std::vector<std::string> seqs, labels;
+    for (size_t i = 0; i < n; ++i) {
+        seqs.push_back(q.substr(i % 150, 40));
+        labels.push_back("L" + std::to_string(i));
+    }
+    auto anno = build_anno_graph<DBGSuccinct, annot::ColumnCompressed<>>(kK, seqs, labels);
+    const cli::ResolveTimeLimits limits { 0, cli::kResolveFinalizeMs, 0, 0, 0, 0, 1024 };
+    Json::Value request;
+    request["sequence"] = q;
+    request["discover"]["max_labels"] = static_cast<Json::UInt64>(n);
+    uint64_t reads = 0;
+    const std::function<bool()> gone = [&]() { ++reads; return false; };
+    const Json::Value out = cli::process_resolve_request(request, *anno, "r1", 0, nullptr, gone,
+                                                         limits);
+    ASSERT_EQ(n, out["labels"].size());
+    const uint64_t route_reads = reads;
+    // the work's own readings: resolve_support with the request's options
+    cli::ResolveRequest parsed = cli::parse_resolve_request(request);
+    reads = 0;
+    parsed.options.stop = gone;
+    parsed.options.abandon = []() { throw std::runtime_error("abandoned"); };
+    LabelOracle oracle(*anno);
+    resolve_support(oracle, q, parsed.options);
+    const uint64_t work_reads = reads;
+    // once after the work, once where the selection is done, and one per kResolveCheckLabels
+    // objects of the answer
+    const uint64_t objects = out["labels"].size() + out["candidates"].size();
+    EXPECT_EQ(work_reads + 2 + objects / kResolveCheckLabels, route_reads);
+    EXPECT_GE(objects / kResolveCheckLabels, 2u);
+    // a stop at the build's last reading abandons the request there
+    uint64_t gone_from = route_reads;
+    reads = 0;
+    const std::function<bool()> late = [&]() { return ++reads >= gone_from; };
+    EXPECT_THROW(cli::process_resolve_request(request, *anno, "r1", 0, nullptr, late, limits),
+                 graph::traversal::AttemptAborted);
+    EXPECT_EQ(gone_from, reads);
+}
+
 // Sample 38 (SPEC-labeled-traversal-core.md §4.1), a real run: more explicit seeds than the cap
 // (2 on the recording server), the route's own body for the sample's request and cap
 TEST(ResolveBoundsRoute, Sample38) {

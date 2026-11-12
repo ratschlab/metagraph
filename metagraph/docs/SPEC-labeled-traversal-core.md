@@ -372,7 +372,13 @@ deadline. `src/cli/traverse.cpp` `process_resolve_request`, `src/graph/traversal
   finalisation reserve of 250 ms included): nothing partial is sent", "code": "deadline"}`, never a partial
   answer; the CLI writes that body and exits 1. (A 503 with `Retry-After` and no `code` is still the loading
   index's.) A deadline that passes during the selection is this 503 too, at its next reading: a selection is no
-  prefix of the query, so there is no `stop` for it, and nothing partial is sent.
+  prefix of the query, so there is no `stop` for it, and nothing partial is sent. Each of these readings
+  (the loops over the labels, the selection, the JSON's objects) reads the request's stop first, with or
+  without a deadline: a client gone (§10.3) and, on a multi-graph server, the fan-out's stop at its work cutoff
+  (SPEC-multigraph-envelope.md section 4) abandon the request there, nothing answered *(T5a-X1, Fable review
+  2026-11-12: before, a request without a deadline read nothing after its row pass, and a `max_support`
+  selection at the caps ran for minutes on its thread after its pair had been answered `unfinished`)*. The
+  readings do not change what is built: an answer that completes is the same bytes.
 - **Not polled** — each a piece the deadline can fall into, so a stop comes up to one of them after the work
   deadline, and their overrun of the reserve is a 503: the request's parse; the mapping of the query's k-mers
   (one call, linear in the query, which `bounds.max_query_bp` and `--resolve-max-query-bp` bound); the
@@ -1546,7 +1552,9 @@ response is delivered whole (`outcome.delivery: inline`, §7.0; spooled / paged 
     that goes away stops within one row batch**: it is checked at its phase boundaries, between the row
     batches of the discovery and of the explicit labels' pass — 64 rows, then up to 4,096 rows or about
     64 MiB of rows (§4.2) — and every 4,096 k-mers of an explicit-label support pass (*review of 2026-10-06,
-    X-EFFICIENCY-04*), with or without `bounds.time_budget_ms`, each check a peek at the socket; the one
+    X-EFFICIENCY-04*), and after the work at each of the answer's readings of §4.5 (every 4,096 labels of the
+    loops over the labels, steps of the selection or objects of the answer's tree; *T5a-X1*), with or without
+    `bounds.time_budget_ms`, each check a peek at the socket; the one
     exception is the direct cell path — at most 16 explicit column labels on an annotation with single-cell
     reads, none of the row-diff family — without `bounds.time_budget_ms`, whose read of the query's cells is
     one piece; once its answer is built, also while the answer is serialised and compressed, as `/traverse`'s
