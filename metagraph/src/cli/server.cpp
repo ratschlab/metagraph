@@ -21,6 +21,7 @@
 #include "server_cache.hpp"
 #include "server_request.hpp"
 #include "traverse.hpp"
+#include "pattern.hpp"
 #include "cli/load/load_annotation.hpp"
 
 
@@ -676,6 +677,11 @@ int run_server(Config *config) {
         server.resource["^/traverse$"]["POST"] = traverse_route(
             [](const Json::Value &request, const AnnotatedDBG &index, const TraverseLimits &limits) {
                 return process_traverse_request(request, index, limits);
+            });
+        server.resource["^/pattern$"]["POST"] = traverse_route(
+            [&](const Json::Value &request, const AnnotatedDBG &index, const TraverseLimits &) {
+                return process_pattern_request(request, index.get_graph(),
+                                               config->pattern_max_time_ms);
             });
     } else {
         // a list of graphs: the graphs are selected as in /search, and each one is walked

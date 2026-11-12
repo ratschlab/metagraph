@@ -8,6 +8,8 @@
 
 #include <json/json.h>
 
+#include "strict_json.hpp"
+
 
 class ThreadPool;
 
@@ -32,12 +34,6 @@ TraverseLimits traverse_limits(const Config &config);
 constexpr uint64_t kMaxSeedBp = 10'000;
 // The largest labels.max_seed_labels of a /traverse request
 constexpr uint64_t kMaxSeedLabels = 100'000;
-
-// A request that is not valid under the v1 schema (an unknown field included)
-class InvalidRequest : public std::invalid_argument {
-  public:
-    using std::invalid_argument::invalid_argument;
-};
 
 // The request and response schemas are documented in the manual (docs/source/traverse.rst)
 Json::Value process_traverse_request(const Json::Value &request,

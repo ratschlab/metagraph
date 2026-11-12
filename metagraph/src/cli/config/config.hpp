@@ -98,6 +98,7 @@ class Config {
     // more seeds than the second are refused
     double traverse_max_time_ms = 30'000;
     size_t traverse_max_seeds = 10;
+    double pattern_max_time_ms = 30'000;
     unsigned int min_tip_size = 1;
     unsigned int min_unitig_median_kmer_abundance = 1;
     int fallback_abundance_cutoff = 1;

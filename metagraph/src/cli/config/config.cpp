@@ -434,16 +434,19 @@ Config::Config(int argc, char *argv[]) {
             relax_arity_brwt = atoi(get_value(i++));
         } else if (!strcmp(argv[i], "--RA-ivbuff-size")) {
             RA_ivbuffer_size = atoll(get_value(i++));
-        } else if (!strcmp(argv[i], "--traverse-max-time-ms")) {
+        } else if (!strcmp(argv[i], "--traverse-max-time-ms")
+                    || !strcmp(argv[i], "--pattern-max-time-ms")) {
+            double &max_time_ms = !strcmp(argv[i], "--traverse-max-time-ms")
+                                    ? traverse_max_time_ms : pattern_max_time_ms;
             const std::string value = get_value(i++);
             size_t end = 0;
             try {
-                traverse_max_time_ms = std::stod(value, &end);
+                max_time_ms = std::stod(value, &end);
             } catch (const std::exception &) {
                 end = 0;
             }
             if (end != value.size())
-                traverse_max_time_ms = -1;   // refused below
+                max_time_ms = -1;   // refused below
         } else if (!strcmp(argv[i], "--traverse-max-seeds")) {
             traverse_max_seeds = parse_limit(get_value(i++));
         } else if (!strcmp(argv[i], "--cache-size")) {
@@ -647,9 +650,10 @@ Config::Config(int argc, char *argv[]) {
 
     if (identity == SERVER_QUERY
             && (!std::isfinite(traverse_max_time_ms) || !(traverse_max_time_ms > 0)
+                || !std::isfinite(pattern_max_time_ms) || !(pattern_max_time_ms > 0)
                 || !traverse_max_seeds)) {
-        std::cerr << "Error: --traverse-max-time-ms and --traverse-max-seeds"
-                     " must be positive and finite" << std::endl;
+        std::cerr << "Error: --traverse-max-time-ms, --pattern-max-time-ms and"
+                     " --traverse-max-seeds must be positive and finite" << std::endl;
         print_usage_and_exit = true;
     }
 
@@ -1559,6 +1563,7 @@ if (advanced) {
             fprintf(stderr, "\n\tA server on a single index (-i, -a) also serves /traverse (experimental):\n");
             fprintf(stderr, "\t   --traverse-max-time-ms [FLOAT] \tthe most time one seed's walk may take [30000]\n");
             fprintf(stderr, "\t   --traverse-max-seeds [INT] \tthe most seeds a traversal request may hold [10]\n");
+            fprintf(stderr, "\t   --pattern-max-time-ms [FLOAT] \tthe most time one pattern request may take [30000]\n");
         } break;
 
     }

@@ -20,6 +20,7 @@ or propose a pull request against the `manual source <https://github.com/ratschl
    api.rst
    sequence_search.rst
    traverse.rst
+   pattern.rst
    sequence_assembly.rst
    faq.rst
    troubleshooting.rst
