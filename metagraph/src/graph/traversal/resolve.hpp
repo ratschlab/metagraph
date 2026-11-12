@@ -1,7 +1,6 @@
 #ifndef __TRAVERSAL_RESOLVE_HPP__
 #define __TRAVERSAL_RESOLVE_HPP__
 
-#include <optional>
 #include <string>
 #include <string_view>
 #include <tuple>
@@ -27,25 +26,10 @@ struct KmerInterval {
     }
 };
 
-struct ResolveOptions {
-    // exactly one of |labels| (explicit) or |discover| must be set
-    std::vector<std::string> labels;
-    bool discover = false;
-    size_t discover_max_labels = 1000;
-    LabelKind discover_kind = LabelKind::COLUMN;
-};
-
 struct LabelProfile {
     LabelRef label;
     uint64_t kmers_supported = 0;
     std::vector<KmerInterval> runs;          // maximal support runs
-};
-
-// A discovery that found more labels than |discover_max_labels| keeps those supporting the
-// most k-mers (ties: smaller column, then sequence id)
-struct LabelTruncation {
-    size_t kept = 0;
-    size_t total = 0;
 };
 
 struct SupportProfile {
@@ -54,50 +38,14 @@ struct SupportProfile {
     Regime regime = Regime::BASIC;
     std::vector<KmerInterval> graph_runs;    // runs of k-mers present in the graph
     std::vector<LabelProfile> labels;
-    std::optional<LabelTruncation> labels_truncated;
 };
 
-// Resolve where |query| is supported by which labels. No traversal.
-// Throws std::invalid_argument for unknown labels or invalid options.
+// Where |query| is supported by each of |labels|: the walker's check of a seed's named
+// labels. No traversal.
+// Throws std::invalid_argument for unknown labels, no labels or a query shorter than k.
 SupportProfile resolve_support(const LabelOracle &oracle,
                                std::string_view query,
-                               const ResolveOptions &options);
-
-// Seeds cover the labels: the first is the interval contained in the most label runs, each
-// next one the interval contained in the most runs of labels that no earlier seed carries
-struct SelectionPolicy {
-    size_t max_seeds = 10;
-    uint64_t min_block_bp = 0;               // 0: at least k
-    size_t max_labels_per_seed = 1000;
-};
-
-// The labels supporting a selected seed beyond |max_labels_per_seed|: the kept ones are the
-// first in the order of their FNV-1a hash, so a cut is reproducible and unbiased by name
-struct LabelPopulation {
-    size_t supporting_total = 0;             // labels supporting the whole interval
-    std::vector<std::string> dropped;        // kept only if <= 1000
-    size_t dropped_count = 0;
-};
-
-struct FrozenSeed {
-    std::string seed_id;
-    std::string sequence;
-    KmerInterval kmers;
-    std::vector<std::string> labels;         // bytewise sorted
-    LabelPopulation population;
-};
-
-// Seeds are listed in the order they were picked; they may overlap
-std::vector<FrozenSeed> select_seeds(const SupportProfile &profile,
-                                     std::string_view query,
-                                     const SelectionPolicy &policy,
-                                     bool canonical_orientation);
-
-// seed_id = hex FNV-1a-64 over the case-mapped (and in canonical graphs canonical)
-// sequence and the length-prefixed sorted labels
-std::string make_seed_id(std::string_view sequence,
-                         bool canonical_orientation,
-                         std::vector<std::string> labels);
+                               const std::vector<std::string> &labels);
 
 // |sequence| in the case the graph stores (upper case unless the build is case-sensitive)
 std::string in_graph_case(std::string_view sequence);

@@ -345,7 +345,6 @@ void Walker::validate_seed() {
                              + encode_presence_mask(present), nodes_.size(),
                              sdsl::util::cnt_one_bits(present));
     }
-    result_.seed_id = seed_.seed_id;
     result_.length_bp = seq.size();
     result_.num_kmers = nodes_.size();
 
@@ -375,9 +374,7 @@ void Walker::validate_seed() {
         // A label that does not carry the seed is dropped, with the runs of k-mers it is
         // on (check_seed refused duplicates). A column carries the seed when it is on
         // every k-mer, a record when it also holds the k-mers at consecutive coordinates.
-        ResolveOptions options;
-        options.labels = seed_.labels;
-        SupportProfile profile = resolve_support(oracle_, seed_upper_, options);
+        SupportProfile profile = resolve_support(oracle_, seed_upper_, seed_.labels);
         const KmerInterval whole { 0, nodes_.size() };
         auto on_every_kmer = [&](const LabelProfile &lp) {
             return lp.runs.size() == 1 && lp.runs[0] == whole;
@@ -423,14 +420,6 @@ void Walker::validate_seed() {
         result_.labels_supporting_total = result_.label_dict.size();
     }
     assert(places_.size() == result_.label_dict.size());
-
-    std::vector<std::string> names;
-    for (const LabelRef &ref : result_.label_dict) {
-        names.push_back(ref.name);
-    }
-    result_.validated_seed_id = make_seed_id(seed_upper_, regime_ != Regime::BASIC, names);
-    result_.seed_id_mismatch = !seed_.seed_id.empty()
-                                && seed_.seed_id != result_.validated_seed_id;
 }
 
 // The rows of the seed's k-mers, read a window at a time and handed to |consume|(i, row,

@@ -21,7 +21,6 @@ TraverseLimits traverse_limits(const Config &config) {
     TraverseLimits limits;
     limits.max_time_ms = config.traverse_max_time_ms;
     limits.max_seeds = config.traverse_max_seeds;
-    limits.max_resolve_query_bp = config.resolve_max_query_bp;
     return limits;
 }
 
@@ -190,7 +189,6 @@ TraverseRequest parse_traverse_request(const Json::Value &json, const TraverseLi
     for (Json::ArrayIndex i = 0; i < seeds.size(); ++i) {
         Strict ss(seeds[i], "request.seeds[" + std::to_string(i) + "]");
         Seed seed;
-        seed.seed_id = ss.str("seed_id", "");
         seed.sequence = ss.str("sequence", "");
         if (seed.sequence.empty())
             throw InvalidRequest(ss.child("sequence") + " is required");
@@ -365,9 +363,6 @@ Json::Value arm_to_json(const ArmResult &arm) {
 Json::Value seed_result_to_json(const SeedResult &r) {
     Json::Value j;
     Json::Value &seed = j["seed"];
-    seed["seed_id"] = r.seed_id;
-    seed["validated_seed_id"] = r.validated_seed_id;
-    seed["seed_id_mismatch"] = r.seed_id_mismatch;
     seed["length_bp"] = uint_json(r.length_bp);
     seed["num_kmers"] = uint_json(r.num_kmers);
     Json::Value labels(Json::arrayValue);
@@ -412,7 +407,6 @@ Json::Value seed_result_to_json(const SeedResult &r) {
 
 Json::Value failed_seed_to_json(const Seed &seed, const SeedDerivationError &e) {
     Json::Value j;
-    j["seed"]["seed_id"] = seed.seed_id;
     j["seed"]["length_bp"] = uint_json(seed.sequence.size());
     j["seed"]["labels_from_seed"] = seed.labels.empty();
     j["error"]["cause"] = to_string(e.cause());
@@ -424,106 +418,6 @@ Json::Value failed_seed_to_json(const Seed &seed, const SeedDerivationError &e) 
     return j;
 }
 
-
-/********************************* /resolve **********************************/
-
-struct ResolveRequest {
-    std::string sequence;
-    ResolveOptions options;
-    bool select = false;
-    SelectionPolicy policy;
-};
-
-ResolveRequest parse_resolve_request(const Json::Value &json, const TraverseLimits &limits) {
-    ResolveRequest req;
-    Strict s(json, "request");
-    req.sequence = s.str("sequence", "");
-    if (req.sequence.empty())
-        throw InvalidRequest("request.sequence is required");
-    if (req.sequence.size() > limits.max_resolve_query_bp) {
-        throw InvalidRequest("request.sequence: " + std::to_string(req.sequence.size())
-                             + " bp, over the server's limit of "
-                             + std::to_string(limits.max_resolve_query_bp));
-    }
-    req.options.labels = s.strings("labels");
-    if (req.options.labels.size() > kMaxSeedLabels) {
-        throw InvalidRequest("request.labels: " + std::to_string(req.options.labels.size())
-                             + " labels, over the limit of " + std::to_string(kMaxSeedLabels));
-    }
-    if (s.has("discover")) {
-        Strict d(s.raw("discover"), "request.discover");
-        req.options.discover = true;
-        req.options.discover_max_labels = d.uint("max_labels", 1000, 1, kMaxSeedLabels);
-        req.options.discover_kind = d.enumeration<LabelKind>("kind", LabelKind::COLUMN,
-            { { "column", LabelKind::COLUMN }, { "header", LabelKind::HEADER } });
-        d.done();
-    }
-    if (req.options.labels.empty() == !req.options.discover)
-        throw InvalidRequest("request: specify exactly one of 'labels' or 'discover'");
-    if (s.has("select")) {
-        Strict p(s.raw("select"), "request.select");
-        req.select = true;
-        req.policy.max_seeds = p.uint("max_seeds", 10, 1, 1000);
-        req.policy.min_block_bp = p.uint("min_block_bp", 0);
-        req.policy.max_labels_per_seed = p.uint("max_labels_per_seed", 1000, 1, kMaxSeedLabels);
-        p.done();
-    }
-    s.done();
-    return req;
-}
-
-Json::Value profile_to_json(const SupportProfile &p, const std::vector<FrozenSeed> *sel) {
-    Json::Value j;
-    j["k"] = uint_json(p.k);
-    j["regime"] = to_string(p.regime);
-    j["num_kmers"] = uint_json(p.num_kmers);
-    j["graph_runs"] = runs_json(p.graph_runs);
-    Json::Value labels(Json::arrayValue);
-    for (const LabelProfile &l : p.labels) {
-        Json::Value lj;
-        lj["label"] = l.label.name;
-        lj["kind"] = to_string(l.label.kind);
-        lj["kmers_supported"] = uint_json(l.kmers_supported);
-        lj["runs"] = runs_json(l.runs);
-        labels.append(std::move(lj));
-    }
-    j["labels"] = std::move(labels);
-    if (p.labels_truncated) {
-        Json::Value &t = j["labels_truncated"];
-        t["kept"] = uint_json(p.labels_truncated->kept);
-        t["total"] = uint_json(p.labels_truncated->total);
-    } else {
-        j["labels_truncated"] = Json::Value::null;
-    }
-    if (sel) {
-        Json::Value &s = j["selection"];
-        Json::Value seeds(Json::arrayValue);
-        for (const FrozenSeed &seed : *sel) {
-            Json::Value sj;
-            sj["seed_id"] = seed.seed_id;
-            sj["sequence"] = seed.sequence;
-            sj["kmer_interval"] = interval_json(seed.kmers.begin, seed.kmers.end);
-            Json::Value ls(Json::arrayValue);
-            for (const std::string &l : seed.labels) {
-                ls.append(l);
-            }
-            sj["labels"] = std::move(ls);
-            Json::Value &pop = sj["label_population"];
-            pop["supporting_total"] = uint_json(seed.population.supporting_total);
-            pop["dropped_count"] = uint_json(seed.population.dropped_count);
-            if (seed.population.dropped_count) {
-                Json::Value dl(Json::arrayValue);
-                for (const std::string &d : seed.population.dropped) {
-                    dl.append(d);
-                }
-                pop["dropped"] = std::move(dl);
-            }
-            seeds.append(std::move(sj));
-        }
-        s["seeds"] = std::move(seeds);
-    }
-    return j;
-}
 
 } // namespace
 
@@ -550,19 +444,6 @@ Json::Value process_traverse_request(const Json::Value &request,
     }
     out["results"] = std::move(results);
     return out;
-}
-
-Json::Value process_resolve_request(const Json::Value &request,
-                                    const AnnotatedDBG &anno_graph,
-                                    const TraverseLimits &limits) {
-    const ResolveRequest req = parse_resolve_request(request, limits);
-    const LabelOracle oracle(anno_graph);
-    const SupportProfile profile = resolve_support(oracle, req.sequence, req.options);
-    if (!req.select)
-        return profile_to_json(profile, nullptr);
-    const std::vector<FrozenSeed> seeds = select_seeds(profile, req.sequence, req.policy,
-                                                       oracle.regime() != Regime::BASIC);
-    return profile_to_json(profile, &seeds);
 }
 
 } // namespace cli

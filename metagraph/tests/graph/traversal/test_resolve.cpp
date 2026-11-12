@@ -1,8 +1,5 @@
 #include "gtest/gtest.h"
 
-#include <fmt/format.h>
-#include <folly/hash/FnvHash.h>
-
 #include <algorithm>
 #include <map>
 #include <random>
@@ -64,11 +61,7 @@ TYPED_TEST(ResolveTest, ThreeStatesAndRuns) {
                                     }) {
         auto anno = build_anno_graph<Graph, Annotation>(kK, { a_graph, b_seq }, { "A", "B" }, mode);
         LabelOracle oracle(*anno);
-        const bool canonical = mode != DeBruijnGraph::BASIC;
-
-        ResolveOptions opts;
-        opts.labels = { "A", "B" };
-        auto profile = resolve_support(oracle, q, opts);
+        auto profile = resolve_support(oracle, q, { "A", "B" });
         EXPECT_EQ(190u, profile.num_kmers);
         EXPECT_EQ(kK, profile.k);
 
@@ -86,36 +79,6 @@ TYPED_TEST(ResolveTest, ThreeStatesAndRuns) {
         // B: k-mers fully inside q[100,200): starts 100..189
         EXPECT_EQ(iv({ {100, 190} }), B.runs);
         EXPECT_EQ(90u, B.kmers_supported);
-
-
-        // the shared [100,110) carries both labels, so one seed covers them
-        SelectionPolicy pol;
-        pol.max_seeds = 3;
-        auto sel = select_seeds(profile, q, pol, canonical);
-        ASSERT_EQ(1u, sel.size());
-        EXPECT_EQ((KmerInterval{ 100, 110 }), sel[0].kmers);
-        EXPECT_EQ((std::vector<std::string>{ "A", "B" }), sel[0].labels);
-        EXPECT_EQ(q.substr(100, 10 + kK - 1), sel[0].sequence);
-        EXPECT_EQ(16u, sel[0].seed_id.size());
-
-        // max_support with overlap: A and B both cover [100,110)
-        pol = SelectionPolicy();
-        pol.max_seeds = 1;
-        sel = select_seeds(profile, q, pol, canonical);
-        ASSERT_EQ(1u, sel.size());
-        EXPECT_EQ((KmerInterval{ 100, 110 }), sel[0].kmers);
-        EXPECT_EQ((std::vector<std::string>{ "A", "B" }), sel[0].labels);
-        EXPECT_EQ(2u, sel[0].population.supporting_total);
-
-        // max_labels_per_seed drops deterministically and reports the drop
-        pol.max_seeds = 1;
-        pol.max_labels_per_seed = 1;
-        sel = select_seeds(profile, q, pol, canonical);
-        ASSERT_EQ(1u, sel.size());
-        EXPECT_EQ(1u, sel[0].labels.size());
-        EXPECT_EQ(1u, sel[0].population.dropped_count);
-        EXPECT_EQ(1u, sel[0].population.dropped.size());
-        EXPECT_EQ(sel[0].labels, select_seeds(profile, q, pol, canonical)[0].labels);
 
         // agreement with the signature API for the labels present
         auto sigs = anno->get_top_label_signatures(q, 10, 0.0, 0.0);
@@ -137,157 +100,17 @@ TYPED_TEST(ResolveTest, ThreeStatesAndRuns) {
     }
 }
 
-// discovery with truncation keeps the top labels by k-mers, ties by column id
-TYPED_TEST(ResolveTest, DiscoverTruncation) {
+// requests that are refused
+TYPED_TEST(ResolveTest, Validation) {
     using Graph = typename TypeParam::first_type;
     using Annotation = typename TypeParam::second_type;
     std::string q = random_seq(100, 5);
-    // X, Y, Z carry the whole query; W carries half
-    auto anno = build_anno_graph<Graph, Annotation>(kK, { q, q, q, q.substr(0, 50) },
-                                                    { "X", "Y", "Z", "W" }, DeBruijnGraph::BASIC);
-    LabelOracle oracle(*anno);
-    ResolveOptions opts;
-    opts.discover = true;
-    opts.discover_max_labels = 2;
-    auto profile = resolve_support(oracle, q, opts);
-    ASSERT_TRUE(profile.labels_truncated.has_value());
-    EXPECT_EQ(2u, profile.labels_truncated->kept);
-    EXPECT_EQ(4u, profile.labels_truncated->total);
-    ASSERT_EQ(2u, profile.labels.size());
-    Column cx = anno->get_annotator().get_label_encoder().encode("X");
-    Column cy = anno->get_annotator().get_label_encoder().encode("Y");
-    EXPECT_EQ(std::min(cx, cy), profile.labels[0].label.column);
-    EXPECT_EQ(std::max(cx, cy), profile.labels[1].label.column);
-
-    opts.discover_max_labels = 10;
-    profile = resolve_support(oracle, q, opts);
-    EXPECT_FALSE(profile.labels_truncated.has_value());
-    ASSERT_EQ(4u, profile.labels.size());
-    EXPECT_EQ("W", profile.labels[3].label.name);
-    EXPECT_EQ(40u, profile.labels[3].kmers_supported);
-
-    // validation
-    ResolveOptions bad;
-    EXPECT_THROW(resolve_support(oracle, q, bad), std::invalid_argument);
-    bad.labels = { "nope" };
-    EXPECT_THROW(resolve_support(oracle, q, bad), std::invalid_argument);
-    bad.discover = true;
-    EXPECT_THROW(resolve_support(oracle, q, bad), std::invalid_argument);
-    ResolveOptions headers;
-    headers.discover = true;
-    headers.discover_kind = LabelKind::HEADER;
-    EXPECT_THROW(resolve_support(oracle, q, headers), std::invalid_argument);  // no CoordToHeader
-    EXPECT_THROW(resolve_support(oracle, q.substr(0, kK - 1), opts), std::invalid_argument);
-}
-
-// discovered labels are sorted by support, whatever their column order
-TYPED_TEST(ResolveTest, DiscoverySortsBySupport) {
-    using Graph = typename TypeParam::first_type;
-    using Annotation = typename TypeParam::second_type;
-    std::string q = random_seq(100, 7);
-    // W, the first column, carries half of the query; X carries all of it
-    auto anno = build_anno_graph<Graph, Annotation>(kK, { q.substr(0, 50), q }, { "W", "X" },
+    auto anno = build_anno_graph<Graph, Annotation>(kK, { q, q.substr(0, 50) }, { "X", "W" },
                                                     DeBruijnGraph::BASIC);
-    const auto &encoder = anno->get_annotator().get_label_encoder();
-    ASSERT_LT(encoder.encode("W"), encoder.encode("X"));
     LabelOracle oracle(*anno);
-    ResolveOptions opts;
-    opts.discover = true;
-    auto profile = resolve_support(oracle, q, opts);
-    ASSERT_EQ(2u, profile.labels.size());
-    EXPECT_EQ("X", profile.labels[0].label.name);
-    EXPECT_EQ("W", profile.labels[1].label.name);
-}
-
-// max_support at many labels: a synthetic profile whose runs end at jittered positions. The
-// breadth-optimal block is the prefix every label covers
-TEST(Resolve, MaxSupportScalesWithManyLabels) {
-    const size_t num_labels = 1000;
-    const uint64_t num_kmers = 5000;
-    SupportProfile profile;
-    profile.k = kK;
-    profile.num_kmers = num_kmers;
-    profile.graph_runs = iv({ {0, num_kmers} });
-    std::mt19937 gen(7);
-    for (size_t i = 0; i < num_labels; ++i) {
-        LabelProfile lp;
-        lp.label.column = static_cast<Column>(i);
-        lp.label.name = "L" + std::to_string(i);
-        // every label covers [0, 1000); each ends somewhere in [1000, 5000)
-        uint64_t end = 1000 + gen() % (num_kmers - 1000);
-        lp.runs = iv({ {0, end} });
-        lp.kmers_supported = end;
-        profile.labels.push_back(lp);
-    }
-
-    SelectionPolicy policy;
-    policy.max_seeds = 1;
-    policy.min_block_bp = kK;   // min_kmers == 1
-    const std::string query(num_kmers + kK - 1, 'A');
-    auto selection = select_seeds(profile, query, policy, false);
-    ASSERT_EQ(1u, selection.size());
-    uint64_t smallest_end = num_kmers;
-    for (const auto &lp : profile.labels) {
-        smallest_end = std::min(smallest_end, lp.runs[0].end);
-    }
-    EXPECT_EQ((KmerInterval{ 0, smallest_end }), selection[0].kmers);
-    EXPECT_EQ(num_labels, selection[0].labels.size());
-
-    // a length floor trades labels for length
-    policy.min_block_bp = 3000 + kK - 1;
-    auto longer = select_seeds(profile, query, policy, false);
-    ASSERT_EQ(1u, longer.size());
-    EXPECT_GE(longer[0].kmers.size(), 3000u);
-    EXPECT_LT(longer[0].labels.size(), num_labels);
-    for (const auto &name : longer[0].labels) {
-        const auto &lp = *std::find_if(profile.labels.begin(), profile.labels.end(),
-                                       [&](const LabelProfile &x) { return x.label.name == name; });
-        EXPECT_GE(lp.runs[0].end, longer[0].kmers.end);
-    }
-}
-
-// Later seeds count only the labels without a seed, and may overlap earlier seeds: with
-// A=[0,10), B=D=[0,6), C=[5,10) and seeds of at least 2 k-mers, [0,6) carries A, B and D,
-// and C then gets [5,10), which overlaps it
-TEST(Resolve, SeedsCoverTheLabels) {
-    SupportProfile profile;
-    profile.k = kK;
-    profile.num_kmers = 10;
-    for (auto [name, begin, end] : { std::tuple<const char*, uint64_t, uint64_t>{ "A", 0, 10 },
-                                     std::tuple<const char*, uint64_t, uint64_t>{ "B", 0, 6 },
-                                     std::tuple<const char*, uint64_t, uint64_t>{ "C", 5, 10 },
-                                     std::tuple<const char*, uint64_t, uint64_t>{ "D", 0, 6 } }) {
-        LabelProfile lp;
-        lp.label.column = static_cast<Column>(profile.labels.size());
-        lp.label.name = name;
-        lp.runs = iv({ { begin, end } });
-        lp.kmers_supported = end - begin;
-        profile.labels.push_back(lp);
-    }
-
-    SelectionPolicy policy;
-    policy.max_seeds = 10;
-    policy.min_block_bp = kK + 1;      // min_kmers == 2
-    auto sel = select_seeds(profile, std::string(10 + kK - 1, 'A'), policy, false);
-    ASSERT_EQ(2u, sel.size());         // every label has a seed: picking stops
-    EXPECT_EQ((KmerInterval{ 0, 6 }), sel[0].kmers);
-    EXPECT_EQ((std::vector<std::string>{ "A", "B", "D" }), sel[0].labels);
-    EXPECT_EQ((KmerInterval{ 5, 10 }), sel[1].kmers);
-    EXPECT_EQ((std::vector<std::string>{ "A", "C" }), sel[1].labels);
-}
-
-// seed ids: canonical orientation and label order do not change the id
-TEST(Resolve, SeedId) {
-    std::string s = "ACGTTGCAAGT";
-    std::string rc = "ACTTGCAACGT";
-    EXPECT_EQ(make_seed_id(s, true, { "b", "a" }), make_seed_id(rc, true, { "a", "b" }));
-    EXPECT_NE(make_seed_id(s, false, { "a" }), make_seed_id(rc, false, { "a" }));
-    // length-prefixed labels: {"a,b"} != {"a","b"}
-    EXPECT_NE(make_seed_id(s, false, { "a,b" }), make_seed_id(s, false, { "a", "b" }));
-    // the id of the labeled-traversal prototype for the same seed (no release name)
-    using folly::hash::fnva64;
-    EXPECT_EQ(fmt::format("{:016x}", fnva64("1:a", fnva64("\t", fnva64(s, fnva64("\t"))))),
-              make_seed_id(s, false, { "a" }));
+    EXPECT_THROW(resolve_support(oracle, q, {}), std::invalid_argument);
+    EXPECT_THROW(resolve_support(oracle, q, { "nope" }), std::invalid_argument);
+    EXPECT_THROW(resolve_support(oracle, q.substr(0, kK - 1), { "X" }), std::invalid_argument);
 }
 
 
@@ -300,7 +123,7 @@ typedef ::testing::Types<
 TYPED_TEST_SUITE(ResolveCoordTest, ResolveCoordTypes);
 
 // header labels: acc1 = L + R + M + R (repeat R twice) and acc2 = R, both in column F
-TYPED_TEST(ResolveCoordTest, HeaderLabelsAndDiscovery) {
+TYPED_TEST(ResolveCoordTest, HeaderLabels) {
     using Graph = typename TypeParam::first_type;
     using Annotation = typename TypeParam::second_type;
     std::string L = random_seq(40, 1), R = random_seq(40, 2), M = random_seq(40, 3);
@@ -314,9 +137,7 @@ TYPED_TEST(ResolveCoordTest, HeaderLabelsAndDiscovery) {
     LabelOracle oracle(*anno);
 
     std::string q = R + M + R;
-    ResolveOptions opts;
-    opts.labels = { "acc1", "acc2", "F" };
-    auto profile = resolve_support(oracle, q, opts);
+    auto profile = resolve_support(oracle, q, { "acc1", "acc2", "F" });
     ASSERT_EQ(3u, profile.labels.size());
     EXPECT_TRUE(profile.labels[0].label.kind == LabelKind::HEADER);
     EXPECT_EQ(iv({ {0, q.size() - kK + 1} }), profile.labels[0].runs);     // acc1
@@ -325,26 +146,13 @@ TYPED_TEST(ResolveCoordTest, HeaderLabelsAndDiscovery) {
     EXPECT_TRUE(profile.labels[2].label.kind == LabelKind::COLUMN);
     EXPECT_EQ(iv({ {0, q.size() - kK + 1} }), profile.labels[2].runs);     // column F
 
-    // header discovery gives the same profiles
-    ResolveOptions disc;
-    disc.discover = true;
-    disc.discover_kind = LabelKind::HEADER;
-    auto discovered = resolve_support(oracle, q, disc);
-    ASSERT_EQ(2u, discovered.labels.size());
-    EXPECT_EQ("acc1", discovered.labels[0].label.name);
-    EXPECT_EQ(profile.labels[0].runs, discovered.labels[0].runs);
-    EXPECT_EQ("acc2", discovered.labels[1].label.name);
-    EXPECT_EQ(60u, discovered.labels[1].kmers_supported);
-    EXPECT_EQ(profile.labels[1].runs, discovered.labels[1].runs);
-
     // an unknown header
-    opts.labels = { "acc3" };
-    EXPECT_THROW(resolve_support(oracle, q, opts), std::invalid_argument);
+    EXPECT_THROW(resolve_support(oracle, q, { "acc3" }), std::invalid_argument);
 }
 
-// The explicit profiles of a few hundred labels are the discovery's, and a label absent from
-// the query has none
-TYPED_TEST(ResolveCoordTest, ExplicitLabelsGiveTheDiscoverysProfiles) {
+// The profiles of a few hundred named labels are those of the signature API, and a label
+// absent from the query has none
+TYPED_TEST(ResolveCoordTest, NamedLabelsGiveTheSignatureProfiles) {
     using Graph = typename TypeParam::first_type;
     using Annotation = typename TypeParam::second_type;
     const std::string R = random_seq(40, 21), M = random_seq(40, 22);
@@ -369,22 +177,18 @@ TYPED_TEST(ResolveCoordTest, ExplicitLabelsGiveTheDiscoverysProfiles) {
     auto anno = build_anno_graph<Graph, Annotation>(kK, seqs, labels, DeBruijnGraph::BASIC, true);
     LabelOracle oracle(*anno);
 
-    ResolveOptions disc;
-    disc.discover = true;
-    const SupportProfile discovered = resolve_support(oracle, q, disc);
-    ResolveOptions opts;
-    opts.labels = labels;
-    const SupportProfile explicit_ = resolve_support(oracle, q, opts);
+    const SupportProfile explicit_ = resolve_support(oracle, q, labels);
     ASSERT_EQ(labels.size(), explicit_.labels.size());
     std::map<std::string, const LabelProfile *> by_name;
     for (const LabelProfile &lp : explicit_.labels) {
         by_name[lp.label.name] = &lp;
     }
-    ASSERT_GT(discovered.labels.size(), 200u);
-    for (const LabelProfile &d : discovered.labels) {
-        const LabelProfile &e = *by_name.at(d.label.name);
-        EXPECT_EQ(d.runs, e.runs) << d.label.name;
-        EXPECT_EQ(d.kmers_supported, e.kmers_supported) << d.label.name;
+    const auto signatures = anno->get_top_label_signatures(q, labels.size(), 0.0, 0.0);
+    ASSERT_GT(signatures.size(), 200u);
+    for (const auto &[name, count, mask] : signatures) {
+        const LabelProfile &e = *by_name.at(name);
+        EXPECT_EQ(runs_of(mask.size(), [&](uint64_t i) { return mask[i]; }), e.runs) << name;
+        EXPECT_EQ(count, e.kmers_supported) << name;
     }
     const LabelProfile &absent = *by_name.at("absent");
     EXPECT_TRUE(absent.runs.empty());

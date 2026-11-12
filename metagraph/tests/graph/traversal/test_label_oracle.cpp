@@ -10,7 +10,6 @@
 
 #include "graph/traversal/label_oracle.hpp"
 #include "graph/annotation_key_mapper.hpp"
-#include "graph/traversal/resolve.hpp"
 #include "graph/annotated_dbg.hpp"
 #include "graph/representation/canonical_dbg.hpp"
 #include "graph/representation/hash/dbg_sshash.hpp"
@@ -371,25 +370,8 @@ TYPED_TEST(LabelOracleCoordTest, HeaderLabels) {
     EXPECT_THROW(clash_oracle.resolve_label("acc2"), std::invalid_argument);
     EXPECT_THROW(clash_oracle.resolve_label("nope"), std::invalid_argument);
     EXPECT_EQ(LabelKind::COLUMN, clash_oracle.resolve_label("F").kind);
-    // discovery leaves those names out, so that every discovered label can be resubmitted
-    ResolveOptions discover_clash;
-    discover_clash.discover = true;
-    discover_clash.discover_kind = LabelKind::HEADER;
-    EXPECT_TRUE(resolve_support(clash_oracle, s1, discover_clash).labels.empty());
-    // a cut list counts only the labels returned: here none
-    discover_clash.discover_max_labels = 1;
-    auto cut = resolve_support(clash_oracle, s1, discover_clash);
-    EXPECT_TRUE(cut.labels.empty());
-    ASSERT_TRUE(cut.labels_truncated.has_value());
-    EXPECT_EQ(0u, cut.labels_truncated->kept);
-    EXPECT_EQ(2u, cut.labels_truncated->total);
-    discover_clash.discover_max_labels = ResolveOptions().discover_max_labels;
-    discover_clash.discover_kind = LabelKind::COLUMN;
-    auto columns = resolve_support(clash_oracle, s1, discover_clash).labels;
-    ASSERT_EQ(1u, columns.size());
-    EXPECT_EQ("F", columns[0].label.name);
 
-    // a column without sequence records has no header labels: header discovery skips it
+    // a column without sequence records has no header labels
     std::vector<std::vector<std::string>> partial(2);
     std::vector<std::vector<uint64_t>> partial_kmers(2);
     partial[col_f] = { "acc1", "acc2" }; partial_kmers[col_f] = { n1, n2 };
@@ -400,14 +382,6 @@ TYPED_TEST(LabelOracleCoordTest, HeaderLabels) {
     LabelOracle partial_oracle(*partial_anno);
     EXPECT_TRUE(partial_oracle.has_header_records(col_f));
     EXPECT_FALSE(partial_oracle.has_header_records(col_g));
-    ResolveOptions discover;
-    discover.discover = true;
-    discover.discover_kind = LabelKind::HEADER;
-    auto profile = resolve_support(partial_oracle, s3, discover);
-    ASSERT_FALSE(profile.labels.empty());
-    for (const auto &support : profile.labels) {
-        EXPECT_EQ(col_f, support.label.column);
-    }
 
     // tuple rows read with a RowDiffCache are the rows read without one
     annot::matrix::RowDiffCache<annot::matrix::MultiIntMatrix::RowTuples> cache(2048);

@@ -87,8 +87,8 @@ class TraverseServer(TraverseFixture):
     def _post(self, route, request):
         return requests.post(self._url(route), data=json.dumps(request))
 
-    def _traverse(self, request, route='traverse'):
-        res = self._post(route, request)
+    def _traverse(self, request):
+        res = self._post('traverse', request)
         self.assertEqual(200, res.status_code, res.text)
         return res.json()
 
@@ -96,12 +96,10 @@ class TraverseServer(TraverseFixture):
 @parameterized_class(('mode',), input_values=[(mode,) for mode in GRAPH_MODES])
 class TestTraverse(TraverseServer):
     def test_fork(self):
-        out = self._traverse({'seeds': [{'seed_id': 'x', 'sequence': self.X, 'labels': ['A', 'B']}]})
+        out = self._traverse({'seeds': [{'sequence': self.X, 'labels': ['A', 'B']}]})
         result = out['results'][0]
         self.assertEqual(['A', 'B'], result['seed']['labels'])
         self.assertFalse(result['seed']['labels_from_seed'])
-        self.assertEqual(16, len(result['seed']['validated_seed_id']))
-        self.assertTrue(result['seed']['seed_id_mismatch'])
 
         right = result['arms']['right']
         self.assertEqual('complete', right['status'])
@@ -140,25 +138,21 @@ class TestTraverse(TraverseServer):
             flank = ''.join(right['segments'][s]['sequence'] for s in path['segments'])
             self.assertEqual(10, len(flank))
 
-    def test_resolve(self):
-        out = self._traverse({'sequence': self.X + self.P, 'discover': {},
-                              'select': {'min_block_bp': len(self.X + self.P), 'max_seeds': 1}},
-                             'resolve')
-        self.assertEqual(K, out['k'])
-        names = {label['label']: label for label in out['labels']}
-        self.assertEqual({'A', 'B'}, set(names))
-        n = len(self.X + self.P) - K + 1
-        self.assertEqual([[0, n]], names['A']['runs'])
-        seeds = out['selection']['seeds']
-        self.assertEqual(1, len(seeds))
-        self.assertEqual(['A'], seeds[0]['labels'])
-        self.assertEqual(self.X + self.P, seeds[0]['sequence'])
+    def test_search_labels_into_traverse(self):
+        query = self.X + self.P
+        res = self._post('search', {'FASTA': f'>q\n{query}', 'with_signature': True,
+                                    'discovery_fraction': 0})
+        self.assertEqual(200, res.status_code, res.text)
+        results = res.json()[0]['results']
+        self.assertEqual({'A', 'B'}, {r['sample'] for r in results})
+        n = len(query) - K + 1
 
-        # the selected seed is valid /traverse input, with its id
-        traversed = self._traverse({'seeds': [{'seed_id': seeds[0]['seed_id'],
-                                               'sequence': seeds[0]['sequence'],
-                                               'labels': seeds[0]['labels']}]})
-        self.assertFalse(traversed['results'][0]['seed']['seed_id_mismatch'])
+        # the query with the labels on all its k-mers is valid /traverse input
+        whole = [r['sample'] for r in results if r['signature']['presence_mask'] == f'x{n}']
+        self.assertEqual(['A'], whole)
+        self.assertEqual([n], [r['kmer_count'] for r in results if r['sample'] == 'A'])
+        traversed = self._traverse({'seeds': [{'sequence': query, 'labels': whole}]})
+        self.assertEqual(['A'], traversed['results'][0]['seed']['labels'])
 
     def test_invalid_requests(self):
         for request in [
@@ -173,7 +167,9 @@ class TestTraverse(TraverseServer):
             {'seeds': [{'sequence': self.X}], 'graph': 'x'},
         ]:
             self.assertEqual(400, self._post('traverse', request).status_code, request)
-        self.assertEqual(400, self._post('resolve', {'sequence': self.X}).status_code)
+        # there is no /resolve route
+        res = self._post('resolve', {'sequence': self.X, 'labels': ['A']})
+        self.assertEqual(404, res.status_code)
 
 
 @parameterized_class(('mode',), input_values=[(mode,) for mode in GRAPH_MODES])
@@ -204,7 +200,7 @@ class TestTraverseBranchLimit(TraverseServer):
 class TestTraverseLimits(TraverseServer):
     """The server's limits of a request."""
     mode = 'basic'
-    server_flags = '--traverse-max-seeds 2 --resolve-max-query-bp 50'
+    server_flags = '--traverse-max-seeds 2'
 
     def test_limits(self):
         short = self.X[:50]
@@ -212,13 +208,11 @@ class TestTraverseLimits(TraverseServer):
         self.assertEqual(400, self._post('traverse', {'seeds': [{'sequence': short}] * 3}).status_code)
         # a seed over the fixed 10,000 bp limit
         self.assertEqual(400, self._post('traverse', {'seeds': [{'sequence': 'A' * 10001}]}).status_code)
-        self.assertEqual(200, self._post('resolve', {'sequence': short, 'labels': ['A']}).status_code)
-        self.assertEqual(400, self._post('resolve', {'sequence': self.X, 'labels': ['A']}).status_code)
 
     def test_malformed_limit(self):
         # a limit must be a whole number: 1e6 is refused, not read as 1
         command = (f'{METAGRAPH} server_query -i {self.graph} -a {self.annotation}'
-                   f' --port {self.port + 1} --resolve-max-query-bp 1e6')
+                   f' --port {self.port + 1} --traverse-max-seeds 1e6')
         res = subprocess.run(shlex.split(command), stdout=subprocess.PIPE,
                              stderr=subprocess.PIPE, timeout=60)
         self.assertNotEqual(0, res.returncode)

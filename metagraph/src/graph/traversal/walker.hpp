@@ -109,7 +109,6 @@ struct Strategy {
 };
 
 struct Seed {
-    std::string seed_id;
     std::string sequence;
     // The permitted labels. Empty: derive them from the seed (the columns on every k-mer,
     // or the records holding the seed at consecutive coordinates).
@@ -251,9 +250,6 @@ struct DroppedLabel {
 };
 
 struct SeedResult {
-    std::string seed_id;
-    std::string validated_seed_id;
-    bool seed_id_mismatch = false;
     uint64_t length_bp = 0;
     uint64_t num_kmers = 0;
     // the permitted labels; a label id is an index here
