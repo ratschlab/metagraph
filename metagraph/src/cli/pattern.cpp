@@ -43,10 +43,12 @@ PatternRequest parse_pattern_request(Strict &root, double max_time_ms) {
         pattern.done();
     }
     request.max_contexts = root.uint("max_contexts", 1000, 0, kMaxPatternContexts);
-    request.time_budget = std::chrono::milliseconds(static_cast<int64_t>(std::min(
+    // a day is more than any search runs, and fits the duration's range
+    const double kMaxTimeMs = 86'400'000;
+    request.time_budget = std::chrono::milliseconds(static_cast<int64_t>(std::min({
         root.number("time_budget_ms", max_time_ms, 0, std::numeric_limits<double>::max()),
-        max_time_ms
-    )));
+        max_time_ms, kMaxTimeMs
+    })));
     return request;
 }
 

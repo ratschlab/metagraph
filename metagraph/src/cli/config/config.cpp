@@ -445,7 +445,7 @@ Config::Config(int argc, char *argv[]) {
             } catch (const std::exception &) {
                 end = 0;
             }
-            if (end != value.size())
+            if (value.empty() || end != value.size())
                 max_time_ms = -1;   // refused below
         } else if (!strcmp(argv[i], "--traverse-max-seeds")) {
             traverse_max_seeds = parse_limit(get_value(i++));
@@ -1560,7 +1560,7 @@ if (advanced) {
             fprintf(stderr, "\n\t   --num-top-labels [INT] \tmaximum number of top labels per query by default [10'000]\n");
             fprintf(stderr, "\t   --no-coord-mapping \t\tquery without mapping coords to sequence headers even if the .seqs index exists [off]\n");
             fprintf(stderr, "\t   --mem-cap-gb [FLOAT] \tmemory in GB available for the server to load graphs for queries into RAM [0]\n");
-            fprintf(stderr, "\n\tA server on a single index (-i, -a) also serves /traverse (experimental):\n");
+            fprintf(stderr, "\n\tA server on a single index (-i, -a) also serves /traverse and /pattern (experimental):\n");
             fprintf(stderr, "\t   --traverse-max-time-ms [FLOAT] \tthe most time one seed's walk may take [30000]\n");
             fprintf(stderr, "\t   --traverse-max-seeds [INT] \tthe most seeds a traversal request may hold [10]\n");
             fprintf(stderr, "\t   --pattern-max-time-ms [FLOAT] \tthe most time one pattern request may take [30000]\n");
