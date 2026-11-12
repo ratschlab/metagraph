@@ -54,10 +54,10 @@ class CanonicalDBG : public DBGWrapper<DeBruijnGraph> {
     virtual std::unique_ptr<NodeStream> node_stream(std::string_view sequence,
                                                     bool sequential) const override final;
 
-    // Given a node index, call the target nodes of all edges outgoing from it.
+    // The target nodes of all edges outgoing from |node|
     virtual Nodes adjacent_outgoing_nodes(node_index node) const override final;
 
-    // Given a node index, call the source nodes of all edges incoming to it.
+    // The source nodes of all edges incoming to |node|
     virtual Nodes adjacent_incoming_nodes(node_index node) const override final;
 
     virtual Edges outgoing_kmers(node_index kmer) const override final {

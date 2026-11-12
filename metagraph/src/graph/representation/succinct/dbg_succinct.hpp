@@ -30,9 +30,9 @@ class DBGSuccinct : public DeBruijnGraph {
     // Traverse the incoming edge
     virtual node_index traverse_back(node_index node, char prev_char) const override final;
 
-    // Given a node index, call the target nodes of all edges outgoing from it.
+    // The target nodes of all edges outgoing from |node|
     virtual Nodes adjacent_outgoing_nodes(node_index node) const override final;
-    // Given a node index, call the source nodes of all edges incoming to it.
+    // The source nodes of all edges incoming to |node|
     virtual Nodes adjacent_incoming_nodes(node_index node) const override final;
 
     virtual void call_nodes(const std::function<void(node_index)> &callback,
