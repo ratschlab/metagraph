@@ -1,6 +1,9 @@
 #ifndef __METAGRAPH_SERVER_UTILS_HPP__
 #define __METAGRAPH_SERVER_UTILS_HPP__
 
+#include <initializer_list>
+#include <string_view>
+
 #include <server_http.hpp>
 
 
@@ -28,6 +31,11 @@ class CurrentlyInitializingError : public std::runtime_error {
 };
 
 Json::Value parse_json_string(const std::string &msg);
+
+// Refuse a request that is not an object or has a field outside |known|, so that a
+// misspelled field is never ignored
+void check_request_fields(const Json::Value &request,
+                          std::initializer_list<std::string_view> known);
 
 } // namespace cli
 } // namespace mtg
