@@ -11,7 +11,6 @@ import requests
 from parameterized import parameterized_class
 
 from base import PROTEIN_MODE, TestingBase, METAGRAPH, start_server
-from metagraph.client import GraphClient
 
 GRAPH_MODES = ['basic'] if PROTEIN_MODE else ['basic', 'canonical', 'primary']
 K = 31
@@ -175,20 +174,6 @@ class TestTraverse(TraverseServer):
         ]:
             self.assertEqual(400, self._post('traverse', request).status_code, request)
         self.assertEqual(400, self._post('resolve', {'sequence': self.X}).status_code)
-
-    def test_python_client(self):
-        client = GraphClient(self.host, self.port)
-        profile = client.resolve(self.X + self.P, discover={},
-                                 select={'min_block_bp': len(self.X + self.P), 'max_seeds': 1})
-        seed = profile['selection']['seeds'][0]
-        self.assertEqual(['A'], seed['labels'])
-        result = client.traverse([{'seed_id': seed['seed_id'], 'sequence': seed['sequence'],
-                                   'labels': seed['labels']}],
-                                 strategy={'direction': 'left'})['results'][0]
-        self.assertFalse(result['seed']['seed_id_mismatch'])
-        self.assertEqual(['left'], list(result['arms']))
-        with self.assertRaises(RuntimeError):
-            client.traverse([{'sequence': self.X}], strategy={'unknown': 1})
 
 
 @parameterized_class(('mode',), input_values=[(mode,) for mode in GRAPH_MODES])

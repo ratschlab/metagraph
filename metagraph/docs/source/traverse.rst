@@ -3,40 +3,89 @@
 Labeled traversal (experimental)
 ================================
 
-``/resolve`` finds where a query sequence is supported by which labels and proposes seeds.
-``/traverse`` extends seeds in the graph, following only the labels that carry them.
+Labeled traversal extends a sequence in the graph along the labels that contain it. Use it to
+get the flanks of a gene in each record or sample that carries the gene.
 
-Both are experimental: the schema may still change. A server on a single index (``-i`` / ``-a``)
-serves them. A server started with a list of graphs does not.
-
-.. code-block:: text
-
-    metagraph server_query -i graph.dbg -a annotation.annodbg
+It has two server routes:
 
 .. list-table::
    :header-rows: 1
 
    * - Route
      - Method
-     - \
+     - Answer
    * - ``/resolve``
      - POST
-     - a support profile of a query, and optionally seeds selected from it
+     - which labels contain which part of a query, and seeds to start from
    * - ``/traverse``
      - POST
-     - the extension of one or more seeds
+     - the extension of one or more seeds to the left and to the right
 
-A request is a JSON object. A field the schema does not list is an error (HTTP 400), so that
-a misspelled field is never ignored.
+Both routes are experimental. Their request and response fields can change in a later release
+without notice.
 
-Labels
-------
+A server on a single index serves both routes. A server started with a list of graphs does not.
 
-A label is either an annotation **column** (for example a taxid or a file) or, on an index with
-k-mer coordinates and a sequence header index (``annotate --index-header-coords``), one indexed
-**sequence** of a column, named by its FASTA **header** (for example an accession). A name that
-is both a column and a header, or the header of several sequences, is ambiguous: a request that
-names it is refused (HTTP 400). The server builds its index of header names on first use.
+.. code-block:: text
+
+    metagraph server_query -i graph.dbg -a annotation.annodbg
+
+A request is a JSON object. The server refuses a field it does not know with HTTP 400, so a
+misspelled field is never ignored.
+
+Example
+-------
+
+Find a seed for a query and the records that contain it:
+
+.. code-block:: text
+
+    curl -s http://localhost:5555/resolve -d '{
+      "sequence": "ATGGAATTGCCC...",
+      "discover": {"kind": "header"},
+      "select": {"max_seeds": 1}
+    }'
+
+Then extend that seed by 2,000 bp on each side. Take ``seed_id``, ``sequence`` and ``labels``
+from ``selection.seeds[0]`` of the first answer:
+
+.. code-block:: text
+
+    curl -s http://localhost:5555/traverse -d '{
+      "seeds": [{"seed_id": "4c1f...", "sequence": "ATGGAATTGCCC...",
+                 "labels": ["NZ_CM008882.1"]}],
+      "strategy": {"bounds": {"max_extension_bp": 2000}}
+    }'
+
+Terms
+-----
+
+Label
+    What a walk follows. There are two kinds.
+
+    A **column** label is an annotation column, for example a taxid or a file.
+
+    A **header** label is one indexed sequence of a column, named by its FASTA header, for
+    example an accession. Header labels need an index with k-mer coordinates and a sequence
+    header index (``annotate --index-header-coords``). The server builds its index of header
+    names on first use.
+
+    A name is ambiguous when it is both a column and a header, or the header of several
+    sequences. The server refuses a request that names it with HTTP 400.
+
+Seed
+    The sequence a walk starts from. Every k-mer of a seed must be in the graph.
+
+Arm
+    One direction of a walk. The right arm starts at the seed's last k-mer. The left arm
+    starts at its first.
+
+Path, segment
+    A path is one walk from the seed to its end. Paths of an arm share their beginning, so an
+    arm is a tree. A segment is one unbranched piece of that tree.
+
+Interval
+    A half-open range of k-mer positions ``[begin, end)`` in the query or seed.
 
 ``/resolve``
 ------------
@@ -53,29 +102,43 @@ names it is refused (HTTP 400). The server builds its index of header names on f
    :header-rows: 1
 
    * - Field
-     - \
+     - Meaning
      - Default
    * - ``sequence``
-     - the query, at most ``--resolve-max-query-bp`` long (1,000,000 bp by default)
+     - The query. It is at most ``--resolve-max-query-bp`` long, 1,000,000 bp unless set.
      - required
    * - ``labels``
-     - the labels to profile, at most 100,000
-     - exactly one of ``labels`` and ``discover``
+     - The labels to report on, at most 100,000. Give either ``labels`` or ``discover``.
+     - none
+   * - ``discover``
+     - Find the labels instead of naming them. Give either ``labels`` or ``discover``.
+     - none
    * - ``discover.max_labels``
-     - keep the labels supporting the most k-mers, ranked as ``/search`` with ``with_signature`` ranks them
+     - Keep this many labels, those on the most k-mers first. The order is the one ``/search`` uses with ``with_signature``.
      - 1000
    * - ``discover.kind``
-     - ``column`` or ``header``
+     - ``column`` or ``header``.
      - ``column``
    * - ``select``
-     - also select seeds: first the interval contained in the most labels' support runs, then each time the interval contained in the most runs of labels no seed carries yet. Selection stops when every label has a seed, at ``max_seeds`` seeds, or when no interval of ``min_block_bp`` is left
+     - Also select seeds. See below.
      - none
-   * - ``select.max_seeds``, ``select.min_block_bp``
-     - at most that many seeds (at most 1000), each at least that long (at least k)
-     - 10, 0
+   * - ``select.max_seeds``
+     - Select at most this many seeds, at most 1000.
+     - 10
+   * - ``select.min_block_bp``
+     - Each seed is at least this long, and at least k.
+     - 0
    * - ``select.max_labels_per_seed``
-     - the labels kept per seed. Which ones are kept depends only on their names, so it is the same on every request; dropped labels are counted, and listed when at most 1000 are dropped
+     - Keep at most this many labels per seed. The response counts the dropped labels and lists them when there are at most 1000.
      - 1000
+
+Seed selection picks intervals of the query one at a time. The first seed is the interval that
+lies inside the runs of the most labels. Each further seed is the interval that lies inside the
+runs of the most labels that have no seed yet. Selection stops when every label has a seed, at
+``max_seeds`` seeds, or when no interval of ``min_block_bp`` is left.
+
+When a seed has more labels than ``max_labels_per_seed``, the kept ones depend only on the
+label names. The same request therefore keeps the same labels every time.
 
 The response:
 
@@ -94,11 +157,20 @@ The response:
       }
     }
 
-Intervals are half-open k-mer intervals ``[begin, end)``. ``graph_runs`` are the runs of the query's k-mers present in the graph; a label's ``runs``
-are the maximal runs of k-mers it carries. With discovery, ``labels_truncated`` states how many
-labels were kept of how many found. Discovery leaves out names that ``/traverse`` would refuse
-as ambiguous: a column that is also a header, or a header of several records. So a selected
-seed is valid ``/traverse`` input as it stands, with its ``seed_id``. ``/resolve`` checks the seed's k-mers one by one, while ``/traverse`` keeps a header label only when its record holds them at consecutive coordinates. A record that holds them out of order is dropped there and reported in ``dropped_labels``, and a seed left without a label reports ``no_carrier``. Seeds are listed in the order they were picked and may overlap. With ``select.min_block_bp`` set to the query's length, the one seed is the whole query, carried by the labels on all its k-mers. When no label carries all of them, there is no seed.
+- ``graph_runs`` are the intervals of query k-mers that are in the graph.
+- A label's ``runs`` are the longest intervals of k-mers that carry the label.
+- With ``discover``, ``labels_truncated`` gives how many labels were kept and how many were
+  found.
+- ``discover`` leaves out ambiguous names, which ``/traverse`` would refuse.
+- ``selection.seeds`` lists the seeds in the order they were picked. Seeds can overlap.
+- With ``select.min_block_bp`` set to the query's length, the one seed is the whole query. Its
+  labels are those on all its k-mers. When no label is on all of them, there is no seed.
+
+A selected seed can be sent to ``/traverse`` as it is, with its ``seed_id``. One difference
+remains. ``/resolve`` checks the seed's k-mers one by one. ``/traverse`` keeps a header label only
+when its record holds them at consecutive coordinates. ``/traverse`` drops a record that holds
+them out of order and reports it in ``dropped_labels``. A seed left without a label reports
+``no_carrier``.
 
 ``/traverse``
 -------------
@@ -121,96 +193,99 @@ seed is valid ``/traverse`` input as it stands, with its ``seed_id``. ``/resolve
    :header-rows: 1
 
    * - Field
-     - \
+     - Meaning
      - Default
    * - ``seeds``
-     - at most ``--traverse-max-seeds`` seeds, each at most 10,000 bp long, every k-mer in the graph
+     - At most ``--traverse-max-seeds`` seeds. Each is at most 10,000 bp long.
      - required
    * - ``seeds[].seed_id``
-     - the caller's id, compared with the id the seed validates to
+     - Your id for the seed. The response says whether it equals the id the server computes.
      - none
    * - ``seeds[].labels``
-     - the permitted labels, at most 100,000; omitted: derived from the seed
-     - derived
+     - The labels to follow, at most 100,000. Without it, the server takes the labels on every k-mer of the seed.
+     - taken from the seed
    * - ``direction``
-     - ``both``, ``left`` or ``right``
+     - ``both``, ``left`` or ``right``.
      - ``both``
    * - ``labels.max_seed_labels``
-     - the most labels a derived set keeps, in ascending (column, sequence) order (at most 100,000)
+     - Keep at most this many labels taken from the seed, at most 100,000. The server keeps the first ones in (column, sequence) order.
      - 1000
    * - ``labels.seed_label_kind``
-     - what a derived label is: ``column``, ``header``, or ``auto`` (header on an index with a header index)
+     - The kind of the labels taken from the seed: ``column``, ``header`` or ``auto``. ``auto`` is ``header`` on an index with a header index.
      - ``auto``
    * - ``branching.max_label_branches``
-     - how many times a label may continue on more than one successor: an integer up to 1,000,000, or ``"unlimited"``
+     - How many times a column label can go on along more than one successor. An integer up to 1,000,000, or ``"unlimited"``.
      - 0
    * - ``bounds.max_extension_bp``
-     - the extension length per arm
+     - How far each arm extends.
      - 5000
    * - ``bounds.time_budget_ms``
-     - per seed, at least 1, so a request may take up to its number of seeds times this; clamped to ``--traverse-max-time-ms``
+     - The time for one seed, at least 1. A request can take this time once per seed. The server lowers it to ``--traverse-max-time-ms``.
      - ``--traverse-max-time-ms``
 
-The walk
-^^^^^^^^
+How a walk proceeds
+^^^^^^^^^^^^^^^^^^^
 
-A seed's permitted labels are the labels named, or the labels carrying every k-mer of the
-seed. A named label that does not carry every seed k-mer is dropped and reported with the
-k-mer runs it carries.
+The walk follows the named labels, or the labels on every k-mer of the seed. The server drops a
+named label that is not on every k-mer of the seed. It reports the label with the runs of
+k-mers it is on.
 
-From the seed's last k-mer (the right arm) and its first (the left arm) the walk extends
-level by level, one base per level. The two kinds of label are followed differently:
+Each arm extends one base at a time. The two kinds of label are followed differently:
 
-- A **column** label stays on a path while it carries every k-mer walked so far.
-- A **header** label follows its record's k-mer coordinates. It continues on the successor
-  that holds the record's next coordinate and ends at the record's first or last k-mer, so
-  a repeat inside the record is walked through. If the record holds the seed several
-  times, the walk starts from the place with the lowest coordinate.
+- A **column** label stays on a path while it is on every k-mer walked so far.
+- A **header** label follows its record's k-mer coordinates. It goes on to the successor that
+  holds the record's next coordinate. It ends at the record's first or last k-mer. A repeat
+  inside the record is therefore walked through. If the record holds the seed several times,
+  the walk starts from the place with the lowest coordinate.
 
-A label leaves a path with a reason:
+Where the labels of a path go on along different successors, the path splits. Paths that meet
+again stay apart, so each arm is a tree of segments.
+
+A label leaves a path with one of these reasons:
 
 .. list-table::
    :header-rows: 1
 
    * - Reason
-     - \
+     - Meaning
    * - ``dead_end``
-     - the node has no successor (``hairpin``: its only continuation was a hairpin)
+     - The node has no successor. ``hairpin`` instead when its only successor was a hairpin step.
    * - ``label_lost``
-     - successors exist, none carries the label
+     - Successors exist, and none carries the label.
    * - ``record_end``
-     - a header label: its record ends here and the graph goes on
+     - The record of a header label ends here, and the graph goes on.
    * - ``branch``
-     - the label is on several successors and its branch allowance is spent
+     - A column label is on several successors, and its ``max_label_branches`` are used up.
    * - ``edge_reuse``
-     - the label's continuation takes an edge this path took before
+     - The next step of a column label takes an edge that this path took before.
    * - ``edge_reuse_rc``
-     - ... in the opposite orientation (an inverted repeat)
+     - The same, with the edge in the opposite orientation (an inverted repeat).
    * - ``rejoined_seed``
-     - the continuation steps back into the seed (for example a circular record)
+     - The next step of a column label goes back into the seed, for example in a circular record.
    * - ``max_extension_bp``
-     - the extension length was reached
+     - The arm reached its extension length.
    * - ``time_budget``, ``max_steps``, ``max_live_paths``, ``max_paths``, ``max_splits_per_path``
-     - a bound stopped the walk (see below)
+     - A bound stopped the walk. See below.
 
-Where the labels of a path continue on different successors, the path splits. Paths that
-meet again are kept apart, so each arm is a tree of segments.
+**Column labels on graphs with cycles.** A column label could circle forever. Three rules end
+its walk. A path never takes an edge, that is a (k+1)-mer, twice. In canonical graphs this
+holds in either orientation. A path never goes back into the seed. A path never takes a hairpin
+step, which is a step whose (k+1)-mer equals its own reverse complement. These rules bind
+column labels only. A header label ends because its record does. On a step that the rules
+forbid, the column labels of the path end and its header labels go on.
 
-The walk rule makes the walks of column labels finite on a graph with cycles: a path never
-takes an edge ((k+1)-mer) twice, in canonical graphs in either orientation, never steps back
-into the seed, and never takes a self-reverse-complementary step. It applies to column labels
-only, so ``branch``, ``edge_reuse``, ``edge_reuse_rc``, ``rejoined_seed`` and ``hairpin`` end column
-labels. A header label is finite because its record is. On a step the rule forbids, the
-path's column labels end and its header labels go on.
+Column labels have been walked on test data only. Every traversal run on the staging server so
+far named records.
 
-Column labels have been walked on test data only. Every traversal run on the staging server
-so far named records.
+**Bounds.** Fixed limits bound the work for one seed, besides the extension length and the time
+budget:
 
-**Bounds.** Besides the extension length and the time budget, fixed caps bound a seed's work:
-1,000,000 steps, 1000 live paths and 10,000 paths per arm, and 64 splits per path. The time
-budget and the steps stop the whole seed. The live paths and paths stop one arm. The split
-limit ends only the path that reached it. Any cap makes the arm ``truncated``:
-``complete_to_bp`` is the extension up to which every admissible walk is present.
+- 1,000,000 steps. Reaching this limit, or the time budget, stops the whole seed.
+- 1000 live paths and 10,000 paths per arm. Reaching one of these limits stops that arm.
+- 64 splits per path. Reaching this limit ends that path only.
+
+Any of these limits marks the arm ``truncated``. ``complete_to_bp`` is then the extension up to
+which every walk is present.
 
 The response
 ^^^^^^^^^^^^
@@ -252,49 +327,52 @@ The response
       ]
     }
 
-- In an arm, a segment's ``labels`` and ``labels_at_end`` and every ``label`` field are indices
-  into ``label_dict``. ``seed.labels`` holds the label names.
-- ``validated_seed_id`` is the hex FNV-1a-64 of the case-mapped seed (in canonical graphs the
-  smaller of it and its reverse complement) and its sorted labels: the id ``/resolve`` gives.
-- A derived set over ``max_seed_labels`` states how many labels it dropped
-  (``labels_dropped``).
-- A segment's ``sequence`` is in natural orientation on both arms. On the right arm a
-  segment's bases precede its children's. On the left arm they follow its children's, since
-  the children lie further from the seed. ``from_bp`` is the distance from the seed boundary
-  at which the segment starts: its first base on the right arm, its last on the left.
-- A path is a leaf of the tree: ``segments`` from the root, ``length_bp`` from the seed, and
-  the labels reaching its end with their reasons (``branches``: how many times the label took
-  several successors). ``path_reason`` is set when a bound ended the path.
-- A split is ``divergence`` when its labels part, ``ambiguous`` when a label follows several
-  children.
-- ``cap_trigger`` (``reason``, ``at_bp``, ``demand``) is set when a bound stopped the arm
-  (``status: "truncated"``).
+The seed:
 
-A seed whose labels cannot be found — no label, named or derived, carries every k-mer (``no_carrier``), the
-narrowest of its first 64 k-mers carries too many labels (``too_wide``), the time budget ran out
-(``time_budget``), or a derived header name is ambiguous (``ambiguous_header``) — is reported in
-place, and the other seeds are still walked:
+- ``seed.labels`` holds the names of the labels the walk follows.
+- ``validated_seed_id`` is the id the server computes from the seed and its labels. ``/resolve``
+  gives the same id. ``seed_id_mismatch`` says whether your ``seed_id`` differs from it.
+- ``labels_dropped`` counts the labels taken from the seed beyond ``max_seed_labels``.
+- ``dropped_labels`` lists the named labels that are not on every k-mer of the seed.
+
+An arm:
+
+- In an arm, a ``label`` field is an index into ``label_dict``. So are the entries of a
+  segment's ``labels`` and ``labels_at_end``.
+- A segment's ``sequence`` reads left to right on both arms. On the right arm, a segment comes
+  before its children. On the left arm, it comes after them, because the children lie further
+  from the seed.
+- ``from_bp`` is the distance from the seed at which a segment starts. That is its first base on
+  the right arm and its last base on the left arm.
+- A path gives its ``segments`` from the seed outwards and its ``length_bp``. ``end_labels`` are
+  the labels that reach its end, each with its reason and with ``branches``, the number of times
+  it went on along several successors. ``path_reason`` is set when a bound ended the path.
+- A split has the kind ``divergence`` when its labels part. It has the kind ``ambiguous`` when
+  one label goes on along several children.
+- ``cap_trigger`` gives the ``reason``, ``at_bp`` and ``demand`` of the bound that stopped a
+  ``truncated`` arm.
+
+A seed whose labels cannot be determined gets an error in its place. The other seeds are still
+walked.
 
 .. code-block:: json
 
     {"seed": {"seed_id": "...", "length_bp": 813, "labels_from_seed": true},
      "error": {"cause": "no_carrier", "message": "...", "limit": 783, "observed": 412}}
 
-Every other error (an unknown label, a seed not in the graph, too many seeds) fails the
-request.
+.. list-table::
+   :header-rows: 1
 
-Python client
--------------
+   * - ``cause``
+     - Meaning
+   * - ``no_carrier``
+     - No label, named or taken from the seed, is on every k-mer of the seed.
+   * - ``too_wide``
+     - Too many labels are on the seed. The server checks the k-mer with the fewest labels among the first 64.
+   * - ``time_budget``
+     - The time budget ran out before the labels were determined.
+   * - ``ambiguous_header``
+     - A header name taken from the seed is ambiguous.
 
-.. code-block:: python
-
-    from metagraph.client import GraphClient
-
-    client = GraphClient('localhost', 5555)
-    query = 'ATGGAATTGCCC...'  # the sequence to place and extend
-    profile = client.resolve(query, discover={'kind': 'header'},
-                             select={'min_block_bp': len(query), 'max_seeds': 1})
-    seed = profile['selection']['seeds'][0]
-    result = client.traverse([{'seed_id': seed['seed_id'], 'sequence': seed['sequence'],
-                               'labels': seed['labels']}],
-                             strategy={'bounds': {'max_extension_bp': 2000}})
+Any other error fails the whole request with HTTP 400. Examples are an unknown label, a seed
+with a k-mer that is not in the graph, and too many seeds.
