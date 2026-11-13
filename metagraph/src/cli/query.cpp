@@ -1,6 +1,7 @@
 #include "query.hpp"
 
 #include <exception>
+#include <iterator>
 #include <mutex>
 #include <sstream>
 
@@ -141,14 +142,19 @@ collapse_coord_ranges(const graph::PositionCoords &coords) {
     return range_strings;
 }
 
+// Append the run [first, end) of the count |value| to |out|
+void append_count_run(std::string &out, size_t first, size_t end, size_t value) {
+    if (end == first + 1) {
+        fmt::format_to(std::back_inserter(out), "{}={}", first, value);
+    } else {
+        fmt::format_to(std::back_inserter(out), "{}-{}={}", first, end - 1, value);
+    }
+}
+
 std::vector<std::string> count_run_strings(const graph::CountRuns &counts) {
     std::vector<std::string> run_strings;
     counts.call_runs([&](size_t first, size_t end, size_t value) {
-        if (end == first + 1) {
-            run_strings.push_back(fmt::format("{}={}", first, value));
-        } else {
-            run_strings.push_back(fmt::format("{}-{}={}", first, end - 1, value));
-        }
+        append_count_run(run_strings.emplace_back(), first, end, value);
     });
     return run_strings;
 }
@@ -362,9 +368,10 @@ std::string SeqSearchResult::to_string(const std::string delimiter,
             if (verbose_output) {
                 output += fmt::format(":{}", fmt::join(abundances.to_dense(), ":"));
             } else {
-                for (const std::string &run : count_run_strings(abundances)) {
-                    output += ":" + run;
-                }
+                abundances.call_runs([&](size_t first, size_t end, size_t value) {
+                    output += ':';
+                    append_count_run(output, first, end, value);
+                });
             }
         }
     } else {
