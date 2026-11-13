@@ -111,7 +111,7 @@ inline std::string clip_reader_quotes(std::string errors) {
  * otherwise. Not CharReaderBuilder::strictMode(): its strictRoot would refuse a root that is
  * not an object, which each route refuses in its own order. The reader of /pattern, /resolve,
  * /traverse and /traverse/cancel and of the pattern and traverse CLIs; /search and /align keep
- * theirs (parse_json_string).
+ * theirs (parse_json_string), /search with its values counted (count_lenient_json_values).
  *
  * |max_values| (0: unlimited): the most JSON values the text may hold — the root, each array
  * element and each member's value (a member's name is none; an empty array or object holds
@@ -258,6 +258,244 @@ Json::Value parse_strict_json(std::string_view content, const std::string &prefi
     if (!parsed)
         throw Refusal()(prefix + clip_reader_quotes(std::move(errors)));
     return json;
+}
+
+/**
+ * The JSON values that jsoncpp's default reader (CharReaderBuilder's defaults: the reader of
+ * /search, parse_json_string) builds of |content| (the root, each array element and each
+ * member's value, as parse_strict_json counts them), counted before the text is parsed: one
+ * more than |max_values| (0: unlimited) throws TooManyJsonValues at the value that passes it.
+ * Nothing else is checked: the text is the lenient reader's to accept or refuse afterwards, as
+ * before. The count follows jsoncpp 1.9.3's OurReader token by token (readToken, readValue,
+ * readArray, readObject with collectComments, allowComments, allowTrailingCommas, no single
+ * quotes, failIfExtra false, stackLimit 1000), so that a text it accepts is counted at the
+ * number of values it builds, its quirks included:
+ * - a comment opens at a '/' or a '\'' (a '\'' is read as a '/') followed by a '*' or a '/';
+ * - a trailing comma closes an array or an object (the bracket right after it);
+ * - in an object, a member's value followed by a comment takes the next token, whatever it is,
+ *   for the separator;
+ * - nothing after the root value is read.
+ * A member named twice counts each time (the reader builds both values, the tree keeps the
+ * last). Where the reader stops at a fault of the text's structure (a token where none may
+ * stand, nesting past the stack limit) the count stops too; a fault it finds only in a token's
+ * content (a number, an escape, a comment it cannot attach) is not looked for, so that such a
+ * text, which it refuses, may be counted higher than what it built before the fault, never
+ * lower.
+ */
+class LenientJsonValues {
+  public:
+    static uint64_t count(std::string_view content, uint64_t max_values) {
+        LenientJsonValues reader(content, max_values);
+        // the root
+        reader.add();
+        reader.value(1);
+        return reader.values_;
+    }
+
+  private:
+    enum class Token { kObjectBegin, kObjectEnd, kArrayBegin, kArrayEnd, kString, kNumber,
+                       kLiteral, kComment, kArraySeparator, kMemberSeparator, kEnd, kError };
+
+    // jsoncpp's stackLimit (its default, as parse_json_string's): it throws past it
+    static constexpr size_t kStackLimit = 1000;
+
+    LenientJsonValues(std::string_view content, uint64_t max_values)
+          : s_(content), max_(max_values) {}
+
+    void add() {
+        if (++values_ > max_ && max_)
+            throw TooManyJsonValues(max_);
+    }
+
+    void skip_spaces() {
+        while (at_ < s_.size()
+                && (s_[at_] == ' ' || s_[at_] == '\t' || s_[at_] == '\r' || s_[at_] == '\n')) {
+            ++at_;
+        }
+    }
+
+    // the next character, '\0' at the end (not advancing there), as jsoncpp's getNextChar
+    char next_char() { return at_ < s_.size() ? s_[at_++] : '\0'; }
+
+    bool match(std::string_view pattern) {
+        if (s_.substr(at_, pattern.size()) != pattern)
+            return false;
+        at_ += pattern.size();
+        return true;
+    }
+
+    // readNumber: digits, a fraction and an exponent, each optional; a '-' or a '+' before
+    // an 'I' is no number (special floats are off)
+    Token number(bool sign) {
+        if (sign && at_ < s_.size() && s_[at_] == 'I') {
+            ++at_;
+            return Token::kError;
+        }
+        size_t p = at_;
+        auto next = [&]() {
+            at_ = p;
+            return p < s_.size() ? s_[p++] : '\0';
+        };
+        auto digit = [](char c) { return c >= '0' && c <= '9'; };
+        char c = '0';
+        while (digit(c)) {
+            c = next();
+        }
+        if (c == '.') {
+            c = next();
+            while (digit(c)) {
+                c = next();
+            }
+        }
+        if (c == 'e' || c == 'E') {
+            c = next();
+            if (c == '+' || c == '-')
+                c = next();
+            while (digit(c)) {
+                c = next();
+            }
+        }
+        return Token::kNumber;
+    }
+
+    // readComment, after its opening '/' or '\''
+    Token comment() {
+        const char c = next_char();
+        if (c == '*') {
+            while (at_ + 1 < s_.size()) {
+                const char d = s_[at_++];
+                if (d == '*' && s_[at_] == '/')
+                    break;
+            }
+            return next_char() == '/' ? Token::kComment : Token::kError;
+        }
+        if (c == '/') {
+            while (at_ < s_.size()) {
+                const char d = s_[at_++];
+                if (d == '\n')
+                    break;
+                if (d == '\r') {
+                    if (at_ < s_.size() && s_[at_] == '\n')
+                        ++at_;
+                    break;
+                }
+            }
+            return Token::kComment;
+        }
+        return Token::kError;
+    }
+
+    Token token() {
+        skip_spaces();
+        const char c = next_char();
+        switch (c) {
+            case '{': return Token::kObjectBegin;
+            case '}': return Token::kObjectEnd;
+            case '[': return Token::kArrayBegin;
+            case ']': return Token::kArrayEnd;
+            case '"': {
+                char d = 0;
+                while (at_ < s_.size()) {
+                    d = s_[at_++];
+                    if (d == '\\')
+                        next_char();
+                    else if (d == '"')
+                        break;
+                }
+                return d == '"' ? Token::kString : Token::kError;
+            }
+            case '\'':
+            case '/': return comment();
+            case '0': case '1': case '2': case '3': case '4':
+            case '5': case '6': case '7': case '8': case '9': return number(false);
+            case '-':
+            case '+': return number(true);
+            case 't': return match("rue") ? Token::kLiteral : Token::kError;
+            case 'f': return match("alse") ? Token::kLiteral : Token::kError;
+            case 'n': return match("ull") ? Token::kLiteral : Token::kError;
+            case ',': return Token::kArraySeparator;
+            case ':': return Token::kMemberSeparator;
+            case '\0': return Token::kEnd;
+            default: return Token::kError;
+        }
+    }
+
+    // readValue at nesting |depth| (the root 1), its value counted by the caller: false at a
+    // fault (the reader builds nothing more)
+    bool value(size_t depth) {
+        if (depth > kStackLimit)
+            return false;
+        Token t = token();
+        while (t == Token::kComment) {
+            t = token();
+        }
+        switch (t) {
+            case Token::kObjectBegin: return object(depth);
+            case Token::kArrayBegin: return array(depth);
+            case Token::kString:
+            case Token::kNumber:
+            case Token::kLiteral: return true;
+            default: return false;
+        }
+    }
+
+    bool array(size_t depth) {
+        for (;;) {
+            skip_spaces();
+            if (at_ < s_.size() && s_[at_] == ']') {
+                ++at_;
+                return true;
+            }
+            // the element exists before its value is read
+            add();
+            if (!value(depth + 1))
+                return false;
+            Token t = token();
+            while (t == Token::kComment) {
+                t = token();
+            }
+            if (t == Token::kArrayEnd)
+                return true;
+            if (t != Token::kArraySeparator)
+                return false;
+        }
+    }
+
+    bool object(size_t depth) {
+        for (;;) {
+            Token name = token();
+            while (name == Token::kComment) {
+                name = token();
+            }
+            if (name == Token::kObjectEnd)
+                return true;
+            if (name != Token::kString || token() != Token::kMemberSeparator)
+                return false;
+            add();
+            if (!value(depth + 1))
+                return false;
+            Token separator = token();
+            if (separator != Token::kObjectEnd && separator != Token::kArraySeparator
+                    && separator != Token::kComment) {
+                return false;
+            }
+            // after a comment, any next token is taken for the separator (jsoncpp's readObject)
+            while (separator == Token::kComment) {
+                separator = token();
+            }
+            if (separator == Token::kObjectEnd)
+                return true;
+        }
+    }
+
+    std::string_view s_;
+    uint64_t max_;
+    size_t at_ = 0;
+    uint64_t values_ = 0;
+};
+
+inline uint64_t count_lenient_json_values(std::string_view content, uint64_t max_values) {
+    return LenientJsonValues::count(content, max_values);
 }
 
 /**

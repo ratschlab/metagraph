@@ -371,6 +371,30 @@ class TestMultiGraphServer(TestingBase):
         self.assertEqual(status, ret.status_code, ret.text[:2000])
         return ret.json()
 
+    # -------------------------------------------------------------------- /search's value count
+
+    def test_search_bodies_are_counted(self):
+        """POST /search's body is counted before it is parsed (Fable review 2026-11-12), as the
+        strict routes' bodies are: one value more than --max-request-json-values (262144 by
+        default) refuses the whole request 400 too_many_json_values, its members written error
+        first, before any pair is queried; a body at the count is searched as before. The
+        multigraph block's request_intake lists /search."""
+        intake = self.server.get('capabilities').json()['multigraph']['request_intake']
+        self.assertEqual(262144, intake['max_request_json_values'])
+        self.assertEqual(['/pattern', '/resolve', '/search', '/traverse', '/traverse/cancel'],
+                         intake['json_values_routes'])
+        query = '>q\n' + self.records['ecoli'][0][:300]
+        # the root, FASTA, graphs and its name, x and its elements
+        at = {'FASTA': query, 'graphs': ['ecoli'], 'x': [0] * (262144 - 5)}
+        ret = self.server.post('search', at)
+        self.assertEqual(200, ret.status_code, ret.text[:2000])
+        ret = self.server.post('search', dict(at, x=[0] * (262145 - 5)))
+        self.assertEqual(400, ret.status_code, ret.text[:2000])
+        self.assertEqual('{"error":"the request body holds more than 262144 JSON values '
+                         '(--max-request-json-values): it was not parsed and nothing of it ran; '
+                         'send fewer values (split the request)","code":"too_many_json_values",'
+                         '"max_request_json_values":262144}', ret.text)
+
     # -------------------------------------------------------------------- capabilities
 
     def test_capabilities_summarise_every_pair(self):

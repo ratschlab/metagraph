@@ -518,9 +518,10 @@ Json::Value max_request_body_mb_json(uint64_t mb);
  */
 std::optional<uint64_t> content_length_value(const std::string &text);
 
-// The routes whose body is read by parse_strict_json and counted against
-// --max-request-json-values (request_intake.json_values_routes), sorted
-constexpr const char *kJsonValuesRoutes[] = { "/pattern", "/resolve", "/traverse",
+// The routes whose body's values are counted against --max-request-json-values before it is
+// parsed (request_intake.json_values_routes), sorted: the strict-JSON routes (parse_strict_json)
+// and /search, whose lenient reader's values are counted alike (count_lenient_json_values)
+constexpr const char *kJsonValuesRoutes[] = { "/pattern", "/resolve", "/search", "/traverse",
                                               "/traverse/cancel" };
 
 /**
@@ -553,11 +554,11 @@ std::string error_first_json_text(const Json::Value &body);
  * GET /capabilities' `request_intake` (SPEC-multigraph-envelope.md section 8): the byte cap
  * (`max_request_body_mb`, null when unlimited, as the top-level member of that name) and its
  * 413's shape (`body_too_large`: status, code, the body's members), the value count of the
- * strict-JSON routes (`max_request_json_values`, null when unlimited; `json_values_routes`)
- * and its 400's shape (`too_many_json_values`), and the cap on the connections the server
- * holds open (`max_connections`, H3: --max-connections, null when there is none; at it a
- * further connection waits in the listen queue). In the multigraph block on a multi-graph
- * server, at the top level on a single-graph one.
+ * strict-JSON routes and /search (`max_request_json_values`, null when unlimited;
+ * `json_values_routes`) and its 400's shape (`too_many_json_values`), and the cap on the
+ * connections the server holds open (`max_connections`, H3: --max-connections, null when
+ * there is none; at it a further connection waits in the listen queue). In the multigraph
+ * block on a multi-graph server, at the top level on a single-graph one.
  */
 Json::Value request_intake_json(uint64_t max_body_mb, uint64_t max_json_values,
                                 uint64_t max_connections);

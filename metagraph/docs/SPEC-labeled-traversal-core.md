@@ -4086,10 +4086,15 @@ search's routes, `POST /pattern` and `GET /pattern/capabilities`, are `SPEC-patt
   A seed's table is built by one hash lookup per entry (linear in its labels, `extra` and the entries; two scans
   of the dictionary per entry before). **The value count** *(H1)*: `--max-request-json-values N` (an integer in
   [0, 2⁵³ − 1]; 262,144 by default; 0 = unlimited) bounds the JSON values of the body of `POST /traverse`,
-  `/resolve`, `/pattern` and `/traverse/cancel` (§5, the body: 400 `too_many_json_values`); not `/search`'s or
-  `/align`'s. **The request-body limit** *(review of 2026-10-10, resources
-  finding 2)*: `--max-request-body-mb N` (an integer in [0, 1 048 576] MiB; 0 = unlimited, the default; stated by
-  `GET /capabilities` as `max_request_body_mb`, `null` when unlimited) bounds what the HTTP library reads of a
+  `/resolve`, `/pattern` and `/traverse/cancel` (§5, the body: 400 `too_many_json_values`), and *(Fable review
+  2026-11-12)* of `POST /search`: its body is still read by jsoncpp's lenient defaults (a comment, a trailing
+  comma, text after the value and a duplicated member are accepted as before), and the values that reader would
+  build — the root, each array element, each member's value — are counted before it is parsed, the same 400 above
+  the count (before, a 256 MiB body of small values built a tree of about 13 GiB over minutes of a handler thread
+  before it was refused, or answered 200 when its root was an object). Not `/align`'s. **The request-body
+  limit** *(review of 2026-10-10, resources finding 2)*: `--max-request-body-mb N` (an integer in [0, 1 048 576]
+  MiB; 0 = unlimited, the default; stated by `GET /capabilities` as `max_request_body_mb`, `null` when unlimited)
+  bounds what the HTTP library reads of a
   request, headers and body, on every route. A request with a longer body is refused before any route runs with
   **413** *(H1, train 3; before, the connection was closed without a response)*: status line `HTTP/1.1 413
   Payload Too Large`, `Content-Type: application/json`, `Connection: close`, and the body `{"error": "the request

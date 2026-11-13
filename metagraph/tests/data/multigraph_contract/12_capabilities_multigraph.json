@@ -781,6 +781,7 @@
     "json_values_routes": [
      "/pattern",
      "/resolve",
+     "/search",
      "/traverse",
      "/traverse/cancel"
     ],

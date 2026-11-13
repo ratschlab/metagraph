@@ -3091,8 +3091,8 @@ class TestTraverseAPI(TestTraverseBase):
                           'body_too_large': {'status': 413, 'code': 'body_too_large',
                                              'members': ['code', 'error', 'max_request_body_mb']},
                           'max_request_json_values': 262144,
-                          'json_values_routes': ['/pattern', '/resolve', '/traverse',
-                                                 '/traverse/cancel'],
+                          'json_values_routes': ['/pattern', '/resolve', '/search',
+                                                 '/traverse', '/traverse/cancel'],
                           'too_many_json_values': {'status': 400, 'code': 'too_many_json_values',
                                                    'members': ['code', 'error',
                                                                'max_request_json_values']},
@@ -3401,8 +3401,10 @@ class TestTraverseAPI(TestTraverseBase):
         POST /traverse, /resolve, /pattern and /traverse/cancel holds at most N JSON values
         (the root, each array element, each member's value), counted before it is parsed; one
         more is refused 400 {error, code: "too_many_json_values", max_request_json_values} in
-        this order, the same on the four routes, before anything is registered. /search and
-        /align have no count. GET /capabilities states it in request_intake."""
+        this order, the same on the four routes, before anything is registered. POST /search
+        too (Fable review 2026-11-12): its body is still read leniently (a comment, a trailing
+        comma), and the values that reader builds are counted before it is parsed. /align has no
+        count. GET /capabilities states it in request_intake."""
         caps = requests.get(f'http://{self.host}:{self.port}/capabilities').json()
         self.assertEqual(262144, caps['request_intake']['max_request_json_values'])
         proc, url, _ = self._flagged_server(['--max-request-json-values', '64'], 'json-values')
@@ -3410,7 +3412,7 @@ class TestTraverseAPI(TestTraverseBase):
             intake = requests.get(url + '/capabilities').json()['request_intake']
             self.assertEqual(64, intake['max_request_json_values'])
             self.assertIs(type(intake['max_request_json_values']), int)
-            self.assertEqual(['/pattern', '/resolve', '/traverse', '/traverse/cancel'],
+            self.assertEqual(['/pattern', '/resolve', '/search', '/traverse', '/traverse/cancel'],
                              intake['json_values_routes'])
             self.assertEqual({'status': 400, 'code': 'too_many_json_values',
                               'members': ['code', 'error', 'max_request_json_values']},
@@ -3428,9 +3430,26 @@ class TestTraverseAPI(TestTraverseBase):
             self.assertEqual(404, requests.get(url + '/traverse/attempt/json-values-1')
                              .status_code)
             self.assertEqual(404, requests.get(url + '/requests/json-values-1').status_code)
-            # /search reads its body without a count
-            ret = requests.post(url + '/search', data=json.dumps(over))
-            self.assertNotIn('too_many_json_values', ret.text)
+            # /search counts its body as its lenient reader builds it: one over is refused
+            # before it is parsed, whatever else it holds; within the count a search runs, its
+            # comments, trailing commas and unknown members read as before
+            fasta = json.dumps('>q\n' + self.element)
+            for body in (json.dumps(over),
+                         '{"FASTA": ' + fasta + ', "x": [' + ','.join(['0'] * 62) + ']}',
+                         '{"FASTA": ' + fasta + ', "x": [' + ','.join(['0'] * 62) + ']} junk'):
+                ret = requests.post(url + '/search', data=body)
+                self.assertEqual(400, ret.status_code, body[:80])
+                self.assertEqual(self._too_many_json_values(64), ret.text, body[:80])
+            for body in ('{"FASTA": ' + fasta + ', "x": [' + ','.join(['0'] * 61) + ']}',
+                         # 64 values: commas inside a comment, a string and after a trailing
+                         # comma are no values
+                         '{"FASTA": ' + fasta + ', /* ' + ',' * 100 + ' */ "y": ",,,,", '
+                         '"x": [' + ','.join(['0'] * 60) + ',],}',
+                         '{"FASTA": ' + fasta + ', "x": [' + ','.join(['0'] * 61) + ']} '
+                         + '[' + ','.join(['0'] * 100) + ']'):
+                ret = requests.post(url + '/search', data=body)
+                self.assertEqual(200, ret.status_code, ret.text[:500])
+                self.assertEqual(1, len(ret.json()), ret.text[:500])
             # a walk within the count runs
             ret = requests.post(url + '/traverse', data=json.dumps(
                 {'seeds': [{'sequence': self.element}],

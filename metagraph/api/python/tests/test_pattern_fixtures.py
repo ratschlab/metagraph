@@ -3748,8 +3748,9 @@ class TestPatternFixtures(unittest.TestCase):
                              and intake['max_request_json_values'] >= 1),
                          path + '.max_request_json_values', 'an integer of at least 1, or null')
                 check.ok(intake['json_values_routes']
-                         == ['/pattern', '/resolve', '/traverse', '/traverse/cancel'],
-                         path + '.json_values_routes', 'the four strict-JSON routes')
+                         == ['/pattern', '/resolve', '/search', '/traverse', '/traverse/cancel'],
+                         path + '.json_values_routes',
+                         'the four strict-JSON routes and /search (Fable review 2026-11-12)')
                 check.ok(intake['body_too_large']
                          == {'status': 413, 'code': 'body_too_large',
                              'members': ['code', 'error', 'max_request_body_mb']},

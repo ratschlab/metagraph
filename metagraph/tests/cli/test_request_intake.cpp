@@ -3,7 +3,9 @@
 #include <algorithm>
 #include <chrono>
 #include <cstdint>
+#include <functional>
 #include <map>
+#include <memory>
 #include <optional>
 #include <random>
 #include <sstream>
@@ -181,11 +183,12 @@ TEST(ServerRequestIntake, RefusalBodiesWriteErrorFirst) {
 }
 
 // GET /capabilities' request_intake: the byte cap (null when unlimited) and the 413's shape,
-// the value count (null when unlimited), its routes and its 400's shape; members sorted
+// the value count (null when unlimited), its routes (the strict-JSON routes and /search) and its
+// 400's shape; members sorted
 TEST(ServerRequestIntake, CapabilitiesStateTheIntake) {
     EXPECT_EQ(R"x({"body_too_large":{"code":"body_too_large","members":["code","error",)x"
               R"x("max_request_body_mb"],"status":413},"json_values_routes":["/pattern",)x"
-              R"x("/resolve","/traverse","/traverse/cancel"],"max_connections":null,)x"
+              R"x("/resolve","/search","/traverse","/traverse/cancel"],"max_connections":null,)x"
               R"x("max_request_body_mb":256,)x"
               R"x("max_request_json_values":262144,"too_many_json_values":{"code":)x"
               R"x("too_many_json_values","members":["code","error","max_request_json_values"],)x"
@@ -790,4 +793,224 @@ TEST(ServerRequestIntake, ContentLengthValues) {
                                     "99999999999999999999999" }) {
         EXPECT_EQ(std::nullopt, content_length_value(text)) << text;
     }
+}
+
+namespace {
+
+// the values of |v| as the reader built it: the root, each array element and each member's value
+uint64_t values_of(const Json::Value &v) {
+    uint64_t n = 1;
+    if (v.isArray() || v.isObject()) {
+        for (const Json::Value &child : v) {
+            n += values_of(child);
+        }
+    }
+    return n;
+}
+
+// |text| as POST /search reads its body (parse_json_string: jsoncpp's defaults); none when the
+// reader refuses it
+std::optional<Json::Value> lenient(const std::string &text) {
+    Json::CharReaderBuilder builder;
+    std::unique_ptr<Json::CharReader> reader { builder.newCharReader() };
+    Json::Value v;
+    std::string errors;
+    try {
+        if (!reader->parse(text.data(), text.data() + text.size(), &v, &errors))
+            return std::nullopt;
+    } catch (const Json::Exception &) {
+        return std::nullopt;
+    }
+    return v;
+}
+
+// whether |text| names a member twice in one object (jsoncpp's rejectDupKeys, else its defaults)
+bool names_a_member_twice(const std::string &text) {
+    Json::CharReaderBuilder builder;
+    builder["rejectDupKeys"] = true;
+    std::unique_ptr<Json::CharReader> reader { builder.newCharReader() };
+    Json::Value v;
+    std::string errors;
+    try {
+        return !reader->parse(text.data(), text.data() + text.size(), &v, &errors);
+    } catch (const Json::Exception &) {
+        return true;
+    }
+}
+
+// whether |body| is read under a cap of |max| values by /search's count
+bool search_fits(const std::string &body, uint64_t max) {
+    try {
+        count_lenient_json_values(body, max);
+        return true;
+    } catch (const TooManyJsonValues &e) {
+        EXPECT_EQ(max, e.max_values());
+        return false;
+    }
+}
+
+} // namespace
+
+// /search's body is still read by jsoncpp's lenient defaults (Fable review 2026-11-12): its
+// values are counted as that reader reads them, so that the count of every body it accepts is
+// the number of values of the tree it builds: a comment in each place the reader skips one
+// (jsoncpp 1.9.3 takes a ' outside a string for a /, and keeps such a comment when the comment
+// text it attaches to a value begins with a /), a trailing comma, the text after the root value
+// (not read), strings holding brackets, commas and escapes, and the token an object takes for
+// the separator after a member's value and a comment, whatever it is (a NUL byte included)
+TEST(ServerRequestIntake, SearchBodiesAreCountedAsTheirReaderReadsThem) {
+    for (const std::string &body : std::vector<std::string> {
+             "7", "\"x\"", "null", "[]", "{}", "[ ]", "{\n}", "[1, 2, 3]",
+             "{\"a\": 1, \"b\": []}", "[[], {}, [[]]]",
+             "/* a, b */ [1, 2]", "// , ,\n[1, 2]", "[1 /* , */, 2]", "[1, /* , */ 2]",
+             "{\"a\": /* , */ 1}", "{\"a\": 1 /* , */, \"b\": 2}", "{\"a\": 1, /* , */ \"b\": 2}",
+             "{ /* , */ }", "[1, // , ,\r\n 2]", "[1, // , ,\r 2]", "{/**/\"a\": [/***/1]}",
+             "[/**/'* , , */ 1]", "[//\n'/ , ,\n 1]", "/**/'* [ */ [1, 2]",
+             "{\"a\": /**/'* , */ 1}",
+             "[1, 2,]", "{\"a\": 1,}", "{\"a\": [1,], \"b\": {},}", "{\"a\": 1, /* c */ }",
+             "[1, 2] [3, 4, 5]", "{\"a\": 1} , , ,", "7, 8, 9", "\"x\" [1, 2]", "[1]x,y,z",
+             "[1] /* , , unclosed", "[1] // , ,", "true [1, 2]",
+             "[\"[,{\", \"a\\\",b\", \"\\\\\", \"}]\"]", "{\"a\\\\\": \",\"}",
+             "[\"/* , */\", \"'*\", \"//,\"]", "{\"FASTA\": \">q\\nACGT\", \"top_labels\": 5}",
+             "{\"a\": 1 /**/ ] \"b\": 2}", "{\"a\": 1 // ,\n 7 \"b\": [2, 3]}",
+             "{\"a\": 1 /**/ @ \"b\": [2]}", "{\"a\": [1] /**/ { \"b\": 2}",
+             "{\"a\": 1 /**/" + std::string(1, '\0') + " \"b\": 2}",
+             std::string(1000, '[') + std::string(1000, ']') }) {
+        const std::optional<Json::Value> tree = lenient(body);
+        ASSERT_TRUE(tree) << body;
+        const uint64_t values = values_of(*tree);
+        EXPECT_EQ(values, count_lenient_json_values(body, 0)) << body;
+        EXPECT_TRUE(search_fits(body, values)) << body;
+        if (values > 1) {
+            EXPECT_FALSE(search_fits(body, values - 1)) << body;
+        }
+        EXPECT_TRUE(search_fits(body, 0)) << body;
+    }
+    // a member named twice is counted each time: the reader reads both values (it keeps the last)
+    EXPECT_EQ(5u, count_lenient_json_values("{\"a\": 1, \"a\": [2, 3]}", 0));
+    EXPECT_EQ(4u, values_of(*lenient("{\"a\": 1, \"a\": [2, 3]}")));
+    // past its stack limit (1000 nested values) the reader throws: the count stops there too
+    const std::string deep = std::string(1001, '[') + std::string(1001, ']');
+    EXPECT_FALSE(lenient(deep).has_value());
+    EXPECT_EQ(1001u, count_lenient_json_values(deep, 0));
+    EXPECT_EQ(1001u, count_lenient_json_values(deep + deep, 0));
+}
+
+// The same on random bodies: values, arrays and objects nested up to 4 deep, with comments of
+// every form wherever the reader skips one, trailing commas and text after the root value, and
+// on each of them changed at a few random places by a structural byte (inserted, put in place
+// of another or a byte deleted). The reader refuses some of them (a comment text that begins
+// with a ' attached to a value: jsoncpp's "Comments must start with /", or a change): only the
+// bodies it accepts are compared, and of the changed ones those naming no member twice
+TEST(ServerRequestIntake, RandomSearchBodiesAreCountedAsTheirReaderReadsThem) {
+    std::mt19937 rng(20261113);
+    auto pick = [&](int n) { return std::uniform_int_distribution<int>(0, n - 1)(rng); };
+    // what may stand between two tokens: whitespace, or a comment with commas and brackets
+    auto gap = [&](bool comment) -> std::string {
+        switch (pick(comment ? 8 : 3)) {
+            case 0: return "";
+            case 1: return " ";
+            case 2: return "\n\t ";
+            case 3: return "/* , [ { , */";
+            case 4: return "// , ] } ,\n";
+            case 5: return pick(2) ? "'* , , */" : "/**/'* , , */";
+            case 6: return pick(2) ? "'/ , ,\r\n" : "\n/* */'/ , ,\r\n";
+            default: return " /**/ ";
+        }
+    };
+    std::function<std::string(int)> value = [&](int depth) -> std::string {
+        switch (pick(depth >= 4 ? 4 : 7)) {
+            case 0: return std::to_string(pick(1000));
+            case 1: return pick(2) ? "\"s,[{\\\"}]\"" : "\"\"";
+            case 2: return pick(2) ? "true" : "null";
+            case 3: return "-1.5e3";
+            case 4:
+            case 5: {
+                const int n = pick(5);
+                if (!n)
+                    return "[" + gap(false) + "]";
+                std::string s = "[" + gap(true);
+                for (int i = 0; i < n; ++i) {
+                    if (i)
+                        s += "," + gap(true);
+                    s += value(depth + 1) + gap(true);
+                }
+                // a trailing comma, the bracket after it (a comment there is refused)
+                if (!pick(3))
+                    s += "," + gap(false);
+                return s + "]";
+            }
+            default: {
+                const int n = pick(5);
+                std::string s = "{" + gap(true);
+                for (int i = 0; i < n; ++i) {
+                    if (i)
+                        s += "," + gap(true);
+                    s += "\"k" + std::to_string(i) + ",}\":" + gap(true) + value(depth + 1)
+                            + gap(true);
+                }
+                if (n && !pick(3))
+                    s += "," + gap(true);
+                return s + "}";
+            }
+        }
+    };
+    size_t checked = 0;
+    size_t changed_checked = 0;
+    for (int round = 0; round < 3000; ++round) {
+        std::string body = gap(true) + value(0);
+        if (!pick(4))
+            body += gap(true) + (pick(2) ? ", [0, 0, 0]" : "{,,} x");
+        const std::optional<Json::Value> tree = lenient(body);
+        if (!tree)
+            continue;
+        EXPECT_EQ(values_of(*tree), count_lenient_json_values(body, 0)) << body;
+        ++checked;
+        for (int m = 0; m < 4; ++m) {
+            std::string changed = body;
+            static const std::string kBytes(",[]{}\"'/*: \n\r0+-I.e\\\0", 21);
+            for (int edits = 1 + pick(3); edits--; ) {
+                const size_t at = pick(changed.size());
+                const char byte = kBytes[pick(kBytes.size())];
+                switch (pick(3)) {
+                    case 0: changed[at] = byte; break;
+                    case 1: changed.insert(changed.begin() + at, byte); break;
+                    default: if (changed.size() > 1) changed.erase(at, 1);
+                }
+            }
+            const std::optional<Json::Value> changed_tree = lenient(changed);
+            if (!changed_tree || names_a_member_twice(changed))
+                continue;
+            EXPECT_EQ(values_of(*changed_tree), count_lenient_json_values(changed, 0)) << changed;
+            ++changed_checked;
+        }
+    }
+    EXPECT_GT(checked, 1000u);
+    EXPECT_GT(changed_checked, 1000u);
+}
+
+// The cap: a body of exactly the server's default count is read, one more value refused before
+// the parse with the strict routes' error; commas in a comment or a string are no values, nor
+// are commas where the reader stops (it makes one element of "[,,," and stops at its fault)
+TEST(ServerRequestIntake, SearchBodiesAreRefusedPastTheCount) {
+    std::string zeros = "{\"FASTA\": \">q\\nACGT\", \"x\": [0";
+    // the root, FASTA, x and its elements
+    for (size_t i = 4; i < 262144; ++i) {
+        zeros += ",0";
+    }
+    zeros += "]}";
+    EXPECT_TRUE(search_fits(zeros, 262144));
+    EXPECT_EQ(262144u, values_of(*lenient(zeros)));
+    zeros.insert(zeros.size() - 2, ",0");
+    EXPECT_FALSE(search_fits(zeros, 262144));
+    EXPECT_EQ("the request body holds more than 262144 JSON values (--max-request-json-values): "
+              "it was not parsed and nothing of it ran; send fewer values (split the request)",
+              refusal_of([&] { count_lenient_json_values(zeros, 262144); }));
+    // 0: none
+    EXPECT_TRUE(search_fits(zeros, 0));
+    const std::string commas(1'000'000, ',');
+    EXPECT_TRUE(search_fits("{\"FASTA\": \"" + commas + "\", /* " + commas + " */ \"a\": 1} "
+                            + commas, 3));
+    EXPECT_TRUE(search_fits("[" + commas + "]", 2));
+    EXPECT_FALSE(search_fits("[" + commas + "]", 1));
 }
