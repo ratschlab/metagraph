@@ -73,10 +73,25 @@ bool with_madvise() {
     return WITH_MADVISE;
 }
 
+namespace {
+
+// `sdsl::shared_mapper_ifstream` that remembers the path it was opened from.
+class named_mapper_ifstream : public sdsl::shared_mapper_ifstream {
+  public:
+    named_mapper_ifstream(const std::string &filename, std::ios_base::openmode mode)
+          : sdsl::shared_mapper_ifstream(filename, mode), filename_(filename) {}
+    const std::string& get_filename() const { return filename_; }
+
+  private:
+    std::string filename_;
+};
+
+} // namespace
+
 std::unique_ptr<std::ifstream> open_ifstream(const std::string &filename, bool mmap_stream) {
     std::unique_ptr<std::ifstream> in;
     if (mmap_stream) {
-        in.reset(new sdsl::shared_mapper_ifstream(filename, std::ios_base::binary));
+        in.reset(new named_mapper_ifstream(filename, std::ios_base::binary));
     } else {
         in.reset(new named_ifstream(filename, std::ios_base::binary));
     }
@@ -84,12 +99,12 @@ std::unique_ptr<std::ifstream> open_ifstream(const std::string &filename, bool m
 }
 
 const std::string& get_filename(std::istream &f) {
-    if (auto *mmap_in = dynamic_cast<sdsl::shared_mapper_ifstream *>(&f))
-        return mmap_in->filename();
+    if (auto *mmap_in = dynamic_cast<named_mapper_ifstream *>(&f))
+        return mmap_in->get_filename();
     if (auto *named_in = dynamic_cast<named_ifstream *>(&f))
         return named_in->get_filename();
     throw std::runtime_error(
-            "get_filename: stream is neither sdsl::shared_mapper_ifstream nor utils::named_ifstream");
+            "get_filename: stream was not opened by utils::open_ifstream");
 }
 
 void madvise_random_range(std::istream &f, std::streamoff start, std::streamoff length) {
