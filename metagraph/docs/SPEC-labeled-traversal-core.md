@@ -624,9 +624,14 @@ reserved so that no growth holds an old and a new buffer beside the map; then wh
 `candidates`); the selection (a `max_support` selection's scratch as it is allocated: the runs it gathers twice,
 16 B each; the vector of a round's clipped pieces each time it grows past them, its new buffer beside the old one,
 for a run with P picks inside it is P + 1 pieces; a round's candidate starts, run ends and Fenwick counts, about 28 B
-a piece, released with the round; each pick before it is made; each frozen seed before it is built, its sequence,
-names, the label order's copy of them and its overlaps: `selection`); and the answer's JSON tree with its text, part
-`answer`. Each label, candidate and seed is priced before it is built at the deployed build's sizes (libstdc++ and
+a piece, released with the round; each pick before it is made, an explicit seed at every name it lists before its
+checks (this stays charged: the selection keeps a copy of the explicit seeds until the answer is written), and the
+explicit picks' own lists once the seeds are frozen; each frozen seed before it is built, its sequence and id, the
+names it keeps (`max_labels_per_seed`) and lists, and while it is built the label order's copy of every covering
+label's name; its overlaps: `selection`); and the answer's JSON tree with its text, part `answer`. The picks are
+released once the seeds are frozen, so that the selection stays charged for what it holds *(train 5b, T5b-Y1; Fable
+review 2026-11-12: before, every covering label's name and every pick stayed charged, and a selection that fit could
+be refused)*. Each label, candidate and seed is priced before it is built at the deployed build's sizes (libstdc++ and
 jemalloc's size classes, so that a price is the same on every platform): a value in an array or an object 96 B, an
 object member's name its bytes and a terminator, a container 48 B, a string its bytes and 5; and its compact text's
 bytes; 64 KiB for the members beside them. Once the tree is complete, the text's buffer at its size class (the route

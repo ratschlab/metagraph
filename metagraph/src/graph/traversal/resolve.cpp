@@ -1763,6 +1763,26 @@ SeedSelection select_seeds(const SupportProfile &profile,
         }
         return bytes;
     };
+    // What the account holds for the picks: each pick charged as it is made (an explicit one
+    // once the seeds are frozen), all of it released once the seeds are frozen and the picks
+    // freed (T5b-Y1, Fable review 2026-11-12: before, nothing released it, so the picks' label
+    // ids stayed charged through the answer's build)
+    uint64_t picks_charged = 0;
+    auto charge_pick = [&](uint64_t bytes) {
+        charge(bytes);
+        picks_charged += bytes;
+    };
+    // an explicit pick at what it holds once its lists are made: the object, its label ids and
+    // the names it lists as not covering, at their vectors' capacities, and those names' heaps
+    auto held_pick_bytes = [](const Picked &p) {
+        uint64_t bytes = sizeof(Picked)
+                + annot::matrix::buffer_bytes(p.labels.capacity(), sizeof(LabelId))
+                + annot::matrix::buffer_bytes(p.labels_not_covering.capacity(), kStringBytes);
+        for (const std::string &name : p.labels_not_covering) {
+            bytes += string_heap_bytes(name);
+        }
+        return bytes;
+    };
     // the answer's deadline, read once the steps since the last reading reach
     // kResolveCheckLabels (resolve.hpp: a seed and its labels, a run swept, a pair compared)
     uint64_t steps = 0;
@@ -1801,7 +1821,7 @@ SeedSelection select_seeds(const SupportProfile &profile,
                     continue;
                 selection.num_eligible++;
                 if (picked.size() < policy.max_seeds) {
-                    charge(pick_bytes(cand.labels.size(), nullptr));
+                    charge_pick(pick_bytes(cand.labels.size(), nullptr));
                     picked.push_back({ cand.kmers, cand.labels, {} });
                 }
             }
@@ -1975,12 +1995,14 @@ SeedSelection select_seeds(const SupportProfile &profile,
                 }
                 if (!best)
                     break;
-                charge(pick_bytes(best_count, nullptr));
+                charge_pick(pick_bytes(best_count, nullptr));
                 best->labels = covering(best->kmers);
                 assert(best->labels.size() == best_count);
                 taken.push_back(best->kmers);
                 std::sort(taken.begin(), taken.end());
-                picked.push_back(*best);
+                // moved, not copied: the pick's price is one label id vector (a copy beside it
+                // held its ids twice until the round ended)
+                picked.push_back(std::move(*best));
             }
             selection.num_eligible = picked.size();
             // the rounds' scratch, freed with this block
@@ -2001,7 +2023,10 @@ SeedSelection select_seeds(const SupportProfile &profile,
                                                               profile.unknown_labels.end());
             for (const auto &ex : policy.explicit_seeds) {
                 poll(1 + ex.labels.size());
-                // (its names: the most it can list as not covering)
+                // (its names: the most it can list as not covering). It stays charged: the
+                // selection keeps its copy of the explicit seeds (selection.policy) until the
+                // answer is written, and this prices it (T5b-Y1); the pick's own lists are
+                // charged once the seeds are frozen (below)
                 charge(pick_bytes(ex.labels.size(), &ex.labels));
                 if (ex.kmers.end > profile.num_kmers || ex.kmers.begin >= ex.kmers.end)
                     throw std::invalid_argument("Explicit seed interval out of range");
@@ -2058,7 +2083,7 @@ SeedSelection select_seeds(const SupportProfile &profile,
                                       std::min(m.kmers.end, p.kmers.end) };
                 if (common.size() >= min_kmers) {
                     m.kmers = common;
-                    charge(2 * profile.labels.size() * sizeof(LabelId));
+                    charge_pick(2 * profile.labels.size() * sizeof(LabelId));
                     m.labels = covering(common);
                     m.rank = std::min(m.rank, p.rank);
                     continue;
@@ -2071,28 +2096,63 @@ SeedSelection select_seeds(const SupportProfile &profile,
         picked.swap(merged);
     }
 
-    // freeze
+    // freeze. A seed stays charged for what it holds (T5b-Y1, Fable review 2026-11-12: before,
+    // a copy of every covering label's name stayed charged, although a seed keeps
+    // max_labels_per_seed of them and lists the dropped ones only up to 1000), each part priced
+    // before it is built and each vector reserved to its size: the seeds' vector, reserved to the
+    // picks, before the first; before a seed its id and digest, its sequence and its names not
+    // covering, and until it is built the label order's copy of ALL its labels' names, the
+    // order's and the digest's temporary strings and the seed id's views of the names kept and
+    // copies of the sequence; once the order is known, before they are copied, the names it keeps
+    // and the dropped names it lists
+    // (an explicit pick's lists, its covering labels' ids and its names not covering, are
+    // held until the seeds are frozen: charged here, where before every covering label's name
+    // kept with its seed covered them, released with the other picks)
+    if (policy.policy == SelectionPolicy::EXPLICIT) {
+        uint64_t explicit_picks = 0;
+        for (const Picked &p : picked) {
+            explicit_picks += held_pick_bytes(p);
+        }
+        charge_pick(explicit_picks);
+    }
+    charge(annot::matrix::buffer_bytes(picked.size(), priced_sizeof<FrozenSeed>(3)));
+    selection.seeds.reserve(picked.size());
     for (auto &p : picked) {
         poll(1 + p.labels.size());
-        // the frozen seed before it is built: its object, id and digest, its sequence, its
-        // labels' names twice (the label order's copy of them, and the names it keeps or
-        // drops), the names not covering; the order's copy is freed with the seed done
-        uint64_t names = 0;
+        const size_t kept = std::min(p.labels.size(), policy.max_labels_per_seed);
+        const size_t dropped = p.labels.size() - kept;
+        const size_t listed = dropped <= 1000 ? dropped : 0;
+        const uint64_t length = p.kmers.size() + profile.k - 1;
+        uint64_t heaps = 0;
+        size_t longest = 0;
         for (LabelId l : p.labels) {
-            names += priced_sizeof<std::pair<std::string, LabelId>>(1)
-                   + string_heap_bytes(profile.labels[l].label.name);
+            const std::string &name = profile.labels[l].label.name;
+            heaps += string_heap_bytes(name);
+            longest = std::max(longest, name.size());
         }
-        // (its id, sequence and dropped digest at kStringBytes)
-        const uint64_t frozen = priced_sizeof<FrozenSeed>(3) + 2 * 32
-                + annot::matrix::alloc_bytes(p.kmers.size() + profile.k) + names
-                + pick_bytes(0, &p.labels_not_covering);
-        charge(frozen + names);
+        // (its id and dropped digest, 16 hex digits each)
+        uint64_t frozen = 2 * 32 + annot::matrix::alloc_bytes(length + 1)
+                + annot::matrix::buffer_bytes(p.labels_not_covering.size(), kStringBytes);
+        for (const std::string &name : p.labels_not_covering) {
+            frozen += string_heap_bytes(name);
+        }
+        // the order's copy (40 B a pair); three temporary strings of at most twice a name, a
+        // separator and 20 digits (the hash order's keys, the digest's line); the seed id's
+        // views of the names kept, and its case-mapped and reverse-complemented sequences
+        const uint64_t scratch
+                = annot::matrix::buffer_bytes(p.labels.size(),
+                                              priced_sizeof<std::pair<std::string, LabelId>>(1))
+                + heaps + 3 * annot::matrix::alloc_bytes(2 * (longest + 22))
+                + annot::matrix::buffer_bytes(kept, sizeof(std::string_view))
+                + 2 * annot::matrix::alloc_bytes(length + 1);
+        charge(frozen + scratch);
         FrozenSeed seed;
         seed.kmers = p.kmers;
         seed.sequence = std::string(query.substr(p.kmers.begin, p.kmers.size() + profile.k - 1));
         seed.labels_not_covering = p.labels_not_covering;
 
         std::vector<std::pair<std::string, LabelId>> ordered;
+        ordered.reserve(p.labels.size());
         for (LabelId l : p.labels) {
             ordered.emplace_back(profile.labels[l].label.name, l);
         }
@@ -2119,6 +2179,16 @@ SeedSelection select_seeds(const SupportProfile &profile,
                 });
                 break;
         }
+        // the names it keeps and the dropped names it lists, now known, before they are copied
+        // (32 B each, reserved, and each name's heap): what stays charged with the seed
+        uint64_t names = annot::matrix::buffer_bytes(kept, kStringBytes)
+                       + annot::matrix::buffer_bytes(listed, kStringBytes);
+        for (size_t i = 0; i < kept + listed; ++i) {
+            names += string_heap_bytes(ordered[i].first);
+        }
+        charge(names);
+        seed.labels.reserve(kept);
+        seed.population.dropped.reserve(listed);
         seed.population.supporting_total = ordered.size();
         seed.population.order = policy.label_order;
         seed.population.sample_seed = policy.sample_seed;
@@ -2141,9 +2211,12 @@ SeedSelection select_seeds(const SupportProfile &profile,
                                     std::vector<std::string_view>(seed.labels.begin(),
                                                                   seed.labels.end()));
         selection.seeds.push_back(std::move(seed));
-        if (answer)
-            answer->release(names);
+        // the order's copy and the temporaries, freed with the seed built
+        answer_release(scratch);
     }
+    // the picks, frozen: freed, and their charge with them
+    std::vector<Picked>().swap(picked);
+    answer_release(picks_charged);
 
     // every ordered pair of seeds (a row of them at a time; a row's indices at twice their
     // number at most)

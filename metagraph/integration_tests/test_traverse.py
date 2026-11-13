@@ -4234,7 +4234,9 @@ class TestResolveDiscoveryBounds(TestingBase):
         for name, args in (('default', pair),
                            ('cap', pair + ['--resolve-max-discover-labels', '500']),
                            ('memory', pair + ['--resolve-max-discover-memory-mb', '1']),
-                           ('multi-memory', [csv, '--resolve-max-discover-memory-mb', '1'])):
+                           ('multi-memory', [csv, '--resolve-max-discover-memory-mb', '1']),
+                           ('selection', pair + ['--resolve-max-discover-memory-mb', '16']),
+                           ('multi-selection', [csv, '--resolve-max-discover-memory-mb', '16'])):
             port = _free_port()
             log = open(f'{cls.tempdir.name}/server-{name}.log', 'w')
             process = subprocess.Popen(
@@ -4574,6 +4576,40 @@ class TestResolveDiscoveryBounds(TestingBase):
         served = self._post('default', request)
         self.assertEqual(len(names), len(served['labels']))
         self.assertEqual(self._untimed(self._cli(request)), self._untimed(served))
+
+    def test_a_selection_that_fits_is_answered(self):
+        """A selection is charged for what it holds (train 5b, T5b-Y1; Fable review 2026-11-12,
+        engine backlog entry 1): a header discovery of every record (6,000) with a max_support
+        selection keeping one label a seed, about 200 seeds covered by 30 to 6,000 records each,
+        under --resolve-max-discover-memory-mb 16. Its answer holds a few MB, so it is answered
+        as under the default bound (work.memory_bytes apart: the pass's batches are decoded
+        smaller under the bound), and on a multi-graph server the pair is answered. Before,
+        every covering record's name stayed charged with each seed, and every pick (about
+        29 MB): 400 resolve_answer_too_large (selection)"""
+        request = {'sequence': self.core,
+                   'discover': {'kind': 'header', 'max_labels': self.RECORDS},
+                   'run_format': 'rle', 'min_block_kmers': 1000,
+                   'select': {'policy': 'max_support', 'max_seeds': 1024,
+                              'max_labels_per_seed': 1}}
+        served = self._post('default', request)
+        seeds = served['selection']['seeds']
+        self.assertGreater(len(seeds), 150)
+        self.assertEqual((self.RECORDS, 1), (seeds[0]['label_population']['supporting_total'],
+                                             seeds[0]['label_population']['included']))
+
+        def unworked(answer):
+            return self._untimed({k: v for k, v in answer.items() if k != 'work'})
+        bounded = self._post('selection', request)
+        self.assertNotIn('stop', bounded)
+        self.assertEqual(unworked(served), unworked(bounded))
+        # a multi-graph server: the pair answered, its selection the same
+        multi = requests.post(self.servers['multi-selection'][0] + '/resolve',
+                              data=json.dumps(dict(request, graph='P')), timeout=600)
+        self.assertEqual(200, multi.status_code, multi.text[:500])
+        envelope = multi.json()
+        self.assertEqual((1, 0), (envelope['answered'], envelope['refused']), multi.text[:2000])
+        self.assertEqual('answered', envelope['answers'][0]['outcome'])
+        self.assertEqual(served['selection'], envelope['answers'][0]['selection'])
 
 
 @unittest.skipUnless(_supports_traverse(), "`metagraph traverse` is not available in this build")

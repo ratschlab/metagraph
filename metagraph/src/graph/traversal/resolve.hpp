@@ -452,8 +452,15 @@ constexpr char kSeedOrder[] = "rank";
 // |answer| (null: none): the answer account (AnswerAccount), charged with the selection's
 // scratch before it is allocated (a max_support selection's gathered runs, twice; the round's
 // vector of clipped pieces each time it grows past them; a round's candidate starts, run ends
-// and Fenwick counts for its pieces, released with them), each pick before it is made and each frozen seed before it is built (its sequence, names, the
-// label order's copy of them, its overlaps), a selection passing it throwing AnswerTooLarge
+// and Fenwick counts for its pieces, released with them), each pick before it is made (an explicit
+// seed at every name it lists, before its checks: that stays charged, the price of the selection's
+// copy of the explicit seeds in its policy; the explicit picks' own lists once the seeds are
+// frozen), the picks released once the seeds are frozen and the picks freed, and each frozen seed
+// before it is built: its id, sequence and names not covering, until it is built the label
+// order's copy of all its labels' names with the temporaries of its order and id, and the names
+// it keeps (max_labels_per_seed) and lists as dropped; then the overlaps. What stays charged is
+// what the selection holds (T5b-Y1, Fable review 2026-11-12: before, every covering label's name
+// and every pick). A selection passing it throws AnswerTooLarge
 SeedSelection select_seeds(const SupportProfile &profile,
                            std::string_view query,
                            const SelectionPolicy &policy,
