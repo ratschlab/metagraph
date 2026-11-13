@@ -451,6 +451,64 @@ TEST(AnnotatedSearchPositions, RowsHoldTheirRecordsValuesAtEveryPosition) {
     }
 }
 
+// A query over several blocks of rows (the rows of a query by record are decoded a block
+// at a time): the values at every position are those of the whole query, and the records
+// that are not cut come in the order of their first matching position.
+TEST(AnnotatedSearchPositions, RecordsOverSeveralBlocksOfRowsInOrderOfFirstMatch) {
+    std::mt19937 rng(51);
+    const size_t k = 7;
+    std::vector<CoordinateRecord> records;
+    std::uniform_int_distribution<size_t> length(40, 160);
+    for (size_t i = 0; i < 24; ++i) {
+        records.push_back({ random_sequence(rng, length(rng)), "F" + std::to_string(i % 3),
+                            "r" + std::to_string(i) });
+    }
+    // every record once, some again (rows repeated within a block and across blocks), with
+    // foreign stretches between them
+    std::string query;
+    for (size_t i = 0; i < records.size(); ++i) {
+        query += records[(i * 7) % records.size()].sequence + random_sequence(rng, 3);
+        if (i % 5 == 0)
+            query += records[i].sequence.substr(0, 30);
+    }
+    ASSERT_LT(4 * 256u, query.size() - k + 1);
+    for (bool row_diff : { false, true }) {
+        SCOPED_TRACE(::testing::Message() << "row_diff " << row_diff);
+        auto index = coordinate_test_graph(k, records, row_diff, true, true);
+        check_positions(*index, k, records, query, true);
+
+        const size_t top = std::numeric_limits<size_t>::max();
+        std::vector<std::string> order;
+        size_t last_first = 0;
+        for (const auto &[label, count, positions, length] : index->get_kmer_coordinates(query, top, 0, 0)) {
+            size_t first = query.size();
+            positions.call_positions([&](size_t position, const auto &) {
+                first = std::min(first, position);
+            });
+            EXPECT_LE(last_first, first) << label;
+            last_first = first;
+            order.push_back(label);
+        }
+        EXPECT_EQ(records.size(), order.size());
+        // the same records in the same order from every query by record
+        std::vector<std::string> labels;
+        for (const auto &[label, count, values] : index->get_kmer_counts(query, top, 0, 0)) {
+            labels.push_back(label);
+        }
+        EXPECT_EQ(order, labels);
+        labels.clear();
+        for (const auto &[label, count, mask] : index->get_top_label_signatures(query, top, 0, 0)) {
+            labels.push_back(label);
+        }
+        EXPECT_EQ(order, labels);
+        labels.clear();
+        for (const auto &[label, count] : index->get_top_labels(query, top, 0, 0)) {
+            labels.push_back(label);
+        }
+        EXPECT_EQ(order, labels);
+    }
+}
+
 // A query of many records' first k-mers, each record matched at one position: the rows
 // returned times the query's k-mers is large, the positions matched are not (one per row).
 // The values are held at the matched positions only: one run per row. (A record's first base

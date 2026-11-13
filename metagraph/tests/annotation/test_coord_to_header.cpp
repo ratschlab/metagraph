@@ -223,45 +223,37 @@ TEST(CoordToHeader, FindDuplicateHeadersNamesEveryRepeatAgainstTheFirst) {
     EXPECT_EQ(0u, calls);
 }
 
-TEST(CoordToHeader, MapSingleCoordConsistentWithBatch) {
-    // Verify map_single_coord gives same results as map_to_local_coords
-    CoordToHeader cth(
-        { { "h0", "h1", "h2" } },
-        { { 3, 4, 2 } }
-    );
-
-    // Batch mapping
-    using RowTuples = CoordToHeader::RowTuples;
-    std::vector<RowTuples> rows = {
-        { { 0, { 0, 2, 3, 6, 8 } } }
+TEST(CoordToHeader, MapCoordsConsistentWithMapSingleCoord) {
+    // sequences of 3, 4, 1, 1 and 2 k-mers, and a column with one sequence
+    CoordToHeader cth({ { "h0", "h1", "h2", "h3", "h4" }, { "g0" } },
+                      { { 3, 4, 1, 1, 2 }, { 5 } });
+    using Tuple = CoordToHeader::Tuple;
+    const std::vector<std::pair<size_t, Tuple>> rows = {
+        { 0, { 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10 } }, // every coordinate
+        { 0, { 0, 2, 3, 6, 8 } },                    // the next sequence or the same one
+        { 0, { 1, 10 } },                            // a jump over sequences
+        { 0, { 7 } }, { 0, { 10 } }, { 0, {} },
+        { 1, { 0, 4 } },
     };
-    cth.map_to_local_coords(&rows);
-
-    // Single-coord mapping should produce same encoded values
-    for (auto &[col, coords] : rows[0]) {
-        size_t idx = 0;
-        for (uint64_t global_coord : { 0u, 2u, 3u, 6u, 8u }) {
-            auto [seq_id, local_coord] = cth.map_single_coord(col, global_coord);
-            uint64_t encoded = local_coord * cth.num_sequences(col) + seq_id;
-            EXPECT_EQ(encoded, coords[idx])
-                << "Mismatch at global coord " << global_coord;
-            ++idx;
+    for (const auto &[col, coords] : rows) {
+        std::vector<std::pair<size_t, uint64_t>> mapped;
+        cth.map_coords(col, coords, [&](size_t seq_id, uint64_t local_coord) {
+            mapped.emplace_back(seq_id, local_coord);
+        });
+        ASSERT_EQ(coords.size(), mapped.size());
+        for (size_t i = 0; i < coords.size(); ++i) {
+            EXPECT_EQ(cth.map_single_coord(col, coords[i]), mapped[i])
+                << "column " << col << ", coordinate " << coords[i];
         }
     }
 }
 
-TEST(CoordToHeader, MapToLocalCoordsDropsRecordlessColumnsAndRefusesUnknownOnes) {
-    // column 1 has no sequence records
-    CoordToHeader cth({ { "h0", "h1" }, {} }, { { 3, 4 }, {} });
-    using RowTuples = CoordToHeader::RowTuples;
-
-    std::vector<RowTuples> rows = { { { 0, { 0, 4 } }, { 1, { 0 } } } };
-    cth.map_to_local_coords(&rows);
-    ASSERT_EQ(1u, rows[0].size());
-    EXPECT_EQ(0u, rows[0][0].first);
-
-    std::vector<RowTuples> unknown = { { { 2, { 0 } } } };
-    EXPECT_THROW(cth.map_to_local_coords(&unknown), std::runtime_error);
+TEST(CoordToHeader, MapCoordsRefusesUnknownColumnsAndCoordinates) {
+    CoordToHeader cth({ { "h0", "h1" } }, { { 3, 4 } });
+    auto ignore = [](size_t, uint64_t) {};
+    EXPECT_THROW(cth.map_coords(1, { 0 }, ignore), std::out_of_range);
+    EXPECT_THROW(cth.map_coords(0, { 6, 7 }, ignore), std::out_of_range);
+    EXPECT_NO_THROW(cth.map_coords(0, { 6 }, ignore));
 }
 
 // Test Alignment::format_coords(cth, k) renders per-header ranges
