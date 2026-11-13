@@ -13,9 +13,11 @@ namespace mtg::test {
 struct CoordinateRecord { std::string sequence, column, header; };
 
 // Small real coordinate-matrix fixture, with adjacent records in each column.
+// Without |record_mapping| (no CoordToHeader, as an index without a .seqs file), the
+// labels are the columns and the coordinates are those of the column's records joined.
 inline std::unique_ptr<graph::AnnotatedDBG>
 coordinate_test_graph(size_t k, const std::vector<CoordinateRecord> &records,
-                      bool row_diff = false, bool brwt = false) {
+                      bool row_diff = false, bool brwt = false, bool record_mapping = true) {
     using namespace annot::matrix;
     auto graph = std::make_shared<graph::DBGSuccinct>(k);
     annot::LabelEncoder<> encoder;
@@ -149,6 +151,8 @@ coordinate_test_graph(size_t k, const std::vector<CoordinateRecord> &records,
                 throw std::logic_error("Unexpected coordinate in row-diff fixture");
         }
     }
+    if (!record_mapping)
+        return std::make_unique<graph::AnnotatedDBG>(graph, std::move(annotation));
     return std::make_unique<graph::AnnotatedDBG>(
         graph, std::move(annotation), false,
         std::make_unique<annot::CoordToHeader>(std::move(headers), std::move(counts)));

@@ -99,21 +99,57 @@ tabulate_score(const sdsl::bit_vector &presence, size_t correction = 0) {
     return table;
 }
 
-} // namespace
+// tabulate_score(autocorrelate(mask, offset), correction) for the mask of |size| positions
+// whose ones are the runs |call_runs| gives (ascending, maximal), computed from the runs.
+// autocorrelate keeps a one if the next |offset| - 1 positions within the mask are ones
+// too: a run ending before the end of the mask loses its last |offset| - 1 positions
+// (all of them if it is not longer), and a mask shorter than |offset| stays as it is.
+std::array<AlignedVector<size_t>, 2>
+tabulate_runs(size_t size, const CallPresentRuns &call_runs, uint8_t offset, size_t correction) {
+    std::array<AlignedVector<size_t>, 2> table;
+    if (!size)
+        return table;
 
-int32_t score_kmer_presence_mask(size_t k,
-                                 const sdsl::bit_vector &kmer_presence_mask,
-                                 int32_t match_score,
-                                 int32_t mismatch_score) {
-    if (!kmer_presence_mask.size())
-        return 0;
+    const size_t shrink = offset - 1;
+    bool last_block = false;
+    size_t last_size = 0;
+    bool started = false;
+    // start the next block of zeros or ones, ending the previous one
+    auto block = [&](bool bit, size_t length) {
+        if (started)
+            table[last_block].push_back(last_size + correction);
+        started = true;
+        last_block = bit;
+        last_size = length;
+    };
+    size_t pos = 0;
+    call_runs([&](size_t begin, size_t end) {
+        assert(begin >= pos && begin < end && end <= size);
+        size_t kept_end = end;
+        if (size >= offset && end < size)
+            kept_end = end - begin > shrink ? end - shrink : begin;
+        if (kept_end == begin)
+            return;
+        if (begin > pos)
+            block(false, begin - pos);
+        block(true, kept_end - begin);
+        pos = kept_end;
+    });
+    if (pos < size)
+        block(false, size - pos);
+    table[last_block].push_back(last_size);
+    return table;
+}
 
-    const int32_t kmer_adjust = 3;
-
-    const size_t sequence_length = kmer_presence_mask.size() + k - 1;
+// the score of a mask of |size| k-mers from tabulate_score of its autocorrelation
+int32_t score_table(size_t k,
+                    size_t size,
+                    const std::array<AlignedVector<size_t>, 2> &score_counter,
+                    int32_t kmer_adjust,
+                    int32_t match_score,
+                    int32_t mismatch_score) {
+    const size_t sequence_length = size + k - 1;
     const int32_t SNP_t = k + kmer_adjust;
-
-    auto score_counter = tabulate_score(autocorrelate(kmer_presence_mask, kmer_adjust), 1);
 
     double score = std::accumulate(score_counter[1].begin(),
                                    score_counter[1].end(), 0) * match_score;
@@ -121,7 +157,7 @@ int32_t score_kmer_presence_mask(size_t k,
         return 0;
 
     if (score_counter[0].empty())
-        return score * sequence_length / kmer_presence_mask.size();
+        return score * sequence_length / size;
 
     for (double count : score_counter[0]) {
         // A penalty function used in BIGSI
@@ -135,7 +171,35 @@ int32_t score_kmer_presence_mask(size_t k,
         score += (count - mean_penalty) * match_score - mean_penalty;
     }
 
-    return std::max(score * sequence_length / kmer_presence_mask.size(), 0.);
+    return std::max(score * sequence_length / size, 0.);
+}
+
+const int32_t kmer_adjust = 3;
+
+} // namespace
+
+int32_t score_kmer_presence_mask(size_t k,
+                                 const sdsl::bit_vector &kmer_presence_mask,
+                                 int32_t match_score,
+                                 int32_t mismatch_score) {
+    if (!kmer_presence_mask.size())
+        return 0;
+
+    return score_table(k, kmer_presence_mask.size(),
+                       tabulate_score(autocorrelate(kmer_presence_mask, kmer_adjust), 1),
+                       kmer_adjust, match_score, mismatch_score);
+}
+
+int32_t score_kmer_presence_mask(size_t k,
+                                 size_t size,
+                                 const CallPresentRuns &call_present_runs,
+                                 int32_t match_score,
+                                 int32_t mismatch_score) {
+    if (!size)
+        return 0;
+
+    return score_table(k, size, tabulate_runs(size, call_present_runs, kmer_adjust, 1),
+                       kmer_adjust, match_score, mismatch_score);
 }
 
 } // namespace align
