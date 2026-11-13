@@ -2593,6 +2593,318 @@ TEST(ResolveAnswer, TheSelectionChargesTheClippedPieces) {
               << account.peak() << " B)" << std::endl;
 }
 
+// ---- what stays charged once the selection is made (T5b-Y1, Fable review 2026-11-12, engine
+// backlog entry 1: a seed stayed charged for every covering label's name although it keeps
+// max_labels_per_seed of them, and every pick, an explicit one with every name it listed, stayed
+// charged after the picks were freed: a false resolve_answer_too_large)
+
+// names as the account prices them (libstdc++'s 32 B a string, jemalloc's size classes): the
+// vector at its capacity, and a name's heap beyond the 15 bytes held in place
+uint64_t names_held(const std::vector<std::string> &names) {
+    uint64_t bytes = annot::matrix::buffer_bytes(names.capacity(), 32);
+    for (const std::string &name : names) {
+        bytes += name.size() > 15 ? annot::matrix::alloc_bytes(name.size() + 1) : 0;
+    }
+    return bytes;
+}
+
+// What a selection holds once it is made, read from it: the seeds' vector at its capacity (a seed
+// at libstdc++'s sizes), each seed's id and digest (16 hex digits: 32 B each) and sequence, the
+// names it keeps, lists as dropped and as not covering, and its overlaps at the selection's price
+// of them (a row's indices at twice the seeds)
+uint64_t selection_held(const SeedSelection &sel) {
+    uint64_t bytes = annot::matrix::buffer_bytes(
+            sel.seeds.capacity(), sizeof(FrozenSeed) + 3 * (32 - sizeof(std::string)));
+    for (const FrozenSeed &seed : sel.seeds) {
+        bytes += 2 * 32 + annot::matrix::alloc_bytes(seed.sequence.size() + 1)
+               + names_held(seed.labels) + names_held(seed.population.dropped)
+               + names_held(seed.labels_not_covering) + 2 * sel.seeds.size() * sizeof(size_t);
+    }
+    return bytes;
+}
+
+// |labels| labels whose runs are the same |intervals| disjoint intervals of 10 k-mers, every 20
+// k-mers (a max_support pick each, each covered by every label), names of 6 to 140 bytes
+SupportProfile covered_profile(size_t labels, size_t intervals) {
+    SupportProfile profile;
+    profile.k = kK;
+    profile.num_kmers = 20 * intervals;
+    profile.graph_runs = { { 0, profile.num_kmers } };
+    for (size_t l = 0; l < labels; ++l) {
+        LabelProfile lp;
+        lp.label.kind = LabelKind::HEADER;
+        lp.label.column = l;
+        lp.label.name = std::string(5 + l % 131, 'a' + l % 26) + std::to_string(l);
+        for (uint64_t i = 0; i < intervals; ++i) {
+            lp.runs.push_back({ 20 * i, 20 * i + 10 });
+        }
+        lp.kmers_supported = 10 * intervals - l % 7;
+        profile.labels.push_back(std::move(lp));
+    }
+    return profile;
+}
+
+// the selection's seeds as an answer states them
+void expect_same_seeds(const SeedSelection &a, const SeedSelection &b, const std::string &what) {
+    ASSERT_EQ(a.seeds.size(), b.seeds.size()) << what;
+    for (size_t i = 0; i < a.seeds.size(); ++i) {
+        const FrozenSeed &x = a.seeds[i], &y = b.seeds[i];
+        EXPECT_EQ(std::tie(x.seed_id, x.sequence, x.kmers, x.labels, x.labels_not_covering,
+                           x.overlaps_with),
+                  std::tie(y.seed_id, y.sequence, y.kmers, y.labels, y.labels_not_covering,
+                           y.overlaps_with)) << what << " seed " << i;
+        EXPECT_EQ(std::tie(x.population.supporting_total, x.population.included,
+                           x.population.dropped, x.population.dropped_count,
+                           x.population.dropped_digest),
+                  std::tie(y.population.supporting_total, y.population.included,
+                           y.population.dropped, y.population.dropped_count,
+                           y.population.dropped_digest)) << what << " seed " << i;
+    }
+}
+
+// The heap a selection added, within what its account holds: glibc's malloc (no jemalloc) adds up
+// to 16 B a block beyond the model, so that much a name, sequence and id is allowed
+void expect_heap_within(const std::optional<int64_t> &before, const std::optional<int64_t> &after,
+                        const SeedSelection &sel, uint64_t held, const std::string &what) {
+    if (!before || !after)
+        return;
+    uint64_t blocks = 1;
+    for (const FrozenSeed &seed : sel.seeds) {
+        blocks += 4 + seed.labels.size() + seed.population.dropped.size()
+                + seed.labels_not_covering.size();
+    }
+    EXPECT_LE(*after - *before, int64_t(held + 16 * blocks))
+            << what << ": the heap held " << *after - *before << " B, the account " << held;
+}
+
+// A max_support selection whose seeds are covered by many labels: once it is made the account
+// holds what the selection holds (its seeds, each with the names it keeps and lists), not the
+// names of every covering label nor the picks, which are freed. The heap the selection holds is
+// within that charge, and the seeds are those made without an account. Three shapes: dropped
+// labels not listed (more than 1000: a seed keeps one name of 2,500, its charge before 2,500
+// names), listed, and all kept
+TEST(ResolveAnswer, ASeedStaysChargedForTheNamesItKeeps) {
+    for (auto [labels, max_labels, order] : {
+                 std::make_tuple(2500, 1, SelectionPolicy::HASH),
+                 std::make_tuple(1500, 600, SelectionPolicy::KMERS_SUPPORTED),
+                 std::make_tuple(300, 1000, SelectionPolicy::COLUMN_ID) }) {
+        const size_t intervals = 40;
+        const SupportProfile profile = covered_profile(labels, intervals);
+        const std::string query(profile.num_kmers + kK - 1, 'A');
+        SelectionPolicy policy;
+        policy.policy = SelectionPolicy::MAX_SUPPORT;
+        policy.max_seeds = 1024;
+        policy.max_labels_per_seed = max_labels;
+        policy.label_order = order;
+        const std::string what = std::to_string(labels) + " labels, max_labels_per_seed "
+                + std::to_string(max_labels);
+        const SeedSelection plain = select_seeds(profile, query, policy, false);
+        ASSERT_EQ(intervals, plain.seeds.size()) << what;
+        ASSERT_EQ(size_t(labels), plain.seeds[0].population.supporting_total) << what;
+
+        AnswerAccount account(uint64_t(1) << 40);
+        const std::optional<int64_t> before = live_heap_bytes();
+        const SeedSelection got = select_seeds(profile, query, policy, false, {}, &account);
+        const std::optional<int64_t> after = live_heap_bytes();
+        expect_same_seeds(plain, got, what);
+        // what stays charged is what the selection holds
+        EXPECT_EQ(selection_held(got), account.held()) << what;
+        if (max_labels == 1) {
+            // far below the covering labels' names (40 B and the heap each), charged before
+            uint64_t covering_names = 0;
+            for (const LabelProfile &lp : profile.labels) {
+                covering_names += intervals * (40 + names_held({ lp.label.name })
+                                               - annot::matrix::buffer_bytes(1, 32));
+            }
+            EXPECT_LT(account.held() * 20, covering_names) << what << ": " << account.held();
+        }
+        // the heap the selection holds is within its charge
+        expect_heap_within(before, after, got, account.held(), what);
+        // made under its peak, refused a byte below it, at part "selection"
+        AnswerAccount exact(account.peak());
+        expect_same_seeds(plain, select_seeds(profile, query, policy, false, {}, &exact), what);
+        AnswerAccount short_one(account.peak() - 1);
+        try {
+            select_seeds(profile, query, policy, false, {}, &short_one);
+            ADD_FAILURE() << what << ": not refused";
+        } catch (const AnswerTooLarge &e) {
+            EXPECT_EQ("selection", e.part()) << what;
+        }
+    }
+}
+
+// |covered_profile(covering, seeds)| with a label of a run elsewhere (covering none of its
+// seeds) and a label this pair does not hold, and explicit seeds on its intervals, each naming
+// every covering label (in the profile's order) and then those two: |*listed| the names' price
+// before the checks (32 B and the heap each)
+std::pair<SupportProfile, SelectionPolicy> explicit_profile(size_t covering, size_t seeds,
+                                                            uint64_t *listed) {
+    SupportProfile profile = covered_profile(covering, seeds);
+    LabelProfile elsewhere;
+    elsewhere.label.kind = LabelKind::HEADER;
+    elsewhere.label.column = covering;
+    elsewhere.label.name = "a label of a run elsewhere, long enough to have a heap";
+    elsewhere.runs.push_back({ 15, 19 });
+    elsewhere.kmers_supported = 4;
+    profile.labels.push_back(elsewhere);
+    profile.unknown_labels.push_back("not held by this pair, and long enough to have a heap");
+    SelectionPolicy policy;
+    policy.policy = SelectionPolicy::EXPLICIT;
+    policy.max_labels_per_seed = 10;
+    *listed = 0;
+    for (uint64_t i = 0; i < seeds; ++i) {
+        ExplicitSeed ex;
+        ex.kmers = { 20 * i, 20 * i + 10 };
+        for (size_t l = 0; l < covering; ++l) {
+            ex.labels.push_back(profile.labels[l].label.name);
+        }
+        ex.labels.push_back(elsewhere.label.name);
+        ex.labels.push_back(profile.unknown_labels[0]);
+        for (const std::string &name : ex.labels) {
+            *listed += 32 + names_held({ name }) - annot::matrix::buffer_bytes(1, 32);
+        }
+        policy.explicit_seeds.push_back(std::move(ex));
+    }
+    return { std::move(profile), std::move(policy) };
+}
+
+// The heap a max_support selection holds stays within its account while it is made (jemalloc's
+// peak of the thread within the account's peak, the picks' and claimed intervals' vectors aside,
+// as above), for each of its shapes: every vector the freeze builds is reserved to what it charges
+TEST(ResolveAnswer, TheFreezeHoldsAtMostItsCharge) {
+#if USE_JEMALLOC
+    auto measured = [](const SupportProfile &profile, const SelectionPolicy &policy,
+                       const std::string &what) {
+        const std::string query(profile.num_kmers + kK - 1, 'A');
+        AnswerAccount account(uint64_t(1) << 40);
+        size_t sz = sizeof(uint64_t);
+        if (mallctl("thread.peak.reset", nullptr, nullptr, nullptr, 0))
+            return false;
+        const SeedSelection got = select_seeds(profile, query, policy, false, {}, &account);
+        uint64_t peak = 0;
+        mallctl("thread.peak.read", &peak, &sz, nullptr, 0);
+        if (!peak)
+            return false;
+        EXPECT_LE(peak, account.peak() + (64 << 10)) << what;
+        std::cerr << what << ": jemalloc peak " << peak << ", charged peak " << account.peak()
+                  << std::endl;
+        return true;
+    };
+    for (auto [labels, max_labels] : { std::make_tuple(2500, 1), std::make_tuple(1500, 600),
+                                       std::make_tuple(300, 1000), std::make_tuple(513, 1000) }) {
+        SelectionPolicy policy;
+        policy.policy = SelectionPolicy::MAX_SUPPORT;
+        policy.max_seeds = 1024;
+        policy.max_labels_per_seed = max_labels;
+        if (!measured(covered_profile(labels, 40), policy,
+                      std::to_string(labels) + " labels, max_labels_per_seed "
+                              + std::to_string(max_labels)))
+            GTEST_SKIP() << "jemalloc without thread.peak, or not the process allocator";
+    }
+#else
+    GTEST_SKIP() << "needs jemalloc";
+#endif
+}
+
+// Explicit seeds naming 3,000 labels that cover them, max_labels_per_seed 10: each seed is charged
+// before its checks at every name it lists, and that stays charged, for the selection keeps a copy
+// of the explicit seeds (its policy) until the answer is written (the Fable review's claim B,
+// refuted); a seed then stays charged for the 10 names it keeps, no longer for its 3,000 covering
+// labels' names (claim A). A seed's labels not covering (one not profiled by this pair, one that
+// does not cover it) are listed as before
+TEST(ResolveAnswer, AnExplicitSelectionStaysChargedForItsSeeds) {
+    uint64_t listed_names = 0;
+    const auto [profile, policy] = explicit_profile(3000, 20, &listed_names);
+    const std::string query(profile.num_kmers + kK - 1, 'A');
+    const LabelProfile &elsewhere = profile.labels.back();
+    const SeedSelection plain = select_seeds(profile, query, policy, false);
+    ASSERT_EQ(20u, plain.seeds.size());
+    EXPECT_EQ((std::vector<std::string>{ elsewhere.label.name, profile.unknown_labels[0] }),
+              plain.seeds[0].labels_not_covering);
+    EXPECT_EQ(3000u, plain.seeds[0].population.supporting_total);
+
+    AnswerAccount account(uint64_t(1) << 40);
+    const std::optional<int64_t> before = live_heap_bytes();
+    const SeedSelection got = select_seeds(profile, query, policy, false, {}, &account);
+    const std::optional<int64_t> after = live_heap_bytes();
+    expect_same_seeds(plain, got, "explicit");
+    // the selection's copy of the explicit seeds, as the account prices a heap
+    uint64_t copy = annot::matrix::buffer_bytes(got.policy.explicit_seeds.capacity(),
+                                                sizeof(ExplicitSeed));
+    for (const ExplicitSeed &ex : got.policy.explicit_seeds) {
+        copy += names_held(ex.labels);
+    }
+    ASSERT_EQ(20u, got.policy.explicit_seeds.size());
+    // charged: the seeds and the copy; at most the seeds and each listed name's price before its
+    // checks (beside a pick's object and twice its label ids)
+    EXPECT_LE(selection_held(got) + copy, account.held());
+    EXPECT_LE(account.held(), selection_held(got) + listed_names + 20 * (128 + 8 * 3002))
+            << "the seeds hold " << selection_held(got) << " B, the copy " << copy << " B";
+    expect_heap_within(before, after, got, account.held(), "explicit");
+    // the order of an explicit seed's 400s (§4.6) is kept: its pick is charged before its checks,
+    // so an account its names pass refuses it (part "selection") before a label the profile does
+    // not hold is looked up; with room for them, that label is the 400
+    SelectionPolicy unprofiled = policy;
+    unprofiled.explicit_seeds[0].labels.push_back("never profiled");
+    AnswerAccount small(listed_names / 20);
+    try {
+        select_seeds(profile, query, unprofiled, false, {}, &small);
+        ADD_FAILURE() << "not refused";
+    } catch (const AnswerTooLarge &e) {
+        EXPECT_EQ("selection", e.part());
+    }
+    AnswerAccount large(uint64_t(1) << 40);
+    try {
+        select_seeds(profile, query, unprofiled, false, {}, &large);
+        ADD_FAILURE() << "not refused";
+    } catch (const std::invalid_argument &e) {
+        EXPECT_EQ("Explicit seed label was not profiled: 'never profiled'", std::string(e.what()));
+    }
+}
+
+// The route (process_resolve_request), the client-visible change: a max_support selection of 25
+// seeds, each covered by 1,200 labels of 200-byte names, max_labels_per_seed 1 (the 1,199 dropped
+// names not listed), under --resolve-max-discover-memory-mb 6. Its answer holds about 3 MB at
+// most, so it is answered, the answer the one without a bound. Before (T5b-Y1, Fable review
+// 2026-11-12), every covering label's name stayed charged with its seed, 25 x 1,200 x 264 B:
+// 400 resolve_answer_too_large (selection)
+TEST(ResolveBoundsRoute, ASelectionThatFitsIsAnswered) {
+    const std::string q = random_seq(2000, 5151);
+    // the query with a base changed every 80: runs of 69 k-mers between them
+    std::string record = q;
+    for (size_t i = 79; i < record.size(); i += 80) {
+        record[i] = record[i] == 'A' ? 'C' : 'A';
+    }
+    std::vector<std::string> seqs, names;
+    for (size_t l = 0; l < 1200; ++l) {
+        seqs.push_back(record);
+        names.push_back("record " + std::to_string(l) + " " + std::string(190, 'x'));
+    }
+    auto anno = build_anno_graph<DBGSuccinct, annot::ColumnCompressed<>>(kK, seqs, names);
+    Json::Value request;
+    request["sequence"] = q;
+    for (const std::string &name : names) {
+        request["labels"].append(name);
+    }
+    request["run_format"] = "rle";
+    request["min_block_kmers"] = 1000;
+    request["select"]["policy"] = "max_support";
+    request["select"]["max_seeds"] = 1024;
+    request["select"]["max_labels_per_seed"] = 1;
+    const Json::Value plain = cli::process_resolve_request(request, *anno, "r1", 0, nullptr,
+                                                           nullptr, {});
+    ASSERT_EQ(25u, plain["selection"]["counts"]["selected"].asUInt64());
+    const Json::Value &population = plain["selection"]["seeds"][0]["label_population"];
+    ASSERT_EQ(1200u, population["supporting_total"].asUInt64());
+    ASSERT_EQ(1199u, population["dropped_count"].asUInt64());
+    ASSERT_EQ(0u, population["dropped"].size());
+    const cli::ResolveTimeLimits six_mib { 0, cli::kResolveFinalizeMs, 0, 6 };
+    const Json::Value got = cli::process_resolve_request(request, *anno, "r1", 0, nullptr,
+                                                         nullptr, six_mib);
+    EXPECT_FALSE(got.isMember("stop"));
+    EXPECT_EQ(compact(untimed(plain)), compact(untimed(got)));
+}
+
 // The candidates' grouping holds at most its price (T4 review R1, F2): kCandidateRunBytes a run
 // grouped covers the grouping's map node, a label id vector and the candidate, the candidates
 // reserved. Without the reserve, 2^17 + 1 runs of their own made the candidates' last growth hold
