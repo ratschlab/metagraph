@@ -454,8 +454,8 @@ constexpr char kSeedOrder[] = "rank";
 // vector of clipped pieces each time it grows past them; a round's candidate starts, run ends
 // and Fenwick counts for its pieces, released with them), each pick before it is made (an explicit
 // seed at every name it lists, before its checks: that stays charged, the price of the selection's
-// copy of the explicit seeds in its policy; the explicit picks' own lists once the seeds are
-// frozen), the picks released once the seeds are frozen and the picks freed, and each frozen seed
+// copy of the explicit seeds in its policy; the explicit picks' own lists as the freeze
+// starts), the picks released once the seeds are frozen and the picks freed, and each frozen seed
 // before it is built: its id, sequence and names not covering, until it is built the label
 // order's copy of all its labels' names with the temporaries of its order and id, and the names
 // it keeps (max_labels_per_seed) and lists as dropped; then the overlaps. What stays charged is

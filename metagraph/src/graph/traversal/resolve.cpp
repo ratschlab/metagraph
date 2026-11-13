@@ -1763,8 +1763,8 @@ SeedSelection select_seeds(const SupportProfile &profile,
         }
         return bytes;
     };
-    // What the account holds for the picks: each pick charged as it is made (an explicit one
-    // once the seeds are frozen), all of it released once the seeds are frozen and the picks
+    // What the account holds for the picks: each pick charged as it is made (an explicit one's
+    // own lists as the freeze starts), all of it released once the seeds are frozen and the picks
     // freed (T5b-Y1, Fable review 2026-11-12: before, nothing released it, so the picks' label
     // ids stayed charged through the answer's build)
     uint64_t picks_charged = 0;
@@ -2026,7 +2026,7 @@ SeedSelection select_seeds(const SupportProfile &profile,
                 // (its names: the most it can list as not covering). It stays charged: the
                 // selection keeps its copy of the explicit seeds (selection.policy) until the
                 // answer is written, and this prices it (T5b-Y1); the pick's own lists are
-                // charged once the seeds are frozen (below)
+                // charged as the freeze starts (below)
                 charge(pick_bytes(ex.labels.size(), &ex.labels));
                 if (ex.kmers.end > profile.num_kmers || ex.kmers.begin >= ex.kmers.end)
                     throw std::invalid_argument("Explicit seed interval out of range");
