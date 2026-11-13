@@ -13,6 +13,7 @@
 #include "representation/base/sequence_graph.hpp"
 #include "annotation/representation/base/annotation.hpp"
 #include "common/vector.hpp"
+#include "common/vectors/vector_algorithm.hpp"
 #include "annotation/coord_to_header.hpp"
 
 
@@ -256,29 +257,19 @@ void PresenceRuns::call_runs(const Callback &callback) const {
         }
         return;
     }
-    // runs of ones in the mask, a word at a time (the bits past size_ are zero)
-    const uint64_t *words = dense_.data();
-    const size_t num_words = (size_ + 63) / 64;
-    size_t i = 0;
-    while (i < size_) {
-        size_t w = i / 64;
-        uint64_t bits = words[w] & (~uint64_t(0) << (i % 64));
-        while (!bits) {
-            if (++w == num_words)
-                return;
-            bits = words[w];
+    // the ones of the mask, joined into maximal runs
+    size_t begin = 0;
+    size_t end = 0;
+    call_ones(dense_, [&](size_t i) {
+        if (i != end) {
+            if (begin < end)
+                callback(begin, end);
+            begin = i;
         }
-        const size_t begin = w * 64 + __builtin_ctzll(bits);
-        if (begin >= size_)
-            return;
-        bits = ~words[w] & (~uint64_t(0) << (begin % 64));
-        while (!bits && ++w < num_words) {
-            bits = ~words[w];
-        }
-        const size_t end = bits ? std::min(size_, w * 64 + __builtin_ctzll(bits)) : size_;
+        end = i + 1;
+    });
+    if (begin < end)
         callback(begin, end);
-        i = end;
-    }
 }
 
 template <class Callback>
