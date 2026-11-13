@@ -110,8 +110,9 @@ seed for another cause, its walk holds the ``error`` instead (``too_wide``, ``ti
 ``ambiguous_header``).
 
 The server refuses a named label that no selected graph has with HTTP 400. A malformed seed and
-an ambiguous label fail the whole request, as on a single index. The time budget applies to each
-walk. The graphs are walked in parallel.
+an ambiguous label fail the whole request, as on a single index. The graphs are walked in parallel.
+The walks of a request share its time: each walk gets the budget or the time left, whichever is
+less.
 
 Terms
 -----

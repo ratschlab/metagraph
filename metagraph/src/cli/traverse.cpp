@@ -530,9 +530,10 @@ Json::Value process_traverse_request(const Json::Value &request,
     const TraverseRequest req = parse_traverse_request(fields, limits);
 
     // a request takes its time budget at most once per seed, however many indexes walk it
+    // (capped at about 30 years, which Clock::duration holds)
+    const double request_ms = std::min(req.strategy.time_budget_ms * req.seeds.size(), 1e12);
     const auto deadline = Clock::now() + std::chrono::duration_cast<Clock::duration>(
-            std::chrono::duration<double, std::milli>(req.strategy.time_budget_ms
-                                                      * req.seeds.size()));
+            std::chrono::duration<double, std::milli>(request_ms));
     std::vector<IndexWalks> walked(indexes.size());
     // the tasks refer to this frame: they are waited for before it is left, also on a throw
     struct Pending {
