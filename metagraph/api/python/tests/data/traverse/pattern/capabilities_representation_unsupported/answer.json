@@ -431,5 +431,18 @@
   "traverse_capabilities": "GET /traverse/capabilities"
  },
  "schema_version": 1,
+ "search": {
+  "max_memory_mb": 4096,
+  "rule": "SPEC-multigraph-envelope.md section 3, the /search answer budget",
+  "too_large": {
+   "code": "search_answer_too_large",
+   "members": [
+    "code",
+    "error",
+    "max_memory_mb"
+   ],
+   "status": 400
+  }
+ },
  "server_instance": "72968141704f7c87"
 }

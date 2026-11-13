@@ -3774,6 +3774,20 @@ class TestPatternFixtures(unittest.TestCase):
                          path + '.too_large', 'the 400\'s shape')
                 check.ok(c['total'] is None or (is_int(c['total']) and c['total'] >= 0),
                          path + '.total', 'an integer, or null while the index loads')
+            def search_budget(c, path):
+                # lane T5b-Y4 (SPEC-multigraph-envelope.md sections 3 and 8): the /search answer
+                # budget (null: none), its 400's shape and the rule
+                check.keys(c, {'max_memory_mb', 'rule', 'too_large'}, path)
+                check.ok(c['max_memory_mb'] is None
+                         or (is_int(c['max_memory_mb']) and c['max_memory_mb'] >= 1),
+                         path + '.max_memory_mb', 'an integer of at least 1, or null')
+                check.ok(c['rule']
+                         == 'SPEC-multigraph-envelope.md section 3, the /search answer budget',
+                         path + '.rule', 'the section that states it')
+                check.ok(c['too_large']
+                         == {'status': 400, 'code': 'search_answer_too_large',
+                             'members': ['code', 'error', 'max_memory_mb']},
+                         path + '.too_large', 'the 400\'s shape')
 
             def headers_unique(h, path):
                 # SPEC-multigraph-envelope.md section 9: true, false or null (a pair without
@@ -3892,6 +3906,9 @@ class TestPatternFixtures(unittest.TestCase):
                 # and what GET /column_labels answers (H3), at the top level too
                 check.ok('column_labels' in doc, 'column_labels', 'at the top level')
                 column_labels(doc['column_labels'], 'column_labels')
+                # and the /search answer budget (lane T5b-Y4), placed as column_labels
+                check.ok('search' in doc, 'search', 'at the top level')
+                search_budget(doc['search'], 'search')
                 return
             check.ok('headers_unique' not in doc, 'headers_unique',
                      'in graph_summary only on a multi-graph server')
@@ -3905,6 +3922,8 @@ class TestPatternFixtures(unittest.TestCase):
             check.ok('column_labels' not in doc, 'column_labels',
                      'in the multigraph block on a multi-graph server')
             column_labels(doc['multigraph']['column_labels'], 'multigraph.column_labels')
+            check.ok('search' not in doc, 'search', 'in the multigraph block on a multi-graph server')
+            search_budget(doc['multigraph']['search'], 'multigraph.search')
             # SPEC §24.1: the threshold of the selection rule (a request without `graphs`
             # queries every name of a list of at most that many), the server flag, at least 1
             check.ok(is_int(doc['max_graphs_without_selection'])

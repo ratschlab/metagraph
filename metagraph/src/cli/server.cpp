@@ -46,6 +46,7 @@
 #include "server_envelope.hpp"
 #include "server_fanout.hpp"
 #include "server_profile.hpp"
+#include "search_answer.hpp"
 #include "cli/load/load_annotation.hpp"
 
 
@@ -89,9 +90,19 @@ struct SearchSource {
     std::string index_fp;
 };
 
+/**
+ * The rows of every FASTA record of |request| on one pair, as SearchSource states them. With
+ * |budget| (the server's --search-max-answer-memory-mb; null: none) the pair's work is priced
+ * before it is built (SPEC-multigraph-envelope.md section 3, the /search answer budget): what
+ * the records' rows hold, to a values account of this pair (the per-position values as they
+ * grow, each record's rows as its result is handed over), and each record's JSON object, to
+ * the request's answer account, before it is built; past the bound graph::SearchAnswerTooLarge
+ * is thrown and |budget| marked (passed), nothing returned.
+ */
 Json::Value process_search_request(const SearchRequest &request,
                                    const graph::AnnotatedDBG &anno_graph,
-                                   const SearchSource &source) {
+                                   const SearchSource &source,
+                                   graph::SearchBudget *budget = nullptr) {
     const auto &config = request.config;
 
     // Throw client an error if they try to query coordinates/kmer-counts on unsupported indexes
@@ -117,6 +128,15 @@ Json::Value process_search_request(const SearchRequest &request,
     // Need mutex while appending to vector
     std::vector<SeqSearchResult> search_results;
     std::mutex result_mutex;
+    // the values account of this pair (the answer budget's; none without one), noted in the
+    // budget once the pair's rows are built
+    std::unique_ptr<graph::SearchAccount> values;
+    if (budget) {
+        values = std::make_unique<graph::SearchAccount>(budget, "values",
+                source.tagged ? fmt::format("pair ({}, {}, {})", source.graph,
+                                            source.graph_path, source.annotation_path)
+                              : std::string("the graph"));
+    }
 
     // writing to temporary file in order to reuse query code. This is not optimal and
     // may turn out to be an issue in production. However, adapting FastaParser to
@@ -129,10 +149,13 @@ Json::Value process_search_request(const SearchRequest &request,
     // Query sequences and callback by appending result to vector with mutex for thread safety
     query_fasta(tf.name(),
         [&](const SeqSearchResult &result) {
+            // the record's rows, held from now until the pair's answer is built
+            if (values)
+                values->charge(search_record_rows_bytes(result));
             std::lock_guard<std::mutex> lock(result_mutex);
             search_results.emplace_back(std::move(result));
         },
-        config, anno_graph, aligner_config.get()
+        config, anno_graph, aligner_config.get(), values.get()
     );
 
     // Ensure JSON results are sorted by their ID
@@ -147,7 +170,18 @@ Json::Value process_search_request(const SearchRequest &request,
         return stated ? Json::Value(value) : Json::Value();
     };
     Json::Value search_response(Json::arrayValue);
+    // the most one record's rows held while they were built (charged as it grows)
+    uint64_t transient_charged = 0;
     for (const auto &seq_result : search_results) {
+        if (budget) {
+            // the record's object, before it is built
+            const SearchRecordPrice price = search_record_price(
+                    seq_result, config.verbose_output, source.tagged, source.graph,
+                    source.graph_path, source.annotation_path, source.index_fp);
+            const uint64_t transient = std::max(transient_charged, price.transient);
+            budget->answer().charge(price.tree + transient - transient_charged);
+            transient_charged = transient;
+        }
         Json::Value json = seq_result.to_json(config.verbose_output, anno_graph.get_graph().get_k());
         if (source.tagged) {
             for (Json::Value &row : json["results"]) {
@@ -165,8 +199,23 @@ Json::Value process_search_request(const SearchRequest &request,
         json["cuts"].append(std::move(cut));
         search_response.append(std::move(json));
     }
+    if (values)
+        budget->note_values(values->held());
 
     return search_response;
+}
+
+// A /search whose answer was priced past --search-max-answer-memory-mb (|budget| passed;
+// SPEC-multigraph-envelope.md section 3): 400 search_answer_too_large, its members written in
+// the order error, code, the bound (error_first_json_text), the whole request refused whatever
+// else its work raised (the answer never depends on the order its pairs charged in). Nothing
+// partial is sent
+HttpError search_budget_refusal(const graph::SearchBudget &budget, size_t request_id) {
+    logger->info("[Server] Request {}: search_answer_too_large: {} passed the bound of {} MiB",
+                 request_id, budget.first_passed(), budget.max_bytes() >> 20);
+    Json::Value body = search_answer_too_large_json(budget.max_bytes() >> 20);
+    std::string text = error_first_json_text(body);
+    return HttpError(400, std::move(body), std::move(text));
 }
 
 // TODO: implement alignment_result.to_json as in process_search_request
@@ -1239,8 +1288,17 @@ int run_server(Config *config) {
                 // Cache miss: run the search, publish the result. If the
                 // compute throws, propagate the exception to any duplicate
                 // waiters via set_exception() before re-throwing.
+                // The answer budget (--search-max-answer-memory-mb; 0: none): the request's
+                // accounts, made before any pair's work and outliving it
+                std::unique_ptr<graph::SearchBudget> budget;
+                if (config->search_max_answer_memory_mb) {
+                    budget = std::make_unique<graph::SearchBudget>(
+                            config->search_max_answer_memory_mb << 20);
+                }
                 Json::Value result;
+                std::string serialized;
                 try {
+                  try {
                     if (!config->fnames.size()) {
                         logger->trace("Request {}: Started querying graph {}, in total graphs being queried at the moment: {}",
                                       request_id, config->infbase, graphs_being_queried.fetch_add(1) + 1);
@@ -1248,7 +1306,7 @@ int run_server(Config *config) {
                             SearchSource source;
                             source.index_fp = single_identity.fp;
                             result = process_search_request(search_request, *anno_graph.get(),
-                                                            source);
+                                                            source, budget.get());
                         } catch (...) {
                             graphs_being_queried--;
                             throw;
@@ -1341,7 +1399,7 @@ int run_server(Config *config) {
                                         }
 
                                         answers[t] = process_search_request(search_request, *index,
-                                                                            sources[t]);
+                                                                            sources[t], budget.get());
                                         logger->trace("Request {}: {} graph {} {} in {} sec",
                                                       request_id, in_ram ? "Loaded and searched" : "Searched",
                                                       graph_fname, anno_fname, timer.elapsed());
@@ -1384,15 +1442,33 @@ int run_server(Config *config) {
                             }
                         }
                     }
+                    // Serialize once: the cached form *is* the response
+                    // body. Cache hits then skip serialization entirely.
+                    // With a budget the text is priced (its exact length) before it is
+                    // written, byte for byte the same
+                    serialized = budget
+                            ? search_answer_text(result, budget->answer(), handle_holder != nullptr)
+                            : Json::writeString(Json::StreamWriterBuilder(), result);
+                  } catch (...) {
+                    // a request priced past the bound is refused, whatever else its work
+                    // raised
+                    if (budget && budget->passed())
+                        throw search_budget_refusal(*budget, request_id);
+                    throw;
+                  }
                 } catch (...) {
                     if (handle_holder)
                         handle_holder->set_exception(std::current_exception());
                     throw;
                 }
-
-                // Serialize once: the cached form *is* the response
-                // body. Cache hits then skip serialization entirely.
-                std::string serialized = Json::writeString(Json::StreamWriterBuilder(), result);
+                if (budget) {
+                    // what the request charged (each account only grows: the larger of the
+                    // two is the bound it needs)
+                    logger->info("[Server] Request {}: answer budget: values at most {} B a "
+                                 "pair, answer {} B, bound {} MiB", request_id,
+                                 budget->values_max(), budget->answer().held(),
+                                 budget->max_bytes() >> 20);
+                }
                 if (handle_holder) {
                     bool retained = handle_holder->set_result(serialized);
                     // BYPASS: larger than the budget, or than what the entries still being
@@ -3027,6 +3103,12 @@ int run_server(Config *config) {
                     config->max_column_labels_bytes, labels_total);
             if (!multi)
                 c["column_labels"] = column_labels;
+            // the /search answer budget (SPEC-multigraph-envelope.md section 3): its bound, its
+            // 400 and the rule; placed as column_labels
+            const Json::Value search_budget
+                    = search_capabilities_json(config->search_max_answer_memory_mb);
+            if (!multi)
+                c["search"] = search_budget;
             c["release"] = config->index_release;
             if (multi) {
                 // the identity of the indexes served together (SPEC-multigraph-envelope.md
@@ -3043,6 +3125,7 @@ int run_server(Config *config) {
                           resolve_time.max_explicit_labels,
                           resolve_time.max_discover_answer_labels,
                           resolve_time.max_explicit_seeds });
+                c["multigraph"]["search"] = search_budget;
             }
             // the request registry (section 5) on every server: a single-graph /resolve or
             // /pattern with request_id registers too, and GET /requests/{attempt_id} reads a

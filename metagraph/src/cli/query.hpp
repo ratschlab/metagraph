@@ -56,6 +56,17 @@ collapse_coord_ranges(const std::vector<SmallVector<uint64_t>> &tuples);
 std::vector<std::string>
 collapse_coord_ranges(const graph::PositionCoords &coords);
 
+// The text collapse_coord_ranges(coords) makes, without making it: |bytes|, its strings joined
+// by ':' (as the JSON and text outputs write them); |ranges|, the number of strings;
+// |long_ranges_bytes|, the bytes of the strings longer than a std::string holds inline (15),
+// each with its terminator (a /search's answer account prices them)
+struct CoordRangesText {
+    uint64_t bytes = 0;
+    uint64_t ranges = 0;
+    uint64_t long_ranges_bytes = 0;
+};
+CoordRangesText collapsed_coords_text(const graph::PositionCoords &coords);
+
 /**
  * Encode a k-mer presence mask as alternating x<len>o<len>... runs (x = ones, o = zeros),
  * the trailing zeros included: 11100110 -> x3o2x2o1. The mask is given as a bit vector or as
@@ -219,6 +230,9 @@ enum QueryMode {
  * @param config        config object
  * @param anno_graph    annotated de Bruijn graph
  * @param aligner_config alignment config
+ * @param values        a /search's values account of this pair (null: none, the CLI's): the
+ *                      per-position modes charge their rows' values to it as they grow, and
+ *                      past its bound the query throws graph::SearchAnswerTooLarge
  *
  * @return the number of base pairs (characters) in query file
  */
@@ -226,7 +240,8 @@ size_t query_fasta(const std::string &file_path,
                    const std::function<void(const SeqSearchResult &)> &callback,
                    const Config &config,
                    const graph::AnnotatedDBG &anno_graph,
-                   const graph::align::DBGAlignerConfig *aligner_config);
+                   const graph::align::DBGAlignerConfig *aligner_config,
+                   graph::SearchAccount *values = nullptr);
 
 int query_graph(Config *config);
 

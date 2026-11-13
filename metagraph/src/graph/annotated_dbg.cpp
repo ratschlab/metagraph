@@ -9,12 +9,16 @@
 
 #include <tsl/hopscotch_set.h>
 #include <tsl/hopscotch_map.h>
+#if _USE_FOLLY
+#include <folly/memory/Malloc.h>
+#endif
 
 #include "annotation/representation/row_compressed/annotate_row_compressed.hpp"
 #include "annotation/binary_matrix/row_vector/unique_row_binmat.hpp"
 #include "annotation/binary_matrix/row_diff/row_diff.hpp"
 #include "annotation/int_matrix/base/int_matrix.hpp"
 #include "annotation/int_matrix/csr_matrix/csr_matrix.hpp"
+#include "annotation/binary_matrix/base/decode_budget.hpp"
 #include "graph/representation/canonical_dbg.hpp"
 #include "annotation/coord_to_header.hpp"
 #include "common/algorithms.hpp"
@@ -35,6 +39,8 @@ using mtg::annot::matrix::RowMajor;
 using mtg::annot::matrix::UniqueRowBinmat;
 using Column = mtg::annot::matrix::BinaryMatrix::Column;
 using Tuple = mtg::annot::matrix::MultiIntMatrix::Tuple;
+using mtg::annot::matrix::alloc_bytes;
+using mtg::annot::matrix::buffer_bytes;
 
 typedef AnnotatedDBG::Label Label;
 typedef std::pair<Label, size_t> StringCountPair;
@@ -553,19 +559,31 @@ namespace {
 constexpr size_t kMaxRunsSize = std::numeric_limits<uint32_t>::max();
 
 // Room for one more element in |v| within |budget| bytes of buffer: its capacity doubled, at
-// most what |budget| holds; false if |budget| holds no more elements than |v| has
+// most what |budget| holds; false if |budget| holds no more elements than |v| has. The growth
+// is charged to |account| (null: none) before it is made: the new buffer less the old one
 template <typename T>
-bool grow_within(std::vector<T> &v, size_t budget) {
+bool grow_within(std::vector<T> &v, size_t budget, SearchAccount *account) {
     const size_t max_capacity = budget / sizeof(T);
     if (v.size() >= max_capacity)
         return false;
-    v.reserve(std::min(max_capacity, std::max<size_t>(2, 2 * v.capacity())));
+    const size_t capacity = std::min(max_capacity, std::max<size_t>(2, 2 * v.capacity()));
+    if (account && capacity > v.capacity()) {
+        account->charge(buffer_bytes(capacity, sizeof(T))
+                        - buffer_bytes(v.capacity(), sizeof(T)));
+    }
+    v.reserve(capacity);
     return true;
+}
+
+// the net bytes of a buffer of |to| bytes that replaces one of |from| (none if not more)
+uint64_t net_bytes(uint64_t to, uint64_t from) {
+    return to > from ? to - from : 0;
 }
 
 } // namespace
 
-PresenceRuns::PresenceRuns(size_t size) : size(size) {
+PresenceRuns::PresenceRuns(size_t size, SearchAccount *account)
+      : size(size), account_(account) {
     if (size > kMaxRunsSize)
         to_dense_form();
 }
@@ -578,10 +596,15 @@ PresenceRuns::PresenceRuns(const sdsl::bit_vector &mask) : PresenceRuns(mask.siz
 }
 
 bool PresenceRuns::grow() {
-    return grow_within(runs_, dense_bytes(size));
+    return grow_within(runs_, dense_bytes(size), account_);
 }
 
 void PresenceRuns::to_dense_form() {
+    // the mask's words (and sdsl's one word beyond them), the runs freed after
+    if (account_) {
+        account_->charge(net_bytes(alloc_bytes(dense_bytes(size) + sizeof(uint64_t)),
+                                   buffer_bytes(runs_.capacity(), sizeof(Run))));
+    }
     dense_ = sdsl::bit_vector(size, false);
     dense_form_ = true;
     for (const Run &run : runs_) {
@@ -626,7 +649,7 @@ bool PresenceRuns::operator==(const PresenceRuns &other) const {
     return size == other.size && to_dense() == other.to_dense();
 }
 
-CountRuns::CountRuns(size_t size) : size(size) {
+CountRuns::CountRuns(size_t size, SearchAccount *account) : size(size), account_(account) {
     if (size > kMaxRunsSize)
         to_dense_form();
 }
@@ -638,10 +661,15 @@ CountRuns::CountRuns(const std::vector<size_t> &values) : CountRuns(values.size(
 }
 
 bool CountRuns::grow() {
-    return grow_within(runs_, dense_bytes(size));
+    return grow_within(runs_, dense_bytes(size), account_);
 }
 
 void CountRuns::to_dense_form() {
+    // the counts, the runs freed after
+    if (account_) {
+        account_->charge(net_bytes(buffer_bytes(size, sizeof(size_t)),
+                                   buffer_bytes(runs_.capacity(), sizeof(Run))));
+    }
     dense_.assign(size, 0);
     dense_form_ = true;
     for (const Run &run : runs_) {
@@ -678,7 +706,8 @@ bool CountRuns::operator==(const CountRuns &other) const {
     return size == other.size && to_dense() == other.to_dense();
 }
 
-PositionCoords::PositionCoords(size_t size) : size(size) {
+PositionCoords::PositionCoords(size_t size, SearchAccount *account)
+      : size(size), account_(account) {
     if (size > kMaxRunsSize)
         to_dense_form();
 }
@@ -695,9 +724,9 @@ bool PositionCoords::open(size_t position) {
     // grows within what the other's capacity leaves
     const size_t budget = dense_bytes(size);
     if ((coords_.size() == coords_.capacity()
-            && !grow_within(coords_, budget - runs_.capacity() * sizeof(Run)))
+            && !grow_within(coords_, budget - runs_.capacity() * sizeof(Run), account_))
         || (new_run && runs_.size() == runs_.capacity()
-            && !grow_within(runs_, budget - coords_.capacity() * sizeof(Coords)))) {
+            && !grow_within(runs_, budget - coords_.capacity() * sizeof(Coords), account_))) {
         to_dense_form();
         return false;
     }
@@ -710,6 +739,13 @@ bool PositionCoords::open(size_t position) {
 }
 
 void PositionCoords::to_dense_form() {
+    // a list per position, the runs and the lists' vector freed after (the lists' own
+    // buffers move)
+    if (account_) {
+        account_->charge(net_bytes(buffer_bytes(size, sizeof(Coords)),
+                                   buffer_bytes(runs_.capacity(), sizeof(Run))
+                                   + buffer_bytes(coords_.capacity(), sizeof(Coords))));
+    }
     dense_.resize(size);
     dense_form_ = true;
     size_t c = 0;
@@ -745,6 +781,34 @@ size_t PositionCoords::heap_bytes() const {
 
 bool PositionCoords::operator==(const PositionCoords &other) const {
     return size == other.size && to_dense() == other.to_dense();
+}
+
+// folly's small_vector<uint64_t, 2, uint32_t> (the deployed build's, folly as pinned): no
+// buffer while its two elements are inline, else its capacity's (the capacity is stored
+// beside the pointer, in the inline storage: no bytes in front of the buffer); it grows to the
+// larger of one more and 3/2 its capacity plus one, its capacity filling the allocation
+// folly::goodMallocSize gives (with jemalloc the buffer's size class, which alloc_bytes
+// models). A std::vector without folly doubles
+uint64_t PositionCoords::list_bytes(const Coords &coords) {
+#if _USE_FOLLY
+    return coords.capacity() > 2 ? alloc_bytes(coords.capacity() * sizeof(uint64_t)) : 0;
+#else
+    return buffer_bytes(coords.capacity(), sizeof(uint64_t));
+#endif
+}
+
+uint64_t PositionCoords::push_bytes(const Coords &coords) {
+    if (coords.size() < coords.capacity())
+        return 0;
+#if _USE_FOLLY
+    const uint64_t size = std::max<uint64_t>(coords.size() + 1,
+                                             3 * uint64_t(coords.capacity()) / 2 + 1);
+    const uint64_t capacity = folly::goodMallocSize(size * sizeof(uint64_t)) / sizeof(uint64_t);
+    return net_bytes(alloc_bytes(capacity * sizeof(uint64_t)), list_bytes(coords));
+#else
+    const uint64_t capacity = std::max<uint64_t>(1, 2 * uint64_t(coords.capacity()));
+    return net_bytes(buffer_bytes(capacity, sizeof(uint64_t)), list_bytes(coords));
+#endif
 }
 
 using ColumnMedians = std::function<std::vector<uint64_t>(const std::vector<Column> &)>;
@@ -1133,7 +1197,8 @@ template <class Values>
 std::vector<std::tuple<Label, size_t, Values>>
 AnnotatedDBG::get_header_results(std::string_view sequence, size_t num_top_labels,
                                  double discovery_fraction, double presence_fraction,
-                                 bool with_kmer_counts, SearchCut *cut) const {
+                                 bool with_kmer_counts, SearchCut *cut,
+                                 SearchAccount *values_account) const {
     static_assert(utils::is_one_of_v<Values, size_t, CountRuns, PresenceRuns>);
     assert((!with_kmer_counts || std::is_same_v<Values, size_t>));
     assert(coord_to_header_);
@@ -1229,7 +1294,9 @@ AnnotatedDBG::get_header_results(std::string_view sequence, size_t num_top_label
         for (size_t r = 0; r < top.size(); ++r) {
             returned.emplace(top[r].first.header, r);
         }
-        std::vector<Values> values(top.size(), Values(num_kmers));
+        // the records' values, charged to the pair's values account (if any) as they grow
+        charge_search(values_account, buffer_bytes(top.size(), sizeof(Values)));
+        std::vector<Values> values(top.size(), Values(num_kmers, values_account));
         // (record index, its occurrences in the row) per row found, while the row is due
         std::vector<std::vector<std::pair<size_t, size_t>>> hits(tuples.size());
         std::vector<bool> found(tuples.size(), false);
@@ -1295,7 +1362,8 @@ Result filter_and_aggregate(const RowEnumerator &enumerate_rows,
                             const std::vector<size_t> &kmer_positions,
                             size_t num_kmers,
                             const ColumnMedians &medians,
-                            SearchCut *cut) {
+                            SearchCut *cut,
+                            SearchAccount *values_account = nullptr) {
     static_assert(utils::is_one_of_v<Result,
                     std::vector<std::tuple<Label, size_t, PresenceRuns>>,
                     std::vector<std::tuple<Label, size_t, CountRuns>>,
@@ -1336,9 +1404,17 @@ Result filter_and_aggregate(const RowEnumerator &enumerate_rows,
     // that takes fewer bytes); the rows are enumerated in the order of their positions, which
     // the values are built in
     using ValueType = std::tuple_element_t<2, typename Result::value_type>;
+    // the store, charged to the pair's values account (if any) with its index (a dense one
+    // over the labels, or a hash table at most twice the labels kept) and its values, which
+    // charge their buffers as they grow
+    charge_search(values_account,
+                  std::min<uint64_t>(buffer_bytes(label_encoder.size(), sizeof(size_t)),
+                                     2 * buffer_bytes(counts.size(),
+                                                      sizeof(Column) + sizeof(ValueType) + 8))
+                      + buffer_bytes(counts.size(), sizeof(ValueType)));
     utils::ValueStore<Column, ValueType> value_store(label_encoder.size(), counts.size());
     for (const auto &[j, count] : counts) {
-        value_store.emplace(j, num_kmers);
+        value_store.emplace(j, ValueType(num_kmers, values_account));
     }
 
     size_t i = 0;
@@ -1417,7 +1493,8 @@ AnnotatedDBG::get_kmer_counts(std::string_view sequence,
                               size_t num_top_labels,
                               double discovery_fraction,
                               double presence_fraction,
-                              SearchCut *cut) const {
+                              SearchCut *cut,
+                              SearchAccount *values) const {
     assert(discovery_fraction >= 0.);
     assert(discovery_fraction <= 1.);
     assert(presence_fraction >= 0.);
@@ -1436,7 +1513,7 @@ AnnotatedDBG::get_kmer_counts(std::string_view sequence,
     if (coord_to_header_) {
         return get_header_results<CountRuns>(sequence, num_top_labels,
                                              discovery_fraction, presence_fraction,
-                                             false, cut);
+                                             false, cut, values);
     }
 
     size_t num_kmers = sequence.size() - dbg_.get_k() + 1;
@@ -1467,7 +1544,7 @@ AnnotatedDBG::get_kmer_counts(std::string_view sequence,
         }
         auto results = filter_and_aggregate<std::vector<std::tuple<std::string, size_t, CountRuns>>>(
             enumerate_rows, annotator_->get_label_encoder(), min_count, num_top_labels, kmer_positions, num_kmers,
-            medians, cut);
+            medians, cut, values);
         assert(same_results(results, get_top_labels(sequence, num_top_labels, discovery_fraction, presence_fraction)));
         return results;
     };
@@ -1495,7 +1572,8 @@ AnnotatedDBG::get_kmer_coordinates(std::string_view sequence,
                                    size_t num_top_labels,
                                    double discovery_fraction,
                                    double presence_fraction,
-                                   SearchCut *cut) const {
+                                   SearchCut *cut,
+                                   SearchAccount *values) const {
     assert(discovery_fraction >= 0.);
     assert(discovery_fraction <= 1.);
     assert(presence_fraction >= 0.);
@@ -1553,7 +1631,9 @@ AnnotatedDBG::get_kmer_coordinates(std::string_view sequence,
         // split coordinates across sequences, each record's held at the positions it matches
         // (or as a list per position where that takes fewer bytes): the rows are in the order
         // of the query's positions, which they are added in
-        std::vector<PositionCoords> coords_of(top.size(), PositionCoords(num_kmers));
+        // the records' coordinates, charged to the pair's values account (if any) as they grow
+        charge_search(values, buffer_bytes(top.size(), sizeof(PositionCoords)));
+        std::vector<PositionCoords> coords_of(top.size(), PositionCoords(num_kmers, values));
         for (size_t i = 0; i < rows_tuples.size(); ++i) {
             for (auto &[col, coords] : rows_tuples[i]) {
                 for (uint64_t coord : coords) {
@@ -1589,7 +1669,7 @@ AnnotatedDBG::get_kmer_coordinates(std::string_view sequence,
     // ties ordered by label: the coordinates are positions, not abundances
     auto results = filter_and_aggregate<std::vector<std::tuple<Label, size_t, PositionCoords>>>(
         call_rows_tuples, annotator_->get_label_encoder(), min_count, num_top_labels, kmer_positions, num_kmers,
-        {}, cut);
+        {}, cut, values);
     assert(same_results(results, get_top_labels(sequence, num_top_labels, discovery_fraction, presence_fraction)));
 
     // Without a CoordToHeader mapping, the label refers to a whole annotation
@@ -1608,7 +1688,8 @@ AnnotatedDBG::get_top_label_signatures(std::string_view sequence,
                                        size_t num_top_labels,
                                        double discovery_fraction,
                                        double presence_fraction,
-                                       SearchCut *cut) const {
+                                       SearchCut *cut,
+                                       SearchAccount *values) const {
     assert(discovery_fraction >= 0.);
     assert(discovery_fraction <= 1.);
     assert(presence_fraction >= 0.);
@@ -1631,10 +1712,12 @@ AnnotatedDBG::get_top_label_signatures(std::string_view sequence,
                                            presence_fraction, false, cut);
         std::vector<std::tuple<Label, size_t, PresenceRuns>> presence_vectors;
         presence_vectors.reserve(label_counts.size());
-        // every position marked: one run
-        PresenceRuns all(num_kmers);
+        // every position marked: one run, a copy per label (each charged to the pair's values
+        // account, if any)
+        PresenceRuns all(num_kmers, values);
         all.add_run(0, num_kmers);
         all.shrink();
+        charge_search(values, label_counts.size() * alloc_bytes(all.heap_bytes()));
         for (auto&& [label, count] : label_counts) {
             presence_vectors.emplace_back(std::move(label), count, all);
         }
@@ -1644,7 +1727,7 @@ AnnotatedDBG::get_top_label_signatures(std::string_view sequence,
     if (coord_to_header_) {
         return get_header_results<PresenceRuns>(sequence, num_top_labels,
                                                 discovery_fraction, presence_fraction,
-                                                false, cut);
+                                                false, cut, values);
     }
 
     // kmers in the graph and their positions in the query sequence
@@ -1664,7 +1747,7 @@ AnnotatedDBG::get_top_label_signatures(std::string_view sequence,
     auto get_results = [&](const auto &enumerate_rows) {
         auto results = filter_and_aggregate<std::vector<std::tuple<std::string, size_t, PresenceRuns>>>(
             enumerate_rows, annotator_->get_label_encoder(), min_count, num_top_labels, kmer_positions, num_kmers,
-            medians, cut);
+            medians, cut, values);
         assert(same_results(results, get_top_labels(sequence, num_top_labels, discovery_fraction, presence_fraction)));
         return results;
     };

@@ -15,6 +15,7 @@
 #include "annotation/representation/base/annotation.hpp"
 #include "common/vector.hpp"
 #include "annotation/coord_to_header.hpp"
+#include "graph/search_budget.hpp"
 
 
 namespace mtg {
@@ -135,6 +136,12 @@ search_top_n(const std::vector<size_t> &scores,
  * otherwise: its buffers never grow beyond dense_bytes(size), the bytes of the vector's
  * values, so a row never holds more than the vector held. Its runs take 32-bit positions; a
  * query of 2^32 k-mers or more is held densely from the start.
+ *
+ * Each takes an optional account (a /search's values account of its pair, SearchAccount;
+ * null: none, the CLI's): every growth of its buffers is charged to it BEFORE it is made, as
+ * the net bytes it adds (the new buffer less the one it replaces; the coordinates' own lists
+ * too), so that a charge that does not fit throws SearchAnswerTooLarge with nothing more held.
+ * Copies share the account; shrink() (after the last position) detaches it.
  */
 
 // The k-mer presence mask of a row: the runs [begin, end) of the positions it matches,
@@ -148,7 +155,7 @@ struct PresenceRuns {
     size_t size = 0;
 
     PresenceRuns() = default;
-    explicit PresenceRuns(size_t size);
+    explicit PresenceRuns(size_t size, SearchAccount *account = nullptr);
     explicit PresenceRuns(const sdsl::bit_vector &mask);
 
     // marks |position|, at or after the last position marked
@@ -184,8 +191,12 @@ struct PresenceRuns {
     size_t heap_bytes() const;
     // the bytes of the mask's words
     static size_t dense_bytes(size_t size) { return (size + 63) / 64 * sizeof(uint64_t); }
-    // releases the runs' spare capacity (after the last position is added)
-    void shrink() { runs_.shrink_to_fit(); }
+    // releases the runs' spare capacity (after the last position is added) and detaches the
+    // account
+    void shrink() {
+        runs_.shrink_to_fit();
+        account_ = nullptr;
+    }
 
     // the same size and the same positions marked, in either form
     bool operator==(const PresenceRuns &other) const;
@@ -194,6 +205,7 @@ struct PresenceRuns {
     std::vector<Run> runs_;
     sdsl::bit_vector dense_;
     bool dense_form_ = false;
+    SearchAccount *account_ = nullptr;
 
     // room for one more run within dense_bytes(size); false if there is none
     bool grow();
@@ -213,7 +225,7 @@ struct CountRuns {
     size_t size = 0;
 
     CountRuns() = default;
-    explicit CountRuns(size_t size);
+    explicit CountRuns(size_t size, SearchAccount *account = nullptr);
     explicit CountRuns(const std::vector<size_t> &values);
 
     // sets |position| to |value|, at or after the last position set; a zero is no value
@@ -249,8 +261,12 @@ struct CountRuns {
     size_t heap_bytes() const;
     // the bytes of the counts
     static size_t dense_bytes(size_t size) { return size * sizeof(size_t); }
-    // releases the runs' spare capacity (after the last position is added)
-    void shrink() { runs_.shrink_to_fit(); }
+    // releases the runs' spare capacity (after the last position is added) and detaches the
+    // account
+    void shrink() {
+        runs_.shrink_to_fit();
+        account_ = nullptr;
+    }
 
     // the same size and the same values, in either form
     bool operator==(const CountRuns &other) const;
@@ -259,6 +275,7 @@ struct CountRuns {
     std::vector<Run> runs_;
     std::vector<size_t> dense_;
     bool dense_form_ = false;
+    SearchAccount *account_ = nullptr;
 
     bool grow();
     void to_dense_form();
@@ -278,7 +295,7 @@ struct PositionCoords {
     size_t size = 0;
 
     PositionCoords() = default;
-    explicit PositionCoords(size_t size);
+    explicit PositionCoords(size_t size, SearchAccount *account = nullptr);
     explicit PositionCoords(const std::vector<Coords> &values);
 
     // appends |coord| to the coordinates of |position|, at or after the last position with
@@ -286,14 +303,19 @@ struct PositionCoords {
     void add(size_t position, uint64_t coord) {
         assert(position < size);
         if (dense_form_) {
+            charge_push(dense_[position]);
             dense_[position].push_back(coord);
             return;
         }
         assert(runs_.empty() || position + 1 >= runs_.back().end);
         if (!runs_.empty() && runs_.back().end == position + 1) {
+            charge_push(coords_.back());
             coords_.back().push_back(coord);
             return;
         }
+        // a new position's list and its first coordinate, charged before anything is added
+        if (account_)
+            charge_search(account_, push_bytes(Coords()));
         if (!open(position)) {
             dense_[position].push_back(coord);
             return;
@@ -307,6 +329,9 @@ struct PositionCoords {
         assert(position < size);
         if (position_coords.empty())
             return;
+        // the list's own buffer, made by the caller, held from now on
+        if (account_)
+            charge_search(account_, list_bytes(position_coords));
         if (dense_form_) {
             dense_[position] = std::move(position_coords);
             return;
@@ -331,20 +356,33 @@ struct PositionCoords {
     size_t heap_bytes() const;
     // the bytes of a coordinate list per position
     static size_t dense_bytes(size_t size) { return size * sizeof(Coords); }
-    // releases the spare capacity (after the last position is added)
+    // releases the spare capacity (after the last position is added) and detaches the account
     void shrink() {
         runs_.shrink_to_fit();
         coords_.shrink_to_fit();
+        account_ = nullptr;
     }
 
     // the same size and the same coordinates, in either form
     bool operator==(const PositionCoords &other) const;
+
+    // The heap of a coordinate list (its buffer, none while its elements are inline), and the
+    // net bytes one more coordinate adds to it (none while it has room): the account's model
+    static uint64_t list_bytes(const Coords &coords);
+    static uint64_t push_bytes(const Coords &coords);
 
   private:
     std::vector<Run> runs_;
     std::vector<Coords> coords_;
     std::vector<Coords> dense_;
     bool dense_form_ = false;
+    SearchAccount *account_ = nullptr;
+
+    // charges the growth one more coordinate makes to |coords|
+    void charge_push(const Coords &coords) const {
+        if (account_ && coords.size() == coords.capacity())
+            charge_search(account_, push_bytes(coords));
+    }
 
     // a new position after the last one with coordinates, with room for its coordinates;
     // false if the runs and the coordinates would take more than dense_bytes(size): then the
@@ -572,6 +610,9 @@ class AnnotatedDBG : public AnnotatedSequenceGraph {
     // The per-position queries below hold each row's values only where it matches
     // (PresenceRuns, CountRuns, PositionCoords): their memory and time grow with the
     // (row, position) matches, not with the rows returned times the query's k-mers.
+    // |values| (null: none): a /search's values account of this pair (SearchAccount), charged
+    // with the rows' values before each of their buffers grows; past its bound the query
+    // throws SearchAnswerTooLarge, nothing returned.
 
     // returns tuples (label, num_kmer_matches, kmer_abundances)
     std::vector<std::tuple<Label, size_t, CountRuns>>
@@ -579,7 +620,8 @@ class AnnotatedDBG : public AnnotatedSequenceGraph {
                     size_t num_top_labels,
                     double discovery_fraction,
                     double presence_fraction,
-                    SearchCut *cut = nullptr) const;
+                    SearchCut *cut = nullptr,
+                    SearchAccount *values = nullptr) const;
 
     // returns tuples (label, num_kmer_matches, kmer_coordinates, num_kmers_in_target).
     // num_kmers_in_target is 0 when no CoordToHeader mapping is loaded (the
@@ -590,14 +632,16 @@ class AnnotatedDBG : public AnnotatedSequenceGraph {
                          size_t num_top_labels,
                          double discovery_fraction,
                          double presence_fraction,
-                         SearchCut *cut = nullptr) const;
+                         SearchCut *cut = nullptr,
+                         SearchAccount *values = nullptr) const;
 
     std::vector<std::tuple<Label, size_t, PresenceRuns>>
     get_top_label_signatures(std::string_view sequence,
                              size_t num_top_labels,
                              double discovery_fraction = 0.0,
                              double presence_fraction = 0.0,
-                             SearchCut *cut = nullptr) const;
+                             SearchCut *cut = nullptr,
+                             SearchAccount *values = nullptr) const;
 
   private:
     // get_top_labels, get_kmer_counts and get_top_label_signatures on a CoordToHeader
@@ -605,12 +649,14 @@ class AnnotatedDBG : public AnnotatedSequenceGraph {
     // positions it stands for): (header, k-mer matches, value), the records ranked by the
     // score reported (the coordinates matched with |with_kmer_counts|, the k-mer matches
     // otherwise) in the C5 order. Values: the score (size_t), the coordinates matched per query
-    // position (CountRuns) or whether any is matched there (PresenceRuns)
+    // position (CountRuns) or whether any is matched there (PresenceRuns); |values| as the
+    // per-position queries'
     template <class Values>
     std::vector<std::tuple<Label, size_t, Values>>
     get_header_results(std::string_view sequence, size_t num_top_labels,
                        double discovery_fraction, double presence_fraction,
-                       bool with_kmer_counts, SearchCut *cut) const;
+                       bool with_kmer_counts, SearchCut *cut,
+                       SearchAccount *values = nullptr) const;
 
     // The integer matrix to read the abundances of a search's ties from: the annotation's
     // matrix when it holds k-mer counts (has_kmer_abundances), null otherwise

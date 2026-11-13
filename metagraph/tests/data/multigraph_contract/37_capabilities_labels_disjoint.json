@@ -1,7 +1,7 @@
 {
  "route": "GET /capabilities",
  "status": 200,
- "note": "H4 (SPEC sections 9 and 9.1): labels_disjoint, whether no sequence header equals a column name of any pair. A label is resolved as a column name first, so a header equal to a column name selects that column where a pair has one, never the record: headers_unique (headers against headers) does not see it, and a header label selects one record of one pair only when both certificates are true. Here a multi-graph server of two pairs, left (columns x1.fa, x2.fa; records acc1, acc2, acc3) and right (columns y1.fa, y2.fa; records acc4 and x1.fa in y1.fa, y1.fa in y2.fa): headers_unique true (every header distinct), labels_disjoint false with 2 collisions: x1.fa, a record of right (its column y1.fa) and a column of left (labels [\"x1.fa\"] selects left's column and right's record), and y1.fa, a record and a column of right itself (the column shadows the record). Each example lists the pairs with a record of that header (the column of its first record) and the pairs with a column of that name, in pair order, at most 10 each; at most 10 examples, the byte-smallest. A single-graph server states it at the top level, with null pair tags; null where a pair has no .seqs (as headers_unique). Each pair states seqs_order \"verified\": its .seqs, written by annotate --index-header-coords since H4, states its column labels, which matched the annotation's at load (section 10). A real run: the body is the server's answer, its paths relative as the graph list spells them, its server named SERVER_INSTANCE as every sample's.",
+ "note": "H4 (SPEC sections 9 and 9.1): labels_disjoint, whether no sequence header equals a column name of any pair. A label is resolved as a column name first, so a header equal to a column name selects that column where a pair has one, never the record: headers_unique (headers against headers) does not see it, and a header label selects one record of one pair only when both certificates are true. Here a multi-graph server of two pairs, left (columns x1.fa, x2.fa; records acc1, acc2, acc3) and right (columns y1.fa, y2.fa; records acc4 and x1.fa in y1.fa, y1.fa in y2.fa): headers_unique true (every header distinct), labels_disjoint false with 2 collisions: x1.fa, a record of right (its column y1.fa) and a column of left (labels [\"x1.fa\"] selects left's column and right's record), and y1.fa, a record and a column of right itself (the column shadows the record). Each example lists the pairs with a record of that header (the column of its first record) and the pairs with a column of that name, in pair order, at most 10 each; at most 10 examples, the byte-smallest. A single-graph server states it at the top level, with null pair tags; null where a pair has no .seqs (as headers_unique). Each pair states seqs_order \"verified\": its .seqs, written by annotate --index-header-coords since H4, states its column labels, which matched the annotation's at load (section 10). A real run: the body is the server's answer, its paths relative as the graph list spells them, its server named SERVER_INSTANCE as every sample's. T5b-Y4: the multigraph block states search, the /search answer budget at its default (sample 12).",
  "body": {
   "algorithm_version": "traverse-0.2",
   "attempts": {
@@ -303,6 +303,19 @@
    "resolve_max_explicit_labels": 10000,
    "resolve_max_explicit_seeds": 1024,
    "resolve_seed_order": "rank",
+   "search": {
+    "max_memory_mb": 4096,
+    "rule": "SPEC-multigraph-envelope.md section 3, the /search answer budget",
+    "too_large": {
+     "code": "search_answer_too_large",
+     "members": [
+      "code",
+      "error",
+      "max_memory_mb"
+     ],
+     "status": 400
+    }
+   },
    "search_cuts": true,
    "selectors": {
     "/pattern": [

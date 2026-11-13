@@ -14,6 +14,7 @@
 #include <json/json.h>
 
 #include "cli/query.hpp"
+#include "cli/search_answer.hpp"
 #include "cli/server_checks.hpp"
 #include "cli/server_envelope.hpp"
 #include "cli/traverse.hpp"
@@ -533,8 +534,11 @@ TEST(ServerEnvelope, Sample12MultigraphBlock) {
     // the `resolve` block's `discovery` states them
     // (and the cap on a request's explicit seeds, --resolve-max-explicit-seeds 1024)
     const ResolveDiscoveryBounds defaults { 1'000'000, 1024, 10'000, 10'000, 1024 };
-    EXPECT_EQ(text(body["multigraph"]),
-              text(multigraph_capabilities_json(0, {}, intake, column_labels, defaults)));
+    // and the /search answer budget at its default (lane T5b-Y4), which the server places in
+    // the block beside the members multigraph_capabilities_json states
+    Json::Value expected = multigraph_capabilities_json(0, {}, intake, column_labels, defaults);
+    expected["search"] = search_capabilities_json(4096);
+    EXPECT_EQ(text(body["multigraph"]), text(expected));
     // request_intake (H1): the byte cap as the top-level member states it
     EXPECT_EQ(text(body["max_request_body_mb"]),
               text(body["multigraph"]["request_intake"]["max_request_body_mb"]));
@@ -778,4 +782,39 @@ TEST(ServerEnvelope, Sample44ResolveIndexChanged) {
                                                          refusal.status(), refusal.body())));
     // the envelope's account is the answered pair's
     EXPECT_EQ(other["work"]["memory_bytes"].asUInt64(), built["work"]["memory_bytes"].asUInt64());
+}
+
+// Samples 57-60 (lane T5b-Y4, the /search answer budget; SPEC-multigraph-envelope.md section
+// 3), real runs at --search-max-answer-memory-mb 1: one refused /search per mode, each 400 with
+// the body search_answer_too_large_json writes, error first as error_first_json_text writes it,
+// the same in every mode; the request names both pairs and no other mode
+TEST(ServerEnvelope, Samples57To60SearchAnswerTooLarge) {
+    const std::vector<std::pair<std::string, std::string>> samples {
+        { "57_search_400_answer_too_large_plain.json", "" },
+        { "58_search_400_answer_too_large_with_signature.json", "with_signature" },
+        { "59_search_400_answer_too_large_query_counts.json", "query_counts" },
+        { "60_search_400_answer_too_large_query_coords.json", "query_coords" },
+    };
+    const Json::Value refusal = search_answer_too_large_json(1);
+    const std::string expected = error_first_json_text(refusal);
+    EXPECT_EQ(0u, expected.find("{\"error\":"));
+    for (const auto &[name, mode] : samples) {
+        SCOPED_TRACE(name);
+        const Json::Value s = sample(name);
+        EXPECT_EQ("POST /search", s["route"].asString());
+        EXPECT_EQ(400, s["status"].asInt());
+        EXPECT_EQ(text(refusal), text(s["body"]));
+        EXPECT_EQ(1u, s["body"]["max_memory_mb"].asUInt64());
+        for (const char *flag : { "with_signature", "query_counts", "query_coords" }) {
+            EXPECT_EQ(mode == flag, s["request"].isMember(flag)) << flag;
+        }
+        EXPECT_EQ(10000u, s["request"]["top_labels"].asUInt64());
+        EXPECT_EQ(2u, s["request"]["graphs"].size());
+        // the members in the server's order: error, code, max_memory_mb
+        const std::string raw = sample_text(name);
+        const size_t at = raw.find("\"body\": {");
+        ASSERT_NE(std::string::npos, at);
+        EXPECT_LT(raw.find("\"error\":", at), raw.find("\"code\":", at));
+        EXPECT_LT(raw.find("\"code\":", at), raw.find("\"max_memory_mb\":", at));
+    }
 }
