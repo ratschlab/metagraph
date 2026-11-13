@@ -1586,7 +1586,13 @@ void group_candidates(SupportProfile *profile, uint64_t min_block_kmers, AnswerA
     // reserved, so that the candidates never hold an old and a new buffer beside the map (T4
     // review R1, F2: at their last growth 3 x 40 B a run of its own, beyond its price)
     profile->candidates.reserve(groups.size());
+    size_t group = 0;
     for (auto &[iv, labels] : groups) {
+        // read every 4,096 groups as the labels above (T5a-X1, Opus review 2026-11-13: at the
+        // caps, 10,000 labels of 300 runs of their own, this pass over 3 million groups read
+        // nothing for about 0.7 s)
+        if (finishing)
+            finishing(group++);
         std::sort(labels.begin(), labels.end());
         profile->candidates.push_back({ iv, std::move(labels) });
     }

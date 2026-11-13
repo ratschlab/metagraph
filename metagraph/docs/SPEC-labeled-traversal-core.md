@@ -355,7 +355,9 @@ deadline. `src/cli/traverse.cpp` `process_resolve_request`, `src/graph/traversal
   profiled whatever the stop), a seed label that is not one of them. A request whose work completes answers
   `stop: null`; `limits` (the effective budget, the reserve, the clamps) is stated either way.
 - **The answer is built within the reserve.** After the work, the loops over the labels (a discovery's ranking
-  and naming, the profiles, the candidates' grouping) read the whole budget every 4,096 labels, the selection
+  and naming, the profiles, the candidates' grouping) read the whole budget every 4,096 labels, and the grouping
+  every 4,096 groups as it makes them candidates *(T5a-X1, Opus review 2026-11-13: before, that pass read
+  nothing, up to about 0.7 s at 3 million groups)*, the selection
   (`select_seeds`) every 4,096 steps — an explicit seed and each of its labels; a label and its runs gathered for
   `max_support`, and the runs before their sort; in a `max_support` round a run clipped by the picks before it and
   each pick it meets, a candidate start swept, the round's runs once before each of its sorts, and a label with its
@@ -385,11 +387,19 @@ deadline. `src/cli/traverse.cpp` `process_resolve_request`, `src/graph/traversal
   explicit labels' resolution and their query's setup (linear in their bytes, and no server limit caps their
   number; an unknown label is refused before the deadline is first read, so a stop never hides one); one row
   batch's decode (a row-diff row's whole path) and its accumulation (every label of its rows); a pass's setup (the
-  next occurrence of every present k-mer, one hash pass); one piece of hits and its accumulation; the ranking sort of a discovery's labels and the candidates'
+  next occurrence of every present k-mer, one hash pass); one piece of hits and its accumulation; the ranking sort of a discovery's labels, the
+  name sort of its kept labels' runs of equal support (of the boundary's run only its kept part) and the candidates'
   sort (n log n); in `select_seeds`, the sort of the runs `max_support` gathers and each of a round's three sorts (of
   its runs, its candidate starts and its run ends: n log n of at most twice the runs), a seed's label sort and one row of the seeds' overlaps (as many
   pairs as seeds, at most `--resolve-max-explicit-seeds`); and the transport. The client's checks
-  are where they were (§10.3); a reserve that these overrun is not adapted to them (the reserve is fixed).
+  are where they were (§10.3); a reserve that these overrun is not adapted to them (the reserve is fixed). The
+  request's stop (a client gone, the fan-out's stop) is read at the same readings, so it waits for these pieces
+  too. At the server's caps they take, on one laptop core (T5a-X1, Opus review 2026-11-13): the ranking sort and
+  the name sort about 0.1 s each at 1,000,000 tracked labels (10,000 kept, one run of equal support); the
+  candidates' sort about 0.3 s at 3 million groups (10,000 labels of 300 runs of their own); the gathered runs'
+  sort about 0.15 s at 3 million runs; a round's three sorts about 0.5, 0.3 and 0.15 s at 10 million pieces
+  (10,000 labels of one run over the query, each clipped by 1,024 picks). A slower or loaded host takes a few
+  times that, up to about 1.5 s for a round's runs.
 - **Capabilities.** Both GET routes carry the `resolve` block (§10.3). The field is not a `feature_level`: every
   `/resolve` and `/traverse` response states the level, so a bump would change every answer; a client gates
   on the block. An older server refuses the field (400 naming it).
