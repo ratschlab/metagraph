@@ -139,6 +139,40 @@ The answer keeps its upstream shape (a list of `{seq_description, results, ...}`
   before any cached answer is looked up and before any pair is searched (train 4; it was answered 200 with the
   body `null`, nothing searched). A `graphs` that is not a list is still read as no field, and an unknown name
   is refused first (`graph_unknown`).
+- **The answer budget** (lane T5b-Y4, owner decision 2026-11-13; the design note
+  `DESIGN-search-answer-budget.md` of train 5a, option (a)). `--search-max-answer-memory-mb` (4,096 MiB by
+  default, an integer in [0, 1048576], 0 = no bound; the CLI's `metagraph query` has none) bounds what one
+  `POST /search` holds, in every mode (plain, `abundance_sum`, `with_signature`, `query_counts`,
+  `query_coords`, with or without `align`). Two accounts, each bounded by the flag, are charged BEFORE what
+  they price is built:
+  - the values of each pair: the rows of every FASTA record of the body on that pair, their per-position
+    values (signature runs, count runs, coordinates) charged before each of their buffers grows, and each
+    record's rows (labels, entries, its name and sequence) as its result is handed over; held until the
+    pair's answer is built;
+  - the answer of the request: each record's JSON object (its rows, the pair tags, its cut, its node in the
+    merged answer on a multi-graph server) before it is built, then the answer's text at its exact length,
+    beside it the transport's copy (or gzip's and its state) and, with `--cache-size` above 0, the cache's
+    copy, before the text is written. The text is the one written without a budget, byte for byte.
+
+  A model of the deployed build's heap (as `/resolve`'s answer account, `SPEC-labeled-traversal-core.md`
+  §4.6), never a measurement, so a request near the bound may be refused where it would have fit. Not charged:
+  the rows decoded before the top-N cut, the index (mmap pages or an `in_ram` load) and the body (its own cap).
+  When either account would pass the bound, the whole request is refused **400**:
+
+  ```json
+  {"error":"search: the answer would hold more than --search-max-answer-memory-mb 4096 MiB: nothing partial is sent; ask for fewer top_labels, a larger discovery_fraction, fewer or shorter FASTA records, or no per-position values (with_signature, query_counts, query_coords)","code":"search_answer_too_large","max_memory_mb":4096}
+  ```
+
+  written `error` first, then `code` and `max_memory_mb` (the flag's value), as the intake refusals (section
+  8). The text is the same whichever account passed, and on a multi-graph server no pair is named (`/search`
+  has no per-pair entries: one pair's values over the bound, or the pairs' JSON together over it, refuses the
+  whole request; the pairs still running stop at their next charge). The refusals that need no work come
+  first (the body cap, the body's JSON, the fields, the selection, a cached answer); a request that passes
+  the bound during its work is refused so whatever else its work raised (another pair's error, a load
+  refused `index_changed`), so the answer never depends on the order the pairs charged in. The same request
+  is refused again (the code is final: change the request) and is not cached. `in_ram` changes nothing: the
+  same charges, the same refusal. Below the bound every answer is the one without a budget, byte for byte.
+  Stated by GET /capabilities as `search` (section 8).
 
 ## 4. Deadlines and the work cutoff (E4, E20)
 
@@ -451,6 +485,20 @@ alone); the unpaged list above it is refused 400 `column_labels_too_large` (`mem
 (`null` while a single index loads). On a multi-graph server the list holds each distinct (graph, annotation) pair
 once, at its first place in the answers' order (section 3). Its presence is the marker: an engine without it
 ignores the parameters and answers the whole array (`SPEC-labeled-traversal-core.md` §10.3, `GET /column_labels`).
+From lane T5b-Y4 the block also states `search`, the `/search` answer budget (section 3), the same object a
+single-graph server states at the top level of `GET /capabilities`:
+
+```json
+"search": {
+  "max_memory_mb": 4096,
+  "rule": "SPEC-multigraph-envelope.md section 3, the /search answer budget",
+  "too_large": {"status": 400, "code": "search_answer_too_large", "members": ["code", "error", "max_memory_mb"]}
+}
+```
+
+`max_memory_mb` is `--search-max-answer-memory-mb` (`null` when 0, no bound), `too_large` the refusal's status,
+code and body members (a set, sorted; the body writes `error` first), `rule` this section's reference. Its
+presence is the marker: an engine without it has no budget. Not part of any fingerprint.
 A single-graph server, which states its request registry as `routes.requests`, states `expect_server_instance`
 (the same list) at the top level of `GET /capabilities`, beside `routes.requests` (the pattern of `headers_unique`:
 one reader serves both modes), and `request_intake` there too. An engine without the key refuses the field 400 (unknown field), so clients send it

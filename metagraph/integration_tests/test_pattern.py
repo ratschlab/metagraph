@@ -4564,10 +4564,11 @@ class TestPatternRegression(TestingBase):
         # `request_intake` (H1: the body limit, the value count and their refusals' shapes, at the
         # top level of a single-graph server, SPEC-multigraph-envelope.md section 8; H3: the
         # connection cap), `column_labels` (H3: GET /column_labels' byte cap, paging, 400 and
-        # total, placed as request_intake) and `labels_disjoint` (whether no header equals a
-        # column name, H4, section 9.1)
+        # total, placed as request_intake), `labels_disjoint` (whether no header equals a
+        # column name, H4, section 9.1) and `search` (the /search answer budget, lane T5b-Y4,
+        # sections 3 and 8, placed as column_labels)
         only_gains(a, b, {'headers_unique', 'expect_server_instance', 'pair_summary',
-                          'request_intake', 'column_labels', 'labels_disjoint'} | (
+                          'request_intake', 'column_labels', 'labels_disjoint', 'search'} | (
             set() if base_pattern else {
                 'pattern', 'resolve', 'in_ram', 'graph_summary', 'max_graphs_without_selection',
                 'max_request_body_mb'}), 'members')

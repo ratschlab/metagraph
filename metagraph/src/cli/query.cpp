@@ -57,13 +57,14 @@ namespace {
 using Range = std::tuple<uint64_t, uint64_t, uint64_t>;
 
 // One query position |i| of collapse_coord_ranges, with its coordinates |coords| (none: a
-// position without coordinates): extends the open |ranges| it continues, writes out those it
-// ends, opens one for each other coordinate
+// position without coordinates): extends the open |ranges| it continues, ends those it ends
+// (|end_range|(range), in their order), opens one for each other coordinate
+template <class EndRange>
 void collapse_position(size_t i,
                        const SmallVector<uint64_t> &coords,
                        std::vector<Range> &ranges,
                        std::vector<Range> &next_ranges,
-                       std::vector<std::string> &range_strings) {
+                       const EndRange &end_range) {
     assert(std::is_sorted(coords.begin(), coords.end()));
 
     size_t j = 0;
@@ -72,7 +73,7 @@ void collapse_position(size_t i,
     for (uint64_t coord : coords) {
         while (j < ranges.size() && std::get<2>(ranges[j]) + 1 < coord) {
             // end of range
-            range_strings.push_back(get_range(ranges[j++]));
+            end_range(ranges[j++]);
         }
 
         if (j < ranges.size() && std::get<2>(ranges[j]) + 1 == coord) {
@@ -85,10 +86,51 @@ void collapse_position(size_t i,
         }
     }
     while (j < ranges.size()) {
-        range_strings.push_back(get_range(ranges[j++]));
+        end_range(ranges[j++]);
     }
 
     ranges.swap(next_ranges);
+}
+
+// The ranges of collapse_coord_ranges(|coords|) in their order: |end_range|(range) for each
+template <class EndRange>
+void call_coord_ranges(const graph::PositionCoords &coords, const EndRange &end_range) {
+    std::vector<Range> ranges;
+    std::vector<Range> next_ranges;
+    const SmallVector<uint64_t> none;
+
+    size_t next = 0;
+    coords.call_positions([&](size_t i, const SmallVector<uint64_t> &position_coords) {
+        // the positions without coordinates before |i| end every range open (the first of
+        // them does, the others find none)
+        if (i > next)
+            collapse_position(next, none, ranges, next_ranges, end_range);
+        collapse_position(i, position_coords, ranges, next_ranges, end_range);
+        next = i + 1;
+    });
+    // a position without coordinates after the last one with coordinates ends the ranges as
+    // the end does
+
+    for (const auto &range : ranges) {
+        end_range(range);
+    }
+}
+
+// the decimal digits of |x|
+size_t decimal_length(uint64_t x) {
+    size_t digits = 1;
+    while (x >= 10) {
+        x /= 10;
+        ++digits;
+    }
+    return digits;
+}
+
+// the length of get_range(|range|)'s string
+size_t range_length(const Range &range) {
+    const auto &[pos, first, last] = range;
+    return decimal_length(pos) + 1 + decimal_length(first)
+            + (first == last ? 0 : 1 + decimal_length(last));
 }
 
 } // namespace
@@ -110,8 +152,9 @@ collapse_coord_ranges(const std::vector<SmallVector<uint64_t>> &tuples) {
     std::vector<Range> ranges;
     std::vector<Range> next_ranges;
 
+    auto end_range = [&](const Range &range) { range_strings.push_back(get_range(range)); };
     for (size_t i = 0; i < tuples.size(); ++i) {
-        collapse_position(i, tuples[i], ranges, next_ranges, range_strings);
+        collapse_position(i, tuples[i], ranges, next_ranges, end_range);
     }
 
     for (const auto &range : ranges) {
@@ -124,27 +167,23 @@ collapse_coord_ranges(const std::vector<SmallVector<uint64_t>> &tuples) {
 std::vector<std::string>
 collapse_coord_ranges(const graph::PositionCoords &coords) {
     std::vector<std::string> range_strings;
-    std::vector<Range> ranges;
-    std::vector<Range> next_ranges;
-    const SmallVector<uint64_t> none;
-
-    size_t next = 0;
-    coords.call_positions([&](size_t i, const SmallVector<uint64_t> &position_coords) {
-        // the positions without coordinates before |i| end every range open (the first of
-        // them does, the others find none)
-        if (i > next)
-            collapse_position(next, none, ranges, next_ranges, range_strings);
-        collapse_position(i, position_coords, ranges, next_ranges, range_strings);
-        next = i + 1;
-    });
-    // a position without coordinates after the last one with coordinates ends the ranges as
-    // the end does
-
-    for (const auto &range : ranges) {
+    call_coord_ranges(coords, [&](const Range &range) {
         range_strings.push_back(get_range(range));
-    }
-
+    });
     return range_strings;
+}
+
+CoordRangesText collapsed_coords_text(const graph::PositionCoords &coords) {
+    CoordRangesText text;
+    call_coord_ranges(coords, [&](const Range &range) {
+        const size_t length = range_length(range);
+        text.bytes += length + (text.ranges ? 1 : 0);
+        ++text.ranges;
+        // a string longer than its inline capacity (libstdc++: 15 bytes) has a buffer
+        if (length > 15)
+            text.long_ranges_bytes += length + 1;
+    });
+    return text;
 }
 
 
@@ -460,12 +499,15 @@ std::string SeqSearchResult::to_string(const std::string delimiter,
 }
 
 
+// |values| (null: none): a /search's values account of this pair, which the per-position
+// modes charge with their rows' values as they grow (graph::SearchAccount)
 SeqSearchResult execute_query(QuerySequence&& sequence,
                               QueryMode query_mode,
                               size_t num_top_labels,
                               double discovery_fraction,
                               double presence_fraction,
-                              const graph::AnnotatedDBG &anno_graph) {
+                              const graph::AnnotatedDBG &anno_graph,
+                              graph::SearchAccount *values) {
     // Perform a different action depending on the type (specified by config flags)
     SeqSearchResult::result_type result;
     // the top-N cut each mode's query takes (every mode but LABELS, which returns every label
@@ -479,7 +521,7 @@ SeqSearchResult execute_query(QuerySequence&& sequence,
                                                          num_top_labels,
                                                          discovery_fraction,
                                                          presence_fraction,
-                                                         &cut);
+                                                         &cut, values);
             break;
         }
         case COORDS: {
@@ -488,7 +530,7 @@ SeqSearchResult execute_query(QuerySequence&& sequence,
                                                      num_top_labels,
                                                      discovery_fraction,
                                                      presence_fraction,
-                                                     &cut);
+                                                     &cut, values);
             break;
         }
         case COUNTS: {
@@ -497,7 +539,7 @@ SeqSearchResult execute_query(QuerySequence&& sequence,
                                                 num_top_labels,
                                                 discovery_fraction,
                                                 presence_fraction,
-                                                &cut);
+                                                &cut, values);
             break;
         }
         case MATCHES: {
@@ -533,6 +575,16 @@ SeqSearchResult execute_query(QuerySequence&& sequence,
 
     // Create seq search instance and move sequence into it
     return SeqSearchResult(std::move(sequence), std::move(result), {}, cut);
+}
+
+SeqSearchResult execute_query(QuerySequence&& sequence,
+                              QueryMode query_mode,
+                              size_t num_top_labels,
+                              double discovery_fraction,
+                              double presence_fraction,
+                              const graph::AnnotatedDBG &anno_graph) {
+    return execute_query(std::move(sequence), query_mode, num_top_labels, discovery_fraction,
+                         presence_fraction, anno_graph, nullptr);
 }
 
 void call_suffix_match_sequences(const DBGSuccinct &dbg_succ,
@@ -1321,7 +1373,8 @@ Alignment align_sequence(std::string *seq,
 SeqSearchResult query_sequence(QuerySequence&& sequence,
                                const AnnotatedDBG &anno_graph,
                                const Config &config,
-                               const align::DBGAlignerConfig *aligner_config) {
+                               const align::DBGAlignerConfig *aligner_config,
+                               graph::SearchAccount *values) {
     // Align sequence and modify sequence struct to store alignment results
     std::optional<Alignment> alignment;
     if (aligner_config)
@@ -1331,7 +1384,7 @@ SeqSearchResult query_sequence(QuerySequence&& sequence,
     SeqSearchResult result = execute_query(std::move(sequence),
             config.query_mode,
             config.num_top_labels, config.discovery_fraction,
-            config.presence_fraction, anno_graph);
+            config.presence_fraction, anno_graph, values);
 
     if (aligner_config)
         result.get_alignment() = alignment;
@@ -1344,13 +1397,15 @@ size_t batched_query_fasta(seq_io::FastaParser &fasta_parser,
                            const std::function<void(const SeqSearchResult &)> &callback,
                            const Config &config,
                            const graph::AnnotatedDBG &anno_graph,
-                           const graph::align::DBGAlignerConfig *aligner_config);
+                           const graph::align::DBGAlignerConfig *aligner_config,
+                           graph::SearchAccount *values);
 
 size_t query_fasta(const std::string &file,
                    const std::function<void(const SeqSearchResult &)> &callback,
                    const Config &config,
                    const graph::AnnotatedDBG &anno_graph,
-                   const graph::align::DBGAlignerConfig *aligner_config) {
+                   const graph::align::DBGAlignerConfig *aligner_config,
+                   graph::SearchAccount *values) {
     logger->trace("Parsing sequences from file '{}'", file);
 
     seq_io::FastaParser fasta_parser(file, config.forward_and_reverse);
@@ -1385,7 +1440,8 @@ size_t query_fasta(const std::string &file,
     if (config.query_batch_size) {
         if (config.query_mode != COORDS && !anno_graph.get_coord_to_header()) {
             // Construct a query graph and query against it
-            return batched_query_fasta(fasta_parser, callback, config, anno_graph, aligner_config);
+            return batched_query_fasta(fasta_parser, callback, config, anno_graph, aligner_config,
+                                       values);
         } else {
             // TODO: Implement batch mode for query_coords queries
             logger->warn("Querying coordinates in batch mode is currently not supported. Querying sequentially...");
@@ -1410,7 +1466,7 @@ size_t query_fasta(const std::string &file,
             try {
                 // Callback with the SeqSearchResult
                 callback(query_sequence(std::move(sequence), anno_graph,
-                                        config, aligner_config));
+                                        config, aligner_config, values));
             } catch (...) {
                 std::lock_guard<std::mutex> lock(error_mutex);
                 if (!error)
@@ -1431,7 +1487,8 @@ size_t batched_query_fasta(seq_io::FastaParser &fasta_parser,
                            const std::function<void(const SeqSearchResult &)> &callback,
                            const Config &config,
                            const graph::AnnotatedDBG &anno_graph,
-                           const graph::align::DBGAlignerConfig *aligner_config) {
+                           const graph::align::DBGAlignerConfig *aligner_config,
+                           graph::SearchAccount *values) {
     auto it = fasta_parser.begin();
     auto end = fasta_parser.end();
 
@@ -1518,7 +1575,7 @@ size_t batched_query_fasta(seq_io::FastaParser &fasta_parser,
                 try {
                     SeqSearchResult search_result
                         = query_sequence(std::move((*seq_batch)[i]), *query_graph, config,
-                                         config.batch_align ? aligner_config : NULL);
+                                         config.batch_align ? aligner_config : NULL, values);
 
                     if (alignments_batch.size())
                         search_result.get_alignment() = std::move(alignments_batch[i]);

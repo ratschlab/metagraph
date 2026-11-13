@@ -3071,15 +3071,22 @@ class TestTraverseAPI(TestTraverseBase):
         # connection cap); 'column_labels': GET /column_labels' byte cap, paging, 400 and total
         # (H3; placed as request_intake); 'labels_disjoint': whether no header equals a column
         # name (H4, section 9.1; test_multigraph.py's TestLabelsDisjoint checks it), true here:
-        # the headers acc1-acc3, the column the file's path
+        # the headers acc1-acc3, the column the file's path; 'search': the /search answer
+        # budget (lane T5b-Y4, SPEC-multigraph-envelope.md sections 3 and 8; placed as
+        # column_labels), at its default here
         self.assertEqual({'algorithm_version', 'attempts', 'column_labels', 'compression_level',
                           'content_encodings', 'deadline_check', 'expect_server_instance',
                           'feature_level', 'features', 'graph_summary', 'graphs',
                           'headers_unique', 'in_ram', 'labels_disjoint',
                           'max_graphs_without_selection', 'max_request_body_mb', 'mode',
                           'pair_summary', 'pattern', 'ready', 'release', 'request_intake',
-                          'resolve', 'routes', 'schema_version', 'server_instance'},
+                          'resolve', 'routes', 'schema_version', 'search', 'server_instance'},
                          set(c))
+        self.assertEqual({'max_memory_mb': 4096,
+                          'rule': 'SPEC-multigraph-envelope.md section 3, the /search answer budget',
+                          'too_large': {'status': 400, 'code': 'search_answer_too_large',
+                                        'members': ['code', 'error', 'max_memory_mb']}},
+                         c['search'])
         self.assertEqual({'max_request_body_mb': None,
                           'body_too_large': {'status': 413, 'code': 'body_too_large',
                                              'members': ['code', 'error', 'max_request_body_mb']},
@@ -5314,6 +5321,9 @@ class TestTraverseMultiGraph(TestTraverseBase):
         caps = requests.get(self.server.url + '/capabilities').json()
         self.assertNotIn('column_labels', caps)
         self.assertEqual(6, caps['multigraph']['column_labels']['total'])
+        # the /search answer budget (lane T5b-Y4) is placed as column_labels
+        self.assertNotIn('search', caps)
+        self.assertEqual(4096, caps['multigraph']['search']['max_memory_mb'])
         self.assertEqual(16777216, caps['multigraph']['column_labels']['max_column_labels_bytes'])
         self.assertIsNone(caps['multigraph']['request_intake']['max_connections'])
         walked, offset = [], 0

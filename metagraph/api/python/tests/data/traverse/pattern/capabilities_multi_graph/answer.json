@@ -233,6 +233,19 @@
   "resolve_max_explicit_labels": 10000,
   "resolve_max_explicit_seeds": 1024,
   "resolve_seed_order": "rank",
+  "search": {
+   "max_memory_mb": 4096,
+   "rule": "SPEC-multigraph-envelope.md section 3, the /search answer budget",
+   "too_large": {
+    "code": "search_answer_too_large",
+    "members": [
+     "code",
+     "error",
+     "max_memory_mb"
+    ],
+    "status": 400
+   }
+  },
   "search_cuts": true,
   "selectors": {
    "/pattern": [

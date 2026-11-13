@@ -528,6 +528,10 @@ Config::Config(int argc, char *argv[]) {
         } else if (!strcmp(argv[i], "--max-column-labels-bytes")) {
             bounded(argv[i], get_value(i), kMaxColumnLabelsBytes, &max_column_labels_bytes);
             i++;
+        } else if (!strcmp(argv[i], "--search-max-answer-memory-mb")) {
+            // in MiB, at most 1 TiB (charged in bytes)
+            bounded(argv[i], get_value(i), 1048576, &search_max_answer_memory_mb);
+            i++;
         } else if (!strcmp(argv[i], "--traverse-max-memory-mb")) {
             exact_ms(argv[i], get_value(i), &traverse_max_memory_mb);
             i++;
@@ -2119,6 +2123,7 @@ if (advanced) {
             fprintf(stderr, "\t   --max-request-json-values [INT] \tmost JSON values in the body of POST /traverse, /resolve, /pattern and /traverse/cancel, counted before it is parsed: one more is refused 400 too_many_json_values; stated by GET /capabilities; 0 = unlimited [262144]\n");
             fprintf(stderr, "\t   --max-connections [INT] \tmost TCP connections held open at once: at it the server stops accepting and a further connection waits in the listen queue until one closes (a delay, never a refusal); counted from accept to close; 0 or above the handler threads, in [0, 1048576]; stated by GET /capabilities; 0 = no cap [0]\n");
             fprintf(stderr, "\t   --max-column-labels-bytes [INT] \tmost bytes of label text (the labels' JSON strings) one GET /column_labels answer holds: the unpaged list above it is refused 400 column_labels_too_large, a page (?offset=&limit=) ends before it; in [0, 2^40]; 0 = unlimited [16777216]\n");
+            fprintf(stderr, "\t   --search-max-answer-memory-mb [INT] \tmost memory one POST /search answer holds, in MiB: each pair's rows (their per-position values included) and the request's JSON answer with its text, priced before they are built; past it the whole request is refused 400 search_answer_too_large, nothing partial sent; in [0, 1048576], 0 = no bound [4096]\n");
             fprintf(stderr, "\n\t   --index-release [STR] \trelease id echoed by /traverse and /resolve; requests may pin it []\n");
             fprintf(stderr, "\t   --index-name [STR] \t\tname of the index (-i / -a only) in capabilities and graphlets, [A-Za-z0-9._-]+ []\n");
             fprintf(stderr, "\t   --index-manifest [FILE] \tmanifest of the index bundle (-i / -a only); its digest is the index identity []\n");

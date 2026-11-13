@@ -4507,7 +4507,8 @@ search's routes, `POST /pattern` and `GET /pattern/capabilities`, are `SPEC-patt
     `--max-request-body-mb` B, whose capacity can reach 2B) and its body (up to B, capacity up to 2B), so the
     connections hold at most N × (4B + 64 KiB) before their handlers (§5, the connections; no bound without a
     cap, and none worth the name without a small byte cap). Each connection carries at most one answer pending (the next request
-    is read only after it), each bounded by its route's own rules (`/search` and `/align` answers are not).
+    is read only after it), each bounded by its route's own rules (`/align` answers are not; `/search` answers
+    by the answer budget, `--search-max-answer-memory-mb`, `SPEC-multigraph-envelope.md` §3).
   - The cap must be 0 or above the handler threads (else the server refuses to start, naming both), so that a
     connection can be left beyond the threads for the light routes. The rule is necessary, not sufficient, as E19's
     rule for the threads: the connections beyond the threads can be held too -- by idle keep-alives (up to 30 s),
@@ -4566,6 +4567,12 @@ search's routes, `POST /pattern` and `GET /pattern/capabilities`, are `SPEC-patt
     "too_large": {"status": 400, "code": "column_labels_too_large", "members": [...]}, "total"}`, in the
     `multigraph` block on a multi-graph server and at the top level on a single-graph one, as `request_intake`
     (`SPEC-multigraph-envelope.md` §8). Without it a server ignores the parameters and answers the whole array.
+- **The `/search` answer budget** (lane T5b-Y4, owner decision 2026-11-13): `--search-max-answer-memory-mb`
+  (4,096 MiB by default, in [0, 1048576], 0 = none) bounds what one `POST /search` answer holds, each pair's
+  rows and the request's JSON answer with its text, priced before they are built; past it the whole request
+  is refused **400** `search_answer_too_large`, nothing partial sent. A size limit on one request, as the body
+  cap, not an admission cap. `SPEC-multigraph-envelope.md` §3 states it; GET /capabilities states it as
+  `search` (§8 there).
 - **Deployment** (`DESIGN-traverse-graphlet.md` §17.5):
   - `--http-threads` (`-p` when not given) must exceed the concurrent long calls by one at least (the engine's
     caps where they are set, plus the uncapped long calls: the search service's admission cap per server and its
