@@ -62,6 +62,7 @@ class TestSearchAnswerBudget(TestingBase):
     k = 31
     record_length = 60
     records_per_pair = 1000
+    started = 0
 
     @classmethod
     def setUpClass(cls):
@@ -109,7 +110,9 @@ class TestSearchAnswerBudget(TestingBase):
         cls.tempdir.cleanup()
 
     def server(self, extra=(), multi=False, binary=None):
-        name = f'server_{len(self.servers)}.log'
+        # a log of its own (a stopped server leaves the list: its length repeats)
+        TestSearchAnswerBudget.started += 1
+        name = f'server_{TestSearchAnswerBudget.started}.log'
         args = [self.csv] if multi else ['-i', self.pairs['pa'][0], '-a', self.pairs['pa'][1]]
         server = Server(args + list(extra), os.path.join(self.tempdir.name, name), threads=2,
                         binary=binary)
