@@ -112,8 +112,9 @@ TEST(SearchBudget, TheOutcomeIsTheSameInEveryOrder) {
         }
         EXPECT_EQ(total > bound, budget.passed()) << round;
         EXPECT_EQ(total > bound, refused > 0) << round;
-        if (total <= bound)
+        if (total <= bound) {
             EXPECT_EQ(total, budget.answer().held());
+        }
         EXPECT_LE(budget.answer().held(), bound);
     }
 }

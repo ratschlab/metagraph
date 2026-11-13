@@ -295,8 +295,9 @@ TEST(SearchAnswer, ThePriceCoversTheTree) {
                                 << *after - *before;
                     }
                     // the per-position strings at least once beside the tree
-                    if (mode)
+                    if (mode) {
                         EXPECT_LT(0u, price.transient) << what;
+                    }
                 }
             }
         }
