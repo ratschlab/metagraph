@@ -259,7 +259,8 @@ Json::Value multigraph_capabilities_json(uint64_t max_request_memory_mb, const R
     // capabilities probe states them
     m["max_concurrent"] = max_concurrent_json(caps);
     // what the server reads of a request (H1): the byte cap and its 413, the value count of the
-    // strict-JSON routes and its 400, as a single-graph server states them at the top level
+    // strict-JSON routes and /search and its 400, as a single-graph server states them at the
+    // top level
     m["request_intake"] = request_intake;
     m["column_labels"] = column_labels;
     // the bounds of a /resolve discovery, per pair (SPEC-labeled-traversal-core.md §4.6), as

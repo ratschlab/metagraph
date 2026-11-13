@@ -250,8 +250,10 @@ The answer keeps its upstream shape (a list of `{seq_description, results, ...}`
   without a response, `SPEC-labeled-traversal-core.md` §10.3), and a body of `/resolve`, `/pattern`, `/traverse` or
   `POST /traverse/cancel` with more JSON values than `--max-request-json-values` **400** `{"error", "code":
   "too_many_json_values", "max_request_json_values"}` before it is parsed (members in this order;
-  `SPEC-labeled-traversal-core.md` §5 and §10.3). Neither holds an id: `GET /requests/{id}` answers 404 (never
-  admitted), and the same id runs once the request is sent within the limits.
+  `SPEC-labeled-traversal-core.md` §5 and §10.3); from the Fable review of 2026-11-12 a body of `POST /search`
+  too, its values counted as its lenient reader would build them (`SPEC-labeled-traversal-core.md` §10.3).
+  Neither holds an id: `GET /requests/{id}` answers 404 (never admitted), and the same id runs once the request
+  is sent within the limits.
 - A repeated `request_id` that is running, or retained after it finished, starts no work: 409, body = the registry
   entry (below) plus `error`.
 - `request_id` and `attempt_id` are one namespace, as `GET /requests/{id}` reads both: a `request_id` equal to a
@@ -414,7 +416,7 @@ single-graph server states at the top level of `GET /capabilities`:
   "max_request_body_mb": 256,
   "body_too_large": {"status": 413, "code": "body_too_large", "members": ["code", "error", "max_request_body_mb"]},
   "max_request_json_values": 262144,
-  "json_values_routes": ["/pattern", "/resolve", "/traverse", "/traverse/cancel"],
+  "json_values_routes": ["/pattern", "/resolve", "/search", "/traverse", "/traverse/cancel"],
   "too_many_json_values": {"status": 400, "code": "too_many_json_values", "members": ["code", "error", "max_request_json_values"]},
   "max_connections": null
 }
@@ -422,7 +424,8 @@ single-graph server states at the top level of `GET /capabilities`:
 
 `max_request_body_mb` is `--max-request-body-mb` in MiB (`null` when unlimited; the top-level member of that
 name, which stays in both modes, states the same), `max_request_json_values` is `--max-request-json-values`
-(`null` when unlimited), `json_values_routes` the routes whose body is counted. `members` lists each refusal's
+(`null` when unlimited), `json_values_routes` the routes whose body is counted (sorted; `/search` from the Fable
+review of 2026-11-12, its body counted as its lenient reader builds it). `members` lists each refusal's
 body members as a set (sorted); the body itself writes them `error` first, then `code`, then the cap (section 5;
 `SPEC-labeled-traversal-core.md` §5 and §10.3). The 413 answers a body over `max_request_body_mb` on every route,
 before it is read; the 400 a body of a listed route with more values, before it is parsed. Its presence is the

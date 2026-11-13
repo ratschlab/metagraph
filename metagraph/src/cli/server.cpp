@@ -535,6 +535,24 @@ Json::Value parse_traversal_body(const std::string &content, uint64_t max_values
     }
 }
 
+// The body of POST /search, read by its lenient reader as before (parse_json_string: a comment,
+// a trailing comma, text after the value, a duplicated member are accepted; its faults are 400
+// "Bad json received: ..."), its values counted first against |max_values|
+// (--max-request-json-values; 0: none) as that reader reads them (count_lenient_json_values):
+// one more is json_values_refusal, before jsoncpp builds anything (Fable review 2026-11-12: a
+// 256 MiB body of small values built a tree of about 13 GiB over minutes of a handler thread
+// before it was refused, or was answered with the tree held through the search)
+Json::Value parse_search_body(const std::string &content, uint64_t max_values) {
+    if (max_values) {
+        try {
+            count_lenient_json_values(content, max_values);
+        } catch (const TooManyJsonValues &e) {
+            throw json_values_refusal(e);
+        }
+    }
+    return parse_json_string(content);
+}
+
 // The body of /pattern (parse_pattern_body: its faults are PatternRefusal 400
 // invalid_request), its values counted as parse_traversal_body counts them
 Json::Value parse_pattern_route_body(const std::string &content, uint64_t max_values) {
@@ -1182,7 +1200,8 @@ int run_server(Config *config) {
                 if (!config->fnames.size() && anno_graph.wait_for(0s) != std::future_status::ready)
                     throw CurrentlyInitializingError();  // graph still loading
 
-                Json::Value content_json = parse_json_string(content);
+                Json::Value content_json
+                        = parse_search_body(content, config->max_request_json_values);
                 if (logger->should_log(spdlog::level::trace))
                     logger->trace("[Server] Request {}: {}", request_id, content_json.toStyledString());
 
@@ -3007,8 +3026,8 @@ int run_server(Config *config) {
             // body_too_large before it is read), so that a client can check it before it sends
             c["max_request_body_mb"] = max_request_body_mb_json(config->max_request_body_mb);
             // what the server reads of a request (H1): that cap and its 413, the value count of
-            // the strict-JSON routes and its 400; in the multigraph block on a multi-graph
-            // server, here on a single-graph one (one reader for both, as
+            // the strict-JSON routes and /search and its 400; in the multigraph block on a
+            // multi-graph server, here on a single-graph one (one reader for both, as
             // expect_server_instance)
             const Json::Value intake = request_intake_json(config->max_request_body_mb,
                                                            config->max_request_json_values,

@@ -175,9 +175,9 @@ class Config {
     // (max_request_body_mb, null when unlimited; request_intake)
     uint64_t max_request_body_mb = 0;
     // The most JSON values the body of a strict-JSON route (POST /traverse, /resolve, /pattern,
-    // /traverse/cancel) may hold (0 = unlimited): counted before the body is parsed, so that
-    // jsoncpp never builds a larger tree (about 100 bytes and more per value); one more is
-    // refused 400 too_many_json_values. Not /search's nor /align's. Stated by GET /capabilities
+    // /traverse/cancel) and of POST /search may hold (0 = unlimited): counted before the body is
+    // parsed, so that jsoncpp never builds a larger tree (about 100 bytes and more per value);
+    // one more is refused 400 too_many_json_values. Not /align's. Stated by GET /capabilities
     // (request_intake.max_request_json_values). 2^18: 64 seeds of 4,000 explicit labels
     uint64_t max_request_json_values = 262'144;
     // The most TCP connections the server holds open at once (0 = no cap, the default; H3,
