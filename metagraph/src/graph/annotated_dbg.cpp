@@ -468,6 +468,11 @@ class RecordFold {
     // Add the row of query position |pos|, counted |weight| times. With per-position
     // values, the positions must come in ascending order, each once.
     void add_row(const MultiIntMatrix::RowTuples &row, size_t pos, size_t weight = 1) {
+        // runs hold 32-bit positions
+        if (pos > std::numeric_limits<uint32_t>::max()) {
+            throw std::runtime_error("A sequence queried by sequence record must have fewer "
+                                     "than 2^32 k-mers");
+        }
         ++row_;
         for (const auto &entry : row) {
             const Column column = entry.first;
@@ -483,6 +488,8 @@ class RecordFold {
             mapping_.map_coords(column, coords, [&](size_t seq_id, uint64_t local_coord) {
                 uint32_t &slot = slots.at(seq_id, mapping_.num_sequences(column));
                 if (!slot) {
+                    if (records_.size() == std::numeric_limits<uint32_t>::max())
+                        throw std::runtime_error("A query matches 2^32 or more sequence records");
                     records_.push_back({ Header{column, seq_id}, 0, 0, 0, {} });
                     slot = records_.size();
                 }
