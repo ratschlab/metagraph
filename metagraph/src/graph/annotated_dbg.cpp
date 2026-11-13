@@ -960,16 +960,7 @@ bool AnnotatedSequenceGraph::check_compatibility() const {
 }
 
 std::string encode_presence_mask(const sdsl::bit_vector &mask) {
-    std::string result;
-    size_t pos = 0;
-    while (pos < mask.size()) {
-        bool bit = mask[pos];
-        size_t run_start = pos;
-        while (pos < mask.size() && (bool)mask[pos] == bit) ++pos;
-        result += (bit ? 'x' : 'o');
-        result += std::to_string(pos - run_start);
-    }
-    return result;
+    return encode_presence_mask(PresenceRuns(mask));
 }
 
 std::string encode_presence_mask(const PresenceRuns &mask) {

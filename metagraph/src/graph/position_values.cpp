@@ -32,10 +32,7 @@ PresenceRuns::PresenceRuns(size_t size) : size_(size) {
 }
 
 PresenceRuns::PresenceRuns(const sdsl::bit_vector &mask) : PresenceRuns(mask.size()) {
-    for (size_t i = 0; i < mask.size(); ++i) {
-        if (mask[i])
-            add(i);
-    }
+    call_runs_of_ones(mask, [&](size_t begin, size_t end) { add_run(begin, end); });
 }
 
 bool PresenceRuns::grow() {

@@ -252,19 +252,7 @@ void PresenceRuns::call_runs(const Callback &callback) const {
         }
         return;
     }
-    // the ones of the mask, joined into maximal runs
-    size_t begin = 0;
-    size_t end = 0;
-    call_ones(dense_, [&](size_t i) {
-        if (i != end) {
-            if (begin < end)
-                callback(begin, end);
-            begin = i;
-        }
-        end = i + 1;
-    });
-    if (begin < end)
-        callback(begin, end);
+    call_runs_of_ones(dense_, callback);
 }
 
 template <class Callback>

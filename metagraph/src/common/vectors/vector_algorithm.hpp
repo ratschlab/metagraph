@@ -145,9 +145,23 @@ sdsl::bit_vector generate_subindex(const bit_vector &column,
                                    const bit_vector &reference,
                                    ThreadPool &thread_pool);
 
-// Apply the bitwise AND of vector with right-shifts of itself. Only works for
-// values of offset < 64
-sdsl::bit_vector autocorrelate(const sdsl::bit_vector &vector, uint8_t offset);
+// Call (uint64_t begin, uint64_t end) for each maximal run [begin, end) of set bits,
+// in ascending order
+template <class Callback>
+void call_runs_of_ones(const sdsl::bit_vector &vector, Callback callback) {
+    uint64_t begin = 0;
+    uint64_t end = 0;
+    call_ones(vector, [&](uint64_t i) {
+        if (i != end) {
+            if (begin < end)
+                callback(begin, end);
+            begin = i;
+        }
+        end = i + 1;
+    });
+    if (begin < end)
+        callback(begin, end);
+}
 
 
 // Call (uint64_t index, uint64_t value) for each non-zero value in [begin, end)

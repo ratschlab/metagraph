@@ -99,22 +99,7 @@ void collapse_position(size_t i,
  */
 std::vector<std::string>
 collapse_coord_ranges(const std::vector<SmallVector<uint64_t>> &tuples) {
-    // Build output
-    std::vector<std::string> range_strings;
-
-    // Keep track of the ranges: start position, first coord, last coord
-    std::vector<Range> ranges;
-    std::vector<Range> next_ranges;
-
-    for (size_t i = 0; i < tuples.size(); ++i) {
-        collapse_position(i, tuples[i], ranges, next_ranges, range_strings);
-    }
-
-    for (const auto &range : ranges) {
-        range_strings.push_back(get_range(range));
-    }
-
-    return range_strings;
+    return collapse_coord_ranges(graph::PositionCoords(tuples));
 }
 
 std::vector<std::string>

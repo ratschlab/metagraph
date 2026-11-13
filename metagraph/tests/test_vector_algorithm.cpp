@@ -656,43 +656,6 @@ TEST(bit_vector, to_sdsl) {
     }
 }
 
-TEST(bit_vector, autocorrelate) {
-    std::vector<std::tuple<sdsl::bit_vector, sdsl::bit_vector, uint8_t>> results {
-        { sdsl::bit_vector({}), sdsl::bit_vector({}), 5 },
-        { sdsl::bit_vector({ 0, 0, 0, 0, 0 }), sdsl::bit_vector({ 0, 0, 0, 0, 0 }), 5 },
-        { sdsl::bit_vector({ 1, 1, 1, 1, 1 }), sdsl::bit_vector({ 1, 1, 1, 1, 1 }), 5 },
-        { sdsl::bit_vector({ 1, 1, 1, 1, 1 }), sdsl::bit_vector({ 1, 1, 1, 1, 1 }), 4 },
-        { sdsl::bit_vector({ 1, 1, 1, 1, 1 }), sdsl::bit_vector({ 1, 1, 1, 1, 1 }), 3 },
-        { sdsl::bit_vector({ 1, 1, 1, 1, 1 }), sdsl::bit_vector({ 1, 1, 1, 1, 1 }), 2 },
-        { sdsl::bit_vector({ 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0,
-                             0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0,
-                             0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0,
-                             0, 0, 0, 0, 0, 0, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-                             0, 0, 0, 0, 0, 0, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0  }),
-          sdsl::bit_vector({ 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-                             0, 0, 0, 0, 0, 0, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-                             0, 0, 0, 0, 0, 0, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-                             0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-                             0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0  }), 3},
-    };
-
-    for (const auto &[input, output, offset] : results) {
-        sdsl::bit_vector reference(input);
-
-        if (input.size() >= offset) {
-            for (size_t i = 0; i < reference.size(); ++i) {
-                for (uint8_t j = 1; j < offset && i + j < reference.size(); ++j) {
-                    reference[i] = reference[i] && input[i + j];
-                }
-            }
-        }
-
-        ASSERT_EQ(reference, output);
-        EXPECT_EQ(reference, autocorrelate(input, offset));
-    };
-}
-
-
 TEST(select_support_scan_offset, vector_zeros) {
     sdsl::bit_vector bv(156, false);
     sdsl::select_support_scan_offset<0> select(&bv);

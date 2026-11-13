@@ -516,69 +516,6 @@ void compute_subindex(const bit_vector &column,
 #endif
 }
 
-inline uint128_t pushback_epi64(const uint128_t &v, const uint128_t &a) {
-    return (v >> 64) | (a << 64);
-}
-
-sdsl::bit_vector autocorrelate(const sdsl::bit_vector &vector, uint8_t offset) {
-    assert(offset < 64);
-
-    if (vector.size() < offset)
-        return vector;
-
-    auto presence = vector;
-
-    // process one word at a time
-    // TODO: is it worth vectorizing this?
-    size_t i = 0;
-    auto dword = uint128_t(vector.data()[0]) << 64;
-    for ( ; i + 64 <= presence.size() - offset + 1; i += 64) {
-        dword = pushback_epi64(dword, vector.data()[(i >> 6) + 1]);
-        for (uint8_t j = 1; j < offset; ++j) {
-            presence.data()[i >> 6] &= uint64_t(dword >> j);
-        }
-    }
-
-    assert(presence.size() - i >= static_cast<size_t>(offset) - 1);
-    assert(presence.size() - i <= 128 - static_cast<size_t>(offset) + 1);
-
-    // handle last word
-    if (vector.size() - i <= 64) {
-        uint64_t word = vector.get_int(i, vector.size() - i);
-        uint64_t word_masked = word;
-        uint64_t mask = 0;
-        for (uint8_t j = 1; j < offset; ++j) {
-            mask |= uint64_t(1) << (vector.size() - i - j);
-            word_masked &= (word >> j) | mask;
-        }
-
-        presence.set_int(i, word_masked, vector.size() - i);
-
-    } else {
-        dword = pushback_epi64(dword, vector.data()[(i >> 6) + 1])
-            | (uint128_t((1llu << offset) - 1) << (vector.size() - i));
-        uint128_t dword_masked = dword;
-        for (uint8_t j = 1; j < offset; ++j) {
-            dword_masked &= dword >> j;
-        }
-        presence.set_int(i, uint64_t(dword_masked));
-        presence.set_int(i + 64, uint64_t(dword_masked >> 64), vector.size() - i - 64);
-    }
-
-#ifndef NDEBUG
-    for (size_t i = 0; i < presence.size(); ++i) {
-        bool b = vector[i];
-        for (uint8_t j = 1; j < offset && i + j < presence.size(); ++j) {
-            b &= vector[i + j];
-        }
-        assert(b == presence[i]);
-    }
-#endif
-
-    return presence;
-}
-
-
 uint64_t footprint_sd_vector(uint64_t size, uint64_t num_set_bits) {
     uint8_t logn = sdsl::bits::hi(size) + 1;
     uint8_t logm = sdsl::bits::hi(num_set_bits) + 1;
