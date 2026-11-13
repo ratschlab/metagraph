@@ -1528,7 +1528,33 @@ AnnotatedDBG::get_kmer_coordinates(std::string_view sequence,
     if (!tuple_matrix)
         throw std::runtime_error("k-mer coordinates are not indexed in this annotator");
 
-    auto rows_tuples = tuple_matrix->get_row_tuples(row_indices);
+    // Each distinct row is decoded once (as get_header_results decodes them), its positions
+    // still counted separately: a row was decoded and held once per query position, so a
+    // k-mer the query repeats m times held m copies of its coordinates (8 B x m x the row's
+    // coordinates: GBs for a homopolymer query, T5b-Y3). |rows|: the distinct rows in the
+    // order of their first position; |row_of|: the index in |rows| of each present position's
+    // row; |due|: the number of positions of each row
+    std::vector<row_index> rows;
+    std::vector<size_t> row_of(row_indices.size());
+    std::vector<size_t> due;
+    {
+        tsl::hopscotch_map<row_index, size_t> index_of;
+        index_of.reserve(row_indices.size());
+        for (size_t i = 0; i < row_indices.size(); ++i) {
+            auto [it, inserted] = index_of.emplace(row_indices[i], rows.size());
+            if (inserted) {
+                rows.push_back(row_indices[i]);
+                due.push_back(0);
+            }
+            row_of[i] = it->second;
+            ++due[it->second];
+        }
+    } // the hash table is released before the rows are decoded
+    row_indices = std::vector<row_index>();
+
+    // a row's content does not depend on the rows read with it, so that each position gets the
+    // row it got when every position's row was read
+    auto rows_tuples = tuple_matrix->get_row_tuples(rows);
 
     if (coord_to_header_) {
         // the constructor refused a mapping of another column count: a request never exits
@@ -1541,9 +1567,10 @@ AnnotatedDBG::get_kmer_coordinates(std::string_view sequence,
         coord_to_header_->map_to_local_coords(&rows_tuples);
         // Now each coord in `rows_tuples` is `coord = local_coord * num_sequences[j] + seq_id`
 
-        // the records ranked by the number of query positions they match
+        // the records ranked by the number of query positions they match: each row weighted by
+        // its positions
         auto top = top_header_matches(rows_tuples, *coord_to_header_, min_count,
-                                      num_top_labels, false, {}, cut);
+                                      num_top_labels, false, due, cut);
         tsl::hopscotch_map<Header, size_t> returned; // a record's index in |top|
         returned.reserve(top.size());
         for (size_t r = 0; r < top.size(); ++r) {
@@ -1551,21 +1578,46 @@ AnnotatedDBG::get_kmer_coordinates(std::string_view sequence,
         }
 
         // split coordinates across sequences, each record's held at the positions it matches
-        // (or as a list per position where that takes fewer bytes): the rows are in the order
-        // of the query's positions, which they are added in
+        // (or as a list per position where that takes fewer bytes): the query's positions are
+        // visited in ascending order, which they are added in, each position's coordinates in
+        // the order of its row. A row of one position is read from its tuples. A row of several
+        // positions gives, at its first position, the (returned record, local coordinate) of
+        // its coordinates in that order, which its other positions repeat; its tuples are
+        // released then, the list after its last position: per row at most 16 B a coordinate,
+        // where a copy of the row per position held 8 B a coordinate per position
         std::vector<PositionCoords> coords_of(top.size(), PositionCoords(num_kmers));
-        for (size_t i = 0; i < rows_tuples.size(); ++i) {
-            for (auto &[col, coords] : rows_tuples[i]) {
-                for (uint64_t coord : coords) {
-                    size_t header = coord % coord_to_header_->num_sequences(col);
-                    uint64_t local_coord = coord / coord_to_header_->num_sequences(col);
-                    auto it = returned.find({col, header});
-                    if (it != returned.end())
-                        coords_of[it->second].add(kmer_positions[i], local_coord);
+        std::vector<std::vector<std::pair<size_t, uint64_t>>> hits(rows_tuples.size());
+        std::vector<bool> found(rows_tuples.size(), false);
+        for (size_t i = 0; i < row_of.size(); ++i) {
+            const size_t d = row_of[i];
+            const size_t position = kmer_positions[i];
+            if (!found[d]) {
+                found[d] = true;
+                for (const auto &[col, coords] : rows_tuples[d]) {
+                    for (uint64_t coord : coords) {
+                        size_t header = coord % coord_to_header_->num_sequences(col);
+                        uint64_t local_coord = coord / coord_to_header_->num_sequences(col);
+                        auto it = returned.find({col, header});
+                        if (it == returned.end())
+                            continue;
+                        if (due[d] == 1) {
+                            coords_of[it->second].add(position, local_coord);
+                        } else {
+                            hits[d].emplace_back(it->second, local_coord);
+                        }
+                    }
                 }
-                coords.clear();
+                rows_tuples[d] = MultiIntMatrix::RowTuples();
+                if (due[d] == 1) {
+                    due[d] = 0;
+                    continue;
+                }
             }
-            rows_tuples[i].clear();
+            for (const auto &[r, local_coord] : hits[d]) {
+                coords_of[r].add(position, local_coord);
+            }
+            if (!--due[d])
+                hits[d] = std::vector<std::pair<size_t, uint64_t>>();
         }
         rows_tuples.clear();
 
@@ -1582,8 +1634,11 @@ AnnotatedDBG::get_kmer_coordinates(std::string_view sequence,
         return result;
     }
 
+    // each present position's row, in the order of the positions
     auto call_rows_tuples = [&](const auto &callback) {
-        std::for_each(rows_tuples.begin(), rows_tuples.end(), callback);
+        for (size_t d : row_of) {
+            callback(rows_tuples[d]);
+        }
     };
 
     // ties ordered by label: the coordinates are positions, not abundances
