@@ -203,10 +203,18 @@ mask_nodes_by_label(const AnnotatedDBG &anno_graph,
         CounterLocks counter_locks;
         std::atomic_thread_fence(std::memory_order_release);
 
+        // the positions a signature marks, in ascending order
+        auto call_marked = [](const PresenceRuns &b, const auto &callback) {
+            b.call_runs([&](size_t begin, size_t end) {
+                for (size_t i = begin; i < end; ++i) {
+                    callback(i);
+                }
+            });
+        };
         auto mask_or = [&](sdsl::bit_vector &a,
-                           const sdsl::bit_vector &b,
+                           const PresenceRuns &b,
                            const std::vector<node_index> &id_map) {
-            call_ones(b, [&](size_t i) {
+            call_marked(b, [&](size_t i) {
                 if (id_map[i])
                     set_bit(a.data(), id_map[i], parallel, std::memory_order_relaxed);
             });
@@ -214,10 +222,10 @@ mask_nodes_by_label(const AnnotatedDBG &anno_graph,
 
         counts.visit([&](auto &values) {
             auto count_merge = [&](sdsl::bit_vector &a,
-                                   const sdsl::bit_vector &b,
+                                   const PresenceRuns &b,
                                    const std::vector<node_index> &id_map,
                                    size_t offset = 0) {
-                call_ones(b, [&](size_t i) {
+                call_marked(b, [&](size_t i) {
                     if (id_map[i]) {
                         set_bit(a.data(), id_map[i], parallel, std::memory_order_relaxed);
                         atomic_add(values, id_map[i] * 2 + offset, 1, counter_locks);

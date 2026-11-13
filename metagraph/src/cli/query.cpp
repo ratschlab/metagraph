@@ -1,6 +1,7 @@
 #include "query.hpp"
 
 #include <exception>
+#include <iterator>
 #include <mutex>
 #include <sstream>
 
@@ -52,6 +53,42 @@ std::string get_range(const std::tuple<uint64_t, uint64_t, uint64_t> &range) {
     }
 }
 
+using Range = std::tuple<uint64_t, uint64_t, uint64_t>;
+
+// Process the coordinates |coords| of query position |i| in collapse_coord_ranges: extend
+// the open |ranges| they continue, write out those they end and open one for each other
+void collapse_position(size_t i,
+                       const SmallVector<uint64_t> &coords,
+                       std::vector<Range> &ranges,
+                       std::vector<Range> &next_ranges,
+                       std::vector<std::string> &range_strings) {
+    assert(std::is_sorted(coords.begin(), coords.end()));
+
+    size_t j = 0;
+    next_ranges.resize(0);
+
+    for (uint64_t coord : coords) {
+        while (j < ranges.size() && std::get<2>(ranges[j]) + 1 < coord) {
+            // end of range
+            range_strings.push_back(get_range(ranges[j++]));
+        }
+
+        if (j < ranges.size() && std::get<2>(ranges[j]) + 1 == coord) {
+            // extend range
+            next_ranges.push_back(ranges[j++]);
+            std::get<2>(next_ranges.back())++;
+        } else {
+            // start new range
+            next_ranges.emplace_back(i, coord, coord);
+        }
+    }
+    while (j < ranges.size()) {
+        range_strings.push_back(get_range(ranges[j++]));
+    }
+
+    ranges.swap(next_ranges);
+}
+
 /**
  * Given a vector of kmer label matched coordinates, collapse continuous ranges of coordinates
  * to start-end tuples.
@@ -62,47 +99,56 @@ std::string get_range(const std::tuple<uint64_t, uint64_t, uint64_t> &range) {
  */
 std::vector<std::string>
 collapse_coord_ranges(const std::vector<SmallVector<uint64_t>> &tuples) {
-    // Build output
+    return collapse_coord_ranges(graph::PositionCoords(tuples));
+}
+
+std::vector<std::string>
+collapse_coord_ranges(const graph::PositionCoords &coords) {
     std::vector<std::string> range_strings;
+    std::vector<Range> ranges;
+    std::vector<Range> next_ranges;
+    const SmallVector<uint64_t> none;
 
-    // Keep track of the ranges: start position, first coord, last coord
-    std::vector<std::tuple<uint64_t, uint64_t, uint64_t>> ranges;
-    std::vector<std::tuple<uint64_t, uint64_t, uint64_t>> next_ranges;
+    size_t next = 0;
+    coords.call_positions([&](size_t i, const SmallVector<uint64_t> &position_coords) {
+        // a position without coordinates ends all open ranges (the positions after it
+        // find none open)
+        if (i > next)
+            collapse_position(next, none, ranges, next_ranges, range_strings);
+        collapse_position(i, position_coords, ranges, next_ranges, range_strings);
+        next = i + 1;
+    });
 
-    for (size_t i = 0; i < tuples.size(); ++i) {
-        const auto &coords = tuples[i];
-        assert(std::is_sorted(coords.begin(), coords.end()));
-
-        size_t j = 0;
-        next_ranges.resize(0);
-
-        for (uint64_t coord : coords) {
-            while (j < ranges.size() && std::get<2>(ranges[j]) + 1 < coord) {
-                // end of range
-                range_strings.push_back(get_range(ranges[j++]));
-            }
-
-            if (j < ranges.size() && std::get<2>(ranges[j]) + 1 == coord) {
-                // extend range
-                next_ranges.push_back(ranges[j++]);
-                std::get<2>(next_ranges.back())++;
-            } else {
-                // start new range
-                next_ranges.emplace_back(i, coord, coord);
-            }
-        }
-        while (j < ranges.size()) {
-            range_strings.push_back(get_range(ranges[j++]));
-        }
-
-        ranges.swap(next_ranges);
-    }
-
+    // the positions without coordinates after the last one end the ranges as the end does
     for (const auto &range : ranges) {
         range_strings.push_back(get_range(range));
     }
 
     return range_strings;
+}
+
+// Append the run [first, end) of the count |value| to |out|
+void append_count_run(std::string &out, size_t first, size_t end, size_t value) {
+    if (end == first + 1) {
+        fmt::format_to(std::back_inserter(out), "{}={}", first, value);
+    } else {
+        fmt::format_to(std::back_inserter(out), "{}-{}={}", first, end - 1, value);
+    }
+}
+
+std::vector<std::string> count_run_strings(const graph::CountRuns &counts) {
+    std::vector<std::string> run_strings;
+    counts.call_runs([&](size_t first, size_t end, size_t value) {
+        append_count_run(run_strings.emplace_back(), first, end, value);
+    });
+    return run_strings;
+}
+
+// score_kmer_presence_mask of the mask, from its runs
+int32_t presence_mask_score(size_t k, const graph::PresenceRuns &mask) {
+    return align::score_kmer_presence_mask(k, mask.size(), [&](const auto &callback) {
+        mask.call_runs(callback);
+    });
 }
 
 
@@ -207,10 +253,11 @@ Json::Value SeqSearchResult::to_json(bool verbose_output, size_t k) const {
             Json::Value &label_obj = root["results"].append(get_label_as_json(label));
             // Store the presence mask and score in a separate object
             Json::Value &sig_obj = (label_obj[SIGNATURE_FIELD] = Json::objectValue);
+            // the full mask only with verbose output (one character per k-mer)
             sig_obj["presence_mask"] = Json::Value(verbose_output
-                ? sdsl::util::to_string(kmer_presence_mask)
+                ? sdsl::util::to_string(kmer_presence_mask.to_dense())
                 : encode_presence_mask(kmer_presence_mask));
-            sig_obj["score"] = Json::Value(align::score_kmer_presence_mask(k, kmer_presence_mask));
+            sig_obj["score"] = Json::Value(presence_mask_score(k, kmer_presence_mask));
             // Add kmer_counts calculated using bitmask
             label_obj[KMER_COUNT_FIELD] = static_cast<Json::Int64>(count);
         }
@@ -221,32 +268,11 @@ Json::Value SeqSearchResult::to_json(bool verbose_output, size_t k) const {
             Json::Value &label_obj = root["results"].append(get_label_as_json(label));
             label_obj[KMER_COUNT_FIELD] = static_cast<Json::Int64>(count);
             if (verbose_output) {
-                label_obj[KMER_ABUNDANCE_FIELD] = fmt::format("{}", fmt::join(abundances, ":"));
-            } else {
-                std::vector<std::string> run_strings;
-                std::pair<size_t, size_t> last(0, abundances.at(0));
-                for (size_t i = 1; i <= abundances.size(); ++i) {
-                    if (i < abundances.size() && abundances[i] == last.second)
-                        continue; // extend run
-
-                    // end of run
-                    if (last.second) {
-                        if (i == last.first + 1) {
-                            run_strings.push_back(fmt::format("{}={}", last.first, last.second));
-                        } else {
-                            run_strings.push_back(
-                                fmt::format("{}-{}={}", last.first, i - 1, last.second));
-                        }
-                    }
-
-                    // start new run
-                    if (i < abundances.size()) {
-                        last.first = i;
-                        last.second = abundances[i];
-                    }
-                }
                 label_obj[KMER_ABUNDANCE_FIELD]
-                    = fmt::format("{}", fmt::join(run_strings, ":"));
+                    = fmt::format("{}", fmt::join(abundances.to_dense(), ":"));
+            } else {
+                label_obj[KMER_ABUNDANCE_FIELD]
+                    = fmt::format("{}", fmt::join(count_run_strings(abundances), ":"));
             }
         }
     } else {
@@ -262,7 +288,7 @@ Json::Value SeqSearchResult::to_json(bool verbose_output, size_t k) const {
             if (verbose_output) {
                 std::vector<std::string> segments;
                 segments.reserve(tuples.size());
-                for (const auto &coords : tuples) {
+                for (const auto &coords : tuples.to_dense()) {
                     segments.push_back(fmt::format("{}", fmt::join(coords, ",")));
                 }
                 label_obj[KMER_COORDINATE_FIELD]
@@ -315,37 +341,22 @@ std::string SeqSearchResult::to_string(const std::string delimiter,
         for (const auto &[label, count, kmer_presence_mask] : *v) {
             output += fmt::format("\t<{}>:{}:{}:{}", label,
                                   count,
-                                  verbose_output ? sdsl::util::to_string(kmer_presence_mask)
-                                                 : encode_presence_mask(kmer_presence_mask),
-                                  align::score_kmer_presence_mask(k, kmer_presence_mask));
+                                  verbose_output
+                                      ? sdsl::util::to_string(kmer_presence_mask.to_dense())
+                                      : encode_presence_mask(kmer_presence_mask),
+                                  presence_mask_score(k, kmer_presence_mask));
         }
     } else if (const auto *v = std::get_if<LabelCountAbundancesVec>(&result_)) {
         // k-mer counts (or quantiles)
         for (const auto &[label, count, abundances] : *v) {
             output += "\t<" + label + ">";
             if (verbose_output) {
-                output += fmt::format(":{}", fmt::join(abundances, ":"));
+                output += fmt::format(":{}", fmt::join(abundances.to_dense(), ":"));
             } else {
-                std::pair<size_t, size_t> last(0, abundances.at(0));
-                for (size_t i = 1; i <= abundances.size(); ++i) {
-                    if (i < abundances.size() && abundances[i] == last.second)
-                        continue; // extend run
-
-                    // end of run
-                    if (last.second) {
-                        if (i == last.first + 1) {
-                            output += fmt::format(":{}={}", last.first, last.second);
-                        } else {
-                            output += fmt::format(":{}-{}={}", last.first, i - 1, last.second);
-                        }
-                    }
-
-                    // start new run
-                    if (i < abundances.size()) {
-                        last.first = i;
-                        last.second = abundances[i];
-                    }
-                }
+                abundances.call_runs([&](size_t first, size_t end, size_t value) {
+                    output += ':';
+                    append_count_run(output, first, end, value);
+                });
             }
         }
     } else {
@@ -358,7 +369,7 @@ std::string SeqSearchResult::to_string(const std::string delimiter,
             }
 
             if (verbose_output) {
-                for (const auto &coords : tuples) {
+                for (const auto &coords : tuples.to_dense()) {
                     output += fmt::format(":{}", fmt::join(coords, ","));
                 }
             } else {

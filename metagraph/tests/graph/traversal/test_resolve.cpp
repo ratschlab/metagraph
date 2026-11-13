@@ -7,6 +7,7 @@
 
 #include "tests/graph/all/test_dbg_helpers.hpp"
 #include "tests/annotation/test_annotated_dbg_helpers.hpp"
+#include "tests/annotation/dense_search_values.hpp"
 #include "tests/graph/traversal/traversal_test_helpers.hpp"
 
 #include "graph/traversal/resolve.hpp"
@@ -81,7 +82,7 @@ TYPED_TEST(ResolveTest, ThreeStatesAndRuns) {
         EXPECT_EQ(90u, B.kmers_supported);
 
         // agreement with the signature API for the labels present
-        auto sigs = anno->get_top_label_signatures(q, 10, 0.0, 0.0);
+        auto sigs = dense(anno->get_top_label_signatures(q, 10, 0.0, 0.0));
         for (const auto &[label, count, mask] : sigs) {
             const auto &lp = label == "A" ? A : B;
             EXPECT_EQ(count, lp.kmers_supported);
@@ -183,7 +184,7 @@ TYPED_TEST(ResolveCoordTest, NamedLabelsGiveTheSignatureProfiles) {
     for (const LabelProfile &lp : explicit_.labels) {
         by_name[lp.label.name] = &lp;
     }
-    const auto signatures = anno->get_top_label_signatures(q, labels.size(), 0.0, 0.0);
+    const auto signatures = dense(anno->get_top_label_signatures(q, labels.size(), 0.0, 0.0));
     ASSERT_GT(signatures.size(), 200u);
     for (const auto &[name, count, mask] : signatures) {
         const LabelProfile &e = *by_name.at(name);

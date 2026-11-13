@@ -1,5 +1,7 @@
 #include "gtest/gtest.h"
 
+#include <random>
+
 #include "common/vectors/bit_vector_sdsl.hpp"
 #include "common/vectors/vector_algorithm.hpp"
 #include "common/threads/threading.hpp"
@@ -595,6 +597,40 @@ TEST(bit_vector, to_sdsl_empty) {
     EXPECT_EQ(0u, to_sdsl(std::vector<uint8_t>()).size());
 }
 
+TEST(bit_vector, call_runs_of_ones) {
+    std::mt19937 gen(1);
+    for (size_t size : { 0, 1, 2, 63, 64, 65, 127, 128, 129, 200, 1000, 4096 }) {
+        for (double density : { 0.0, 0.02, 0.5, 0.98, 1.0 }) {
+            sdsl::bit_vector vector(size, false);
+            std::bernoulli_distribution bit(density);
+            for (size_t i = 0; i < size; ++i) {
+                vector[i] = bit(gen);
+            }
+            // whole words of ones and of zeros
+            for (size_t i = 64; i + 64 <= size; i += 192) {
+                for (size_t j = i; j < i + 64; ++j) {
+                    vector[j] = (i / 64) % 2;
+                }
+            }
+            std::vector<std::pair<uint64_t, uint64_t>> expected;
+            for (size_t i = 0; i < size; ++i) {
+                if (!vector[i])
+                    continue;
+                if (!expected.empty() && expected.back().second == i) {
+                    ++expected.back().second;
+                } else {
+                    expected.emplace_back(i, i + 1);
+                }
+            }
+            std::vector<std::pair<uint64_t, uint64_t>> runs;
+            call_runs_of_ones(vector, [&](uint64_t begin, uint64_t end) {
+                runs.emplace_back(begin, end);
+            });
+            EXPECT_EQ(expected, runs) << size << " " << density;
+        }
+    }
+}
+
 TEST(bit_vector, to_sdsl_zeros) {
     for (size_t i = 0; i < 1025; ++i) {
         auto vector_bool = to_sdsl(std::vector<bool>(i, false));
@@ -655,43 +691,6 @@ TEST(bit_vector, to_sdsl) {
         EXPECT_EQ(ranks[i], c.rank1(i));
     }
 }
-
-TEST(bit_vector, autocorrelate) {
-    std::vector<std::tuple<sdsl::bit_vector, sdsl::bit_vector, uint8_t>> results {
-        { sdsl::bit_vector({}), sdsl::bit_vector({}), 5 },
-        { sdsl::bit_vector({ 0, 0, 0, 0, 0 }), sdsl::bit_vector({ 0, 0, 0, 0, 0 }), 5 },
-        { sdsl::bit_vector({ 1, 1, 1, 1, 1 }), sdsl::bit_vector({ 1, 1, 1, 1, 1 }), 5 },
-        { sdsl::bit_vector({ 1, 1, 1, 1, 1 }), sdsl::bit_vector({ 1, 1, 1, 1, 1 }), 4 },
-        { sdsl::bit_vector({ 1, 1, 1, 1, 1 }), sdsl::bit_vector({ 1, 1, 1, 1, 1 }), 3 },
-        { sdsl::bit_vector({ 1, 1, 1, 1, 1 }), sdsl::bit_vector({ 1, 1, 1, 1, 1 }), 2 },
-        { sdsl::bit_vector({ 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0,
-                             0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0,
-                             0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0,
-                             0, 0, 0, 0, 0, 0, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-                             0, 0, 0, 0, 0, 0, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0  }),
-          sdsl::bit_vector({ 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-                             0, 0, 0, 0, 0, 0, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-                             0, 0, 0, 0, 0, 0, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-                             0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-                             0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0  }), 3},
-    };
-
-    for (const auto &[input, output, offset] : results) {
-        sdsl::bit_vector reference(input);
-
-        if (input.size() >= offset) {
-            for (size_t i = 0; i < reference.size(); ++i) {
-                for (uint8_t j = 1; j < offset && i + j < reference.size(); ++j) {
-                    reference[i] = reference[i] && input[i + j];
-                }
-            }
-        }
-
-        ASSERT_EQ(reference, output);
-        EXPECT_EQ(reference, autocorrelate(input, offset));
-    };
-}
-
 
 TEST(select_support_scan_offset, vector_zeros) {
     sdsl::bit_vector bv(156, false);

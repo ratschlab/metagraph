@@ -9,7 +9,7 @@
 
 #include "representation/base/sequence_graph.hpp"
 #include "annotation/representation/base/annotation.hpp"
-#include "common/vector.hpp"
+#include "position_values.hpp"
 #include "annotation/coord_to_header.hpp"
 
 
@@ -116,8 +116,12 @@ class AnnotatedDBG : public AnnotatedSequenceGraph {
                    double presence_fraction = 0.0,
                    bool with_kmer_counts = false) const;
 
+    // The per-position queries below hold each label's values only at the positions
+    // it matches (PresenceRuns, CountRuns, PositionCoords), so their memory grows with
+    // the matches, not with the labels returned times the k-mers of the query.
+
     // returns tuples (label, num_kmer_matches, kmer_abundances)
-    std::vector<std::tuple<Label, size_t, std::vector<size_t>>>
+    std::vector<std::tuple<Label, size_t, CountRuns>>
     get_kmer_counts(std::string_view sequence,
                     size_t num_top_labels,
                     double discovery_fraction,
@@ -127,7 +131,7 @@ class AnnotatedDBG : public AnnotatedSequenceGraph {
     // num_kmers_in_target is 0 when no CoordToHeader mapping is loaded (the
     // label refers to a whole annotation column rather than a single indexed
     // sequence).
-    std::vector<std::tuple<Label, size_t, std::vector<SmallVector<uint64_t>>, size_t>>
+    std::vector<std::tuple<Label, size_t, PositionCoords, size_t>>
     get_kmer_coordinates(std::string_view sequence,
                          size_t num_top_labels,
                          double discovery_fraction,
@@ -136,7 +140,7 @@ class AnnotatedDBG : public AnnotatedSequenceGraph {
     // With |num_passed|, also report how many labels passed the thresholds, before the cut
     // to |num_top_labels|. With |header_labels| false, rank annotation columns even when a
     // CoordToHeader mapping is loaded.
-    std::vector<std::tuple<Label, size_t, sdsl::bit_vector>>
+    std::vector<std::tuple<Label, size_t, PresenceRuns>>
     get_top_label_signatures(std::string_view sequence,
                              size_t num_top_labels,
                              double discovery_fraction = 0.0,
@@ -158,6 +162,8 @@ class AnnotatedDBG : public AnnotatedSequenceGraph {
 // Encode a k-mer presence bitmask as alternating x<len>o<len>... runs (x = ones,
 // o = zeros), trailing zeros included. Example: 11100110 -> x3o2x2o1
 std::string encode_presence_mask(const sdsl::bit_vector &mask);
+// The same string, from the runs of the mask
+std::string encode_presence_mask(const PresenceRuns &mask);
 
 } // namespace graph
 } // namespace mtg

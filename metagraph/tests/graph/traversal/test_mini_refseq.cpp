@@ -10,6 +10,7 @@
 
 #include "tests/graph/traversal/walker_test_helpers.hpp"
 #include "tests/graph/traversal/test_trie_reference.hpp"
+#include "tests/annotation/dense_search_values.hpp"
 
 #include "graph/traversal/resolve.hpp"
 #include "seq_io/sequence_io.hpp"
@@ -115,7 +116,7 @@ class MiniRefSeq : public ::testing::Test {
     std::vector<std::tuple<std::string, size_t, sdsl::bit_vector>>
     header_signatures(const std::string &query) const {
         size_t total = 0;
-        auto signatures = anno_graph_->get_top_label_signatures(query, 1000, 0.0, 0.0, &total, true);
+        auto signatures = dense(anno_graph_->get_top_label_signatures(query, 1000, 0.0, 0.0, &total, true));
         EXPECT_EQ(total, signatures.size());
         return signatures;
     }

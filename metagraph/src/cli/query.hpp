@@ -15,6 +15,7 @@
 
 #include "common/vector.hpp"
 #include "graph/alignment/alignment.hpp"
+#include "graph/annotated_dbg.hpp"
 
 namespace mtg {
 
@@ -48,6 +49,16 @@ using StringGenerator = std::function<void(std::function<void(const std::string 
 std::vector<std::string>
 collapse_coord_ranges(const std::vector<SmallVector<uint64_t>> &tuples);
 
+// The same ranges for the coordinates per query position that |coords| stands for
+std::vector<std::string>
+collapse_coord_ranges(const graph::PositionCoords &coords);
+
+/**
+ * Format the runs of one nonzero k-mer count as '<i>=<v>' for a run of one position
+ * and '<i>-<j>=<v>' otherwise, in order of position (runs of zeros are left out).
+ */
+std::vector<std::string> count_run_strings(const graph::CountRuns &counts);
+
 
 // Simple struct to wrap a query sequence
 struct QuerySequence {
@@ -78,12 +89,12 @@ class SeqSearchResult {
     typedef std::string Label;
     typedef std::vector<Label> LabelVec;
     typedef std::vector<std::pair<Label, size_t>> LabelCountVec;
-    typedef std::vector<std::tuple<Label, size_t, sdsl::bit_vector>> LabelSigVec;
-    typedef std::vector<std::tuple<Label, size_t, std::vector<size_t>>> LabelCountAbundancesVec;
+    typedef std::vector<std::tuple<Label, size_t, graph::PresenceRuns>> LabelSigVec;
+    typedef std::vector<std::tuple<Label, size_t, graph::CountRuns>> LabelCountAbundancesVec;
     // (label, num_kmer_matches, kmer_coordinates, num_kmers_in_target). The last
     // element is 0 when no CoordToHeader mapping is loaded (the label refers to
     // a whole annotation column rather than a single indexed sequence).
-    typedef std::vector<std::tuple<Label, size_t, std::vector<SmallVector<uint64_t>>, size_t>> LabelCountCoordsVec;
+    typedef std::vector<std::tuple<Label, size_t, graph::PositionCoords, size_t>> LabelCountCoordsVec;
 
     typedef std::variant<LabelVec,
                          LabelCountVec,
