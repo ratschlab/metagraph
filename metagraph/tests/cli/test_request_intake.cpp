@@ -881,8 +881,9 @@ TEST(ServerRequestIntake, SearchBodiesAreCountedAsTheirReaderReadsThem) {
         const uint64_t values = values_of(*tree);
         EXPECT_EQ(values, count_lenient_json_values(body, 0)) << body;
         EXPECT_TRUE(search_fits(body, values)) << body;
-        if (values > 1)
+        if (values > 1) {
             EXPECT_FALSE(search_fits(body, values - 1)) << body;
+        }
         EXPECT_TRUE(search_fits(body, 0)) << body;
     }
     // a member named twice is counted each time: the reader reads both values (it keeps the last)

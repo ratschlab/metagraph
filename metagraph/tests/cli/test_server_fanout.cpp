@@ -1380,8 +1380,9 @@ TEST(ServerFanout, QueuedTasksHoldNoBodyOnceEveryPairIsDecided) {
             EXPECT_EQ(how == "gone", out.client_gone);
             ASSERT_EQ(3u, out.entries.size());
             for (const Json::Value &e : out.entries) {
-                if (how != "gone")
+                if (how != "gone") {
                     EXPECT_EQ("not_reached", e["refusal"]["code"].asString());
+                }
             }
             EXPECT_EQ(3u, queued.size());
         }
