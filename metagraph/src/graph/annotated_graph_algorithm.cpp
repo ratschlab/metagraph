@@ -205,11 +205,11 @@ mask_nodes_by_label(const AnnotatedDBG &anno_graph,
 
         // the positions a label's signature marks, in ascending order
         auto call_marked = [](const PresenceRuns &b, const auto &callback) {
-            for (const auto &[begin, end] : b.runs) {
+            b.call_runs([&](size_t begin, size_t end) {
                 for (size_t i = begin; i < end; ++i) {
                     callback(i);
                 }
-            }
+            });
         };
         auto mask_or = [&](sdsl::bit_vector &a,
                            const PresenceRuns &b,

@@ -128,20 +128,17 @@ collapse_coord_ranges(const graph::PositionCoords &coords) {
     std::vector<Range> next_ranges;
     const SmallVector<uint64_t> none;
 
-    size_t c = 0;
-    size_t last_end = 0;
-    for (const auto &[begin, end] : coords.runs) {
-        // the positions without coordinates before the run end every range open (the first
-        // of them does, the others find none)
-        if (begin > last_end)
-            collapse_position(last_end, none, ranges, next_ranges, range_strings);
-        for (size_t i = begin; i < end; ++i) {
-            collapse_position(i, coords.coords[c++], ranges, next_ranges, range_strings);
-        }
-        last_end = end;
-    }
-    assert(c == coords.coords.size());
-    // a position without coordinates after the last run ends the ranges as the end does
+    size_t next = 0;
+    coords.call_positions([&](size_t i, const SmallVector<uint64_t> &position_coords) {
+        // the positions without coordinates before |i| end every range open (the first of
+        // them does, the others find none)
+        if (i > next)
+            collapse_position(next, none, ranges, next_ranges, range_strings);
+        collapse_position(i, position_coords, ranges, next_ranges, range_strings);
+        next = i + 1;
+    });
+    // a position without coordinates after the last one with coordinates ends the ranges as
+    // the end does
 
     for (const auto &range : ranges) {
         range_strings.push_back(get_range(range));
@@ -191,8 +188,8 @@ std::string encode_presence_mask(const sdsl::bit_vector &mask) {
 std::string encode_presence_mask(const graph::PresenceRuns &mask) {
     std::string result;
     size_t pos = 0;
-    for (const auto &[begin, end] : mask.runs) {
-        // canonical runs: none empty, no two adjacent
+    mask.call_runs([&](size_t begin, size_t end) {
+        // maximal runs: none empty, no two adjacent
         assert(begin < end && end <= mask.size);
         assert(begin > pos || (begin == 0 && pos == 0));
         if (begin > pos) {
@@ -202,7 +199,7 @@ std::string encode_presence_mask(const graph::PresenceRuns &mask) {
         result += 'x';
         result += std::to_string(end - begin);
         pos = end;
-    }
+    });
     if (pos < mask.size) {
         result += 'o';
         result += std::to_string(mask.size - pos);
@@ -212,22 +209,22 @@ std::string encode_presence_mask(const graph::PresenceRuns &mask) {
 
 std::vector<std::string> count_run_strings(const graph::CountRuns &counts) {
     std::vector<std::string> run_strings;
-    for (size_t r = 0; r < counts.runs.size(); ) {
-        const size_t first = counts.runs[r].begin;
-        const size_t value = counts.runs[r].value;
-        size_t end = counts.runs[r].end;
-        // the runs of one value are maximal, as the positions of the vector they stand for
-        for (++r; r < counts.runs.size() && counts.runs[r].begin == end
-                                         && counts.runs[r].value == value; ++r) {
-            end = counts.runs[r].end;
-        }
+    // the runs of one value are maximal, as the positions of the vector they stand for
+    counts.call_runs([&](size_t first, size_t end, size_t value) {
         if (end == first + 1) {
             run_strings.push_back(fmt::format("{}={}", first, value));
         } else {
             run_strings.push_back(fmt::format("{}-{}={}", first, end - 1, value));
         }
-    }
+    });
     return run_strings;
+}
+
+// score_kmer_presence_mask of the mask, from its runs
+static int32_t presence_mask_score(size_t k, const graph::PresenceRuns &mask) {
+    return graph::align::score_kmer_presence_mask(k, mask.size, [&](const auto &callback) {
+        mask.call_runs(callback);
+    });
 }
 
 
@@ -317,8 +314,7 @@ Json::Value SeqSearchResult::to_json(bool verbose_output, size_t k) const {
             sig_obj["presence_mask"] = Json::Value(verbose_output
                 ? sdsl::util::to_string(kmer_presence_mask.to_dense())
                 : encode_presence_mask(kmer_presence_mask));
-            sig_obj["score"] = Json::Value(align::score_kmer_presence_mask(
-                    k, kmer_presence_mask.size, kmer_presence_mask.runs));
+            sig_obj["score"] = Json::Value(presence_mask_score(k, kmer_presence_mask));
             // Add kmer_counts calculated using bitmask
             label_obj[KMER_COUNT_FIELD] = static_cast<Json::Int64>(count);
         }
@@ -427,8 +423,7 @@ std::string SeqSearchResult::to_string(const std::string delimiter,
                                   verbose_output
                                       ? sdsl::util::to_string(kmer_presence_mask.to_dense())
                                       : encode_presence_mask(kmer_presence_mask),
-                                  align::score_kmer_presence_mask(k, kmer_presence_mask.size,
-                                                                  kmer_presence_mask.runs));
+                                  presence_mask_score(k, kmer_presence_mask));
         }
     } else if (const auto *v = std::get_if<LabelCountAbundancesVec>(&result_)) {
         // k-mer counts (or quantiles)

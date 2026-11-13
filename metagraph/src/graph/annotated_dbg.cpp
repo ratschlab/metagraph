@@ -546,69 +546,205 @@ search_top_n(const std::vector<size_t> &scores,
     return result;
 }
 
-PresenceRuns::PresenceRuns(const sdsl::bit_vector &mask) : size(mask.size()) {
+namespace {
+
+// the largest position a run of 32-bit positions takes (its end): a query of more k-mers is
+// held densely from the start
+constexpr size_t kMaxRunsSize = std::numeric_limits<uint32_t>::max();
+
+// Room for one more element in |v| within |budget| bytes of buffer: its capacity doubled, at
+// most what |budget| holds; false if |budget| holds no more elements than |v| has
+template <typename T>
+bool grow_within(std::vector<T> &v, size_t budget) {
+    const size_t max_capacity = budget / sizeof(T);
+    if (v.size() >= max_capacity)
+        return false;
+    v.reserve(std::min(max_capacity, std::max<size_t>(2, 2 * v.capacity())));
+    return true;
+}
+
+} // namespace
+
+PresenceRuns::PresenceRuns(size_t size) : size(size) {
+    if (size > kMaxRunsSize)
+        to_dense_form();
+}
+
+PresenceRuns::PresenceRuns(const sdsl::bit_vector &mask) : PresenceRuns(mask.size()) {
     for (size_t i = 0; i < mask.size(); ++i) {
         if (mask[i])
             add(i);
     }
 }
 
+bool PresenceRuns::grow() {
+    return grow_within(runs_, dense_bytes(size));
+}
+
+void PresenceRuns::to_dense_form() {
+    dense_ = sdsl::bit_vector(size, false);
+    dense_form_ = true;
+    for (const Run &run : runs_) {
+        mark(run.begin, run.end);
+    }
+    std::vector<Run>().swap(runs_);
+}
+
+void PresenceRuns::mark(size_t begin, size_t end) {
+    for (size_t i = begin; i < end; ++i) {
+        dense_[i] = true;
+    }
+}
+
 size_t PresenceRuns::count() const {
+    if (dense_form_)
+        return sdsl::util::cnt_one_bits(dense_);
     size_t count = 0;
-    for (const auto &[begin, end] : runs) {
-        count += end - begin;
+    for (const Run &run : runs_) {
+        count += run.end - run.begin;
     }
     return count;
 }
 
 sdsl::bit_vector PresenceRuns::to_dense() const {
+    if (dense_form_)
+        return dense_;
     sdsl::bit_vector mask(size, false);
-    for (const auto &[begin, end] : runs) {
-        for (size_t i = begin; i < end; ++i) {
+    for (const Run &run : runs_) {
+        for (size_t i = run.begin; i < run.end; ++i) {
             mask[i] = true;
         }
     }
     return mask;
 }
 
-CountRuns::CountRuns(const std::vector<size_t> &values) : size(values.size()) {
+size_t PresenceRuns::heap_bytes() const {
+    return dense_form_ ? dense_bytes(size) : runs_.capacity() * sizeof(Run);
+}
+
+bool PresenceRuns::operator==(const PresenceRuns &other) const {
+    return size == other.size && to_dense() == other.to_dense();
+}
+
+CountRuns::CountRuns(size_t size) : size(size) {
+    if (size > kMaxRunsSize)
+        to_dense_form();
+}
+
+CountRuns::CountRuns(const std::vector<size_t> &values) : CountRuns(values.size()) {
     for (size_t i = 0; i < values.size(); ++i) {
         add(i, values[i]);
     }
 }
 
+bool CountRuns::grow() {
+    return grow_within(runs_, dense_bytes(size));
+}
+
+void CountRuns::to_dense_form() {
+    dense_.assign(size, 0);
+    dense_form_ = true;
+    for (const Run &run : runs_) {
+        std::fill(dense_.begin() + run.begin, dense_.begin() + run.end, run.value);
+    }
+    std::vector<Run>().swap(runs_);
+}
+
 size_t CountRuns::count() const {
+    if (dense_form_)
+        return size - std::count(dense_.begin(), dense_.end(), size_t(0));
     size_t count = 0;
-    for (const Run &run : runs) {
+    for (const Run &run : runs_) {
         count += run.end - run.begin;
     }
     return count;
 }
 
 std::vector<size_t> CountRuns::to_dense() const {
+    if (dense_form_)
+        return dense_;
     std::vector<size_t> values(size, 0);
-    for (const Run &run : runs) {
+    for (const Run &run : runs_) {
         std::fill(values.begin() + run.begin, values.begin() + run.end, run.value);
     }
     return values;
 }
 
-PositionCoords::PositionCoords(const std::vector<Coords> &values) : size(values.size()) {
+size_t CountRuns::heap_bytes() const {
+    return dense_form_ ? dense_.capacity() * sizeof(size_t) : runs_.capacity() * sizeof(Run);
+}
+
+bool CountRuns::operator==(const CountRuns &other) const {
+    return size == other.size && to_dense() == other.to_dense();
+}
+
+PositionCoords::PositionCoords(size_t size) : size(size) {
+    if (size > kMaxRunsSize)
+        to_dense_form();
+}
+
+PositionCoords::PositionCoords(const std::vector<Coords> &values) : PositionCoords(values.size()) {
     for (size_t i = 0; i < values.size(); ++i) {
         add(i, Coords(values[i]));
     }
 }
 
-std::vector<PositionCoords::Coords> PositionCoords::to_dense() const {
-    std::vector<Coords> values(size);
+bool PositionCoords::open(size_t position) {
+    const bool new_run = runs_.empty() || runs_.back().end != position;
+    // the runs and the coordinates within the bytes of a coordinate list per position: each
+    // grows within what the other's capacity leaves
+    const size_t budget = dense_bytes(size);
+    if ((coords_.size() == coords_.capacity()
+            && !grow_within(coords_, budget - runs_.capacity() * sizeof(Run)))
+        || (new_run && runs_.size() == runs_.capacity()
+            && !grow_within(runs_, budget - coords_.capacity() * sizeof(Coords)))) {
+        to_dense_form();
+        return false;
+    }
+    if (new_run) {
+        runs_.push_back({ static_cast<uint32_t>(position), static_cast<uint32_t>(position + 1) });
+    } else {
+        ++runs_.back().end;
+    }
+    return true;
+}
+
+void PositionCoords::to_dense_form() {
+    dense_.resize(size);
+    dense_form_ = true;
     size_t c = 0;
-    for (const auto &[begin, end] : runs) {
-        for (size_t i = begin; i < end; ++i) {
-            values[i] = coords[c++];
+    for (const Run &run : runs_) {
+        for (size_t i = run.begin; i < run.end; ++i) {
+            dense_[i] = std::move(coords_[c++]);
         }
     }
-    assert(c == coords.size());
+    assert(c == coords_.size());
+    std::vector<Run>().swap(runs_);
+    std::vector<Coords>().swap(coords_);
+}
+
+size_t PositionCoords::count() const {
+    if (!dense_form_)
+        return coords_.size();
+    return std::count_if(dense_.begin(), dense_.end(),
+                         [](const Coords &coords) { return !coords.empty(); });
+}
+
+std::vector<PositionCoords::Coords> PositionCoords::to_dense() const {
+    if (dense_form_)
+        return dense_;
+    std::vector<Coords> values(size);
+    call_positions([&](size_t i, const Coords &coords) { values[i] = coords; });
     return values;
+}
+
+size_t PositionCoords::heap_bytes() const {
+    return dense_form_ ? dense_.capacity() * sizeof(Coords)
+                       : runs_.capacity() * sizeof(Run) + coords_.capacity() * sizeof(Coords);
+}
+
+bool PositionCoords::operator==(const PositionCoords &other) const {
+    return size == other.size && to_dense() == other.to_dense();
 }
 
 using ColumnMedians = std::function<std::vector<uint64_t>(const std::vector<Column> &)>;
@@ -1081,12 +1217,13 @@ AnnotatedDBG::get_header_results(std::string_view sequence, size_t num_top_label
                                 with_kmer_counts ? match.coordinates : match.kmers);
         }
     } else {
-        // Each record's values are held only at the positions it matches (a value of
-        // num_kmers per record made the memory the records returned times the query's
-        // k-mers): the query's positions are visited in ascending order, so that each
-        // record's runs are appended in order. A row's records and their occurrences in it
-        // are found at its first position and kept while its other positions are due; its
-        // decoded tuples are released then.
+        // Each record's values are held only at the positions it matches while that takes
+        // fewer bytes than a value of num_kmers (which made the memory the records returned
+        // times the query's k-mers), and as that value otherwise: the query's positions are
+        // visited in ascending order, so that each record's runs are appended in order, a
+        // block of consecutive positions of one row at once. A row's records and their
+        // occurrences in it are found at its first position and kept while its other
+        // positions are due; its decoded tuples are released then.
         tsl::hopscotch_map<Header, size_t> returned; // a record's index in |top|
         returned.reserve(top.size());
         for (size_t r = 0; r < top.size(); ++r) {
@@ -1099,10 +1236,17 @@ AnnotatedDBG::get_header_results(std::string_view sequence, size_t num_top_label
         // the positions of each row not visited yet
         std::vector<size_t> &due = weights;
         tsl::hopscotch_map<Header, size_t> occurrences;
-        for (size_t position = 0; position < num_kmers; ++position) {
+        for (size_t position = 0; position < num_kmers; ) {
             const size_t i = row_at[position];
-            if (i == kNoRow)
+            if (i == kNoRow) {
+                ++position;
                 continue;
+            }
+            // the positions [position, end) of row |i| (a k-mer repeated along the query)
+            size_t end = position + 1;
+            while (end < num_kmers && row_at[end] == i) {
+                ++end;
+            }
             if (!found[i]) {
                 found[i] = true;
                 occurrences.clear();
@@ -1120,15 +1264,18 @@ AnnotatedDBG::get_header_results(std::string_view sequence, size_t num_top_label
             }
             for (const auto &[r, count] : hits[i]) {
                 if constexpr (std::is_same_v<Values, PresenceRuns>) {
-                    values[r].add(position);
+                    values[r].add_run(position, end);
                 } else {
-                    values[r].add(position, count);
+                    values[r].add_run(position, end, count);
                 }
             }
-            if (!--due[i])
+            due[i] -= end - position;
+            if (!due[i])
                 hits[i] = std::vector<std::pair<size_t, size_t>>();
+            position = end;
         }
         for (size_t r = 0; r < top.size(); ++r) {
+            values[r].shrink();
             result.emplace_back(std::move(top[r].second), top[r].first.kmers,
                                 std::move(values[r]));
         }
@@ -1185,8 +1332,9 @@ Result filter_and_aggregate(const RowEnumerator &enumerate_rows,
     }
     candidates = decltype(candidates)();
 
-    // each label's values held at the positions it matches only; the rows are enumerated in
-    // the order of their positions, which the values are built in
+    // each label's values held at the positions it matches (or as a value per position where
+    // that takes fewer bytes); the rows are enumerated in the order of their positions, which
+    // the values are built in
     using ValueType = std::tuple_element_t<2, typename Result::value_type>;
     utils::ValueStore<Column, ValueType> value_store(label_encoder.size(), counts.size());
     for (const auto &[j, count] : counts) {
@@ -1215,7 +1363,9 @@ Result filter_and_aggregate(const RowEnumerator &enumerate_rows,
     result.reserve(counts.size());
     for (size_t r = 0; r < counts.size(); ++r) {
         const auto &[j, count] = counts[r];
-        result.emplace_back(std::move(top[r].second), count, std::move(*value_store.get(j)));
+        ValueType *value = value_store.get(j);
+        value->shrink();
+        result.emplace_back(std::move(top[r].second), count, std::move(*value));
     }
     return result;
 }
@@ -1401,7 +1551,8 @@ AnnotatedDBG::get_kmer_coordinates(std::string_view sequence,
         }
 
         // split coordinates across sequences, each record's held at the positions it matches
-        // only: the rows are in the order of the query's positions, which they are added in
+        // (or as a list per position where that takes fewer bytes): the rows are in the order
+        // of the query's positions, which they are added in
         std::vector<PositionCoords> coords_of(top.size(), PositionCoords(num_kmers));
         for (size_t i = 0; i < rows_tuples.size(); ++i) {
             for (auto &[col, coords] : rows_tuples[i]) {
@@ -1422,6 +1573,7 @@ AnnotatedDBG::get_kmer_coordinates(std::string_view sequence,
         result.reserve(top.size());
         for (size_t r = 0; r < top.size(); ++r) {
             const auto &[col, header] = top[r].first.header;
+            coords_of[r].shrink();
             result.emplace_back(std::move(top[r].second),
                                 top[r].first.kmers, std::move(coords_of[r]),
                                 coord_to_header_->num_kmers_in_sequence(col, header));
@@ -1482,6 +1634,7 @@ AnnotatedDBG::get_top_label_signatures(std::string_view sequence,
         // every position marked: one run
         PresenceRuns all(num_kmers);
         all.add_run(0, num_kmers);
+        all.shrink();
         for (auto&& [label, count] : label_counts) {
             presence_vectors.emplace_back(std::move(label), count, all);
         }

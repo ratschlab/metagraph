@@ -100,7 +100,7 @@ tabulate_score(const sdsl::bit_vector &presence, size_t correction = 0) {
 }
 
 // tabulate_score(autocorrelate(mask, offset), correction) of the mask of |size| positions whose
-// ones are the runs [first, second) of |runs| (ascending, none empty and no two adjacent),
+// ones are the runs [begin, end) |call_runs| gives (ascending, none empty and no two adjacent),
 // built from the runs: autocorrelate keeps a one if the next |offset| - 1 positions within
 // the mask are ones too, so a run that ends before the mask's end loses its last |offset| - 1
 // positions (and vanishes if it has no more), and keeps a mask shorter than |offset| as it is;
@@ -108,7 +108,7 @@ tabulate_score(const sdsl::bit_vector &presence, size_t correction = 0) {
 // plus |correction|.
 std::array<AlignedVector<size_t>, 2>
 tabulate_runs(size_t size,
-              const std::vector<std::pair<size_t, size_t>> &runs,
+              const CallPresentRuns &call_runs,
               uint8_t offset,
               size_t correction) {
     std::array<AlignedVector<size_t>, 2> table;
@@ -128,18 +128,18 @@ tabulate_runs(size_t size,
         last_size = length;
     };
     size_t pos = 0;
-    for (const auto &[begin, end] : runs) {
+    call_runs([&](size_t begin, size_t end) {
         assert(begin >= pos && begin < end && end <= size);
         size_t kept_end = end;
         if (size >= offset && end < size)
             kept_end = end - begin > shrink ? end - shrink : begin;
         if (kept_end == begin)
-            continue;
+            return;
         if (begin > pos)
             block(false, begin - pos);
         block(true, kept_end - begin);
         pos = kept_end;
-    }
+    });
     if (pos < size)
         block(false, size - pos);
     table[last_block].push_back(last_size);
@@ -198,13 +198,13 @@ int32_t score_kmer_presence_mask(size_t k,
 
 int32_t score_kmer_presence_mask(size_t k,
                                  size_t size,
-                                 const std::vector<std::pair<size_t, size_t>> &present_runs,
+                                 const CallPresentRuns &call_present_runs,
                                  int32_t match_score,
                                  int32_t mismatch_score) {
     if (!size)
         return 0;
 
-    return score_table(k, size, tabulate_runs(size, present_runs, kmer_adjust, 1),
+    return score_table(k, size, tabulate_runs(size, call_present_runs, kmer_adjust, 1),
                        kmer_adjust, match_score, mismatch_score);
 }
 
