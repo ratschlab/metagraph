@@ -57,11 +57,11 @@ using Range = std::tuple<uint64_t, uint64_t, uint64_t>;
 
 // Process the coordinates |coords| of query position |i| in collapse_coord_ranges: extend
 // the open |ranges| they continue, write out those they end and open one for each other
-static void collapse_position(size_t i,
-                              const SmallVector<uint64_t> &coords,
-                              std::vector<Range> &ranges,
-                              std::vector<Range> &next_ranges,
-                              std::vector<std::string> &range_strings) {
+void collapse_position(size_t i,
+                       const SmallVector<uint64_t> &coords,
+                       std::vector<Range> &ranges,
+                       std::vector<Range> &next_ranges,
+                       std::vector<std::string> &range_strings) {
     assert(std::is_sorted(coords.begin(), coords.end()));
 
     size_t j = 0;
@@ -160,7 +160,7 @@ std::vector<std::string> count_run_strings(const graph::CountRuns &counts) {
 }
 
 // score_kmer_presence_mask of the mask, from its runs
-static int32_t presence_mask_score(size_t k, const graph::PresenceRuns &mask) {
+int32_t presence_mask_score(size_t k, const graph::PresenceRuns &mask) {
     return align::score_kmer_presence_mask(k, mask.size(), [&](const auto &callback) {
         mask.call_runs(callback);
     });
