@@ -146,21 +146,34 @@ sdsl::bit_vector generate_subindex(const bit_vector &column,
                                    ThreadPool &thread_pool);
 
 // Call (uint64_t begin, uint64_t end) for each maximal run [begin, end) of set bits,
-// in ascending order
+// in ascending order. Scans a word at a time.
 template <class Callback>
 void call_runs_of_ones(const sdsl::bit_vector &vector, Callback callback) {
-    uint64_t begin = 0;
-    uint64_t end = 0;
-    call_ones(vector, [&](uint64_t i) {
-        if (i != end) {
-            if (begin < end)
-                callback(begin, end);
-            begin = i;
+    const uint64_t size = vector.size();
+    const uint64_t *words = vector.data();
+    const uint64_t num_words = (size + 63) / 64;
+    uint64_t i = 0;
+    while (i < size) {
+        // the first set bit at or after |i|
+        uint64_t w = i / 64;
+        uint64_t bits = words[w] & (~uint64_t(0) << (i % 64));
+        while (!bits) {
+            if (++w == num_words)
+                return;
+            bits = words[w];
         }
-        end = i + 1;
-    });
-    if (begin < end)
+        const uint64_t begin = w * 64 + sdsl::bits::lo(bits);
+        if (begin >= size)
+            return;
+        // the first unset bit after it
+        bits = ~words[w] & (~uint64_t(0) << (begin % 64));
+        while (!bits && ++w < num_words) {
+            bits = ~words[w];
+        }
+        const uint64_t end = bits ? std::min(size, w * 64 + sdsl::bits::lo(bits)) : size;
         callback(begin, end);
+        i = end;
+    }
 }
 
 

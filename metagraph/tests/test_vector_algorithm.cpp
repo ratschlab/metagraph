@@ -1,5 +1,7 @@
 #include "gtest/gtest.h"
 
+#include <random>
+
 #include "common/vectors/bit_vector_sdsl.hpp"
 #include "common/vectors/vector_algorithm.hpp"
 #include "common/threads/threading.hpp"
@@ -593,6 +595,40 @@ TEST(bit_vector, inner_prod_disjoint) {
 TEST(bit_vector, to_sdsl_empty) {
     EXPECT_EQ(0u, to_sdsl(std::vector<bool>()).size());
     EXPECT_EQ(0u, to_sdsl(std::vector<uint8_t>()).size());
+}
+
+TEST(bit_vector, call_runs_of_ones) {
+    std::mt19937 gen(1);
+    for (size_t size : { 0, 1, 2, 63, 64, 65, 127, 128, 129, 200, 1000, 4096 }) {
+        for (double density : { 0.0, 0.02, 0.5, 0.98, 1.0 }) {
+            sdsl::bit_vector vector(size, false);
+            std::bernoulli_distribution bit(density);
+            for (size_t i = 0; i < size; ++i) {
+                vector[i] = bit(gen);
+            }
+            // whole words of ones and of zeros
+            for (size_t i = 64; i + 64 <= size; i += 192) {
+                for (size_t j = i; j < i + 64; ++j) {
+                    vector[j] = (i / 64) % 2;
+                }
+            }
+            std::vector<std::pair<uint64_t, uint64_t>> expected;
+            for (size_t i = 0; i < size; ++i) {
+                if (!vector[i])
+                    continue;
+                if (!expected.empty() && expected.back().second == i) {
+                    ++expected.back().second;
+                } else {
+                    expected.emplace_back(i, i + 1);
+                }
+            }
+            std::vector<std::pair<uint64_t, uint64_t>> runs;
+            call_runs_of_ones(vector, [&](uint64_t begin, uint64_t end) {
+                runs.emplace_back(begin, end);
+            });
+            EXPECT_EQ(expected, runs) << size << " " << density;
+        }
+    }
 }
 
 TEST(bit_vector, to_sdsl_zeros) {
