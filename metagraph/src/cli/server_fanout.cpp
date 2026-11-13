@@ -689,8 +689,11 @@ std::atomic<size_t> g_fanouts_alive { 0 };
  * The COMPLETE state of one fan-out request, shared by its handler and every worker (each holds
  * a shared_ptr): the settings and the job (which holds the parsed request), the slots and the
  * stop flag. A worker that outlives the HTTP answer reads nothing else. |mutex| guards the
- * slots, |closed| and the transitions of the registry entry that decide an outcome (a pair
- * starting, the handler closing), so that a pair is either started or not_reached, never both.
+ * slots, |closed|, |job| and the transitions of the registry entry that decide an outcome (a
+ * pair starting, the handler closing), so that a pair is either started or not_reached, never
+ * both. The job is shared: a pair holds it while it runs, and the state lets it go once the
+ * handler has decided every pair (release_job_locked), so that a task still in the pool's
+ * queue, which never calls it then, holds nothing of the request's body.
  */
 class FanoutState {
   public:
@@ -710,7 +713,8 @@ class FanoutState {
     };
 
     FanoutState(FanoutSettings s, std::shared_ptr<RequestEntry> e, PairJob j)
-          : settings(std::move(s)), entry(std::move(e)), job(std::move(j)),
+          : settings(std::move(s)), entry(std::move(e)),
+            job(std::make_shared<PairJob>(std::move(j))),
             inline_run(settings.pairs.size() == 1), slots(settings.pairs.size()) {
         if (!settings.clock)
             settings.clock = []() { return SteadyClock::now(); };
@@ -854,6 +858,18 @@ class FanoutState {
             }
         }
         changed.notify_all();
+    }
+
+    // The handler has decided every pair (under |mutex|, |closed|): a task still in the pool's
+    // queue finds its pair resolved and never calls the job, which holds the request's parsed
+    // body (the route's lambda captures it), so the state lets the job go; a pair still running
+    // holds its own reference until it ends (run_pair). Returned to be freed outside the lock
+    // (Fable review 2026-11-12, medium: queued tasks of answered requests held their bodies,
+    // up to the body cap each, while the pool's workers were busy)
+    std::shared_ptr<const PairJob> release_job_locked() {
+        assert(closed);
+        assert(std::all_of(slots.begin(), slots.end(), [](const Slot &s) { return s.resolved; }));
+        return std::move(job);
     }
 
     // samples the worker's CPU time for the registry (the worker's thread, at most every
@@ -1005,6 +1021,8 @@ class FanoutState {
 
     // one pair, on the thread that took it
     static void run_pair(const std::shared_ptr<FanoutState> &self, size_t i) {
+        // the job, held while the pair runs (the handler may let the state's go meanwhile)
+        std::shared_ptr<const PairJob> job;
         {
             std::lock_guard<std::mutex> lock(self->mutex);
             Slot &slot = self->slots[i];
@@ -1025,12 +1043,15 @@ class FanoutState {
             }
             slot.start_usage = common::ThreadUsage::now();
             slot.next_sample = self->now();
+            // (a slot not resolved: the handler has not closed, the job is the state's)
+            assert(self->job);
+            job = self->job;
         }
         const common::ThreadUsage start = common::ThreadUsage::now();
         PairResult result;
         try {
             PairControl control(self, i);
-            result = self->job(control);
+            result = (*job)(control);
         } catch (...) {
             // a job answers its failures in its entry; anything that escapes it is the pair's
             // internal error, never the process's (a pool thread must not throw)
@@ -1046,7 +1067,8 @@ class FanoutState {
 
     FanoutSettings settings;
     std::shared_ptr<RequestEntry> entry;
-    PairJob job;
+    // null once the handler decided every pair (release_job_locked)
+    std::shared_ptr<const PairJob> job;
     const bool inline_run;
     std::function<bool()> inline_gone;
     // an inline pair's stop instant (PairControl::stop_at_cutoff), and whether its stop came
@@ -1136,6 +1158,9 @@ FanoutOutcome run_fanout(const FanoutSettings &settings,
     }
     const RequestDeadlines &d = state->settings.deadlines;
     const std::function<bool()> &gone = state->inline_gone;
+    // the job, once every pair is decided: freed here after the lock (declared before it), unless
+    // a pair still running holds it
+    std::shared_ptr<const PairJob> released;
     std::unique_lock<std::mutex> lock(state->mutex);
     auto all_resolved = [&]() {
         return std::all_of(state->slots.begin(), state->slots.end(),
@@ -1198,6 +1223,7 @@ FanoutOutcome run_fanout(const FanoutSettings &settings,
             if (!lock.owns_lock())
                 lock.lock();
             state->abandon_locked();
+            released = state->release_job_locked();
             state->inline_gone = nullptr;
             throw;
         }
@@ -1215,6 +1241,10 @@ FanoutOutcome run_fanout(const FanoutSettings &settings,
         state->closed = true;
         state->stop.store(true, std::memory_order_release);
     }
+    // every pair is decided: the tasks still queued hold no body (a task whose pair ran has
+    // ended; one queued finds its pair resolved)
+    if (state->closed)
+        released = state->release_job_locked();
     for (FanoutState::Slot &slot : state->slots) {
         if (slot.usage_final)
             outcome.pairs_usage.add(slot.usage);

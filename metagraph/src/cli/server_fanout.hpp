@@ -511,7 +511,9 @@ struct FanoutOutcome {
  * wait to be handed over; a pair not handed over by then is not_reached like a queued one. An
  * exception of |launch| closes the request, stops the workers handed over and ends every pair
  * not started (not_reached in |entry|), then leaves here: nothing is answered, and |entry|
- * ends once the caller records the response and the workers ended.
+ * ends once the caller records the response and the workers ended. Once the handler has
+ * decided every pair, |job| (and what it captured, the parsed request) is held only by the
+ * pairs still running: a task still in |launch|'s queue then holds none of it.
  */
 FanoutOutcome run_fanout(const FanoutSettings &settings,
                          const std::shared_ptr<RequestEntry> &entry,

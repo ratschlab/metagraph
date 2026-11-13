@@ -1333,6 +1333,134 @@ TEST(ServerFanout, ClientGoneStopsTheWorkers) {
     EXPECT_FALSE(j["pairs"][0]["usage"].isNull());
 }
 
+// A request's parsed body lives in its job (the route's lambda captures it). Once the handler
+// has decided every pair, a task still in the pool's queue never calls the job: it holds none of
+// the body, so that the answered requests queued behind busy workers do not keep their bodies
+// (Fable review 2026-11-12, medium: up to the body cap each, for as long as the workers were
+// busy). The four ways a handler decides pairs still queued: its cutoff, its client gone,
+// not_after_ms, a submission that throws
+TEST(ServerFanout, QueuedTasksHoldNoBodyOnceEveryPairIsDecided) {
+    for (const char *closing : { "cutoff", "gone", "not_after_ms", "thrown" }) {
+        const std::string how = closing;
+        SCOPED_TRACE(how);
+        const std::vector<SelectedPair> pairs = kPairs;
+        auto entry = entry_of(pairs);
+        RequestHandles h;
+        if (how == "not_after_ms")
+            h.not_after_ms = now_ms() + 100;
+        // (the cutoff: the budget less the reserve of 50 ms)
+        const RequestDeadlines d = deadlines_now(how == "cutoff" ? 130 : 60'000, h);
+        FanoutSettings settings = settings_of(pairs, d, "/pattern");
+        settings.poll_ms = 5;
+        size_t asked = 0;
+        if (how == "gone")
+            settings.gone = [&]() { return ++asked > 1; };
+        std::shared_ptr<const std::string> body = std::make_shared<std::string>(1 << 20, 'A');
+        const std::weak_ptr<const std::string> watch = body;
+        std::atomic<size_t> calls { 0 };
+        PairJob job = [body, &calls](PairControl &control) {
+            ++calls;
+            EXPECT_EQ(size_t(1) << 20, body->size());
+            return answered(control);
+        };
+        body.reset();
+        // the pool's workers are busy: every task handed over stays queued
+        std::vector<std::function<void()>> queued;
+        auto launch = [&](std::function<void()> task, SteadyClock::time_point) -> bool {
+            if (how == "thrown" && queued.size() == 1)
+                throw std::bad_alloc();
+            queued.push_back(std::move(task));
+            return true;
+        };
+        if (how == "thrown") {
+            EXPECT_THROW(run_fanout(settings, entry, std::move(job), launch), std::bad_alloc);
+            EXPECT_EQ(1u, queued.size());
+        } else {
+            FanoutOutcome out = run_fanout(settings, entry, std::move(job), launch);
+            EXPECT_EQ(how == "gone", out.client_gone);
+            ASSERT_EQ(3u, out.entries.size());
+            for (const Json::Value &e : out.entries) {
+                if (how != "gone")
+                    EXPECT_EQ("not_reached", e["refusal"]["code"].asString());
+            }
+            EXPECT_EQ(3u, queued.size());
+        }
+        // the handler has answered, every task still queued: none holds the body
+        EXPECT_TRUE(watch.expired());
+        // the workers take the tasks later: no pair starts, the registry is as it was
+        for (auto &task : queued) {
+            task();
+        }
+        queued.clear();
+        EXPECT_EQ(0u, calls.load());
+        for (Json::ArrayIndex i = 0; i < 3; ++i) {
+            EXPECT_EQ("never_started", entry->json(0)["pairs"][i]["state"].asString());
+            EXPECT_EQ("not_reached", entry->json(0)["pairs"][i]["outcome"].asString());
+        }
+        entry->response(200, 1);
+        EXPECT_TRUE(entry->ended());
+        wait_for_workers();
+    }
+}
+
+// A pair still running when the handler decides holds the body until it ends, then lets it go
+// while its siblings' tasks are still queued
+TEST(ServerFanout, ARunningPairHoldsTheBodyUntilItEnds) {
+    const std::vector<SelectedPair> pairs = kPairs;
+    auto entry = entry_of(pairs);
+    // (the cutoff 80 ms from now: the budget less the reserve of 50 ms)
+    FanoutSettings settings = settings_of(pairs, deadlines_now(130), "/pattern");
+    settings.poll_ms = 5;
+    std::shared_ptr<const std::string> body = std::make_shared<std::string>(1 << 20, 'A');
+    const std::weak_ptr<const std::string> watch = body;
+    Gate running;
+    Gate release;
+    std::atomic<bool> read_after_the_answer { false };
+    PairJob job = [body, &running, &release, &read_after_the_answer](PairControl &control) {
+        EXPECT_TRUE(control.start_running());
+        running.open();
+        // uninterruptible until the test lets it go, after the handler answered
+        release.wait();
+        // the request's body is the pair's to read until it ends
+        read_after_the_answer = body->size() == (size_t(1) << 20) && (*body)[0] == 'A';
+        PairResult r;
+        r.aborted = control.stopped();
+        return r;
+    };
+    body.reset();
+    std::thread worker;
+    std::vector<std::function<void()>> queued;
+    FanoutOutcome out = run_fanout(settings, entry, std::move(job),
+        [&](std::function<void()> task, SteadyClock::time_point) {
+            if (!worker.joinable()) {
+                worker = std::thread(std::move(task));
+                running.wait();
+            } else {
+                queued.push_back(std::move(task));
+            }
+            return true;
+        });
+    ASSERT_EQ(3u, out.entries.size());
+    EXPECT_EQ("unfinished", out.entries[0]["refusal"]["code"].asString());
+    EXPECT_EQ("not_reached", out.entries[1]["refusal"]["code"].asString());
+    EXPECT_EQ("not_reached", out.entries[2]["refusal"]["code"].asString());
+    EXPECT_EQ(2u, queued.size());
+    // answered: the running pair holds the body
+    EXPECT_FALSE(watch.expired());
+    release.open();
+    worker.join();
+    EXPECT_TRUE(read_after_the_answer.load());
+    // the pair ended, its siblings' tasks still queued: nothing holds the body
+    EXPECT_TRUE(watch.expired());
+    for (auto &task : queued) {
+        task();
+    }
+    queued.clear();
+    entry->response(200, 1);
+    EXPECT_TRUE(entry->ended());
+    wait_for_workers();
+}
+
 // ---------------------------------------------------------------- the registry
 
 // A repeated request_id that is running or retained starts no work: 409, its entry with an
