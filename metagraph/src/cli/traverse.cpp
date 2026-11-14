@@ -490,7 +490,9 @@ class TimeShare {
     double budget_ms(double seed_budget_ms) const {
         const std::chrono::duration<double, std::milli> left = deadline_ - Clock::now();
         const size_t walks = std::max<size_t>(walks_left_.load(), 1);
-        return std::max(0.0, std::min(seed_budget_ms, left.count() * lanes_ / walks));
+        // never more than the time left: fewer walks than lanes run in fewer lanes
+        const size_t lanes = std::min(lanes_, walks);
+        return std::max(0.0, std::min(seed_budget_ms, left.count() * lanes / walks));
     }
 
     // Counts a walk of an index as finished when it goes out of scope, whether it was walked,
