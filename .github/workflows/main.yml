@@ -178,18 +178,9 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-      # A run that finishes after a newer commit's run must not move `master` back to its
-      # older image. Every image gets its commit's tag; `master` moves only while the commit
-      # is still the head of the branch.
-      - name: Check that the commit is still the branch head
-        id: head
-        if: github.event_name != 'pull_request' && github.ref_type == 'branch'
-        run: |
-          head=$(git ls-remote origin "$GITHUB_REF" | cut -f1)
-          if [ "$head" = "$GITHUB_SHA" ]; then current=true; else current=false; fi
-          echo "current=$current" >> "$GITHUB_OUTPUT"
-          echo "Branch head $head, this commit $GITHUB_SHA, move the branch tag: $current"
-
+      # Every pushed image gets its commit's tag. A run that finishes after a newer commit's
+      # run must not move `master` back to its older image, so `master` moves only after the
+      # push, and only while the commit is still the head of the branch.
       - name: Tags to push
         id: meta_push
         if: github.event_name != 'pull_request'
@@ -197,7 +188,6 @@ jobs:
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
           tags: |
-            type=ref,event=branch,enable=${{ steps.head.outputs.current == 'true' }}
             type=ref,event=tag
             type=sha,format=long
 
@@ -211,6 +201,19 @@ jobs:
           labels: ${{ steps.meta_push.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+      - name: Move the branch tag to this image if the commit is still the branch head
+        if: github.event_name != 'pull_request' && github.ref_type == 'branch'
+        run: |
+          set -euo pipefail
+          remote=$(git ls-remote origin "$GITHUB_REF")
+          head=${remote%%[[:space:]]*}
+          image=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          if [ "$head" = "$GITHUB_SHA" ]; then
+            docker buildx imagetools create -t "$image:$GITHUB_REF_NAME" "$image:sha-$GITHUB_SHA"
+          else
+            echo "Branch head is $head, not $GITHUB_SHA: $image:$GITHUB_REF_NAME stays"
+          fi
 
   # ========================================================================
   # Release
