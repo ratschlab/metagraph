@@ -108,7 +108,7 @@ from . import derive, export, ops
 from ._codec import GraphletFormatError
 from .budget import LocalBudget, LocalBudgetExceeded, LocalLimits
 from .client import (AttemptAtBound, ServerInitializing, TraverseError, _ResponseCut,
-                     auto_coordinates, drop_coordinates_note)
+                     auto_coordinates, drop_coordinates_note, single_answer)
 from .model import (
     ARM_SIDES, AmbiguousLabel, IncompleteRecording, MissingEnvelope, NextRequest,
     UnknownLabel, UnverifiableLabelName,
@@ -356,9 +356,19 @@ class _Receipt(dict):
         return out
 
 
+def _traverse_answer(client, req):
+    """POST /traverse through |client| -> the answer as a single-graph server writes it: a
+    multi-graph server's envelope of one pair (SPEC-multigraph-envelope.md section 1) is read
+    as its entry with the envelope's usage beside it (single_answer(), as
+    TraverseClient.traverse() reads it), so that results[0] and the envelope the graphlet
+    keeps are the pair's answer; a refused entry raises its refusal (TraverseError, answered
+    as backend_error with its http_status)."""
+    return single_answer(client.traverse_raw(req))
+
+
 def _first_result(response):
-    """results[0] of a traversal response (traverse_fetch, traverse_continue): a response
-    without a result is empty_response, not a failed seed."""
+    """results[0] of a traversal response read by _traverse_answer() (traverse_fetch,
+    traverse_continue): a response without a result is empty_response, not a failed seed."""
     results = response.get('results') or []
     if not results:
         raise ToolError('empty_response', 'the server returned no result')
@@ -1276,7 +1286,7 @@ class GraphletTools:
             # deepen() and build_request() send it (never posted without one)
             req = _with_graph(req, client)
             identity = self._check_same_index(client, ident, allow_unverified_index, req)
-        response = self._backend(client.traverse_raw, req)
+        response = self._backend(_traverse_answer, client, req)
         result = _first_result(response)
         # coordinates the automatic rule asked for under a memory budget, in a seed that
         # stopped on it: how to walk further without them (the client's note)
@@ -1546,7 +1556,7 @@ class GraphletTools:
         _check_receipt(_Receipt(dict({'handle': 'g_' + '0' * 12, 'parent': parent,
                                       'identity': identity}, **stated), optional),
                        max_bytes or self.max_bytes)
-        response = self._backend(client.traverse_raw, req)
+        response = self._backend(_traverse_answer, client, req)
         result = _first_result(response)
         if 'graphlet' not in result:
             return _seed_failed(result, parent=parent)
