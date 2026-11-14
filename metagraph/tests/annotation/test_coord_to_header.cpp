@@ -274,8 +274,10 @@ TEST(CoordToHeader, MapCoordsOfRandomRows) {
             }
             size_t i = 0;
             cth.map_coords(0, coords, [&](size_t seq_id, uint64_t local_coord) {
-                ASSERT_EQ(cth.map_single_coord(0, coords[i]), std::make_pair(seq_id, local_coord))
-                    << "max length " << max_length << ", coordinate " << coords[i];
+                if (i < coords.size()) {
+                    EXPECT_EQ(cth.map_single_coord(0, coords[i]), std::make_pair(seq_id, local_coord))
+                        << "max length " << max_length << ", coordinate " << coords[i];
+                }
                 ++i;
             });
             EXPECT_EQ(coords.size(), i);

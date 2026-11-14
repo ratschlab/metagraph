@@ -244,12 +244,16 @@ bool CoordToHeader::load(const std::string &filename_base) {
             load_string_vector(*in, &headers[i]);
             coord_offsets[i].load(*in);
         }
+        // allocated before anything is replaced, so that a failure leaves this object as it was
+        auto sequence_starts_once = std::make_unique<std::once_flag[]>(num_columns);
+        std::vector<std::vector<uint64_t>> sequence_starts(num_columns);
         // the index views the headers being replaced: drop it with them
         std::lock_guard<std::mutex> lock(header_index_mutex_);
         header_index_.reset();
         headers_.swap(headers);
         coord_offsets_.swap(coord_offsets);
-        reset_sequence_starts();
+        sequence_starts_once_.swap(sequence_starts_once);
+        sequence_starts_.swap(sequence_starts);
         return true;
 
     } catch (const std::exception &e) {

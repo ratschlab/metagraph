@@ -509,6 +509,39 @@ TEST(AnnotatedSearchPositions, RecordsOverSeveralBlocksOfRowsInOrderOfFirstMatch
     }
 }
 
+// Records that repeat a unit: a query k-mer has as many coordinates in such a record as the
+// unit has copies, more than a few, and the coordinates of consecutive positions continue
+// each other
+TEST(AnnotatedSearchPositions, RecordsWithManyCoordinatesPerPosition) {
+    std::mt19937 rng(52);
+    const size_t k = 9;
+    const std::string unit = random_sequence(rng, 37);
+    std::vector<CoordinateRecord> records;
+    for (size_t copies : { 2, 5, 9, 16 }) {
+        std::string sequence = random_sequence(rng, 12);
+        for (size_t i = 0; i < copies; ++i) {
+            sequence += unit;
+        }
+        records.push_back({ sequence + random_sequence(rng, 12), "F" + std::to_string(copies % 2),
+                            "r" + std::to_string(copies) });
+    }
+    records.push_back({ random_sequence(rng, 80), "F0", "other" });
+    const std::vector<std::string> queries {
+        unit + unit + unit,
+        records[2].sequence,
+        unit.substr(5) + random_sequence(rng, 4) + unit + unit.substr(0, 20) + records[4].sequence,
+    };
+    for (bool row_diff : { false, true }) {
+        for (bool by_record : { true, false }) {
+            SCOPED_TRACE(::testing::Message() << "row_diff " << row_diff << " by_record " << by_record);
+            auto index = coordinate_test_graph(k, records, row_diff, true, by_record);
+            for (const auto &query : queries) {
+                check_positions(*index, k, records, query, by_record);
+            }
+        }
+    }
+}
+
 // A query of many records' first k-mers, each record matched at one position: the rows
 // returned times the query's k-mers is large, the positions matched are not (one per row).
 // The values are held at the matched positions only: one run per row. (A record's first base

@@ -468,8 +468,8 @@ class RecordFold {
     // Add the row of query position |pos|, counted |weight| times. With per-position
     // values, the positions must come in ascending order, each once.
     void add_row(const MultiIntMatrix::RowTuples &row, size_t pos, size_t weight = 1) {
-        // runs hold 32-bit positions
-        if (pos > std::numeric_limits<uint32_t>::max()) {
+        // runs hold 32-bit positions, and the end of a run is one past its last position
+        if (pos >= std::numeric_limits<uint32_t>::max()) {
             throw std::runtime_error("A sequence queried by sequence record must have fewer "
                                      "than 2^32 k-mers");
         }
@@ -490,7 +490,7 @@ class RecordFold {
                 if (!slot) {
                     if (records_.size() == std::numeric_limits<uint32_t>::max())
                         throw std::runtime_error("A query matches 2^32 or more sequence records");
-                    records_.push_back({ Header{column, seq_id}, 0, 0, 0, {} });
+                    records_.push_back({ Header{column, seq_id}, 0, 0, 0, {}, 0, 0, 0 });
                     slot = records_.size();
                 }
                 Record &record = records_[slot - 1];
@@ -515,7 +515,9 @@ class RecordFold {
                         }
                         break;
                     case kCoords:
-                        add_coord(record.runs, pos, local_coord);
+                        if (first)
+                            open_runs(record, pos);
+                        add_coord(record, pos, local_coord);
                         break;
                 }
             });
@@ -539,7 +541,7 @@ class RecordFold {
 
     size_t abundance(const Header &header) const { return record(header).abundance; }
 
-    // The runs of a record, in ascending order of position (kCoords: not maximal)
+    // The runs of a record: in ascending order of position, or (kCoords) in any order
     std::vector<Run> take_runs(const Header &header) {
         std::vector<Run> runs = std::move(record(header).runs);
         if (values_ != kCoords)
@@ -554,6 +556,12 @@ class RecordFold {
         size_t abundance;
         size_t last_row;
         std::vector<Run> runs;
+        // kCoords: the runs [open_begin, open_end) can continue at the position being
+        // added, in the order of their next coordinate. Those before |open_next| were
+        // continued or passed.
+        uint32_t open_begin;
+        uint32_t open_next;
+        uint32_t open_end;
     };
 
     // The index + 1 in |records_| of each sequence of a column, 0 for the ones not met:
@@ -602,18 +610,39 @@ class RecordFold {
         }
     }
 
-    // Extend a recent run that |coord| at |pos| continues, or start one. A record met
-    // at several coordinates per position keeps a run for each.
-    static void add_coord(std::vector<Run> &runs, size_t pos, uint64_t coord) {
-        const size_t oldest = runs.size() > 4 ? runs.size() - 4 : 0;
-        for (size_t r = runs.size(); r-- > oldest; ) {
-            Run &run = runs[r];
-            if (run.pos + run.len == pos && run.value + run.len == coord) {
-                ++run.len;
-                return;
-            }
+    // the coordinate that continues |run| at the position after its last one
+    static uint64_t next_coord(const Run &run) { return run.value + run.len; }
+
+    // Before the first coordinate of |pos|: find the runs that end at the position
+    // before, which the coordinates of |pos| can continue. A record met at several
+    // coordinates per position (a repeat) has one such run per coordinate.
+    static void open_runs(Record &record, size_t pos) {
+        std::vector<Run> &runs = record.runs;
+        const auto open = std::partition(runs.begin() + record.open_begin, runs.end(),
+                                         [&](const Run &run) {
+            return static_cast<size_t>(run.pos) + run.len != pos;
+        });
+        std::sort(open, runs.end(), [](const Run &a, const Run &b) {
+            return next_coord(a) < next_coord(b);
+        });
+        record.open_begin = open - runs.begin();
+        record.open_next = record.open_begin;
+        record.open_end = runs.size();
+    }
+
+    // Continue the open run that |coord| at |pos| follows, or start a run. The
+    // coordinates of a position come in ascending order, as the open runs do.
+    static void add_coord(Record &record, size_t pos, uint64_t coord) {
+        std::vector<Run> &runs = record.runs;
+        while (record.open_next < record.open_end
+                && next_coord(runs[record.open_next]) < coord) {
+            ++record.open_next;
         }
-        runs.push_back({ static_cast<uint32_t>(pos), 1, coord });
+        if (record.open_next < record.open_end && next_coord(runs[record.open_next]) == coord) {
+            ++runs[record.open_next++].len;
+        } else {
+            runs.push_back({ static_cast<uint32_t>(pos), 1, coord });
+        }
     }
 
     const annot::CoordToHeader &mapping_;
