@@ -474,9 +474,12 @@ class RecordFold {
     RecordFold(const annot::CoordToHeader &mapping, Values values)
           : mapping_(mapping), values_(values) {}
 
-    // Add the row of query position |pos|, counted |weight| times. With per-position
-    // values, the positions must come in ascending order, each once.
-    void add_row(const MultiIntMatrix::RowTuples &row, size_t pos, size_t weight = 1) {
+    // Add the row of query position |pos|, counted |weight| times, and without |values|
+    // only counted. With per-position values, the positions must come in ascending
+    // order, each once.
+    void add_row(const MultiIntMatrix::RowTuples &row, size_t pos, size_t weight = 1,
+                 bool values = true) {
+        const Values values_to_add = values ? values_ : kNone;
         // runs hold 32-bit positions, and the end of a run is one past its last position
         if (pos >= std::numeric_limits<uint32_t>::max()) {
             throw std::runtime_error("A sequence queried by sequence record must have fewer "
@@ -508,7 +511,7 @@ class RecordFold {
                     record.last_row = row_;
                     record.count += weight;
                 }
-                switch (values_) {
+                switch (values_to_add) {
                     case kNone:
                         break;
                     case kAbundance:
@@ -940,6 +943,17 @@ AnnotatedDBG::get_kmer_coordinates(std::string_view sequence,
     if (!tuple_matrix)
         throw std::runtime_error("k-mer coordinates are not indexed in this annotator");
 
+    // A k-mer repeated m times (a poly-A query) has one row. Each distinct row is decoded
+    // once, not once per position: the row of a repeat can hold millions of coordinates.
+    // |distinct| holds the rows in the order of their first position, |row_of| the index
+    // in |distinct| of the row at each position.
+    std::vector<row_index> distinct;
+    std::vector<uint32_t> row_of;
+    {
+        tsl::hopscotch_map<row_index, uint32_t> seen;
+        index_distinct_rows(row_indices, seen, distinct, row_of);
+    }
+
     if (coord_to_header_) {
         if (annotator_->num_labels() != coord_to_header_->num_columns()) {
             throw std::runtime_error(fmt::format("Incompatible number of columns in CoordToHeader "
@@ -948,20 +962,76 @@ AnnotatedDBG::get_kmer_coordinates(std::string_view sequence,
                                                  annotator_->num_labels()));
         }
 
-        // split the coordinates across sequences, a block of rows at a time
+        // the positions of the repeated rows are kept as 32-bit, as the runs of the fold
+        if (num_kmers >= std::numeric_limits<uint32_t>::max()) {
+            throw std::runtime_error("A sequence queried by sequence record must have fewer "
+                                     "than 2^32 k-mers");
+        }
+        std::vector<size_t> first_position(distinct.size());
+        std::vector<uint32_t> weight(distinct.size(), 0); // the positions of each row
+        for (size_t i = 0; i < row_of.size(); ++i) {
+            if (!weight[row_of[i]]++)
+                first_position[row_of[i]] = kmer_positions[i];
+        }
+
+        // Split the coordinates across sequences, a block of rows at a time. Each row is
+        // added once, at its first position, counted for all its positions. A row of one
+        // position adds its coordinates. A repeated row is only counted here: its
+        // coordinates at all positions, for all records, would take time and memory in
+        // proportion to both. They are added below for the returned records.
         RecordFold fold(*coord_to_header_, RecordFold::kCoords);
-        call_row_tuples(*tuple_matrix, row_indices,
+        call_row_tuples(*tuple_matrix, distinct,
                         [&](size_t i, const MultiIntMatrix::RowTuples &row) {
-            fold.add_row(row, kmer_positions[i]);
+            fold.add_row(row, first_position[i], weight[i], weight[i] == 1);
         });
         const auto counts = fold.select(min_count, num_top_labels);
+
+        // (position, coordinate) of each returned record from the repeated rows
+        std::vector<std::vector<std::pair<uint32_t, uint64_t>>> repeated_coords(counts.size());
+        std::vector<row_index> repeated;
+        std::vector<uint32_t> repeated_of(distinct.size()); // index in |repeated|
+        for (size_t i = 0; i < distinct.size(); ++i) {
+            if (weight[i] > 1) {
+                repeated_of[i] = repeated.size();
+                repeated.push_back(distinct[i]);
+            }
+        }
+        if (repeated.size() && counts.size()) {
+            tsl::hopscotch_map<Header, uint32_t> returned; // index in |counts|
+            returned.reserve(counts.size());
+            for (size_t r = 0; r < counts.size(); ++r) {
+                returned.emplace(counts[r].first, r);
+            }
+            // (index in |counts|, coordinate) of each repeated row
+            std::vector<std::vector<std::pair<uint32_t, uint64_t>>> hits(repeated.size());
+            call_row_tuples(*tuple_matrix, repeated,
+                            [&](size_t j, const MultiIntMatrix::RowTuples &row) {
+                for (const auto &[col, coords] : row) {
+                    if (!coord_to_header_->num_sequences(col))
+                        continue;
+                    coord_to_header_->map_coords(col, coords, [&](size_t seq, uint64_t coord) {
+                        auto it = returned.find(Header{ col, seq });
+                        if (it != returned.end())
+                            hits[j].emplace_back(it->second, coord);
+                    });
+                }
+            });
+            for (size_t i = 0; i < row_of.size(); ++i) {
+                if (weight[row_of[i]] == 1)
+                    continue;
+                for (const auto &[r, coord] : hits[repeated_of[row_of[i]]]) {
+                    repeated_coords[r].emplace_back(kmer_positions[i], coord);
+                }
+            }
+        }
 
         std::vector<std::tuple<std::string, size_t, PositionCoords, size_t>> result;
         result.reserve(counts.size());
         std::vector<std::pair<uint32_t, uint64_t>> coords_at; // (position, coordinate)
-        for (const auto &[h, count] : counts) {
+        for (size_t r = 0; r < counts.size(); ++r) {
+            const auto &[h, count] = counts[r];
             const auto &[col, header] = h;
-            coords_at.clear();
+            coords_at = std::move(repeated_coords[r]);
             for (const RecordFold::Run &run : fold.take_runs(h)) {
                 for (uint32_t i = 0; i < run.len; ++i) {
                     coords_at.emplace_back(run.pos + i, run.value + i);
@@ -981,14 +1051,7 @@ AnnotatedDBG::get_kmer_coordinates(std::string_view sequence,
         return result;
     }
 
-    // the rows are read twice (to count, then to fill the values), so each distinct row is
-    // decoded once and kept: a k-mer repeated m times would otherwise be decoded m times
-    std::vector<row_index> distinct;
-    std::vector<uint32_t> row_of;
-    {
-        tsl::hopscotch_map<row_index, uint32_t> seen;
-        index_distinct_rows(row_indices, seen, distinct, row_of);
-    }
+    // the rows are read twice (to count, then to fill the values) and kept
     const auto rows_tuples = tuple_matrix->get_row_tuples(distinct);
 
     auto call_rows_tuples = [&](const auto &callback) {
