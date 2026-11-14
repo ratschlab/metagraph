@@ -77,6 +77,29 @@ def _peak(fn):
         tracemalloc.stop()
 
 
+def _warm_peak(warm, fn):
+    """_peak() of fn after warm() ran once, the collector held off from before warm() to the
+    end. CPython keeps freed small objects on per-size free lists, memory tracemalloc still
+    counts as allocated where they were first made, and a full collection (_peak()'s
+    gc.collect(), or an automatic one) empties the lists: a cold peak includes refilling
+    them, and what that costs depends on the interpreter, not on the library. On Python
+    3.11 a keyword call of the slots dataclass Claim (20 fields, the tp_call path) packs two
+    20-item tuples that are parked there: 1,604 tuples of 200 bytes on the comb of 800
+    splits, 1.0x its leaves' bases, which 3.12 and later do not allocate (their calls go
+    through vectorcall). Warm, the peak is the library's own, the same on every run."""
+    gc.collect()
+    gc.disable()
+    try:
+        warm()
+        tracemalloc.start()
+        base = tracemalloc.get_traced_memory()[0]
+        out = fn()
+        return tracemalloc.get_traced_memory()[1] - base, out
+    finally:
+        tracemalloc.stop()
+        gc.enable()
+
+
 class TestWalkIter(unittest.TestCase):
     def test_the_stream_is_walk_batch(self):
         rng = random.Random(55)
@@ -243,10 +266,14 @@ class TestExportPeaks(unittest.TestCase):
         # claims: the keys' prefixes (each claim's bases, in the keys of both sides) and
         # the claims behind them -- 4x the leaves' bases here, 14x with every spelling held
         # and a chain kept at every spine segment; prefix_subset: the walks cut and every
-        # label's supported prefixes besides -- 8-9x here, 26x with every spelling held
+        # label's supported prefixes besides -- 8-9x here, 26x with every spelling held.
+        # Measured warm (_warm_peak()): 5.60x and 10.30x on Python 3.11, 5.30x and 9.71x on
+        # 3.13, 5.31x and 9.90x on 3.14 (cold, as before, 3.11 counted its free lists'
+        # refill too, 6.85x and 11.20x: over the bound)
         for mode, bound in (('claims', 6), ('prefix_subset', 12)):
             x, y = self.g(), self.g()
-            peak, c = _peak(lambda: x.compare(y, mode=mode))
+            peak, c = _warm_peak(lambda: self.g().compare(self.g(), mode=mode),
+                                 lambda: x.compare(y, mode=mode))
             self.assertTrue(c.equal is not False, mode)
             self.assertLess(peak, bound * bases, mode)
 
