@@ -1,6 +1,8 @@
 #include <algorithm>
 #include <limits>
 #include <random>
+#include <set>
+#include <span>
 #include <string>
 #include <tuple>
 #include <vector>
@@ -856,6 +858,74 @@ TEST(AnnotatedSearchPositions, WrittenAsTheirVectors) {
             EXPECT_EQ(count_text, count_result.to_string(";", false, verbose, k));
             EXPECT_EQ(coord_text, coord_result.to_string(";", false, verbose, k));
         }
+    }
+}
+
+// The fixture's matrix without row-diff, recording the rows its batched read is asked for
+class CountingCoordinates : public annot::matrix::TupleCSCMatrix<annot::matrix::ColumnMajor> {
+  public:
+    using TupleCSCMatrix::TupleCSCMatrix;
+
+    std::vector<RowTuples> get_row_tuples(std::span<const Row> rows,
+                                          size_t num_threads = 1) const override {
+        requested.insert(requested.end(), rows.begin(), rows.end());
+        return TupleCSCMatrix::get_row_tuples(rows, num_threads);
+    }
+
+    mutable std::vector<Row> requested;
+};
+
+// Queries that repeat k-mers (a homopolymer against records with poly-A runs of many lengths, a
+// periodic query, records repeated) on an index without a record mapping: get_kmer_coordinates
+// asks the matrix for each distinct row of the query's k-mers once, not once per position, and
+// every column holds its coordinates at every position, by brute force; also on row-diff over
+// BRWT.
+TEST(AnnotatedSearchPositions, EachRowOfTheQueryDecodedOnceWithoutRecordMapping) {
+    std::mt19937 rng(55);
+    const size_t k = 9;
+    std::vector<CoordinateRecord> records;
+    for (size_t i = 0; i < 24; ++i) {
+        // poly-A runs of k to k + 40 bases (1 to 41 occurrences of A^k)
+        records.push_back({ random_sequence(rng, 12) + std::string(k + (i * 7) % 41, 'A')
+                                + random_sequence(rng, 12),
+                            "F" + std::to_string(i % 3), "r" + std::to_string(i) });
+    }
+    std::string periodic;
+    for (size_t m = 0; m < 40; ++m) {
+        periodic += records[3].sequence.substr(0, 15) + "T";
+    }
+    std::string repeated;
+    for (size_t m = 0; m < 3; ++m) {
+        repeated += records[1].sequence + records[2].sequence;
+    }
+    const std::vector<std::string> queries {
+        std::string(k + 300, 'A'), periodic, repeated, records[4].sequence,
+        random_sequence(rng, 20) + std::string(k + 50, 'A') + records[6].sequence
+    };
+    auto counting = coordinate_test_graph<CountingCoordinates>(k, records, false, false, false);
+    const auto &matrix = dynamic_cast<const CountingCoordinates &>(
+            counting->get_annotator().get_matrix());
+    auto row_diff_brwt = coordinate_test_graph(k, records, true, true, false);
+    for (const auto &query : queries) {
+        std::set<annot::matrix::BinaryMatrix::Row> distinct;
+        size_t present = 0;
+        for (auto node : counting->get_graph().node_range(query)) {
+            if (node) {
+                distinct.insert(graph::AnnotatedDBG::graph_to_anno_index(node));
+                ++present;
+            }
+        }
+        ASSERT_LT(distinct.size(), present) << "the query repeats a k-mer";
+        for (size_t top : { size_t(1), size_t(2), std::numeric_limits<size_t>::max() }) {
+            SCOPED_TRACE(::testing::Message() << query << " top " << top);
+            matrix.requested.clear();
+            EXPECT_FALSE(counting->get_kmer_coordinates(query, top, 0, 0).empty());
+            EXPECT_EQ(distinct.size(), matrix.requested.size());
+            EXPECT_EQ(distinct, std::set<annot::matrix::BinaryMatrix::Row>(
+                                        matrix.requested.begin(), matrix.requested.end()));
+        }
+        check_positions(*counting, k, records, query, false);
+        check_positions(*row_diff_brwt, k, records, query, false);
     }
 }
 

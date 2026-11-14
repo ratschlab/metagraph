@@ -1925,5 +1925,79 @@ class TestQueryPositionsHeldSparsely(TestingBase):
         self.assertLess(peak, self.max_peak_bytes)
 
 
+class TestQueryRepeatedKmerDecodedOnce(TestingBase):
+    """The coords query mode on a coordinate index without a record mapping (.seqs) decodes
+    each distinct annotation row of the query's k-mers once, not once per query position. A
+    file (column) with a long poly-A run (25,000 occurrences of A^31) and a file with one
+    A^31, as row_diff_brwt_coord. A query of 10,000 poly-A k-mers followed by the 40 k-mers
+    of the second file after its A^31 returns that file at --num-top-labels 1 (it matches
+    40 positions more, whatever the order of the columns). A copy of the A^31 row per
+    position would take 10,000 x 25,001 x 8 B = 2 GB; the query stays far below that and
+    writes the expected bytes."""
+    k = 31
+    long_run = 25000      # occurrences of A^31 in the long record
+    query_kmers = 10000
+    flank = 40            # the short record's A^31 is at its coordinate 40
+    max_peak_bytes = 512 * 1024 ** 2
+
+    @classmethod
+    def setUpClass(cls):
+        import random
+        cls.tempdir = TemporaryDirectory()
+        rng = random.Random(55)
+        # flanks without an A, so that the short record holds A^31 once
+        right = ''.join(rng.choice('CGT') for _ in range(cls.flank))
+        short = ''.join(rng.choice('CGT') for _ in range(cls.flank)) + 'A' * cls.k + right
+        records = {'a': short, 'z': 'A' * (cls.k + cls.long_run - 1)}
+        cls.fasta = {}
+        for name, sequence in records.items():
+            cls.fasta[name] = cls.tempdir.name + f'/{name}.fa'
+            with open(cls.fasta[name], 'w') as f:
+                f.write(f'>rec_{name}\n{sequence}\n')
+        cls.query = cls.tempdir.name + '/query.fa'
+        with open(cls.query, 'w') as f:
+            f.write('>q\n' + 'A' * (cls.k + cls.query_kmers - 1) + right + '\n')
+
+        cls.graph = cls.tempdir.name + '/graph' + graph_file_extension['succinct']
+        cls._build_graph(list(cls.fasta.values()), cls.tempdir.name + '/graph', cls.k,
+                         'succinct', 'basic')
+        cls.anno_base = cls.tempdir.name + '/columns'
+        cls.anno = cls.anno_base + anno_file_extension['row_diff_brwt_coord']
+        cls._annotate_graph([cls.fasta['a'], cls.fasta['z']], cls.graph, cls.anno_base,
+                            'row_diff_brwt_coord', anno_type='filename')
+        assert not os.path.exists(cls.anno_base + '.seqs')
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.tempdir.cleanup()
+
+    def test_coords(self):
+        out = self.tempdir.name + '/out.tsv'
+        command = [METAGRAPH, 'query', '--query-mode', 'coords', '--min-kmers-fraction-label', '0',
+                   '--num-top-labels', '1', '-i', self.graph, '-a', self.anno, self.query]
+        res = subprocess.run([sys.executable, '-c', PEAK_RSS, out] + command,
+                             stdout=PIPE, stderr=PIPE)
+        self.assertEqual(res.returncode, 0, res.stderr.decode())
+        rc, peak = (int(x) for x in res.stdout.decode().split())
+        self.assertEqual(rc, 0)
+        with open(out) as f:
+            lines = f.read().splitlines()
+        self.assertEqual(1, len(lines))
+        fields = lines[0].split('\t')
+        self.assertEqual(['0', 'q'], fields[:2])
+        self.assertEqual(3, len(fields))
+        label, value = fields[2][1:].split('>', 1)
+        self.assertEqual(self.fasta['a'], label)
+        # the short record's A^31 (its coordinate 40) at every poly-A position, each a range
+        # of its own, and at the last one the start of the range of its k-mers to the end
+        last = self.query_kmers - 1
+        ranges = [f'{p}-{self.flank}' for p in range(last)]
+        self.assertEqual(':' + ':'.join(ranges + [f'{last}-{self.flank}-{2 * self.flank}']), value)
+        print(f'[ coords ] {self.query_kmers} positions of one row of {self.long_run + 1} '
+              f'coordinates: peak RSS {peak / 1024 ** 2:.0f} MiB', flush=True)
+        # a copy of the row per position
+        self.assertGreater(self.query_kmers * (self.long_run + 1) * 8, 1024 ** 3)
+        self.assertLess(peak, self.max_peak_bytes)
+
 if __name__ == '__main__':
     unittest.main()

@@ -972,10 +972,28 @@ AnnotatedDBG::get_kmer_coordinates(std::string_view sequence,
         return result;
     }
 
-    auto rows_tuples = tuple_matrix->get_row_tuples(row_indices);
+    // A k-mer the query repeats has one row: decode each distinct row once (a copy per
+    // position would take 8 B x positions x the row's coordinates) and visit it at each of
+    // its positions. |rows|: the distinct rows in the order of their first position,
+    // |row_of|: the index in |rows| of the row at each position.
+    std::vector<row_index> rows;
+    std::vector<size_t> row_of;
+    row_of.reserve(row_indices.size());
+    {
+        tsl::hopscotch_map<row_index, size_t> index_of;
+        for (row_index row : row_indices) {
+            auto [it, inserted] = index_of.try_emplace(row, rows.size());
+            if (inserted)
+                rows.push_back(row);
+            row_of.push_back(it->second);
+        }
+    } // release the hash table before decoding the rows
+    const auto rows_tuples = tuple_matrix->get_row_tuples(rows);
 
     auto call_rows_tuples = [&](const auto &callback) {
-        std::for_each(rows_tuples.begin(), rows_tuples.end(), callback);
+        for (size_t i : row_of) {
+            callback(rows_tuples[i]);
+        }
     };
 
     auto results = filter_and_aggregate<std::vector<std::tuple<Label, size_t, PositionCoords>>>(
