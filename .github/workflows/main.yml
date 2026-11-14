@@ -178,14 +178,37 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
+      # A run that finishes after a newer commit's run must not move `master` back to its
+      # older image. Every image gets its commit's tag; `master` moves only while the commit
+      # is still the head of the branch.
+      - name: Check that the commit is still the branch head
+        id: head
+        if: github.event_name != 'pull_request' && github.ref_type == 'branch'
+        run: |
+          head=$(git ls-remote origin "$GITHUB_REF" | cut -f1)
+          if [ "$head" = "$GITHUB_SHA" ]; then current=true; else current=false; fi
+          echo "current=$current" >> "$GITHUB_OUTPUT"
+          echo "Branch head $head, this commit $GITHUB_SHA, move the branch tag: $current"
+
+      - name: Tags to push
+        id: meta_push
+        if: github.event_name != 'pull_request'
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=ref,event=branch,enable=${{ steps.head.outputs.current == 'true' }}
+            type=ref,event=tag
+            type=sha,format=long
+
       - name: Build and push Docker image
         if: github.event_name != 'pull_request'
         uses: docker/build-push-action@v6
         with:
           context: .
           push: true
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
+          tags: ${{ steps.meta_push.outputs.tags }}
+          labels: ${{ steps.meta_push.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
