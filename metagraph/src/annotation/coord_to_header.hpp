@@ -1,6 +1,7 @@
 #ifndef __COORD_TO_HEADER_HPP__
 #define __COORD_TO_HEADER_HPP__
 
+#include <algorithm>
 #include <functional>
 #include <memory>
 #include <mutex>
@@ -64,23 +65,31 @@ class CoordToHeader {
     std::pair<uint64_t, uint64_t> sequence_coords(Column col, size_t seq_id) const;
 
     /**
-     * Batch variant of `map_single_coord` that replaces each global coord
-     * in `rows_tuples` with a packed `(seq_id, local_coord)` pair
-     * encoded as a single `uint64_t`. Used by the query pipeline to reuse
-     * the existing `uint64_t`-valued row/tuple data structures instead of
-     * introducing a parallel structure for pairs.
-     *
-     * Packing:   `packed = local_coord * num_sequences[col] + seq_id`
-     * Unpacking: `seq_id   = packed % num_sequences[col]`
-     *            `local_coord = packed / num_sequences[col]`
-     *
-     * Entries of columns without sequence records are removed: they have no
-     * header labels. A column outside the index throws std::runtime_error.
-     *
-     * For single-coord lookups prefer `map_single_coord`, which returns
-     * the pair directly without packing.
+     * `map_single_coord` for the coordinates |coords| of an annotation row in column
+     * |col|, which are in ascending order: calls |callback|(seq_id, local_coord) for
+     * each. The next coordinate usually lies in the same sequence or in the one after,
+     * so the sequences are found in the column's sequence starts without a rank and a
+     * select per coordinate. The starts take 8 bytes per sequence. They are built on
+     * the first call for a column and kept. Throws std::out_of_range as
+     * `map_single_coord` does. Thread-safe, except against a concurrent load().
      */
-    void map_to_local_coords(std::vector<RowTuples> *rows_tuples) const;
+    template <class Callback>
+    void map_coords(Column col, const Tuple &coords, const Callback &callback) const {
+        const std::vector<uint64_t> &starts = sequence_starts(col);
+        size_t seq = 0;
+        for (uint64_t coord : coords) {
+            if (coord >= starts.back())
+                throw_coord_out_of_range(col, coord);
+            if (coord < starts[seq] || coord >= starts[seq + 1]) {
+                if (coord >= starts[seq + 1] && seq + 2 < starts.size() && coord < starts[seq + 2]) {
+                    ++seq;
+                } else {
+                    seq = std::upper_bound(starts.begin(), starts.end(), coord) - starts.begin() - 1;
+                }
+            }
+            callback(seq, coord - starts[seq]);
+        }
+    }
 
     uint64_t num_columns() const { return coord_offsets_.size(); }
     size_t num_sequences(Column column) const { return headers_[column].size(); }
@@ -124,8 +133,17 @@ class CoordToHeader {
     std::vector<std::pair<Column, size_t>> records_of(std::string_view header,
                                                        size_t limit) const;
 
+    // The first coordinate of each sequence of |col|, then the number of coordinates
+    const std::vector<uint64_t>& sequence_starts(Column col) const;
+    [[noreturn]] void throw_coord_out_of_range(Column col, uint64_t coord) const;
+    void reset_sequence_starts();
+
     std::vector<std::vector<std::string>> headers_;
     std::vector<bit_vector_sd> coord_offsets_;
+
+    // map_coords(): built per column on first use; load() drops them
+    mutable std::unique_ptr<std::once_flag[]> sequence_starts_once_;
+    mutable std::vector<std::vector<uint64_t>> sequence_starts_;
 
     // find_header(): keys are views into |headers_|, which only load() changes, and load()
     // drops the index first

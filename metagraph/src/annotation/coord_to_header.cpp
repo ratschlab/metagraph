@@ -156,35 +156,38 @@ CoordToHeader::CoordToHeader(std::vector<std::vector<std::string>> &&headers,
             }
         }, offsets.back(), offsets.size());
     }
+    reset_sequence_starts();
 }
 
-void CoordToHeader::map_to_local_coords(std::vector<RowTuples> *rows) const {
-    assert(rows);
-    for (auto &row : *rows) {
-        for (const auto &[col, coords] : row) {
-            if (col >= num_columns())
-                throw std::runtime_error(fmt::format("Column {} is out of range: CoordToHeader "
-                                                     "has {} columns", col, num_columns()));
-        }
-        // a column without sequence records has no header labels
-        row.erase(std::remove_if(row.begin(), row.end(), [&](const auto &entry) {
-                      return !num_sequences(entry.first);
-                  }),
-                  row.end());
-        for (auto &[col, coords] : row) {
-            const size_t n = num_sequences(col);
-            for (uint64_t &coord : coords) {
-                auto [seq_id, local_coord] = map_single_coord(col, coord);
-                assert(n);
-                if (local_coord > std::numeric_limits<uint64_t>::max() / n) {
-                    throw std::runtime_error(fmt::format("Local coordinate {} is too large to "
-                            "pack with a seq_id into a single 64-bit integer "
-                            "({} sequences in column {})", local_coord, n, col));
-                }
-                coord = local_coord * n + seq_id;
-            }
-        }
+void CoordToHeader::reset_sequence_starts() {
+    sequence_starts_once_ = std::make_unique<std::once_flag[]>(num_columns());
+    sequence_starts_.assign(num_columns(), {});
+}
+
+const std::vector<uint64_t>& CoordToHeader::sequence_starts(Column col) const {
+    if (col >= num_columns()) {
+        throw std::out_of_range(fmt::format("Column {} out of range "
+                "(CoordToHeader has {} columns)", col, num_columns()));
     }
+    std::call_once(sequence_starts_once_[col], [&]() {
+        const auto &offsets = coord_offsets_[col];
+        std::vector<uint64_t> starts;
+        starts.reserve(num_sequences(col) + 1);
+        starts.push_back(0);
+        // coord_offsets_ has a set bit at the last coordinate of each sequence
+        for (size_t i = 1; i <= num_sequences(col); ++i) {
+            starts.push_back(offsets.select1(i) + 1);
+        }
+        assert(starts.back() == offsets.size());
+        sequence_starts_[col] = std::move(starts);
+    });
+    return sequence_starts_[col];
+}
+
+void CoordToHeader::throw_coord_out_of_range(Column col, uint64_t coord) const {
+    throw std::out_of_range(fmt::format("Coordinate {} for column {} out of range "
+            "(CoordToHeader has {} coordinates for that column)",
+            coord, col, coord_offsets_[col].size()));
 }
 
 std::pair<size_t, uint64_t>
@@ -241,11 +244,16 @@ bool CoordToHeader::load(const std::string &filename_base) {
             load_string_vector(*in, &headers[i]);
             coord_offsets[i].load(*in);
         }
+        // allocated before anything is replaced, so that a failure leaves this object as it was
+        auto sequence_starts_once = std::make_unique<std::once_flag[]>(num_columns);
+        std::vector<std::vector<uint64_t>> sequence_starts(num_columns);
         // the index views the headers being replaced: drop it with them
         std::lock_guard<std::mutex> lock(header_index_mutex_);
         header_index_.reset();
         headers_.swap(headers);
         coord_offsets_.swap(coord_offsets);
+        sequence_starts_once_.swap(sequence_starts_once);
+        sequence_starts_.swap(sequence_starts);
         return true;
 
     } catch (const std::exception &e) {
