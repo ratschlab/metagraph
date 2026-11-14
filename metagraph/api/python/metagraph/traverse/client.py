@@ -590,7 +590,9 @@ class TraverseClient:
         capabilities()['resolve']['max_explicit_seeds'], 1024 by default, 0 for none): more raise
         TraverseError 400 with the body {error, code: 'too_many_explicit_seeds',
         max_explicit_seeds}; a select.max_seeds above the cap is lowered to it and stated in
-        limits.clamped (SPEC §4.3).
+        limits.clamped (SPEC §4.3). An explicit seed naming one label twice raises TraverseError
+        400 {error: "request.select.seeds[i].labels: Duplicate seed label 'x'"} (SPEC §4.3: the
+        words /traverse refuses such a seed with).
 
         The discovery's memory bound (capabilities()['resolve']['discovery']['max_memory_mb'])
         also bounds explicit labels on the row paths (the same stop with reason 'memory') and

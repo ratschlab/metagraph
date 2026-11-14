@@ -2481,6 +2481,84 @@ class TestMultiGraphServer(TestingBase):
             if base:
                 base.stop()
 
+    def test_resolve_refuses_a_seed_naming_a_label_twice(self):
+        """An explicit /resolve seed naming one label twice is refused 400 before any work
+        (T6-W4, the review of 9726cb420, item 6: it was answered with the label twice,
+        supporting_total and included counting each copy, and /traverse refused that seed,
+        "Duplicate seed label"): {"error": "request.select.seeds[i].labels: Duplicate seed label
+        'x'"}, /traverse's words after the field's path, the first seed with a repeat (before a
+        name that is not profiled), with labels or a discovery; alike on a single-graph server,
+        on a multi-graph server request-level (no envelope, one pair or two) and in the CLI
+        (exit status 1); its request_id is not held. The seed naming the label once is answered,
+        frozen once, and traversed."""
+        server = self._single_server('repeat')
+        try:
+            kleb = self.records['kleb'][0]
+            query = kleb[3000:3080]
+            label = server.post('resolve', {'sequence': query,
+                                            'discover': {'max_labels': 1}}).json()
+            label = label['labels'][0]['label']
+
+            def explicit(*seed_labels):
+                return {'sequence': query, 'labels': [label],
+                        'select': {'policy': 'explicit',
+                                   'seeds': [{'kmer_interval': [0, 5], 'labels': list(names)}
+                                             for names in seed_labels]}}
+            twice = f"request.select.seeds[0].labels: Duplicate seed label '{label}'"
+            discovered = {'sequence': query, 'discover': {'max_labels': 2},
+                          'select': {'policy': 'explicit', 'seeds': [
+                              {'kmer_interval': [0, 5], 'labels': [label, label]}]}}
+            cases = (
+                ('twice', explicit([label, label]), twice),
+                ('second', explicit([label], ['nolabel', label, 'nolabel']),
+                 "request.select.seeds[1].labels: Duplicate seed label 'nolabel'"),
+                ('discover', discovered, twice),
+            )
+            graph, anno = self.pairs['kleb']
+            for name, bad, error in cases:
+                with self.subTest(case=name):
+                    request_id = f'repeat-{name}'
+                    ret = server.post('resolve', dict(bad, request_id=request_id))
+                    self.assertEqual(400, ret.status_code, ret.text[:2000])
+                    self.assertEqual({'error': error}, ret.json())
+                    self.assertEqual(404, server.get(f'requests/{request_id}').status_code)
+                    for graphs in (['kleb'], ['kleb', 'ecoli']):
+                        ret = self.server.post('resolve', dict(bad, graphs=graphs,
+                                                               request_id=request_id))
+                        self.assertEqual(400, ret.status_code, ret.text[:2000])
+                        self.assertEqual({'error': error}, ret.json())
+                        self.assertEqual(404,
+                                         self.server.get(f'requests/{request_id}').status_code)
+                    path = os.path.join(self.tempdir.name, f'resolve_{request_id}.json')
+                    with open(path, 'w') as f:
+                        json.dump(bad, f)
+                    res = subprocess.run(shlex.split(METAGRAPH) + [
+                        'traverse', '--resolve', '--json', '-i', graph, '-a', anno, path],
+                        stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+                    self.assertEqual(1, res.returncode, res.stderr.decode()[-2000:])
+                    self.assertEqual({'error': error},
+                                     json.loads(res.stdout.decode().strip().split('\n')[-1]))
+            # named once: answered, frozen with the label once, and traversed
+            ret = server.post('resolve', explicit([label]))
+            self.assertEqual(200, ret.status_code, ret.text[:2000])
+            seed = ret.json()['selection']['seeds'][0]
+            self.assertEqual([label], seed['labels'])
+            self.assertEqual((1, 1), (seed['label_population']['supporting_total'],
+                                      seed['label_population']['included']))
+            traverse = {'seeds': [{'sequence': seed['sequence'], 'labels': seed['labels'],
+                                   'seed_id': seed['seed_id']}],
+                        'strategy': {'direction': 'right', 'bounds': {'max_extension_bp': 10}}}
+            ret = server.post('traverse', traverse)
+            self.assertEqual(200, ret.status_code, ret.text[:2000])
+            envelope = self.post('resolve', dict(explicit([label]), graphs=['kleb', 'ecoli']))
+            entry = {a['graph']: a for a in envelope['answers']}['kleb']
+            self.assertEqual('answered', entry['outcome'])
+            self.assertEqual(seed, entry['selection']['seeds'][0])
+            ret = self.server.post('traverse', dict(traverse, graphs=['kleb']))
+            self.assertEqual(200, ret.status_code, ret.text[:2000])
+        finally:
+            server.stop()
+
     def test_single_graph_pattern_400s_come_before_the_expired_409(self):
         """A single-graph /pattern refused for its own fields is refused 400 (invalid_request)
         also when its not_after_ms has passed, with or without a request_id, and registers

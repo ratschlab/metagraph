@@ -236,7 +236,9 @@ TraverseRequest parse_traverse_request(const Json::Value &json);
 // seed's `labels` (SPEC-labeled-traversal-core.md §4.1), checked first, on the parsed body
 // before anything of it is copied: a 400 naming the list, the cap and the flag.
 // |max_explicit_seeds| (0: none): the cap on the number of explicit seeds (select.seeds),
-// checked with them: TooManyExplicitSeeds
+// checked with them: TooManyExplicitSeeds. Under select.policy "explicit", a seed's labels naming
+// one label twice: InvalidRequest "request.select.seeds[i].labels: Duplicate seed label 'x'"
+// (T6-W4: /traverse refuses such a seed), with the seed, before any later field
 ResolveRequest parse_resolve_request(const Json::Value &json, uint64_t max_explicit_labels = 0,
                                      uint64_t max_explicit_seeds = 0);
 

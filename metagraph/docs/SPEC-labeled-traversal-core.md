@@ -235,6 +235,16 @@ Deterministic, recorded in the output.
   2⁶³ − 1 included (before, such an end was a 400 with the JSON library's own text and no field, and aborted the
   CLI). Every seed listed is selected on its own, a duplicate too; their number is capped by
   `--resolve-max-explicit-seeds` (1,024 by default, §4.1: more are a 400 `too_many_explicit_seeds`).
+  A seed's `labels` name each label once: a seed naming one twice (the same name, byte for byte) is a 400
+  `{"error": "request.select.seeds[1].labels: Duplicate seed label 'NZ_STEQ01000045.1'"}`, /traverse's words for
+  the same fault (§6.1 step 4) after the field's path, no `code`, the first name in the list's order that repeats
+  an earlier one, of the first seed with one *(T6-W4, the review of 9726cb420, item 6: such a seed was frozen
+  with the label twice, `supporting_total` and `included` counting each copy and its `seed_id` hashing both, and
+  /traverse refused it)*. The parser checks it with the seed, after the seed's `kmer_interval` and its labels'
+  type and before the next seed: so after the caps of §4.1 and before every later field, the request's handles
+  and every other explicit-seed 400 (an interval out of range, a label not profiled); nothing is admitted. On a
+  multi-graph server it refuses the whole request before any pair (SPEC-multigraph-envelope.md §5). Only under
+  `policy: "explicit"`: another policy does not select from `seeds`.
 - `max_seeds` (10 by default, at least 1): the most picks of `longest_first` and rounds of `max_support` (`explicit`
   selects every seed it lists). On the server a larger value is lowered to `--resolve-max-explicit-seeds` (1,024 by
   default; 0 = no maximum) and stated as `limits.clamped: [{"field": "select.max_seeds", "requested": 5000,

@@ -353,6 +353,8 @@ void check_resolve_request(const LabelOracle &oracle,
 
 struct ExplicitSeed {
     KmerInterval kmers;
+    // each name once: a /resolve request naming one twice is refused by its parser
+    // (parse_resolve_request, T6-W4), and select_seeds freezes the list as given
     std::vector<std::string> labels;
 };
 
