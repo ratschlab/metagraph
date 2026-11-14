@@ -1925,5 +1925,111 @@ class TestQueryPositionsHeldSparsely(TestingBase):
         self.assertLess(peak, self.max_peak_bytes)
 
 
+class TestQueryRepeatedKmerDecodedOnce(TestingBase):
+    """The coords query mode decodes each distinct annotation row of the query's k-mers once,
+    not once per query position, and keeps the coordinates of a repeated row only for the
+    returned records. A record with one A^31, a record of 4,000 separate A-runs (31 to 40
+    bases) and a record of a long poly-A run (25,000 occurrences of A^31), as
+    row_diff_brwt_coord with a record mapping (.seqs) and, each record in a file (column) of
+    its own, without one; a poly-A query of 10,000 k-mers returns the record (column) with
+    one A^31 at --num-top-labels 1 (the tie of 10,000 positions goes to the first). A copy of
+    the row per position would take 10,000 x 25,001 x 8 B = 2 GB, and the coordinates of the
+    separate A-runs at every position, kept for all records, about 10,000 x 4,000 x 16 B;
+    the query stays far below both and writes the expected bytes."""
+    k = 31
+    long_run = 25000      # occurrences of A^31 in the long record
+    separate_runs = 4000  # A-runs of 31 to 40 bases in another record
+    query_kmers = 10000
+    flank = 40            # the short record's A^31 is at its coordinate 40
+    max_peak_bytes = 512 * 1024 ** 2
+
+    @classmethod
+    def setUpClass(cls):
+        import random
+        cls.tempdir = TemporaryDirectory()
+        rng = random.Random(55)
+        # flanks without an A, so that the short record holds A^31 once
+        short = (''.join(rng.choice('CGT') for _ in range(cls.flank)) + 'A' * cls.k
+                 + ''.join(rng.choice('CGT') for _ in range(cls.flank)))
+        cls.short_kmers = len(short) - cls.k + 1
+        separate = ''.join(rng.choice('CGT') + 'A' * rng.randint(cls.k, cls.k + 9)
+                           + rng.choice('CGT') for _ in range(cls.separate_runs))
+        records = {'a': ('rec_a', short), 'y': ('rec_y', separate),
+                   'z': ('rec_z', 'A' * (cls.k + cls.long_run - 1))}
+        cls.fasta = {}
+        for name, (header, sequence) in records.items():
+            cls.fasta[name] = cls.tempdir.name + f'/{name}.fa'
+            with open(cls.fasta[name], 'w') as f:
+                f.write(f'>{header}\n{sequence}\n')
+        cls.both = cls.tempdir.name + '/both.fa'
+        with open(cls.both, 'w') as f:
+            for header, sequence in records.values():
+                f.write(f'>{header}\n{sequence}\n')
+        cls.query = cls.tempdir.name + '/query.fa'
+        with open(cls.query, 'w') as f:
+            f.write('>q\n' + 'A' * (cls.k + cls.query_kmers - 1) + '\n')
+
+        cls.graph = cls.tempdir.name + '/graph' + graph_file_extension['succinct']
+        cls._build_graph(cls.both, cls.tempdir.name + '/graph', cls.k, 'succinct', 'basic')
+        # with a record mapping: both records in one column
+        cls.anno_base = cls.tempdir.name + '/records'
+        cls.anno = cls.anno_base + anno_file_extension['row_diff_brwt_coord']
+        cls._annotate_graph(cls.both, cls.graph, cls.anno_base, 'row_diff_brwt_coord',
+                            anno_type='filename')
+        res = subprocess.run([f'{METAGRAPH} annotate --anno-filename --index-header-coords '
+                              f'-i {cls.graph} -o {cls.anno_base} {cls.both}'],
+                             shell=True, stdout=PIPE, stderr=PIPE)
+        assert res.returncode == 0, res.stderr.decode()
+        assert os.path.exists(cls.anno_base + '.seqs')
+        # without one: a column per record's file
+        cls.columns_base = cls.tempdir.name + '/columns'
+        cls.columns = cls.columns_base + anno_file_extension['row_diff_brwt_coord']
+        cls._annotate_graph([cls.fasta['a'], cls.fasta['y'], cls.fasta['z']], cls.graph,
+                            cls.columns_base,
+                            'row_diff_brwt_coord', anno_type='filename')
+        assert not os.path.exists(cls.columns_base + '.seqs')
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.tempdir.cleanup()
+
+    def _query(self, anno):
+        out = self.tempdir.name + '/out.tsv'
+        command = [METAGRAPH, 'query', '--query-mode', 'coords', '--min-kmers-fraction-label', '0',
+                   '--num-top-labels', '1', '-i', self.graph, '-a', anno, self.query]
+        res = subprocess.run([sys.executable, '-c', PEAK_RSS, out] + command,
+                             stdout=PIPE, stderr=PIPE)
+        self.assertEqual(res.returncode, 0, res.stderr.decode())
+        rc, peak = (int(x) for x in res.stdout.decode().split())
+        self.assertEqual(rc, 0)
+        with open(out) as f:
+            lines = f.read().splitlines()
+        self.assertEqual(1, len(lines))
+        fields = lines[0].split('\t')
+        self.assertEqual(['0', 'q'], fields[:2])
+        self.assertEqual(3, len(fields))
+        label, value = fields[2][1:].split('>', 1)
+        print(f'[ coords ] {self.query_kmers} positions of one row of {self.long_run + 1} '
+              f'coordinates: peak RSS {peak / 1024 ** 2:.0f} MiB', flush=True)
+        # a copy of the row per position
+        self.assertGreater(self.query_kmers * (self.long_run + 1) * 8, 1024 ** 3)
+        self.assertLess(peak, self.max_peak_bytes)
+        return label, value
+
+    def _ranges(self):
+        # the short record's coordinate at every query position, each a range of its own
+        return ':'.join(f'{p}-{self.flank}' for p in range(self.query_kmers))
+
+    def test_coords_by_record(self):
+        label, value = self._query(self.anno)
+        self.assertEqual('rec_a', label)
+        self.assertEqual(f'/{self.short_kmers}:' + self._ranges(), value)
+
+    def test_coords_by_column(self):
+        label, value = self._query(self.columns)
+        self.assertEqual(self.fasta['a'], label)
+        self.assertEqual(':' + self._ranges(), value)
+
+
 if __name__ == '__main__':
     unittest.main()
