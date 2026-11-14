@@ -1493,6 +1493,312 @@ TEST(CoordToHeaderLayout, CorruptFilesNeverCrashALoadOrALookup) {
     }
 }
 
+// ---------------------------------------------------------------------------------------------
+// The positions of a column's offsets strictly increase within its length (review of 9726cb420,
+// [P2]; train 6, lane W3). sdsl decodes the i-th position from the high part (its i-th set bit's
+// position less i, the bucket, shifted by the low bits) and from the low part (its i-th value).
+// The layout checks above validate every size and the high part, but not the low part's values:
+// a corrupt value repeated or reordered positions within a bucket and kept every checked size, the
+// record count and the last record's end
+
+// The review's column: 12 records of 5, 1, ..., 1 k-mers, a length of 16 whose 12 record ends (4
+// to 15) are stored inverted: the zeros 0 to 3, one bucket of 2 low bits, their low values 0, 1,
+// 2 and 3 in the data's first byte, 0xE4
+CoordToHeader twelve_records() {
+    std::vector<uint64_t> counts(12, 1);
+    counts[0] = 5;
+    return CoordToHeader({ seqs_names(12, "t") }, { std::move(counts) });
+}
+
+// An inverted column whose last stored zero shares the last record end's bucket: 12 records of
+// one k-mer, then one of 6 (a length of 18; the zeros 12 to 16, 2 low bits, 16 in bucket 4 with
+// the end 17), so that a low value can state a zero past the length
+CoordToHeader thirteen_records() {
+    std::vector<uint64_t> counts(13, 1);
+    counts[12] = 6;
+    return CoordToHeader({ seqs_names(13, "u") }, { std::move(counts) });
+}
+
+// A column stored as is (not inverted) whose first record ends share a bucket: 4 records of one
+// k-mer, then one of 100 (a length of 104, 4 low bits: the ends 0 to 3 in bucket 0, 103 in 6)
+CoordToHeader clustered_ends() {
+    return CoordToHeader({ seqs_names(5, "k") }, { { 1, 1, 1, 1, 100 } });
+}
+
+// The |i|-th low value of column |c| ("c0") of |bytes|, and |bytes| with it set to |value|
+uint64_t seqs_low(const std::string &bytes, const std::map<std::string, SeqsField> &fields,
+                  const std::string &c, uint64_t i) {
+    const uint64_t wl = seqs_value(bytes, fields.at(c + ".sd.wl"));
+    const SeqsField &data = fields.at(c + ".sd.low.data");
+    uint64_t value = 0;
+    for (uint64_t b = 0; b < wl; ++b) {
+        const uint64_t bit = i * wl + b;
+        value |= uint64_t((bytes[data.offset + bit / 8] >> (bit % 8)) & 1) << b;
+    }
+    return value;
+}
+
+std::string with_low(std::string bytes, const std::map<std::string, SeqsField> &fields,
+                     const std::string &c, uint64_t i, uint64_t value) {
+    const uint64_t wl = seqs_value(bytes, fields.at(c + ".sd.wl"));
+    for (uint64_t b = 0; b < wl; ++b) {
+        bytes = with_data_bit(bytes, fields.at(c + ".sd.low.data"), i * wl + b, (value >> b) & 1);
+    }
+    return bytes;
+}
+
+// The positions column |c| of |bytes| stores, decoded as sdsl decodes them
+std::vector<uint64_t> seqs_positions(const std::string &bytes,
+                                     const std::map<std::string, SeqsField> &fields,
+                                     const std::string &c) {
+    const uint64_t wl = seqs_value(bytes, fields.at(c + ".sd.wl"));
+    const uint64_t high_bits = seqs_value(bytes, fields.at(c + ".sd.high.bits"));
+    const SeqsField &high = fields.at(c + ".sd.high.data");
+    std::vector<uint64_t> positions;
+    for (uint64_t bit = 0; bit < high_bits; ++bit) {
+        if ((bytes[high.offset + bit / 8] >> (bit % 8)) & 1) {
+            const uint64_t i = positions.size();
+            positions.push_back(((bit - i) << wl) | seqs_low(bytes, fields, c, i));
+        }
+    }
+    return positions;
+}
+
+// Whether |positions| strictly increase below |length|
+bool increasing_within(const std::vector<uint64_t> &positions, uint64_t length) {
+    for (size_t i = 0; i < positions.size(); ++i) {
+        if (positions[i] >= length || (i && positions[i] <= positions[i - 1]))
+            return false;
+    }
+    return true;
+}
+
+// Whether |bytes| loads as the .seqs of |base|, plain and mapped, without a lookup (load_both's
+// lookups read outside the offsets of a corrupt file that loaded)
+std::pair<bool, bool> loads(const std::string &base, const std::string &bytes) {
+    {
+        std::ofstream out(base + CoordToHeader::kExtension, std::ios::binary | std::ios::trunc);
+        out << bytes;
+    }
+    const bool with_mmap = utils::with_mmap();
+    bool loaded[2];
+    for (bool mmap : { false, true }) {
+        utils::set_mmap(mmap);
+        CoordToHeader cth;
+        loaded[mmap] = cth.load(base);
+    }
+    utils::set_mmap(with_mmap);
+    return { loaded[0], loaded[1] };
+}
+
+// The review's example: the inverted column's low byte 0xE4 -> 0x00 decodes the four zeros all
+// at 0. Every checked size, the 12 record ends and the last record's end were kept, so the file
+// loaded, and a lookup of coordinate 1 made the inverted rank compute 1 - 4 (unsigned):
+// map_single_coord passed record 2^64 - 3 to select, which read outside the offsets
+TEST(CoordToHeaderLayout, TheReviewsRepeatedPositionsAreRefused) {
+    const std::string base = test_dump_dir() + "/cth_repeated";
+    twelve_records().serialize(base);
+    const std::string bytes = file_bytes(base + CoordToHeader::kExtension);
+    const auto fields = seqs_fields(bytes);
+    // the shape is the review's
+    ASSERT_EQ(1u, seqs_value(bytes, fields.at("c0.inverted")));
+    ASSERT_EQ(16u, seqs_value(bytes, fields.at("c0.sd.size")));
+    ASSERT_EQ(2u, seqs_value(bytes, fields.at("c0.sd.wl")));
+    ASSERT_EQ(8u, seqs_value(bytes, fields.at("c0.sd.low.bits")));
+    const SeqsField &low = fields.at("c0.sd.low.data");
+    ASSERT_EQ(0xE4, static_cast<uint8_t>(bytes[low.offset]));
+    ASSERT_EQ((std::vector<uint64_t> { 0, 1, 2, 3 }), seqs_positions(bytes, fields, "c0"));
+    ASSERT_EQ(kLoaded, load_both(base, bytes));
+
+    std::string zeroed = bytes;
+    zeroed[low.offset] = 0;
+    ASSERT_EQ((std::vector<uint64_t> { 0, 0, 0, 0 }), seqs_positions(zeroed, fields, "c0"));
+    EXPECT_EQ(kRefused, loads(base, zeroed));
+}
+
+// Each low value set to its bucket predecessor's (a repeat) or below it (an inversion), and the
+// last position past the length, is refused, in inverted columns (the review's, FC's) and in one
+// stored as is; a corrupt value that keeps the positions increasing still loads (it moves a record
+// end inside the column: a lookup answers another record, as the layout check states)
+TEST(CoordToHeaderLayout, ThePositionsStrictlyIncreaseWithinTheLength) {
+    const std::string base = test_dump_dir() + "/cth_increase";
+    std::map<std::string, CoordToHeader> shapes;
+    shapes.emplace("T12", twelve_records());
+    shapes.emplace("T13", thirteen_records());
+    shapes.emplace("KC", clustered_ends());
+    shapes.emplace("FC", std::move(seqs_shapes().at("FC")));
+    for (auto &[name, built] : shapes) {
+        built.serialize(base);
+        const std::string bytes = file_bytes(base + CoordToHeader::kExtension);
+        const auto fields = seqs_fields(bytes);
+        const uint64_t wl = seqs_value(bytes, fields.at("c0.sd.wl"));
+        const uint64_t length = seqs_value(bytes, fields.at("c0.sd.size"));
+        const std::vector<uint64_t> positions = seqs_positions(bytes, fields, "c0");
+        ASSERT_TRUE(increasing_within(positions, length)) << name;
+        ASSERT_EQ(kLoaded, load_both(base, bytes)) << name;
+        size_t num_cases = 0;
+        for (uint64_t i = 1; i < positions.size(); ++i) {
+            // (FC's 1,500 positions: its first buckets and its last)
+            if (positions.size() > 100 && i > 8 && i + 8 < positions.size())
+                continue;
+            if ((positions[i] >> wl) != (positions[i - 1] >> wl))
+                continue;
+            const uint64_t before = seqs_low(bytes, fields, "c0", i - 1);
+            EXPECT_EQ(kRefused, loads(base, with_low(bytes, fields, "c0", i, before)))
+                    << name << " entry " << i << " repeats its predecessor";
+            if (before) {
+                EXPECT_EQ(kRefused, loads(base, with_low(bytes, fields, "c0", i, before - 1)))
+                        << name << " entry " << i << " below its predecessor";
+            }
+            // and the predecessor raised to the entry's value
+            EXPECT_EQ(kRefused, loads(base, with_low(bytes, fields, "c0", i - 1,
+                                                     seqs_low(bytes, fields, "c0", i))))
+                    << name << " entry " << i - 1 << " repeats its successor";
+            ++num_cases;
+        }
+        EXPECT_LT(0u, num_cases) << name;
+    }
+    // a position past the length, the last zero of T13 (16 -> 18 of 18) and the last record end
+    // of KC (103 -> 111 of 104)
+    for (const char *name : { "T13", "KC" }) {
+        shapes.at(name).serialize(base);
+        const std::string bytes = file_bytes(base + CoordToHeader::kExtension);
+        const auto fields = seqs_fields(bytes);
+        const uint64_t last = seqs_positions(bytes, fields, "c0").size() - 1;
+        const uint64_t wl = seqs_value(bytes, fields.at("c0.sd.wl"));
+        const std::string past = with_low(bytes, fields, "c0", last, (uint64_t(1) << wl) - 1
+                                          - (std::string(name) == "T13"));
+        const std::vector<uint64_t> positions = seqs_positions(past, fields, "c0");
+        ASSERT_LE(seqs_value(bytes, fields.at("c0.sd.size")), positions.back()) << name;
+        EXPECT_EQ(kRefused, loads(base, past)) << name;
+    }
+    // FB's first record end 9 (bucket 1 of 3 low bits) moved to 8: the positions still increase,
+    // and the file loads, its first record one k-mer shorter and its second one longer
+    {
+        seqs_shapes().at("FB").serialize(base);
+        const std::string bytes = file_bytes(base + CoordToHeader::kExtension);
+        const auto fields = seqs_fields(bytes);
+        ASSERT_EQ(3u, seqs_value(bytes, fields.at("c0.sd.wl")));
+        ASSERT_EQ(9u, seqs_positions(bytes, fields, "c0")[0]);
+        const std::string moved = with_low(bytes, fields, "c0", 0, 0);
+        ASSERT_EQ(8u, seqs_positions(moved, fields, "c0")[0]);
+        ASSERT_EQ(kLoaded, load_both(base, moved));
+        CoordToHeader cth;
+        ASSERT_TRUE(cth.load(base));
+        EXPECT_EQ(9u, cth.num_kmers_in_sequence(0, 0));
+        EXPECT_EQ(11u, cth.num_kmers_in_sequence(0, 1));
+        EXPECT_EQ(std::make_pair(size_t(1), uint64_t(0)), cth.map_single_coord(0, 9));
+    }
+}
+
+// Every byte of the low part of these columns corrupted (each lowest two bits and highest bit
+// flipped, the byte inverted, the byte zeroed): a file loads only if its positions strictly
+// increase within the length, and then answers every lookup without leaving its column (plain and
+// mapped alike)
+TEST(CoordToHeaderLayout, ACorruptLowPartLoadsOnlyWithIncreasingPositions) {
+    const std::string base = test_dump_dir() + "/cth_lowfuzz";
+    std::map<std::string, CoordToHeader> shapes;
+    shapes.emplace("T12", twelve_records());
+    shapes.emplace("T13", thirteen_records());
+    shapes.emplace("KC", clustered_ends());
+    shapes.emplace("FC", std::move(seqs_shapes().at("FC")));
+    shapes.emplace("FA", std::move(seqs_shapes().at("FA")));
+    for (auto &[name, built] : shapes) {
+        built.serialize(base);
+        const std::string bytes = file_bytes(base + CoordToHeader::kExtension);
+        const auto fields = seqs_fields(bytes);
+        const uint64_t length = seqs_value(bytes, fields.at("c0.sd.size"));
+        const SeqsField &low = fields.at("c0.sd.low.data");
+        size_t num_refused = 0;
+        size_t num_loaded = 0;
+        for (size_t at = low.offset; at < low.offset + low.size; ++at) {
+            for (int mask : { 1, 2, 0x80, 0xFF, 0x100 }) {
+                std::string corrupt = bytes;
+                // (0x100: the byte zeroed)
+                corrupt[at] = mask == 0x100 ? 0 : corrupt[at] ^ static_cast<char>(mask);
+                if (corrupt == bytes)
+                    continue;
+                if (!increasing_within(seqs_positions(corrupt, fields, "c0"), length)) {
+                    EXPECT_EQ(kRefused, loads(base, corrupt))
+                            << name << " byte " << at - low.offset << " ^ " << mask;
+                    ++num_refused;
+                } else {
+                    const auto loaded = load_both(base, corrupt);
+                    EXPECT_EQ(loaded.first, loaded.second)
+                            << name << " byte " << at - low.offset << " ^ " << mask;
+                    num_loaded += loaded.first;
+                }
+            }
+        }
+        EXPECT_LT(0u, num_refused) << name;
+        // (the padding bits after FA's and FC's last values change no position: those files load)
+        if (name == "FA" || name == "FC") {
+            EXPECT_LT(0u, num_loaded) << name;
+        }
+    }
+}
+
+// The lookups' own bounds, reached by loading the review's file without the check of its record
+// ends (a test's hook): no answer names a record outside the column or a range without its
+// coordinate. Coordinates 1 to 3 ranked as records 2^64 - 3 to 2^64 - 1 (the inverted rank's
+// underflow), and from coordinate 4 on each record range ended before its coordinate (on which
+// LabelRecorder's walk over a row never moved, allocating): each such lookup throws
+TEST(CoordToHeaderLayout, LookupsNeverAnswerOutsideTheColumn) {
+    const std::string base = test_dump_dir() + "/cth_lookups";
+    twelve_records().serialize(base);
+    std::string bytes = file_bytes(base + CoordToHeader::kExtension);
+    const auto fields = seqs_fields(bytes);
+    bytes[fields.at("c0.sd.low.data").offset] = 0;
+    {
+        std::ofstream out(base + CoordToHeader::kExtension, std::ios::binary | std::ios::trunc);
+        out << bytes;
+    }
+    const bool with_mmap = utils::with_mmap();
+    for (bool mmap : { false, true }) {
+        utils::set_mmap(mmap);
+        CoordToHeader checked;
+        EXPECT_FALSE(checked.load(base)) << mmap;
+        CoordToHeader cth;
+        cth.set_check_record_ends(false);
+        ASSERT_TRUE(cth.load(base)) << mmap;
+        ASSERT_EQ(12u, cth.num_sequences(0));
+        ASSERT_EQ(16u, cth.num_kmers(0));
+        EXPECT_EQ(std::make_pair(size_t(0), uint64_t(0)), cth.map_single_coord(0, 0));
+        for (uint64_t coord = 1; coord < 4; ++coord) {
+            EXPECT_THROW(cth.map_single_coord(0, coord), std::runtime_error) << coord;
+        }
+        for (uint64_t coord = 1; coord < 16; ++coord) {
+            EXPECT_THROW(cth.sequence_range(0, coord), std::runtime_error) << coord;
+        }
+        // whatever is answered stays in the column, and a range holds its coordinate
+        for (uint64_t coord = 0; coord < 16; ++coord) {
+            try {
+                const auto [seq_id, local] = cth.map_single_coord(0, coord);
+                EXPECT_GT(12u, seq_id) << coord;
+                EXPECT_GE(coord, local) << coord;
+            } catch (const std::runtime_error &) {}
+            try {
+                const auto range = cth.sequence_range(0, coord);
+                EXPECT_GT(12u, range.seq_id) << coord;
+                EXPECT_LE(range.first, coord) << coord;
+                EXPECT_GE(range.last, coord) << coord;
+            } catch (const std::runtime_error &) {}
+        }
+        // and a batch refuses a row holding such a coordinate
+        std::vector<CoordToHeader::RowTuples> rows { { { 0, { 0, 1 } } } };
+        EXPECT_THROW(cth.map_to_local_coords(&rows), std::runtime_error);
+    }
+    utils::set_mmap(with_mmap);
+    // a valid file loads alike with the hook off
+    twelve_records().serialize(base);
+    CoordToHeader valid;
+    valid.set_check_record_ends(false);
+    ASSERT_TRUE(valid.load(base));
+    for (uint64_t coord = 0; coord < 16; ++coord) {
+        EXPECT_EQ(twelve_records().map_single_coord(0, coord), valid.map_single_coord(0, coord));
+    }
+}
+
 TEST(CoordToHeader, MapSingleCoordConsistentWithBatch) {
     // Verify map_single_coord gives same results as map_to_local_coords
     CoordToHeader cth(
