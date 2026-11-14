@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <array>
+#include <bit>
 #include <cctype>
 #include <cmath>
 #include <cstring>
@@ -1477,6 +1478,21 @@ char symbol_char(size_t b) {
 BaseSet symbol_of_char(char c) {
     return base_of_char(c);
 }
+#endif
+
+/**
+ * The most children a node has at one position of the extension (the DFS of extend_anchor and
+ * the segment search's arms): a node has at most one outgoing k-mer per last symbol and one
+ * incoming k-mer per first symbol, and a child is kept only when its symbol is in the
+ * position's set (symbol_of_char), so at most one per symbol a position can admit: A, C, G, T
+ * on the DNA builds (N and $ in no set), the 22 residues read as themselves on the Protein build
+ * (B, J, Z, X and $ in no set). The size of the DFS levels' child buffers.
+ */
+constexpr size_t kMaxChildren = std::popcount(kAllSymbols);
+#if _PROTEIN_GRAPH
+static_assert(kMaxChildren == kNumResidues);
+#else
+static_assert(kMaxChildren == 4);
 #endif
 
 // the bases of an exact pattern (every position one base)
@@ -3198,11 +3214,11 @@ class PatternRun {
         std::vector<node_index> path { anchor.node };
 
         // the allowed outgoing k-mers of one node of the path, in symbol order, the next one
-        // to enter, and the Model's state at that node (after its bases). At most four: a node
-        // has one outgoing k-mer per last base, and a pattern position allows only A, C, G, T
-        // (never N or $)
+        // to enter, and the Model's state at that node (after its bases). At most kMaxChildren:
+        // a node has one outgoing k-mer per last symbol, and a pattern position allows only the
+        // symbols of kAllSymbols (A, C, G, T; the 22 residues on the Protein build)
         struct Level {
-            std::array<std::pair<char, node_index>, 4> children;
+            std::array<std::pair<char, node_index>, kMaxChildren> children;
             Model::State state = 0;
             uint8_t size = 0;
             uint8_t next = 0;
@@ -3261,8 +3277,8 @@ class PatternRun {
                 return false;
             if (level.size > 1)
                 ++work_.extension_branches;
-            // symbol order, by an insertion sort of at most four (std::sort's path for more
-            // than 16 elements makes GCC 13 -O3 report -Warray-bounds on this array)
+            // symbol order, by an insertion sort of at most kMaxChildren (std::sort's path for
+            // more than 16 elements makes GCC 13 -O3 report -Warray-bounds on this array)
             for (uint8_t i = 1; i < level.size; ++i) {
                 for (uint8_t j = i;
                         j && level.children[j].first < level.children[j - 1].first; --j) {
@@ -3913,8 +3929,9 @@ struct Memo {
 // the last symbol of the second's node; the first is where its incoming edges are called from
 typedef std::pair<edge_index, edge_index> BwdPair;
 
-// up to four children in symbol order (A < C < G < T), by an insertion sort: std::sort's path
-// for more than 16 elements makes GCC 13 -O3 report -Warray-bounds on such arrays
+// up to kMaxChildren children in symbol order (A < C < G < T; residues alphabetically), by an
+// insertion sort: std::sort's path for more than 16 elements makes GCC 13 -O3 report
+// -Warray-bounds on such arrays
 template <class Child, size_t N>
 void sort_by_base(std::array<Child, N> &children, uint8_t size) {
     for (uint8_t i = 1; i < size; ++i) {
@@ -4314,7 +4331,7 @@ class SegmentRun {
             Model::State state;
             // the greatest end of the walks through this state found so far
             uint32_t reach;
-            std::array<Child, 4> children = {};
+            std::array<Child, kMaxChildren> children = {};
             uint8_t size = 0;
             uint8_t next = 0;
         };
@@ -4429,7 +4446,7 @@ class SegmentRun {
             Model::State state;
             // the least start of the walks through this state found so far
             uint32_t reach;
-            std::array<Child, 4> children = {};
+            std::array<Child, kMaxChildren> children = {};
             uint8_t size = 0;
             uint8_t next = 0;
         };
