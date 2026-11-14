@@ -1,6 +1,7 @@
 #include "traverse.hpp"
 
 #include <algorithm>
+#include <atomic>
 #include <chrono>
 #include <cmath>
 #include <exception>
@@ -477,13 +478,45 @@ struct IndexWalks {
 
 using Clock = std::chrono::steady_clock;
 
-// The walks of all indexes share the request's time: each walk gets its seed's budget or the
-// time left before |deadline|, whichever is less
+// The time of a request, shared by the walks of all indexes. A walk gets its seed's budget or a
+// fair part of the time left, whichever is less: the time left times the walks that can run at
+// once, divided by the walks not yet finished. A walk that ends early, such as one of an index
+// without the seed, leaves its part to the others.
+class TimeShare {
+  public:
+    TimeShare(Clock::time_point deadline, size_t lanes, size_t walks)
+          : deadline_(deadline), lanes_(std::max<size_t>(lanes, 1)), walks_left_(walks) {}
+
+    double budget_ms(double seed_budget_ms) const {
+        const std::chrono::duration<double, std::milli> left = deadline_ - Clock::now();
+        const size_t walks = std::max<size_t>(walks_left_.load(), 1);
+        return std::max(0.0, std::min(seed_budget_ms, left.count() * lanes_ / walks));
+    }
+
+    // Counts a walk of an index as finished when it goes out of scope, whether it was walked,
+    // skipped or failed
+    class Walk {
+      public:
+        explicit Walk(TimeShare &share) : share_(share) {}
+        ~Walk() { --share_.walks_left_; }
+        Walk(const Walk &) = delete;
+        Walk& operator=(const Walk &) = delete;
+      private:
+        TimeShare &share_;
+    };
+
+  private:
+    const Clock::time_point deadline_;
+    const size_t lanes_;
+    std::atomic<size_t> walks_left_;
+};
+
 IndexWalks walk_index(const TraverseRequest &req, const TraverseIndex &index,
-                      Clock::time_point deadline) {
+                      TimeShare &share) {
     const LabelOracle oracle(*index.anno_graph);
     IndexWalks out;
     for (const Seed &named : req.seeds) {
+        const TimeShare::Walk counted(share);
         out.known.emplace_back();
         Json::Value &walk = out.walks.emplace_back();
         // the index follows the labels it has
@@ -502,8 +535,7 @@ IndexWalks walk_index(const TraverseRequest &req, const TraverseIndex &index,
             // a malformed seed or an ambiguous label refuses the request
             check_seed(oracle, seed);
             Strategy strategy = req.strategy;
-            const std::chrono::duration<double, std::milli> left = deadline - Clock::now();
-            strategy.time_budget_ms = std::max(0.0, std::min(strategy.time_budget_ms, left.count()));
+            strategy.time_budget_ms = share.budget_ms(strategy.time_budget_ms);
             walk = seed_result_to_json(traverse_seed(oracle, seed, strategy));
         } catch (const SeedNotInGraph &) {
             continue;
@@ -532,8 +564,9 @@ Json::Value process_traverse_request(const Json::Value &request,
     // a request takes its time budget at most once per seed, however many indexes walk it
     // (capped at about 30 years, which Clock::duration holds)
     const double request_ms = std::min(req.strategy.time_budget_ms * req.seeds.size(), 1e12);
-    const auto deadline = Clock::now() + std::chrono::duration_cast<Clock::duration>(
-            std::chrono::duration<double, std::milli>(request_ms));
+    TimeShare share(Clock::now() + std::chrono::duration_cast<Clock::duration>(
+                            std::chrono::duration<double, std::milli>(request_ms)),
+                    pool.num_threads(), indexes.size() * req.seeds.size());
     std::vector<IndexWalks> walked(indexes.size());
     // the tasks refer to this frame: they are waited for before it is left, also on a throw
     struct Pending {
@@ -549,7 +582,7 @@ Json::Value process_traverse_request(const Json::Value &request,
     for (size_t i = 0; i < indexes.size(); ++i) {
         futures.push_back(pool.enqueue([&, i]() {
             try {
-                walked[i] = walk_index(req, indexes[i], deadline);
+                walked[i] = walk_index(req, indexes[i], share);
             } catch (...) {
                 return std::current_exception();
             }

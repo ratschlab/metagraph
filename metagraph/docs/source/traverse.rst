@@ -111,8 +111,10 @@ seed for another cause, its walk holds the ``error`` instead (``too_wide``, ``ti
 
 The server refuses a named label that no selected graph has with HTTP 400. A malformed seed and
 an ambiguous label fail the whole request, as on a single index. The graphs are walked in parallel.
-The walks of a request share its time: each walk gets the budget or the time left, whichever is
-less.
+The walks of a request share its time. Each walk gets the budget or a fair part of the time left,
+whichever is less. The part is the time left times the server's threads, divided by the walks not
+yet finished. So the graphs that hold the seed share the time, and a graph without it leaves its
+part to the others.
 
 Terms
 -----
@@ -192,7 +194,7 @@ Interval
      - How far each arm extends.
      - 5000
    * - ``bounds.time_budget_ms``
-     - The time for one seed, at least 1. A request can take this time once per seed. This holds on a server with a list of graphs too. A walk there gets the time that is left, which can be less than the budget. The server lowers it to ``--traverse-max-time-ms``.
+     - The time for one seed, at least 1. A request can take this time once per seed. This holds on a server with a list of graphs too. A walk there can get less than the budget. See `A list of graphs`_. The server lowers it to ``--traverse-max-time-ms``.
      - ``--traverse-max-time-ms``
 
 How a walk proceeds
