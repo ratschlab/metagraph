@@ -878,9 +878,11 @@ class CountingCoordinates : public annot::matrix::TupleCSCMatrix<annot::matrix::
 // Queries that repeat k-mers (a homopolymer against records with poly-A runs of many lengths, a
 // periodic query, records repeated): get_kmer_coordinates asks the matrix for each distinct row
 // of the query's k-mers once, not once per position, and with a record mapping once more for
-// each repeated row when records are returned. It returns the records (columns without a
+// each repeated row when records are returned, and so do get_top_label_signatures and
+// get_kmer_counts with a record mapping. It returns the records (columns without a
 // record mapping) of get_kmer_counts in the same order, each with its coordinates at every
-// position in the order of its rows, by brute force. On the counting matrix and on row-diff
+// position in the order of its rows, by brute force, and with a record mapping the
+// signatures and counts of the same records. On the counting matrix and on row-diff
 // over BRWT, with and without a record mapping, at the cuts 1, 2 and none.
 TEST(AnnotatedSearchPositions, EachRowOfTheQueryDecodedOnce) {
     std::mt19937 rng(55);
@@ -924,27 +926,55 @@ TEST(AnnotatedSearchPositions, EachRowOfTheQueryDecodedOnce) {
             for (size_t top : { size_t(1), size_t(2), std::numeric_limits<size_t>::max() }) {
                 SCOPED_TRACE(::testing::Message() << "by_record " << by_record << " query "
                              << query << " top " << top);
+                // Each distinct row is read once, and with a record mapping a repeated row
+                // once more when records are returned. A debug build drops the values of
+                // the fold at once: if it held any, every row is then read again.
+                auto check_requests = [&](const std::vector<annot::matrix::BinaryMatrix::Row> &rows,
+                                          bool returned, const std::string &what) {
+                    std::map<annot::matrix::BinaryMatrix::Row, size_t> requests;
+                    for (auto row : rows) {
+                        ++requests[row];
+                    }
+                    bool all_again = false;
+#ifndef NDEBUG
+                    for (const auto &[row, positions] : positions_of_row) {
+                        all_again |= by_record && returned && positions == 1
+                                        && requests[row] == 2;
+                    }
+#endif
+                    std::map<annot::matrix::BinaryMatrix::Row, size_t> expected_requests;
+                    for (const auto &[row, positions] : positions_of_row) {
+                        expected_requests[row]
+                            = by_record && returned && (positions > 1 || all_again) ? 2 : 1;
+                    }
+                    EXPECT_EQ(expected_requests, requests) << what;
+                };
                 matrix.requested.clear();
                 const auto coords = counting->get_kmer_coordinates(query, top, 0, 0);
-                std::map<annot::matrix::BinaryMatrix::Row, size_t> expected_requests;
-                for (const auto &[row, positions] : positions_of_row) {
-                    expected_requests[row] = by_record && positions > 1 && coords.size() ? 2 : 1;
+                check_requests(matrix.requested, coords.size(), "coordinates");
+                if (by_record) {
+                    // signatures and counts by record read the rows as the coordinates do
+                    matrix.requested.clear();
+                    counting->get_top_label_signatures(query, top, 0, 0);
+                    check_requests(matrix.requested, coords.size(), "signatures");
+                    matrix.requested.clear();
+                    counting->get_kmer_counts(query, top, 0, 0);
+                    check_requests(matrix.requested, coords.size(), "counts");
                 }
-                std::map<annot::matrix::BinaryMatrix::Row, size_t> requests;
-                for (auto row : matrix.requested) {
-                    ++requests[row];
-                }
-                EXPECT_EQ(expected_requests, requests);
                 for (const auto *index : { counting.get(), row_diff_brwt.get() }) {
                     const auto result = index == counting.get()
                             ? coords : index->get_kmer_coordinates(query, top, 0, 0);
                     const auto counts = index->get_kmer_counts(query, top, 0, 0);
+                    const auto signatures = index->get_top_label_signatures(query, top, 0, 0);
                     ASSERT_EQ(std::min(top, expected.size()), result.size());
                     ASSERT_EQ(counts.size(), result.size());
+                    ASSERT_EQ(signatures.size(), result.size());
                     for (size_t r = 0; r < result.size(); ++r) {
                         const auto &[label, count, positions, length] = result[r];
                         EXPECT_EQ(std::get<0>(counts[r]), label);
                         EXPECT_EQ(std::get<1>(counts[r]), count);
+                        EXPECT_EQ(std::get<0>(signatures[r]), label);
+                        EXPECT_EQ(std::get<1>(signatures[r]), count);
                         auto e = std::find_if(expected.begin(), expected.end(),
                                               [&](const auto &o) { return o.label == label; });
                         ASSERT_NE(expected.end(), e) << label;
@@ -956,6 +986,17 @@ TEST(AnnotatedSearchPositions, EachRowOfTheQueryDecodedOnce) {
                             ASSERT_EQ(e->coords[p], std::vector<uint64_t>(dense_coords[p].begin(),
                                                                           dense_coords[p].end()))
                                 << label << " position " << p;
+                        }
+                        if (by_record) {
+                            // a record's count at a position is its number of coordinates there
+                            const auto dense_counts = std::get<2>(counts[r]).to_dense();
+                            const auto mask = std::get<2>(signatures[r]).to_dense();
+                            for (size_t p = 0; p < dense_coords.size(); ++p) {
+                                EXPECT_EQ(e->coords[p].size(), dense_counts[p])
+                                    << label << " position " << p;
+                                EXPECT_EQ(!e->coords[p].empty(), mask[p])
+                                    << label << " position " << p;
+                            }
                         }
                     }
                 }
