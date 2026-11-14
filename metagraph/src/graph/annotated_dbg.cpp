@@ -412,6 +412,20 @@ using HeaderCounts = std::vector<std::pair<Header, size_t>>;
 // small block loses.
 constexpr size_t kRowBlock = 256;
 
+// Append the rows of |rows| not seen yet to |distinct|, in the order of their first
+// occurrence, and the index in |distinct| of each row to |index|
+void index_distinct_rows(std::span<const AnnotatedDBG::row_index> rows,
+                         tsl::hopscotch_map<AnnotatedDBG::row_index, uint32_t> &seen,
+                         std::vector<AnnotatedDBG::row_index> &distinct,
+                         std::vector<uint32_t> &index) {
+    for (AnnotatedDBG::row_index row : rows) {
+        auto [it, inserted] = seen.try_emplace(row, distinct.size());
+        if (inserted)
+            distinct.push_back(row);
+        index.push_back(it->second);
+    }
+}
+
 // Call |callback|(i, row of rows[i]) for i in order, decoding |kRowBlock| rows at a time
 // and each distinct row of a block once
 template <class Callback>
@@ -425,12 +439,7 @@ void call_row_tuples(const MultiIntMatrix &matrix, std::span<const AnnotatedDBG:
         distinct.clear();
         index.clear();
         seen.clear();
-        for (size_t i = begin; i < end; ++i) {
-            auto [it, inserted] = seen.try_emplace(rows[i], distinct.size());
-            if (inserted)
-                distinct.push_back(rows[i]);
-            index.push_back(it->second);
-        }
+        index_distinct_rows(rows.subspan(begin, end - begin), seen, distinct, index);
         const auto decoded = matrix.get_row_tuples(distinct);
         for (size_t i = begin; i < end; ++i) {
             callback(i, decoded[index[i - begin]]);
@@ -972,10 +981,20 @@ AnnotatedDBG::get_kmer_coordinates(std::string_view sequence,
         return result;
     }
 
-    auto rows_tuples = tuple_matrix->get_row_tuples(row_indices);
+    // the rows are read twice (to count, then to fill the values), so each distinct row is
+    // decoded once and kept: a k-mer repeated m times would otherwise be decoded m times
+    std::vector<row_index> distinct;
+    std::vector<uint32_t> row_of;
+    {
+        tsl::hopscotch_map<row_index, uint32_t> seen;
+        index_distinct_rows(row_indices, seen, distinct, row_of);
+    }
+    const auto rows_tuples = tuple_matrix->get_row_tuples(distinct);
 
     auto call_rows_tuples = [&](const auto &callback) {
-        std::for_each(rows_tuples.begin(), rows_tuples.end(), callback);
+        for (uint32_t i : row_of) {
+            callback(rows_tuples[i]);
+        }
     };
 
     auto results = filter_and_aggregate<std::vector<std::tuple<Label, size_t, PositionCoords>>>(
