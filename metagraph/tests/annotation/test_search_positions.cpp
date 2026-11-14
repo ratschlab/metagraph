@@ -1,4 +1,5 @@
 #include <algorithm>
+#include <cmath>
 #include <limits>
 #include <map>
 #include <random>
@@ -923,12 +924,22 @@ TEST(AnnotatedSearchPositions, EachRowOfTheQueryDecodedOnce) {
                 }
             }
             ASSERT_LT(positions_of_row.size(), present) << "the query repeats a k-mer";
-            for (size_t top : { size_t(1), size_t(2), std::numeric_limits<size_t>::max() }) {
+            const size_t num_kmers = query.size() - k + 1;
+            const size_t all = std::numeric_limits<size_t>::max();
+            // the cuts: the number of records and the fraction of k-mers to match
+            for (const auto &[top, fraction] : std::vector<std::pair<size_t, double>> {
+                        { 1, 0. }, { 2, 0. }, { all, 0. }, { 2, 0.25 }, { all, 0.25 } }) {
                 SCOPED_TRACE(::testing::Message() << "by_record " << by_record << " query "
-                             << query << " top " << top);
+                             << query << " top " << top << " fraction " << fraction);
+                const size_t min_count = std::max<size_t>(1, std::ceil(fraction * num_kmers));
+                const size_t num_expected
+                    = std::count_if(expected.begin(), expected.end(),
+                                    [&](const auto &e) { return e.matched() >= min_count; });
                 // Each distinct row is read once, and with a record mapping a repeated row
-                // once more when records are returned. A debug build drops the values of
-                // the fold at once: if it held any, every row is then read again.
+                // once more when records are returned. A debug build has no budget for
+                // the values of the fold. With more records in the race than the cut
+                // returns, it keeps only the counts, and every row is then read again.
+                // With fewer, it frees the values of the records below the fraction.
                 auto check_requests = [&](const std::vector<annot::matrix::BinaryMatrix::Row> &rows,
                                           bool returned, const std::string &what) {
                     std::map<annot::matrix::BinaryMatrix::Row, size_t> requests;
@@ -950,23 +961,23 @@ TEST(AnnotatedSearchPositions, EachRowOfTheQueryDecodedOnce) {
                     EXPECT_EQ(expected_requests, requests) << what;
                 };
                 matrix.requested.clear();
-                const auto coords = counting->get_kmer_coordinates(query, top, 0, 0);
+                const auto coords = counting->get_kmer_coordinates(query, top, fraction, 0);
                 check_requests(matrix.requested, coords.size(), "coordinates");
                 if (by_record) {
                     // signatures and counts by record read the rows as the coordinates do
                     matrix.requested.clear();
-                    counting->get_top_label_signatures(query, top, 0, 0);
+                    counting->get_top_label_signatures(query, top, fraction, 0);
                     check_requests(matrix.requested, coords.size(), "signatures");
                     matrix.requested.clear();
-                    counting->get_kmer_counts(query, top, 0, 0);
+                    counting->get_kmer_counts(query, top, fraction, 0);
                     check_requests(matrix.requested, coords.size(), "counts");
                 }
                 for (const auto *index : { counting.get(), row_diff_brwt.get() }) {
                     const auto result = index == counting.get()
-                            ? coords : index->get_kmer_coordinates(query, top, 0, 0);
-                    const auto counts = index->get_kmer_counts(query, top, 0, 0);
-                    const auto signatures = index->get_top_label_signatures(query, top, 0, 0);
-                    ASSERT_EQ(std::min(top, expected.size()), result.size());
+                            ? coords : index->get_kmer_coordinates(query, top, fraction, 0);
+                    const auto counts = index->get_kmer_counts(query, top, fraction, 0);
+                    const auto signatures = index->get_top_label_signatures(query, top, fraction, 0);
+                    ASSERT_EQ(std::min(top, num_expected), result.size());
                     ASSERT_EQ(counts.size(), result.size());
                     ASSERT_EQ(signatures.size(), result.size());
                     for (size_t r = 0; r < result.size(); ++r) {

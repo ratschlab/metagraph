@@ -519,41 +519,58 @@ void call_selected_coords(const MultiIntMatrix &matrix, const annot::CoordToHead
     });
 }
 
-// The (position, value) of each record of |counts| at the positions of the repeated
-// rows, whose values the fold does not hold. The value is each coordinate of the record
-// there or, with |count|, their number. The pairs of a record come in ascending order
-// of position.
-std::vector<std::vector<std::pair<uint32_t, uint64_t>>>
-selected_values(const MultiIntMatrix &matrix, const annot::CoordToHeader &mapping,
-                const QueryRows &q, std::span<const size_t> positions,
-                const HeaderCounts &counts, bool count) {
-    // (index in |counts|, value) of each repeated row
-    std::vector<std::vector<std::pair<uint32_t, uint64_t>>> hits(q.repeated.size());
-    std::vector<size_t> last_row(counts.size(), std::numeric_limits<size_t>::max());
-    std::vector<uint32_t> hit_of(counts.size()); // index in hits[last_row[r]]
-    call_selected_coords(matrix, mapping, q.repeated, counts, [&](size_t j, uint32_t r, uint64_t coord) {
-        if (!count) {
-            hits[j].emplace_back(r, coord);
-            return;
+// The values of the records of |counts| at the positions of the repeated rows, whose
+// values the fold does not hold. The value is each coordinate of the record there or,
+// with |count|, their number. A value is held once per row and spread over the
+// positions of the row one record at a time.
+class RepeatedValues {
+  public:
+    RepeatedValues(const MultiIntMatrix &matrix, const annot::CoordToHeader &mapping,
+                   const QueryRows &q, std::span<const size_t> positions,
+                   const HeaderCounts &counts, bool count)
+          : positions_(q.repeated.size()), hits_(counts.size()) {
+        for (size_t i = 0; i < q.row_of.size(); ++i) {
+            const uint32_t d = q.row_of[i];
+            if (q.weight[d] > 1)
+                positions_[q.repeated_of[d]].push_back(positions[i]);
         }
-        if (last_row[r] != j) {
-            last_row[r] = j;
-            hit_of[r] = hits[j].size();
-            hits[j].emplace_back(r, 0);
-        }
-        ++hits[j][hit_of[r]].second;
-    });
-    std::vector<std::vector<std::pair<uint32_t, uint64_t>>> values(counts.size());
-    for (size_t i = 0; i < q.row_of.size(); ++i) {
-        const uint32_t d = q.row_of[i];
-        if (q.weight[d] == 1)
-            continue;
-        for (const auto &[r, value] : hits[q.repeated_of[d]]) {
-            values[r].emplace_back(positions[i], value);
-        }
+        call_selected_coords(matrix, mapping, q.repeated, counts,
+                             [&](size_t j, uint32_t r, uint64_t coord) {
+            if (!count) {
+                hits_[r].emplace_back(j, coord);
+            } else if (hits_[r].size() && hits_[r].back().first == j) {
+                ++hits_[r].back().second;
+            } else {
+                hits_[r].emplace_back(j, 1);
+            }
+        });
     }
-    return values;
-}
+
+    // The (position, value) pairs of counts[r] in ascending order, to take once
+    std::vector<std::pair<uint32_t, uint64_t>> take(size_t r) {
+        const auto hits = std::move(hits_[r]);
+        size_t num_values = 0;
+        for (const auto &[j, value] : hits) {
+            num_values += positions_[j].size();
+        }
+        std::vector<std::pair<uint32_t, uint64_t>> values;
+        values.reserve(num_values);
+        for (const auto &[j, value] : hits) {
+            for (uint32_t pos : positions_[j]) {
+                values.emplace_back(pos, value);
+            }
+        }
+        if (!std::is_sorted(values.begin(), values.end()))
+            std::sort(values.begin(), values.end());
+        return values;
+    }
+
+  private:
+    // the query positions of each repeated row, ascending
+    std::vector<std::vector<uint32_t>> positions_;
+    // (index of the repeated row, value) of each record, by row
+    std::vector<std::vector<std::pair<uint32_t, uint64_t>>> hits_;
+};
 
 /**
  * The sequence records (headers) that the coordinates of annotation rows fall in, with
@@ -1061,8 +1078,7 @@ AnnotatedDBG::get_header_results(std::string_view sequence, size_t num_top_label
 
         read_again_if_dropped(*matrix, q, counts, &fold);
         // the values of the returned records at the repeated rows
-        auto unheld_values = selected_values(*matrix, *coord_to_header_, q, positions,
-                                             counts, true);
+        RepeatedValues unheld_values(*matrix, *coord_to_header_, q, positions, counts, true);
 
         std::vector<std::tuple<Label, size_t, Values>> result;
         result.reserve(counts.size());
@@ -1071,8 +1087,9 @@ AnnotatedDBG::get_header_results(std::string_view sequence, size_t num_top_label
             Values values(num_kmers);
             // merge the runs of the fold and the values it does not hold, both in
             // ascending order of position
-            auto next = unheld_values[r].begin();
-            const auto end = unheld_values[r].end();
+            const auto unheld = unheld_values.take(r);
+            auto next = unheld.begin();
+            const auto end = unheld.end();
             auto add_unheld_before = [&](size_t pos) {
                 for ( ; next != end && next->first < pos; ++next) {
                     if constexpr (std::is_same_v<Values, PresenceRuns>) {
@@ -1242,8 +1259,8 @@ AnnotatedDBG::get_kmer_coordinates(std::string_view sequence,
 
         read_again_if_dropped(*tuple_matrix, q, counts, &fold);
         // (position, coordinate) of each returned record at the repeated rows
-        auto unheld_coords = selected_values(*tuple_matrix, *coord_to_header_, q,
-                                             kmer_positions, counts, false);
+        RepeatedValues unheld_coords(*tuple_matrix, *coord_to_header_, q, kmer_positions,
+                                     counts, false);
 
         std::vector<std::tuple<std::string, size_t, PositionCoords, size_t>> result;
         result.reserve(counts.size());
@@ -1251,7 +1268,7 @@ AnnotatedDBG::get_kmer_coordinates(std::string_view sequence,
         for (size_t r = 0; r < counts.size(); ++r) {
             const auto &[h, count] = counts[r];
             const auto &[col, header] = h;
-            coords_at = std::move(unheld_coords[r]);
+            coords_at = unheld_coords.take(r);
             for (const RecordFold::Run &run : fold.take_runs(h)) {
                 for (uint32_t i = 0; i < run.len; ++i) {
                     coords_at.emplace_back(run.pos + i, run.value + i);
