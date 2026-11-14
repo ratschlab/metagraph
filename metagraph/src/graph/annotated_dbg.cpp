@@ -827,7 +827,8 @@ class RecordFold {
 
     void drop_values(Record &record) {
         num_runs_ -= record.runs.size();
-        record.runs = {};
+        // free the buffer: assigning {} would keep its capacity
+        std::vector<Run>().swap(record.runs);
         record.open_begin = record.open_next = record.open_end = 0;
         record.keeps_values = false;
     }
@@ -1228,6 +1229,11 @@ AnnotatedDBG::get_kmer_coordinates(std::string_view sequence,
     if (!tuple_matrix)
         throw std::runtime_error("k-mer coordinates are not indexed in this annotator");
 
+    // the rows and positions of a query are indexed as 32-bit
+    if (num_kmers >= std::numeric_limits<uint32_t>::max()) {
+        throw std::runtime_error("A sequence queried for coordinates must have fewer "
+                                 "than 2^32 k-mers");
+    }
     // each distinct row is decoded once, not once per position
     const QueryRows q(row_indices, kmer_positions);
 
@@ -1239,11 +1245,6 @@ AnnotatedDBG::get_kmer_coordinates(std::string_view sequence,
                                                  annotator_->num_labels()));
         }
 
-        // the positions of the repeated rows are kept as 32-bit, as the runs of the fold
-        if (num_kmers >= std::numeric_limits<uint32_t>::max()) {
-            throw std::runtime_error("A sequence queried by sequence record must have fewer "
-                                     "than 2^32 k-mers");
-        }
         // Split the coordinates across sequences, a block of rows at a time. Each row is
         // added once, at its first position, counted for all its positions. A row of one
         // position adds its coordinates. A repeated row is only counted here: its
