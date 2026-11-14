@@ -413,11 +413,11 @@ using HeaderCounts = std::vector<std::pair<Header, size_t>>;
 constexpr size_t kRowBlock = 256;
 
 // Bytes of per-position values that the fold of a query by sequence record holds for
-// all records it meets, before it drops them and keeps only the counts. The values of
-// the returned records are then read again after the cut. Debug builds drop them at
-// once, so that the tests check both ways.
+// all records it meets. Past them, only the records leading by count keep their values.
+// If another record is returned, the values of the returned records are read again
+// after the cut. Debug builds drop the values at once, so that the tests check both ways.
 #ifdef NDEBUG
-constexpr size_t kFoldValuesBudget = size_t(256) << 20;
+constexpr size_t kFoldValuesBudget = size_t(64) << 20;
 #else
 constexpr size_t kFoldValuesBudget = 0;
 #endif
@@ -519,7 +519,8 @@ void call_selected_coords(const MultiIntMatrix &matrix, const annot::CoordToHead
 }
 
 // The (position, value) of each record of |counts| at the positions whose values the
-// fold does not hold: those of the repeated rows, or all if it dropped its values. The
+// fold does not hold: those of the repeated rows, or all if it dropped the values of a
+// record of |counts| (|dropped|). The
 // value is each coordinate of the record there or, with |count|, their number. The
 // pairs of a record come in ascending order of position.
 std::vector<std::vector<std::pair<uint32_t, uint64_t>>>
@@ -579,15 +580,18 @@ class RecordFold {
         uint64_t value;
     };
 
-    RecordFold(const annot::CoordToHeader &mapping, Values values)
-          : mapping_(mapping), values_(values) {}
+    // |num_top|: the number of records to be selected, whose values are kept past the
+    // budget while they lead
+    RecordFold(const annot::CoordToHeader &mapping, Values values,
+               size_t num_top = std::numeric_limits<size_t>::max())
+          : mapping_(mapping), values_(values), num_top_(num_top) {}
 
     // Add the row of query position |pos|, counted |weight| times, and without |values|
     // only counted. With per-position values, the positions must come in ascending
     // order, each once.
     void add_row(const MultiIntMatrix::RowTuples &row, size_t pos, size_t weight = 1,
                  bool values = true) {
-        const Values values_to_add = values && !dropped_ ? values_ : kNone;
+        const Values values_to_add = values ? values_ : kNone;
         // runs hold 32-bit positions, and the end of a run is one past its last position
         if (pos >= std::numeric_limits<uint32_t>::max()) {
             throw std::runtime_error("A sequence queried by sequence record must have fewer "
@@ -610,7 +614,8 @@ class RecordFold {
                 if (!slot) {
                     if (records_.size() == std::numeric_limits<uint32_t>::max())
                         throw std::runtime_error("A query matches 2^32 or more sequence records");
-                    records_.push_back({ Header{column, seq_id}, 0, 0, 0, {}, 0, 0, 0 });
+                    records_.push_back({ Header{column, seq_id}, 0, 0, 0, {}, 0, 0, 0,
+                                         !dropped_ });
                     slot = records_.size();
                 }
                 Record &record = records_[slot - 1];
@@ -620,7 +625,7 @@ class RecordFold {
                     record.count += weight;
                 }
                 const size_t runs_before = record.runs.size();
-                switch (values_to_add) {
+                switch (record.keeps_values ? values_to_add : kNone) {
                     case kNone:
                         break;
                     case kAbundance:
@@ -649,8 +654,20 @@ class RecordFold {
             drop_values();
     }
 
-    // true if the values were dropped: take_runs() then returns none
-    bool dropped_values() const { return dropped_; }
+    // After select(): true if a record of |selected| dropped its values. The values of
+    // all records are then freed (take_runs() returns none), to be read again for
+    // |selected|.
+    bool refill(const HeaderCounts &selected) {
+        if (!dropped_ || std::all_of(selected.begin(), selected.end(), [&](const auto &h) {
+                             return record(h.first).keeps_values;
+                         })) {
+            return false;
+        }
+        for (Record &record : records_) {
+            record.runs = {};
+        }
+        return true;
+    }
 
     // The records matched by at least |min_count| rows: all of them in the order of
     // their first match, or the |num_top| with the most matches, sorted
@@ -690,6 +707,8 @@ class RecordFold {
         uint32_t open_begin;
         uint32_t open_next;
         uint32_t open_end;
+        // false once the record has dropped its values
+        bool keeps_values;
     };
 
     // The index + 1 in |records_| of each sequence of a column, 0 for the ones not met:
@@ -773,19 +792,34 @@ class RecordFold {
         }
     }
 
-    // Free the values of all records and keep only their counts. The values of a record
-    // seen at scattered positions take a run each, for every record until the cut.
+    // Free the values of all records except the |num_top_| leading by count, and keep
+    // only the counts of the others and of the records met later. The values of a record
+    // seen at scattered positions take a run each, for every record until the cut. The
+    // counts and the order of the records don't depend on the values, and the leaders
+    // often stay the ones to return. If the values of the leaders exceed the budget
+    // again (many records to return), free them all.
     void drop_values() {
         for (Record &record : records_) {
-            record.runs = {};
-            record.open_begin = record.open_next = record.open_end = 0;
+            record.keeps_values = false;
         }
-        num_runs_ = 0;
+        if (!dropped_) {
+            for (const auto &[header, count] : select(0, num_top_)) {
+                record(header).keeps_values = true;
+            }
+        }
+        for (Record &record : records_) {
+            if (!record.keeps_values) {
+                num_runs_ -= record.runs.size();
+                record.runs = {};
+                record.open_begin = record.open_next = record.open_end = 0;
+            }
+        }
         dropped_ = true;
     }
 
     const annot::CoordToHeader &mapping_;
     const Values values_;
+    const size_t num_top_;
     size_t num_runs_ = 0;
     bool dropped_ = false;
     size_t row_ = 0;
@@ -928,7 +962,8 @@ AnnotatedDBG::get_header_results(std::string_view sequence, size_t num_top_label
     RecordFold fold(*coord_to_header_,
                     std::is_same_v<Values, PresenceRuns> ? RecordFold::kPresence
                         : std::is_same_v<Values, CountRuns> ? RecordFold::kCounts
-                        : with_kmer_counts ? RecordFold::kAbundance : RecordFold::kNone);
+                        : with_kmer_counts ? RecordFold::kAbundance : RecordFold::kNone,
+                    num_top_labels);
     if constexpr (std::is_same_v<Values, size_t>) {
         call_row_tuples(*matrix, rows, [&](size_t i, const MultiIntMatrix::RowTuples &row) {
             fold.add_row(row, 0, weights[i]);
@@ -951,7 +986,7 @@ AnnotatedDBG::get_header_results(std::string_view sequence, size_t num_top_label
         // As in get_kmer_coordinates, each row is added once, at its first position,
         // counted for all its positions. A repeated row is only counted here, and its
         // values are added below for the returned records, as are all values if the
-        // fold dropped them.
+        // fold dropped those of a returned record.
         const QueryRows q(rows, positions);
         call_row_tuples(*matrix, q.distinct, [&](size_t i, const MultiIntMatrix::RowTuples &row) {
             fold.add_row(row, q.first_position[i], q.weight[i], q.weight[i] == 1);
@@ -960,7 +995,7 @@ AnnotatedDBG::get_header_results(std::string_view sequence, size_t num_top_label
 
         // the values the fold does not hold, of the returned records
         auto unheld_values = selected_values(*matrix, *coord_to_header_, q, positions,
-                                             counts, fold.dropped_values(), true);
+                                             counts, fold.refill(counts), true);
 
         std::vector<std::tuple<Label, size_t, Values>> result;
         result.reserve(counts.size());
@@ -1130,8 +1165,8 @@ AnnotatedDBG::get_kmer_coordinates(std::string_view sequence,
         // position adds its coordinates. A repeated row is only counted here: its
         // coordinates at all positions, for all records, would take time and memory in
         // proportion to both. They are added below for the returned records, as are all
-        // coordinates if the fold dropped its values.
-        RecordFold fold(*coord_to_header_, RecordFold::kCoords);
+        // coordinates if the fold dropped those of a returned record.
+        RecordFold fold(*coord_to_header_, RecordFold::kCoords, num_top_labels);
         call_row_tuples(*tuple_matrix, q.distinct,
                         [&](size_t i, const MultiIntMatrix::RowTuples &row) {
             fold.add_row(row, q.first_position[i], q.weight[i], q.weight[i] == 1);
@@ -1141,7 +1176,7 @@ AnnotatedDBG::get_kmer_coordinates(std::string_view sequence,
         // (position, coordinate) of each returned record that the fold does not hold
         auto unheld_coords = selected_values(*tuple_matrix, *coord_to_header_, q,
                                              kmer_positions, counts,
-                                             fold.dropped_values(), false);
+                                             fold.refill(counts), false);
 
         std::vector<std::tuple<std::string, size_t, PositionCoords, size_t>> result;
         result.reserve(counts.size());
