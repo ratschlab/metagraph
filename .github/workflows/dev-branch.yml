@@ -79,7 +79,8 @@ jobs:
   # The generated test data against their generators, without a build: the MGT v1 codec
   # vectors and the hand-made graphlet documents. The CLI graphlet documents and the pattern
   # bodies are checked against the build, in mini-index-tests; the pattern bodies against the
-  # SPEC in python-tests.
+  # SPEC in python-tests. And the examples of the graphlets page (graphlets.rst) against the
+  # library, which needs no build either.
   fixture-checks:
     if: *requested
     name: Fixture checks
@@ -102,3 +103,9 @@ jobs:
 
       - name: The hand-made graphlet documents are what graphlet_fixtures.py derives
         run: python metagraph/scripts/traversal/graphlet_fixtures.py --check
+
+      # run_examples.py runs every example of the page in order in one session, from the
+      # committed fixtures (the client example against a stand-in server on 127.0.0.1 that
+      # replays a committed response), and fails when one prints other than the page shows
+      - name: The examples of graphlets.rst print what the page shows
+        run: python metagraph/docs/source/_graphlet_examples/run_examples.py

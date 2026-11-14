@@ -474,7 +474,7 @@ so that a large retrieval can be saved or spooled before (or without) building i
 
 .. code-block:: text
 
-   True J 3441
+   True J 3536
 
 Integrity
 ^^^^^^^^^
@@ -1201,8 +1201,10 @@ Support along a walk
 
 ``support_profile(arm, walk, kind='displayed')`` returns maximal ``SupportRun`` pieces
 (``from_bp``, ``to_bp``, ``labels``, ``exact``, ``total``) of the labels supporting the
-displayed bases; ``kind='route'`` adds every run on the walk over its own route
-interval. ``support_changes(arm, walk)`` says where the displayed support changes and
+displayed bases, each run's label from its ``evidence_from`` as its claim states it (on
+``merge``, ``b.fa`` and ``a.fa`` reach the walk's end through the merges at 36 and 62, so
+they support its displayed bases from there); ``kind='route'`` adds every run on the walk
+over its own route interval. ``support_changes(arm, walk)`` says where the displayed support changes and
 why: an end (with the walker's reason), a switch, a ``split`` (the label took another
 branch, with its first base), a ``merge`` (it joined through another parent). In
 ``annotate`` mode both kinds are the recorded sets, with ``exact`` false where a list
@@ -1223,15 +1225,11 @@ was cut and ``total`` the true count.
 
 .. code-block:: text
 
-   (0, 20) ['a.fa', 'b.fa', 'c.fa', 'both.fa']
-   (20, 36) ['a.fa', 'c.fa', 'both.fa']
-   (36, 46) ['a.fa', 'b.fa', 'c.fa', 'both.fa']
-   (46, 62) ['b.fa', 'c.fa', 'both.fa']
+   (0, 36) ['c.fa', 'both.fa']
+   (36, 62) ['b.fa', 'c.fa', 'both.fa']
    (62, 100) ['a.fa', 'b.fa', 'c.fa', 'both.fa']
    [(0, 100, 4)]
-   20 removed b.fa split ['T']
    36 added b.fa merge 2
-   46 removed a.fa split ['C']
    62 added a.fa merge 4
 
 Label summary
@@ -2451,4 +2449,6 @@ An example whose directive carries the flag ``pending`` shows the intended behav
 of a library fix that is not merged yet; the runner reports its difference without
 failing, and ``--write --pending`` replaces its output once the fix is in. No example is
 pending today. The client example runs against a stand-in server that
-replays the committed fixture response.
+replays the committed fixture response. The branch's CI runs the check in its fixture
+checks (``.github/workflows/dev-branch.yml``), so an output that no longer matches the
+library fails there.
