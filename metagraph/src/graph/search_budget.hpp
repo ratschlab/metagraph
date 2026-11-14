@@ -108,17 +108,23 @@ class SearchBudget {
     bool passed() const { return passed_.load(std::memory_order_acquire); }
     SearchAccount& answer() { return answer_; }
 
-    // marks the request: |account| would have passed the bound (the first one is kept for
-    // the log, read once the request's work has ended)
-    void note_passed(const SearchAccount &account) {
+    // marks the request: |account|, holding |held| bytes, would have passed the bound with a
+    // charge of |charge| bytes (the first one is kept for the log, read once the request's
+    // work has ended)
+    void note_passed(const SearchAccount &account, uint64_t held, uint64_t charge) {
         bool expected = false;
         if (passed_.compare_exchange_strong(expected, true, std::memory_order_acq_rel)) {
             first_passed_ = std::string("the ") + account.name() + " account";
             if (!account.where().empty())
                 first_passed_ += " of " + account.where();
+            first_held_ = held;
+            first_charge_ = charge;
         }
     }
     const std::string& first_passed() const { return first_passed_; }
+    // what the first account to pass the bound held before the charge refused, and that charge
+    uint64_t first_held() const { return first_held_; }
+    uint64_t first_charge() const { return first_charge_; }
 
     // the most a pair's values account held (noted as each pair's work ends), for the log
     void note_values(uint64_t bytes) {
@@ -132,6 +138,8 @@ class SearchBudget {
     const uint64_t max_bytes_;
     std::atomic<bool> passed_ { false };
     std::string first_passed_;
+    uint64_t first_held_ = 0;
+    uint64_t first_charge_ = 0;
     std::atomic<uint64_t> values_max_ { 0 };
     SearchAccount answer_;
 };
@@ -143,7 +151,7 @@ inline void SearchAccount::charge(uint64_t bytes) {
     uint64_t held = held_.load(std::memory_order_relaxed);
     do {
         if (bytes > max || held > max - bytes) {
-            budget_->note_passed(*this);
+            budget_->note_passed(*this, held, bytes);
             throw SearchAnswerTooLarge(max, name_);
         }
     } while (!held_.compare_exchange_weak(held, held + bytes, std::memory_order_relaxed));

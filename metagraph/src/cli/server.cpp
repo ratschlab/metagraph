@@ -211,10 +211,14 @@ Json::Value process_search_request(const SearchRequest &request,
 // SPEC-multigraph-envelope.md section 3): 400 search_answer_too_large, its members written in
 // the order error, code, the bound (error_first_json_text), the whole request refused whatever
 // else its work raised (the answer never depends on the order its pairs charged in). Nothing
-// partial is sent
+// partial is sent. The log states the account whose charge passed the bound (a values
+// account's with its pair), what it held before that charge, and the charge
 HttpError search_budget_refusal(const graph::SearchBudget &budget, size_t request_id) {
-    logger->info("[Server] Request {}: search_answer_too_large: {} passed the bound of {} MiB",
-                 request_id, budget.first_passed(), budget.max_bytes() >> 20);
+    logger->info("[Server] Request {}: search_answer_too_large: {} passed the bound of {} MiB: "
+                 "held {} B ({:.1f} MiB) before a charge of {} B ({:.1f} MiB)",
+                 request_id, budget.first_passed(), budget.max_bytes() >> 20,
+                 budget.first_held(), budget.first_held() / double(1 << 20),
+                 budget.first_charge(), budget.first_charge() / double(1 << 20));
     Json::Value body = search_answer_too_large_json(budget.max_bytes() >> 20);
     std::string text = error_first_json_text(body);
     return HttpError(400, std::move(body), std::move(text));

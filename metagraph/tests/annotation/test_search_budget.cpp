@@ -71,15 +71,28 @@ TEST(SearchBudget, ChargesUpToTheBound) {
     EXPECT_EQ(uint64_t(2) << 20, values.held());
     EXPECT_TRUE(budget.passed());
     EXPECT_EQ("the values account of pair (a, a.dbg, a.annodbg)", budget.first_passed());
+    // for the log: what that account held before the charge refused, and the charge
+    EXPECT_EQ(uint64_t(2) << 20, budget.first_held());
+    EXPECT_EQ(1u, budget.first_charge());
     EXPECT_THROW(budget.answer().charge(1), SearchAnswerTooLarge);
     EXPECT_EQ(uint64_t(1) << 20, budget.answer().held());
+    // the first account to pass the bound is the one kept
+    EXPECT_EQ("the values account of pair (a, a.dbg, a.annodbg)", budget.first_passed());
+    EXPECT_EQ(uint64_t(2) << 20, budget.first_held());
+    EXPECT_EQ(1u, budget.first_charge());
     // a charge larger than the bound itself, and the largest charge
     SearchBudget small(10);
+    small.answer().charge(3);
     EXPECT_THROW(small.answer().charge(11), SearchAnswerTooLarge);
+    EXPECT_EQ("the answer account", small.first_passed());
+    EXPECT_EQ(3u, small.first_held());
+    EXPECT_EQ(11u, small.first_charge());
     SearchBudget other(10);
     EXPECT_THROW(other.answer().charge(std::numeric_limits<uint64_t>::max()),
                  SearchAnswerTooLarge);
     EXPECT_EQ(0u, other.answer().held());
+    EXPECT_EQ(0u, other.first_held());
+    EXPECT_EQ(std::numeric_limits<uint64_t>::max(), other.first_charge());
     // none charged without an account
     graph::charge_search(nullptr, 1 << 30);
 }
