@@ -1,5 +1,7 @@
 #include <gtest/gtest.h>
 
+#include <random>
+
 #include "../test_helpers.hpp"
 #include "annotation/coord_to_header.hpp"
 #include "graph/alignment/alignment.hpp"
@@ -244,6 +246,39 @@ TEST(CoordToHeader, MapCoordsConsistentWithMapSingleCoord) {
         for (size_t i = 0; i < coords.size(); ++i) {
             EXPECT_EQ(cth.map_single_coord(col, coords[i]), mapped[i])
                 << "column " << col << ", coordinate " << coords[i];
+        }
+    }
+}
+
+// Random columns, from sequences of one k-mer to long ones, and rows from every coordinate
+// to few of them
+TEST(CoordToHeader, MapCoordsOfRandomRows) {
+    std::mt19937 rng(7);
+    for (size_t max_length : { 1, 2, 3, 40, 5000 }) {
+        std::vector<std::string> headers;
+        std::vector<uint64_t> num_kmers;
+        std::uniform_int_distribution<uint64_t> length(1, max_length);
+        uint64_t total = 0;
+        for (size_t i = 0; i < 700; ++i) {
+            headers.push_back("h" + std::to_string(i));
+            num_kmers.push_back(length(rng));
+            total += num_kmers.back();
+        }
+        CoordToHeader cth({ headers }, { num_kmers });
+        for (double density : { 1.0, 0.5, 0.05, 0.002 }) {
+            CoordToHeader::Tuple coords;
+            std::bernoulli_distribution take(density);
+            for (uint64_t coord = 0; coord < total; ++coord) {
+                if (take(rng))
+                    coords.push_back(coord);
+            }
+            size_t i = 0;
+            cth.map_coords(0, coords, [&](size_t seq_id, uint64_t local_coord) {
+                ASSERT_EQ(cth.map_single_coord(0, coords[i]), std::make_pair(seq_id, local_coord))
+                    << "max length " << max_length << ", coordinate " << coords[i];
+                ++i;
+            });
+            EXPECT_EQ(coords.size(), i);
         }
     }
 }
