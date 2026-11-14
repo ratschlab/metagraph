@@ -12,7 +12,10 @@
   4. frames.records() builds its walk rows from the per-leaf records, never whole walks
      (their chains and bases are quadratic on a comb): the same rows;
   5. the route support profile is one sweep over the runs' ends, not a scan of the profile
-     and of every run per piece: the same profile.
+     and of every run per piece: the same profile;
+  7. setup.py works from a copy of api/python outside the repository (its version from
+     PKG-INFO, else 0+unknown) and from another directory, and states the repository's
+     version in a checkout as before.
 """
 
 import copy
@@ -22,6 +25,8 @@ import glob
 import json
 import os
 import random
+import shutil
+import subprocess
 import sys
 import tempfile
 import tracemalloc
@@ -471,6 +476,49 @@ class TestTheRouteProfile(unittest.TestCase):
         peak, _ = _peak(lambda: g.support_profile('right', 0, 'route'))
         self.assertGreaterEqual(b.peak_bytes, peak)
 
+
+# ======================================================================= finding 7
+
+# setup.py run with a stand-in setuptools that records setup()'s arguments: what it states
+# is checked without building anything, fetching its setup_requires or needing setuptools
+_SETUP = """import json, runpy, sys, types
+got = {}
+st = types.ModuleType('setuptools')
+st.setup = lambda **kw: got.update(kw)
+st.find_packages = lambda **kw: ['metagraph']
+sys.modules['setuptools'] = st
+runpy.run_path(sys.argv[1], run_name='__main__')
+print(json.dumps({k: got[k] for k in ('name', 'version', 'install_requires')}))
+"""
+
+
+class TestSetupFromAnywhere(unittest.TestCase):
+    def stated(self, setup_py, cwd):
+        p = subprocess.run([sys.executable, '-c', _SETUP, setup_py], cwd=cwd,
+                           stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        self.assertEqual(0, p.returncode, p.stderr.decode())
+        return json.loads(p.stdout.decode().splitlines()[-1]), p.stderr.decode()
+
+    def test_in_the_checkout(self):
+        with open(os.path.join(T.API, '..', '..', '..', 'package.json')) as f:
+            version = json.load(f)['version']
+        setup_py = os.path.join(T.API, 'setup.py')
+        here, _ = self.stated(setup_py, T.API)
+        self.assertEqual(('metagraph-api', version), (here['name'], here['version']))
+        # before: FileNotFoundError (README.rst read from the current directory)
+        self.assertEqual(here, self.stated(setup_py, os.path.dirname(T.API))[0])
+
+    def test_a_copy_outside_the_repository(self):
+        with tempfile.TemporaryDirectory() as d:
+            for name in ('setup.py', 'README.rst', 'requirements.txt'):
+                shutil.copy(os.path.join(T.API, name), d)
+            # before: FileNotFoundError: '../../../package.json'
+            got, err = self.stated('setup.py', d)
+            self.assertEqual('0+unknown', got['version'])
+            self.assertIn('the version is unknown', err)
+            with open(os.path.join(d, 'PKG-INFO'), 'w') as f:
+                f.write('Metadata-Version: 2.1\nName: metagraph-api\nVersion: 0.5.2\n')
+            self.assertEqual('0.5.2', self.stated('setup.py', d)[0]['version'])
 
 if __name__ == '__main__':
     unittest.main()

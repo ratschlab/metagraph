@@ -3,21 +3,47 @@
 
 """The setup script."""
 
+import email.parser
 import json
+import os
+import sys
 from setuptools import setup, find_packages
 
-with open('README.rst') as readme_file:
+# every file is read beside this script, not from the current directory: the package builds
+# from any directory, and from a copy outside the repository (an sdist, a copied folder)
+HERE = os.path.dirname(os.path.abspath(__file__))
+
+
+def _version():
+    """The repository's version (package.json at its top) in a checkout; in a copy without
+    it, the version its PKG-INFO states (an sdist, or a folder unpacked from one); else
+    0+unknown, said on stderr: nothing states a version there."""
+    repository = os.path.join(HERE, '..', '..', '..', 'package.json')
+    if os.path.exists(repository):
+        with open(repository) as f:
+            return json.load(f)['version']
+    pkg_info = os.path.join(HERE, 'PKG-INFO')
+    if os.path.exists(pkg_info):
+        with open(pkg_info, encoding='utf-8') as f:
+            version = email.parser.Parser().parse(f, headersonly=True).get('Version')
+        if version:
+            return version
+    print('setup.py: neither %s nor %s exists: the version is unknown (0+unknown)'
+          % (os.path.normpath(repository), pkg_info), file=sys.stderr)
+    return '0+unknown'
+
+
+with open(os.path.join(HERE, 'README.rst')) as readme_file:
     readme = readme_file.read()
 
 setup_requirements = ['pytest-runner']
 
-with open('requirements.txt') as f:
+with open(os.path.join(HERE, 'requirements.txt')) as f:
     requirements = list(f.readlines())
 
 test_requirements = ['pytest']
 
-with open('../../../package.json') as f:
-    version = json.load(f)['version']
+version = _version()
 
 setup(
     author="ratschlab",
