@@ -10,14 +10,18 @@
      object, the only place /traverse takes it), never a strategy field;
   3. a view of one arm answers claims() for that arm only, as walks() and to_fasta() do;
   4. frames.records() builds its walk rows from the per-leaf records, never whole walks
-     (their chains and bases are quadratic on a comb): the same rows.
+     (their chains and bases are quadratic on a comb): the same rows;
+  5. the route support profile is one sweep over the runs' ends, not a scan of the profile
+     and of every run per piece: the same profile.
 """
 
 import copy
+import dataclasses
 import gc
 import glob
 import json
 import os
+import random
 import sys
 import tempfile
 import tracemalloc
@@ -364,6 +368,108 @@ class TestTheTableRows(unittest.TestCase):
             tracemalloc.stop()
         self.assertEqual(2001, len(rec['walks']))
         self.assertLess(peak, 1.5 * kept)
+
+
+# ======================================================================= finding 5
+
+def _route_reference(g, arm, leaf):
+    """support_profile(kind='route') as 9726cb420 made it: per piece between two cuts, the
+    displayed profile scanned from its start and every run on the walk's chain tested."""
+    a = g.arm(arm)
+    seg_id = ops.leaf_segment(a, leaf)
+    prof = ops._displayed_profile(g, a, seg_id)
+    rbs = MT.derive.runs_by_segment(a)
+    extra = [a.runs[r] for sid in MT.derive.chain(a, seg_id) for r in rbs[sid]
+             if a.runs[r].to_bp > a.runs[r].from_bp]
+    if extra:
+        cuts = sorted({0, a.segments[seg_id].end_bp}
+                      | {x for f, t, _ in prof for x in (f, t)}
+                      | {x for r in extra for x in (r.from_bp, r.to_bp)})
+        pieces = []
+        for f, t in zip(cuts, cuts[1:]):
+            base = next((s for pf, pt, s in prof if pf <= f < pt), frozenset())
+            add = {r.label for r in extra if r.from_bp <= f < r.to_bp}
+            pieces.append((f, t, frozenset(base | add)))
+        prof = ops._merge_runs(pieces)
+    return [(f, t, sorted(x)) for f, t, x in prof]
+
+
+def _profile(rows):
+    return [(r.from_bp, r.to_bp, sorted(l.id for l in r.labels)) for r in rows]
+
+
+def _many_runs(n, seed=7):
+    """The `linear` fixture with its right arm's one segment widened to 4n + 100 bp and n
+    runs added on it at seeded random intervals, over the fixture's labels and n // 4 more
+    (the model changed in memory: what the profile reads)."""
+    g = T.graphlet('linear')
+    a = g.arms['right']
+    length = 4 * n + 100
+    a.segments[0].length_bp = length
+    a.complete_to_bp = length
+    rng = random.Random(seed)
+    first = g.labels[0]
+    g.labels = list(g.labels) + [
+        dataclasses.replace(first, id=len(g.labels) + j, seq_id=1000 + j, name='x%d' % j)
+        for j in range(n // 4)]
+    runs = list(a.runs)
+    for _ in range(n):
+        f = rng.randrange(0, length - 1)
+        runs.append(dataclasses.replace(a.runs[0], id=len(runs),
+                                        label=rng.randrange(len(g.labels)),
+                                        from_bp=f, to_bp=rng.randrange(f + 1, length + 1)))
+    a.runs = runs
+    a.cache.clear()
+    return g
+
+
+class _Reads(list):
+    """A profile that counts the passes over it."""
+    passes = 0
+
+    def __iter__(self):
+        _Reads.passes += 1
+        return super().__iter__()
+
+
+class TestTheRouteProfile(unittest.TestCase):
+    def test_the_committed_retrievals(self):
+        n = 0
+        for _, result, response in _items():
+            g = MT.from_response(result, response)
+            if g.mode != 'constrain':
+                continue
+            for side, a in g.arms.items():
+                for p in MT.derive.paths(a):
+                    want = _route_reference(g, side, p.id)
+                    self.assertEqual(want, _profile(g.support_profile(side, p.id, 'route')))
+                    n += 1
+        self.assertGreater(n, 50)
+
+    def test_many_runs(self):
+        for n in (1, 2, 40, 400):
+            want = _route_reference(_many_runs(n), 'right', 0)
+            self.assertEqual(want, _profile(_many_runs(n).support_profile('right', 0, 'route')))
+            got = _many_runs(n).support_profile('right', 0, 'route', budget=LocalBudget())
+            self.assertEqual(want, _profile(got))
+
+    def test_the_profile_is_read_once(self):
+        g = _many_runs(400)
+        real = ops._displayed_profile
+        _Reads.passes = 0
+        with mock.patch.object(ops, '_displayed_profile',
+                               lambda *a, **k: _Reads(real(*a, **k))):
+            g.support_profile('right', 0, 'route')
+        # before: once per piece (about 800 here)
+        self.assertLessEqual(_Reads.passes, 2)
+
+    def test_the_account_bounds_the_peak(self):
+        g = _many_runs(400)
+        b = LocalBudget()
+        g.support_profile('right', 0, 'route', budget=b)
+        g = _many_runs(400)
+        peak, _ = _peak(lambda: g.support_profile('right', 0, 'route'))
+        self.assertGreaterEqual(b.peak_bytes, peak)
 
 
 if __name__ == '__main__':

@@ -1903,25 +1903,54 @@ def _support_profile(g, arm, leaf, kind, b):
                 if run.to_bp > run.from_bp:
                     extra.append(run)
         if extra:
-            cuts = sorted({0, a.segments[seg_id].end_bp}
-                          | {x for f, t, _ in prof for x in (f, t)}
-                          | {x for r in extra for x in (r.from_bp, r.to_bp)})
-            if b is not None:
-                n = len(cuts)
-                widest = max((len(x[2]) for x in prof), default=0) + len(extra)
-                b.charge(sort_work(n) + n * (len(prof) + len(extra))
-                         + ((n * widest) >> _B.ID_SHIFT_C),
-                         n * (TUPLE + 2 * INT + set_bytes(widest)))
-            pieces = []
-            for f, t in zip(cuts, cuts[1:]):
-                base = next((s for pf, pt, s in prof if pf <= f < pt), frozenset())
-                add = {r.label for r in extra if r.from_bp <= f < r.to_bp}
-                pieces.append((f, t, frozenset(base | add)))
-            prof = _merge_runs(pieces)
+            prof = _route_profile(prof, extra, a.segments[seg_id].end_bp, b)
     elif kind != 'displayed':
         raise ValueError("kind is 'displayed' or 'route'")
     return _support_out(g, b, prof,
                         lambda r: SupportRun(r[0], r[1], _labels(g, r[2]), True, len(r[2])))
+
+
+def _route_profile(prof, extra, end, b=None):
+    """The route profile: the displayed profile |prof| [(from, to, set)] with the label of
+    every run of |extra| (each to_bp > from_bp) added over its own [from_bp, to_bp), as
+    maximal runs over [0, |end|). One sweep over the cuts -- the profile's boundaries and
+    the runs' ends, ascending -- with the runs covering the current piece counted per label
+    (a run covers [f, t) when from_bp <= f < to_bp): the profile and the runs are each read
+    once, where a scan of both per piece was quadratic (4,000 runs on one walk took
+    seconds). |b|: the cuts, the two orders of the runs, the counts and every piece's set
+    charged before they are made."""
+    cuts = sorted({0, end} | {x for f, t, _ in prof for x in (f, t)}
+                  | {x for r in extra for x in (r.from_bp, r.to_bp)})
+    m = len(extra)
+    if b is not None:
+        n = len(cuts)
+        widest = max((len(x[2]) for x in prof), default=0) + m
+        b.charge(sort_work(n) + 2 * sort_work(m) + n + len(prof) + 2 * m
+                 + ((n * widest) >> _B.ID_SHIFT_C),
+                 n * (TUPLE + 2 * INT + set_bytes(widest)) + 2 * list_bytes(m)
+                 + dict_bytes(m))
+    starts = sorted(extra, key=lambda r: r.from_bp)
+    ends = sorted(extra, key=lambda r: r.to_bp)
+    covering = {}                   # label -> the runs covering the current piece
+    pieces = []
+    k = i = j = 0
+    empty = frozenset()
+    for f, t in zip(cuts, cuts[1:]):
+        while k < len(prof) and prof[k][1] <= f:
+            k += 1
+        base = prof[k][2] if k < len(prof) and prof[k][0] <= f else empty
+        while i < m and starts[i].from_bp <= f:
+            covering[starts[i].label] = covering.get(starts[i].label, 0) + 1
+            i += 1
+        while j < m and ends[j].to_bp <= f:
+            lab = ends[j].label
+            if covering[lab] == 1:
+                del covering[lab]
+            else:
+                covering[lab] -= 1
+            j += 1
+        pieces.append((f, t, base.union(covering) if covering else frozenset(base)))
+    return _merge_runs(pieces)
 
 
 def support_changes(g, arm, leaf, *, budget=None):
