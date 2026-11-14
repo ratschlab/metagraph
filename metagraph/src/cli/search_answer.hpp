@@ -49,6 +49,25 @@ SearchRecordPrice search_record_price(const SeqSearchResult &result, bool verbos
                                       const std::string &annotation_path,
                                       const std::string &index_fp);
 
+// What measuring one record's price (search_record_price) holds while it runs: the coordinate
+// ranges collapsed_coords_text keeps open for a query_coords row (not |verbose_output|), at
+// most coord_ranges_bytes of the record's longest coordinate list; the other measures hold
+// nothing (REVIEW 9726cb420 [P2], lane T6-W2)
+uint64_t search_record_scratch(const SeqSearchResult &result, bool verbose_output);
+
+// Charges |answer| (the request's answer account) for one record's object before the server
+// builds it, as process_search_request does for each record in turn: the scratch measuring its
+// price holds (search_record_scratch), before it is measured, then its tree and its transient;
+// the transient (and the scratch, which it covers) as the most any record's took so far,
+// |*transient_charged|, which it raises (the records' objects are built one at a time).
+// Returns the price; past the bound throws graph::SearchAnswerTooLarge
+SearchRecordPrice charge_search_record(graph::SearchAccount &answer, uint64_t *transient_charged,
+                                       const SeqSearchResult &result, bool verbose_output,
+                                       bool tagged, const std::string &graph,
+                                       const std::string &graph_path,
+                                       const std::string &annotation_path,
+                                       const std::string &index_fp);
+
 // The bytes of the per-position strings SeqSearchResult::to_json writes for a row (with
 // |verbose| as --verbose-output), computed without writing them: its signature's presence_mask,
 // its kmer_abundances, its kmer_coords

@@ -66,6 +66,12 @@ struct CoordRangesText {
     uint64_t long_ranges_bytes = 0;
 };
 CoordRangesText collapsed_coords_text(const graph::PositionCoords &coords);
+// The most the ranges collapse_coord_ranges and collapsed_coords_text keep open hold at once,
+// for coordinates whose longest list (of a position) has |longest| coordinates: two vectors
+// of (position, first, last), each grown by doubling to at most a list's coordinates (to the
+// power of two at least |longest|), and at a growth the old buffer beside the new one, each
+// buffer at its size class (alloc_bytes)
+uint64_t coord_ranges_bytes(uint64_t longest);
 
 /**
  * Encode a k-mer presence mask as alternating x<len>o<len>... runs (x = ones, o = zeros),

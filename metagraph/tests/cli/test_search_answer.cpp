@@ -1,4 +1,5 @@
 #include <algorithm>
+#include <memory>
 #include <optional>
 #include <random>
 #include <string>
@@ -8,6 +9,7 @@
 #include <json/json.h>
 #include "gtest/gtest.h"
 
+#include "annotation/binary_matrix/base/decode_budget.hpp"
 #include "cli/query.hpp"
 #include "cli/search_answer.hpp"
 #include "cli/server_checks.hpp"
@@ -41,6 +43,7 @@ using graph::PositionCoords;
 using graph::SearchAccount;
 using graph::SearchAnswerTooLarge;
 using graph::SearchBudget;
+using annot::matrix::alloc_bytes;
 
 constexpr uint64_t kLarge = uint64_t(1) << 40;
 
@@ -376,6 +379,167 @@ TEST(SearchAnswer, TheRefusalAndTheCapabilityBlock) {
         members.append(name);
     }
     EXPECT_EQ(compact(members), compact(none["too_large"]["members"]));
+}
+
+// An allocator that counts what its buffers hold (each at its size class, alloc_bytes) and the
+// most they held at once
+struct Held {
+    uint64_t now = 0;
+    uint64_t most = 0;
+};
+template <class T>
+struct CountingAllocator {
+    using value_type = T;
+    Held *held;
+    explicit CountingAllocator(Held *held) : held(held) {}
+    template <class U>
+    CountingAllocator(const CountingAllocator<U> &other) : held(other.held) {}
+    T* allocate(size_t n) {
+        held->now += alloc_bytes(n * sizeof(T));
+        held->most = std::max(held->most, held->now);
+        return std::allocator<T>().allocate(n);
+    }
+    void deallocate(T *p, size_t n) {
+        held->now -= alloc_bytes(n * sizeof(T));
+        std::allocator<T>().deallocate(p, n);
+    }
+    template <class U>
+    bool operator==(const CountingAllocator<U> &other) const { return held == other.held; }
+    template <class U>
+    bool operator!=(const CountingAllocator<U> &other) const { return held != other.held; }
+};
+
+// The most the two vectors of open ranges of collapse_coord_ranges (cli/query.cpp,
+// call_coord_ranges) hold at once for |coords|: each position empties the next ones
+// (resize(0)), adds one range per coordinate (extended or new) and swaps them with the open
+// ones; a gap before a position ends every open range (a position without coordinates)
+uint64_t open_ranges_peak(const PositionCoords &coords) {
+    using Range = std::tuple<uint64_t, uint64_t, uint64_t>;
+    Held held;
+    std::vector<Range, CountingAllocator<Range>> ranges { CountingAllocator<Range>(&held) };
+    std::vector<Range, CountingAllocator<Range>> next_ranges { CountingAllocator<Range>(&held) };
+    auto position = [&](size_t coordinates) {
+        next_ranges.resize(0);
+        for (size_t c = 0; c < coordinates; ++c) {
+            next_ranges.emplace_back(c, c, c);
+        }
+        ranges.swap(next_ranges);
+    };
+    size_t next = 0;
+    coords.call_positions([&](size_t i, const PositionCoords::Coords &list) {
+        if (i > next)
+            position(0);
+        position(list.size());
+        next = i + 1;
+    });
+    return held.most;
+}
+
+// REVIEW 9726cb420 [P2], lane T6-W2: the ranges a coordinate row's collapse keeps open are
+// priced at their peak, coord_ranges_bytes of the row's longest list: two vectors grown by
+// doubling, the old buffer of one beside its new one at a growth (2 x buffer_bytes(open, 24)
+// before, which missed both)
+TEST(SearchAnswer, TheOpenRangesArePricedAtTheirPeak) {
+    EXPECT_EQ(0u, cli::coord_ranges_bytes(0));
+    std::mt19937 rng(47);
+    for (size_t round = 0; round < 200; ++round) {
+        const size_t size = 1 + rng() % 40;
+        PositionCoords coords(size);
+        uint64_t longest = 0;
+        for (size_t i = 0; i < size; ++i) {
+            if (rng() % 3 == 0)
+                continue;
+            const size_t n = 1 + rng() % (round < 100 ? 70 : 5000);
+            longest = std::max<uint64_t>(longest, n);
+            for (size_t c = 0; c < n; ++c) {
+                coords.add(i, 1000 + c * (1 + rng() % 3) + i);
+            }
+        }
+        const uint64_t peak = open_ranges_peak(coords);
+        EXPECT_LE(peak, cli::coord_ranges_bytes(longest)) << round;
+    }
+    // the worst case is the bound: two positions with as many coordinates, just past a power
+    // of two (the REVIEW's 30,000 too)
+    for (size_t n : { size_t(2), size_t(3), size_t(17), size_t(1025), size_t(30000),
+                      size_t(65537) }) {
+        PositionCoords coords(2);
+        for (size_t i = 0; i < 2; ++i) {
+            for (size_t c = 0; c < n; ++c) {
+                coords.add(i, 1000 + c + i);
+            }
+        }
+        EXPECT_EQ(open_ranges_peak(coords), cli::coord_ranges_bytes(n)) << n;
+    }
+    EXPECT_EQ(2 * 786'432u + 393'216u, cli::coord_ranges_bytes(30000));
+}
+
+// REVIEW 9726cb420 [P2], lane T6-W2: what measuring a record's price holds (the open ranges
+// of collapsed_coords_text for its coordinate rows) is charged before it is measured, as the
+// record's transient: the REVIEW's record, two successive positions of 30,000 coordinates,
+// fits a values account of 1 MiB, while measuring it would hold 1,966,080 B of ranges; it is
+// refused with nothing charged
+TEST(SearchAnswer, TheScratchOfThePriceIsChargedBeforeItIsMeasured) {
+    SearchBudget budget(1 << 20);
+    SearchAccount values(&budget, "values");
+    PositionCoords coords(2, &values);
+    for (size_t i = 0; i < 2; ++i) {
+        for (uint64_t c = 0; c < 30000; ++c) {
+            coords.add(i, 5000 + c + i);
+        }
+    }
+    coords.shrink();
+    EXPECT_FALSE(budget.passed());
+    EXPECT_GE(uint64_t(1) << 20, values.held());
+    auto record = [&](bool second) {
+        SeqSearchResult::LabelCountCoordsVec rows;
+        rows.emplace_back(second ? "b" : "a", 2, coords, 0);
+        return SeqSearchResult(QuerySequence { size_t(second), "q", std::string(32, 'A') },
+                               std::move(rows));
+    };
+    const SeqSearchResult first = record(false);
+    const uint64_t scratch = cli::search_record_scratch(first, false);
+    EXPECT_EQ(cli::coord_ranges_bytes(30000), scratch);
+    EXPECT_LT(uint64_t(1) << 20, scratch);
+    // verbose: the dense text is measured without allocating
+    EXPECT_EQ(0u, cli::search_record_scratch(first, true));
+    // other modes: nothing
+    EXPECT_EQ(0u, cli::search_record_scratch(
+            SeqSearchResult(QuerySequence { 0, "q", "" }, SeqSearchResult::LabelVec { "a" }),
+            false));
+
+    uint64_t transient_charged = 0;
+    EXPECT_THROW(cli::charge_search_record(budget.answer(), &transient_charged, first, false,
+                                           false, "", "", "", ""),
+                 SearchAnswerTooLarge);
+    EXPECT_EQ(0u, budget.answer().held());
+    EXPECT_EQ(0u, transient_charged);
+    EXPECT_TRUE(budget.passed());
+
+    // a bound that fits: the record's tree and its transient (which covers the scratch), each
+    // record's transient as the most one took
+    SearchBudget large(kLarge);
+    transient_charged = 0;
+    const cli::SearchRecordPrice price = cli::charge_search_record(
+            large.answer(), &transient_charged, first, false, false, "", "", "", "");
+    EXPECT_LE(scratch, price.transient);
+    EXPECT_EQ(price.transient, transient_charged);
+    EXPECT_EQ(price.tree + price.transient, large.answer().held());
+    const SeqSearchResult second = record(true);
+    const cli::SearchRecordPrice price2 = cli::charge_search_record(
+            large.answer(), &transient_charged, second, false, false, "", "", "", "");
+    EXPECT_EQ(price.tree + price2.tree + std::max(price.transient, price2.transient),
+              large.answer().held());
+    // a bound of exactly that admits it, one byte less refuses it before its scratch
+    SearchBudget exact(price.tree + price.transient);
+    transient_charged = 0;
+    cli::charge_search_record(exact.answer(), &transient_charged, first, false, false, "", "",
+                              "", "");
+    SearchBudget less(scratch - 1);
+    transient_charged = 0;
+    EXPECT_THROW(cli::charge_search_record(less.answer(), &transient_charged, first, false,
+                                           false, "", "", "", ""),
+                 SearchAnswerTooLarge);
+    EXPECT_EQ(0u, less.answer().held());
 }
 
 } // namespace

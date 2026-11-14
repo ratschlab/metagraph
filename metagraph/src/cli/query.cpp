@@ -13,6 +13,7 @@
 #include "common/utils/template_utils.hpp"
 #include "common/threads/threading.hpp"
 #include "common/vectors/vector_algorithm.hpp"
+#include "annotation/binary_matrix/base/decode_budget.hpp"
 #include "annotation/representation/annotation_matrix/static_annotators_def.hpp"
 #include "graph/alignment/dbg_aligner.hpp"
 #include "graph/representation/hash/dbg_hash_ordered.hpp"
@@ -171,6 +172,16 @@ collapse_coord_ranges(const graph::PositionCoords &coords) {
         range_strings.push_back(get_range(range));
     });
     return range_strings;
+}
+
+uint64_t coord_ranges_bytes(uint64_t longest) {
+    if (!longest)
+        return 0;
+    uint64_t capacity = 1;
+    while (capacity < longest) {
+        capacity *= 2;
+    }
+    return 2 * buffer_bytes(capacity, sizeof(Range)) + buffer_bytes(capacity / 2, sizeof(Range));
 }
 
 CoordRangesText collapsed_coords_text(const graph::PositionCoords &coords) {

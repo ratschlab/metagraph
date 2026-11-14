@@ -178,13 +178,11 @@ Json::Value process_search_request(const SearchRequest &request,
     uint64_t transient_charged = 0;
     for (const auto &seq_result : search_results) {
         if (budget) {
-            // the record's object, before it is built
-            const SearchRecordPrice price = search_record_price(
-                    seq_result, config.verbose_output, source.tagged, source.graph,
-                    source.graph_path, source.annotation_path, source.index_fp);
-            const uint64_t transient = std::max(transient_charged, price.transient);
-            budget->answer().charge(price.tree + transient - transient_charged);
-            transient_charged = transient;
+            // the record's object, before it is built, and the scratch of its price's
+            // measurement, before that is measured
+            charge_search_record(budget->answer(), &transient_charged, seq_result,
+                                 config.verbose_output, source.tagged, source.graph,
+                                 source.graph_path, source.annotation_path, source.index_fp);
         }
         Json::Value json = seq_result.to_json(config.verbose_output, anno_graph.get_graph().get_k());
         if (source.tagged) {
