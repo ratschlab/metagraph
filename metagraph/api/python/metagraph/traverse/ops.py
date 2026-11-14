@@ -3382,8 +3382,14 @@ class GraphletView:
         return ids if top is None else ids[:top]
 
     def claims(self, arm=None, at_most_bp=None, strict=True, *, budget=None, resume=None):
+        """claims() of the backing graphlet for the view's labels, on the view's arms: |arm|
+        (the view's arm by default, both arms of a view of both) -- an arm outside the view
+        has no claims here, [] as walks() and to_fasta() answer for it (the backing arm's
+        claims were answered before)."""
         if arm is None and self.arm_side is not None:
             arm = self.arm_side
+        if arm is not None and self.backing.arm(arm).side not in self.segments:
+            return []
         return self.backing.claims(arm, self.labels, at_most_bp, strict, budget=budget,
                                    resume=resume)
 

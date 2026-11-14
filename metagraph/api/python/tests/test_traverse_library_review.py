@@ -7,7 +7,8 @@
   2. a continuation (next_request(), deepen(), traverse_continue), a replay (request_of(),
      traverse_fetch(replay=)) and the client keep the pair a retrieval was answered on --
      graph, graph_path, annotation_path -- and annotation_path is a selector (in a `pairs`
-     object, the only place /traverse takes it), never a strategy field.
+     object, the only place /traverse takes it), never a strategy field;
+  3. a view of one arm answers claims() for that arm only, as walks() and to_fasta() do.
 """
 
 import copy
@@ -21,7 +22,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import traverse_testlib as T  # noqa: E402
 from test_traverse_mcp import BY_SEED, SEED, FakeClient  # noqa: E402
 
-from metagraph.traverse import GraphletStore, TraverseClient  # noqa: E402
+from metagraph.traverse import GraphletStore, LocalBudget, TraverseClient  # noqa: E402
 from metagraph.traverse.mcp_tools import GraphletTools  # noqa: E402
 
 PAIR = {'graph': 'E', 'graph_path': '/g/E', 'annotation_path': '/a/E'}
@@ -266,6 +267,27 @@ class TestTheToolsKeepThePair(ToolsPair):
         again = tools.traverse_fetch(replay=done['handle'])
         self.assertNotIn('error', again, again)
         self.assertEqual(PAIRS, _selection(client.requests[-1]))
+
+
+# ======================================================================= finding 3
+
+class TestAViewKeepsItsArm(unittest.TestCase):
+    def test_claims_of_another_arm(self):
+        g = T.graphlet('fork')
+        v = g.subgraph(['acc2'], arm='right')
+        self.assertEqual((['right'], [], ''), (v.arms(), v.walks('left'), v.to_fasta('left')))
+        # before: the left arm's claim of acc2
+        self.assertEqual([], v.claims('left'))
+        self.assertEqual([], v.claims('l', budget=LocalBudget()))
+        right = [c.as_dict() for c in g.claims('right', ['acc2'])]
+        self.assertTrue(right)
+        for arm in (None, 'right', 'r'):
+            self.assertEqual(right, [c.as_dict() for c in v.claims(arm)])
+        both = g.subgraph(['acc2'])
+        self.assertEqual([c.as_dict() for c in g.claims('left', ['acc2'])],
+                         [c.as_dict() for c in both.claims('left')])
+        with self.assertRaises((KeyError, ValueError)):
+            v.claims('up')
 
 
 if __name__ == '__main__':

@@ -1313,8 +1313,9 @@ segments and walks that carry the selected labels, with the backing graphlet's o
 ids (nothing is renumbered). A view needs at least one label (``None`` or ``[]`` is a
 ``BadSelector``). It answers ``walks()``, ``claims()``, ``to_fasta()`` and
 ``summary()`` for the selected labels -- ``walks(top=k)`` ranks the view's walks and
-then keeps ``k`` of them -- and its completeness is the backing ``complete_to_bp``
-*qualified "for the selected labels"*. Its ``of`` names the backing body (the digest of
+then keeps ``k`` of them -- and, for a view of one arm (``arm=``), on that arm only: the
+other arm has no walks, claims or records there. Its completeness is the backing
+``complete_to_bp`` *qualified "for the selected labels"*. Its ``of`` names the backing body (the digest of
 its text, or the ``of=`` the caller gives, such as a store handle: then the body is not
 dumped for its digest). ``save()`` writes the unchanged backing body plus the view's
 selectors in the ``J`` line; ``load()`` returns the view again, and refuses a saved view
