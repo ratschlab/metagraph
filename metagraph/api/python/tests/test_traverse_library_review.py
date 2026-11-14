@@ -8,24 +8,51 @@
      traverse_fetch(replay=)) and the client keep the pair a retrieval was answered on --
      graph, graph_path, annotation_path -- and annotation_path is a selector (in a `pairs`
      object, the only place /traverse takes it), never a strategy field;
-  3. a view of one arm answers claims() for that arm only, as walks() and to_fasta() do.
+  3. a view of one arm answers claims() for that arm only, as walks() and to_fasta() do;
+  4. frames.records() builds its walk rows from the per-leaf records, never whole walks
+     (their chains and bases are quadratic on a comb): the same rows.
 """
 
 import copy
+import gc
+import glob
 import json
 import os
 import sys
 import tempfile
+import tracemalloc
 import unittest
+from unittest import mock
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import traverse_testlib as T  # noqa: E402
-from test_traverse_mcp import BY_SEED, SEED, FakeClient  # noqa: E402
+import traverse_golden as TG  # noqa: E402
+from test_traverse_scale import comb_annotate  # noqa: E402
+from test_traverse_mcp import SEED, FakeClient  # noqa: E402
 
-from metagraph.traverse import GraphletStore, LocalBudget, TraverseClient  # noqa: E402
+import metagraph.traverse as MT  # noqa: E402
+from metagraph.traverse import GraphletStore, LocalBudget, TraverseClient, ops  # noqa: E402
+from metagraph.traverse import frames, parse  # noqa: E402
 from metagraph.traverse.mcp_tools import GraphletTools  # noqa: E402
 
 PAIR = {'graph': 'E', 'graph_path': '/g/E', 'annotation_path': '/a/E'}
+
+
+def _items():
+    """Every committed retrieval with a graphlet: the documents and the golden inputs."""
+    files = sorted(glob.glob(os.path.join(T.DOCS, '**', '*.graphlet.json'), recursive=True))
+    return TG.items_of(files + TG.golden_files())
+
+
+def _peak(fn):
+    gc.collect()
+    tracemalloc.start()
+    base = tracemalloc.get_traced_memory()[0]
+    try:
+        out = fn()
+        return tracemalloc.get_traced_memory()[1] - base, out
+    finally:
+        tracemalloc.stop()
 
 
 def envelope(resp, pair=PAIR, refusal=None):
@@ -288,6 +315,55 @@ class TestAViewKeepsItsArm(unittest.TestCase):
                          [c.as_dict() for c in both.claims('left')])
         with self.assertRaises((KeyError, ValueError)):
             v.claims('up')
+
+
+# ======================================================================= finding 4
+
+def _walk_row(side, w):
+    """The row frames.records() made from a whole Walk before (the reference)."""
+    return {'arm': side, 'walk': w.path_id, 'leaf': w.leaf, 'length_bp': w.length_bp,
+            'path_reason': w.path_reason, 'n_alive': w.n_alive,
+            'n_full': len(w.labels_full), 'complete': w.complete,
+            'beyond_certified_bp': w.beyond_certified_bp}
+
+
+class TestTheTableRows(unittest.TestCase):
+    def test_the_walk_rows_are_the_walks_fields(self):
+        n = 0
+        for _, result, response in _items():
+            g = MT.from_response(result, response)
+            want = [_walk_row(side, w) for side in ('left', 'right') if side in g.arms
+                    for w in g.walks(side, by='id')]
+            got = frames.records(MT.from_response(result, response))['walks']
+            self.assertEqual(want, got)
+            n += len(got)
+        self.assertGreater(n, 100)
+
+    def test_no_walk_is_built(self):
+        g = parse(comb_annotate(60))
+        want = [_walk_row('right', w) for w in g.walks('right', by='id')]
+        g = parse(comb_annotate(60))
+        # before: every Walk was built (its chain, its spelling, its claims)
+        with mock.patch.object(ops, '_walk_objects', side_effect=AssertionError('a Walk')), \
+                mock.patch.object(MT.derive, 'walk_batch', side_effect=AssertionError('a chain')):
+            rec = frames.records(g)
+        self.assertEqual(want, rec['walks'])
+
+    def test_the_peak_is_what_the_call_keeps(self):
+        # on a comb of 2,000 splits (Python 3.11): before, a traced peak of 25.5 MB for
+        # 7.9 MB kept (the rows and the derivations cached), the walks' chains and bases
+        # quadratic in the splits; now 8.0 MB for 7.6 MB kept
+        g = parse(comb_annotate(2000))
+        gc.collect()
+        tracemalloc.start()
+        try:
+            base = tracemalloc.get_traced_memory()[0]
+            rec = frames.records(g)
+            kept, peak = (x - base for x in tracemalloc.get_traced_memory())
+        finally:
+            tracemalloc.stop()
+        self.assertEqual(2001, len(rec['walks']))
+        self.assertLess(peak, 1.5 * kept)
 
 
 if __name__ == '__main__':

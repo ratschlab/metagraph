@@ -1460,6 +1460,32 @@ def _leaf_end_counts(a):
     return {s: len(v) for s, v in _annotate_leaf_ends(a).items() if segs[s].leaf is not None}
 
 
+def _walk_end(a, p):
+    """(path_reason, complete, beyond_certified_bp) of the walk of path |p|: its leaf's
+    reason, whether it is certified (no resource stop at its leaf, within complete_to_bp),
+    and how far it reaches past complete_to_bp."""
+    code = a.segments[p.leaf].leaf.path_reason
+    return (REASON[code] if code else None,
+            (code is None or code not in RESOURCE_CODES) and p.length_bp <= a.complete_to_bp,
+            max(0, p.length_bp - a.complete_to_bp))
+
+
+def walk_rows(g, arm):
+    """The scalar facts of every walk of |arm|, in path order, as frames.records() states
+    them: (path_id, leaf, length_bp, path_reason, n_alive, n_full, complete,
+    beyond_certified_bp) -- the Walk fields of walks(by='id') with n_full =
+    len(labels_full) -- from the per-leaf records only, as rank_walks() reads them: no
+    chain, spelling or claim is built (every walk's chain and bases are quadratic on a
+    comb)."""
+    a = g.arm(arm)
+    out = []
+    for p, full, alive_ids, _ in _ranked_walks(g, a, 'id', None, True, 0):
+        path_reason, complete, beyond = _walk_end(a, p)
+        out.append((p.id, p.leaf, p.length_bp, path_reason, len(alive_ids), len(full),
+                    complete, beyond))
+    return out
+
+
 def _walk_objects(g, a, ranked, with_claims, b=None, out=None):
     """The Walk objects of |ranked|. Under a budget, chunk by chunk: each chunk is
     charged at its price before it is built (its chains, spellings and claims), so a
@@ -1531,13 +1557,11 @@ def _walk_objects(g, a, ranked, with_claims, b=None, out=None):
     seen = set()
     out = []
     for p, full, alive_ids, _ in ranked:
-        seg = a.segments[p.leaf]
         reasons = {}
         if g.mode == 'constrain':
             for e in derive.end_labels(a, p.leaf):
                 name = a.runs[e.run].reason
                 reasons[name] = reasons.get(name, 0) + 1
-        code = seg.leaf.path_reason
         if batch is None:
             chain = p.segments
             try:
@@ -1551,14 +1575,12 @@ def _walk_objects(g, a, ranked, with_claims, b=None, out=None):
             if p.leaf in seen:
                 chain = list(chain)          # a walk asked twice: each Walk owns its list
             seen.add(p.leaf)
+        path_reason, complete, beyond = _walk_end(a, p)
         fields = dict(
             path_id=p.id, leaf=p.leaf, segments=chain, length_bp=p.length_bp,
-            sequence=sequence, path_reason=REASON[code] if code else None,
+            sequence=sequence, path_reason=path_reason,
             end_reasons=reasons, claims=by_leaf.get(p.leaf, []), labels_full=full,
-            n_alive=len(alive_ids),
-            complete=(code is None or code not in RESOURCE_CODES)
-            and p.length_bp <= a.complete_to_bp,
-            beyond_certified_bp=max(0, p.length_bp - a.complete_to_bp))
+            n_alive=len(alive_ids), complete=complete, beyond_certified_bp=beyond)
         if rcs is None:
             out.append(Walk(**fields))
         else:
