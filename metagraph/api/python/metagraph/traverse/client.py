@@ -81,7 +81,8 @@ __all__ = ['TraverseClient', 'TraverseResponse', 'TraverseError', 'ServerInitial
            'UnsupportedFeature', 'ResolveDeadline', 'AttemptAnswer', 'AttemptSent',
            'Suppression', 'ReleaseVerdict', 'release_verdict', 'classify_409', 'ACCEPT_ENCODING',
            'SUPPRESSION_LEVEL', 'COORDINATES_LEVEL', 'AUTO_COORDINATES_UNDER_MEMORY_BUDGET',
-           'auto_coordinates', 'drop_coordinates_note', 'strip_coordinate_cap']
+           'auto_coordinates', 'drop_coordinates_note', 'strip_coordinate_cap',
+           'SELECTORS', 'pair_members', 'answered_pair', 'requested_pair']
 
 ACCEPT_ENCODING = 'gzip, deflate'
 # the feature level of the tombstone's suppression (a cancel with not_after_ms,
@@ -124,6 +125,68 @@ _LEVELLED_FIELDS = frozenset(('not_after_ms', 'expect_server_instance'))
 # the largest max_coordinate_occurrences a server accepts (2^64 - 2: the wire contract)
 _MAX_CAP = (1 << 64) - 2
 
+# What names the pair a /traverse request runs on (SPEC-multigraph-envelope.md section 6):
+# request-level members, never strategy fields. `annotation_path` is no member of a request:
+# /traverse takes it inside a `pairs` object only (pair_members() writes it there)
+SELECTORS = ('graph', 'graph_path', 'annotation_path', 'graphs', 'pairs')
+
+
+def _text(v):
+    return v if isinstance(v, str) and v else None
+
+
+def pair_members(graph=None, graph_path=None, annotation_path=None):
+    """The request members that name one pair of a multi-graph server: `graph` (and
+    `graph_path`), or -- with |annotation_path|, which /traverse reads inside a pair object
+    only -- `pairs: [{graph, graph_path?, annotation_path}]` (`graph` beside `pairs` is
+    refused, SPEC-multigraph-envelope.md section 6). {} without a graph: the request names
+    no pair (a single-graph server, or a multi-graph server's only pair). A graph_path or
+    an annotation_path without a graph is a ValueError: the server needs the name."""
+    if not graph:
+        if graph_path or annotation_path:
+            raise ValueError('graph_path and annotation_path name a pair of a graph: give '
+                             'the graph too (graph_path %r, annotation_path %r)'
+                             % (graph_path, annotation_path))
+        return {}
+    if annotation_path:
+        pair = {'graph': graph}
+        if graph_path:
+            pair['graph_path'] = graph_path
+        pair['annotation_path'] = annotation_path
+        return {'pairs': [pair]}
+    out = {'graph': graph}
+    if graph_path:
+        out['graph_path'] = graph_path
+    return out
+
+
+def answered_pair(envelope):
+    """(graph, graph_path, annotation_path) of the pair a retrieval was answered on, from
+    the envelope its graphlet keeps: a multi-graph server's entry carries them
+    (single_answer() keeps the tags); None for a single-graph server's answer, which names
+    no pair. A path the entry does not state is None."""
+    env = envelope if isinstance(envelope, dict) else {}
+    graph = _text(env.get('graph'))
+    if graph is None:
+        return None
+    return graph, _text(env.get('graph_path')), _text(env.get('annotation_path'))
+
+
+def requested_pair(req):
+    """(graph, graph_path, annotation_path) of the pair a /traverse request names -- its
+    `graph` and `graph_path`, or its one `pairs` object -- or None (no pair named, or
+    `graphs`, or several pairs: the server decides)."""
+    req = req if isinstance(req, dict) else {}
+    pairs = req.get('pairs')
+    if pairs is not None:
+        if isinstance(pairs, list) and len(pairs) == 1 and isinstance(pairs[0], dict) \
+                and _text(pairs[0].get('graph')):
+            p = pairs[0]
+            return p['graph'], _text(p.get('graph_path')), _text(p.get('annotation_path'))
+        return None
+    graph = _text(req.get('graph'))
+    return None if graph is None else (graph, _text(req.get('graph_path')), None)
+
 
 def strip_coordinate_cap(strategy):
     """|strategy| (in place) without output.max_coordinate_occurrences unless its
@@ -149,7 +212,7 @@ def _memory_budget(strategy):
     return isinstance(v, (int, float)) and not isinstance(v, bool) and v > 0
 
 
-def auto_coordinates(client, strategy, graph=None, graph_path=None):
+def auto_coordinates(client, strategy, graph=None, graph_path=None, annotation_path=None):
     """The automatic rule for record coordinates -> (value, statement):
     value True (ask), or None (leave the strategy as given); statement None when the rule
     does not apply (the strategy sets output.coordinates, or is not support: trace in
@@ -158,7 +221,8 @@ def auto_coordinates(client, strategy, graph=None, graph_path=None):
     passing), 'unsupported' (the index states no coordinates block, or supported false) or
     'memory_budget' (a request memory budget with the gate not passing: not asked, |note|
     says how to ask). |client|: anything with supports_coordinates() (a TraverseClient);
-    one without asks for none."""
+    one without asks for none. |graph|, |graph_path|, |annotation_path|: the pair whose
+    capabilities decide (the client's own when none is given)."""
     s = strategy or {}
     out = s.get('output') if isinstance(s.get('output'), dict) else {}
     if 'coordinates' in out:
@@ -167,7 +231,8 @@ def auto_coordinates(client, strategy, graph=None, graph_path=None):
     if s.get('support', 'kmer') != 'trace' or labels.get('mode', 'constrain') != 'constrain':
         return None, None
     probe = getattr(client, 'supports_coordinates', None)
-    if probe is None or not probe(graph, graph_path):
+    if probe is None or not (probe(graph, graph_path) if annotation_path is None
+                             else probe(graph, graph_path, annotation_path=annotation_path)):
         return None, {'requested': False, 'reason': 'unsupported'}
     if _memory_budget(s):
         if not AUTO_COORDINATES_UNDER_MEMORY_BUDGET:
@@ -311,8 +376,14 @@ def _decode_body(data, encoding):
 
 class TraverseClient:
     def __init__(self, host, port, api_path=None, *, session=None, timeout=900, release=None,
-                 scheme='http', graph=None, feature_level=None):
-        """|feature_level|: the server's, when the caller knows it; else it is read from GET
+                 scheme='http', graph=None, feature_level=None, graph_path=None,
+                 annotation_path=None):
+        """|graph|, |graph_path|, |annotation_path|: the client's own pair of a multi-graph
+        server, named by every request and probe that names none (selection()); a graph
+        with several graphs needs graph_path, a graph whose pairs share one graph
+        annotation_path (sent in a `pairs` object: pair_members()).
+
+        |feature_level|: the server's, when the caller knows it; else it is read from GET
         /capabilities the first time a feature-level-5 field is to be sent (and never for a
         request without one, so a request without level-5 fields reads no capabilities).
         Once GET /capabilities has been read (expect_server_instance='auto' reads it for the
@@ -328,9 +399,12 @@ class TraverseClient:
         self.timeout = timeout
         self.release = release
         self.graph = graph
+        self.graph_path = graph_path
+        self.annotation_path = annotation_path
         self.feature_level = feature_level
         self._server_doc = None
-        # (graph, graph_path) -> whether GET /traverse/capabilities states coordinates
+        # (graph, graph_path, annotation_path) -> whether GET /traverse/capabilities states
+        # coordinates
         self._coord_support = {}
 
     # ---------------------------------------------------------------- transport
@@ -514,34 +588,49 @@ class TraverseClient:
 
     # ---------------------------------------------------------------- routes
 
-    def capabilities(self, graph=None, graph_path=None):
+    def selection(self, graph=None, graph_path=None, annotation_path=None):
+        """(graph, graph_path, annotation_path): the pair a request or probe names -- the
+        arguments (|graph| the client's own when only the paths are given), or, with none
+        given, the client's own pair."""
+        if graph is None and graph_path is None and annotation_path is None:
+            return self.graph, self.graph_path, self.annotation_path
+        return graph or self.graph, graph_path, annotation_path
+
+    def capabilities(self, graph=None, graph_path=None, annotation_path=None):
         """GET /traverse/capabilities: what one index supports. On a multi-graph server name
-        it: |graph| (the client's own graph by default) and, when the name spans several
-        graphs, |graph_path|."""
-        graph = graph or self.graph
+        it: |graph| (the client's own pair by default, selection()) and, when the name spans
+        several graphs, |graph_path|; |annotation_path| where its pairs share one graph."""
+        graph, graph_path, annotation_path = self.selection(graph, graph_path, annotation_path)
         query = []
         if graph:
             query.append('graph=' + urllib.parse.quote(graph, safe=''))
         if graph_path:
             query.append('graph_path=' + urllib.parse.quote(graph_path, safe=''))
+        if annotation_path:
+            query.append('annotation_path=' + urllib.parse.quote(annotation_path, safe=''))
         # a multi-graph server's probe of one pair is an envelope of one entry
         return single_answer(self._request('GET', '/traverse/capabilities'
                                            + ('?' + '&'.join(query) if query else '')))
 
-    def supports_coordinates(self, graph=None, graph_path=None, refresh=False):
-        """Whether the index (|graph|, |graph_path| on a multi-graph server) reports record
-        coordinates: its GET /traverse/capabilities states the coordinates block (feature
-        level 6: on every index, `supported` saying whether this one records them) with
-        supported true, and supports_trace. Read once per (graph, graph_path) and kept
-        (|refresh| reads it again; a 400 that refuses a coordinates field forgets it). A
-        server whose capabilities route fails with an HTTP error is taken as not supporting
-        them."""
-        key = (graph or self.graph, graph_path)
+    def supports_coordinates(self, graph=None, graph_path=None, refresh=False, *,
+                             annotation_path=None):
+        """Whether the index (|graph|, |graph_path|, |annotation_path| on a multi-graph
+        server; the client's own pair by default) reports record coordinates: its GET
+        /traverse/capabilities states the coordinates block (feature level 6: on every
+        index, `supported` saying whether this one records them) with supported true, and
+        supports_trace. Read once per pair and kept (|refresh| reads it again; a 400 that
+        refuses a coordinates field forgets it). A server whose capabilities route fails
+        with an HTTP error is taken as not supporting them."""
+        key = self.selection(graph, graph_path, annotation_path)
         got = None if refresh else self._coord_support.get(key)
         if got is None:
             try:
-                caps = self.capabilities() if graph is None and graph_path is None \
-                    else self.capabilities(graph, graph_path)
+                if graph is None and graph_path is None and annotation_path is None:
+                    caps = self.capabilities()
+                elif annotation_path is None:
+                    caps = self.capabilities(graph, graph_path)
+                else:
+                    caps = self.capabilities(graph, graph_path, annotation_path)
             except TraverseError:
                 return False
             block = caps.get('coordinates') if isinstance(caps, dict) else None
@@ -550,9 +639,9 @@ class TraverseClient:
             self._coord_support[key] = got
         return got
 
-    def auto_coordinates(self, strategy, graph=None, graph_path=None):
+    def auto_coordinates(self, strategy, graph=None, graph_path=None, annotation_path=None):
         """auto_coordinates(self, ...): the automatic rule for record coordinates."""
-        return auto_coordinates(self, strategy, graph, graph_path)
+        return auto_coordinates(self, strategy, graph, graph_path, annotation_path)
 
     def server_capabilities(self):
         """GET /capabilities: the server-wide document — routes and features, feature_level,
@@ -676,8 +765,11 @@ class TraverseClient:
     def build_request(self, seeds, strategy=None, *, detail='graphlet', timing=True,
                       graph=None, attempt_id=None, budget_id=None, locus_id=None,
                       not_after_ms=None, expect_server_instance=None, coordinates=None,
-                      max_coordinate_occurrences=None):
-        """The /traverse request (a dict). |expect_server_instance| (with |attempt_id| only,
+                      max_coordinate_occurrences=None, graph_path=None, annotation_path=None):
+        """The /traverse request (a dict). |graph|, |graph_path|, |annotation_path|: the pair
+        of a multi-graph server it runs on (the client's own when none is given,
+        selection()), written by pair_members(): `graph` and `graph_path`, or a `pairs`
+        object with the annotation_path. |expect_server_instance| (with |attempt_id| only,
         feature level 5): the server_instance the attempt is meant for -- a string, or 'auto'
         for the server's own (server_instance(), kept for that process). An explicit one to
         a server below feature level 5 raises UnsupportedFeature (nothing is sent: that
@@ -720,9 +812,7 @@ class TraverseClient:
         req = {'seeds': norm, 'strategy': strategy}
         if self.release:
             req['release'] = self.release
-        graph = graph or self.graph
-        if graph:
-            req['graph'] = graph
+        req.update(pair_members(*self.selection(graph, graph_path, annotation_path)))
         for key, value in (('attempt_id', attempt_id), ('budget_id', budget_id),
                            ('locus_id', locus_id), ('not_after_ms', not_after_ms)):
             if value is not None:
@@ -744,7 +834,7 @@ class TraverseClient:
     def traverse(self, seeds, strategy=None, *, detail='graphlet', timing=True, graph=None,
                  attempt_id=None, budget_id=None, locus_id=None, not_after_ms=None,
                  expect_server_instance=None, coordinates='auto',
-                 max_coordinate_occurrences=None):
+                 max_coordinate_occurrences=None, graph_path=None, annotation_path=None):
         """-> TraverseResponse(envelope, graphlets, errors). A seed whose permitted set
         could not be derived is an error result ({seed, error}), not an exception: the
         other seeds' graphlets are still returned (so is a seed an attempt never started,
@@ -758,7 +848,9 @@ class TraverseClient:
         any exception raised once the request was built (a TraverseError, and a transport
         error too: a timeout, a reset connection), state the attempt fields as sent (for
         release_verdict()); an error raised while building it (UnsupportedFeature) sent
-        nothing.
+        nothing. |graph|, |graph_path|, |annotation_path|: the pair, as in build_request();
+        each graphlet keeps the pair a multi-graph server answered on (its envelope), and
+        its continuations run there (next_request(), deepen()).
 
         |coordinates| (feature level 6): 'auto' (the default) asks for record coordinates
         for a support: trace strategy that does not set output.coordinates, where the index
@@ -770,8 +862,10 @@ class TraverseClient:
         refuses the field (an older one: 400) raises; nothing is retried without it."""
         auto = None
         if coordinates == 'auto':
-            coordinates, auto = auto_coordinates(self, strategy, graph)
+            coordinates, auto = auto_coordinates(self, strategy, graph, graph_path,
+                                                 annotation_path)
         req = self.build_request(seeds, strategy, detail=detail, timing=timing, graph=graph,
+                                 graph_path=graph_path, annotation_path=annotation_path,
                                  attempt_id=attempt_id, budget_id=budget_id, locus_id=locus_id,
                                  not_after_ms=not_after_ms,
                                  expect_server_instance=expect_server_instance,
@@ -819,9 +913,16 @@ class TraverseClient:
         The response's notes carry the request's: how the continuation may differ from
         one uninterrupted walk (a loss budget conservative for the labels that ended at a
         lower loss, ...). Walks whose continuations carry different labels cannot share a
-        request (IncompatibleContinuations): deepen them one walk at a time."""
-        if self.graph and 'graph' not in overrides:
-            overrides['graph'] = self.graph
+        request (IncompatibleContinuations): deepen them one walk at a time.
+
+        The continuation runs on the pair the graphlet was answered on (a multi-graph
+        server's envelope names it, and next_request() keeps it), else on the client's own
+        pair (selection()); a selection in |overrides| (graph, graph_path, annotation_path,
+        graphs, pairs) replaces either whole."""
+        if answered_pair(getattr(graphlet, 'envelope', None)) is None \
+                and not any(k in overrides for k in SELECTORS):
+            overrides.update((k, v) for k, v in zip(('graph', 'graph_path', 'annotation_path'),
+                                                    self.selection()) if v)
         req = graphlet.next_request(arm, leaves, bp, **overrides)
         out = self.response(self.traverse_raw(req))
         out.notes = list(getattr(req, 'notes', ()))

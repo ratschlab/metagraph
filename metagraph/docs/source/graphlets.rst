@@ -132,11 +132,23 @@ run), and an attempt stopped at its duration bound while its response was built 
 ``AttemptAtBound`` (a 503 with ``usage``: it ran, so it is not retried under the same
 ``attempt_id`` -- refused while the server holds the id, it would run again after that).
 ``capabilities()`` and ``resolve()`` call the other two routes (on a multi-graph server
-``capabilities(graph=..., graph_path=...)`` describes one of its indexes),
+``capabilities(graph=..., graph_path=..., annotation_path=...)`` describes one of its
+pairs),
 ``server_capabilities()`` reads the server-wide document (``GET /capabilities``:
 the routes and features, ``feature_level``, the mode and graph names, the attempts),
 ``traverse_raw(request)`` sends a request you built yourself, and ``api_path`` is for a
 server behind a proxy prefix.
+
+On a multi-graph server a request names the pair it runs on: ``traverse(...,
+graph=..., graph_path=..., annotation_path=...)``, or the client's own pair given to
+``TraverseClient(..., graph=..., graph_path=..., annotation_path=...)``. ``graph_path``
+picks one graph of a name with several, ``annotation_path`` one annotation of a graph
+with several; the request carries ``graph`` and ``graph_path``, or, with an
+``annotation_path``, one ``pairs`` object, the only place ``/traverse`` takes it. The
+server answers in the envelope of that pair; the client reads its entry, and each
+graphlet keeps the pair's tags (``graph``, ``graph_path``, ``annotation_path``) in its
+envelope. Its continuations and replays run on that pair (below), not on the client's
+own.
 
 .. graphlet-example: client server
 
@@ -1360,8 +1372,13 @@ them exactly.
 builds the resubmittable request: one seed per walk (its continuation, with its labels
 named explicitly in ``constrain`` mode), the retrieval's normalized strategy with
 ``direction`` set to the arm, ``bounds.max_extension_bp = bp`` when given, and the
-keyword overrides deep-merged into the strategy (``release``, ``graph`` and
-``graph_path`` go to the request level). ``labels.change_cost`` is merged as one unit: an
+keyword overrides deep-merged into the strategy (``release`` and the pair's selectors
+``graph``, ``graph_path``, ``annotation_path``, ``graphs`` and ``pairs`` go to the request
+level). The request runs on the pair the retrieval was answered on, which a multi-graph
+server's envelope names: ``graph`` and ``graph_path``, or a ``pairs`` object with the
+``annotation_path``. A selector among the overrides replaces that pair whole
+(``graph=None`` names none), and ``deepen()`` adds the client's own pair only to a
+graphlet that names none (a single-graph server's). ``labels.change_cost`` is merged as one unit: an
 override that names another ``model`` replaces the retrieval's whole (the server reads only
 the fields of the model it names and refuses any other), one that names the same model, or
 none, updates its fields. ``None`` for a section the strategy holds as an object
@@ -2051,9 +2068,10 @@ digits):
   tells a caller that the retrieval can be run again. ``free(handle)`` deletes for good;
 * ``save(handle, path)`` / ``load(path)`` move entries through ``.mgt`` files
   (``load_graphlet(path)`` also returns the model it parsed, kept or not), and
-  ``list()`` describes the entries. ``request_of(g, graph=..., graph_path=...)`` keeps
-  the graph of a multi-graph server in the replay request (else the envelope's, when
-  the server echoed it); a request without one is valid on a single-graph server only;
+  ``list()`` describes the entries. ``request_of(g, graph=..., graph_path=...,
+  annotation_path=...)`` keeps the pair of a multi-graph server in the replay request
+  (else the pair the envelope names, where a multi-graph server answered); a request
+  without one is valid on a single-graph server only;
 * the disk TTL counts from the last use also across restarts (the entry file is
   rewritten once its recorded use lags by a tenth of the TTL). Processes may share a
   spool: a body is deleted only when no entry file names it any more, a handle another
