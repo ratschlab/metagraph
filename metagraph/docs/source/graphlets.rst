@@ -20,6 +20,15 @@ single retrieval, the **graphlet**:
 * going further is a **new traversal**: the library builds the request from a walk's
   continuation, the server runs it. Nothing about the first retrieval is resumed.
 
+**Merging graphlets is not supported.** Every operation reads one retrieval, or compares
+two: ``subgraph()`` is a filtered view of one graphlet, ``compare()`` compares two
+retrievals of the same locus on the same index, and a continuation (``deepen()``,
+``next_request()``) returns a new graphlet that is not joined to its parent.
+``branching.on_reconverge: "merge"`` merges paths within one traversal only. Combining
+graphlets would need rules for their overlaps, their orientation, labels whose ids are
+local to each index, provenance and incomplete evidence; concatenating their records
+does not make a graphlet.
+
 The traversal itself (seed validation, the walk rule, label modes, termination reasons)
 is specified in ``metagraph/docs/SPEC-labeled-traversal-core.md`` (§5 to §7); the
 format and the library in ``metagraph/docs/DESIGN-traverse-graphlet.md``. MGT v1 is
