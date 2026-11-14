@@ -1,6 +1,7 @@
 #include "annotated_dbg.hpp"
 
 #include <algorithm>
+#include <cmath>
 #include <cstdlib>
 #include <limits>
 #include <numeric>
@@ -19,6 +20,7 @@
 #include "annotation/int_matrix/base/int_matrix.hpp"
 #include "annotation/int_matrix/csr_matrix/csr_matrix.hpp"
 #include "annotation/binary_matrix/base/decode_budget.hpp"
+#include "annotation/binary_matrix/base/hopscotch_layout.hpp"
 #include "graph/representation/canonical_dbg.hpp"
 #include "annotation/coord_to_header.hpp"
 #include "common/algorithms.hpp"
@@ -1351,6 +1353,26 @@ AnnotatedDBG::get_header_results(std::string_view sequence, size_t num_top_label
 }
 
 
+template <class Values>
+uint64_t search_store_bytes(size_t num_labels, size_t num_rows) {
+    using Store = utils::ValueStore<Column, Values>;
+    if (Store::dense(num_labels)) {
+        // ids_: a size_t per label; dense_values_: reserved for the rows
+        return buffer_bytes(num_labels, sizeof(size_t)) + buffer_bytes(num_rows, sizeof(Values));
+    }
+    if (!num_rows)
+        return 0;
+    // tsl's reserve: the buckets for |num_rows| at the table's maximum load, rounded up by its
+    // growth policy (the table holds them and its padding, HopscotchLayout)
+    using Map = typename Store::SparseMap;
+    size_t buckets = size_t(std::ceil(float(num_rows) / Map().max_load_factor()));
+    tsl::hh::power_of_two_growth_policy<2> policy(buckets);
+    return annot::matrix::HopscotchLayout<Map>::array_bytes(buckets);
+}
+template uint64_t search_store_bytes<PresenceRuns>(size_t, size_t);
+template uint64_t search_store_bytes<CountRuns>(size_t, size_t);
+template uint64_t search_store_bytes<PositionCoords>(size_t, size_t);
+
 // The C5 top N of the labels of the rows |enumerate_rows| calls (the query's k-mers found in
 // the graph, at |kmer_positions|) with at least |min_count| of them, each with its value per
 // query position; |medians| and |cut| as filter_and_decode's
@@ -1404,18 +1426,23 @@ Result filter_and_aggregate(const RowEnumerator &enumerate_rows,
     // that takes fewer bytes); the rows are enumerated in the order of their positions, which
     // the values are built in
     using ValueType = std::tuple_element_t<2, typename Result::value_type>;
-    // the store, charged to the pair's values account (if any) with its index (a dense one
-    // over the labels, or a hash table at most twice the labels kept) and its values, which
-    // charge their buffers as they grow
-    charge_search(values_account,
-                  std::min<uint64_t>(buffer_bytes(label_encoder.size(), sizeof(size_t)),
-                                     2 * buffer_bytes(counts.size(),
-                                                      sizeof(Column) + sizeof(ValueType) + 8))
-                      + buffer_bytes(counts.size(), sizeof(ValueType)));
+    // the store, this record's scratch (freed when its rows are returned; the values, which
+    // charge their buffers as they grow, move into them), charged to the pair's values account
+    // (if any) as what it allocates before it is built: the dense index over the labels and the
+    // values' buffer, or the hash table reserved for the labels kept (REVIEW 9726cb420 [P2],
+    // lane T6-W2: the smaller of the two was charged, but the store picks its form by the
+    // labels alone)
+    charge_search_scratch(values_account,
+                          search_store_bytes<ValueType>(label_encoder.size(), counts.size()));
     utils::ValueStore<Column, ValueType> value_store(label_encoder.size(), counts.size());
     for (const auto &[j, count] : counts) {
         value_store.emplace(j, ValueType(num_kmers, values_account));
     }
+    // keys that collide in the table's hash (label ids chosen for it) can make it grow past its
+    // reserve: what it holds then, charged once its keys are in, before any value is added
+    if (values_account && !value_store.is_dense())
+        values_account->charge_scratch(
+                annot::matrix::hopscotch_held_bytes(value_store.sparse_values()));
 
     size_t i = 0;
     enumerate_rows([&](const auto &row) {

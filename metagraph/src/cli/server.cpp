@@ -129,13 +129,15 @@ Json::Value process_search_request(const SearchRequest &request,
     std::vector<SeqSearchResult> search_results;
     std::mutex result_mutex;
     // the values account of this pair (the answer budget's; none without one), noted in the
-    // budget once the pair's rows are built
+    // budget once the pair's rows are built; the pair's records run on get_num_threads()
+    // threads at once (query_fasta), each with its scratch
     std::unique_ptr<graph::SearchAccount> values;
     if (budget) {
         values = std::make_unique<graph::SearchAccount>(budget, "values",
                 source.tagged ? fmt::format("pair ({}, {}, {})", source.graph,
                                             source.graph_path, source.annotation_path)
-                              : std::string("the graph"));
+                              : std::string("the graph"),
+                get_num_threads());
     }
 
     // writing to temporary file in order to reuse query code. This is not optimal and

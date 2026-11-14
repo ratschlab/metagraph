@@ -1,8 +1,11 @@
 #ifndef __SEARCH_BUDGET_HPP__
 #define __SEARCH_BUDGET_HPP__
 
+#include <algorithm>
 #include <atomic>
+#include <cstddef>
 #include <cstdint>
+#include <limits>
 #include <stdexcept>
 #include <string>
 
@@ -53,15 +56,28 @@ class SearchBudget;
  */
 class SearchAccount {
   public:
-    // |where|: what the account is of, for the log (a values account's pair)
-    SearchAccount(SearchBudget *budget, const char *name, std::string where = "")
-          : budget_(budget), name_(name), where_(std::move(where)) {}
+    // |where|: what the account is of, for the log (a values account's pair); |threads|: how
+    // many tasks of its work run at once (a values account: the pair's records, on the pair's
+    // threads), for charge_scratch
+    SearchAccount(SearchBudget *budget, const char *name, std::string where = "",
+                  size_t threads = 1)
+          : budget_(budget), name_(name), where_(std::move(where)),
+            threads_(std::max<size_t>(threads, 1)) {}
     SearchAccount(const SearchAccount &) = delete;
     SearchAccount& operator=(const SearchAccount &) = delete;
 
     inline void charge(uint64_t bytes);
+    // Charges the scratch one task of the account's work holds while it runs and frees before
+    // it ends (a record's store of its rows): the account holds |threads| times the most any
+    // task's scratch took, raised (charge) before the scratch is allocated, which covers the
+    // tasks running at once without charging a freed scratch again for every task; the total
+    // it adds is the same in every order the tasks run in (lane T6-W2)
+    inline void charge_scratch(uint64_t bytes);
 
     uint64_t held() const { return held_.load(std::memory_order_relaxed); }
+    // the most one task's scratch took (charge_scratch), and how many run at once
+    uint64_t scratch() const { return scratch_.load(std::memory_order_relaxed); }
+    size_t threads() const { return threads_; }
     const char* name() const { return name_; }
     const std::string& where() const { return where_; }
     SearchBudget* budget() const { return budget_; }
@@ -70,7 +86,9 @@ class SearchAccount {
     SearchBudget *budget_;
     const char *name_;
     std::string where_;
+    size_t threads_;
     std::atomic<uint64_t> held_ { 0 };
+    std::atomic<uint64_t> scratch_ { 0 };
 };
 
 /**
@@ -135,6 +153,27 @@ inline void SearchAccount::charge(uint64_t bytes) {
 inline void charge_search(SearchAccount *account, uint64_t bytes) {
     if (account && bytes)
         account->charge(bytes);
+}
+
+inline void SearchAccount::charge_scratch(uint64_t bytes) {
+    uint64_t most = scratch_.load(std::memory_order_relaxed);
+    while (bytes > most) {
+        if (scratch_.compare_exchange_weak(most, bytes, std::memory_order_relaxed)) {
+            // the raise for each task that can run at once (a product past the range is past
+            // every bound)
+            const uint64_t raise = bytes - most;
+            charge(raise > std::numeric_limits<uint64_t>::max() / threads_
+                       ? std::numeric_limits<uint64_t>::max()
+                       : raise * threads_);
+            return;
+        }
+    }
+}
+
+// |account|.charge_scratch(|bytes|) where an account is given (null: none, the CLI's)
+inline void charge_search_scratch(SearchAccount *account, uint64_t bytes) {
+    if (account && bytes)
+        account->charge_scratch(bytes);
 }
 
 } // namespace graph
