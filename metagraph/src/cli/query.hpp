@@ -222,8 +222,10 @@ enum QueryMode {
 /**
  * Query sequences from a FASTA file.
  *
- * Provide a callback which receives a reference to a SeqSearchResult instance which the
- * callback function should use as desired (typically generate a string/JSON output).
+ * Provide a callback which receives each SeqSearchResult instance as an rvalue, which the
+ * callback function should use as desired (typically generate a string/JSON output, or move
+ * it into a container: a callback that keeps the result moves it, so that its per-position
+ * values are never held twice; one taking a const reference reads it in place).
  *
  * @param file_path     path to FASTA file
  * @param callback      callback function
@@ -237,7 +239,7 @@ enum QueryMode {
  * @return the number of base pairs (characters) in query file
  */
 size_t query_fasta(const std::string &file_path,
-                   const std::function<void(const SeqSearchResult &)> &callback,
+                   const std::function<void(SeqSearchResult &&)> &callback,
                    const Config &config,
                    const graph::AnnotatedDBG &anno_graph,
                    const graph::align::DBGAlignerConfig *aligner_config,

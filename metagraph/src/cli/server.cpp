@@ -146,9 +146,11 @@ Json::Value process_search_request(const SearchRequest &request,
     tf.ofstream() << request.fasta;
     tf.ofstream().close();
 
-    // Query sequences and callback by appending result to vector with mutex for thread safety
+    // Query sequences and callback by appending result to vector with mutex for thread safety;
+    // each result is moved in (taken as an rvalue: a const reference would copy its per-position
+    // values, held twice beside the account; REVIEW 9726cb420, lane T6-W2)
     query_fasta(tf.name(),
-        [&](const SeqSearchResult &result) {
+        [&](SeqSearchResult &&result) {
             // the record's rows, held from now until the pair's answer is built
             if (values)
                 values->charge(search_record_rows_bytes(result));

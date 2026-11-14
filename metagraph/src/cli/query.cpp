@@ -1394,14 +1394,14 @@ SeqSearchResult query_sequence(QuerySequence&& sequence,
 
 
 size_t batched_query_fasta(seq_io::FastaParser &fasta_parser,
-                           const std::function<void(const SeqSearchResult &)> &callback,
+                           const std::function<void(SeqSearchResult &&)> &callback,
                            const Config &config,
                            const graph::AnnotatedDBG &anno_graph,
                            const graph::align::DBGAlignerConfig *aligner_config,
                            graph::SearchAccount *values);
 
 size_t query_fasta(const std::string &file,
-                   const std::function<void(const SeqSearchResult &)> &callback,
+                   const std::function<void(SeqSearchResult &&)> &callback,
                    const Config &config,
                    const graph::AnnotatedDBG &anno_graph,
                    const graph::align::DBGAlignerConfig *aligner_config,
@@ -1484,7 +1484,7 @@ size_t query_fasta(const std::string &file,
 }
 
 size_t batched_query_fasta(seq_io::FastaParser &fasta_parser,
-                           const std::function<void(const SeqSearchResult &)> &callback,
+                           const std::function<void(SeqSearchResult &&)> &callback,
                            const Config &config,
                            const graph::AnnotatedDBG &anno_graph,
                            const graph::align::DBGAlignerConfig *aligner_config,
@@ -1580,7 +1580,7 @@ size_t batched_query_fasta(seq_io::FastaParser &fasta_parser,
                     if (alignments_batch.size())
                         search_result.get_alignment() = std::move(alignments_batch[i]);
 
-                    callback(search_result);
+                    callback(std::move(search_result));
                 } catch (...) {
                     keep_error(std::current_exception());
                 }

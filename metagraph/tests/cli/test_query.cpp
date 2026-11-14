@@ -1,6 +1,7 @@
 #include <algorithm>
 #include <functional>
 #include <map>
+#include <mutex>
 #include <random>
 #include <tuple>
 #include <vector>
@@ -12,6 +13,7 @@
 #include "../graph/all/test_dbg_helpers.hpp"
 
 #include "../annotation/test_matrix_helpers.hpp"
+#include "../annotation/coordinate_test_graph.hpp"
 
 #include "annotation/binary_matrix/multi_brwt/brwt.hpp"
 #include "annotation/int_matrix/csr_matrix/csr_matrix.hpp"
@@ -691,6 +693,74 @@ TEST(construct_query_graph, no_values_read_without_a_tie) {
             EXPECT_EQ(2u, tie.get_cut().tied);
             EXPECT_EQ(reads + searches, counted.reads);
             EXPECT_EQ(rows_read + 60 * searches, counted.rows_read);
+        }
+    }
+}
+
+// REVIEW 9726cb420 [P2], lane T6-W2: query_fasta hands each record's result to its callback as
+// an rvalue, so that a callback that keeps it (the server's /search, which moves it into the
+// pair's results) takes its rows and their per-position values over instead of copying them:
+// a copy was held beside the original, outside the /search answer budget's values account.
+// Every mode, the sequential path (a record mapping, or query_coords) and the batched one
+TEST(query_fasta, a_record_kept_by_the_callback_is_moved_not_copied) {
+    std::mt19937 rng(17);
+    auto random_sequence = [&](size_t length) {
+        std::string s(length, 'A');
+        for (char &c : s) {
+            c = "ACGT"[rng() % 4];
+        }
+        return s;
+    };
+    const size_t k = 7;
+    std::vector<test::CoordinateRecord> records;
+    for (size_t i = 0; i < 12; ++i) {
+        records.push_back({ random_sequence(40 + rng() % 30),
+                            "column_with_a_long_name_" + std::to_string(i % 3),
+                            "record_with_a_long_name_" + std::to_string(i) });
+    }
+    utils::TempFile fasta;
+    for (size_t q = 0; q < 6; ++q) {
+        fasta.ofstream() << ">q" << q << "\n" << records[q].sequence << records[q + 3].sequence
+                         << records[q].sequence << "\n";
+    }
+    fasta.ofstream().close();
+
+    for (bool record_mapping : { true, false }) {
+        auto index = test::coordinate_test_graph(k, records, false, false, false, record_mapping);
+        for (const std::string mode : { "labels", "matches", "signature", "coords" }) {
+            for (unsigned long long batch : { 0ull, 100'000'000ull }) {
+                SCOPED_TRACE(::testing::Message() << "record_mapping " << record_mapping
+                             << " mode " << mode << " batch " << batch);
+                auto config = query_config(mode);
+                config->discovery_fraction = 0;
+                config->num_top_labels = 1000;
+                config->query_batch_size = batch;
+                std::mutex mutex;
+                std::vector<cli::SeqSearchResult> kept;
+                size_t moved = 0;
+                // a callback written as the server's: it keeps each result it is handed
+                cli::query_fasta(fasta.name(), [&](auto &&result) {
+                    auto rows_buffer = [](const cli::SeqSearchResult &r) {
+                        return std::visit([](const auto &rows) {
+                            return static_cast<const void *>(rows.data());
+                        }, r.get_result());
+                    };
+                    const void *before = rows_buffer(result);
+                    std::lock_guard<std::mutex> lock(mutex);
+                    kept.emplace_back(std::move(result));
+                    // the rows' buffer is the one the query made: taken over, not copied
+                    if (before && rows_buffer(kept.back()) == before)
+                        ++moved;
+                }, *config, *index, nullptr);
+                ASSERT_EQ(6u, kept.size());
+                size_t with_rows = 0;
+                for (const auto &result : kept) {
+                    std::visit([&](const auto &rows) { with_rows += !rows.empty(); },
+                               result.get_result());
+                }
+                EXPECT_EQ(6u, with_rows);
+                EXPECT_EQ(with_rows, moved);
+            }
         }
     }
 }
