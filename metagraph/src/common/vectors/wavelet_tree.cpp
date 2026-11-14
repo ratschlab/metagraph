@@ -550,7 +550,7 @@ template wavelet_tree_dyn wavelet_tree::convert_to<wavelet_tree_dyn>();
     template class wt; \
     template wt wavelet_tree::convert_to<wt>(); \
 
-INSTANTIATE_WT(wavelet_tree_sdsl<sdsl::wt_huff<sdsl::packed_vector_view<1>>>);
+INSTANTIATE_WT(wavelet_tree_sdsl<mtg::detail::wt_huff_stat>);
 
 INSTANTIATE_WT(wavelet_tree_sdsl<sdsl::wt_huff<mtg::detail::rrr_storage<63>>>);
 

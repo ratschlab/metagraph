@@ -35,7 +35,6 @@ bool with_madvise();
 void set_madvise(bool set_bit);
 
 // `std::ifstream` that remembers the path it was opened from.
-// Mirrors `sdsl::shared_mapper_ifstream` so loaders can recover the filename via cast.
 class named_ifstream : public std::ifstream {
   public:
     explicit named_ifstream(const std::string &filename,
@@ -50,8 +49,7 @@ class named_ifstream : public std::ifstream {
 std::unique_ptr<std::ifstream>
 open_ifstream(const std::string &filename, bool mmap_stream = with_mmap());
 
-// Returns the filename from a stream opened by `open_ifstream`
-// (i.e. `sdsl::shared_mapper_ifstream` or `utils::named_ifstream`); throws otherwise.
+// Returns the filename of a stream opened by `open_ifstream`; throws otherwise.
 const std::string& get_filename(std::istream &f);
 
 // Hint MADV_RANDOM on `[start, start + length)` of the file mmapped by `f`.
