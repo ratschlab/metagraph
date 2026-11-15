@@ -1931,8 +1931,8 @@ class TestQueryRepeatedKmerDecodedOnce(TestingBase):
     returned records. A record with one A^31, a record of 4,000 separate A-runs (31 to 40
     bases) and a record of a long poly-A run (25,000 occurrences of A^31), as
     row_diff_brwt_coord with a record mapping (.seqs) and, each record in a file (column) of
-    its own, without one; a poly-A query of 10,000 k-mers returns the record (column) with
-    one A^31 at --num-top-labels 1 (the tie of 10,000 positions goes to the first). A copy of
+    its own, without one; a query with 10,000 poly-A k-mers and one k-mer unique to the short
+    record returns that record at --num-top-labels 1, regardless of column order. A copy of
     the row per position would take 10,000 x 25,001 x 8 B = 2 GB, and the coordinates of the
     separate A-runs at every position, kept for all records, about 10,000 x 4,000 x 16 B;
     the query stays far below both and writes the expected bytes."""
@@ -1967,7 +1967,9 @@ class TestQueryRepeatedKmerDecodedOnce(TestingBase):
                 f.write(f'>{header}\n{sequence}\n')
         cls.query = cls.tempdir.name + '/query.fa'
         with open(cls.query, 'w') as f:
-            f.write('>q\n' + 'A' * (cls.k + cls.query_kmers - 1) + '\n')
+            # The unique k-mer breaks the tie independently of parallel column insertion.
+            f.write('>q\n' + short[:cls.k] + 'N'
+                    + 'A' * (cls.k + cls.query_kmers - 1) + '\n')
 
         cls.graph = cls.tempdir.name + '/graph' + graph_file_extension['succinct']
         cls._build_graph(cls.both, cls.tempdir.name + '/graph', cls.k, 'succinct', 'basic')
@@ -2017,8 +2019,9 @@ class TestQueryRepeatedKmerDecodedOnce(TestingBase):
         return label, value
 
     def _ranges(self):
-        # the short record's coordinate at every query position, each a range of its own
-        return ':'.join(f'{p}-{self.flank}' for p in range(self.query_kmers))
+        # One unique k-mer, then the short record's A^31 at every poly-A query position.
+        return '0-0:' + ':'.join(f'{p + self.k + 1}-{self.flank}'
+                                for p in range(self.query_kmers))
 
     def test_coords_by_record(self):
         label, value = self._query(self.anno)
