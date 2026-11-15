@@ -6,6 +6,7 @@ import socket
 import subprocess
 import time
 import unittest
+import uuid
 
 import requests
 from parameterized import parameterized_class
@@ -272,6 +273,29 @@ class TestTraverseGraphList(TraverseServer):
             self.assertEqual(['one', 'two'], [walk['graph'] for walk in walks])
             self.assertEqual([['A'], ['B']], [walk['seed']['labels'] for walk in walks])
             self.assertEqual([[self.P], [self.Q]], [self._flanks(walk) for walk in walks])
+
+    def _assert_opaque_pair_ids(self, items):
+        expected = {}
+        for graph in ['one', 'two']:
+            base = f'{self.tempdir.name}/{graph}'
+            fields = [graph, base + '.dbg', base + '.column.annodbg']
+            name = ''.join(f'{len(field.encode("utf-8"))}:{field}' for field in fields)
+            expected[graph] = 'n1-' + str(uuid.uuid5(
+                uuid.UUID('d3565c73-e7e9-5bca-b6a9-64cb5c4c9f93'), name))
+        for item in items:
+            self.assertEqual(expected[item['graph']], item['pair_id'])
+            self.assertNotIn('graph_path', item)
+            self.assertNotIn('annotation_path', item)
+        self.assertNotIn(self.tempdir.name, json.dumps(items))
+
+    def test_search_opaque_pair_ids_match_python(self):
+        response = self._post('search', {'FASTA': '>q\n' + self.X, 'top_labels': 10,
+                                         'discovery_fraction': 1})
+        self.assertEqual(200, response.status_code, response.text)
+        searched = response.json()[0]
+        self.assertEqual(2, len(searched['results']))
+        self.assertEqual(2, len(searched['cuts']))
+        self._assert_opaque_pair_ids(searched['results'] + searched['cuts'])
 
     def test_selected_graphs(self):
         seeds = [{'sequence': self.X}]
