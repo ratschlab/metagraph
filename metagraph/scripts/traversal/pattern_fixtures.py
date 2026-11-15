@@ -1546,7 +1546,7 @@ FIXTURES = [
          {'patterns': [p(NDM_40, ident='NDM-40'), p(NDM_F, ident='NDM-F')], 'mode': 'count',
           'long_search': 'paths', 'max_memory_mb': 1}, 200,
          'the same request in mode count: nothing is kept or built, but the extension\'s '
-         'depth-first stack is in the account in every mode (SPEC §12.1), so max_memory_mb acts '
+         'depth-first stack is in the account in every mode (SPEC §30), so max_memory_mb acts '
          'on NDM-40\'s entry (no note; its paths counted as in `paths_count`) and not on NDM-F '
          '(L <= k), which says note annotation_not_read (SPEC §8.10)',
          entries(expect_all(paths_count('exact', 2, 'completed'), field('notes', [])),

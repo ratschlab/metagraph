@@ -1540,8 +1540,9 @@ object that fits beside the 20 walks kept released) and `paths_memory_withheld` 
 the third `withheld: output_budget` with `stop {output, max_memory}`, the second's objects freed with it); and
 `paths_memory_named` (`max_memory_mb` named alone: NDM-40's paths answered as without it, the entry of `paths`;
 NDM-F, L ≤ k, which the field does not act on, keeps `annotation_not_read`, §8.10) and `paths_memory_count` (the
-same request in mode `count`, where nothing is kept or built: both entries keep `annotation_not_read`, NDM-40's
-paths counted as in `paths_count`).
+same request in mode `count`, where nothing is kept or built; since §30 the extension's depth-first stack is in the
+account in every mode, so the field acts on NDM-40's entry, which carries no note, its paths counted as in
+`paths_count`, and NDM-F keeps `annotation_not_read`).
 
 After the review of 2026-10-10 (§26): `utf8_label_refused`, `utf8_label_count` and `utf8_label_predicate`, on the
 server `utf8_labels` (a BASIC graph at k = 31 of two records written as bytes, A × 40 under the raw header
@@ -3665,7 +3666,7 @@ Measured with this build's server on the masked copy of the mini (the fixtures o
 | `supported_paths_count` | NDM-40 and NDM-F, `count`, `labels: "all"` | NDM-40's supported paths counted (22 rows read), note `projection_not_read`; NDM-F (L ≤ k) as without the option, `annotation_not_read` |
 | `supported_paths_partial` / `_above_threshold` | NDM-40, `max_paths` 1 | `partial`: the `+` path, `cut: max_paths`; `all_or_count`: `withheld: count_above_threshold` |
 | `supported_paths_work_budget` (`_partial`) | NDM-40, `max_annotation_work` 1 | the first anchor's row read (491 units), `stop {extension, max_annotation_work}`, `supported_paths` `at_least` 0 (`search: "stopped"`), `withheld: annotation_budget` (`cut: max_annotation_work`) |
-| `supported_paths_memory` | six copies of `GCGGCGGCGGCG` + N × 34 (`+`, 47 supported paths each), `partial`, `labels: "all"`, `max_memory_mb` 1 | the first four listed whole; the fifth's list ends at 33 (`stop {output, max_memory}`, `cut: max_memory`, counts `exact`); the sixth stops at a row of 27,312 bytes the account cannot hold (`rows_refused` phase `extension`, `stop {extension, max_memory}`), 15 supported paths `at_least`, all 15 listed |
+| `supported_paths_memory` | six copies of `GCGGCGGCGGCG` + N × 34 (`+`, 47 supported paths each), `partial`, `labels: "all"`, `max_memory_mb` 1 | the first four listed whole; the fifth's list ends at 33 (`stop {output, max_memory}`, `cut: max_memory`, counts `exact`); the sixth stops at a row of 27,376 bytes the account cannot hold (27,312 before §30: the extension's stack takes its share of the account) (`rows_refused` phase `extension`, `stop {extension, max_memory}`), 15 supported paths `at_least`, all 15 listed |
 | `supported_paths_predicate` / `_label` | the chimera, `any(562)` | `best`: no supported walk, `tested` 0, `selected` 0; `label_intersection`: both walks selected |
 | `supported_paths_predicate_context` / `_either` | NDM-40, `none(546)` | `"context"`: the `-` walk (its 7 supporting columns lack 546) selected, 1 of 2; `"either"`: 0 (the `+` walk, which 546 supports, is the `-` walk's mirror, found by the search on the other strand: `mirror_rows` 0) |
 | `supported_paths_predicate_mirror` | NDM-40, `strands: "reverse"`, `any(546)`, `"either"`, `predicate_only` | the mirror walk looked up (`predicate_lookups` 1) and read (`mirror_rows` 11 of `annotation_rows` 22); the `-` walk selected by its mirror's support, `selection_strands: ["reverse_complement"]`, its own `labels` [] |
@@ -5135,6 +5136,12 @@ request and the index, not of thread interleaving.
   `{extension, max_memory}` where it went on before, bounded by `max_steps` and the work time alone.
 - `annotation_not_read` (§8.10): `max_memory_mb` named alone acts on a `"paths"` entry of a pattern longer than k in
   mode `count` too, so that entry no longer carries the note (fixture `paths_memory_count`).
+- Where a memory stop lands: the stack takes its share of the account, so a pattern the account stopped before
+  may stop a little earlier. Fixture `supported_paths_memory` (1 MiB): the sixth entry's search stops at another
+  row (27,376 bytes needed, 27,283 available, where it was 27,312 and 27,303), 4 candidates earlier
+  (`candidates_examined` and `extension_edges` 235 → 231, `annotation_rows` 297 → 293, `annotation_units`
+  94,879 → 91,755, `steps` 3,223 → 3,219); the stop reason, the paths listed and the counts' values are the same.
+  `paths_memory` and `paths_memory_withheld` are unchanged (their account's peak falls in the release).
 - The segment search's arms (`Request::segments`; no route serves them yet) admit their levels to the search's sink
   the same way (194 and 352 bytes a level on a DNA build, 770 and 1,504 on the Protein build, and the left arm's
   spelling at its length), a refusal ending the search with the sink's `max_memory`.
@@ -5143,4 +5150,9 @@ Tests: `PatternSearch.ExtensionMemoryAccount`, `PatternSearch.ExtensionStackBoun
 (`tests/graph/alignment/test_pattern_search.cpp`), `PatternSegments.ArmStacksInTheSink`
 (`test_pattern_segments.cpp`), `PatternProtein.ExtensionStackInTheMemoryAccount` (`test_pattern_protein.cpp`, the
 Protein build), `PatternPaths.TheMemoryAccountHoldsTheExtensionStack` (`tests/cli/test_pattern_paths.cpp`), the
-fixture `paths_memory_count` and its validator (`api/python/tests/test_pattern_fixtures.py`).
+fixture `paths_memory_count` and its validator (`api/python/tests/test_pattern_fixtures.py`). Fixtures regenerated
+(§11, the Linux answers): `work.memory_bytes` of `paths_count`, `paths_count_above_threshold`,
+`paths_stop_at_max_paths`, `paths_memory_count` (also its note), `peptide_no_stop_codon`, `motif_long_patterns`
+and the `supported_paths` fixtures (`_count`, `_partial`, `_above_threshold`, `_label`, `_primary` and the
+`_predicate` ones), and `supported_paths_memory`'s stop (above); on the Protein build `pattern_protein/entry` (the
+entries of `long` and `long_class` 3,966 bytes, 1,950 and 2,888 before).

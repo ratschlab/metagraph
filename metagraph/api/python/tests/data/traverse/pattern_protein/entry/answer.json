@@ -1161,7 +1161,7 @@
     "extension_branches": 0,
     "extension_edges": 5,
     "mask_scans": 0,
-    "memory_bytes": 1950,
+    "memory_bytes": 3966,
     "ranges_visited": 15,
     "steps": 20
    }
@@ -1250,7 +1250,7 @@
     "extension_branches": 0,
     "extension_edges": 1,
     "mask_scans": 0,
-    "memory_bytes": 2888,
+    "memory_bytes": 3966,
     "ranges_visited": 23,
     "steps": 24
    }
@@ -1273,6 +1273,6 @@
   }
  ],
  "work": {
-  "memory_bytes": 2888
+  "memory_bytes": 3966
  }
 }
