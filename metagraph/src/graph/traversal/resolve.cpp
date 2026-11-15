@@ -984,6 +984,9 @@ SupportProfile resolve_support(LabelOracle &oracle,
                     (slot[c] == kNoSlot ? fresh : known)++;
                     continue;
                 }
+                // (a column without sequence records has no header labels)
+                if (oracle.column_without_records(c))
+                    continue;
                 const Coord *data = nullptr;
                 const bool sorted_fits = sorted_coords(coords, &data);  // (reserved above)
                 assert(sorted_fits);
@@ -1110,6 +1113,10 @@ SupportProfile resolve_support(LabelOracle &oracle,
                 size_t widest = 0;
                 size_t unsorted = 0;
                 for (const auto &[c, coords] : row) {
+                    // a column without sequence records has no header labels: a header
+                    // discovery skips it, here and below
+                    if (!by_column && oracle.column_without_records(c))
+                        continue;
                     coords_in_row += coords.size();
                     widest = std::max(widest, coords.size());
                     if (!std::is_sorted(coords.begin(), coords.end()))
@@ -1147,6 +1154,8 @@ SupportProfile resolve_support(LabelOracle &oracle,
                 const size_t labels_before = found.size();
                 const uint64_t i = present_pos[j];
                 for (const auto &[c, coords] : row) {
+                    if (!by_column && oracle.column_without_records(c))
+                        continue;
                     const Coord *data = nullptr;
                     const bool sorted_fits = sorted_coords(coords, &data);  // (reserved above)
                     assert(sorted_fits);

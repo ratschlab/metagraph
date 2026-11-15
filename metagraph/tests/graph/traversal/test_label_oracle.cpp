@@ -487,6 +487,73 @@ TYPED_TEST(LabelOracleCoordTest, RecorderMapsOneCoordinatePerSequence) {
     }
 }
 
+// A column of the record mapping without sequence records (its coordinates in the annotation,
+// none of its records in the .seqs; Q-M4) has no header labels: the recorder of an
+// annotate-mode walk skips its coordinates, read whole and (row-diff) budget-aware, where it
+// refused the walk with std::out_of_range. Its column label is recorded as before
+TYPED_TEST(LabelOracleCoordTest, RecorderSkipsAColumnWithoutRecords) {
+    using Graph = typename TypeParam::first_type;
+    using Annotation = typename TypeParam::second_type;
+    // G's record shares a 30 bp block with acc1
+    auto rnd = make_sequences(3, 70, 11);
+    std::string s1 = rnd[0], s2 = rnd[1], s3 = rnd[2].substr(0, 20) + s1.substr(10, 30) + rnd[2].substr(50);
+    uint64_t n1 = s1.size() - kTestK + 1, n2 = s2.size() - kTestK + 1;
+    auto anno = build_anno_graph<Graph, Annotation>(kTestK, { s1, s2, s3 }, { "F", "F", "G" },
+                                                    DeBruijnGraph::BASIC, true, { 0, n1, 0 });
+    Column col_f = anno->get_annotator().get_label_encoder().encode("F");
+    Column col_g = anno->get_annotator().get_label_encoder().encode("G");
+    std::vector<std::vector<std::string>> headers(2);
+    std::vector<std::vector<uint64_t>> num_kmers(2);
+    headers[col_f] = { "acc1", "acc2" }; num_kmers[col_f] = { n1, n2 };
+    annot::CoordToHeader cth(std::move(headers), std::move(num_kmers));
+    LabelOracle oracle(*anno, &cth);
+    EXPECT_FALSE(oracle.column_without_records(col_f));
+    EXPECT_TRUE(oracle.column_without_records(col_g));
+
+    const auto keys = oracle.keys_of_sequence(s3);
+    size_t shared = 0;
+    auto name_bytes = [](std::string_view n) { return 100 + n.size(); };
+    for (bool budgeted : { false, true }) {
+        // the budget-aware read is the row-diff annotation's
+        if (budgeted && !oracle.row_diff())
+            continue;
+        LabelRecorder recorder(oracle, LabelKind::HEADER, 10);
+        std::vector<LabelRecorder::NodeLabels> lists;
+        if (budgeted) {
+            annot::matrix::DecodeBudget budget;
+            std::vector<KeyCost> costs;
+            size_t refused = 0;
+            ASSERT_TRUE(recorder.fetch(keys.data(), keys.size(), budget, &lists, &costs,
+                                       &refused, name_bytes));
+        } else {
+            lists = recorder.fetch(keys);
+        }
+        ASSERT_EQ(keys.size(), lists.size());
+        shared = 0;
+        for (size_t i = 0; i < keys.size(); ++i) {
+            // acc1 where the k-mer is s1's too, else no header label
+            const bool in_s1 = s1.find(s3.substr(i, kTestK)) != std::string::npos;
+            shared += in_s1;
+            EXPECT_EQ(in_s1 ? 1u : 0u, lists[i].total) << budgeted << " k-mer " << i;
+            ASSERT_EQ(lists[i].total, lists[i].labels.size());
+            if (in_s1) {
+                EXPECT_EQ("acc1", recorder.labels().at(lists[i].labels[0]).name);
+            }
+        }
+    }
+    EXPECT_GT(shared, 0u);
+    EXPECT_LT(shared, keys.size());
+    // the column labels: G at every k-mer
+    LabelRecorder columns(oracle, LabelKind::COLUMN, 10);
+    for (const auto &list : columns.fetch(keys)) {
+        ASSERT_FALSE(list.labels.empty());
+        EXPECT_NE(list.labels.end(), std::find_if(list.labels.begin(), list.labels.end(),
+                                                  [&](LabelId l) {
+            return columns.labels().at(l).name == "G";
+        }));
+    }
+}
+
 // The header index belongs to the CoordToHeader, so it dies with it: a process-wide cache
 // keyed by the CoordToHeader's address and checked by a fingerprint of the corner headers
 // would answer an object made at a freed address with the same corners but other headers in

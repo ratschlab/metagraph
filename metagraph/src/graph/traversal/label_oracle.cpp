@@ -253,6 +253,11 @@ const std::string& LabelOracle::header_name(Column column, uint64_t seq_id) cons
     return coord_to_header_->get_headers(column).at(seq_id);
 }
 
+bool LabelOracle::column_without_records(Column column) const {
+    assert(coord_to_header_);
+    return column < coord_to_header_->num_columns() && !coord_to_header_->num_sequences(column);
+}
+
 std::pair<uint64_t, Coord> LabelOracle::map_coord(Column column, Coord coord) const {
     assert(coord_to_header_);
     counters_.coords_mapped++;
@@ -1654,6 +1659,9 @@ void LabelRecorder::fetch_uncached(const node_index *keys, size_t n) {
         for (size_t i = 0; i < rows.size(); ++i) {
             all.clear();
             for (const auto &[c, tuple] : fetched[i]) {
+                // a column without sequence records has no header labels
+                if (oracle_.column_without_records(c))
+                    continue;
                 // The true count needs to know which SEQUENCES of the column this k-mer
                 // belongs to, and only the coordinate mapping tells. But the sequences
                 // of a column occupy contiguous coordinate ranges, so one mapping per
@@ -1899,12 +1907,15 @@ bool LabelRecorder::raw_budgeted(const BinaryMatrix::SetBitPositions &row, Decod
 }
 
 // As fetch_uncached's HEADER branch (one coordinate mapping per sequence a column's
-// coordinates enter), with its two working vectors reserved at their largest sizes (every
-// coordinate its own sequence; the widest tuple) and charged before
+// coordinates enter; a column without sequence records skipped), with its two working vectors
+// reserved at their largest sizes (every coordinate its own sequence; the widest tuple) and
+// charged before
 bool LabelRecorder::raw_budgeted(const MultiIntMatrix::RowTuples &row, DecodeBudget &budget,
                                  RawRow *raw, uint64_t *peak) {
     uint64_t coords_total = 0, widest = 0;
     for (const auto &entry : row) {
+        if (oracle_.column_without_records(entry.first))
+            continue;
         coords_total += entry.second.size();
         widest = std::max<uint64_t>(widest, entry.second.size());
     }
@@ -1916,6 +1927,8 @@ bool LabelRecorder::raw_budgeted(const MultiIntMatrix::RowTuples &row, DecodeBud
     all.reserve(coords_total);
     coords.reserve(widest);
     for (const auto &[c, tuple] : row) {
+        if (oracle_.column_without_records(c))
+            continue;
         coords.assign(tuple.begin(), tuple.end());
         std::sort(coords.begin(), coords.end());
         for (auto it = coords.begin(); it != coords.end(); ) {

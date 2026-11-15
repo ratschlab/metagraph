@@ -2981,6 +2981,61 @@ TEST(WalkerDerive, AmbiguousDerivedHeaderNamesAreRefused) {
     EXPECT_EQ(1u, one.labels_supporting_total);
 }
 
+// A column of the record mapping without sequence records (its coordinates in the annotation,
+// none of its records in the .seqs) has no header labels: a derivation skips its coordinates,
+// as b02de7e81 of the traversal-v1 stack for master does (until train 7 it refused the seed
+// with std::out_of_range; Q-M4). A seed carried by that column alone derives no header label;
+// its column label is derived as before
+TEST(WalkerDerive, AColumnWithoutRecordsHasNoHeaderLabels) {
+    auto b = clean_blocks({ 30, 20, 20 }, 211);
+    const std::string S = b[0], T = b[1], U = b[2];
+    auto anno = build_anno_graph<DBGSuccinct, annot::ColumnCompressed<>>(
+            kK, { S + T, S + U }, { "colA", "colB" }, DeBruijnGraph::BASIC, true);
+    const auto &encoder = anno->get_annotator().get_label_encoder();
+    const Column col_a = encoder.encode("colA"), col_b = encoder.encode("colB");
+    std::vector<std::vector<std::string>> headers(2);
+    std::vector<std::vector<uint64_t>> num_kmers(2);
+    headers[col_a] = { "acc1" };
+    num_kmers[col_a] = { (S + T).size() - kK + 1 };
+    annot::CoordToHeader cth(std::move(headers), std::move(num_kmers));
+
+    LabelOracle oracle(*anno, &cth);
+    EXPECT_FALSE(oracle.column_without_records(col_a));
+    EXPECT_TRUE(oracle.column_without_records(col_b));
+    // (a column outside the mapping is not one: the mapping refuses its coordinates)
+    EXPECT_FALSE(oracle.column_without_records(2));
+    Seed seed;
+    seed.sequence = S;                  // carried by both columns
+    auto derived = traverse_seed(oracle, seed, Strategy(), LabelChangeCost::forbid());
+    ASSERT_EQ(1u, derived.num_seed_labels);
+    EXPECT_EQ(LabelKind::HEADER, derived.label_dict[0].kind);
+    EXPECT_EQ("acc1", derived.label_dict[0].name);
+    EXPECT_EQ(1u, derived.labels_supporting_total);
+    // the same under `support: trace`, which keeps the coordinates of the candidates
+    Strategy trace;
+    trace.support = Support::TRACE;
+    trace.merge_reconverge = false;     // trace evidence cannot survive a merge
+    LabelOracle traced(*anno, &cth);
+    auto with_trace = traverse_seed(traced, seed, trace, LabelChangeCost::forbid());
+    ASSERT_EQ(1u, with_trace.num_seed_labels);
+    EXPECT_EQ("acc1", with_trace.label_dict[0].name);
+
+    seed.sequence = U;                  // colB's alone
+    LabelOracle alone(*anno, &cth);
+    try {
+        traverse_seed(alone, seed, Strategy(), LabelChangeCost::forbid());
+        FAIL() << "a seed of a column without records derived a header label";
+    } catch (const SeedDerivationError &e) {
+        EXPECT_EQ(SeedDerivationError::NO_CARRIER, e.cause()) << e.what();
+    }
+    Strategy by_column;
+    by_column.seed_label_kind = LabelKind::COLUMN;
+    LabelOracle columns(*anno, &cth);
+    auto column = traverse_seed(columns, seed, by_column, LabelChangeCost::forbid());
+    ASSERT_EQ(1u, column.num_seed_labels);
+    EXPECT_EQ("colB", column.label_dict[0].name);
+}
+
 // Under `support: trace` the derivation keeps the live coordinates of every candidate at
 // every seed k-mer, so that the per-label validation needs no second read. Those entries
 // are only ever read for the candidates that survive to the end, and the prefix is

@@ -717,6 +717,49 @@ TYPED_TEST(ResolveCoordTest, HeaderDiscoveryTiesByName) {
     }
 }
 
+// A column of the record mapping without sequence records (its coordinates in the annotation,
+// none of its records in the .seqs; Q-M4) has no header labels: a header discovery skips its
+// coordinates, under presence and trace, where it refused the request with std::out_of_range.
+// It finds the records the same mapping with that column's record finds, less that record,
+// with the same support; a column discovery still finds the column
+TYPED_TEST(ResolveCoordTest, HeaderDiscoverySkipsAColumnWithoutRecords) {
+    using Graph = typename TypeParam::first_type;
+    using Annotation = typename TypeParam::second_type;
+    const std::string q = random_seq(100, 8);
+    const std::string part = q.substr(0, 50);
+    const uint64_t n = q.size() - kK + 1, m = part.size() - kK + 1;
+    auto anno = build_anno_graph<Graph, Annotation>(kK, { q, part, q }, { "F", "F", "E" },
+                                                    DeBruijnGraph::BASIC, true, { 0, n, 0 });
+    const auto &encoder = anno->get_annotator().get_label_encoder();
+    ASSERT_EQ(0u, encoder.encode("F"));
+    ASSERT_EQ(1u, encoder.encode("E"));
+    annot::CoordToHeader with_e({ { "hq", "hp" }, { "he" } }, { { n, m }, { n } });
+    annot::CoordToHeader without_e({ { "hq", "hp" }, {} }, { { n, m }, {} });
+    LabelOracle reference(*anno, &with_e), oracle(*anno, &without_e);
+    for (Support support : { Support::KMER, Support::TRACE }) {
+        const std::string what = support == Support::TRACE ? "trace" : "kmer";
+        ResolveOptions opts;
+        opts.discover = true;
+        opts.discover_kind = LabelKind::HEADER;
+        opts.discover_max_labels = 10;
+        opts.support = support;
+        const SupportProfile expected = resolve_support(reference, q, opts);
+        ASSERT_EQ((std::vector<std::string>{ "he", "hq", "hp" }), names_of(expected)) << what;
+        const SupportProfile profile = resolve_support(oracle, q, opts);
+        ASSERT_EQ((std::vector<std::string>{ "hq", "hp" }), names_of(profile)) << what;
+        for (size_t i = 0; i < 2; ++i) {
+            EXPECT_EQ(expected.labels[i + 1].kmers_supported, profile.labels[i].kmers_supported)
+                << what << " " << i;
+            EXPECT_EQ(expected.labels[i + 1].runs, profile.labels[i].runs) << what << " " << i;
+        }
+        EXPECT_EQ(m, profile.labels[1].kmers_supported) << what;
+
+        opts.discover_kind = LabelKind::COLUMN;
+        EXPECT_EQ((std::vector<std::string>{ "E", "F" }), names_of(resolve_support(oracle, q, opts)))
+            << what;
+    }
+}
+
 // SPEC-multigraph-envelope.md §7 under support "trace" (E18): a discovery ranks, cuts and
 // states its cut (min_kept_kmers, max_dropped_kmers, dropped_full_length, tied_at_boundary,
 // tied_kept) by the number it reports as kmers_supported -- under trace the traced k-mers

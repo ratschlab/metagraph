@@ -997,8 +997,8 @@ struct QueryRows {
 };
 
 // Call |callback|(j, r, coordinate) for each coordinate of rows[j] in the record
-// counts[r], for j in order. (Staging: a column without records, or outside the mapping,
-// is refused with std::out_of_range by map_coords, as map_single_coord refuses it.)
+// counts[r], for j in order. A column without sequence records is skipped, as master's
+// (#764); a column outside the mapping is refused by map_coords (std::out_of_range, staging's)
 template <class Callback>
 void call_selected_coords(const MultiIntMatrix &matrix, const annot::CoordToHeader &mapping,
                           std::span<const AnnotatedDBG::row_index> rows,
@@ -1012,6 +1012,8 @@ void call_selected_coords(const MultiIntMatrix &matrix, const annot::CoordToHead
     }
     call_row_tuples(matrix, rows, [&](size_t j, const MultiIntMatrix::RowTuples &row) {
         for (const auto &[col, coords] : row) {
+            if (col < mapping.num_columns() && !mapping.num_sequences(col))
+                continue;
             mapping.map_coords(col, coords, [&](size_t seq, uint64_t coord) {
                 auto it = selected.find(Header{ col, seq });
                 if (it != selected.end())
@@ -1125,8 +1127,10 @@ class RecordFold {
         for (const auto &entry : row) {
             const Column column = entry.first;
             const auto &coords = entry.second;
-            // (staging: a column outside the mapping, or one without sequence records, is
-            // refused by map_coords with std::out_of_range, as map_single_coord refuses it)
+            // a column without sequence records has no header labels (master's #764); a column
+            // outside the mapping is refused by map_coords (std::out_of_range, staging's)
+            if (column < mapping_.num_columns() && !mapping_.num_sequences(column))
+                continue;
             Slots &slots = slots_[column];
             mapping_.map_coords(column, coords, [&](size_t seq_id, uint64_t local_coord) {
                 uint32_t &slot = slots.at(seq_id, mapping_.num_sequences(column));

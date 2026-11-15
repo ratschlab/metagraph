@@ -789,6 +789,18 @@ coordinates, more than the <n> k-mers the mapping states for it (the files were 
 is never built with a mapping of another column count, so no query checks it (before H4 a query exited the process
 on it).
 
+A column that holds coordinates while the mapping has no records for it (the mapping was written while that file held
+only records shorter than k) loads on the row-diff forms, which state no coordinates per column, and is refused at
+load on column_coord and brwt_coord (the third reason above: it holds more coordinates than the 0 k-mers the mapping
+states). Such a column has no header labels. Since train 7 (Q-M4, as master's #764 and b02de7e81 of the traversal-v1
+stack for master), the queries by record skip its coordinates: `/search` in every mode, `metagraph query`, a header
+discovery of `/resolve`, and the header labels of `/traverse` (a seed's derived labels, the labels of a walk in
+annotate mode). Its column label is answered as before. Until train 7 each of these answered the 400 named above
+(`Coordinate <c> for column <j> out of range (CoordToHeader has 0 coordinates for that column)`); `metagraph query`
+exited 1. `/pattern` with occurrences placed in records still answers that 400: there the column is the label, and the
+mapping has no record to place its occurrences in. None of the indexes served in November 2026 (refseq33m, the 11
+graphs of r237) has such a column.
+
 **The stated labels.** `annotate --index-header-coords` writes, after the columns, the number `0x6d74672d636f6c73`
 (the bytes `mtg-cols`, 8 bytes big-endian as every number of the file), then the column labels (their number, equal
 to the columns', then each label, as the file's string vectors are written): for its i-th input file the label
