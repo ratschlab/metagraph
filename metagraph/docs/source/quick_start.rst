@@ -936,7 +936,7 @@ To load up a MetaGraph index in server mode for querying it with the Python API 
 .. _configured_pair_id:
 
 Pair identifiers in server responses
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 Response records that identify a configured graph/annotation pair carry its ``graph`` name
 and ``pair_id``. The ID distinguishes pairs that share a name. For example:

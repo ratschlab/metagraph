@@ -1,5 +1,5 @@
-#ifndef __CONFIGURED_PAIR_ID_HPP__
-#define __CONFIGURED_PAIR_ID_HPP__
+#ifndef MTG_CONFIGURED_PAIR_ID_HPP
+#define MTG_CONFIGURED_PAIR_ID_HPP
 
 #include <boost/uuid/name_generator.hpp>
 #include <boost/uuid/string_generator.hpp>
@@ -33,4 +33,4 @@ inline std::string configured_pair_id(std::optional<std::string_view> graph,
 
 } // namespace mtg::common
 
-#endif // __CONFIGURED_PAIR_ID_HPP__
+#endif // MTG_CONFIGURED_PAIR_ID_HPP
