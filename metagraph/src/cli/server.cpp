@@ -500,8 +500,7 @@ int run_server(Config *config) {
                                                     continue;
                                                 for (auto &value : sequence[field]) {
                                                     value["graph"] = name;
-                                                    value["graph_path"] = graph_fname;
-                                                    value["annotation_path"] = anno_fname;
+                                                    value["pair_id"] = pair_ids.at({ name, graph_fname, anno_fname });
                                                 }
                                             }
                                         }
