@@ -17,6 +17,9 @@ struct CoordinateRecord { std::string sequence, column, header; };
 // annotation, as a load of a .seqs written since H4 (CoordToHeader::column_order_verified).
 // |record_mapping| false: no record mapping (a coordinate index without a .seqs, whose labels
 // are its columns and whose coordinates are the column's, its records concatenated)
+// Without |row_diff| and |brwt|, the matrix is a |ColumnMatrix|: TupleCSCMatrix<ColumnMajor>
+// or a class derived from it.
+template <class ColumnMatrix = annot::matrix::TupleCSCMatrix<annot::matrix::ColumnMajor>>
 inline std::unique_ptr<graph::AnnotatedDBG>
 coordinate_test_graph(size_t k, const std::vector<CoordinateRecord> &records,
                       bool row_diff = false, bool brwt = false, bool verified_order = false,
@@ -130,8 +133,9 @@ coordinate_test_graph(size_t k, const std::vector<CoordinateRecord> &records,
             BRWTBottomUpBuilder::build(std::move(bits), reversed),
             std::move(delimiters), std::move(values)));
     } else {
-        annotation = wrap(std::make_unique<TupleCSCMatrix<ColumnMajor>>(
-            ColumnMajor(std::move(bits)), std::move(delimiters), std::move(values)));
+        std::unique_ptr<TupleCSCMatrix<ColumnMajor>> matrix = std::make_unique<ColumnMatrix>(
+            ColumnMajor(std::move(bits)), std::move(delimiters), std::move(values));
+        annotation = wrap(std::move(matrix));
     }
     if (expected) {
         std::vector<BinaryMatrix::Row> ids;

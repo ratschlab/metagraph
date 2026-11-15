@@ -83,7 +83,9 @@ CoordToHeader::CoordToHeader(const CoordToHeader &other)
         column_labels_(other.column_labels_),
         column_order_verified_(other.column_order_verified_),
         check_record_ends_(other.check_record_ends_),
-        header_hash_(other.header_hash_) {}
+        header_hash_(other.header_hash_) {
+    reset_sequence_starts();
+}
 
 void CoordToHeader::set_column_labels(std::vector<std::string> &&labels) {
     if (labels.size() != num_columns()) {
@@ -451,25 +453,7 @@ CoordToHeader::CoordToHeader(std::vector<std::vector<std::string>> &&headers,
             }
         }, offsets.back(), offsets.size());
     }
-}
-
-void CoordToHeader::map_to_local_coords(std::vector<RowTuples> *rows) const {
-    assert(rows);
-    for (auto &row : *rows) {
-        for (auto &[col, coords] : row) {
-            const size_t n = num_sequences(col);
-            for (uint64_t &coord : coords) {
-                auto [seq_id, local_coord] = map_single_coord(col, coord);
-                assert(n);
-                if (local_coord > std::numeric_limits<uint64_t>::max() / n) {
-                    throw std::runtime_error(fmt::format("Local coordinate {} is too large to "
-                            "pack with a seq_id into a single 64-bit integer "
-                            "({} sequences in column {})", local_coord, n, col));
-                }
-                coord = local_coord * n + seq_id;
-            }
-        }
-    }
+    reset_sequence_starts();
 }
 
 // A lookup in a mapping whose record ends do not increase (loaded without check_record_ends, as
@@ -479,6 +463,48 @@ void CoordToHeader::map_to_local_coords(std::vector<RowTuples> *rows) const {
 // before its coordinate)
 [[noreturn]] static void refuse_corrupt_lookup(const std::string &what) {
     throw std::runtime_error("The record mapping (.seqs) is corrupt: " + what);
+}
+
+void CoordToHeader::reset_sequence_starts() {
+    sequence_starts_once_ = std::make_unique<std::once_flag[]>(num_columns());
+    sequence_starts_.assign(num_columns(), {});
+}
+
+const std::vector<uint64_t>& CoordToHeader::sequence_starts(Column col) const {
+    if (col >= num_columns()) {
+        throw std::out_of_range(fmt::format("Column {} out of range "
+                "(CoordToHeader has {} columns)", col, num_columns()));
+    }
+    std::call_once(sequence_starts_once_[col], [&]() {
+        const auto &offsets = coord_offsets_[col];
+        std::vector<uint64_t> starts;
+        starts.reserve(num_sequences(col) + 1);
+        starts.push_back(0);
+        // coord_offsets_ has a set bit at the last coordinate of each sequence
+        for (size_t i = 1; i <= num_sequences(col); ++i) {
+            starts.push_back(offsets.select1(i) + 1);
+            // (staging: a mapping loaded without its record-end check is refused, as the
+            // lookups refuse it, never answered with a record outside the column)
+            if (starts.back() <= starts[starts.size() - 2] || starts.back() > offsets.size()) {
+                refuse_corrupt_lookup(fmt::format("record {} of column {} ends at {}, not "
+                                                  "after its predecessor's end", i - 1, col,
+                                                  starts.back() - 1));
+            }
+        }
+        if (starts.back() != offsets.size()) {
+            refuse_corrupt_lookup(fmt::format("the records of column {} end at {}, its "
+                                              "coordinates at {}", col, starts.back(),
+                                              offsets.size()));
+        }
+        sequence_starts_[col] = std::move(starts);
+    });
+    return sequence_starts_[col];
+}
+
+void CoordToHeader::throw_coord_out_of_range(Column col, uint64_t coord) const {
+    throw std::out_of_range(fmt::format("Coordinate {} for column {} out of range "
+            "(CoordToHeader has {} coordinates for that column)",
+            coord, col, coord_offsets_[col].size()));
 }
 
 std::pair<size_t, uint64_t>
@@ -864,6 +890,7 @@ bool CoordToHeader::load(const std::string &filename_base) {
     column_order_verified_ = false;
     headers_.clear();
     coord_offsets_.clear();
+    reset_sequence_starts();
     try {
         // each count is checked against the bytes left in the file before anything is
         // allocated for it (train-3 review R4, N3: 16 bytes stating 2^22 columns reached
@@ -954,15 +981,18 @@ bool CoordToHeader::load(const std::string &filename_base) {
                 throw std::runtime_error("unexpected data after the column labels");
             column_labels_ = std::move(labels);
         }
+        reset_sequence_starts();
         return true;
 
     } catch (const std::exception &e) {
         logger->error("Cannot load CoordToHeader from '{}': {} (caught: {})", path,
                       utils::file_read_failure_detail(path), e.what());
+        reset_sequence_starts();
         return false;
     } catch (...) {
         logger->error("Cannot load CoordToHeader from '{}': {} (caught unknown exception)",
                       path, utils::file_read_failure_detail(path));
+        reset_sequence_starts();
         return false;
     }
 }

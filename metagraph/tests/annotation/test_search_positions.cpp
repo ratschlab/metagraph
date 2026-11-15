@@ -1,5 +1,7 @@
 #include <algorithm>
+#include <cmath>
 #include <limits>
+#include <map>
 #include <memory>
 #include <numeric>
 #include <random>
@@ -457,6 +459,96 @@ TEST(AnnotatedSearchPositions, RowsHoldTheirRecordsValuesAtEveryPosition) {
     }
 }
 
+// A query over several blocks of rows (the rows of a query by record are decoded a block
+// at a time): the values at every position are those of the whole query, and the records
+// that are not cut come in the C5 order (staging's; on master they come in the order of their
+// first matching position), the same from every query by record.
+TEST(AnnotatedSearchPositions, RecordsOverSeveralBlocksOfRowsInTheC5Order) {
+    std::mt19937 rng(51);
+    const size_t k = 7;
+    std::vector<CoordinateRecord> records;
+    std::uniform_int_distribution<size_t> length(40, 160);
+    for (size_t i = 0; i < 24; ++i) {
+        records.push_back({ random_sequence(rng, length(rng)), "F" + std::to_string(i % 3),
+                            "r" + std::to_string(i) });
+    }
+    // every record once, some again (rows repeated within a block and across blocks), with
+    // foreign stretches between them
+    std::string query;
+    for (size_t i = 0; i < records.size(); ++i) {
+        query += records[(i * 7) % records.size()].sequence + random_sequence(rng, 3);
+        if (i % 5 == 0)
+            query += records[i].sequence.substr(0, 30);
+    }
+    ASSERT_LT(4 * 256u, query.size() - k + 1);
+    for (bool row_diff : { false, true }) {
+        SCOPED_TRACE(::testing::Message() << "row_diff " << row_diff);
+        auto index = coordinate_test_graph(k, records, row_diff, true, false, true);
+        check_positions(*index, k, records, query, true);
+
+        const size_t top = std::numeric_limits<size_t>::max();
+        std::vector<std::string> order;
+        std::pair<size_t, std::string> last { std::numeric_limits<size_t>::max(), "" };
+        for (const auto &[label, count, positions, length] : index->get_kmer_coordinates(query, top, 0, 0)) {
+            // positions matched, then label
+            EXPECT_TRUE(count < last.first || (count == last.first && last.second < label))
+                    << label;
+            last = { count, label };
+            order.push_back(label);
+        }
+        EXPECT_EQ(records.size(), order.size());
+        // the same records in the same order from every query by record
+        std::vector<std::string> labels;
+        for (const auto &[label, count, values] : index->get_kmer_counts(query, top, 0, 0)) {
+            labels.push_back(label);
+        }
+        EXPECT_EQ(order, labels);
+        labels.clear();
+        for (const auto &[label, count, mask] : index->get_top_label_signatures(query, top, 0, 0)) {
+            labels.push_back(label);
+        }
+        EXPECT_EQ(order, labels);
+        labels.clear();
+        for (const auto &[label, count] : index->get_top_labels(query, top, 0, 0)) {
+            labels.push_back(label);
+        }
+        EXPECT_EQ(order, labels);
+    }
+}
+
+// Records that repeat a unit: a query k-mer has as many coordinates in such a record as the
+// unit has copies, more than a few, and the coordinates of consecutive positions continue
+// each other
+TEST(AnnotatedSearchPositions, RecordsWithManyCoordinatesPerPosition) {
+    std::mt19937 rng(52);
+    const size_t k = 9;
+    const std::string unit = random_sequence(rng, 37);
+    std::vector<CoordinateRecord> records;
+    for (size_t copies : { 2, 5, 9, 16 }) {
+        std::string sequence = random_sequence(rng, 12);
+        for (size_t i = 0; i < copies; ++i) {
+            sequence += unit;
+        }
+        records.push_back({ sequence + random_sequence(rng, 12), "F" + std::to_string(copies % 2),
+                            "r" + std::to_string(copies) });
+    }
+    records.push_back({ random_sequence(rng, 80), "F0", "other" });
+    const std::vector<std::string> queries {
+        unit + unit + unit,
+        records[2].sequence,
+        unit.substr(5) + random_sequence(rng, 4) + unit + unit.substr(0, 20) + records[4].sequence,
+    };
+    for (bool row_diff : { false, true }) {
+        for (bool by_record : { true, false }) {
+            SCOPED_TRACE(::testing::Message() << "row_diff " << row_diff << " by_record " << by_record);
+            auto index = coordinate_test_graph(k, records, row_diff, true, false, by_record);
+            for (const auto &query : queries) {
+                check_positions(*index, k, records, query, by_record);
+            }
+        }
+    }
+}
+
 // A query of many records' first k-mers, each record matched at one position: the rows
 // returned times the query's k-mers is large, the positions matched are not (one per row).
 // The values are held at the matched positions only: one run per row. (A record's first base
@@ -774,115 +866,46 @@ TEST(AnnotatedSearchPositions, WrittenAsTheirVectors) {
     }
 }
 
-// coordinate_test_graph's matrix without a row-diff (TupleCSCMatrix over ColumnMajor) that
-// records the rows its batched read is asked for
+// The fixture's matrix without row-diff, recording the rows its batched read is asked for
 class CountingCoordinates : public annot::matrix::TupleCSCMatrix<annot::matrix::ColumnMajor> {
   public:
-    using Base = annot::matrix::TupleCSCMatrix<annot::matrix::ColumnMajor>;
-    using Base::Base;
+    using TupleCSCMatrix::TupleCSCMatrix;
 
     std::vector<RowTuples> get_row_tuples(std::span<const Row> rows,
                                           size_t num_threads = 1) const override {
         requested.insert(requested.end(), rows.begin(), rows.end());
-        return Base::get_row_tuples(rows, num_threads);
+        return TupleCSCMatrix::get_row_tuples(rows, num_threads);
     }
 
     mutable std::vector<Row> requested;
 };
 
-// coordinate_test_graph(k, records, false, false, false, |record_mapping|) on a
-// CountingCoordinates matrix, which |*matrix| is set to
-std::unique_ptr<graph::AnnotatedDBG>
-counting_coordinate_graph(size_t k, const std::vector<CoordinateRecord> &records,
-                          bool record_mapping, const CountingCoordinates **matrix) {
-    using namespace annot::matrix;
-    auto graph = std::make_shared<graph::DBGSuccinct>(k);
-    annot::LabelEncoder<> encoder;
-    for (const auto &record : records) {
-        graph->add_sequence(record.sequence);
-        encoder.insert_and_encode(record.column);
-    }
-    graph->mask_dummy_kmers(1, false);
-    graph->switch_state(graph::boss::BOSS::STAT);
-    std::vector<std::vector<std::vector<uint64_t>>> coords(
-        encoder.size(), std::vector<std::vector<uint64_t>>(graph->max_index()));
-    std::vector<std::vector<std::string>> headers(encoder.size());
-    std::vector<std::vector<uint64_t>> counts(encoder.size());
-    std::vector<uint64_t> offsets(encoder.size());
-    for (const auto &record : records) {
-        auto col = encoder.encode(record.column);
-        size_t pos = 0;
-        for (auto node : graph->node_range(record.sequence, true)) {
-            if (node)
-                coords[col][node - 1].push_back(offsets[col] + pos);
-            ++pos;
-        }
-        offsets[col] += pos;
-        headers[col].push_back(record.header);
-        counts[col].push_back(pos);
-    }
-    std::vector<std::unique_ptr<bit_vector>> bits;
-    std::vector<bit_vector_smart> delimiters;
-    std::vector<sdsl::int_vector<>> values;
-    for (const auto &column : coords) {
-        sdsl::bit_vector membership(column.size(), 0);
-        std::vector<uint64_t> flat;
-        std::vector<bool> marks{true};
-        for (size_t row = 0; row < column.size(); ++row) {
-            if (column[row].empty())
-                continue;
-            membership[row] = 1;
-            for (auto coord : column[row]) {
-                flat.push_back(coord);
-                marks.push_back(false);
-            }
-            marks.push_back(true);
-        }
-        sdsl::bit_vector delim(marks.size(), 0);
-        for (size_t i = 0; i < marks.size(); ++i)
-            delim[i] = marks[i];
-        sdsl::int_vector<> vals(flat.size(), 0, 64);
-        std::copy(flat.begin(), flat.end(), vals.begin());
-        bits.push_back(std::make_unique<bit_vector_sd>(membership));
-        delimiters.emplace_back(delim);
-        values.push_back(std::move(vals));
-    }
-    auto counting = std::make_unique<CountingCoordinates>(
-            ColumnMajor(std::move(bits)), std::move(delimiters), std::move(values));
-    *matrix = counting.get();
-    std::unique_ptr<graph::AnnotatedDBG::Annotator> annotation
-            = std::make_unique<annot::StaticBinRelAnnotator<CountingCoordinates::Base>>(
-                    std::unique_ptr<CountingCoordinates::Base>(std::move(counting)), encoder);
-    if (!record_mapping)
-        return std::make_unique<graph::AnnotatedDBG>(graph, std::move(annotation));
-    return std::make_unique<graph::AnnotatedDBG>(
-            graph, std::move(annotation), false,
-            std::make_unique<annot::CoordToHeader>(std::move(headers), std::move(counts)));
-}
-
 // Queries that repeat k-mers (a homopolymer against records with poly-A runs of many lengths, a
-// periodic query, a query repeating records): get_kmer_coordinates asks the matrix for each
-// distinct row of the query's k-mers once (T5b-Y3: it read and held a copy of a row per query
-// position, 8 B x the positions x the row's coordinates), and returns the records (columns
-// without a record mapping) in the C5 order, each with its coordinates at every position IN
-// THEIR ORDER as each position's own row gives them (ascending: a record's coordinates of a
-// row are in one column, sorted). On the counting matrix and on r237's form (row-diff over a
-// BRWT), with and without a record mapping, at the cuts 1, 2 and none.
+// periodic query, records repeated): get_kmer_coordinates asks the matrix for each distinct row
+// of the query's k-mers once, not once per position, and with a record mapping once more for
+// each repeated row when records are returned, and so do get_top_label_signatures and
+// get_kmer_counts with a record mapping (T5b-Y3 made it read each distinct row once; master's
+// #764 and #765 the rest, lane T7-M5). It returns the records (columns without a record
+// mapping) of get_kmer_counts in the same order, the C5 order (staging's: positions matched,
+// then label), each with its coordinates at every position in the order of its rows, by brute
+// force, and with a record mapping the signatures and counts of the same records. On the
+// counting matrix and on row-diff over BRWT (r237's form), with and without a record mapping,
+// at the cuts 1, 2 and none.
 TEST(AnnotatedSearchPositions, EachRowOfTheQueryDecodedOnce) {
     std::mt19937 rng(55);
     const size_t k = 9;
     std::vector<CoordinateRecord> records;
     for (size_t i = 0; i < 24; ++i) {
-        // poly-A runs of k to k + 40 bases (1 to 41 occurrences of A^k), a header per record
+        // poly-A runs of k to k + 40 bases (1 to 41 occurrences of A^k)
         records.push_back({ random_sequence(rng, 12) + std::string(k + (i * 7) % 41, 'A')
                                 + random_sequence(rng, 12),
                             "F" + std::to_string(i % 3), "r" + std::to_string(i) });
     }
     std::string periodic;
-    std::string repeated;
     for (size_t m = 0; m < 40; ++m) {
         periodic += records[3].sequence.substr(0, 15) + "T";
     }
+    std::string repeated;
     for (size_t m = 0; m < 3; ++m) {
         repeated += records[1].sequence + records[2].sequence;
     }
@@ -890,55 +913,116 @@ TEST(AnnotatedSearchPositions, EachRowOfTheQueryDecodedOnce) {
         std::string(k + 300, 'A'), periodic, repeated, records[4].sequence,
         random_sequence(rng, 20) + std::string(k + 50, 'A') + records[6].sequence
     };
-    const size_t all = std::numeric_limits<size_t>::max();
     for (bool by_record : { true, false }) {
-        const CountingCoordinates *matrix = nullptr;
-        auto counting = counting_coordinate_graph(k, records, by_record, &matrix);
-        auto r237_form = coordinate_test_graph(k, records, true, true, false, by_record);
+        auto counting = coordinate_test_graph<CountingCoordinates>(k, records, false, false,
+                                                                   false, by_record);
+        const auto &matrix = dynamic_cast<const CountingCoordinates &>(
+                counting->get_annotator().get_matrix());
+        auto row_diff_brwt = coordinate_test_graph(k, records, true, true, false, by_record);
         for (const auto &query : queries) {
             const auto expected = occurrences(k, records, query, by_record);
-            // the C5 order of the brute force's rows: positions matched, then label
-            std::vector<size_t> order(expected.size());
-            std::iota(order.begin(), order.end(), 0);
-            std::sort(order.begin(), order.end(), [&](size_t a, size_t b) {
-                if (expected[a].matched() != expected[b].matched())
-                    return expected[a].matched() > expected[b].matched();
-                return expected[a].label < expected[b].label;
-            });
-            std::set<annot::matrix::BinaryMatrix::Row> distinct;
+            std::map<annot::matrix::BinaryMatrix::Row, size_t> positions_of_row;
             size_t present = 0;
             for (auto node : counting->get_graph().node_range(query)) {
                 if (node) {
-                    distinct.insert(graph::AnnotatedDBG::graph_to_anno_index(node));
+                    ++positions_of_row[graph::AnnotatedDBG::graph_to_anno_index(node)];
                     ++present;
                 }
             }
-            for (size_t top : { size_t(1), size_t(2), all }) {
+            ASSERT_LT(positions_of_row.size(), present) << "the query repeats a k-mer";
+            const size_t num_kmers = query.size() - k + 1;
+            const size_t all = std::numeric_limits<size_t>::max();
+            // the cuts: the number of records and the fraction of k-mers to match
+            for (const auto &[top, fraction] : std::vector<std::pair<size_t, double>> {
+                        { 1, 0. }, { 2, 0. }, { all, 0. }, { 2, 0.25 }, { all, 0.25 } }) {
                 SCOPED_TRACE(::testing::Message() << "by_record " << by_record << " query "
-                             << query << " top " << top);
-                matrix->requested.clear();
-                const auto coords = counting->get_kmer_coordinates(query, top, 0, 0);
-                // each distinct row once, where the query has repeats
-                EXPECT_EQ(distinct.size(), matrix->requested.size());
-                EXPECT_EQ(distinct, std::set<annot::matrix::BinaryMatrix::Row>(
-                                            matrix->requested.begin(), matrix->requested.end()));
-                EXPECT_LT(distinct.size(), present) << "the query repeats a k-mer";
-                for (const auto *index : { counting.get(), r237_form.get() }) {
+                             << query << " top " << top << " fraction " << fraction);
+                const size_t min_count = std::max<size_t>(1, std::ceil(fraction * num_kmers));
+                const size_t num_expected
+                    = std::count_if(expected.begin(), expected.end(),
+                                    [&](const auto &e) { return e.matched() >= min_count; });
+                // the C5 order of the brute force's rows: positions matched, then label
+                std::vector<size_t> order(expected.size());
+                std::iota(order.begin(), order.end(), 0);
+                std::sort(order.begin(), order.end(), [&](size_t a, size_t b) {
+                    if (expected[a].matched() != expected[b].matched())
+                        return expected[a].matched() > expected[b].matched();
+                    return expected[a].label < expected[b].label;
+                });
+                // Each distinct row is read once, and with a record mapping a repeated row
+                // once more when records are returned. A debug build has no budget for
+                // the values of the fold. With more records in the race than the cut
+                // returns, it keeps only the counts, and every row is then read again.
+                // With fewer, it frees the values of the records below the fraction.
+                auto check_requests = [&](const std::vector<annot::matrix::BinaryMatrix::Row> &rows,
+                                          bool returned, const std::string &what) {
+                    std::map<annot::matrix::BinaryMatrix::Row, size_t> requests;
+                    for (auto row : rows) {
+                        ++requests[row];
+                    }
+                    bool all_again = false;
+#ifndef NDEBUG
+                    for (const auto &[row, positions] : positions_of_row) {
+                        all_again |= by_record && returned && positions == 1
+                                        && requests[row] == 2;
+                    }
+#endif
+                    std::map<annot::matrix::BinaryMatrix::Row, size_t> expected_requests;
+                    for (const auto &[row, positions] : positions_of_row) {
+                        expected_requests[row]
+                            = by_record && returned && (positions > 1 || all_again) ? 2 : 1;
+                    }
+                    EXPECT_EQ(expected_requests, requests) << what;
+                };
+                matrix.requested.clear();
+                const auto coords = counting->get_kmer_coordinates(query, top, fraction, 0);
+                check_requests(matrix.requested, coords.size(), "coordinates");
+                if (by_record) {
+                    // signatures and counts by record read the rows as the coordinates do
+                    matrix.requested.clear();
+                    counting->get_top_label_signatures(query, top, fraction, 0);
+                    check_requests(matrix.requested, coords.size(), "signatures");
+                    matrix.requested.clear();
+                    counting->get_kmer_counts(query, top, fraction, 0);
+                    check_requests(matrix.requested, coords.size(), "counts");
+                }
+                for (const auto *index : { counting.get(), row_diff_brwt.get() }) {
                     const auto result = index == counting.get()
-                            ? coords : index->get_kmer_coordinates(query, top, 0, 0);
-                    ASSERT_EQ(std::min(top, expected.size()), result.size());
+                            ? coords : index->get_kmer_coordinates(query, top, fraction, 0);
+                    const auto counts = index->get_kmer_counts(query, top, fraction, 0);
+                    const auto signatures = index->get_top_label_signatures(query, top, fraction, 0);
+                    ASSERT_EQ(std::min(top, num_expected), result.size());
+                    ASSERT_EQ(counts.size(), result.size());
+                    ASSERT_EQ(signatures.size(), result.size());
                     for (size_t r = 0; r < result.size(); ++r) {
                         const auto &[label, count, positions, length] = result[r];
-                        const Occurrences &e = expected[order[r]];
-                        EXPECT_EQ(e.label, label);
-                        EXPECT_EQ(e.matched(), count);
-                        EXPECT_EQ(e.kmers_in_target, length);
+                        EXPECT_EQ(std::get<0>(counts[r]), label);
+                        EXPECT_EQ(std::get<1>(counts[r]), count);
+                        EXPECT_EQ(std::get<0>(signatures[r]), label);
+                        EXPECT_EQ(std::get<1>(signatures[r]), count);
+                        EXPECT_EQ(expected[order[r]].label, label);
+                        auto e = std::find_if(expected.begin(), expected.end(),
+                                              [&](const auto &o) { return o.label == label; });
+                        ASSERT_NE(expected.end(), e) << label;
+                        EXPECT_EQ(e->matched(), count);
+                        EXPECT_EQ(e->kmers_in_target, length);
                         const auto dense_coords = positions.to_dense();
-                        ASSERT_EQ(e.coords.size(), dense_coords.size());
+                        ASSERT_EQ(e->coords.size(), dense_coords.size());
                         for (size_t p = 0; p < dense_coords.size(); ++p) {
-                            ASSERT_EQ(e.coords[p], std::vector<uint64_t>(dense_coords[p].begin(),
-                                                                         dense_coords[p].end()))
+                            ASSERT_EQ(e->coords[p], std::vector<uint64_t>(dense_coords[p].begin(),
+                                                                          dense_coords[p].end()))
                                 << label << " position " << p;
+                        }
+                        if (by_record) {
+                            // a record's count at a position is its number of coordinates there
+                            const auto dense_counts = std::get<2>(counts[r]).to_dense();
+                            const auto mask = std::get<2>(signatures[r]).to_dense();
+                            for (size_t p = 0; p < dense_coords.size(); ++p) {
+                                EXPECT_EQ(e->coords[p].size(), dense_counts[p])
+                                    << label << " position " << p;
+                                EXPECT_EQ(!e->coords[p].empty(), mask[p])
+                                    << label << " position " << p;
+                            }
                         }
                     }
                 }

@@ -1,7 +1,9 @@
 #include <algorithm>
 #include <atomic>
 #include <limits>
+#include <map>
 #include <random>
+#include <span>
 #include <string>
 #include <thread>
 #include <tuple>
@@ -340,6 +342,90 @@ TEST(SearchBudget, QueriesWithAnAccountAnswerAsWithout) {
             }
         }
     }
+}
+
+// The fixture's matrix without row-diff, recording the rows its batched read is asked for
+class CountingRows : public annot::matrix::TupleCSCMatrix<annot::matrix::ColumnMajor> {
+  public:
+    using TupleCSCMatrix::TupleCSCMatrix;
+
+    std::vector<RowTuples> get_row_tuples(std::span<const Row> rows,
+                                          size_t num_threads = 1) const override {
+        requested.insert(requested.end(), rows.begin(), rows.end());
+        return TupleCSCMatrix::get_row_tuples(rows, num_threads);
+    }
+
+    mutable std::vector<Row> requested;
+};
+
+// Train 7 P1's R8 (a), lane T7-M5. A query by record folds its rows into the records it
+// meets; past the fold's budget (kFoldValuesBudget: 16 MiB of runs in a release build, none
+// in a debug one), with more records still in the race than the cut returns, the fold keeps
+// only the counts and reads the rows again after the cut for the returned records (master's
+// #765). The runs that read builds are values of the returned records: they are charged to
+// the pair's account (as the task's scratch) before they grow, the values built from them as
+// they grow. Here 1,200 records share a stretch of 1,000 k-mers, which the query holds each at
+// a position of its own: 1.2 M runs before the cut. With an account the answer is the one
+// without; the account's scratch holds at least the runs read again (16 B each: position,
+// length, value); a bound below what the query needs, and one below those runs alone, refuse
+// it with SearchAnswerTooLarge.
+TEST(SearchBudget, AQueryByRecordReadAgainAfterTheCutIsCharged) {
+    std::mt19937 rng(765);
+    const size_t k = 11;
+    const size_t num_shared = 1000;
+    const std::string shared = random_sequence(rng, num_shared + k - 1);
+    std::vector<CoordinateRecord> records;
+    for (size_t i = 0; i < 1200; ++i) {
+        records.push_back({ random_sequence(rng, 10) + shared + random_sequence(rng, 10),
+                            "F" + std::to_string(i % 2), "r" + std::to_string(i) });
+    }
+    std::string query;
+    for (size_t i = 0; i < num_shared; ++i) {
+        query += shared.substr(i, k) + "N";
+    }
+    auto index = coordinate_test_graph<CountingRows>(k, records, false, false, false, true);
+    const auto &matrix = dynamic_cast<const CountingRows &>(index->get_annotator().get_matrix());
+    const size_t top = 10;
+    auto check = [&](const std::string &mode, const auto &query_with) {
+        SCOPED_TRACE(mode);
+        matrix.requested.clear();
+        const auto plain = query_with(nullptr);
+        ASSERT_EQ(top, plain.size());
+        // every row of the query was read twice: the fold kept only the counts
+        std::map<annot::matrix::BinaryMatrix::Row, size_t> requests;
+        for (auto row : matrix.requested) {
+            ++requests[row];
+        }
+        std::map<annot::matrix::BinaryMatrix::Row, size_t> twice;
+        for (auto node : index->get_graph().node_range(query)) {
+            if (node)
+                twice[graph::AnnotatedDBG::graph_to_anno_index(node)] = 2;
+        }
+        ASSERT_LT(num_shared * 9 / 10, twice.size());
+        EXPECT_EQ(twice, requests);
+        SearchBudget budget(kLarge);
+        SearchAccount account(&budget, "values");
+        EXPECT_EQ(plain, query_with(&account));
+        const uint64_t runs_read_again = top * num_shared * 16;
+        EXPECT_LE(runs_read_again, account.scratch());
+        EXPECT_LT(account.scratch(), account.held());
+        for (uint64_t bound : { account.held() - 1, runs_read_again / 2 }) {
+            SearchBudget short_one(bound);
+            SearchAccount refused(&short_one, "values");
+            EXPECT_THROW(query_with(&refused), SearchAnswerTooLarge) << bound;
+            EXPECT_TRUE(short_one.passed());
+            EXPECT_GE(bound, refused.held());
+        }
+    };
+    check("signatures", [&](SearchAccount *a) -> Signatures {
+        return index->get_top_label_signatures(query, top, 0, 0, nullptr, a);
+    });
+    check("counts", [&](SearchAccount *a) -> Counts {
+        return index->get_kmer_counts(query, top, 0, 0, nullptr, a);
+    });
+    check("coordinates", [&](SearchAccount *a) -> Coordinates {
+        return index->get_kmer_coordinates(query, top, 0, 0, nullptr, a);
+    });
 }
 
 // REVIEW 9726cb420 [P2], lane T6-W2: the scratch one task of an account's work holds while it
