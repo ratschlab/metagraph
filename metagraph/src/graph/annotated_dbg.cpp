@@ -418,7 +418,7 @@ constexpr size_t kRowBlock = 256;
 // the fold keeps only the counts, and the rows are read again after the cut for the
 // returned records. Debug builds have no budget, so that the tests check both ways.
 #ifdef NDEBUG
-constexpr size_t kFoldValuesBudget = size_t(64) << 20;
+constexpr size_t kFoldValuesBudget = size_t(16) << 20;
 #else
 constexpr size_t kFoldValuesBudget = 0;
 #endif
