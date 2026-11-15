@@ -48,8 +48,7 @@ Json::Value process_traverse_request(const Json::Value &request,
 struct TraverseIndex {
     std::string graph;  // its name in the list
     const graph::AnnotatedDBG *anno_graph;
-    std::string graph_path;
-    std::string annotation_path;
+    std::string pair_id;  // opaque configured-pair identity, shared with /search
 };
 
 // The same request on several indexes, walked in |pool|. Each seed gets one walk per index

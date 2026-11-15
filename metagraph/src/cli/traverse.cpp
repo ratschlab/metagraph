@@ -551,8 +551,7 @@ IndexWalks walk_index(const TraverseRequest &req, const TraverseIndex &index,
             walk = failed_seed_to_json(seed, e);
         }
         walk["graph"] = index.graph;
-        walk["graph_path"] = index.graph_path;
-        walk["annotation_path"] = index.annotation_path;
+        walk["pair_id"] = index.pair_id;
     }
     return out;
 }
