@@ -406,8 +406,12 @@ Json::Value seed_result_to_json(const SeedResult &r) {
         lj["name"] = l.name;
         lj["kind"] = to_string(l.kind);
         lj["column"] = uint_json(l.column);
-        if (l.kind == LabelKind::HEADER)
+        if (l.kind == LabelKind::HEADER) {
             lj["seq_id"] = uint_json(l.seq_id);
+            const auto &place = r.record_places.at(dict.size());
+            lj["place"]["origin"] = uint_json(place.origin);
+            lj["place"]["dir"] = static_cast<int>(place.dir);
+        }
         dict.append(std::move(lj));
     }
     j["label_dict"] = std::move(dict);
@@ -547,6 +551,8 @@ IndexWalks walk_index(const TraverseRequest &req, const TraverseIndex &index,
             walk = failed_seed_to_json(seed, e);
         }
         walk["graph"] = index.graph;
+        walk["graph_path"] = index.graph_path;
+        walk["annotation_path"] = index.annotation_path;
     }
     return out;
 }

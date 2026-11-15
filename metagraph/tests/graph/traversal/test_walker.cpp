@@ -1006,12 +1006,29 @@ TEST(WalkerDerive, DerivationNarrowsAWideFirstKmerToItsCarriers) {
     seed.sequence = seed_seq;
     auto derived = traverse_seed(oracle, seed, Strategy());
     ASSERT_EQ(2u, derived.label_dict.size());
+    ASSERT_EQ(2u, derived.record_places.size());
+    for (const auto &place : derived.record_places) {
+        EXPECT_EQ(0u, place.origin);
+        EXPECT_EQ(1, place.dir);
+    }
     std::set<std::string> names;
     for (const auto &l : derived.label_dict) {
         EXPECT_EQ(LabelKind::HEADER, l.kind);
         names.insert(l.name);
     }
     EXPECT_EQ((std::set<std::string>{ "h_carrierA", "h_carrierB" }), names);
+}
+
+// A repeated seed follows the one chosen record place, not every seed copy.
+TEST(WalkerDerive, ChosenRecordPlaceUsesFirstCopy) {
+    const std::string record = "AAACTTTAAAG";
+    auto anno = build_anno_graph<DBGSuccinct, annot::ColumnCompressed<>>(
+        3, {record}, {"column"}, DeBruijnGraph::BASIC, true);
+    anno = with_coord_to_header(std::move(anno), {{"record"}}, {{record.size() - 2}});
+    auto result = run(*anno, "AAA", {"record"});
+    ASSERT_EQ(1u, result.record_places.size());
+    EXPECT_EQ(0u, result.record_places[0].origin);
+    EXPECT_EQ(1, result.record_places[0].dir);
 }
 
 // a header in two columns cannot be resubmitted by name: refused, with the lever
