@@ -528,8 +528,13 @@ namespace utils {
     template <typename T, typename ValueType>
     class ValueStore {
       public:
+        using SparseMap = tsl::hopscotch_map<T, ValueType>;
+
+        // whether a store over |universe_size| ids is dense (an index per id) or a hash table
+        static bool dense(size_t universe_size) { return universe_size < kMaxDenseSize; }
+
         ValueStore(size_t universe_size, size_t reserve_size = 0)
-              : use_dense_(universe_size < kMaxDenseSize) {
+              : use_dense_(dense(universe_size)) {
             if (use_dense_) {
                 // For a small universe size, using a dense vector is faster than a hash table.
                 ids_.resize(universe_size);
@@ -556,6 +561,10 @@ namespace utils {
             return it != sparse_values_.end() ? &it.value() : nullptr;
         }
 
+        bool is_dense() const { return use_dense_; }
+        // the hash table of a sparse store (empty for a dense one)
+        const SparseMap& sparse_values() const { return sparse_values_; }
+
       private:
         static constexpr size_t kMaxDenseSize = 1'000'000;
         bool use_dense_;
@@ -563,7 +572,7 @@ namespace utils {
         Vector<ValueType> dense_values_;
         std::vector<size_t> ids_;
         // if sparse, then sparse_values_[j] is the value for j
-        tsl::hopscotch_map<T, ValueType> sparse_values_;
+        SparseMap sparse_values_;
     };
 
 } // namespace utils

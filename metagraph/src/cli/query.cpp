@@ -13,6 +13,7 @@
 #include "common/utils/template_utils.hpp"
 #include "common/threads/threading.hpp"
 #include "common/vectors/vector_algorithm.hpp"
+#include "annotation/binary_matrix/base/decode_budget.hpp"
 #include "annotation/representation/annotation_matrix/static_annotators_def.hpp"
 #include "graph/alignment/dbg_aligner.hpp"
 #include "graph/representation/hash/dbg_hash_ordered.hpp"
@@ -171,6 +172,16 @@ collapse_coord_ranges(const graph::PositionCoords &coords) {
         range_strings.push_back(get_range(range));
     });
     return range_strings;
+}
+
+uint64_t coord_ranges_bytes(uint64_t longest) {
+    if (!longest)
+        return 0;
+    uint64_t capacity = 1;
+    while (capacity < longest) {
+        capacity *= 2;
+    }
+    return 2 * buffer_bytes(capacity, sizeof(Range)) + buffer_bytes(capacity / 2, sizeof(Range));
 }
 
 CoordRangesText collapsed_coords_text(const graph::PositionCoords &coords) {
@@ -1394,14 +1405,14 @@ SeqSearchResult query_sequence(QuerySequence&& sequence,
 
 
 size_t batched_query_fasta(seq_io::FastaParser &fasta_parser,
-                           const std::function<void(const SeqSearchResult &)> &callback,
+                           const std::function<void(SeqSearchResult &&)> &callback,
                            const Config &config,
                            const graph::AnnotatedDBG &anno_graph,
                            const graph::align::DBGAlignerConfig *aligner_config,
                            graph::SearchAccount *values);
 
 size_t query_fasta(const std::string &file,
-                   const std::function<void(const SeqSearchResult &)> &callback,
+                   const std::function<void(SeqSearchResult &&)> &callback,
                    const Config &config,
                    const graph::AnnotatedDBG &anno_graph,
                    const graph::align::DBGAlignerConfig *aligner_config,
@@ -1484,7 +1495,7 @@ size_t query_fasta(const std::string &file,
 }
 
 size_t batched_query_fasta(seq_io::FastaParser &fasta_parser,
-                           const std::function<void(const SeqSearchResult &)> &callback,
+                           const std::function<void(SeqSearchResult &&)> &callback,
                            const Config &config,
                            const graph::AnnotatedDBG &anno_graph,
                            const graph::align::DBGAlignerConfig *aligner_config,
@@ -1580,7 +1591,7 @@ size_t batched_query_fasta(seq_io::FastaParser &fasta_parser,
                     if (alignments_batch.size())
                         search_result.get_alignment() = std::move(alignments_batch[i]);
 
-                    callback(search_result);
+                    callback(std::move(search_result));
                 } catch (...) {
                     keep_error(std::current_exception());
                 }

@@ -158,6 +158,15 @@ RunsText dense_coords_text(const graph::PositionCoords &coords) {
     return text;
 }
 
+// the coordinates of the longest list of |coords|
+uint64_t longest_list(const graph::PositionCoords &coords) {
+    uint64_t longest = 0;
+    coords.call_positions([&](size_t, const graph::PositionCoords::Coords &list) {
+        longest = std::max<uint64_t>(longest, list.size());
+    });
+    return longest;
+}
+
 // the heap of a coordinate list copied out of a PositionCoords (to_dense)
 uint64_t coords_copy_bytes(const graph::PositionCoords &coords) {
     uint64_t bytes = 0;
@@ -351,15 +360,12 @@ SearchRecordPrice search_record_price(const SeqSearchResult &result, bool verbos
                         + buffer_bytes(coords.size, kStringBytes) + text.long_bytes;
             } else {
                 // collapse_coord_ranges: a string per range (a vector at its last growth) and
-                // the ranges open (at most every coordinate of a position, twice)
+                // the ranges open (two vectors of at most a position's coordinates, grown by
+                // doubling: coord_ranges_bytes)
                 const CoordRangesText text = collapsed_coords_text(coords);
                 length = text.bytes;
-                uint64_t open = 0;
-                coords.call_positions([&](size_t, const graph::PositionCoords::Coords &list) {
-                    open = std::max<uint64_t>(open, list.size());
-                });
                 transient = 3 * buffer_bytes(text.ranges, kStringBytes) + text.long_ranges_bytes
-                        + 2 * buffer_bytes(open, 3 * sizeof(uint64_t));
+                        + coord_ranges_bytes(longest_list(coords));
             }
             transient += 4 * alloc_bytes(length + 1);
             row(label, member(SeqSearchResult::KMER_COUNT_FIELD)
@@ -368,6 +374,39 @@ SearchRecordPrice search_record_price(const SeqSearchResult &result, bool verbos
                 transient);
         }
     }
+    return price;
+}
+
+uint64_t search_record_scratch(const SeqSearchResult &result, bool verbose_output) {
+    using LabelCountCoordsVec = SeqSearchResult::LabelCountCoordsVec;
+    const auto *rows = std::get_if<LabelCountCoordsVec>(&result.get_result());
+    if (verbose_output || !rows)
+        return 0;
+    uint64_t longest = 0;
+    for (const auto &row : *rows) {
+        longest = std::max(longest, longest_list(std::get<2>(row)));
+    }
+    return coord_ranges_bytes(longest);
+}
+
+SearchRecordPrice charge_search_record(graph::SearchAccount &answer, uint64_t *transient_charged,
+                                       const SeqSearchResult &result, bool verbose_output,
+                                       bool tagged, const std::string &graph,
+                                       const std::string &graph_path,
+                                       const std::string &annotation_path,
+                                       const std::string &index_fp) {
+    // the scratch of the price's measurement, before it is allocated
+    const uint64_t scratch = search_record_scratch(result, verbose_output);
+    if (scratch > *transient_charged) {
+        answer.charge(scratch - *transient_charged);
+        *transient_charged = scratch;
+    }
+    // the record's object, before it is built
+    const SearchRecordPrice price = search_record_price(result, verbose_output, tagged, graph,
+                                                        graph_path, annotation_path, index_fp);
+    const uint64_t transient = std::max(*transient_charged, price.transient);
+    answer.charge(price.tree + transient - *transient_charged);
+    *transient_charged = transient;
     return price;
 }
 

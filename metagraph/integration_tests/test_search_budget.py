@@ -10,7 +10,8 @@ multigraph block on a multi-graph server).
 Each test learns a request's charge from the server's log ("answer budget: values at most N B a
 pair, answer M B"; the accounts only grow, so the bound a request needs is the larger of the two,
 whatever the order its work charged in) and checks it at the bound of that many MiB rounded up
-(answered, byte for byte as without a budget) and one MiB below (refused).
+(answered, byte for byte as without a budget) and one MiB below (refused). Each refusal's log line
+states the account whose charge passed the bound, what it held before that charge, and the charge.
 """
 
 import json
@@ -55,6 +56,9 @@ BLOCK = {'max_memory_mb': 4096,
 
 CHARGE = re.compile(r'Request (\d+): answer budget: values at most (\d+) B a pair, answer (\d+) B, '
                     r'bound (\d+) MiB')
+REFUSAL = re.compile(r'Request (\d+): search_answer_too_large: (the (?:values|answer) account(?: of .*?)?) '
+                     r'passed the bound of (\d+) MiB: held (\d+) B \((\d+\.\d) MiB\) before a charge of '
+                     r'(\d+) B \((\d+\.\d) MiB\)\n')
 
 
 @unittest.skipIf(PROTEIN_MODE, "the fixture is DNA")
@@ -148,12 +152,22 @@ class TestSearchAnswerBudget(TestingBase):
         return r.content, self.charge(server, before)
 
     def refused(self, server, body, max_mb):
+        before = len(server.text())
         r = server.post('search', body)
         self.assertEqual(400, r.status_code, r.text[:2000])
         self.assertEqual(refusal_text(max_mb), r.text)
         self.assertEqual('application/json', r.headers['Content-Type'])
         self.assertNotIn('Content-Encoding', r.headers)
         self.assertEqual(['error', 'code', 'max_memory_mb'], list(json.loads(r.text)))
+        # the log: the account's charge that passed the bound, on top of what it held
+        lines = [m for m in REFUSAL.finditer(server.text()) if m.start() >= before]
+        self.assertEqual(1, len(lines), server.text()[-3000:])
+        bound, held, charge = (int(lines[0].group(i)) for i in (3, 4, 6))
+        self.assertEqual(max_mb, bound)
+        self.assertLessEqual(held, max_mb * MIB)
+        self.assertGreater(held + charge, max_mb * MIB)
+        self.assertEqual((f'{held / MIB:.1f}', f'{charge / MIB:.1f}'),
+                         (lines[0].group(5), lines[0].group(7)))
         return r
 
     # ------------------------------------------------------------------------ tests

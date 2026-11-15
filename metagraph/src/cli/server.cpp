@@ -129,13 +129,15 @@ Json::Value process_search_request(const SearchRequest &request,
     std::vector<SeqSearchResult> search_results;
     std::mutex result_mutex;
     // the values account of this pair (the answer budget's; none without one), noted in the
-    // budget once the pair's rows are built
+    // budget once the pair's rows are built; the pair's records run on get_num_threads()
+    // threads at once (query_fasta), each with its scratch
     std::unique_ptr<graph::SearchAccount> values;
     if (budget) {
         values = std::make_unique<graph::SearchAccount>(budget, "values",
                 source.tagged ? fmt::format("pair ({}, {}, {})", source.graph,
                                             source.graph_path, source.annotation_path)
-                              : std::string("the graph"));
+                              : std::string("the graph"),
+                get_num_threads());
     }
 
     // writing to temporary file in order to reuse query code. This is not optimal and
@@ -146,9 +148,11 @@ Json::Value process_search_request(const SearchRequest &request,
     tf.ofstream() << request.fasta;
     tf.ofstream().close();
 
-    // Query sequences and callback by appending result to vector with mutex for thread safety
+    // Query sequences and callback by appending result to vector with mutex for thread safety;
+    // each result is moved in (taken as an rvalue: a const reference would copy its per-position
+    // values, held twice beside the account; REVIEW 9726cb420, lane T6-W2)
     query_fasta(tf.name(),
-        [&](const SeqSearchResult &result) {
+        [&](SeqSearchResult &&result) {
             // the record's rows, held from now until the pair's answer is built
             if (values)
                 values->charge(search_record_rows_bytes(result));
@@ -174,13 +178,11 @@ Json::Value process_search_request(const SearchRequest &request,
     uint64_t transient_charged = 0;
     for (const auto &seq_result : search_results) {
         if (budget) {
-            // the record's object, before it is built
-            const SearchRecordPrice price = search_record_price(
-                    seq_result, config.verbose_output, source.tagged, source.graph,
-                    source.graph_path, source.annotation_path, source.index_fp);
-            const uint64_t transient = std::max(transient_charged, price.transient);
-            budget->answer().charge(price.tree + transient - transient_charged);
-            transient_charged = transient;
+            // the record's object, before it is built, and the scratch of its price's
+            // measurement, before that is measured
+            charge_search_record(budget->answer(), &transient_charged, seq_result,
+                                 config.verbose_output, source.tagged, source.graph,
+                                 source.graph_path, source.annotation_path, source.index_fp);
         }
         Json::Value json = seq_result.to_json(config.verbose_output, anno_graph.get_graph().get_k());
         if (source.tagged) {
@@ -209,10 +211,14 @@ Json::Value process_search_request(const SearchRequest &request,
 // SPEC-multigraph-envelope.md section 3): 400 search_answer_too_large, its members written in
 // the order error, code, the bound (error_first_json_text), the whole request refused whatever
 // else its work raised (the answer never depends on the order its pairs charged in). Nothing
-// partial is sent
+// partial is sent. The log states the account whose charge passed the bound (a values
+// account's with its pair), what it held before that charge, and the charge
 HttpError search_budget_refusal(const graph::SearchBudget &budget, size_t request_id) {
-    logger->info("[Server] Request {}: search_answer_too_large: {} passed the bound of {} MiB",
-                 request_id, budget.first_passed(), budget.max_bytes() >> 20);
+    logger->info("[Server] Request {}: search_answer_too_large: {} passed the bound of {} MiB: "
+                 "held {} B ({:.1f} MiB) before a charge of {} B ({:.1f} MiB)",
+                 request_id, budget.first_passed(), budget.max_bytes() >> 20,
+                 budget.first_held(), budget.first_held() / double(1 << 20),
+                 budget.first_charge(), budget.first_charge() / double(1 << 20));
     Json::Value body = search_answer_too_large_json(budget.max_bytes() >> 20);
     std::string text = error_first_json_text(body);
     return HttpError(400, std::move(body), std::move(text));
