@@ -44,10 +44,9 @@ library paths are under `api/python/metagraph/traverse/`. Line numbers are `bc96
    arms of one seed becomes a later validation helper (Appendix D.5).
 5. **No engine change and no MCP tool.** The service keeps one record per graph and seed; a union is built from
    those records, not stored in their place (§5).
-6. **What the owner decides:** whether to confirm the provisional answers (§8.1; OQ18 and OQ19 are decided), whether two
-   extras cut from 1a-U come back (OQ12, §8.2), and four questions the reviews raised (OQ15–OQ17 and OQ20, §8.3), among
-   them how `count_only` header names are stated (OQ20). The service session has answered the service's precondition for
-   r237 (OQ21).
+6. **What the owner decides:** whether to confirm the provisional answers (§8.1; OQ18, OQ19 and OQ20 are decided),
+   whether two extras cut from 1a-U come back (OQ12, §8.2), and three questions the reviews raised (OQ15–OQ17, §8.3).
+   The service session has answered the service's precondition for r237 (OQ21).
 
 ## 1. Use cases
 
@@ -152,11 +151,12 @@ for any arm and depth, structured (a `Statements` object, Appendix C.1):
    labels carry the walk from where.
 3. **What a turn-off means** (§2.4): a pair not following a walk did not follow it under its own request. Only a
    span marked `absence: graph` says the pair's graph lacks the walk.
-4. **Labels per pair** (§2.5): every label is shown with its pair (`g1/NC_000913.3`), and equal names in two pairs
-   are not claimed to be one record.
-5. **The scope of the paths** (§2.7). Source-supported, the default: "A walk that no single graph holds entirely is
-   in no part, so not in this union." Inferred: "Inferred paths join graphs at the transitions they name: no graph
-   is shown to hold them whole, and no sample to contain them."
+4. **Labels per pair** (§2.5): every label is shown with its pair (`g1/NC_000913.3`), equal names in two pairs are not
+   claimed to be one record, and header names on a pair whose record mapping was not checked are marked so.
+5. **The scope of the paths** (§2.7). Source-supported, the default: "A walk that no single graph holds entirely is in
+   no part, so not in this union." Inferred: "Joined paths connect graphs at the transitions they name, and no graph is
+   shown to hold them whole; routes are held whole by their graph through its own merges; no inferred path is shown to
+   be contained in a sample."
 
 The statements lead every summary and are never cut (§2.8, `summary()`).
 
@@ -172,7 +172,7 @@ without one (g02 and g09 do not hold the seed; g05 holds it, but no label carrie
 with a deadline, and g11's result was not passed in.
 
 ```python
->>> u = union_pairs(results, expected_pairs=r237_graphs)     # results: the 10 answers, in any order
+>>> u = union_pairs(results, expected_pairs=r237_graphs, seqs_order=r237_seqs_order)   # the 10 answers, any order
 >>> print(u)
 union of one seed (40 bp) over 11 expected pairs: 6 parts, 4 absent records (1 failed), 1 not included
 right arm, to 1000 bp (constrain, kmer, in every pair): complete in g01, g04, g08; complete, qualified, in g03
@@ -202,6 +202,7 @@ g06  merges     at 85 into s31; route held to 812, goes on       labels 2: 1 fro
 g07  ends       at 420  max_steps                               absence: uncertified
 g03  diverges   at 140                                          absence: under_strategy
 g08  diverges   at 40                                           absence: under_strategy
+header names of every pair rest on an unchecked record mapping (count_only)
 ```
 
 And the FASTA record of the same walk starts with this header (one line in the file):
@@ -209,7 +210,7 @@ And the FASTA record of the same walk starts with this header (one line in the f
     >right.u3 kind=walk len=812 held=g01,g04,g06 whole=g01,g04 merges=g06@85>s31 ends=g07@420:max_steps/uncertified
      diverges=g03@140/under_strategy,g08@40/under_strategy certified=g01:812,g03:140,g04:812,g06:812,g07:420,g08:40
      labels=g01:3/2,g04:1/1,g06:2/1 modes=constrain absent=g02:seed_not_in_graph,g05:not_walked,g09:seed_not_in_graph,
-     g10:failed not_included=g11 scope=within_one_graph
+     g10:failed not_included=g11 mapping=count_only scope=within_one_graph
 
 In the later inferred mode (§2.7, OQ18), a request adds the paths that switch graphs where the parts allow it. One of
 them:
@@ -235,8 +236,8 @@ overlap on [55, 700) and neither holds it whole: it is a candidate, and each pie
 
 ### 2.3 Inputs, preconditions and refusals
 
-**One list of results.** `union_pairs(results, *, seed=None, expected_pairs=None, budget=None)` takes the results as
-they come back and sorts them into parts and absent records. The sorting is total:
+**One list of results.** `union_pairs(results, *, seed=None, expected_pairs=None, seqs_order=None, budget=None)` takes
+the results as they come back and sorts them into parts and absent records. The sorting is total:
 
 - a `Graphlet` with its envelope, or a `TraverseResponse` holding one seed result (a part, or an absent record when the
   result has no graphlet);
@@ -288,16 +289,16 @@ mode (constrain, annotate), support (`kmer`, `trace`), radius, caps and `on_reco
 only; a part whose identity is unverified (no `index_fp`) or whose pair the caller stated. Each pair's mode is
 stated in the coverage sentence and on each span wherever a part is not in annotate mode (§2.4).
 
-**Refusals.** The arguments are checked first (`expected_pairs` must be a list or tuple, not a string; `seed` a
-string). Then each check of the table runs over all elements in the order given before the next check runs
-(check-major order), and the first failing check decides; a refusal names the first failing element. Commutativity
-(§2.10) covers successful unions only. `%s` names an element by its tag or, before a tag exists, by its position.
-The last three codes refuse queries, not construction.
+**Refusals.** The arguments are checked first (`expected_pairs` must be a list or tuple, not a string; `seqs_order` a
+dict of pairs to `verified`, `count_only` or `None`; `seed` a string). Then each check of the table runs over all
+elements in the order given before the next check runs (check-major order), and the first failing check decides; a
+refusal names the first failing element. Commutativity (§2.10) covers successful unions only. `%s` names an element by
+its tag or, before a tag exists, by its position. The last three codes refuse queries, not construction.
 
-The codes, in that order: `bad_expected`, `not_combinable`, `view_unsupported`, `not_one_seed`, `result_has_graphlet`,
-`no_graphlet`, `no_seed`, MissingEnvelope, `pair_mismatch`, `no_pair`, `ambiguous_pair`, `no_bases`,
-`different_alphabet`, `different_seed`, `duplicate_pair`, `not_expected`, `ambiguous_name`, `summary_too_small`,
-`not_offered`. Their exact texts are in Appendix A.2.
+The codes, in that order: `bad_expected`, `bad_seqs_order`, `not_combinable`, `view_unsupported`, `not_one_seed`,
+`result_has_graphlet`, `no_graphlet`, `no_seed`, MissingEnvelope, `pair_mismatch`, `no_pair`, `ambiguous_pair`,
+`no_bases`, `different_alphabet`, `different_seed`, `duplicate_pair`, `not_expected`, `ambiguous_name`,
+`summary_too_small`, `not_offered`. Their exact texts are in Appendix A.2.
 
 - **A reverse-complement part is refused**, not flipped. On primary graphs a seed and its reverse complement are one
   seed; flipping a part's walks (each arm becomes the other, reverse complemented) is phase 2.
@@ -445,10 +446,16 @@ the union reads no certificate.
 - `shared_names()` lists the names seen in two or more parts, with their pairs. The labels statement gives their
   count: "equal names in two pairs are not claimed to be one record (3 names occur in more than one pair)".
 
-A header name rests on its pair's record mapping. On a pair whose `seqs_order` is `"count_only"`, as on every r237
-pair today, that mapping's column order was not checked at load, so a header name can name another record even
-inside one pair (envelope spec §9.1). The tag does not repair that. The library states it for no graphlet today, since
-it reads no `GET /capabilities` certificate; whether it should is an owner question (OQ20, §8.3).
+A header name rests on its pair's record mapping. On a pair whose `seqs_order` is `"count_only"`, as on every r237 pair
+today, that mapping's column order was not checked at load, so a header name can name another record even inside one
+pair (envelope spec §9.1). The tag does not repair that, and the library states it for no graphlet today. The owner
+decided (OQ20) that the union warns per pair. `union_pairs(..., seqs_order=)` takes each pair's value as `GET
+/capabilities` states it (`graph_summary.pairs[]` or `pair_summary`, envelope spec §9.1): `verified`, `count_only`, or
+`None` where no `.seqs` is loaded. The fan-out helper fills it in (`PairResults.seqs_order`); a pair not given reads
+`unknown`, as do the service's records unless the caller passes their pairs' values. Every header label (`h:` ref) of a
+pair whose value is `count_only` or `unknown` is marked as resting on an unchecked record mapping: in the labels
+statement, in `carriers()` and its printout, and in the exports (FASTA `mapping=`, a GFA comment line). Column labels,
+`verified` pairs and pairs without `.seqs` carry no warning.
 
 ### 2.6 Coverage per pair: never more complete than the parts
 
@@ -509,9 +516,12 @@ contributes nothing from it.
 
 What it costs: on r237 each graph is a taxonomic group, so a real sequence (a chromosome, a plasmid) lies within one
 graph, and a walk across graphs would join two organisms. A sequence shared by two groups (a plasmid, a transposon, a
-conserved gene) is held entirely by both graphs, so it is in the union with both pairs and each pair's labels. Where
-a release splits its graphs by something other than organism, this mode can miss real walks, and it cannot measure
-that.
+conserved gene) is held entirely by both graphs, so its bases are in the union with both pairs and each pair's labels:
+as a union walk where a pair displays it, otherwise as a stub walk whose merge leads into the walk below (`held_in`
+through the route). The supported mode lists displayed walks and stub walks, not every route through the merges: where
+both parts display the same allele of a shared bubble, the other allele is listed only as a stub walk, and the inferred
+mode lists its full route. Where a release splits its graphs by something other than organism, this mode can miss real
+walks, and it cannot measure that.
 
 **Inferred (on request; designed now, built in a later phase).** A path may switch from one graph's spelling to
 another's, but only at a connection the input graphlets justify. The connection rule of the first version admits two
@@ -522,8 +532,8 @@ kinds, and nothing else:
   whichever pairs spell it (to each child of m where the merge segment has no bases). Where one pair holds the path on
   both sides, it is that pair's route and no transition is counted. Such routes can be many: the committed `merge.mgt`
   has two bubbles in a row, so its one part has one displayed walk but four routes from the seed to the leaf; the
-  default mode lists the walk and two stub walks, the inferred mode the four routes, none with a transition. B bubbles
-  in a row give up to 2^B routes, whatever `max_transitions` is.
+  default mode lists the walk and two stub walks; the inferred mode lists four paths without a transition, the walk
+  (`kind: walk`) and three routes. B bubbles in a row give up to 2^B routes, whatever `max_transitions` is.
 - **seed** (GFA only, where both arms meet). The left flank of one pair and the right flank of another meet at the
   seed, which every part holds as the same oriented sequence.
 
@@ -557,26 +567,32 @@ An inferred path follows three rules:
    biological sequences exist: each piece carries its pair's `certified_to_bp`, and the path has no `complete` of its
    own.
 
-The fifth statement then reads: "Joined paths connect graphs at the transitions they name, and no graph is shown to
-hold them whole; routes are held whole by their graph through its own merges; no inferred path is shown to be
-contained in a sample." A union walk is listed in both modes, without a transition; a route only in inferred mode.
-Inferred paths can be many even without a transition: routes multiply at every merge, and each transition multiplies
-the choices below a merge. So the enumeration is bounded by `max_paths` (default 1000), independently of
-`max_transitions`, and by `budget=`; it runs in path-id order, so a cut is the same in every run, and the listing
-states how many paths it gave and whether it was cut. What neither mode gives is a walk of one traversal over several
-graphs, which no engine offers today.
+The fifth statement then reads: "Joined paths connect graphs at the transitions they name, and no graph is shown to hold
+them whole; routes are held whole by their graph through its own merges; no inferred path is shown to be contained in a
+sample." A union walk is listed in both modes, without a transition; a route only in inferred mode. Inferred paths can
+be many even without a transition: routes multiply at every merge, and each transition multiplies the choices below a
+merge. So the enumeration is bounded by `max_paths` (default 1000), independently of `max_transitions`, and by
+`budget=`; it runs in path-id order, so a cut is the same in every run. The listing is an `InferredListing`: the paths,
+`count` (how many were enumerated), `cut` (true when `max_paths` or the budget stopped the enumeration) and `resume` (a
+token that continues it in path-id order, as `Partial` does, `budget.py`). A caller who receives exactly `max_paths`
+paths reads `cut` to know whether more exist. `top=` and `by=` rank only the paths enumerated: with `cut`, the ranking
+is within the first `count` paths in path-id order, never a global top, and the listing says so. Each FASTA record of an
+inferred listing carries `of=<count>`, with `+` when it was cut. This contract belongs to the later inferred phase. What
+neither mode gives is a walk of one traversal over several graphs, which no engine offers today.
 
 ### 2.8 Python API
 
-New module `union.py`, exported from `metagraph.traverse`; the parts container, refusals, evidence and budgets are
-in `composite.py`, shared with `stitch.py` (Appendix F.2). Everything is phase 1a-U except the line marked `[1c]`.
+New module `union.py`, exported from `metagraph.traverse`; the parts container, refusals, evidence and budgets are in
+`composite.py`, shared with `stitch.py` (Appendix F.2). Everything is phase 1a-U except what is marked `[1c]` and
+`[inferred]` (the later inferred phase, §7.1).
 
 ```python
-union_pairs(results, *, seed=None, expected_pairs=None, budget=None) -> PairUnion
+union_pairs(results, *, seed=None, expected_pairs=None, seqs_order=None, budget=None) -> PairUnion
     # results: Graphlet | TraverseResponse (one seed) | {response, index} | {response, sequence}
     #          | {pair, graphlet} | {pair, result[, error][, sequence]} | {pair, error}
     # seed: the oriented seed sequence; required only when no result carries a graphlet
     # expected_pairs: the pairs the request was sent to (graph names or pair objects); None: not known
+    # seqs_order: pair -> 'verified' | 'count_only' | None, from GET /capabilities; a pair not given: 'unknown'
     # A new object every time; parts held by reference, never copied or modified.
 
 class PairUnion:                          # every method also takes budget= (keyword-only, see below)
@@ -594,7 +610,8 @@ class PairUnion:                          # every method also takes budget= (key
     segments(arm, *, budget=None, resume=None) -> list[UnionSegment]
     walks(arm, *, paths='supported'|'inferred', max_transitions=1, max_paths=1000, top=None, by='pairs'|'length'|'id',
           pairs=None, labels=None, min_bp=0, spell=False, stubs=False, budget=None, resume=None)
-          -> list[UnionWalk] | list[InferredPath]
+          -> list[UnionWalk] | InferredListing
+    # [inferred] paths='inferred', max_transitions, max_paths and InferredListing, here and below
     spell(arm, walk, orientation='natural'|'walk', with_seed=False, *, budget=None) -> str  # a walk or inferred id
     carriers(arm, walk, *, at_bp=None, budget=None, resume=None) -> Carriers  # a list of PairSpan; str(): §2.2
     to_fasta(arm=None, walks=None, with_seed=True, orientation='natural', width=None, *, paths='supported',
@@ -649,7 +666,7 @@ tokens, empty ones left out, on one line in the file:
     >right.u12 kind=walk len=812 held=g1,g4,g6 whole=g1,g4 merges=g6@85>s31 ends=g7@120:dead_end/graph
      diverges=g8@40/under_strategy certified=g1:812,g4:812,g6:812,g7:120,g8:40 labels=g1:3/2,g4:1+/1,g6:2/0
      modes=constrain absent=g2:seed_not_in_graph,g3:seed_not_in_graph,g5:not_walked not_included=g9
-     scope=within_one_graph
+     mapping=count_only scope=within_one_graph
 
 and, in the later inferred mode, for the inferred path of §2.2:
 
@@ -685,6 +702,7 @@ The default mode's file, abridged:
     # right arm, to 300 bp (constrain, kmer, in every pair): complete in g1, g4, g8; ...
     # turn-offs: a pair not following a walk did not follow it under its own request (absence on each span)
     # labels: per pair, as <tag>/<name>; equal names in two pairs are not claimed to be one record (3 shared)
+    # labels: header names of g1, g4, g6, g7, g8 rest on an unchecked record mapping (count_only)
     # scope: a walk that no single graph holds entirely is in no part, so not in this union
     S	seed_r	CGTACC...	LN:i:40
     S	s12	ACGTT...	LN:i:300	pp:Z:g1,g4	pl:Z:g1=3;g4=1+
@@ -927,26 +945,31 @@ depends on notes `next_request()` returned: a child made another way is judged b
   the child's `evidence.complete_to_bp`): certification stops at the first relevant violation inside the child, not only
   at junctions. It passes to piece i + 1 only if piece i's walk ends within that depth and the junction between them is
   `exact`. In phase 1a-S no junction is `exact`, so a stitched walk is certified at most to its first junction, and
-  every walk that reaches into a child reads `complete: false`; each piece still lists its own part's certificate.
-  `certified_to_bp` is where it stops, `beyond_certified_bp = length_bp − certified_to_bp`, and `complete` holds when
-  that is 0, the last piece's walk is complete in its part (`Walk.complete`), and no walk-scope cause lies on the walk,
-  at its end included. The `loop_branch` walk has `candidate_changed` at its end, 115 bp, after a child walk of 0 bp
-  that its part calls complete: it is certified to 115 bp and not complete. `certified_to_bp` counts bases; whether the
-  walk ends where it ends is `complete`. A parent walk cut by a cap beyond its arm's `complete_to_bp` therefore stays
-  uncertified past that depth, however far its child reaches.
+  every walk that reaches into a child reads `complete: false`; each piece still lists its own part's certificate. The
+  rules still compute the **prospective result**: the same answer with `exact_gated` read as `exact`, that is, certified
+  through such junctions, with `complete` and the evidence as they will read once `exact` is switched on. In 1a-S it is
+  a private test hook (T4, T11) and never part of a public answer. `certified_to_bp` is where it stops,
+  `beyond_certified_bp = length_bp − certified_to_bp`, and `complete` holds when that is 0, the last piece's walk is
+  complete in its part (`Walk.complete`), and no walk-scope cause lies on the walk, at its end included. The
+  `loop_branch` walk has `candidate_changed` at its end, 115 bp, after a child walk of 0 bp that its part calls
+  complete: it is certified to 115 bp and not complete. `certified_to_bp` counts bases; whether the walk ends where it
+  ends is `complete`. A parent walk cut by a cap beyond its arm's `complete_to_bp` therefore stays uncertified past that
+  depth, however far its child reaches.
 - **The evidence block** (`evidence()`, and with every answer): each part's own `evidence_block` (`ops.py:6006`) keyed
   by part, the junctions it depends on with verdicts and causes, the identity statement, and an `outcome` that takes the
   **weakest** value per dimension over every part and junction the answer reads. A `qualified` junction, and a
   walk-scope cause on any walk the answer reads, map to `walks: partial` and `label_evidence: qualified`. `exact` holds
-  only when every part read is exact, every junction is `exact`, no walk the answer reads has a walk-scope cause, and
-  the identity is verified, so the CLI fixtures, which have no `index_fp`, can never read `exact` there (§6 T4). In
-  phase 1a-S no stitched answer's evidence reads `exact`: a `qualified` verdict never stands beside `complete: true` or
-  exact evidence that the causes do not justify. Each part keeps its `K` records, its `Q` (`resource_stop`), its dropped
-  seed labels (`X`), its cut lists (`label_lists`, `inexact_counts`), its dropped branch events
-  (`evidence.complete_to_bp`), its `coordinates` limitation and its delivery (`spooled`), all listed under its key. None
-  is summed or dropped. A local-budget stop follows the library's rule (`budget.py`): `LocalBudgetExceeded`, with a
-  `Partial` of whole rows and a resume token bound to the stitched graphlet's digest for the lists whose order allows
-  it, and no partial otherwise.
+  only when every part read is exact, every junction is `exact`, no walk the answer reads has a walk-scope cause, and,
+  where the answer reads a junction, the identity is verified, so the CLI fixtures, which have no `index_fp`, can never
+  read `exact` there (§6 T4). In phase 1a-S no answer that depends on a junction reads `exact`, and a `qualified`
+  verdict never stands beside `complete: true` or exact evidence that the causes do not justify. An answer that depends
+  on no junction, `stitch(g)` without a child or a root walk no child continues, states the root's own evidence, `exact`
+  where the root's is, so `stitch(g)` still answers as `g` (T2). Each part keeps its `K` records, its `Q`
+  (`resource_stop`), its dropped seed labels (`X`), its cut lists (`label_lists`, `inexact_counts`), its dropped branch
+  events (`evidence.complete_to_bp`), its `coordinates` limitation and its delivery (`spooled`), all listed under its
+  key. None is summed or dropped. A local-budget stop follows the library's rule (`budget.py`): `LocalBudgetExceeded`,
+  with a `Partial` of whole rows and a resume token bound to the stitched graphlet's digest for the lists whose order
+  allows it, and no partial otherwise.
 
 ### 3.6 Exports, provenance and replay
 
@@ -1100,6 +1123,9 @@ TraverseClient.traverse_pairs(seed, strategy=None, *, pairs=None, detail='graphl
 - *Failures.* Every answer is kept as returned; a refused or failed request becomes `{pair, error}`.
 - *Expected pairs.* `PairResults.expected_pairs` holds the full pair objects the requests were sent to, so two
   annotations of one graph name stay two pairs.
+- *Seed and mappings.* `PairResults.seed` is the oriented seed sent, so a union whose every pair lacks the seed is still
+  built (`seed=`, §2.3); `PairResults.seqs_order` holds each pair's record-mapping certificate from `GET /capabilities`
+  (§2.5).
 - *Kept seeds.* Each `TraverseResponse` keeps the seeds it sent (`seeds_sent`, beside the attempt fields it keeps as
   `.sent` today, `attempts.py:363`), so absent records read from it are `seed_check: 'sent'` (§2.3).
 - *Not accepted.* `attempt_id` and `expect_server_instance`. Attempt ids share one server-wide namespace with request
@@ -1108,7 +1134,7 @@ TraverseClient.traverse_pairs(seed, strategy=None, *, pairs=None, detail='graphl
 
 ```python
 >>> r = client.traverse_pairs(seed, strategy)                   # every graph of the release
->>> u = union_pairs(r.results, expected_pairs=r.expected_pairs)
+>>> u = union_pairs(r.results, seed=r.seed, expected_pairs=r.expected_pairs, seqs_order=r.seqs_order)
 ```
 
 ## 6. Tests
@@ -1124,7 +1150,7 @@ uninterrupted traversals (T11; OQ19, decided). The oracle triples of T4 pin ever
 ### 7.1 Phases
 
 - **Phase 0 (this note).** Four Fable reviews, an external review and a GPT review (Appendix G). The owner answered
-  OQ1–OQ10, OQ13 and OQ14 provisionally and decided OQ18 and OQ19, all on 2026-11-15 (§8.1); OQ12, OQ15–OQ17 and OQ20
+  OQ1–OQ10, OQ13 and OQ14 provisionally and decided OQ18, OQ19 and OQ20, all on 2026-11-15 (§8.1); OQ12 and OQ15–OQ17
   are open (§8.2, §8.3); the service session answered OQ21.
 - **Phase 1a-U, the cross-pair union, first.** `composite.py` and `union.py`, cut to what looking at one seed across
   r237's 11 graphs needs. Its first step is a round trip on one real r237 record: the service's `mgt` export, `load()`,
@@ -1132,15 +1158,16 @@ uninterrupted traversals (T11; OQ19, decided). The oracle triples of T4 pin ever
   refusal, the trie with terminal markers and stubs, spans, routes through merges and span labels, interval support,
   `absence`, coverage with the qualified and not-walked categories, labels per pair, walks, spell, carriers of a walk,
   FASTA and GFA with the statements, summary and `print()`, evidence and provenance, all in the source-supported mode
-  only (OQ18, decided); the client's fan-out helper and its kept seeds (§5.2); P1–P12 and the integration check; the
-  split-graph fixture; the docs. No new file format. One lane, its own review, then a merge train like every library
-  change. **Why the union ships first.** It has a named user and a need today (the owner, on r237's 11 graphs; OQ3). It
-  states nothing beyond what its parts state, so no part of it waits for an oracle, while stitching's `exact` waits for
-  a randomized comparison. And it builds the shared machinery (`composite.py`), which makes stitching smaller. **Cut
-  from 1a-U** (Appendix G.2): `certificates=` and every name rule; `routes=` (replaced by stubs); a union-level
-  `compare()` (each common pair's parts compare with their own `compare()`); `support_by_depth()`;
-  `carriers(sequence=)`; a per-pair FASTA (it equals the parts' own exports); a `PairUnion` as an input;
-  `walks(by='labels')`.
+  only (OQ18, decided); per-pair warnings on header names whose record mapping was not checked, `unknown` where the
+  certificate is not known (OQ20, decided, §2.5); the client's fan-out helper and its kept seeds (§5.2); P1–P12 and the
+  integration check; the split-graph fixture; the docs. No new file format. One lane, its own review, then a merge train
+  like every library change. **Why the union ships first.** It has a named user and a need today (the owner, on r237's
+  11 graphs; OQ3). It states nothing beyond what its parts state, so no part of it waits for an oracle, while
+  stitching's `exact` waits for a randomized comparison. And it builds the shared machinery (`composite.py`), which
+  makes stitching smaller. **Cut from 1a-U** (Appendix G.2): `certificates=` and every name rule (only `seqs_order=`
+  came back, for OQ20); `routes=` (replaced by stubs); a union-level `compare()` (each common pair's parts compare with
+  their own `compare()`); `support_by_depth()`; `carriers(sequence=)`; a per-pair FASTA (it equals the parts' own
+  exports); a `PairUnion` as an input; `walks(by='labels')`.
 - **Phase 1a-S, stitching, after the union (the owner's provisional answer to OQ1).** `stitch()` and `StitchedGraphlet`
   with walks, spell, continuation and next_request delegation, FASTA, completeness, evidence, summary and provenance;
   every refusal; the junction and walk statement with every cause of §3.4, every verdict `qualified` (OQ19, decided);
@@ -1190,9 +1217,9 @@ first changed decision, and `qualified` only until a seeded randomized compariso
 
 ### 8.1 The owner's answers so far
 
-The owner: "do not take my answers as the final answers yet". Every answer below is **provisional, 2026-11-15**,
-except OQ18 and OQ19, which the owner **decided** on 2026-11-15; the body follows them all, and the provisional ones
-can still change. The owner's own words are quoted where they were relayed.
+The owner: "do not take my answers as the final answers yet". Every answer below is **provisional, 2026-11-15**, except
+OQ18, OQ19 and OQ20, which the owner **decided** on 2026-11-15; the body follows them all, and the provisional ones can
+still change. The owner's own words are quoted where they were relayed.
 
 | OQ | question | the owner's answer | status | where |
 |---|---|---|---|---|
@@ -1210,6 +1237,7 @@ can still change. The owner's own words are quoted where they were relayed.
 | OQ14 | combining two retrievals of one pair | belongs in the design, implementation deferred; restated with OQ18 and OQ19: "combining separate retrievals from the same graph/annotation pair remains designed now and implemented later" | provisional, 2026-11-15 | §4.2 |
 | OQ18 | when the inferred mode ships | "Ship source-supported union first. Keep inferred paths in the design and implement them in a later stage." | **decided, 2026-11-15** | §2.7, §7.1 |
 | OQ19 | `exact` for stitching before a randomized comparison | "Ship stitching as qualified first. Defer exactness until the corrected rules pass a seeded randomized comparison against uninterrupted traversals. The qualified stitching release still needs the completeness fixes: walk-specific causes must propagate into `complete`, evidence and outcomes. A qualified verdict must not coexist with an unjustified `complete=True` or `exact=True`." | **decided, 2026-11-15** | §3.4, §3.5, §7.1, E.2 T11 |
+| OQ20 | header names on `count_only` pairs | "add per-pair warnings for unchecked header-to-record mappings, using `unknown` when metadata is unavailable" (option (b); recorded from the owner's paste of the GPT follow-up review, for the owner to correct if it is not his decision) | **decided, 2026-11-15** | §2.5, §7.1 |
 
 OQ11 (which rule joins label names across pairs) was withdrawn after the union review: under the server's
 certificates no name occurs in two pairs, so no rule would ever join anything (§2.5).
@@ -1259,7 +1287,7 @@ for graphs of one index on both sides, each part's own `compare()`.
 that 1a-U states. Support by depth would be the natural first follow-up; comparing unions needs rules of its own for
 matching graphs across releases. *Reviewers:* Fable and GPT recommend the same.
 
-### 8.3 Open: four questions from the reviews, and OQ21 answered
+### 8.3 Open: three questions from the reviews, and OQ21 answered
 
 Each question stands on its own; my recommendation follows it.
 
@@ -1278,16 +1306,6 @@ Each question stands on its own; my recommendation follows it.
   `pair_id` is gone: unique display tags are the one identifier. Since the GPT review: the path kinds `walk`, `route`,
   `joined`, `max_paths`, `Transition.by` as a tuple, and `PairResults`. *Recommendation: accept. Fable and GPT agree,
   GPT after the contract fixes of Appendix G.6, which are made.*
-- **OQ20, header names on `count_only` pairs.** On every r237 pair the mapping from a header label to its record was not
-  checked at load (`seqs_order: "count_only"`), so a header name can name another record even within one graph (envelope
-  spec §9.1). That touches "which records carry this flank". The library states it for no graphlet today. Options: (a)
-  leave it, as today; (b) the union states it per pair: the fan-out helper records each pair's `seqs_order` from `GET
-  /capabilities` with its results, records from elsewhere (the service's exports, saved files) carry it where their
-  source recorded it, and a pair whose `seqs_order` is not known reads `unknown`; every sentence, carriers listing and
-  export marks header labels on `count_only` and `unknown` pairs as resting on an unchecked mapping; (c) a library-wide
-  change for every graphlet. The owner's main workflow goes through the service, so (b) only helps there if the service
-  records `seqs_order` with each record. *Recommendation: (b) in 1a-U, with `unknown`; (c) later. Fable and GPT
-  recommend (b); GPT asks for the `unknown` state and for the service's exports to carry it.*
 
 **OQ21, the `J` line from the service: answered by the service session, 2026-11-15, for r237.** The service adds the `J`
 line to every stored record, and both the REST `format=mgt` export and the MCP `graphlet_export(format="mgt")` keep it.
@@ -1323,6 +1341,7 @@ The sorting is total: every element becomes a part, an absent record, or a refus
 | code | text |
 |---|---|
 | `bad_expected` | `expected_pairs= takes a list of the pairs the request was sent to, as graph names or {graph, graph_path, annotation_path} objects; %s is not one` (a string: `expected_pairs= is a string: pass a list of graph names`) |
+| `bad_seqs_order` | `seqs_order= maps pairs (graph names or pair objects) to "verified", "count_only" or None, as GET /capabilities states them; %s is not one` |
 | `not_combinable` (TypeError) | `union_pairs() takes results: a Graphlet, a TraverseResponse, {response, sequence}, or {pair, graphlet}, {pair, result} or {pair, error}; not %s` (once stitching ships, a StitchedGraphlet too) |
 | `view_unsupported` | `union_pairs() reads whole retrievals, not views: pass view.backing, and select labels on the union (labels=)` |
 | `not_one_seed` | `result %s holds %d seed results: pass {response, index} for this union's seed, or it as {pair, graphlet} or {pair, result}`; zero: `result %s holds no seed result`; out of range: `result %s has no seed result %d (it holds %d)` |
@@ -1416,12 +1435,15 @@ its result as canonical JSON without `seed_id`); a failed record's, (the pair ke
   `labels='full'` the full lists, as `<tag>/<name>@<from_bp>`.
 - `modes=` whenever a part is not in annotate mode (`modes=g1:constrain,g7:annotate` when they differ).
 - `absent=` the absent records as `<tag>:<category>`; `not_included=` the expected pairs not given.
+- `mapping=` the pairs whose header labels rest on an unchecked record mapping, as `<tag>:count_only` or
+  `<tag>:unknown`, or one value when every pair has it (`mapping=count_only` on r237).
 - `scope=within_one_graph` (the non-claim of the default mode) or `scope=inferred`.
 - Stub walks are exported only with `stubs=True`, as `kind=stub`.
 - An inferred path states `pieces=` as `<tag>[+<tag>…]:<from_bp>-<to_bp>` and `transitions=` as
   `merge:<tag>[+<tag>…]@<trie node>:<at_bp>[<from_bp>-<to_bp>]` (every pair whose merge permits it) or
-  `seed[<from_bp>-<to_bp>]`, instead of span tokens; a route also states `held=`, as a walk does. Its `certified=` gives
-  each pair's certified depth on its piece.
+  `seed[<from_bp>-<to_bp>]`, instead of span tokens; a route also states `held=`, as a walk does; every record of an
+  inferred listing states `of=<count>`, `of=<count>+` when the listing was cut. Its `certified=` gives each pair's
+  certified depth on its piece.
 
 **Escaping.** Names and tags in tokens are percent-escaped, so that every token decodes back to what it names: every
 byte outside printable ASCII (`!` to `~`), which takes in the space, control characters and the UTF-8 bytes of every
@@ -1496,9 +1518,10 @@ them equal; if they are ever implemented, a non-zero window becomes a `qualified
 ```python
 @dataclass(frozen=True)
 class PairPart:    tag: str; key: tuple; pair_stated_by: str         # tag: unique (A.4); 'envelope' | 'caller'
+                   seqs_order: str                                  # 'verified' | 'count_only' | 'none' | 'unknown'
                    graphlet: Graphlet; identity: dict; retrieval: tuple; digest: str   # retrieval identity: A.4
 @dataclass(frozen=True)
-class PairAbsent:  tag: str; key: tuple; pair_stated_by: str; category: str; detail: dict
+class PairAbsent:  tag: str; key: tuple; pair_stated_by: str; category: str; detail: dict; seqs_order: str
                    seed_check: str                                  # 'sent' | 'stated' | 'unchecked' (§2.3)
                    # category: 'seed_not_in_graph' | 'labels_not_in_graph' | 'not_walked' | 'failed'
 @dataclass(frozen=True)
@@ -1550,6 +1573,8 @@ class InferredPath: id: str; arm: str; length_bp: int; sequence: str | None   # 
                    pieces: tuple[tuple[int, int, tuple[str, ...]], ...]   # cut wherever the holding set changes
                    transitions: tuple[Transition, ...]              # empty for a walk or a route
                    certified: dict                                  # tag -> certified_to_bp on its stretch
+class InferredListing(list):                                        # [inferred] walks(paths='inferred'), §2.7
+                   count: int; cut: bool; resume: str | None        # enumerated; stopped by max_paths or budget
 @dataclass(frozen=True)
 class Coverage:    arm: str; at_bp: int; per_pair: dict; by_category: dict   # at_bp: the depth used (§2.6)
                    every_pair_certified_to_bp: int | None; sentence: str     # None also without expected_pairs=
@@ -1558,7 +1583,9 @@ class Statements:  arm: str | None; at_bp: int; paths: str           # 'supporte
                    coverage: Coverage; provenance: str; turn_offs: str; labels: str; scope: str
                    def sentences(self) -> list[str]: ...            # the five, in order, as print() writes them
 @dataclass(frozen=True)
-class PairResults: results: list; expected_pairs: tuple[dict, ...] # traverse_pairs(): the pair objects sent (§5.2)
+class PairResults: results: list; seed: str                         # traverse_pairs() (§5.2): the seed sent
+                   expected_pairs: tuple[dict, ...]                 # the pair objects sent
+                   seqs_order: dict                                 # pair -> its record-mapping certificate (§2.5)
 ```
 
 ### C.2 Stitching
@@ -1816,17 +1843,18 @@ Stdlib `unittest` with seeded random generation, as in the existing suites; no n
   (the pair still stated by the envelope); `{response, sequence}`; `{pair, graphlet}` (CLI bodies under two stated
   pairs); `{pair, result}` with and without `sequence`, and with the `error` beside it as in `TraverseResponse.errors`;
   a result with a graphlet (`result_has_graphlet`); `{pair, error}` with a string and with an exception; zero and two
-  seed results (`not_one_seed`); a union of absent records only, with `seed=` (arm-less coverage). The pair-match rule:
-  bare names against envelope pairs (an absent `g2` and the part on `g2` are one pair; `expected_pairs=['g2']` is not
-  `not_included`), two databases' same-named graphs (two pairs by `index_fp`; `ambiguous_pair` for a bare name that
-  matches both). Two pairs with one graph name and release, different paths and no `index_fp` get two display tags with
-  `~` suffixes (Appendix A.4), and no dict, label or span of one is read as the other's. Retrieval identity: the same
-  retrieval twice is a no-op that keeps the envelope-stated form in either order; two identical absent records are one;
-  a failed record and then an answer keep the answer, with the failure in `provenance()`; one body from two requests,
-  and two requests that differ only in `seed_id` against a changed strategy, are told apart as §2.3 says. `seed_check`
-  gives `sent` for a response from the client that kept its seeds, `stated` with a sequence and `unchecked` otherwise,
-  sequences compared after case mapping, also when the record's `seed_id` happens to equal the union's seed id (a
-  caller's text proves nothing).
+  seed results (`not_one_seed`); a union of absent records only, with `seed=` (arm-less coverage), and a fan-out whose
+  every pair lacks the seed: `union_pairs(r.results, seed=r.seed, ...)` builds the arm-less union, and without `seed=`
+  it is refused `no_seed`. The pair-match rule: bare names against envelope pairs (an absent `g2` and the part on `g2`
+  are one pair; `expected_pairs=['g2']` is not `not_included`), two databases' same-named graphs (two pairs by
+  `index_fp`; `ambiguous_pair` for a bare name that matches both). Two pairs with one graph name and release, different
+  paths and no `index_fp` get two display tags with `~` suffixes (Appendix A.4), and no dict, label or span of one is
+  read as the other's. Retrieval identity: the same retrieval twice is a no-op that keeps the envelope-stated form in
+  either order; two identical absent records are one; a failed record and then an answer keep the answer, with the
+  failure in `provenance()`; one body from two requests, and two requests that differ only in `seed_id` against a
+  changed strategy, are told apart as §2.3 says. `seed_check` gives `sent` for a response from the client that kept its
+  seeds, `stated` with a sequence and `unchecked` otherwise, sequences compared after case mapping, also when the
+  record's `seed_id` happens to equal the union's seed id (a caller's text proves nothing).
 - **P5 the trie.** Hand-built cases: two pairs that share a prefix and branch; a pair whose walk ends inside another's
   (`ends`, with its reason), and the same walk kept as a union walk by its terminal marker (A answers `AC`, B `ACGT`:
   `AC` is a walk, `whole` in A and `extends` in B, `walks(pairs=['A'])` returns it, and adding B to a union of A removes
@@ -1854,10 +1882,12 @@ Stdlib `unittest` with seeded random generation, as in the existing suites; no n
   or as a prefix ended by that graph's `dead_end`. Constrain mode: every walk of the unsplit retrieval carried by a
   label whose record lies in graph g is in g's part; a walk whose k-mers are all in g but whose only carrier is a record
   of the other graph need not be.
-- **P7 labels.** Every label is shown with its pair; `label({'name'})` resolves for a name in one pair and is
-  refused `ambiguous_name` for the shared record's name; `shared_names()` lists it, and the statement counts it.
-  `{pair, name}` on the `same_name` fixture (two labels ACC1 in one pair) raises the part's `AmbiguousLabel`;
-  `{pair, ref}` resolves.
+- **P7 labels.** Every label is shown with its pair; `label({'name'})` resolves for a name in one pair and is refused
+  `ambiguous_name` for the shared record's name; `shared_names()` lists it, and the statement counts it. `{pair, name}`
+  on the `same_name` fixture (two labels ACC1 in one pair) raises the part's `AmbiguousLabel`; `{pair, ref}` resolves.
+  Header-name warnings: `count_only`, `unknown` (a pair not in `seqs_order=`, and every pair without it) and `None`
+  pairs; header labels marked and column labels not, in the statement, `carriers()`, FASTA `mapping=` and the GFA
+  comment; a `verified` pair unmarked; `bad_seqs_order` for a value outside the three.
 - **P8 coverage.** Every category of §2.6: absent records `not_in_graph` with none and with some k-mers present,
   `labels_not_in_graph`, a failed derivation (`not_walked`, seed in graph) and `{pair, error}`; a part with a
   `seed_labels` limitation (`max_seed_labels` below the carriers) and one with a `scope` limitation
@@ -1896,11 +1926,12 @@ Stdlib `unittest` with seeded random generation, as in the existing suites; no n
   `at`, `at_bp`, `from_bp` and `to_bp`, the pairs before and after), no `held_in` and no `complete`; its id is `i:` and
   its union segments, the same whatever `max_transitions` lists it; a union walk is listed in both modes without a
   transition (`kind: walk`); on the committed `merge.mgt` the default mode lists one walk and two stub walks and the
-  inferred mode four routes (`kind: route`, `held_in` the part's pair, no transition); a chain of bubbles is cut at
-  `max_paths` with `max_transitions` 0, the same cut in every run and stated; two pairs whose merges at one trie node
-  permit a connection are both in `by`; `max_transitions` bounds the transitions, which are stated; no junction is made
-  at equal sequence in another branch or position (no overlap assembly); the fifth statement reads as §2.7 says in that
-  mode.
+  inferred mode one `walk` and three `route`s (`held_in` the part's pair, no transition); a chain of bubbles is cut at
+  `max_paths` with `max_transitions` 0, the same cut in every run, with `cut` true, `count`, a `resume` that continues
+  it, `of=<count>+` in FASTA, and `top=` ranking only the paths enumerated; exactly `max_paths` paths without a cut read
+  `cut` false; two pairs whose merges at one trie node permit a connection are both in `by`; `max_transitions` bounds
+  the transitions, which are stated; no junction is made at equal sequence in another branch or position (no overlap
+  assembly); the fifth statement reads as §2.7 says in that mode.
 
 Beside them, one integration check on a two-graph server (`integration_tests/test_multigraph.py`): a seed held by
 one graph only, so the other answers `not_in_graph`, read as §2.3 and §2.6 expect from a real response. The new
@@ -1937,16 +1968,18 @@ graphlets.rst examples run in `run_examples.py` (CI's fixture-checks job).
   `qualified`, certified to 115 bp and not complete); `decisions_unrecorded` (the child's branch events cut at 1; the
   `loop_branch` child with `max_branch_events` 0, whose boundary is 0 and whose walk is 0 bp; a boundary equal to a
   walk's end). Every fixture asserts, beside the verdict and the causes, each stitched walk's `certified_to_bp` and
-  `complete` and the evidence's outcome and `exact`: the `loop_branch` walk is not complete. One fixture with the
-  changed decision inside the child, past its first base, where certification stops at that depth and not at the
-  junction. Where the uninterrupted retrieval differs, the difference lies below a stated cause. (c) Promotion
+  `complete` and the evidence's outcome and `exact`, in the public result and in the prospective one (§3.5): the
+  `loop_branch` walk is complete in neither. One fixture with the changed decision inside the child, past its first
+  base, where the prospective certification stops at that depth and not at the junction, while the public result stops
+  at the junction. Where the uninterrupted retrieval differs, the difference lies below a stated cause. (c) Promotion
   candidates (`same_stop`, uniform-shift switching) get fixtures that show their walks equal the reference's before they
   are moved to the whitelist.
 - **T5 no laundering.** Over all fixture combinations: every answer's evidence is, per dimension, no stronger than any
   part or junction it reads. Every part's `K` kinds, `Q` and `X` appear under its key. A stitched walk is complete only
   if all its pieces and junctions are and no walk-scope cause lies on it; in phase 1a-S no stitched walk that reaches
-  into a child is complete, and no stitched answer's evidence reads `exact`. With fixtures whose `H` carries an
-  `index_fp`, the evidence's `exact` is checked too.
+  into a child is complete, and no answer that depends on a junction reads `exact`, while `stitch(g)` and the root walks
+  no child continues keep the root's evidence (T2). With fixtures whose `H` carries an `index_fp`, the evidence's
+  `exact` is checked too.
 - **T6 round trip.** In 1a: saving the parts and stitching the loaded parts gives an equal digest. In 1c:
   `save`/`load` byte-identical with equal digests, and `load` refuses a truncated part (`GraphletFormatError` naming
   part and line), a digest mismatch, an unknown manifest member, a tree whose child is not a continuation (the §3.1
@@ -1961,11 +1994,13 @@ graphlets.rst examples run in `run_examples.py` (CI's fixture-checks job).
   with `descends_from` linking them, and no claim spans both labels.
 - **T11 randomized comparison (the gate for `exact`, OQ19).** Seeded random small graphs (generated records with
   repeats, loops and bubbles; basic, canonical and primary regimes; both label modes), each with parent, child and
-  uninterrupted traversals, and chains of three or more parts. For every stitched walk the rules call `exact` or
-  `exact_gated`, the comparison checks against the uninterrupted traversal its endpoint and end reasons, `complete` and
-  `certified_to_bp`, the evidence and the outcome per dimension, not only its spelling; runs with branch events cut
-  (`max_branch_events` down to 0) are included. Every disagreement fails the gate and is kept, minimized, as a fixture.
-  `exact` is switched on only when the comparison passes; it is not part of phase 1a-S.
+  uninterrupted traversals, and chains of three or more parts. For every stitched walk the rules call `exact_gated`, the
+  comparison checks the prospective result (§3.5) against the uninterrupted traversal: its endpoint and end reasons,
+  `complete` and `certified_to_bp`, the evidence and the outcome per dimension, not only its spelling. A second check on
+  the same runs asserts that the public result only reduces the prospective one: `certified_to_bp` no larger, `complete`
+  only where the prospective result is complete, evidence and outcome no stronger in any dimension; runs with branch
+  events cut (`max_branch_events` down to 0) are included. Every disagreement fails the gate and is kept, minimized, as
+  a fixture. `exact` is switched on only when the comparison passes; it is not part of phase 1a-S.
 
 
 ## Appendix F. Cost, code plan, docs, today, service and risks
@@ -2034,12 +2069,12 @@ graphlets.rst examples run in `run_examples.py` (CI's fixture-checks job).
 | file | change |
 |---|---|
 | `composite.py` (new; 1a-U) | the parts container, `CombineRefused`, the shared preconditions (envelope, bases, alphabet, the index identity rules), the weakest-of evidence, digests, the budget plumbing, the streaming speller over pieces |
-| `union.py` (new; 1a-U) | `union_pairs`, `PairUnion`, `PairPart`, `PairAbsent`, `PairLabel`, `SpanLabel`, `LabelInterval`, `SegmentSupport`, `UnionSegment`, `PairSpan`, `Carriers`, `UnionWalk`, `InferredPath`, `Transition`, `Coverage`, `Statements`; the input classification, the tags and retrieval identity, the trie with terminal markers by one pass over each first-parent tree, the spans and their absence, coverage, the statements, the inferred paths (the later inferred phase, OQ18). The queries delegate to the parts' `ops` (no derivation reimplemented) |
+| `union.py` (new; 1a-U) | `union_pairs`, `PairUnion`, `PairPart`, `PairAbsent`, `PairLabel`, `SpanLabel`, `LabelInterval`, `SegmentSupport`, `UnionSegment`, `PairSpan`, `Carriers`, `UnionWalk`, `Coverage`, `Statements`; the input classification, the tags and retrieval identity, each pair's `seqs_order` and the header-name warnings (OQ20), the trie with terminal markers by one pass over each first-parent tree, the spans and their absence, coverage, the statements. The later inferred phase (OQ18) adds `InferredPath`, `InferredListing`, `Transition` and the inferred paths. The queries delegate to the parts' `ops` (no derivation reimplemented) |
 | `stitch.py` (new; 1a-S) | `stitch`, `StitchedGraphlet`, `Part`, `Junction`, `StitchedWalk`, `StitchedClaim`; the preconditions; the whitelist and causes; the decision check (W8); the queries, which delegate to the parts' `ops` and shift |
 | `ops.py` | split `_identity` into the index rule and the seed rule (the index rule shared, no behaviour change; 1a-U); a public per-segment label-interval accessor, built from the entry set and `derive.label_changes()` (constrain) or the `presence` runs (annotate), linear, priced like `_alive_prices` (Appendix F.1; 1a-U); expose the (k+1)-mer edge key of SPEC §6.6 (1a-S) |
-| `client.py`, `attempts.py` | `TraverseClient.traverse_pairs()` and `PairResults` (§5.2), and `TraverseResponse.seeds_sent` (`attempts.py:363`), 1a-U. `TraverseClient.response()` already keeps results without a graphlet with their errors (`client.py:895-911`), which `union_pairs()` reads from a one-seed response |
+| `client.py`, `attempts.py` | `TraverseClient.traverse_pairs()` and `PairResults` with the seed sent and each pair's `seqs_order` (§5.2), and `TraverseResponse.seeds_sent` (`attempts.py:363`), 1a-U. `TraverseClient.response()` already keeps results without a graphlet with their errors (`client.py:895-911`), which `union_pairs()` reads from a one-seed response |
 | `parser.py` | (1c) `load()` dispatches on `#mgt-bundle`; the atomic writer reused |
-| `export.py` | the union's FASTA and GFA in both path modes, with the token escaping (1a-U); stitched FASTA (1a-S) |
+| `export.py` | the union's FASTA and GFA in the source-supported mode, with the token escaping (1a-U); the inferred records and links (the later inferred phase); stitched FASTA (1a-S) |
 | `budget.py` | prices for the trie, the union queries, stitching and the stitched queries |
 | `__init__.py` | exports |
 | `scripts/traversal/graphlet_fixtures.py` | `UNION_FIXTURES` (1a-U): one tiny index split by record into two graphs with one shared record, the unsplit index, and the split index at a second k (P6, P11); `STITCH_FIXTURES` (1a-S): CLI parent, child, uninterrupted triples (Appendix E.2 T4, `loop_branch` among them), the child's request committed as JSON and pinned to `parent.next_request()` by a test. The script still does not import the library |
@@ -2061,20 +2096,20 @@ lines of tests; stitching 1,200–1,800 lines and about 1,000 lines of tests; ab
   offered. The graphlets of one seed answered on several pairs (the graphs of a release, or two databases) can be
   combined by sequence (`Combining one seed across pairs`_). The result keeps every retrieval unchanged and states, with
   every answer, how complete each pair is, which pairs carry each walk and how far, that a pair not following a walk did
-  not follow it under its own request, and that labels are each pair's own. By default every path it gives is held
-  whole by one graph; inferred paths that switch graphs where the parts allow it are given on request, with every
-  switch named. A continuation can be stitched to the walk it continues (`Stitching a continuation`_); the result
-  states, at each junction, whether its walks are those of one uninterrupted walk (`exact`) or why that is not
-  established (`qualified`). Combining two retrievals of one pair is planned; every other combination is not offered,
+  not follow it under its own request, and that labels are each pair's own. Every path it gives is held whole by one
+  graph; inferred paths that switch graphs where the parts allow it, with every switch named, come in a later release. A
+  continuation can be stitched to the walk it continues (`Stitching a continuation`_); the result states, at each
+  junction and walk, why its walks may differ from one uninterrupted walk (`qualified`, with named causes); `exact`
+  comes in a later release. Combining two retrievals of one pair is planned; every other combination is not offered,
   with the reason (`What is not combined`_)", followed by the existing sentences on `subgraph()`, `compare()` and
   `on_reconverge`.
 - graphlets.rst, new sections. "Combining one seed across pairs", after "Comparing retrievals": the five statements
   first, then the inputs, the trie with its spans and absence values, the coverage categories, labels per pair, the
-  two path modes with the r237 example and the connection rule, one example on the split-graph fixture, FASTA and
-  GFA (what each mode's file admits). "Stitching a
-  continuation", after "Continuations and the next request": offsets, orientation and the continuation's length,
-  walk keys, the whitelist and the causes, the certified depth, one example on a committed triple, marked
-  experimental. "What is not combined": the table of §4.
+  source-supported mode with the r237 example (the inferred mode and its connection rule when that phase ships), the
+  header-name warnings, one example on the split-graph fixture, FASTA and GFA (what the file admits). "Stitching a
+  continuation", after "Continuations and the next request": offsets, orientation and the continuation's length, walk
+  keys, the whitelist and the causes, the certified depth, one example on a committed triple, marked experimental. "What
+  is not combined": the table of §4.
 - `DESIGN-traverse-graphlet.md`: `composite.py`, `union.py` and `stitch.py` rows in the §5 module table, a sentence
   in §5.3 pointing to this note, and the public-API block.
 - No spec change: no wire, record or field changes.
@@ -2143,9 +2178,9 @@ Item 4 of the list in §5.2 in full, and one more item for the service session's
    the third statement, and each pair's mode in the sentence, on the spans and in `modes=` (review M1).
 4. **Equal names read as one record.** Mitigated by showing every label with its pair, refusing a bare name held by
    two pairs (`ambiguous_name`), and counting shared names in the labels statement.
-5. **A header name on a `count_only` pair names another record.** The tag does not repair it, and the library
-   states it for no graphlet today, since it reads no `GET /capabilities` certificate. Whether the union states it
-   per pair, from each pair's `seqs_order`, or the library for every graphlet, is an owner question (OQ20, §8.3).
+5. **A header name on a `count_only` pair names another record.** The tag does not repair it. Mitigated by the
+   per-pair warning the owner decided (OQ20, §2.5): header labels of `count_only` and `unknown` pairs are marked in
+   the statement, carriers and exports. A library-wide warning for every graphlet stays a later option.
 6. **Reviewed four times.** Fable reviewed the union at `42023784f` (Appendix G.2), the stubs and the input list at
    `c607ae6df` (Appendix G.3) and the whole note at `8e0083759` (Appendix G.5), and an external reviewer the
    owner-review edition (Appendix G.4). The fixes follow
@@ -2392,3 +2427,21 @@ session answered OQ21.
 | cut: mandatory sharing of parsed models | A.4 and P1 of `8486498fe` ("identical bodies are parsed and held once"); results arrive already parsed, and a model carries its envelope and caches | **agreed, cut**: each part keeps the model it was given, and no model is shared or merged between parts; sharing one parsed body is a later optimization (A.4, P1). Holding the caller's parts by reference, never copied, stays; it is not this optimization |
 | cut: inferred enumeration and same-pair combination later | §7.1 | **agreed**: the inferred mode is a later phase (OQ18, decided); the same-pair combination stays designed and deferred (OQ14) |
 | "checked and sound" (the default GFA topology, terminal markers and `extends`, interval support, pair-qualified labels, the revised W8 on the recorded example, the split recurrence, the root's arm-wide completeness, the same-pair decision) | — | no change needed |
+
+### G.7 GPT, follow-up of `cd6a4245a`, with the owner's decision on OQ20
+
+The reviewer's verdict: ready after minor fixes; no blocker or major, five minors and one nit, all reasoned from the
+note (nothing run). Each was checked against the note and, where it touches them, the code and the specs; none needed
+a run. The owner's paste of this review also carried the decision on OQ20, recorded in §8.1.
+
+| finding | checked against | settled |
+|---|---|---|
+| minor 1 the fan-out example fails when no graph holds the seed | §2.3 (`seed=` is required when no result carries a graphlet), A.2 (`no_seed`); §5.2 of `cd6a4245a` called `union_pairs(r.results, expected_pairs=...)` without `seed=` | **verified, fixed**: `PairResults` carries the seed sent, and the example passes `seed=r.seed` (§5.2, C.1); P4 builds the arm-less union of an all-absent fan-out and checks `no_seed` without `seed=` |
+| minor 2 qualification should apply only to answers that read a junction | §3.5 of `cd6a4245a` ("no stitched answer's evidence reads `exact`") against the identity element (C.3: `stitch(g)` answers as `g`) and T2 | **verified, fixed**: in phase 1a-S no answer that depends on a junction reads `exact`; `stitch(g)` without a child and root walks no child continues keep the root's own evidence; the identity condition applies where a junction is read (§3.5); T5 |
+| minor 3 T11 must compare the prospective exact result, not the public one | T11 and T4 of `cd6a4245a`: the public 1a-S result certifies a walk only to its first junction, so a correct chain of a 100 bp parent and a 100 bp child reads 100 bp and incomplete while the uninterrupted traversal reads 200 bp and complete; the comparison as written would fail it | **verified, fixed**: §3.5 defines the prospective result (`exact_gated` read as `exact`), a private test hook in 1a-S; T11 compares it with the uninterrupted traversal and checks separately that the public result only reduces it; T4 asserts both, its interior-certification fixture on the prospective result |
+| minor 4 the inferred listing needs a truncation contract and a ranking rule | §2.7 of `cd6a4245a` (a count and a cut promised, `walks()` returning a plain list, no FASTA token) | **verified, fixed for the later inferred phase**: `InferredListing` with `count`, `cut` and `resume`; `top=` and `by=` rank only the paths enumerated, within the path-id prefix when cut, never a global top; FASTA `of=<count>`, `+` when cut (§2.7, §2.8, A.5, C.1); P13 |
+| minor 5 path claims contradict the walk/route distinction | §2.1 of `cd6a4245a` (the old fifth statement, "no graph is shown to hold them whole"), §2.7 ("it is in the union"), P13 (four results as `route`); `merge.mgt` has one displayed walk among its four routes (`gpt-rerun/m4_m5.py`) | **verified, fixed**: §2.1 quotes the fifth statement of §2.7; a shared sequence's bases are in the union, as walks where a pair displays them and as stub walks otherwise, and the supported mode does not list every route (two parts displaying the same allele list the other only as a stub walk); P13 expects one `walk` and three `route`s |
+| nit availability descriptions | §2.8 ("everything is phase 1a-U except `[1c]`"), F.2 (`union.py`, `export.py`), F.3 (the graphlets.rst intro and sections) | **verified, fixed**: `[inferred]` marks in the API; the inferred classes, records and links listed under the later phase in F.2; the docs plan says inferred paths and stitching's `exact` come in a later release |
+| OQ20 decided | the owner's paste: "add per-pair warnings for unchecked header-to-record mappings, using `unknown` when metadata is unavailable"; envelope spec §9.1 (`seqs_order`: `verified`, `count_only`, null; in `GET /capabilities`, not in `/traverse` answers) | **recorded as decided, 2026-11-15**, from the paste, for the owner to correct: option (b) is a requirement of 1a-U. `union_pairs(..., seqs_order=)` (the helper fills it; a pair not given reads `unknown`), refusal `bad_seqs_order`, `PairPart.seqs_order`, warnings on header labels in the labels statement, `carriers()`, FASTA `mapping=` and a GFA comment (§2.5, §2.8, §7.1, §8.1, A.2, A.5, C.1); P7. `seqs_order=` is the one input that comes back from the cut `certificates=` |
+| views on OQ12, OQ15–OQ17 | §8.2, §8.3 | unchanged (defer; accept, accept, accept), as recorded |
+| "checked and sound" (per-character absence, terminal decisions at the cutoff, walk-scope causes in completeness, linear intervals, zero-transition routes, every merge witness, ASCII escaping, full pair selectors, the keyword contract, no model sharing) | — | no change needed |
