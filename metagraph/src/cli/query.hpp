@@ -127,10 +127,11 @@ class SeqSearchResult {
      */
     SeqSearchResult(QuerySequence&& sequence,
                     result_type&& result,
-                    std::optional<Alignment>&& alignment = {})
+                    std::optional<Alignment>&& alignment = {},
+                    std::optional<graph::SearchCut> cut = {})
           : sequence_(std::move(sequence)),
             alignment_(std::move(alignment)),
-            result_(std::move(result)) {}
+            cut_(cut), result_(std::move(result)) {}
 
     /** Const reference getters */
     const QuerySequence& get_sequence() const { return sequence_; }
@@ -167,6 +168,7 @@ class SeqSearchResult {
   private:
     QuerySequence sequence_;             // query sequence this result represents
     std::optional<Alignment> alignment_; // optional wrapper for alignment struct
+    std::optional<graph::SearchCut> cut_;
     result_type result_;                 // result vector of labels and additional info
 };
 
