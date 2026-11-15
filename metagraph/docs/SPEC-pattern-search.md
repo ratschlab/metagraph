@@ -1229,7 +1229,7 @@ It costs no step.
 
 | note | meaning |
 |---|---|
-| `low_complexity_pattern` | an exact pattern that sdust flags over its whole text (T = 20, W = 64, the seeder's parameters): a hint that its counts may be large; for L > k the flag can come from bases outside the anchor windows. Stated in an answer without a stop, beside a threshold stop (`max_contexts`, `max_anchors`, `max_paths`, and on supported paths a predicate's `max_paths` and `max_predicate_contexts`, §20.5) or beside a stop of a later phase (labels, selection, output); never beside a budget stop of the search (`max_steps`, `time`, the supported-path search's own budgets, §20.5; an earlier pattern's request-wide stop included), and left out of a pattern of more than 191 bases whose diagnostic the work time cut (`determinism: "time_limited"`, its `stop` unchanged; §7.8). Its absence is no claim that a pattern is not low-complexity |
+| `low_complexity_pattern` | an exact pattern that sdust flags over its whole text (T = 20, W = 64, the seeder's parameters): a hint that its counts may be large; for L > k the flag can come from bases outside the anchor windows. Stated in an answer without a stop, beside a threshold stop (`max_contexts`, `max_anchors`, `max_paths`, and on supported paths a predicate's `max_paths` and `max_predicate_contexts`, §20.5) or beside a stop of a later phase (labels, selection, output); never beside a budget stop of the search (`max_steps`, `time`, the extension's `max_memory`, a kept walk or a level of its depth-first stack, §12.1, §30, the supported-path search's own budgets, §20.5; an earlier pattern's request-wide stop included), and left out of a pattern of more than 191 bases whose diagnostic the work time cut (`determinism: "time_limited"`, its `stop` unchanged; §7.8). Its absence is no claim that a pattern is not low-complexity |
 | `strand_unknown_canonical` | a CANONICAL or PRIMARY graph: orientations, not strands |
 | `paths_later_increment` | L > k without `long_search: "paths"`: anchors counted, paths neither extended nor extracted (ask with `long_search: "paths"`, §12.1) |
 | `annotation_unbudgeted` | increment 3: the labels were read without the budget-aware decode (`allow_unbudgeted_annotation`): no memory bound on the reads themselves (what they returned is in the account), the deadline checked between chunks of keys. Increment 5b: also an entry whose selection read rows so, without a projection; increment 5s: an entry whose supported-path search read rows so (§20.6) |
@@ -5115,8 +5115,9 @@ only while the extension runs, and the stack is empty when the release begins).
 anchors `exact`; `determinism` stays `full` (the stop depends on the request and the index alone). As for a kept
 walk's stop: `partial` returns the walks completed before it (`cut: max_memory`), `all_or_count` withholds
 `output_budget` under `"paths"`, and `annotation_budget` under `"supported_paths"` (the search's own memory, as a
-frame or a row it could not hold, §20.5); in `count` the counts say it. A memory stop ends only its own pattern
-(§7.6): the next pattern starts with what the account has left.
+frame or a row it could not hold, §20.5); in `count` the counts say it. As after every budget stop of the search,
+the entry does not state `low_complexity_pattern` (§8.10). A memory stop ends only its own pattern (§7.6): the next
+pattern starts with what the account has left.
 
 **Determinism.** A request runs on one thread (a multi-graph server runs each pair's request on one thread of its
 pool, with its own account, §24): its patterns in request order, each pattern's anchors in answer order, each
