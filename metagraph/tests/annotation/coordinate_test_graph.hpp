@@ -15,6 +15,9 @@ struct CoordinateRecord { std::string sequence, column, header; };
 // Small real coordinate-matrix fixture, with adjacent records in each column.
 // Without |record_mapping| (no CoordToHeader, as an index without a .seqs file), the
 // labels are the columns and the coordinates are those of the column's records joined.
+// Without |row_diff| and |brwt|, the matrix is a |ColumnMatrix|: TupleCSCMatrix<ColumnMajor>
+// or a class derived from it.
+template <class ColumnMatrix = annot::matrix::TupleCSCMatrix<annot::matrix::ColumnMajor>>
 inline std::unique_ptr<graph::AnnotatedDBG>
 coordinate_test_graph(size_t k, const std::vector<CoordinateRecord> &records,
                       bool row_diff = false, bool brwt = false, bool record_mapping = true) {
@@ -127,8 +130,9 @@ coordinate_test_graph(size_t k, const std::vector<CoordinateRecord> &records,
             BRWTBottomUpBuilder::build(std::move(bits), reversed),
             std::move(delimiters), std::move(values)));
     } else {
-        annotation = wrap(std::make_unique<TupleCSCMatrix<ColumnMajor>>(
-            ColumnMajor(std::move(bits)), std::move(delimiters), std::move(values)));
+        std::unique_ptr<TupleCSCMatrix<ColumnMajor>> matrix = std::make_unique<ColumnMatrix>(
+            ColumnMajor(std::move(bits)), std::move(delimiters), std::move(values));
+        annotation = wrap(std::move(matrix));
     }
     if (expected) {
         std::vector<BinaryMatrix::Row> ids;
