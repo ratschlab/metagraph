@@ -303,7 +303,9 @@ TYPED_TEST(DeBruijnGraphTest, OutgoingAdjacent) {
 
         // AA, AAAAA
         auto it = graph->kmer_to_node(std::string(k, 'A'));
-        graph->map_to_nodes_sequentially(std::string(k, 'A'), [&](auto i) { EXPECT_EQ(it, i); });
+        for (auto i : map_to_nodes_sequentially(*graph, std::string(k, 'A'))) {
+            EXPECT_EQ(it, i);
+        }
         ASSERT_NE(DeBruijnGraph::npos, it);
         graph->adjacent_outgoing_nodes(it, [&](auto i) { adjacent_nodes.push_back(i); });
         ASSERT_EQ(2u, adjacent_nodes.size());
@@ -329,7 +331,9 @@ TYPED_TEST(DeBruijnGraphTest, OutgoingAdjacent) {
 
         // CC, CCCCC
         it = graph->kmer_to_node(std::string(k, 'C'));
-        graph->map_to_nodes_sequentially(std::string(k, 'C'), [&](auto i) { EXPECT_EQ(it, i); });
+        for (auto i : map_to_nodes_sequentially(*graph, std::string(k, 'C'))) {
+            EXPECT_EQ(it, i);
+        }
         ASSERT_NE(DeBruijnGraph::npos, it);
         graph->adjacent_outgoing_nodes(it, [&](auto i) { adjacent_nodes.push_back(i); });
         ASSERT_EQ(2u, adjacent_nodes.size());
@@ -354,7 +358,9 @@ TYPED_TEST(DeBruijnGraphTest, OutgoingAdjacent) {
 
         // GGGGG
         it = graph->kmer_to_node(std::string(k, 'G'));
-        graph->map_to_nodes_sequentially(std::string(k, 'G'), [&](auto i) { EXPECT_EQ(it, i); });
+        for (auto i : map_to_nodes_sequentially(*graph, std::string(k, 'G'))) {
+            EXPECT_EQ(it, i);
+        }
         ASSERT_NE(DeBruijnGraph::npos, it);
         graph->adjacent_outgoing_nodes(it, [&](auto i) { adjacent_nodes.push_back(i); });
         ASSERT_EQ(1u, adjacent_nodes.size());

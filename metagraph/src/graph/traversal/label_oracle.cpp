@@ -156,7 +156,9 @@ std::vector<node_index> LabelOracle::keys_of_sequence(std::string_view sequence)
     keys.reserve(sequence.size() - get_k() + 1);
     // map_to_nodes returns annotation keys in every regime: the node itself (BASIC),
     // the primary node (CanonicalDBG), the canonical node (native CANONICAL graphs)
-    graph_->map_to_nodes(sequence, [&](node_index key) { keys.push_back(key); });
+    for (node_index key : graph_->node_range(sequence)) {
+        keys.push_back(key);
+    }
     counters_.keys_mapped += keys.size();
     return keys;
 }
@@ -176,7 +178,9 @@ node_index LabelOracle::key_of(node_index node, std::string_view kmer) const {
             assert(kmer.size() == get_k());
             {
                 node_index key = npos;
-                graph_->map_to_nodes(kmer, [&](node_index k) { key = k; });
+                for (node_index k : graph_->node_range(kmer)) {
+                    key = k;
+                }
                 return key;
             }
     }
@@ -206,7 +210,9 @@ LabelOracle::keys_of_path(const std::vector<node_index> &nodes, std::string_view
             } else {
                 // one incremental mapping over the whole window instead of O(k) per node
                 size_t i = 0;
-                graph_->map_to_nodes(window, [&](node_index key) { keys[i++] = key; });
+                for (node_index key : graph_->node_range(window)) {
+                    keys[i++] = key;
+                }
                 assert(i == nodes.size());
             }
             break;

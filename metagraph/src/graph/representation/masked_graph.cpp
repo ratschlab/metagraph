@@ -225,34 +225,12 @@ void MaskedDeBruijnGraph
     }
 }
 
-// Traverse graph mapping sequence to the graph nodes
-// and run callback for each node until the termination condition is satisfied
-void MaskedDeBruijnGraph::map_to_nodes(std::string_view sequence,
-                                       const std::function<void(node_index)> &callback,
-                                       const std::function<bool()> &terminate) const {
-    graph_->map_to_nodes(
-        sequence,
-        [&](const node_index &index) {
-            callback(index && in_graph(index) ? index : npos);
-        },
-        terminate
-    );
-}
-
-// Traverse graph mapping sequence to the graph nodes
-// and run callback for each node until the termination condition is satisfied.
-// Guarantees that nodes are called in the same order as the input sequence
-void MaskedDeBruijnGraph
-::map_to_nodes_sequentially(std::string_view sequence,
-                            const std::function<void(node_index)> &callback,
-                            const std::function<bool()> &terminate) const {
-    graph_->map_to_nodes_sequentially(
-        sequence,
-        [&](const node_index &index) {
-            callback(index && in_graph(index) ? index : npos);
-        },
-        terminate
-    );
+std::unique_ptr<NodeStream>
+MaskedDeBruijnGraph::node_stream(std::string_view sequence, bool sequential) const {
+    return map_node_stream(graph_->node_stream(sequence, sequential),
+                           [this](node_index node) {
+        return node && in_graph(node) ? node : npos;
+    });
 }
 
 // Get string corresponding to |node_index|.

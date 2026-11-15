@@ -125,9 +125,9 @@ int augment_graph(Config *config) {
         for (const auto &file : files) {
             parse_sequences_and_log(file, *config, graph->get_k(),
                 [&graph,&node_weights](std::string_view seq, uint32_t count) {
-                    graph->map_to_nodes_sequentially(seq,
-                        [&](auto node) { node_weights->add_weight(node, count); }
-                    );
+                    for (auto node : graph->node_range(seq, true)) {
+                        node_weights->add_weight(node, count);
+                    }
                 }
             );
         }

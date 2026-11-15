@@ -43,19 +43,8 @@ class DBGHashOrderedImpl : public DBGHashOrdered::DBGHashOrderedInterface {
                       const std::function<bool()> &skip,
                       const std::function<void(node_index)> &on_insertion);
 
-    // Traverse graph mapping sequence to the graph nodes
-    // and run callback for each node until the termination condition is satisfied
-    void map_to_nodes(std::string_view sequence,
-                      const std::function<void(node_index)> &callback,
-                      const std::function<bool()> &terminate) const;
-
-    // Traverse graph mapping sequence to the graph nodes
-    // and run callback for each node until the termination condition is satisfied.
-    // Guarantees that nodes are called in the same order as the input sequence.
-    // In canonical mode, non-canonical k-mers are NOT mapped to canonical ones
-    void map_to_nodes_sequentially(std::string_view sequence,
-                                   const std::function<void(node_index)> &callback,
-                                   const std::function<bool()> &terminate) const;
+    std::unique_ptr<NodeStream> node_stream(std::string_view sequence,
+                                            bool sequential) const;
 
     void call_outgoing_kmers(node_index node,
                              const OutgoingEdgeCallback &callback) const;
@@ -176,69 +165,32 @@ void DBGHashOrderedImpl<KMER>::add_sequence(std::string_view sequence,
     }
 }
 
-// Traverse graph mapping sequence to the graph nodes
-// and run callback for each node until the termination condition is satisfied.
-// Guarantees that nodes are called in the same order as the input sequence.
-// In canonical mode, non-canonical k-mers are NOT mapped to canonical ones
+// Map the k-mers of |sequence| to nodes. If |sequential|, non-canonical
+// k-mers are NOT mapped to canonical ones in canonical mode
 template <typename KMER>
-void DBGHashOrderedImpl<KMER>::map_to_nodes_sequentially(
-                              std::string_view sequence,
-                              const std::function<void(node_index)> &callback,
-                              const std::function<bool()> &terminate) const {
+std::unique_ptr<NodeStream>
+DBGHashOrderedImpl<KMER>::node_stream(std::string_view sequence, bool sequential) const {
+    auto kmers = sequence_to_kmers(sequence, !sequential && mode_ == CANONICAL);
+    size_t size = kmers.size();
 #if _DBGHash_LINEAR_PATH_OPTIMIZATIONS
-    uint64_t n_nodes = num_nodes();
-    node_index prev_index = n_nodes;
-#endif
-
-    for (const auto &[kmer, valid] : sequence_to_kmers(sequence)) {
-        if (terminate())
-            return;
-
-#if _DBGHash_LINEAR_PATH_OPTIMIZATIONS
+    return make_node_stream(size, [this, kmers = std::move(kmers), n_nodes = num_nodes(),
+                                   prev_index = num_nodes()](size_t i) mutable -> node_index {
+        const auto &[kmer, valid] = kmers[i];
         if (!valid) {
             prev_index = n_nodes;
-            callback(npos);
-        } else if (prev_index < n_nodes && get_kmer(prev_index + 1) == kmer) {
-            // optimization for linear paths
-            callback(prev_index = prev_index + 1);
-        } else {
-            callback(prev_index = get_index(kmer));
+            return npos;
         }
+        // optimization for linear paths
+        if (prev_index < n_nodes && get_kmer(prev_index + 1) == kmer)
+            return ++prev_index;
+
+        return prev_index = get_index(kmer);
+    });
 #else
-        callback(valid ? get_index(kmer) : npos);
+    return make_node_stream(size, [this, kmers = std::move(kmers)](size_t i) {
+        return kmers[i].second ? get_index(kmers[i].first) : npos;
+    });
 #endif
-    }
-}
-
-// Traverse graph mapping sequence to the graph nodes
-// and run callback for each node until the termination condition is satisfied
-template <typename KMER>
-void DBGHashOrderedImpl<KMER>::map_to_nodes(std::string_view sequence,
-                                            const std::function<void(node_index)> &callback,
-                                            const std::function<bool()> &terminate) const {
-#if _DBGHash_LINEAR_PATH_OPTIMIZATIONS
-    uint64_t n_nodes = num_nodes();
-    node_index prev_index = n_nodes;
-#endif
-
-    for (const auto &[kmer, valid] : sequence_to_kmers(sequence, mode_ == CANONICAL)) {
-        if (terminate())
-            return;
-
-#if _DBGHash_LINEAR_PATH_OPTIMIZATIONS
-        if (!valid) {
-            prev_index = n_nodes;
-            callback(npos);
-        } else if (prev_index < n_nodes && get_kmer(prev_index + 1) == kmer) {
-            // optimization for linear paths
-            callback(prev_index = prev_index + 1);
-        } else {
-            callback(prev_index = get_index(kmer));
-        }
-#else
-        callback(valid ? get_index(kmer) : npos);
-#endif
-    }
 }
 
 template <typename KMER>

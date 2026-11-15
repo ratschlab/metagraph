@@ -1,7 +1,6 @@
 #include "sequence_graph.hpp"
 
 #include <algorithm>
-#include <array>
 #include <cassert>
 #include <progress_bar.hpp>
 #include <sdsl/int_vector.hpp>
@@ -58,9 +57,8 @@ void SequenceGraph::serialize_extensions(const std::string &filename) const {
 node_index DeBruijnGraph::kmer_to_node(std::string_view kmer) const {
     assert(kmer.size() == get_k());
 
-    node_index node = npos;
-    map_to_nodes_sequentially(kmer, [&node](node_index i) { node = i; });
-    return node;
+    // a k-mer maps to exactly one node
+    return *node_range(kmer, true).begin();
 }
 
 // Check whether graph contains fraction of nodes from the sequence
@@ -72,20 +70,20 @@ bool DeBruijnGraph::find(std::string_view sequence,
     const size_t num_kmers = sequence.length() - get_k() + 1;
     const size_t max_kmers_missing = num_kmers * (1 - discovery_fraction);
     const size_t min_kmers_discovered = num_kmers - max_kmers_missing;
+    if (!min_kmers_discovered)
+        return true;
+
     size_t num_kmers_discovered = 0;
     size_t num_kmers_missing = 0;
 
-    map_to_nodes(sequence,
-        [&](node_index node) {
-            if (node) {
-                num_kmers_discovered++;
-            } else {
-                num_kmers_missing++;
-            }
-        },
-        [&]() { return num_kmers_missing > max_kmers_missing
-                        || num_kmers_discovered >= min_kmers_discovered; }
-    );
+    for (node_index node : node_range(sequence)) {
+        if (node) {
+            if (++num_kmers_discovered >= min_kmers_discovered)
+                return true;
+        } else if (++num_kmers_missing > max_kmers_missing) {
+            return false;
+        }
+    }
 
     return num_kmers_missing <= max_kmers_missing;
 }
@@ -540,59 +538,23 @@ size_t incoming_edge_rank(const SequenceGraph &graph,
     return edge_rank;
 }
 
-std::unique_ptr<NodeStream>
-SequenceGraph::node_stream(std::string_view sequence, bool sequential) const {
-    return std::make_unique<BufferedNodeStream>(
-        sequential ? graph::map_to_nodes_sequentially(*this, sequence)
-                   : graph::map_to_nodes(*this, sequence)
-    );
-}
-
-void DeBruijnGraph::call_streamed_nodes(std::string_view sequence, bool sequential,
-                                        const std::function<void(node_index)> &callback,
-                                        const std::function<bool()> &terminate,
-                                        size_t max_chunk_size) const {
-    assert(max_chunk_size && max_chunk_size <= NodeRange::kChunkSize);
-    if (terminate())
-        return;
-
-    // Pull chunks of doubling size: a virtual call per node is slow for fast
-    // graphs, while terminate() may stop early, and then at most as many nodes
-    // are mapped in vain as were already passed to the callback
-    auto stream = node_stream(sequence, sequential);
-    std::array<node_index, NodeRange::kChunkSize> buffer;
-    for (size_t size = 1; ; size = std::min(2 * size, max_chunk_size)) {
-        size_t n = stream->next({ buffer.data(), size });
-        for (size_t i = 0; i < n; ++i) {
-            callback(buffer[i]);
-            if (terminate())
-                return;
-        }
-        if (n < size)
-            return;
+static std::vector<node_index> collect_nodes(NodeRange&& nodes, size_t max_num_nodes) {
+    std::vector<node_index> result;
+    result.reserve(max_num_nodes);
+    for (node_index node : nodes) {
+        result.push_back(node);
     }
+    return result;
 }
 
 std::vector<SequenceGraph::node_index>
 map_to_nodes_sequentially(const SequenceGraph &graph, std::string_view sequence) {
-    std::vector<SequenceGraph::node_index> nodes;
-    nodes.reserve(sequence.size());
-
-    graph.map_to_nodes_sequentially(sequence,
-        [&nodes](auto node) { nodes.push_back(node); }
-    );
-
-    return nodes;
+    return collect_nodes(graph.node_range(sequence, true), sequence.size());
 }
 
 std::vector<SequenceGraph::node_index>
 map_to_nodes(const SequenceGraph &graph, std::string_view sequence) {
-    std::vector<node_index> nodes;
-    nodes.reserve(sequence.size());
-
-    graph.map_to_nodes(sequence, [&](node_index i) { nodes.push_back(i); });
-
-    return nodes;
+    return collect_nodes(graph.node_range(sequence), sequence.size());
 }
 
 void reverse_complement_seq_path(const SequenceGraph &graph,

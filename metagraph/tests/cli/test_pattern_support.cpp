@@ -462,7 +462,9 @@ struct Oracle {
                 ++e.anchors;
                 e.anchor_rows.insert(row(x));
                 node_index anchor = 0;
-                graph.map_to_nodes_sequentially(x, [&](node_index v) { anchor = v; });
+                for (node_index v : graph.node_range(x, true)) {
+                    anchor = v;
+                }
                 if (!supported(x, records)) {
                     ++e.branches_pruned;
                     e.pruned_early = true;
@@ -1264,7 +1266,9 @@ TEST(PatternSupport, TheTrackerHoldsNoMoreThanTheAccount) {
     const DeBruijnGraph &graph = idx.anno->get_graph();
     auto nodes_of = [&](const std::string &s) {
         std::vector<node_index> nodes;
-        graph.map_to_nodes_sequentially(s, [&](node_index v) { nodes.push_back(v); });
+        for (node_index v : graph.node_range(s, true)) {
+            nodes.push_back(v);
+        }
         return nodes;
     };
     const std::vector<node_index> n1 = nodes_of(s1), n2 = nodes_of(s2), nd = nodes_of(dead);

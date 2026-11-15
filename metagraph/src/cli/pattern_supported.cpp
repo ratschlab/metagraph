@@ -401,9 +401,9 @@ const char* PathSelection::read_mirror(const std::string &sequence,
     ++answer_.lookups;
     std::vector<node_index> nodes;
     nodes.reserve(n);
-    env.oracle.graph().map_to_nodes_sequentially(sequence, [&](node_index v) {
+    for (node_index v : env.oracle.graph().node_range(sequence, true)) {
         nodes.push_back(v);
-    });
+    }
     out->clear();
     if (nodes.size() != n
             || std::find(nodes.begin(), nodes.end(), DeBruijnGraph::npos) != nodes.end()) {

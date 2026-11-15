@@ -60,97 +60,98 @@ NodeFirstCache& CanonicalDBG::get_cache() const {
     return *fallback_cache_;
 }
 
-void CanonicalDBG
-::map_to_nodes_sequentially(std::string_view sequence,
-                            const std::function<void(node_index)> &callback,
-                            const std::function<bool()> &terminate) const {
-    if (sequence.size() < get_k())
-        return;
+std::unique_ptr<NodeStream>
+CanonicalDBG::node_stream(std::string_view sequence, bool sequential) const {
+    class Stream final : public NodeStream {
+      public:
+        Stream(const CanonicalDBG &graph, std::string_view sequence)
+              : graph_(graph), sequence_(sequence),
+                prefix_(graph.graph_->node_stream(sequence, true)) {}
 
-    std::vector<node_index> path;
-    path.reserve(sequence.size() - get_k() + 1);
-
-    // map until the first mismatch
-    bool stop = false;
-    graph_->map_to_nodes_sequentially(sequence,
-        [&](node_index node) {
-            if (node) {
-                path.push_back(node);
-            } else {
-                stop = true;
+        size_t next(std::span<node_index> out) override {
+            size_t n = 0;
+            // map until the first mismatch, one node at a time: lookups in
+            // the base graph may be slow and the suffix maps them differently
+            while (prefix_ && n < out.size()) {
+                node_index node;
+                if (!prefix_->next({ &node, 1 })) {
+                    prefix_.reset();
+                } else if (node) {
+                    out[n++] = node;
+                    num_mapped_++;
+                } else {
+                    prefix_.reset();
+                    suffix_ = map_suffix(sequence_.substr(num_mapped_));
+                }
             }
-        },
-        [&]() { return stop; }
-    );
-
-    for (node_index node : path) {
-        if (terminate())
-            return;
-
-        callback(node);
-    }
-
-    // trim the mapped prefix
-    sequence = sequence.substr(path.size());
-    path.resize(0);
-    if (sequence.size() < get_k())
-        return;
-
-    std::string rev_seq(sequence);
-    ::reverse_complement(rev_seq.begin(), rev_seq.end());
-    // map the reverse-complement
-    std::vector<node_index> rev_path = graph::map_to_nodes_sequentially(*graph_, rev_seq);
-
-    // map the forward
-    const auto *dbg_succ = get_dbg_succ(*graph_);
-    if (dbg_succ && k_odd_) {
-        // if it's a boss table with odd k (without palindromic k-mers),
-        // we can skip k-mers that have been found in the rev-compl sequence
-        const auto &boss = dbg_succ->get_boss();
-        // the initial forward mapping stopped on this k-mer,
-        // hence it's missing and we skip it
-        path.push_back(npos);
-        auto it = rev_path.rbegin() + 1;
-        auto is_missing = get_missing_kmer_skipper(dbg_succ->get_bloom_filter(),
-                                                   sequence.substr(1));
-        boss.map_to_edges(sequence.substr(1),
-            [&](boss::BOSS::edge_index edge) {
-                path.push_back(dbg_succ->validate_edge(edge));
-                ++it;
-            },
-            []() { return false; },
-            [&]() { return is_missing() || *it; }
-        );
-
-        assert(it == rev_path.rend());
-
-    } else {
-        path = graph::map_to_nodes_sequentially(*graph_, sequence);
-    }
-
-    assert(path.size() == rev_path.size());
-
-    auto it = rev_path.rbegin();
-    for (auto jt = path.begin(); jt != path.end(); ++jt, ++it) {
-        if (terminate())
-            return;
-
-        if (*jt != npos) {
-            callback(*jt);
-        } else if (*it != npos) {
-            callback(*it + offset_);
-        } else {
-            callback(npos);
+            size_t m = std::min(out.size() - n, suffix_.size() - pos_);
+            std::copy_n(suffix_.begin() + pos_, m, out.begin() + n);
+            pos_ += m;
+            return n + m;
         }
-    }
-}
 
-void CanonicalDBG::map_to_nodes(std::string_view sequence,
-                                const std::function<void(node_index)> &callback,
-                                const std::function<bool()> &terminate) const {
-    map_to_nodes_sequentially(sequence, [&](node_index i) {
-        callback(get_base_node(i));
-    }, terminate);
+      private:
+        const CanonicalDBG &graph_;
+        std::string_view sequence_;
+        std::unique_ptr<NodeStream> prefix_;
+        size_t num_mapped_ = 0;
+        std::vector<node_index> suffix_;
+        size_t pos_ = 0;
+
+        // Map a sequence whose first k-mer is missing in the base graph
+        std::vector<node_index> map_suffix(std::string_view sequence) const {
+            const DeBruijnGraph &base = *graph_.graph_;
+
+            std::string rev_seq(sequence);
+            ::reverse_complement(rev_seq.begin(), rev_seq.end());
+            // map the reverse-complement
+            std::vector<node_index> rev_path = graph::map_to_nodes_sequentially(base, rev_seq);
+
+            // map the forward
+            std::vector<node_index> path;
+            const auto *dbg_succ = get_dbg_succ(base);
+            if (dbg_succ && graph_.k_odd_) {
+                // if it's a boss table with odd k (without palindromic k-mers),
+                // we can skip k-mers that have been found in the rev-compl sequence
+                const auto &boss = dbg_succ->get_boss();
+                path.reserve(rev_path.size());
+                // the first k-mer is missing and we skip it
+                path.push_back(npos);
+                auto it = rev_path.rbegin() + 1;
+                auto is_missing = get_missing_kmer_skipper(dbg_succ->get_bloom_filter(),
+                                                           sequence.substr(1));
+                boss.map_to_edges(sequence.substr(1),
+                    [&](boss::BOSS::edge_index edge) {
+                        path.push_back(dbg_succ->validate_edge(edge));
+                        ++it;
+                    },
+                    []() { return false; },
+                    [&]() { return is_missing() || *it; }
+                );
+
+                assert(it == rev_path.rend());
+
+            } else {
+                path = graph::map_to_nodes_sequentially(base, sequence);
+            }
+
+            assert(path.size() == rev_path.size());
+
+            auto it = rev_path.rbegin();
+            for (auto jt = path.begin(); jt != path.end(); ++jt, ++it) {
+                if (*jt == npos && *it != npos)
+                    *jt = *it + graph_.offset_;
+            }
+            return path;
+        }
+    };
+
+    auto stream = std::make_unique<Stream>(*this, sequence);
+    if (sequential)
+        return stream;
+
+    return map_node_stream(std::move(stream),
+                           [this](node_index node) { return get_base_node(node); });
 }
 
 void CanonicalDBG::call_outgoing_kmers(node_index node,

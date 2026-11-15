@@ -45,8 +45,54 @@ class BufferedNodeStream final : public NodeStream {
     size_t pos_ = 0;
 };
 
-// Single-pass input range over a NodeStream. Reads the stream in small chunks
-// to amortize the virtual call. Example:
+// A stream of |size| nodes, where |get_node(i)| computes the i-th one.
+// |get_node| is called once for each i, in increasing order.
+template <class GetNode>
+std::unique_ptr<NodeStream> make_node_stream(size_t size, GetNode get_node) {
+    class Stream final : public NodeStream {
+      public:
+        Stream(size_t size, GetNode&& get_node) : size_(size), get_node_(std::move(get_node)) {}
+
+        size_t next(std::span<node_index> out) override {
+            size_t n = std::min(out.size(), size_ - i_);
+            for (size_t j = 0; j < n; ++j) {
+                out[j] = get_node_(i_++);
+            }
+            return n;
+        }
+
+      private:
+        size_t size_;
+        GetNode get_node_;
+        size_t i_ = 0;
+    };
+    return std::make_unique<Stream>(size, std::move(get_node));
+}
+
+// A stream that applies |map| to every node of |stream|.
+template <class Map>
+std::unique_ptr<NodeStream> map_node_stream(std::unique_ptr<NodeStream> stream, Map map) {
+    class Stream final : public NodeStream {
+      public:
+        Stream(std::unique_ptr<NodeStream> stream, Map&& map)
+              : stream_(std::move(stream)), map_(std::move(map)) {}
+
+        size_t next(std::span<node_index> out) override {
+            size_t n = stream_->next(out);
+            std::transform(out.begin(), out.begin() + n, out.begin(), map_);
+            return n;
+        }
+
+      private:
+        std::unique_ptr<NodeStream> stream_;
+        Map map_;
+    };
+    return std::make_unique<Stream>(std::move(stream), std::move(map));
+}
+
+// Single-pass input range over a NodeStream. Reads the stream in chunks of
+// doubling size (1 to kChunkSize) to amortize the virtual call, so a loop that
+// stops early maps at most as many nodes in vain as it has consumed. Example:
 //     for (node_index node : graph.node_range(sequence)) { ... }
 class NodeRange {
   public:
@@ -90,12 +136,14 @@ class NodeRange {
     std::array<node_index, kChunkSize> buffer_;
     size_t pos_ = 0;
     size_t size_ = 0;
+    size_t chunk_size_ = 1;
 
     bool refill() {
         pos_ = 0;
-        size_ = stream_ ? stream_->next(buffer_) : 0;
-        if (size_ < kChunkSize)
+        size_ = stream_ ? stream_->next({ buffer_.data(), chunk_size_ }) : 0;
+        if (size_ < chunk_size_)
             stream_.reset();
+        chunk_size_ = std::min(2 * chunk_size_, kChunkSize);
         return size_;
     }
 };

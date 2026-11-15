@@ -154,7 +154,9 @@ TYPED_TEST(DeBruijnGraphTest, Weighted) {
         auto &weights = *graph->template get_extension<NodeWeights>();
 
         for (const auto &sequence : sequences) {
-            graph->map_to_nodes(sequence, [&](auto node) { weights.add_weight(node, 1); });
+            for (auto node : map_to_nodes(*graph, sequence)) {
+                weights.add_weight(node, 1);
+            }
         }
 
         auto node_idx = graph->kmer_to_node(std::string(k, 'A'));
@@ -430,9 +432,9 @@ TYPED_TEST(DeBruijnGraphTest, get_node_sequence) {
     EXPECT_TRUE(check_graph_nodes(*graph));
 
     std::string mapped_query = "";
-    graph->map_to_nodes(query, [&](DeBruijnGraph::node_index node) {
+    for (DeBruijnGraph::node_index node : map_to_nodes(*graph, query)) {
         mapped_query += graph->get_node_sequence(node);
-    });
+    }
 
     EXPECT_EQ(query, mapped_query);
 }

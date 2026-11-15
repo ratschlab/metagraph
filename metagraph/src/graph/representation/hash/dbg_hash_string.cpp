@@ -39,19 +39,12 @@ void DBGHashString::add_sequence(std::string_view sequence,
     }
 }
 
-void DBGHashString::map_to_nodes(std::string_view sequence,
-                                 const std::function<void(node_index)> &callback,
-                                 const std::function<bool()> &terminate) const {
-    map_to_nodes_sequentially(sequence, callback, terminate);
-}
-
-void DBGHashString
-::map_to_nodes_sequentially(std::string_view sequence,
-                            const std::function<void(node_index)> &callback,
-                            const std::function<bool()> &terminate) const {
-    for (size_t i = 0; i + k_ <= sequence.size() && !terminate(); ++i) {
-        callback(kmer_to_node(sequence.substr(i, k_)));
-    }
+std::unique_ptr<NodeStream>
+DBGHashString::node_stream(std::string_view sequence, bool) const {
+    return make_node_stream(sequence.size() >= k_ ? sequence.size() - k_ + 1 : 0,
+                            [this, sequence](size_t i) {
+        return kmer_to_node(sequence.substr(i, k_));
+    });
 }
 
 DBGHashString::node_index
