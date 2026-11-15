@@ -546,7 +546,7 @@ class RepeatedValues {
         });
     }
 
-    // The (position, value) pairs of counts[r] in ascending order, to take once, with
+    // The (position, value) pairs of counts[r], to take once, with
     // room for |num_more| pairs
     std::vector<std::pair<uint32_t, uint64_t>> take(size_t r, size_t num_more = 0) {
         const auto hits = std::move(hits_[r]);
@@ -561,8 +561,6 @@ class RepeatedValues {
                 values.emplace_back(pos, value);
             }
         }
-        if (!std::is_sorted(values.begin(), values.end()))
-            std::sort(values.begin(), values.end());
         return values;
     }
 
@@ -1089,7 +1087,9 @@ AnnotatedDBG::get_header_results(std::string_view sequence, size_t num_top_label
             Values values(num_kmers);
             // merge the runs of the fold and the values it does not hold, both in
             // ascending order of position
-            const auto unheld = unheld_values.take(r);
+            auto unheld = unheld_values.take(r);
+            if (!std::is_sorted(unheld.begin(), unheld.end()))
+                std::sort(unheld.begin(), unheld.end());
             auto next = unheld.begin();
             const auto end = unheld.end();
             auto add_unheld_before = [&](size_t pos) {
