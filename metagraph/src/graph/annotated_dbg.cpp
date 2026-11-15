@@ -304,30 +304,12 @@ AnnotatedSequenceGraph::get_labels(node_index index) const {
     return annotator_->get_labels(graph_to_anno_index(index));
 }
 
-// Container `code_counts` must have pairs (index, count)
-template <class Container>
-void top_n_sorted(Container& code_counts, size_t num_top_labels) {
-    assert(num_top_labels <= code_counts.size());
-    auto comp = [](const auto &x, const auto &y) {
-        return std::make_pair(y.second, x.first)
-              < std::make_pair(x.second, y.first);
-    };
-    std::nth_element(code_counts.begin(),
-                     code_counts.begin() + num_top_labels,
-                     code_counts.end(),
-                     comp);
-    // leave only the first |num_top_labels| top labels
-    code_counts.resize(num_top_labels);
-    // sort the top labels by counts
-    std::sort(code_counts.begin(), code_counts.end(), comp);
-}
 
 template <class Container>
 std::vector<StringCountPair> filter_and_decode(Container&& code_counts,
                                                const annot::LabelEncoder<> &label_encoder,
-                                               size_t num_top_labels) {
-    if (code_counts.size() > num_top_labels)
-        top_n_sorted(code_counts, num_top_labels);
+                                               size_t num_top_labels, SearchCut *cut = nullptr) {
+    top_n_sorted(code_counts, num_top_labels, cut);
 
     // TODO: remove this step? (return (code, count) pairs and defer label decoding to the caller)
     std::vector<StringCountPair> label_counts;
@@ -344,7 +326,9 @@ AnnotatedDBG::get_top_labels(std::string_view sequence,
                              size_t num_top_labels,
                              double discovery_fraction,
                              double presence_fraction,
-                             bool with_kmer_counts) const {
+                             bool with_kmer_counts, SearchCut *cut) const {
+    if (cut)
+        *cut = {};
     assert(discovery_fraction >= 0.);
     assert(discovery_fraction <= 1.);
     assert(presence_fraction >= 0.);
@@ -357,7 +341,7 @@ AnnotatedDBG::get_top_labels(std::string_view sequence,
     if (coord_to_header_) {
         auto counts = get_header_results<size_t>(sequence, num_top_labels,
                                                 discovery_fraction, presence_fraction,
-                                                with_kmer_counts);
+                                                with_kmer_counts, nullptr, cut);
         std::vector<StringCountPair> result;
         result.reserve(counts.size());
         for (auto &[label, matches, count] : counts)
@@ -388,11 +372,11 @@ AnnotatedDBG::get_top_labels(std::string_view sequence,
     if (with_kmer_counts) {
         result = filter_and_decode(dynamic_cast<const IntMatrix &>(annotator_->get_matrix())
                                         .sum_row_values(index_counts.values_container(), min_count),
-                                   annotator_->get_label_encoder(), num_top_labels);
+                                   annotator_->get_label_encoder(), num_top_labels, cut);
     } else {
         result = filter_and_decode(annotator_->get_matrix()
                                         .sum_rows(index_counts.values_container(), min_count),
-                                   annotator_->get_label_encoder(), num_top_labels);
+                                   annotator_->get_label_encoder(), num_top_labels, cut);
     }
 
     assert(with_kmer_counts || std::all_of(result.begin(), result.end(),
@@ -697,7 +681,7 @@ class RecordFold {
 
     // The records matched by at least |min_count| rows: all of them in the order of
     // their first match, or the |num_top| with the most matches, sorted
-    HeaderCounts select(size_t min_count, size_t num_top, size_t *num_passed = nullptr) const {
+    HeaderCounts select(size_t min_count, size_t num_top, size_t *num_passed = nullptr, SearchCut *cut = nullptr) const {
         HeaderCounts counts;
         for (const Record &record : records_) {
             if (record.count >= min_count)
@@ -705,8 +689,7 @@ class RecordFold {
         }
         if (num_passed)
             *num_passed = counts.size();
-        if (counts.size() > num_top)
-            top_n_sorted(counts, num_top);
+        top_n_sorted(counts, num_top, cut);
         return counts;
     }
 
@@ -920,7 +903,7 @@ Result filter_and_aggregate(const RowEnumerator &enumerate_rows,
                             size_t num_top_labels,
                             const std::vector<size_t> &kmer_positions,
                             size_t num_kmers,
-                            size_t *num_passed = nullptr) {
+                            size_t *num_passed = nullptr, SearchCut *cut = nullptr) {
     static_assert(utils::is_one_of_v<Result,
                     std::vector<std::tuple<Label, size_t, PresenceRuns>>,
                     std::vector<std::tuple<Label, size_t, CountRuns>>,
@@ -938,8 +921,7 @@ Result filter_and_aggregate(const RowEnumerator &enumerate_rows,
 
     if (num_passed)
         *num_passed = counts.size();
-    if (counts.size() > num_top_labels)
-        top_n_sorted(counts, num_top_labels);
+    top_n_sorted(counts, num_top_labels, cut);
 
     if (counts.empty())
         return {};
@@ -1002,7 +984,7 @@ template <class Values>
 std::vector<std::tuple<Label, size_t, Values>>
 AnnotatedDBG::get_header_results(std::string_view sequence, size_t num_top_labels,
                                  double discovery_fraction, double presence_fraction,
-                                 bool with_kmer_counts, size_t *num_passed) const {
+                                 bool with_kmer_counts, size_t *num_passed, SearchCut *cut) const {
     static_assert(utils::is_one_of_v<Values, size_t, CountRuns, PresenceRuns>);
     const size_t num_kmers = sequence.size() - dbg_.get_k() + 1;
     // The rows to decode and the query position of each. Without per-position values,
@@ -1052,7 +1034,7 @@ AnnotatedDBG::get_header_results(std::string_view sequence, size_t num_top_label
         call_row_tuples(*matrix, rows, [&](size_t i, const MultiIntMatrix::RowTuples &row) {
             fold.add_row(row, 0, weights[i]);
         });
-        const auto counts = fold.select(min_count, num_top_labels, num_passed);
+        const auto counts = fold.select(min_count, num_top_labels, num_passed, cut);
         std::vector<std::tuple<Label, size_t, Values>> result;
         result.reserve(counts.size());
         for (const auto &[h, count] : counts) {
@@ -1074,7 +1056,7 @@ AnnotatedDBG::get_header_results(std::string_view sequence, size_t num_top_label
         call_row_tuples(*matrix, q.distinct, [&](size_t i, const MultiIntMatrix::RowTuples &row) {
             fold.add_row(row, q.first_position[i], q.weight[i], q.weight[i] == 1);
         });
-        const auto counts = fold.select(min_count, num_top_labels, num_passed);
+        const auto counts = fold.select(min_count, num_top_labels, num_passed, cut);
 
         read_again_if_dropped(*matrix, q, counts, &fold);
         // the values of the returned records at the repeated rows
@@ -1144,7 +1126,9 @@ std::vector<std::tuple<std::string, size_t, CountRuns>>
 AnnotatedDBG::get_kmer_counts(std::string_view sequence,
                               size_t num_top_labels,
                               double discovery_fraction,
-                              double presence_fraction) const {
+                              double presence_fraction, SearchCut *cut) const {
+    if (cut)
+        *cut = {};
     assert(discovery_fraction >= 0.);
     assert(discovery_fraction <= 1.);
     assert(presence_fraction >= 0.);
@@ -1156,7 +1140,7 @@ AnnotatedDBG::get_kmer_counts(std::string_view sequence,
 
     if (coord_to_header_) {
         return get_header_results<CountRuns>(sequence, num_top_labels,
-                                             discovery_fraction, presence_fraction);
+                                             discovery_fraction, presence_fraction, false, nullptr, cut);
     }
 
     size_t num_kmers = sequence.size() - dbg_.get_k() + 1;
@@ -1177,7 +1161,7 @@ AnnotatedDBG::get_kmer_counts(std::string_view sequence,
 
     auto get_results = [&](const auto &enumerate_rows) {
         auto results = filter_and_aggregate<std::vector<std::tuple<std::string, size_t, CountRuns>>>(
-            enumerate_rows, annotator_->get_label_encoder(), min_count, num_top_labels, kmer_positions, num_kmers);
+            enumerate_rows, annotator_->get_label_encoder(), min_count, num_top_labels, kmer_positions, num_kmers, nullptr, cut);
         assert(same_results(results, get_top_labels(sequence, num_top_labels, discovery_fraction, presence_fraction)));
         return results;
     };
@@ -1204,7 +1188,9 @@ std::vector<std::tuple<Label, size_t, PositionCoords, size_t>>
 AnnotatedDBG::get_kmer_coordinates(std::string_view sequence,
                                    size_t num_top_labels,
                                    double discovery_fraction,
-                                   double presence_fraction) const {
+                                   double presence_fraction, SearchCut *cut) const {
+    if (cut)
+        *cut = {};
     assert(discovery_fraction >= 0.);
     assert(discovery_fraction <= 1.);
     assert(presence_fraction >= 0.);
@@ -1257,7 +1243,7 @@ AnnotatedDBG::get_kmer_coordinates(std::string_view sequence,
                         [&](size_t i, const MultiIntMatrix::RowTuples &row) {
             fold.add_row(row, q.first_position[i], q.weight[i], q.weight[i] == 1);
         });
-        const auto counts = fold.select(min_count, num_top_labels);
+        const auto counts = fold.select(min_count, num_top_labels, nullptr, cut);
 
         read_again_if_dropped(*tuple_matrix, q, counts, &fold);
         // (position, coordinate) of each returned record at the repeated rows
@@ -1307,7 +1293,7 @@ AnnotatedDBG::get_kmer_coordinates(std::string_view sequence,
     };
 
     auto results = filter_and_aggregate<std::vector<std::tuple<Label, size_t, PositionCoords>>>(
-        call_rows_tuples, annotator_->get_label_encoder(), min_count, num_top_labels, kmer_positions, num_kmers);
+        call_rows_tuples, annotator_->get_label_encoder(), min_count, num_top_labels, kmer_positions, num_kmers, nullptr, cut);
     assert(same_results(results, get_top_labels(sequence, num_top_labels, discovery_fraction, presence_fraction)));
 
     // Without a CoordToHeader mapping, the label refers to a whole annotation
@@ -1327,7 +1313,9 @@ AnnotatedDBG::get_top_label_signatures(std::string_view sequence,
                                        double discovery_fraction,
                                        double presence_fraction,
                                        size_t *num_passed,
-                                       bool header_labels) const {
+                                       bool header_labels, SearchCut *cut) const {
+    if (cut)
+        *cut = {};
     assert(discovery_fraction >= 0.);
     assert(discovery_fraction <= 1.);
     assert(presence_fraction >= 0.);
@@ -1345,7 +1333,7 @@ AnnotatedDBG::get_top_label_signatures(std::string_view sequence,
     // the shortcut ranks with get_top_labels, which reports no count and ranks headers when
     // a CoordToHeader mapping is loaded
     if (discovery_fraction == 1. && !num_passed && (header_labels || !coord_to_header_)) {
-        auto label_counts = get_top_labels(sequence, num_top_labels, discovery_fraction, presence_fraction);
+        auto label_counts = get_top_labels(sequence, num_top_labels, discovery_fraction, presence_fraction, false, cut);
         std::vector<std::tuple<Label, size_t, PresenceRuns>> presence_vectors;
         presence_vectors.reserve(label_counts.size());
         // every position marked: one run
@@ -1361,7 +1349,7 @@ AnnotatedDBG::get_top_label_signatures(std::string_view sequence,
     if (coord_to_header_ && header_labels) {
         return get_header_results<PresenceRuns>(sequence, num_top_labels,
                                                 discovery_fraction, presence_fraction,
-                                                false, num_passed);
+                                                false, num_passed, cut);
     }
 
     // kmers in the graph and their positions in the query sequence
@@ -1378,7 +1366,7 @@ AnnotatedDBG::get_top_label_signatures(std::string_view sequence,
     auto get_results = [&](const auto &enumerate_rows) {
         auto results = filter_and_aggregate<std::vector<std::tuple<std::string, size_t, PresenceRuns>>>(
             enumerate_rows, annotator_->get_label_encoder(), min_count, num_top_labels, kmer_positions, num_kmers,
-            num_passed);
+            num_passed, cut);
         // get_top_labels ranks headers when a CoordToHeader mapping is loaded
         assert(coord_to_header_ || same_results(results, get_top_labels(sequence, num_top_labels,
                                                                          discovery_fraction, presence_fraction)));

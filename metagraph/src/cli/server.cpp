@@ -443,7 +443,7 @@ int run_server(Config *config) {
                         futures.reserve(num_queries);
                         for (const auto &name : graphs_to_query) {
                             for (const auto &[graph_fname, anno_fname] : indexes[name]) {
-                                futures.push_back(graphs_pool.enqueue([&,config,graph_fname=graph_fname,anno_fname=anno_fname]() {
+                                futures.push_back(graphs_pool.enqueue([&,config,name=name,graph_fname=graph_fname,anno_fname=anno_fname]() {
                                     logger->trace("Request {}: Started querying graph {}. In total graphs being queried at the moment: {}",
                                                   request_id, graph_fname, graphs_being_queried.fetch_add(1) + 1);
                                     size_t index_size_reserved = 0;
@@ -492,7 +492,19 @@ int run_server(Config *config) {
                                             index = graphs_cache.at({ graph_fname, anno_fname }).get();
                                         }
 
+                                        const auto &pair_id = pair_ids.at({ name, graph_fname, anno_fname });
                                         auto json = process_search_request(search_request, *index);
+                                        for (auto &sequence : json) {
+                                            // Pair identity must accompany both the rows and their cut.
+                                            for (const char *field : {"results", "cuts"}) {
+                                                if (!sequence.isMember(field))
+                                                    continue;
+                                                for (auto &value : sequence[field]) {
+                                                    value["graph"] = name;
+                                                    value["pair_id"] = pair_id;
+                                                }
+                                            }
+                                        }
                                         logger->trace("Request {}: {} graph {} {} in {} sec",
                                                       request_id, in_ram ? "Loaded and searched" : "Searched",
                                                       graph_fname, anno_fname, timer.elapsed());
@@ -512,6 +524,9 @@ int run_server(Config *config) {
                                                 }
                                                 for (auto&& value : json[i]["results"]) {
                                                     result[i]["results"].append(std::move(value));
+                                                }
+                                                for (auto&& value : json[i]["cuts"]) {
+                                                    result[i]["cuts"].append(std::move(value));
                                                 }
                                             }
                                         }

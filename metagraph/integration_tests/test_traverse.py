@@ -293,6 +293,15 @@ class TestTraverseGraphList(TraverseServer):
         self.assertEqual(2, len(walks))
         self._assert_opaque_pair_ids(walks)
 
+    def test_search_opaque_pair_ids_match_python(self):
+        response = self._post('search', {'FASTA': '>q\n' + self.X, 'top_labels': 10,
+                                         'discovery_fraction': 1})
+        self.assertEqual(200, response.status_code, response.text)
+        searched = response.json()[0]
+        self.assertEqual(2, len(searched['results']))
+        self.assertEqual(2, len(searched['cuts']))
+        self._assert_opaque_pair_ids(searched['results'] + searched['cuts'])
+
     def test_selected_graphs(self):
         seeds = [{'sequence': self.X}]
         walks = self._traverse({'seeds': seeds, 'graphs': ['two']})['results'][0]['walks']

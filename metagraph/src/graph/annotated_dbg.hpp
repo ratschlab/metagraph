@@ -10,6 +10,7 @@
 #include "representation/base/sequence_graph.hpp"
 #include "annotation/representation/base/annotation.hpp"
 #include "position_values.hpp"
+#include "search_cut.hpp"
 #include "annotation/coord_to_header.hpp"
 
 
@@ -114,7 +115,7 @@ class AnnotatedDBG : public AnnotatedSequenceGraph {
                    size_t num_top_labels,
                    double discovery_fraction = 0.0,
                    double presence_fraction = 0.0,
-                   bool with_kmer_counts = false) const;
+                   bool with_kmer_counts = false, SearchCut *cut = nullptr) const;
 
     // The per-position queries below hold each label's values only at the positions
     // it matches (PresenceRuns, CountRuns, PositionCoords), so their memory grows with
@@ -125,7 +126,7 @@ class AnnotatedDBG : public AnnotatedSequenceGraph {
     get_kmer_counts(std::string_view sequence,
                     size_t num_top_labels,
                     double discovery_fraction,
-                    double presence_fraction) const;
+                    double presence_fraction, SearchCut *cut = nullptr) const;
 
     // returns tuples (label, num_kmer_matches, kmer_coordinates, num_kmers_in_target).
     // num_kmers_in_target is 0 when no CoordToHeader mapping is loaded (the
@@ -135,7 +136,7 @@ class AnnotatedDBG : public AnnotatedSequenceGraph {
     get_kmer_coordinates(std::string_view sequence,
                          size_t num_top_labels,
                          double discovery_fraction,
-                         double presence_fraction) const;
+                         double presence_fraction, SearchCut *cut = nullptr) const;
 
     // With |num_passed|, also report how many labels passed the thresholds, before the cut
     // to |num_top_labels|. With |header_labels| false, rank annotation columns even when a
@@ -146,14 +147,15 @@ class AnnotatedDBG : public AnnotatedSequenceGraph {
                              double discovery_fraction = 0.0,
                              double presence_fraction = 0.0,
                              size_t *num_passed = nullptr,
-                             bool header_labels = true) const;
+                             bool header_labels = true, SearchCut *cut = nullptr) const;
 
   private:
     template <class Values>
     std::vector<std::tuple<Label, size_t, Values>>
     get_header_results(std::string_view sequence, size_t num_top_labels,
                        double discovery_fraction, double presence_fraction,
-                       bool with_kmer_counts = false, size_t *num_passed = nullptr) const;
+                       bool with_kmer_counts = false, size_t *num_passed = nullptr,
+                       SearchCut *cut = nullptr) const;
 
     DeBruijnGraph &dbg_;
     std::unique_ptr<annot::CoordToHeader> coord_to_header_;

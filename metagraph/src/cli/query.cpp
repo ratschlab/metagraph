@@ -300,6 +300,19 @@ Json::Value SeqSearchResult::to_json(bool verbose_output, size_t k) const {
         }
     }
 
+    if (cut_) {
+        Json::Value cut(Json::objectValue);
+        for (const char *tag : {"graph", "pair_id", "index_fp"})
+            cut[tag] = Json::nullValue;
+        cut["matched"] = Json::UInt64(cut_->matched);
+        cut["returned"] = Json::UInt64(cut_->returned);
+        cut["complete"] = cut_->returned == cut_->matched;
+        cut["nth_score"] = cut_->nth_score ? Json::Value(Json::UInt64(*cut_->nth_score)) : Json::nullValue;
+        cut["tied"] = Json::UInt64(cut_->tied);
+        cut["tied_returned"] = Json::UInt64(cut_->tied_returned);
+        root["cuts"] = Json::Value(Json::arrayValue);
+        root["cuts"].append(std::move(cut));
+    }
     return root;
 }
 
@@ -390,6 +403,7 @@ SeqSearchResult execute_query(QuerySequence&& sequence,
                               const graph::AnnotatedDBG &anno_graph) {
     // Perform a different action depending on the type (specified by config flags)
     SeqSearchResult::result_type result;
+    graph::SearchCut cut;
 
     switch (query_mode) {
         case SIGNATURE: {
@@ -397,7 +411,7 @@ SeqSearchResult execute_query(QuerySequence&& sequence,
             result = anno_graph.get_top_label_signatures(sequence.sequence,
                                                          num_top_labels,
                                                          discovery_fraction,
-                                                         presence_fraction);
+                                                         presence_fraction, nullptr, true, &cut);
             break;
         }
         case COORDS: {
@@ -405,7 +419,7 @@ SeqSearchResult execute_query(QuerySequence&& sequence,
             result = anno_graph.get_kmer_coordinates(sequence.sequence,
                                                      num_top_labels,
                                                      discovery_fraction,
-                                                     presence_fraction);
+                                                     presence_fraction, &cut);
             break;
         }
         case COUNTS: {
@@ -413,7 +427,7 @@ SeqSearchResult execute_query(QuerySequence&& sequence,
             result = anno_graph.get_kmer_counts(sequence.sequence,
                                                 num_top_labels,
                                                 discovery_fraction,
-                                                presence_fraction);
+                                                presence_fraction, &cut);
             break;
         }
         case MATCHES: {
@@ -422,7 +436,7 @@ SeqSearchResult execute_query(QuerySequence&& sequence,
                                                num_top_labels,
                                                discovery_fraction,
                                                presence_fraction,
-                                               false);
+                                               false, &cut);
             break;
         }
         case COUNTS_SUM: {
@@ -444,7 +458,9 @@ SeqSearchResult execute_query(QuerySequence&& sequence,
     }
 
     // Create seq search instance and move sequence into it
-    return SeqSearchResult(std::move(sequence), std::move(result));
+    return SeqSearchResult(std::move(sequence), std::move(result), {},
+                           query_mode == LABELS || query_mode == COUNTS_SUM
+                               ? std::nullopt : std::optional<graph::SearchCut>(cut));
 }
 
 void call_suffix_match_sequences(const DBGSuccinct &dbg_succ,
