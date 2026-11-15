@@ -5500,6 +5500,15 @@ class TestTraverseMultiGraph(TestTraverseBase):
             block['request_intake']['max_connections'] \
                 = caps['multigraph']['request_intake']['max_connections']
             block['column_labels']['total'] = caps['multigraph']['column_labels']['total']
+            # T7-P1: the /search model total's concurrency is this server's: the sample's ran
+            # -p 2 --threads-each 2 --http-threads 2, this one -p 2 (the handler threads are -p,
+            # --threads-each 1)
+            search = caps['multigraph']['search']
+            concurrency = ('handler_threads', 'pair_searches_at_once', 'records_at_once')
+            self.assertEqual((2, 2, 2), tuple(block['search'][k] for k in concurrency))
+            self.assertEqual((2, 2, 1), tuple(search[k] for k in concurrency))
+            for k in concurrency:
+                block['search'][k] = search[k]
             return block
         # B's second pair and C's second annotation have no manifest
         self.assertIsNone(c['composite_fp'])
