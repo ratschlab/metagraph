@@ -991,7 +991,7 @@ presence-signature, k-mer-count and coordinate modes. Label-only and abundance-s
      - Labels with that count kept by the limit, or zero when ``nth_score`` is ``null``.
 
 Ties use the matching k-mer count only. A k-mer-count response does not certify median-abundance
-ordering or ties. ``complete`` describes this pair's label limit, not later filtering by a client.
+ordering or ties. ``complete`` refers to this pair's label limit only.
 
 On a server with a list of graphs, each result row and cut also carries ``graph`` and ``pair_id``.
 Use both fields to associate rows with their cut. The :ref:`opaque pair ID <configured_pair_id>`
