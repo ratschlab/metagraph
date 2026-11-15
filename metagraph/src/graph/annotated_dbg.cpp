@@ -1266,8 +1266,8 @@ AnnotatedDBG::get_kmer_coordinates(std::string_view sequence,
 
         std::vector<std::tuple<std::string, size_t, PositionCoords, size_t>> result;
         result.reserve(counts.size());
-        std::vector<std::pair<uint32_t, uint64_t>> coords_at; // (position, coordinate)
         for (size_t r = 0; r < counts.size(); ++r) {
+            std::vector<std::pair<uint32_t, uint64_t>> coords_at; // (position, coordinate)
             const auto &[h, count] = counts[r];
             const auto &[col, header] = h;
             {
