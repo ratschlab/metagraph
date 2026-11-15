@@ -5055,8 +5055,15 @@ index), answered by `metagraph_Protein pattern` and pinned by `integration_tests
 (`TestPatternProtein.test_fixtures`). They sit beside `pattern/`, whose fixtures the DNA build answers on the mini index
 (`scripts/traversal/pattern_fixtures.py`).
 
+**Branching.** A node of a protein graph can have up to 26 outgoing (and incoming) k-mers. The extension of a
+pattern longer than k (`long_search` `"paths"` and `"supported_paths"`) follows every one whose residue the
+position admits: up to 22, since no position admits a stored B, J, Z or X. On a DNA graph it follows up to four.
+Builds before train 6 kept the first four in residue order and dropped the others, while the count stayed `exact`
+(the review of 2026-11-14, P1).
+
 Tests: `PatternProtein.*` (`tests/graph/alignment/test_pattern_protein.cpp`: the parser against its own table, the
 bits, one strand, contexts and their levels against a brute-force oracle with and without the mask, long patterns'
-anchors and paths), `PatternProteinRoute.*` (`tests/cli/test_pattern_protein_route.cpp`), and
+anchors and paths, nodes with more than four allowed children in the paths and in both arms of the segment search),
+`PatternProteinRoute.*` (`tests/cli/test_pattern_protein_route.cpp`), and
 `integration_tests/test_pattern_protein.py`, all in the Protein build (CI: the development workflow's Protein job,
 `Linux-Protein`, whose filters name them).

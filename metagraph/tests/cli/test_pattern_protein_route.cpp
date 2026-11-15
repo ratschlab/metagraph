@@ -338,6 +338,71 @@ TEST(PatternProteinRoute, PathsOfALongPattern) {
     EXPECT_EQ(2u, j["counts"]["paths"]["value"].asUInt64());
 }
 
+// more than four allowed children at a node (the review of 2026-11-14, [P1], its example: k 6,
+// CDEFGK followed by A, C, D, F and H; and a node followed by every symbol of the alphabet):
+// long_search "paths" and "supported_paths" answer every walk, each with its record's label,
+// and the counts are exact
+TEST(PatternProteinRoute, PathsBranchingBeyondFour) {
+    std::vector<std::string> records;
+    std::vector<std::string> labels;
+    for (char r : std::string("ACDFH")) {
+        records.push_back(std::string("CDEFGK") + r);
+        labels.push_back(std::string("c") + r);
+    }
+    // the 22 residues read as themselves and the stored ambiguity letters B, J, Z, X
+    const std::string all = "ACDEFGHIKLMNPQRSTVWYUOBJZX";
+    for (char r : all) {
+        records.push_back(std::string("MNPQRS") + r);
+        labels.push_back(std::string("m") + r);
+    }
+    auto index = test::build_anno_graph<DBGSuccinct, annot::ColumnCompressed<>>(
+            kK, records, labels, DeBruijnGraph::BASIC);
+    // (pattern, the residues after its first k that its walks hold)
+    const std::vector<std::pair<std::string, std::string>> cases = {
+        { "CDEFGKX", "ACDFH" }, { "CDEFGK[^C]", "ADFH" }, { "MNPQRSX", all.substr(0, 22) },
+        { "MNPQRS[^AW]", all.substr(1, 17) + all.substr(19, 3) },
+    };
+    for (const char *mode : { "paths", "supported_paths" }) {
+        // (a column annotation has no budget-aware decode: its reads are asked for explicitly)
+        const Json::Value a = answer(*index, std::string(R"({"patterns": [
+            {"protein": "CDEFGKX"}, {"protein": "CDEFGK[^C]"}, {"protein": "MNPQRSX"},
+            {"protein": "MNPQRS[^AW]"}
+        ], "long_search": ")") + mode + R"(", "output": {"labels": "all"},
+            "allow_unbudgeted_annotation": true})");
+        ASSERT_EQ(cases.size(), a["patterns"].size());
+        for (size_t i = 0; i < cases.size(); ++i) {
+            const auto &[text, after] = cases[i];
+            SCOPED_TRACE(std::string(mode) + " " + text);
+            const Json::Value &e = a["patterns"][static_cast<Json::ArrayIndex>(i)];
+            ASSERT_FALSE(e.isMember("error")) << e["error"];
+            EXPECT_EQ("long", e["scope"].asString());
+            const std::string prefix = text.substr(0, kK);
+            std::set<std::string> expected;
+            for (char r : after) {
+                expected.insert(prefix + r);
+            }
+            const Json::Value &count = e["counts"][std::string(mode) == "paths"
+                                                       ? "paths" : "supported_paths"];
+            EXPECT_EQ("exact", count["relation"].asString());
+            EXPECT_EQ(expected.size(), count["value"].asUInt64());
+            EXPECT_EQ(expected.size(), e["counts"]["paths"]["value"].asUInt64());
+            EXPECT_EQ("exact", e["counts"]["paths"]["relation"].asString());
+            ASSERT_EQ(expected.size(), e["results"].size());
+            std::set<std::string> sequences;
+            for (const Json::Value &r : e["results"]) {
+                const std::string sequence = r["sequence"].asString();
+                sequences.insert(sequence);
+                EXPECT_EQ(2u, r["nodes"].size());
+                // the record holding the walk: its label, and that one only
+                ASSERT_EQ(1u, r["labels"].size()) << r["labels"];
+                EXPECT_EQ(std::string(1, prefix == "CDEFGK" ? 'c' : 'm') + sequence.back(),
+                          r["labels"][0]["column"].asString());
+            }
+            EXPECT_EQ(expected, sequences);
+        }
+    }
+}
+
 #endif // _PROTEIN_GRAPH
 
 } // namespace

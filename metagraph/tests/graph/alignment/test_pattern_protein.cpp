@@ -17,6 +17,7 @@
 #include <algorithm>
 #include <cmath>
 #include <functional>
+#include <limits>
 #include <map>
 #include <random>
 #include <set>
@@ -559,6 +560,188 @@ TEST(PatternProtein, FloorAndNotes) {
         EXPECT_LT(0u, result.contexts->total.value);
         EXPECT_TRUE(std::find(result.notes.begin(), result.notes.end(), kNoteLowComplexity)
                         == result.notes.end());
+    }
+}
+
+
+// ---------------------------------------------------------------- more than four children
+
+// the walks of L > k residues spelling the pattern (oracle_paths), as their sequences
+std::multiset<std::string> oracle_walks(const DeBruijnGraph &graph,
+                                        const std::vector<std::string> &sets) {
+    const size_t k = graph.get_k();
+    std::multiset<std::string> walks;
+    std::function<void(node_index, const std::string&)> walk
+            = [&](node_index node, const std::string &spelled) {
+        if (spelled.size() == sets.size()) {
+            walks.insert(spelled);
+            return;
+        }
+        graph.call_outgoing_kmers(node, [&](node_index next, char c) {
+            if (sets[spelled.size()].find(c) != std::string::npos)
+                walk(next, spelled + c);
+        });
+    };
+    graph.call_kmers([&](node_index node, const std::string &kmer) {
+        for (size_t i = 0; i < k; ++i) {
+            if (sets[i].find(kmer[i]) == std::string::npos)
+                return;
+        }
+        walk(node, kmer);
+    });
+    return walks;
+}
+
+// the k-mer |prefix| followed by each of |residues| (one record each)
+std::vector<std::string> fan_out(const std::string &prefix, const std::string &residues) {
+    std::vector<std::string> records;
+    for (char r : residues) {
+        records.push_back(prefix + r);
+    }
+    return records;
+}
+
+// a node with more than four allowed children (the review of 2026-11-14, [P1]: the extension
+// kept four per level, a Release build dropping the others and their walks from an exact count):
+// every allowed child is extended, at one level and at two in a row, up to the 22 residues a
+// position admits; the stored ambiguity letters among a node's children are admitted by none
+TEST(PatternProtein, ExtensionKeepsEveryChild) {
+    const size_t k = 6;
+    // CDEFGK: the review's five children; MNPQRS: all 26 symbols of the alphabet after it;
+    // WYTVLI: six children, each with six more
+    std::vector<std::string> records = fan_out("CDEFGK", "ACDFH");
+    for (const std::string &r : fan_out("MNPQRS", kLiterals + kAmbiguous)) {
+        records.push_back(r);
+    }
+    for (char a : std::string("ACDFHK")) {
+        for (const std::string &r : fan_out(std::string("WYTVLI") + a, "EGMNPQ")) {
+            records.push_back(r);
+        }
+    }
+    auto graph = build_graph<DBGSuccinct>(k, records);
+    PatternSearch search(*graph);
+    // (pattern, its walks)
+    const std::vector<std::pair<std::string, uint64_t>> cases = {
+        { "CDEFGKX", 5 }, { "CDEFGK[^A]", 4 }, { "CDEFGK[CDFHW]", 4 }, { "CDEFGK[FH]", 2 },
+        { "MNPQRSX", 22 }, { "MNPQRS[^W]", 21 }, { "MNPQRS[UOY]", 3 }, { "MNPQRSB", 2 },
+        { "WYTVLIXX", 36 }, { "WYTVLIX[^E]", 30 }, { "XYTVLIXX", 36 }, { "WYTVLI[HK]X", 12 },
+    };
+    for (const auto &[text, expected] : cases) {
+        SCOPED_TRACE(text);
+        const Pattern pattern = Pattern::parse(PatternKind::PROTEIN, text);
+        ASSERT_GT(pattern.length(), k);
+        const std::multiset<std::string> walks = oracle_walks(*graph, oracle_sets(text));
+        ASSERT_EQ(expected, walks.size());
+        Request request = request_of(Scope::ANY_OFFSET);
+        request.extend_paths = true;
+        {
+            Budget budget = unbounded_budget();
+            std::multiset<std::string> released;
+            const Result result = search.enumerate(pattern, request, budget,
+                    [&](const Context &c) {
+                        EXPECT_EQ(pattern.length() - k + 1, c.path.size());
+                        released.insert(c.sequence);
+                    });
+            ASSERT_FALSE(result.refusal) << result.refusal->message;
+            EXPECT_FALSE(result.stop);
+            ASSERT_TRUE(result.anchors);
+            EXPECT_EQ(Relation::EXACT, result.anchors->paths.relation);
+            EXPECT_EQ(expected, result.anchors->paths.value);
+            EXPECT_EQ(walks, released);
+        }
+        {
+            // count(): the same count
+            request.mode = Mode::COUNT;
+            Budget budget = unbounded_budget();
+            const Result result = search.count(pattern, request, budget);
+            ASSERT_FALSE(result.refusal) << result.refusal->message;
+            ASSERT_TRUE(result.anchors);
+            EXPECT_EQ(Relation::EXACT, result.anchors->paths.relation);
+            EXPECT_EQ(expected, result.anchors->paths.value);
+        }
+    }
+}
+
+// the segment search's arms on a protein graph: the anchor's node has five (then 22) allowed
+// children or parents, and only the alphabetically last one's walk goes on, so that it alone
+// sets the extent's end (right arm) or start (left arm)
+TEST(PatternProtein, SegmentArmsKeepEveryChild) {
+    const size_t k = 6;
+    struct Case {
+        std::string what;
+        std::vector<std::string> records;
+        std::string text;
+        WindowChoice choice;
+        // the information floor (window 0 below it for the left arm: window 2's root then
+        // extends left from position 2 to 0)
+        double floor;
+        uint32_t window;
+        uint32_t from;
+        uint32_t to;
+    };
+    std::vector<Case> cases;
+    {
+        // right: CDEFGK's children A C D F H, only H followed by W
+        std::vector<std::string> records = fan_out("CDEFGK", "ACDF");
+        records.push_back("CDEFGKHW");
+        cases.push_back({ "right, five", records, "CDEFGKXW", WindowChoice::FIRST, 0, 0, 0, 8 });
+        // all 26 symbols after MNPQRS, only Y followed by W
+        records = fan_out("MNPQRS", kLiterals + kAmbiguous);
+        records.push_back("MNPQRSYW");
+        cases.push_back({ "right, 22", records, "MNPQRSXW", WindowChoice::FIRST, 0, 0, 0, 8 });
+    }
+    for (const auto &[what, parents] : { std::make_pair(std::string("left, five"),
+                                                        std::string("ACDFH")),
+                                         std::make_pair(std::string("left, 22"),
+                                                        kLiterals + kAmbiguous) }) {
+        // left: CDEFGK's parents, only the last allowed one (H; Y) preceded by W
+        std::vector<std::string> records;
+        for (char r : parents) {
+            records.push_back(std::string(1, r) + "CDEFGK");
+        }
+        const char last = what == "left, five" ? 'H' : 'Y';
+        records.push_back(std::string("W") + last + "CDEFGK");
+        cases.push_back({ what, records, "WXCDEFGK", WindowChoice::ENDS, 24, 2, 0, 8 });
+    }
+    for (const Case &c : cases) {
+        SCOPED_TRACE(c.what + " " + c.text);
+        auto graph = build_graph<DBGSuccinct>(k, c.records);
+        const Pattern pattern = Pattern::parse(PatternKind::PROTEIN, c.text);
+        Request request = request_of(Scope::ANY_OFFSET);
+        request.min_information_bits = c.floor;
+        request.segments.enabled = true;
+        request.segments.choice = c.choice;
+        GraphSegmentStore store(static_cast<uint32_t>(pattern.length()),
+                                std::numeric_limits<uint64_t>::max() / 2);
+        request.segment_sink = &store;
+        Budget budget = unbounded_budget();
+        PatternSearch search(*graph);
+        const Result result = search.count(pattern, request, budget);
+        ASSERT_FALSE(result.refusal) << result.refusal->message;
+        EXPECT_FALSE(result.stop);
+        ASSERT_TRUE(result.segments);
+        ASSERT_EQ(1u, result.segments->windows.count(Orientation::FORWARD));
+        bool extended = false;
+        for (const WindowCount &w : result.segments->windows.at(Orientation::FORWARD)) {
+            if (w.offset == c.window) {
+                EXPECT_EQ(WindowState::EXTENDED, w.state);
+                EXPECT_EQ(1u, w.roots);
+                extended = true;
+            } else {
+                EXPECT_EQ(WindowState::BELOW_FLOOR, w.state) << w.offset;
+            }
+        }
+        EXPECT_TRUE(extended);
+        EXPECT_EQ(1u, result.segments->reported);
+        std::vector<std::tuple<uint32_t, uint32_t, uint64_t, uint32_t>> segments;
+        store.for_each([&](const GraphSegment &s) {
+            EXPECT_EQ(Orientation::FORWARD, s.orientation);
+            segments.emplace_back(s.from, s.to, s.roots, s.window);
+        });
+        EXPECT_EQ((std::vector<std::tuple<uint32_t, uint32_t, uint64_t, uint32_t>> {
+                      { c.from, c.to, 1, c.window } }), segments);
+        // the memoised states released: the store holds its one segment's entry
+        EXPECT_EQ(GraphSegmentStore::kGraphSegmentBytes * store.size(), store.held());
     }
 }
 

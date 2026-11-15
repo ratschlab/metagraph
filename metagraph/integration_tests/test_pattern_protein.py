@@ -103,11 +103,11 @@ def oracle_contexts(kmers, text, max_mismatches=0):
     return found
 
 
-def oracle_paths(kmers, text):
+def oracle_paths(kmers, text, k=K):
     """The anchors (the k-mers instantiating its first k positions) and the walks of a pattern
     longer than k: k-mers overlapping by k - 1, each residue in its position's set."""
     sets = sets_of(text)
-    anchors = [x for x in kmers if all(c in s for c, s in zip(x, sets[:K]))]
+    anchors = [x for x in kmers if all(c in s for c, s in zip(x, sets[:k]))]
     walks = []
 
     def walk(spelled):
@@ -115,7 +115,7 @@ def oracle_paths(kmers, text):
             walks.append(spelled)
             return
         for c in sorted(sets[len(spelled)]):
-            if spelled[len(spelled) - K + 1:] + c in kmers:
+            if spelled[len(spelled) - k + 1:] + c in kmers:
                 walk(spelled + c)
 
     for a in anchors:
@@ -432,6 +432,102 @@ class TestPatternProtein(unittest.TestCase):
             with self.subTest(name):
                 with open(path) as f:
                     self.assertEqual(f.read(), text)
+
+
+@unittest.skipUnless(PROTEIN_MODE, 'pattern search on protein graphs: the Protein build')
+class TestPatternProteinBranching(unittest.TestCase):
+    """Nodes with more than four allowed children (the review of 2026-11-14, [P1]: the extension
+    kept four per level and dropped the others, the count staying "exact"): the review's example
+    (k 6, CDEFGK followed by A, C, D, F and H), a node followed by every symbol of the alphabet
+    (the 22 residues read as themselves and B, J, Z, X, which no position admits), and two levels
+    of six children in a row; long_search "paths" and "supported_paths", through the server and
+    `metagraph pattern`, against the brute-force oracle."""
+
+    K6 = 6
+    RECORDS = dict(
+        [(f'c{r}', f'CDEFGK{r}') for r in 'ACDFH']
+        + [(f'm{r}', f'MNPQRS{r}') for r in LITERALS + AMBIGUOUS]
+        + [(f'w{a}{b}', f'WYTVLI{a}{b}') for a in 'ACDFHK' for b in 'EGMNPQ'])
+    # (pattern, its walks)
+    CASES = (('CDEFGKX', 5), ('CDEFGK[^C]', 4), ('MNPQRSX', 22), ('MNPQRS[^AW]', 20),
+             ('MNPQRSB', 2), ('WYTVLIXX', 36), ('WYTVLI[HK][^E]', 10))
+
+    @classmethod
+    def setUpClass(cls):
+        cls.tempdir = TemporaryDirectory()
+        d = cls.tempdir.name
+        fasta = os.path.join(d, 'records.fa')
+        with open(fasta, 'w') as f:
+            for name, seq in cls.RECORDS.items():
+                f.write(f'>{name}\n{seq}\n')
+        cls.graph = os.path.join(d, 'graph.dbg')
+        cls.anno = os.path.join(d, 'annotation.column.annodbg')
+        for command in (
+                [METAGRAPH, 'build', '-k', str(cls.K6), '-o', os.path.join(d, 'graph'), fasta],
+                [METAGRAPH, 'annotate', '-i', cls.graph, '--anno-header',
+                 '-o', os.path.join(d, 'annotation'), fasta],
+                [METAGRAPH, 'transform', '--mask-dummy', cls.graph]):
+            subprocess.run(command, check=True, stdout=subprocess.DEVNULL,
+                           stderr=subprocess.DEVNULL)
+        cls.kmers = {r[i:i + cls.K6] for r in cls.RECORDS.values()
+                     for i in range(len(r) - cls.K6 + 1)}
+        cls.server = Server(METAGRAPH, ['-i', cls.graph, '-a', cls.anno,
+                                        '--index-release', RELEASE],
+                            os.path.join(d, 'server.log'))
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.server.stop()
+        cls.tempdir.cleanup()
+
+    def request(self, mode):
+        return {'patterns': [{'protein': text} for text, _ in self.CASES], 'long_search': mode,
+                'output': {'labels': 'all'}, 'allow_unbudgeted_annotation': True}
+
+    def cli(self, payload):
+        path = os.path.join(self.tempdir.name, 'request.json')
+        with open(path, 'w') as f:
+            json.dump(payload, f)
+        out = subprocess.run([METAGRAPH, 'pattern', '-i', self.graph, '-a', self.anno,
+                              '--index-release', RELEASE, path],
+                             check=True, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+        return json.loads(out.stdout)
+
+    def check(self, answer, mode):
+        self.assertEqual(len(self.CASES), len(answer['patterns']))
+        for (text, count), entry in zip(self.CASES, answer['patterns']):
+            with self.subTest(text, mode=mode):
+                self.assertNotIn('error', entry)
+                _, walks = oracle_paths(self.kmers, text, self.K6)
+                self.assertEqual(count, len(walks))
+                self.assertEqual((count, 'exact'), (entry['counts']['paths']['value'],
+                                                    entry['counts']['paths']['relation']))
+                if mode == 'supported_paths':
+                    # every walk is one record's: all of them supported, none pruned
+                    sp = entry['counts']['supported_paths']
+                    self.assertEqual((count, 'exact', 0),
+                                     (sp['value'], sp['relation'], sp['branches_pruned']))
+                    self.assertEqual('completed', sp['search'])
+                else:
+                    self.assertEqual('completed', entry['counts']['paths']['extension'])
+                self.assertEqual(walks, sorted(r['sequence'] for r in entry['results']))
+                names = {seq: name for name, seq in self.RECORDS.items()}
+                for r in entry['results']:
+                    self.assertEqual(len(sets_of(text)) - self.K6 + 1, len(r['nodes']))
+                    self.assertEqual([names[r['sequence']]], [l['column'] for l in r['labels']])
+
+    def test_paths_branching_beyond_four(self):
+        for mode in ('paths', 'supported_paths'):
+            self.check(self.pattern_answer(mode), mode)
+
+    def test_cli_paths_branching_beyond_four(self):
+        for mode in ('paths', 'supported_paths'):
+            self.check(self.cli(self.request(mode)), mode)
+
+    def pattern_answer(self, mode):
+        ret = self.server.post('pattern', self.request(mode))
+        self.assertEqual(200, ret.status_code, ret.text)
+        return ret.json()
 
 
 @unittest.skipUnless(PROTEIN_MODE, 'pattern search on protein graphs: the Protein build')
