@@ -1169,8 +1169,10 @@ TEST(PatternPaths, TheMemoryAccountStopsPathRetention) {
 // walks the engine keeps for the release (retained_path_bytes each, within half of what the
 // account has left when the extension begins, each freed as it is handed over) and each path's
 // result object (path_descriptor_bytes, charged before it is built from what the account has
-// left). The engine's refusal: stop {extension, max_memory}, partial releases the walks kept
-// before it (cut max_memory), all_or_count withholds output_budget; the route's: the list ends
+// left), beside the extension's depth-first stack (kExtensionLevelBytes a level, released as
+// the DFS backs out of it). The engine's refusal: stop {extension, max_memory}, partial
+// releases the walks kept before it (cut max_memory), all_or_count withholds output_budget;
+// the route's: the list ends
 // at the first object that does not fit (cut max_memory, stop {output, max_memory};
 // all_or_count output_budget). A request the account holds is answered as without one, and
 // work.memory_bytes (stated in every answered entry since 2026-10-21, SPEC §8.7) is the same
@@ -1250,10 +1252,14 @@ TEST(PatternPaths, TheMemoryAccountBoundsLabelFreePaths) {
     EXPECT_EQ("exact", w["counts"]["paths"]["relation"].asString());
     EXPECT_FALSE(w["retrieval_complete"].asBool());
 
-    // the engine's stop: the half holds two walks, the third stops the extension; the
-    // objects built from the two kept are those that fit beside them
+    // the engine's stop: the account holds the extension's depth-first stack at its deepest
+    // (L - k levels) and two walks beside it (both within the walks' half), not a third: the
+    // third walk stops the extension; the objects built from the two kept are those that fit
+    // beside them
     const uint64_t kept = 2;
-    hooks.max_memory_bytes = 2 * kept * walk + 1;
+    const uint64_t stack = (8 - 5) * pattern::kExtensionLevelBytes;
+    hooks.max_memory_bytes = stack + (kept + 1) * walk - 1;
+    ASSERT_LE(kept * walk, hooks.max_memory_bytes / 2);
     const uint64_t released = admitted(hooks.max_memory_bytes, kept);
     out = run(idx, body(spec, "\"mode\": \"partial\"", "none"), hooks);
     const Json::Value &s = out["patterns"][0];
@@ -1322,6 +1328,87 @@ TEST(PatternPaths, TheMemoryAccountBoundsLabelFreePaths) {
     EXPECT_EQ(0u, u["returned"].asUInt64());
     EXPECT_EQ("exact", u["counts"]["paths"]["relation"].asString());
     EXPECT_EQ(paths, u["counts"]["paths"]["value"].asUInt64());
+}
+
+// The extension's depth-first stack is in the request's memory account in every mode (the
+// owner's decision of 2026-11-15: the DFS is included; kExtensionLevelBytes a level, released as
+// the DFS backs out of it): a homopolymer pattern whose one walk is deeper than the account
+// holds stops {extension, max_memory} in mode count too, its paths at_least 0, and in the
+// retrieval modes as a kept walk's stop (partial cut max_memory, all_or_count withheld
+// output_budget); under supported_paths as a frame's (all_or_count withheld annotation_budget).
+// max_memory_mb named alone acts on such an entry in every mode: no annotation_not_read.
+// work.memory_bytes states the stack's peak, also where the account holds it
+TEST(PatternPaths, TheMemoryAccountHoldsTheExtensionStack) {
+    const size_t k = 5;
+    Index idx = build<annot::RowDiffColumnAnnotator>(
+            k, { { "poly", "r0", std::string(100, 'A') } }, true);
+    const size_t L = 7000;
+    const uint64_t levels = L - k;
+    const std::string spec = "{\"dna\": \"" + std::string(L, 'A') + "\"}";
+    // 1 MiB holds 5,890 of the 6,995 levels
+    const uint64_t fit = (uint64_t(1) << 20) / pattern::kExtensionLevelBytes;
+    ASSERT_LT(fit, levels);
+    auto stopped = [&](const Json::Value &e, const std::string &what) {
+        EXPECT_EQ("extension", e["stop"]["phase"].asString()) << what;
+        EXPECT_EQ("max_memory", e["stop"]["reason"].asString()) << what;
+        EXPECT_EQ("at_least", e["counts"]["paths"]["relation"].asString()) << what;
+        EXPECT_EQ(0u, e["counts"]["paths"]["value"].asUInt64()) << what;
+        EXPECT_EQ("stopped", e["counts"]["paths"]["extension"].asString()) << what;
+        EXPECT_EQ("exact", e["counts"]["anchors"]["relation"].asString()) << what;
+        EXPECT_EQ(1u, e["counts"]["anchors"]["value"].asUInt64()) << what;
+        EXPECT_EQ(fit * pattern::kExtensionLevelBytes, e["work"]["memory_bytes"].asUInt64())
+                << what;
+        for (const Json::Value &note : e["notes"]) {
+            EXPECT_NE("annotation_not_read", note.asString()) << what;
+        }
+    };
+    for (const std::string mode : { "count", "partial", "all_or_count" }) {
+        Json::Value out = run(idx, body(spec, "\"mode\": \"" + mode + "\", \"max_memory_mb\": 1",
+                                        "none"));
+        const Json::Value &e = out["patterns"][0];
+        stopped(e, mode);
+        EXPECT_EQ(e["work"]["memory_bytes"], out["work"]["memory_bytes"]) << mode;
+        if (mode == "partial") {
+            EXPECT_EQ("max_memory", e["cut"]["reason"].asString());
+            EXPECT_EQ(0u, e["returned"].asUInt64());
+        } else if (mode == "all_or_count") {
+            EXPECT_EQ("output_budget", e["withheld"]["reason"].asString());
+        }
+    }
+    // supported paths (a walk the record holds whole: L 90): the stack is charged beside the
+    // tracker's frames, so the peak is at least the stack's; an account smaller than the stack
+    // alone stops the search at a level or a frame, the search's own memory stop either way
+    // (annotation_budget)
+    const size_t short_l = 90;
+    const std::string held = "{\"patterns\": [{\"dna\": \"" + std::string(short_l, 'A')
+            + "\"}], \"long_search\": \"supported_paths\", \"mode\": ";
+    Json::Value whole = run(idx, held + "\"count\"}");
+    const Json::Value &we = whole["patterns"][0];
+    EXPECT_TRUE(we["stop"].isNull()) << we["stop"];
+    EXPECT_EQ("exact", we["counts"]["supported_paths"]["relation"].asString());
+    EXPECT_EQ(1u, we["counts"]["supported_paths"]["value"].asUInt64());
+    EXPECT_GE(we["work"]["memory_bytes"].asUInt64(),
+              (short_l - k) * pattern::kExtensionLevelBytes);
+    RetrievalHooks small;
+    small.max_memory_bytes = (short_l - k) * pattern::kExtensionLevelBytes - 1;
+    for (const std::string mode : { "count", "all_or_count" }) {
+        Json::Value out = run(idx, held + "\"" + mode + "\"}", small);
+        const Json::Value &e = out["patterns"][0];
+        EXPECT_EQ("extension", e["stop"]["phase"].asString()) << mode;
+        EXPECT_EQ("max_memory", e["stop"]["reason"].asString()) << mode;
+        EXPECT_EQ("at_least", e["counts"]["supported_paths"]["relation"].asString()) << mode;
+        EXPECT_LE(e["work"]["memory_bytes"].asUInt64(), small.max_memory_bytes) << mode;
+        if (mode == "all_or_count") {
+            EXPECT_EQ("annotation_budget", e["withheld"]["reason"].asString());
+        }
+    }
+    // the default account holds the stack: the walk counted, the peak the stack's whole
+    Json::Value out = run(idx, body(spec, "\"mode\": \"count\"", "none"));
+    const Json::Value &e = out["patterns"][0];
+    EXPECT_TRUE(e["stop"].isNull()) << e["stop"];
+    EXPECT_EQ("exact", e["counts"]["paths"]["relation"].asString());
+    EXPECT_EQ(1u, e["counts"]["paths"]["value"].asUInt64());
+    EXPECT_EQ(levels * pattern::kExtensionLevelBytes, e["work"]["memory_bytes"].asUInt64());
 }
 
 // The route's memory cut of a label-free path list comes before a time stop the engine's
@@ -1427,9 +1514,10 @@ TEST(PatternPaths, TheRouteCutPrecedesALaterTimeStopOfTheRelease) {
     }
 }
 
-// max_memory_mb acts on a label-free path list (its kept walks and result objects), so named
-// alone it leaves no annotation_not_read note on the entry of a pattern answered by its paths;
-// the other annotation fields, a pattern of L <= k and mode count keep the note
+// max_memory_mb acts on a label-free path list (its kept walks and result objects, and in every
+// mode the extension's depth-first stack, SPEC §30), so named alone it leaves no
+// annotation_not_read note on the entry of a pattern answered by its paths, mode count
+// included; the other annotation fields and a pattern of L <= k keep the note
 TEST(PatternPaths, MaxMemoryAloneLeavesNoNoteOnALabelFreePathEntry) {
     std::mt19937 rng(17);
     std::vector<Record> records;
@@ -1465,6 +1553,10 @@ TEST(PatternPaths, MaxMemoryAloneLeavesNoNoteOnALabelFreePathEntry) {
         EXPECT_TRUE(noted(out["patterns"][0]));
     }
     Json::Value out = run(idx, body(two, "\"mode\": \"count\", \"max_memory_mb\": 1", "none"));
+    EXPECT_FALSE(noted(out["patterns"][0]));
+    EXPECT_TRUE(noted(out["patterns"][1]));
+    out = run(idx, body(two, "\"mode\": \"count\", \"max_memory_mb\": 1, \"max_labels\": 1",
+                        "none"));
     EXPECT_TRUE(noted(out["patterns"][0]));
     EXPECT_TRUE(noted(out["patterns"][1]));
     // without the field no entry carries the note

@@ -908,8 +908,9 @@ class Deadline {
 // Why a pattern's work stopped, or why PARTIAL's list was cut (JSON stop.reason, cut.reason):
 // the knob an agent can turn. MAX_PATHS: the stop_at_threshold threshold of the extension, and
 // PARTIAL's cap on the paths returned. MAX_MEMORY: the request's memory account
-// (Budget::memory) could not hold a walk the extension keeps for the release (phase EXTENSION
-// only; never set without an account). EXTERNAL (internal): the extension's support tracker or
+// (Budget::memory) could not hold a walk the extension keeps for the release, or a level of
+// its depth-first stack (kExtensionLevelBytes; phase EXTENSION only; never set without an
+// account). EXTERNAL (internal): the extension's support tracker or
 // path sink (Request::support, Request::sink) answered STOPPED; the route, which owns them,
 // writes their own reason (SupportTracker::stop_reason, PathSink::stop_reason:
 // max_annotation_work, max_memory), never "external". Never set without a tracker or a sink
@@ -951,8 +952,10 @@ struct Stop {
  * model in bytes, never a measurement (§5.3), owned by the route and shared with everything
  * else the request holds. The engine charges it for what it keeps beyond its DFS frontier for
  * a release: the complete walks of a long pattern's extension (retained_path_bytes each),
- * admitted before they are kept and released as they are handed over or dropped. A refusal
- * stops the pattern's search (stop {EXTENSION, MAX_MEMORY}); the account is never passed.
+ * admitted before they are kept and released as they are handed over or dropped; and, in every
+ * mode, the extension's depth-first stack (kExtensionLevelBytes per level, admitted before the
+ * DFS expands the level's node and released when it backs out of it). A refusal stops the
+ * pattern's search (stop {EXTENSION, MAX_MEMORY}); the account is never passed.
  * Null (the default): nothing is charged, as for a request without an account.
  */
 class MemoryAccount {
@@ -972,6 +975,34 @@ inline uint64_t retained_path_bytes(size_t k, size_t length) {
     const uint64_t n = length >= k ? length - k + 1 : 1;
     return 128 + 8 * n + static_cast<uint64_t>(length);
 }
+
+/**
+ * The model's price of one level of the engine's depth-first stacks over the positions of a
+ * pattern (§5.3): the extension's (PatternRun::extend_anchor, one level per node of the walk
+ * from the anchor on, at most L - k: its allowed children, the Model's state, and the node's id
+ * in the walk's node path and its base in the walk's spelling), and the segment search's arms
+ * (the right arm's levels with their bases; the left arm's with the children's bwd pairs, its
+ * spelling allocated once per arm and charged at its length). Each level is admitted before
+ * the DFS expands its node (the extension: to the request's memory account, Budget::memory;
+ * the arms: to the search's SegmentSink) and released when the DFS backs out of it; what a
+ * stop leaves pushed is released when the search returns. The price is twice the level's bytes
+ * in the stack's containers (sizeof, pinned per build by static_assert): they grow by
+ * doubling, so they hold at most twice what their levels fill (for the moment of a growth's
+ * copy the old buffer stands beside the new one: 1.5 times the charge, the model's slack).
+ * Their capacity is not shrunk when the DFS backs out of a level (it is freed when the search
+ * returns) while the level is released at once: the account's peak covers the deepest stack,
+ * and the extension keeps a walk only at the full depth L - k, where the stack's charge is at
+ * its largest. The DFS frontier of discovery (O(k) per base search) is not charged.
+ */
+#if _PROTEIN_GRAPH
+constexpr uint64_t kExtensionLevelBytes = 754;
+constexpr uint64_t kRightArmLevelBytes = 770;
+constexpr uint64_t kLeftArmLevelBytes = 1504;
+#else
+constexpr uint64_t kExtensionLevelBytes = 178;
+constexpr uint64_t kRightArmLevelBytes = 194;
+constexpr uint64_t kLeftArmLevelBytes = 352;
+#endif
 
 /**
  * The request's work budget: max_steps and the deadline, shared by all patterns of the request
@@ -1019,9 +1050,10 @@ class Budget {
 
     /**
      * The request's memory account (MemoryAccount), charged for the walks an extension keeps
-     * for the release; must outlive the budget's use. Unset (the default): nothing is
-     * charged. A memory stop ends only its own pattern: the next one starts with what the
-     * account has left (never recorded here, unlike a step or time stop).
+     * for the release and for the levels of its depth-first stack; must outlive the budget's
+     * use. Unset (the default): nothing is charged. A memory stop ends only its own pattern:
+     * the next one starts with what the account has left (never recorded here, unlike a step or
+     * time stop).
      */
     void set_memory(MemoryAccount *account) { memory_ = account; }
     MemoryAccount* memory() const { return memory_; }
@@ -1388,8 +1420,9 @@ enum class Withheld {
     // the extension was not admitted (§4.2); counts.anchors is exact, the paths UNKNOWN
     ANCHORS_ABOVE_THRESHOLD,
     // ALL_OR_COUNT, L > k with extend_paths: the request's memory account (Budget::memory)
-    // could not hold a walk the extension kept for the release (stop {EXTENSION, MAX_MEMORY});
-    // the route's name for an answer the account could not hold
+    // could not hold a walk the extension kept for the release or a level of its depth-first
+    // stack (stop {EXTENSION, MAX_MEMORY}); the route's name for an answer the account could
+    // not hold
     OUTPUT_BUDGET,
     // ALL_OR_COUNT, L > k with a support tracker: the tracker stopped the extension
     // (StopReason::EXTERNAL); the route writes the tracker's reason (annotation_budget), never
@@ -1751,9 +1784,11 @@ struct SegmentExtent {
 
 /**
  * The segment search's receiver and its memory account (Request::segment_sink). The search
- * admits every memoised state (kSegmentStateBytes) before it holds it and releases what it held
- * before it returns; a refusal ends the search with stop {EXTENSION, EXTERNAL} (the route writes
- * stop_reason(): max_memory). extent() receives the reported extents in the search's order
+ * admits every memoised state (kSegmentStateBytes) before it holds it, and every level of its
+ * arms' depth-first stacks (kRightArmLevelBytes, kLeftArmLevelBytes, and the left arm's
+ * spelling) before the arm expands it, and releases what it held before it returns; a refusal
+ * ends the search with stop {EXTENSION, EXTERNAL} (the route writes stop_reason():
+ * max_memory). extent() receives the reported extents in the search's order
  * (window-major, then the window's anchors in answer order); false ends the search the same
  * way (stop_reason(): max_segments with stop_at_threshold, max_memory).
  */
@@ -2126,7 +2161,10 @@ class PatternSearch {
      * extension's admission, dropped once their count exceeds max_anchors) and, when
      * admitted, extended to count the paths (AnchorCounts::paths, Extension); no path is
      * retained. The extension's memory is the anchor list (<= max_anchors) and the DFS
-     * stack, O(n * alphabet) for n = L - k + 1.
+     * stack, O(n * alphabet) for n = L - k + 1, whose levels are admitted to the request's
+     * memory account when the budget has one (Budget::memory, kExtensionLevelBytes each, each
+     * released when the DFS backs out of it): the first that does not fit stops the extension
+     * ({EXTENSION, MAX_MEMORY}, the paths AT_LEAST).
      * With Request::support and Request::sink the extension asks the tracker per level and
      * hands every (supported) complete walk to the sink as it completes; the counts are those
      * of AnchorCounts (walks, supported, branches_pruned).
@@ -2164,10 +2202,12 @@ class PatternSearch {
      * window's discovery, {EXTENSION, reason} in its listing or an arm, {EXTENSION, EXTERNAL}
      * when the sink refused (its stop_reason()). The root extents handed over before a stop are
      * the search's exactly (each was handed over once both its arms completed).
-     * Memory: one window's discovery at a time (as a long pattern's anchors), the arms' stacks,
-     * and the memoised states admitted through the sink (kSegmentStateBytes each), all released
-     * before count() returns. Throws std::invalid_argument for a plan the route must refuse
-     * first (window below k, step 0 with STEPS, no segment_sink, a tracker or a path sink set,
+     * Memory: one window's discovery at a time (as a long pattern's anchors), the arms' stacks
+     * (each level admitted through the sink before the arm expands it, kRightArmLevelBytes or
+     * kLeftArmLevelBytes, and the left arm's spelling at its length) and the memoised states
+     * admitted through the sink (kSegmentStateBytes each), all released before count()
+     * returns. Throws std::invalid_argument for a plan the route must refuse first (window below
+     * k, step 0 with STEPS, no segment_sink, a tracker or a path sink set,
      * max_mismatches above 0).
      */
 
@@ -2261,6 +2301,8 @@ class PatternSearch {
      * they are held, and the first that does not fit stops the extension ({EXTENSION,
      * MAX_MEMORY}: PARTIAL releases those kept before it, ALL_OR_COUNT withholds
      * OUTPUT_BUDGET); each is freed and its charge released as the release hands it over.
+     * The extension's depth-first stack is in the account too, as for count(): a level that
+     * does not fit stops it the same way.
      * The contexts themselves are the caller's.
      */
     Result enumerate(const Pattern &pattern, const Request &request, Budget &budget,

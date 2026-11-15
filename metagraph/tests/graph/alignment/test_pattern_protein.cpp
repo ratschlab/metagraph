@@ -745,6 +745,86 @@ TEST(PatternProtein, SegmentArmsKeepEveryChild) {
     }
 }
 
+// The extension's depth-first stack in the request's memory account on a protein graph (the
+// owner's decision of 2026-11-15: the DFS is included): kExtensionLevelBytes a level, twice its
+// bytes in the stack (the 22 children's buffer, the Model's state, the node's id and residue).
+// A homopolymer on a graph whose A^k k-mer loops on itself holds L - k levels at its deepest:
+// an account of that many counts and releases the walk, a smaller one stops the extension at
+// the first level past what it holds ({EXTENSION, MAX_MEMORY}, the paths AT_LEAST 0), its peak
+// the levels before it, everything released
+TEST(PatternProtein, ExtensionStackInTheMemoryAccount) {
+    struct Account final : public MemoryAccount {
+        uint64_t max;
+        uint64_t held = 0;
+        uint64_t peak = 0;
+        explicit Account(uint64_t max) : max(max) {}
+        bool admit(uint64_t bytes) override {
+            if (bytes > left())
+                return false;
+            held += bytes;
+            peak = std::max(peak, held);
+            return true;
+        }
+        void release(uint64_t bytes) override {
+            EXPECT_LE(bytes, held);
+            held -= std::min(bytes, held);
+        }
+        uint64_t left() const override { return held < max ? max - held : 0; }
+    };
+    EXPECT_EQ(2 * (368u + 8 + 1), kExtensionLevelBytes);
+    const size_t k = 6;
+    auto graph = build_graph<DBGSuccinct>(k, { std::string(60, 'A') });
+    PatternSearch search(*graph);
+    for (size_t L : { 7, 40, 2000 }) {
+        SCOPED_TRACE(L);
+        const Pattern pattern = Pattern::parse(PatternKind::PROTEIN, std::string(L, 'A'));
+        Request request = request_of(Scope::ANY_OFFSET);
+        request.extend_paths = true;
+        const uint64_t levels = L - k;
+        {
+            // the stack whole: the walk counted and released, the peak the stack's in count()
+            // and its kept walk's beside it in enumerate()
+            Account account(2 * retained_path_bytes(k, L) + levels * kExtensionLevelBytes);
+            Budget budget = unbounded_budget();
+            budget.set_memory(&account);
+            std::vector<std::string> released;
+            const Result result = search.enumerate(pattern, request, budget,
+                    [&](const Context &c) { released.push_back(c.sequence); });
+            EXPECT_FALSE(result.stop);
+            EXPECT_EQ(std::vector<std::string> { std::string(L, 'A') }, released);
+            EXPECT_EQ(retained_path_bytes(k, L) + levels * kExtensionLevelBytes, account.peak);
+            EXPECT_EQ(0u, account.held);
+            request.mode = Mode::COUNT;
+            Account just(levels * kExtensionLevelBytes);
+            Budget counting = unbounded_budget();
+            counting.set_memory(&just);
+            const Result counted = search.count(pattern, request, counting);
+            EXPECT_FALSE(counted.stop);
+            EXPECT_EQ(Relation::EXACT, counted.anchors->paths.relation);
+            EXPECT_EQ(1u, counted.anchors->paths.value);
+            EXPECT_EQ(levels * kExtensionLevelBytes, just.peak);
+            EXPECT_EQ(0u, just.held);
+        }
+        for (uint64_t fit : { uint64_t(0), levels / 2, levels - 1 }) {
+            SCOPED_TRACE(fit);
+            Account account((fit + 1) * kExtensionLevelBytes - 1);
+            Budget budget = unbounded_budget();
+            budget.set_memory(&account);
+            request.mode = Mode::COUNT;
+            const Result r = search.count(pattern, request, budget);
+            ASSERT_TRUE(r.stop);
+            EXPECT_EQ(StopPhase::EXTENSION, r.stop->phase);
+            EXPECT_EQ(StopReason::MAX_MEMORY, r.stop->reason);
+            EXPECT_EQ(Extension::STOPPED, r.anchors->extension);
+            EXPECT_EQ(Relation::AT_LEAST, r.anchors->paths.relation);
+            EXPECT_EQ(0u, r.anchors->paths.value);
+            EXPECT_EQ(fit * kExtensionLevelBytes, account.peak);
+            EXPECT_EQ(0u, account.held);
+            EXPECT_FALSE(budget.stopped());
+        }
+    }
+}
+
 #endif // _PROTEIN_GRAPH
 
 } // namespace

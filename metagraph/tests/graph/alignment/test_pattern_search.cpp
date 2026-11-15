@@ -3009,26 +3009,40 @@ TEST(PatternSearch, ExtensionMaxPaths) {
 // release is admitted before it is kept (retained_path_bytes), within half of what the account
 // had left when the extension began, and released as the release hands it over; a refusal
 // stops the extension with {EXTENSION, MAX_MEMORY}: PARTIAL releases the walks kept before it
-// (cut MAX_MEMORY), ALL_OR_COUNT withholds OUTPUT_BUDGET. The stop ends only its own pattern;
-// count() keeps no walk and charges nothing
+// (cut MAX_MEMORY), ALL_OR_COUNT withholds OUTPUT_BUDGET. The stop ends only its own pattern.
+// The extension's depth-first stack is in the account too, in every mode (count() included):
+// each level, the anchor's included, admitted at kExtensionLevelBytes before its node is
+// expanded and released when the DFS backs out of it
 TEST(PatternSearch, ExtensionMemoryAccount) {
     struct Account final : public MemoryAccount {
         uint64_t max;
         uint64_t held = 0;
         uint64_t peak = 0;
+        // the walks admitted (any other price than a level's), and the levels held now
         uint64_t admissions = 0;
+        uint64_t levels = 0;
+        uint64_t levels_peak = 0;
         explicit Account(uint64_t max) : max(max) {}
         bool admit(uint64_t bytes) override {
             if (bytes > left())
                 return false;
             held += bytes;
             peak = std::max(peak, held);
-            ++admissions;
+            if (bytes == kExtensionLevelBytes) {
+                levels_peak = std::max(levels_peak, ++levels);
+            } else {
+                ++admissions;
+            }
             return true;
         }
+        // a level is released at its pop; what a stop leaves pushed, in one release when the
+        // anchor's search returns (a multiple of a level's price, never of a walk's here)
         void release(uint64_t bytes) override {
             EXPECT_LE(bytes, held);
             held -= std::min(bytes, held);
+            if (bytes && bytes % kExtensionLevelBytes == 0
+                    && bytes / kExtensionLevelBytes <= levels)
+                levels -= bytes / kExtensionLevelBytes;
         }
         uint64_t left() const override { return held < max ? max - held : 0; }
     };
@@ -3041,22 +3055,29 @@ TEST(PatternSearch, ExtensionMemoryAccount) {
     ASSERT_LT(4u, total);
     const uint64_t walk = retained_path_bytes(5, 7);
     EXPECT_EQ(128u + 8 * 3 + 7, walk);
+    // the stack at its deepest: L - k = 2 levels (the anchor's, and position 6's, whose
+    // children complete the walks at L); the price twice a level's bytes in the containers
+    EXPECT_EQ(2 * (80u + 8 + 1), kExtensionLevelBytes);
+    ASSERT_NE(walk, kExtensionLevelBytes);
+    const uint64_t stack = 2 * kExtensionLevelBytes;
 
     auto run = [&](Request request, Budget &budget, Account *account, Result *result) {
         std::vector<PathCtx> paths;
         *result = engine.enumerate(pattern, request, budget, [&](const Context &c) {
-            // the walks not yet handed over are still held while this one is built (braces:
-            // the gtest macro expands to an if/else)
+            // the walks not yet handed over are still held while this one is built, the stack
+            // released (braces: the gtest macro expands to an if/else)
             if (account && account->admissions) {
                 EXPECT_EQ((account->admissions - paths.size()) * walk, account->held);
+                EXPECT_EQ(0u, account->levels);
             }
             paths.push_back(PathCtx { c.node, c.orientation, c.sequence, c.path });
         });
         return paths;
     };
 
-    // every walk fits its half: the answer of a request without an account, every charge
-    // released by the end, the peak the walks kept
+    // every walk fits its half and the stack the other: the answer of a request without an
+    // account, every charge released by the end, the peak the walks kept beside the stack of
+    // the last
     Request partial = path_request();
     partial.mode = Mode::PARTIAL;
     {
@@ -3069,14 +3090,18 @@ TEST(PatternSearch, ExtensionMemoryAccount) {
         EXPECT_TRUE(result.extraction->complete);
         EXPECT_FALSE(result.stop);
         EXPECT_EQ(total, account.admissions);
-        EXPECT_EQ(total * walk, account.peak);
+        EXPECT_EQ(2u, account.levels_peak);
+        EXPECT_EQ(total * walk + stack, account.peak);
         EXPECT_EQ(0u, account.held);
+        EXPECT_EQ(0u, account.levels);
     }
 
-    // the half holds two walks: the extension stops at the third
+    // the account holds the stack and two walks beside it (both within the walks' half), not a
+    // third: the extension stops at the third walk
     const uint64_t kept = 2;
     {
-        Account account(2 * kept * walk + 1);
+        Account account(stack + (kept + 1) * walk - 1);
+        ASSERT_LE(kept * walk, account.max / 2);
         Budget budget = unbounded_budget();
         budget.set_memory(&account);
         Result result;
@@ -3092,8 +3117,9 @@ TEST(PatternSearch, ExtensionMemoryAccount) {
         EXPECT_EQ(Extension::STOPPED, result.anchors->extension);
         EXPECT_EQ(Relation::AT_LEAST, result.anchors->paths.relation);
         EXPECT_EQ(kept + 1, result.anchors->paths.value);
-        EXPECT_EQ(kept * walk, account.peak);
+        EXPECT_EQ(kept * walk + stack, account.peak);
         EXPECT_EQ(0u, account.held);
+        EXPECT_EQ(0u, account.levels);
 
         // the stop is the pattern's, not the budget's: the next pattern searches
         EXPECT_FALSE(budget.stopped());
@@ -3113,9 +3139,10 @@ TEST(PatternSearch, ExtensionMemoryAccount) {
         EXPECT_EQ(0u, account.held);
     }
 
-    // count() keeps no walk: an account that holds nothing refuses nothing
+    // count() keeps no walk but holds its stack: an account that holds the stack counts every
+    // path, its peak the stack's
     {
-        Account account(1);
+        Account account(stack);
         Budget budget = unbounded_budget();
         budget.set_memory(&account);
         Result counted = engine.count(pattern, path_request(), budget);
@@ -3123,6 +3150,112 @@ TEST(PatternSearch, ExtensionMemoryAccount) {
         EXPECT_EQ(Relation::EXACT, counted.anchors->paths.relation);
         EXPECT_EQ(total, counted.anchors->paths.value);
         EXPECT_EQ(0u, account.admissions);
+        EXPECT_EQ(stack, account.peak);
+        EXPECT_EQ(0u, account.held);
+    }
+    // ... and one byte less: the first anchor's second level does not fit, the extension
+    // stops there ({EXTENSION, MAX_MEMORY}, the paths AT_LEAST 0), the stop the pattern's
+    {
+        Account account(stack - 1);
+        Budget budget = unbounded_budget();
+        budget.set_memory(&account);
+        Result counted = engine.count(pattern, path_request(), budget);
+        ASSERT_TRUE(counted.stop);
+        EXPECT_EQ(StopPhase::EXTENSION, counted.stop->phase);
+        EXPECT_EQ(StopReason::MAX_MEMORY, counted.stop->reason);
+        EXPECT_EQ(Extension::STOPPED, counted.anchors->extension);
+        EXPECT_EQ(Relation::AT_LEAST, counted.anchors->paths.relation);
+        EXPECT_EQ(0u, counted.anchors->paths.value);
+        EXPECT_EQ(Relation::EXACT, counted.anchors->total.relation);
+        EXPECT_EQ(kExtensionLevelBytes, account.peak);
+        EXPECT_EQ(0u, account.held);
+        EXPECT_FALSE(budget.stopped());
+    }
+    // without an account nothing is charged: the counts of an unbounded one
+    {
+        Budget budget = unbounded_budget();
+        Result counted = engine.count(pattern, path_request(), budget);
+        EXPECT_FALSE(counted.stop);
+        EXPECT_EQ(total, counted.anchors->paths.value);
+    }
+}
+
+// A deep walk (a homopolymer pattern on a graph whose A^k k-mer loops on itself: one level per
+// position past the anchor, one child each) holds L - k levels of the depth-first stack at
+// once: the account bounds the depth the DFS reaches, in count() and enumerate() alike, the
+// stop at the first level that does not fit ({EXTENSION, MAX_MEMORY}), its peak the levels
+// admitted before it, everything released
+TEST(PatternSearch, ExtensionStackBoundsTheDepth) {
+    struct Account final : public MemoryAccount {
+        uint64_t max;
+        uint64_t held = 0;
+        uint64_t peak = 0;
+        explicit Account(uint64_t max) : max(max) {}
+        bool admit(uint64_t bytes) override {
+            if (bytes > left())
+                return false;
+            held += bytes;
+            peak = std::max(peak, held);
+            return true;
+        }
+        void release(uint64_t bytes) override {
+            EXPECT_LE(bytes, held);
+            held -= std::min(bytes, held);
+        }
+        uint64_t left() const override { return held < max ? max - held : 0; }
+    };
+    const size_t k = 5;
+    auto graph = build(k, { std::string(40, 'A') }, DeBruijnGraph::BASIC);
+    PatternSearch engine(*graph);
+    for (size_t L : { 6, 7, 31, 500, 5000 }) {
+        const Pattern pattern = Pattern::parse(PatternKind::DNA, std::string(L, 'A'));
+        Request request = path_request();
+        request.strands = Strands::FORWARD;
+        const uint64_t levels = L - k;
+        const std::string what = "L " + std::to_string(L);
+        // the stack whole: the one walk counted, the peak the L - k levels
+        {
+            Account account(levels * kExtensionLevelBytes);
+            Budget budget = unbounded_budget();
+            budget.set_memory(&account);
+            Result r = engine.count(pattern, request, budget);
+            EXPECT_FALSE(r.stop) << what;
+            EXPECT_EQ(Relation::EXACT, r.anchors->paths.relation) << what;
+            EXPECT_EQ(1u, r.anchors->paths.value) << what;
+            EXPECT_EQ(levels * kExtensionLevelBytes, account.peak) << what;
+            EXPECT_EQ(0u, account.held) << what;
+        }
+        // every smaller account stops at the level past what it holds
+        for (uint64_t fit : { uint64_t(0), levels / 2, levels - 1 }) {
+            Account account((fit + 1) * kExtensionLevelBytes - 1);
+            for (Mode mode : { Mode::COUNT, Mode::PARTIAL, Mode::ALL_OR_COUNT }) {
+                request.mode = mode;
+                Budget budget = unbounded_budget();
+                budget.set_memory(&account);
+                account.peak = 0;
+                Result r = mode == Mode::COUNT
+                    ? engine.count(pattern, request, budget)
+                    : engine.enumerate(pattern, request, budget, [](const Context&) {
+                          ADD_FAILURE() << "a path released after a memory stop";
+                      });
+                const std::string at = what + " fit " + std::to_string(fit);
+                ASSERT_TRUE(r.stop) << at;
+                EXPECT_EQ(StopPhase::EXTENSION, r.stop->phase) << at;
+                EXPECT_EQ(StopReason::MAX_MEMORY, r.stop->reason) << at;
+                EXPECT_EQ(Extension::STOPPED, r.anchors->extension) << at;
+                EXPECT_EQ(Relation::AT_LEAST, r.anchors->paths.relation) << at;
+                EXPECT_EQ(0u, r.anchors->paths.value) << at;
+                EXPECT_EQ(fit * kExtensionLevelBytes, account.peak) << at;
+                EXPECT_EQ(0u, account.held) << at;
+                EXPECT_FALSE(budget.stopped()) << at;
+                if (mode == Mode::PARTIAL) {
+                    EXPECT_EQ(StopReason::MAX_MEMORY, r.extraction->cut) << at;
+                } else if (mode == Mode::ALL_OR_COUNT) {
+                    EXPECT_EQ(Withheld::OUTPUT_BUDGET, r.extraction->withheld) << at;
+                }
+            }
+            request.mode = Mode::COUNT;
+        }
     }
 }
 
