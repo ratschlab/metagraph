@@ -546,10 +546,11 @@ class RepeatedValues {
         });
     }
 
-    // The (position, value) pairs of counts[r] in ascending order, to take once
-    std::vector<std::pair<uint32_t, uint64_t>> take(size_t r) {
+    // The (position, value) pairs of counts[r] in ascending order, to take once, with
+    // room for |num_more| pairs
+    std::vector<std::pair<uint32_t, uint64_t>> take(size_t r, size_t num_more = 0) {
         const auto hits = std::move(hits_[r]);
-        size_t num_values = 0;
+        size_t num_values = num_more;
         for (const auto &[j, value] : hits) {
             num_values += positions_[j].size();
         }
@@ -1269,8 +1270,13 @@ AnnotatedDBG::get_kmer_coordinates(std::string_view sequence,
         for (size_t r = 0; r < counts.size(); ++r) {
             const auto &[h, count] = counts[r];
             const auto &[col, header] = h;
-            coords_at = unheld_coords.take(r);
-            for (const RecordFold::Run &run : fold.take_runs(h)) {
+            const auto runs = fold.take_runs(h);
+            size_t num_held = 0;
+            for (const RecordFold::Run &run : runs) {
+                num_held += run.len;
+            }
+            coords_at = unheld_coords.take(r, num_held);
+            for (const RecordFold::Run &run : runs) {
                 for (uint32_t i = 0; i < run.len; ++i) {
                     coords_at.emplace_back(run.pos + i, run.value + i);
                 }
