@@ -1270,15 +1270,17 @@ AnnotatedDBG::get_kmer_coordinates(std::string_view sequence,
         for (size_t r = 0; r < counts.size(); ++r) {
             const auto &[h, count] = counts[r];
             const auto &[col, header] = h;
-            const auto runs = fold.take_runs(h);
-            size_t num_held = 0;
-            for (const RecordFold::Run &run : runs) {
-                num_held += run.len;
-            }
-            coords_at = unheld_coords.take(r, num_held);
-            for (const RecordFold::Run &run : runs) {
-                for (uint32_t i = 0; i < run.len; ++i) {
-                    coords_at.emplace_back(run.pos + i, run.value + i);
+            {
+                const auto runs = fold.take_runs(h);
+                size_t num_held = 0;
+                for (const RecordFold::Run &run : runs) {
+                    num_held += run.len;
+                }
+                coords_at = unheld_coords.take(r, num_held);
+                for (const RecordFold::Run &run : runs) {
+                    for (uint32_t i = 0; i < run.len; ++i) {
+                        coords_at.emplace_back(run.pos + i, run.value + i);
+                    }
                 }
             }
             std::sort(coords_at.begin(), coords_at.end());
