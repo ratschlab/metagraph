@@ -936,7 +936,7 @@ To load up a MetaGraph index in server mode for querying it with the Python API 
 .. _configured_pair_id:
 
 Pair identifiers in server responses
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 Response records that identify a configured graph/annotation pair carry its ``graph`` name
 and ``pair_id``. The ID distinguishes pairs that share a name. For example:
@@ -958,7 +958,7 @@ It is an output field. Existing request selectors keep their documented names an
 .. _search_cut_statements:
 
 Search result limits and pair identity
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 For each query sequence, ``POST /search`` returns ``results`` and a ``cuts`` array in match-count,
 presence-signature, k-mer-count and coordinate modes. Label-only and abundance-sum modes omit
