@@ -258,11 +258,17 @@ struct DroppedLabel {
     std::vector<KmerInterval> runs;
 };
 
+struct RecordPlace {
+    uint64_t origin = 0; // record-local coordinate of the seed first k-mer
+    int8_t dir = 0;    // +1 forward, -1 reverse, 0 for a column label
+};
+
 struct SeedResult {
     uint64_t length_bp = 0;
     uint64_t num_kmers = 0;
     // the permitted labels; a label id is an index here
     std::vector<LabelRef> label_dict;
+    std::vector<RecordPlace> record_places; // aligned with label_dict
     // The labels were derived from the seed. Then |labels_dropped| is how many of them
     // max_seed_labels cut.
     // |labels_supporting_total| is how many labels carry the seed.

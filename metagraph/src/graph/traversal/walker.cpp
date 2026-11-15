@@ -1361,6 +1361,16 @@ SeedResult Walker::run() {
     }
 
     validate_seed();
+    result_.record_places.resize(result_.label_dict.size());
+    for (size_t i = 0; i < result_.label_dict.size(); ++i) {
+        const auto &label = result_.label_dict[i];
+        if (label.kind == LabelKind::HEADER) {
+            const auto &place = places_[i];
+            result_.record_places[i] = {
+                oracle_.map_coord(label.column, place.origin).second, place.dir
+            };
+        }
+    }
     query_ = std::make_unique<LabelQuery>(oracle_, result_.label_dict);
 
     arms_[0].arm = Arm::LEFT;

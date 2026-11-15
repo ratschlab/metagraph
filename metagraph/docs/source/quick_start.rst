@@ -933,6 +933,28 @@ To load up a MetaGraph index in server mode for querying it with the Python API 
                            --port <PORT> \
                            --parallel <NUM_THREADS>
 
+.. _configured_pair_id:
+
+Pair identifiers in server responses
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Response records that identify a configured graph/annotation pair carry its ``graph`` name
+and ``pair_id``. The ID distinguishes pairs that share a name. For example:
+
+.. code-block:: json
+
+    {"graph": "refseq", "pair_id": "n1-0c8ac32d-6ec3-5dc6-85c0-6993b9c02020"}
+
+``pair_id`` is ``n1-`` followed by a lowercase UUIDv5. It identifies the exact graph name,
+configured graph path and configured annotation path. The encoding preserves every UTF-8
+byte, including case and path spelling. It applies no Unicode or path normalization and
+resolves no symlinks. Renaming a configured pair changes its ID. Replacing file contents
+without changing those names leaves its ID unchanged. Content verification needs a separate
+fingerprint.
+
+The ID is deterministic public metadata. Treat it as an identifier, never as a credential.
+It is an output field. Existing request selectors keep their documented names and syntax.
+
 Using Python API
 ^^^^^^^^^^^^^^^^
 See :ref:`api`

@@ -6,6 +6,7 @@ import socket
 import subprocess
 import time
 import unittest
+import uuid
 
 import requests
 from parameterized import parameterized_class
@@ -272,6 +273,25 @@ class TestTraverseGraphList(TraverseServer):
             self.assertEqual(['one', 'two'], [walk['graph'] for walk in walks])
             self.assertEqual([['A'], ['B']], [walk['seed']['labels'] for walk in walks])
             self.assertEqual([[self.P], [self.Q]], [self._flanks(walk) for walk in walks])
+
+    def _assert_opaque_pair_ids(self, items):
+        expected = {}
+        for graph in ['one', 'two']:
+            base = f'{self.tempdir.name}/{graph}'
+            fields = [graph, base + '.dbg', base + '.column.annodbg']
+            name = ''.join(f'{len(field.encode("utf-8"))}:{field}' for field in fields)
+            expected[graph] = 'n1-' + str(uuid.uuid5(
+                uuid.UUID('d3565c73-e7e9-5bca-b6a9-64cb5c4c9f93'), name))
+        for item in items:
+            self.assertEqual(expected[item['graph']], item['pair_id'])
+            self.assertNotIn('graph_path', item)
+            self.assertNotIn('annotation_path', item)
+        self.assertNotIn(self.tempdir.name, json.dumps(items))
+
+    def test_traverse_opaque_pair_ids_match_python(self):
+        walks = self._traverse({'seeds': [{'sequence': self.X}]})['results'][0]['walks']
+        self.assertEqual(2, len(walks))
+        self._assert_opaque_pair_ids(walks)
 
     def test_selected_graphs(self):
         seeds = [{'sequence': self.X}]
