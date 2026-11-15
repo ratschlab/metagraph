@@ -1,0 +1,30 @@
+{
+ "route": "POST /resolve",
+ "status": 400,
+ "note": "T6-W4 (the review of 9726cb420, item 6; SPEC-labeled-traversal-core.md section 4.3): the request of sample 67 on a single-graph server (bact_other's pair alone): the same 400 and body, {\"error\": \"request.select.seeds[i].labels: Duplicate seed label '<name>'\"}, refused by the request's parser before its admission (GET /requests/svc-res-w4-68 then answered 404). A real run.",
+ "request": {
+  "sequence": "CCGTGATGGTGATCGTAAACACGAACTTGGTCTTTCTCACTGAGCTAGCACGGGTTCTTACAACAACCAATCTAGTTGATTCCTTGTGTTTGTACTTAGCTCACTATATCATTAGGTGCTTAGCTCAATTTATGTACTGATTGCTTAAAGGAATATCATCTACGCTGGGATAGATGTTCAACATCGCGCAAAAGTGATGTCGATCGCGCAGTTATGCCACGCCGCATTCGGTACCTCGGT",
+  "labels": [
+   "acc1"
+  ],
+  "select": {
+   "policy": "explicit",
+   "seeds": [
+    {
+     "kmer_interval": [
+      0,
+      10
+     ],
+     "labels": [
+      "acc1",
+      "acc1"
+     ]
+    }
+   ]
+  },
+  "request_id": "svc-res-w4-68"
+ },
+ "body": {
+  "error": "request.select.seeds[0].labels: Duplicate seed label 'acc1'"
+ }
+}

@@ -1,0 +1,30 @@
+{
+ "route": "POST /resolve",
+ "status": 400,
+ "note": "T6-W4 (the review of 9726cb420, item 6; SPEC-labeled-traversal-core.md section 4.3, SPEC-multigraph-envelope.md section 5): an explicit /resolve seed names each label once. A seed whose labels name one label twice (the same name, byte for byte) is refused 400 {\"error\": \"request.select.seeds[i].labels: Duplicate seed label '<name>'\"}: /traverse's words for the same fault after the field's path, no code, as every fault of a /resolve request's fields; the first name in the list's order that repeats an earlier one, of the first seed with one. Before, such a seed was answered with the label twice in its labels (label_population.supporting_total and included counting each copy, its seed_id hashing both, so another id than the seed naming it once), and /traverse refused that seed 400 \"seed '<seed_id>': Duplicate seed label '<name>'\". The parser checks it with the seed, after its kmer_interval and its labels' type and before the next seed: after the caps of samples 32 and 38, before every later field, the request's handles and every other explicit-seed 400 (an interval out of range, a label not profiled). Only under policy \"explicit\" (another policy does not select from seeds); two seeds naming one label stay allowed. On a multi-graph server request-level, before any pair, whether the request names one pair or many: no envelope, nothing admitted (GET /requests/svc-res-w4-67 then answered 404). A single-graph server answers the same (sample 68), and the CLI writes the same body and exits 1. The same request naming acc1 once is answered by each pair with the seed's labels [\"acc1\"], supporting_total 1 and included 1, and /traverse walks that seed. A real run on the pairs of sample 30.",
+ "request": {
+  "sequence": "CCGTGATGGTGATCGTAAACACGAACTTGGTCTTTCTCACTGAGCTAGCACGGGTTCTTACAACAACCAATCTAGTTGATTCCTTGTGTTTGTACTTAGCTCACTATATCATTAGGTGCTTAGCTCAATTTATGTACTGATTGCTTAAAGGAATATCATCTACGCTGGGATAGATGTTCAACATCGCGCAAAAGTGATGTCGATCGCGCAGTTATGCCACGCCGCATTCGGTACCTCGGT",
+  "labels": [
+   "acc1"
+  ],
+  "select": {
+   "policy": "explicit",
+   "seeds": [
+    {
+     "kmer_interval": [
+      0,
+      10
+     ],
+     "labels": [
+      "acc1",
+      "acc1"
+     ]
+    }
+   ]
+  },
+  "request_id": "svc-res-w4-67"
+ },
+ "body": {
+  "error": "request.select.seeds[0].labels: Duplicate seed label 'acc1'"
+ }
+}

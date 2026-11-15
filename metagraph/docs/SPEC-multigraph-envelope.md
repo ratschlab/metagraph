@@ -266,7 +266,7 @@ The answer keeps its upstream shape (a list of `{seq_description, results, ...}`
   id is admitted at the same point, without an entry.
 - On `/resolve` and `/pattern` the request's own 400s (the body, the selection, the fields; on `/resolve` also what
   the request and k decide of its explicit seeds: a `kmer_interval` empty or out of range, a seed label that is not
-  one of `labels`) come before every admission 409 (`instance_mismatch`, the repeated id, `expired`): a malformed request with an expired
+  one of `labels`, a seed naming a label twice, which its parser refuses request-level, T6-W4) come before every admission 409 (`instance_mismatch`, the repeated id, `expired`): a malformed request with an expired
   `not_after_ms` gets 400. The seeds are checked in their order, the work's, which checks a seed's labels before
   the next seed: under a discovery the seeds after the first that names labels are checked by the work. An
   HTTP-level 400 never holds a `request_id`: one that only the work can find (a seed not fully present in the graph,

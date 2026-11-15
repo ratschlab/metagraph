@@ -572,6 +572,24 @@ static void check_resolve_counts(const Json::Value &json, uint64_t max_explicit_
     }
 }
 
+// An explicit seed's labels name each label once (T6-W4, the review of 9726cb420, item 6): a
+// repeat was frozen as given -- the label twice in the seed's labels, supporting_total and
+// included counting each copy, the seed id hashing both -- and /traverse refuses that seed
+// ("Duplicate seed label", walker.cpp). Refused here, with /traverse's words after the field's
+// path: the first name, in the list's order, that repeats an earlier one. The names seen are
+// views of the parsed request's names in a hash set, as /traverse's check (linear in the names)
+static void refuse_repeated_seed_label(const std::vector<std::string> &labels,
+                                       const std::string &path) {
+    std::unordered_set<std::string_view> named;
+    named.reserve(labels.size());
+    for (const std::string &name : labels) {
+        if (!named.insert(name).second) {
+            throw InvalidRequest(path + ": Duplicate seed label '"
+                                 + ::utils::clip_for_message(name) + "'");
+        }
+    }
+}
+
 ResolveRequest parse_resolve_request(const Json::Value &json, uint64_t max_explicit_labels,
                                      uint64_t max_explicit_seeds) {
     check_resolve_counts(json, max_explicit_labels, max_explicit_seeds);
@@ -657,6 +675,8 @@ ResolveRequest parse_resolve_request(const Json::Value &json, uint64_t max_expli
                 }
                 seed.kmers = { *begin, *end };
                 seed.labels = e.strings("labels");
+                if (req.policy.policy == SelectionPolicy::EXPLICIT)
+                    refuse_repeated_seed_label(seed.labels, e.path("labels"));
                 req.policy.explicit_seeds.push_back(std::move(seed));
             }
         }

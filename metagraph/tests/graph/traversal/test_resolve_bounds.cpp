@@ -32,6 +32,7 @@
 #include "annotation/representation/annotation_matrix/static_annotators_def.hpp"
 #include "cli/traverse.hpp"
 #include "common/utils/file_utils.hpp"
+#include "common/utils/string_utils.hpp"
 
 #if defined(__APPLE__)
 #include <malloc/malloc.h>
@@ -1697,6 +1698,136 @@ TEST(ResolveBoundsRoute, TheExplicitSeedsCap) {
                           ["selection"]["counts"]["selected"].asUInt64());
 }
 
+// ---- an explicit seed names each label once (T6-W4, the review of 9726cb420, item 6)
+
+// A request of explicit seeds on k-mer 0 of |sequence|, the i-th naming |seed_labels[i]|, with
+// the request's `labels` |profiled| (none: no member)
+Json::Value named_seeds_request(const std::string &sequence,
+                                const std::vector<std::string> &profiled,
+                                const std::vector<std::vector<std::string>> &seed_labels) {
+    Json::Value request;
+    request["sequence"] = sequence;
+    for (const std::string &name : profiled) {
+        request["labels"].append(name);
+    }
+    request["select"]["policy"] = "explicit";
+    Json::Value &seeds = request["select"]["seeds"];
+    seeds = Json::Value(Json::arrayValue);
+    for (const auto &names : seed_labels) {
+        Json::Value seed;
+        seed["kmer_interval"].append(0);
+        seed["kmer_interval"].append(1);
+        seed["labels"] = Json::Value(Json::arrayValue);
+        for (const std::string &name : names) {
+            seed["labels"].append(name);
+        }
+        seeds.append(seed);
+    }
+    return request;
+}
+
+std::string repeated_label(size_t seed, const std::string &name) {
+    return "request.select.seeds[" + std::to_string(seed) + "].labels: Duplicate seed label '"
+        + name + "'";
+}
+
+// A seed's labels naming one label twice are refused by the parser, with /traverse's words
+// after the field's path (/traverse refuses such a seed; before, /resolve froze it with the
+// label twice, supporting_total and included counting each copy, its id hashing both): the
+// first name that repeats an earlier one, of the first seed with one, after that seed's interval
+// and before the next seed and every later field. Two seeds naming one label, and identical
+// seeds, are parsed as before; another policy's seeds, which are not selected from, are not
+// checked
+TEST(ResolveBoundsRoute, AnExplicitSeedNamesEachLabelOnce) {
+    const std::string q = random_seq(200, 1818);
+    EXPECT_EQ(repeated_label(0, "L"),
+              refusal_of(named_seeds_request(q, { "L" }, { { "L", "L" } }), 0));
+    // the first name, in the list's order, that repeats an earlier one
+    EXPECT_EQ(repeated_label(0, "B"),
+              refusal_of(named_seeds_request(q, { "A", "B" }, { { "A", "B", "B", "A" } }), 0));
+    // the first seed with a repeat
+    EXPECT_EQ(repeated_label(2, "A"),
+              refusal_of(named_seeds_request(q, { "A", "B" },
+                                             { { "A" }, { "A", "B" }, { "B", "A", "A" },
+                                               { "B", "B" } }), 0));
+    // below the labels' cap as without one; at the cap the cap is not what refuses it
+    EXPECT_EQ(repeated_label(0, "L"),
+              refusal_of(named_seeds_request(q, { "L" }, { { "L", "L" } }), 2));
+    // ... and above it the cap first (it reads only the list's size)
+    EXPECT_EQ("request.select.seeds[0].labels: at most 1 labels per seed "
+              "(--resolve-max-explicit-labels)",
+              refusal_of(named_seeds_request(q, { "L" }, { { "L", "L" } }), 1));
+    // two seeds naming one label, and identical seeds: parsed
+    EXPECT_EQ("", refusal_of(named_seeds_request(q, { "A", "B" },
+                                                 { { "A", "B" }, { "A", "B" }, { "B" } }), 0));
+    // names differing in a byte are two names
+    EXPECT_EQ("", refusal_of(named_seeds_request(q, { "a", "A" }, { { "a", "A" } }), 0));
+    // a name the request's labels do not hold: the repeat is the parser's, before the
+    // selection's "not profiled"
+    EXPECT_EQ(repeated_label(0, "zz"),
+              refusal_of(named_seeds_request(q, { "L" }, { { "zz", "zz" } }), 0));
+    // a name clipped as every error text clips a client's
+    const std::string long_name(5000, 'n');
+    EXPECT_EQ(repeated_label(0, ::utils::clip_for_message(long_name)),
+              refusal_of(named_seeds_request(q, { long_name }, { { long_name, long_name } }),
+                         0));
+    // the seed's own interval and labels' type first
+    Json::Value faulty = named_seeds_request(q, { "L" }, { { "L", "L" }, { "L" } });
+    faulty["select"]["seeds"][0]["kmer_interval"] = "x";
+    EXPECT_EQ("request.select.seeds[0].kmer_interval: expected [begin, end] as non-negative "
+              "integers", refusal_of(faulty, 0));
+    // then the repeat, before a later seed's faults and every later field
+    faulty = named_seeds_request(q, { "L" }, { { "L", "L" }, { "L" } });
+    faulty["select"]["seeds"][1]["kmer_interval"] = "x";
+    faulty["bogus"] = 1;
+    faulty["request_id"] = 5;
+    EXPECT_EQ(repeated_label(0, "L"), refusal_of(faulty, 0));
+    faulty = named_seeds_request(q, { "L" }, { { "L" }, { "L", "L" } });
+    faulty["select"]["seeds"][0]["kmer_interval"][1] = 1000;
+    EXPECT_EQ(repeated_label(1, "L"), refusal_of(faulty, 0));
+    // under a discovery as with labels
+    Json::Value discovered = named_seeds_request(q, {}, { { "L", "L" } });
+    discovered["discover"]["max_labels"] = 5;
+    EXPECT_EQ(repeated_label(0, "L"), refusal_of(discovered, 0));
+    // another policy's seeds are not selected from: not checked
+    for (const char *policy : { "max_support", "longest_first" }) {
+        Json::Value other = named_seeds_request(q, { "L" }, { { "L", "L" } });
+        other["select"]["policy"] = policy;
+        EXPECT_EQ("", refusal_of(other, 0)) << policy;
+    }
+
+    // the route: refused before its admission (nothing of the index read), on a single-graph
+    // server and on a multi-graph server's pair (labels it does not hold dropped, not refused)
+    // alike; the seed naming its label once is selected as before, once
+    auto anno = build_anno_graph<DBGSuccinct, annot::ColumnCompressed<>>(kK, { q }, { "L" });
+    const std::vector<std::pair<Json::Value, std::string>> refused {
+        { named_seeds_request(q, { "L" }, { { "L", "L" } }), "L" },
+        { named_seeds_request(q, { "L", "Z" }, { { "Z", "L", "Z" } }), "Z" },
+    };
+    for (bool dropped : { false, true }) {
+        for (const auto &[request, name] : refused) {
+            bool admitted = false;
+            try {
+                cli::process_resolve_request(request, *anno, "r1", 0, nullptr, nullptr, {},
+                                             nullptr, nullptr, dropped,
+                                             [&]() { admitted = true; });
+                ADD_FAILURE() << "not refused";
+            } catch (const cli::InvalidRequest &e) {
+                EXPECT_EQ(repeated_label(0, name), std::string(e.what()));
+            }
+            EXPECT_FALSE(admitted) << name;
+        }
+    }
+    const Json::Value once = cli::process_resolve_request(
+            named_seeds_request(q, { "L" }, { { "L" }, { "L" } }), *anno, "r1");
+    ASSERT_EQ(2u, once["selection"]["seeds"].size());
+    for (const Json::Value &seed : once["selection"]["seeds"]) {
+        EXPECT_EQ("[\"L\"]", compact(seed["labels"]));
+        EXPECT_EQ(1u, seed["label_population"]["supporting_total"].asUInt64());
+        EXPECT_EQ(1u, seed["label_population"]["included"].asUInt64());
+    }
+}
+
 // A select.max_seeds above the cap is lowered to it and stated in limits.clamped (as the
 // answer-labels clamp of discover.max_labels), with or without a deadline; the answer is that of
 // the cap; at the cap, or with none, nothing is stated
@@ -2201,6 +2332,31 @@ TEST(ResolveBoundsRoute, Sample38) {
     EXPECT_EQ("seeds: " + doc["body"]["error"].asString(),
               seeds_refusal_of(doc["request"], 10'000, cap));
     EXPECT_EQ("", seeds_refusal_of(doc["request"], 10'000, cap + 1));
+}
+
+// Samples 67 and 68 (SPEC-labeled-traversal-core.md §4.3; T6-W4), real runs on a multi-graph and a
+// single-graph server: an explicit seed naming its label twice, the parser's own body for the
+// sample's request; the request naming it once is parsed
+TEST(ResolveBoundsRoute, Samples67And68) {
+    for (const char *name : { "67_resolve_400_repeated_seed_label.json",
+                              "68_resolve_400_repeated_seed_label_single.json" }) {
+        const std::string path = source_path(std::string("tests/data/multigraph_contract/") + name);
+        std::ifstream in(path, std::ios::binary);
+        ASSERT_TRUE(in.good()) << path << " not found";
+        Json::Value doc;
+        std::string errors;
+        Json::CharReaderBuilder builder;
+        ASSERT_TRUE(Json::parseFromStream(builder, in, &doc, &errors)) << errors;
+        EXPECT_EQ(400, doc["status"].asInt()) << name;
+        EXPECT_EQ((std::vector<std::string>{ "error" }), doc["body"].getMemberNames()) << name;
+        EXPECT_EQ(doc["body"]["error"].asString(), refusal_of(doc["request"], 10'000)) << name;
+        Json::Value once = doc["request"];
+        Json::Value &labels = once["select"]["seeds"][0]["labels"];
+        ASSERT_EQ(2u, labels.size()) << name;
+        EXPECT_EQ(labels[0], labels[1]) << name;
+        labels.resize(1);
+        EXPECT_EQ("", refusal_of(once, 10'000)) << name;
+    }
 }
 
 // Sample 39 (SPEC-labeled-traversal-core.md §4.6, SPEC-multigraph-envelope.md §5; T4 review R1, S1), a
