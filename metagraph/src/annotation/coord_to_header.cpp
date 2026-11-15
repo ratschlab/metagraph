@@ -82,6 +82,7 @@ CoordToHeader::CoordToHeader(const CoordToHeader &other)
       : headers_(other.headers_), coord_offsets_(other.coord_offsets_),
         column_labels_(other.column_labels_),
         column_order_verified_(other.column_order_verified_),
+        check_record_ends_(other.check_record_ends_),
         header_hash_(other.header_hash_) {}
 
 void CoordToHeader::set_column_labels(std::vector<std::string> &&labels) {
@@ -471,6 +472,15 @@ void CoordToHeader::map_to_local_coords(std::vector<RowTuples> *rows) const {
     }
 }
 
+// A lookup in a mapping whose record ends do not increase (loaded without check_record_ends, as
+// only a test does): refused, never answered with a record outside the column or a range that does
+// not hold the coordinate (the review of 9726cb420: an inverted rank's underflow named record
+// 2^64 - 3, and LabelRecorder's walk over a row's coordinates never moved past a range that ended
+// before its coordinate)
+[[noreturn]] static void refuse_corrupt_lookup(const std::string &what) {
+    throw std::runtime_error("The record mapping (.seqs) is corrupt: " + what);
+}
+
 std::pair<size_t, uint64_t>
 CoordToHeader::map_single_coord(Column col, uint64_t coord) const {
     if (col >= num_columns()) {
@@ -482,9 +492,22 @@ CoordToHeader::map_single_coord(Column col, uint64_t coord) const {
         throw std::out_of_range(fmt::format("Coordinate {} for column {} out of range "
                 "(CoordToHeader has {} coordinates for that column)", coord, col, offsets.size()));
     }
-    size_t header = coord ? offsets.rank1(coord - 1) : 0;
-    uint64_t local_coord = !header ? coord : coord - offsets.select1(header) - 1;
-    return { header, local_coord };
+    // (in a mapping that loaded the record ends strictly increase: the record is one of the
+    // column's, and the one before it ends before |coord|)
+    const size_t header = coord ? offsets.rank1(coord - 1) : 0;
+    if (header >= num_sequences(col)) {
+        refuse_corrupt_lookup(fmt::format("coordinate {} of column {} ranks as record {} of {}",
+                                          coord, col, header, num_sequences(col)));
+    }
+    if (!header)
+        return { 0, coord };
+    const uint64_t previous_end = offsets.select1(header);
+    if (previous_end >= coord) {
+        refuse_corrupt_lookup(fmt::format("coordinate {} of column {} ranks as record {}, whose "
+                                          "predecessor ends at {}", coord, col, header,
+                                          previous_end));
+    }
+    return { header, coord - previous_end - 1 };
 }
 
 CoordToHeader::SequenceRange
@@ -498,10 +521,21 @@ CoordToHeader::sequence_range(Column col, uint64_t coord) const {
         throw std::out_of_range(fmt::format("Coordinate {} for column {} out of range "
                 "(CoordToHeader has {} coordinates for that column)", coord, col, offsets.size()));
     }
-    // as map_single_coord: a set bit marks the last coordinate of each sequence
+    // as map_single_coord: a set bit marks the last coordinate of each sequence (and the range
+    // holds |coord|, which a caller walking sorted coordinates relies on to move past it)
     const size_t header = coord ? offsets.rank1(coord - 1) : 0;
+    if (header >= num_sequences(col)) {
+        refuse_corrupt_lookup(fmt::format("coordinate {} of column {} ranks as record {} of {}",
+                                          coord, col, header, num_sequences(col)));
+    }
     const uint64_t first = header ? offsets.select1(header) + 1 : 0;
-    return { header, first, offsets.select1(header + 1) };
+    const uint64_t last = offsets.select1(header + 1);
+    if (coord < first || coord > last) {
+        refuse_corrupt_lookup(fmt::format("coordinate {} of column {} ranks as record {}, whose "
+                                          "coordinates are {} to {}", coord, col, header, first,
+                                          last));
+    }
+    return { header, first, last };
 }
 
 uint64_t CoordToHeader::last_coord(Column col, size_t seq_id) const {
@@ -531,6 +565,11 @@ uint64_t CoordToHeader::num_kmers_in_sequence(Column col, size_t seq_id) const {
     //     select1(s+1) - (s == 0 ? -1 : select1(s)).
     uint64_t end = offsets.select1(seq_id + 1);
     uint64_t start = seq_id ? offsets.select1(seq_id) + 1 : 0;
+    if (end < start) {
+        // (start > end >= 0: seq_id > 0, and start - 1 is its predecessor's end)
+        refuse_corrupt_lookup(fmt::format("record {} of column {} ends at {}, not after its "
+                                          "predecessor's end at {}", seq_id, col, end, start - 1));
+    }
     return end - start + 1;
 }
 
@@ -588,8 +627,8 @@ struct StoredIntVector {
 //   equal to the position it stands for, against one pass over the high part (V3-S3: a corrupt
 //   value read outside the high part or answered wrong records);
 // - the inversion flag 0 or 1.
-// Not checked: the low part's values (a corrupt one maps a coordinate to another record or
-// states a wrong count, inside the column). |in| is returned to where it was
+// Not checked here: the low part's values (check_record_ends checks the positions they make, once
+// sdsl loaded them). |in| is returned to where it was
 static void check_offsets_layout(std::istream &in, uint64_t file_size, uint64_t column) {
     const std::streampos start = in.tellg();
     auto fail = [&](const std::string &why) {
@@ -761,6 +800,43 @@ static void check_offsets_layout(std::istream &in, uint64_t file_size, uint64_t 
     in.seekg(start);
 }
 
+// The positions the coordinate offsets of column |column| store (the record ends, or, stored
+// inverted, the other coordinates), decoded as sdsl decodes them, strictly increase, the last below
+// the length. The i-th is the high part's i-th set bit's position less i (its bucket), shifted by
+// the low bits per position, plus the low part's i-th value: within a bucket only the low values
+// order them, and check_offsets_layout reads none. sdsl's rank and select assume a set: in the
+// review of 9726cb420, a column of 12 records stored inverted with its 4 low values zeroed made the
+// inverted rank underflow (record 2^64 - 3) and record ranges end before the coordinates asked
+// for, on which a /traverse in annotate mode looped, allocating. One pass over the loaded high
+// part's words and low values (check_offsets_layout checked that the high part has one set bit per
+// low value and none past its end), nothing copied. A corrupt low value that keeps the positions
+// increasing still maps a coordinate to another record or states a wrong count, inside the column
+static void check_record_ends(const bit_vector_sd &offsets, uint64_t column) {
+    const auto &sd = offsets.data();
+    const auto words = sd.high.data();
+    const uint64_t num_words = (sd.high.bit_size() + 63) / 64;
+    uint64_t i = 0;
+    uint64_t previous = 0;
+    for (uint64_t w = 0; w < num_words; ++w) {
+        for (uint64_t word = words[w]; word; word &= word - 1, ++i) {
+            const uint64_t bucket = w * 64 + sdsl::bits::lo(word) - i;
+            const uint64_t position = (bucket << sd.wl) | sd.low[i];
+            if (i && position <= previous) {
+                throw std::runtime_error(fmt::format(
+                        "the coordinate offsets of column {} decode their position {} as {}, not "
+                        "above the previous {} (their low part is corrupt)", column, i, position,
+                        previous));
+            }
+            previous = position;
+        }
+    }
+    if (i && previous >= offsets.size()) {
+        throw std::runtime_error(fmt::format(
+                "the coordinate offsets of column {} decode their last position as {}, past their "
+                "length of {}", column, previous, offsets.size()));
+    }
+}
+
 bool CoordToHeader::load(const std::string &filename_base) {
     const std::string path = utils::make_suffix(filename_base, kExtension);
     std::unique_ptr<std::ifstream> in;
@@ -831,6 +907,8 @@ bool CoordToHeader::load(const std::string &filename_base) {
             bit_vector_sd offsets;
             if (!offsets.load(*in) || in->fail())
                 throw std::runtime_error(fmt::format("the coordinate offsets of column {}", i));
+            if (check_record_ends_)
+                check_record_ends(offsets, i);
             // one set bit per record, the last coordinate of each, the column's last k-mer last
             if (offsets.num_set_bits() != headers.size()) {
                 throw std::runtime_error(fmt::format(

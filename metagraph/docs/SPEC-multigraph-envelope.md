@@ -878,7 +878,18 @@ allocated for it or sdsl reads it:
 - the inversion flag, 0 or 1;
 - once loaded, a column with records must end at its last record's end, and a column without records must state no
   length (`column <j>: no records, and its coordinate offsets state <n> k-mers`: any length loaded before, and a
-  coordinate lookup in the column then divided by its zero records and read a record of none, a segfault).
+  coordinate lookup in the column then divided by its zero records and read a record of none, a segfault);
+- once loaded, the positions each column's offsets store (its record ends, or, when stored inverted, its other
+  coordinates), decoded as sdsl decodes them: strictly increasing, the last below the length (`the coordinate offsets
+  of column <j> decode their position <i> as <p>, not above the previous <q> (their low part is corrupt)`, or `...
+  decode their last position as <p>, past their length of <n>`). Within a bucket of the high part only the low part's
+  values order the positions, and none of the checks above reads them. Since train 6 (the review of 9726cb420): a
+  column of 12 records stored inverted, its four low values zeroed, loaded and passed every check above. Its rank
+  underflowed (coordinate 1 in record 2^64 - 3), /search answered other records, and a /traverse in annotate mode
+  looped on record ranges that ended before their coordinates, allocating until the process was killed. The lookups
+  refuse such a mapping as well, which only a mapping loaded without the check can reach (a test's): a coordinate
+  that ranks as no record of its column, or outside its record's range, and a record that ends before its
+  predecessor, throw `The record mapping (.seqs) is corrupt: ...` instead of answering.
 
 Before the train-3 verification a stated length of 2^20 or more ended the process with a segfault (any of `stats`,
 `query`, `server_query`, and a per-request copy), a select support over 2^36 bits took 805 MiB and a header's or
@@ -894,9 +905,11 @@ select samples, held while the column is checked: measured +0.2 to 4 MiB peak on
 on the largest, bact_pseudomonadota, plain and `--mmap`), and about 250 to 300 MB for a single-column `.seqs` of
 6 x 10^8 records (UniParc's size), small beside that column's header strings (24 to 32 bytes each). Its time is
 linear in the file: each word of the high part read once, each stored select value checked once (+0 to 10 % CPU
-on the r237 copies' loads).
+on the r237 copies' loads). The positions' check (train 6) reads the offsets sdsl loaded in place, copying nothing
+(on `--mmap` it reads the mapped file): one more pass over each column's high part and its low values.
 
-A load does not check the low part's values (the low bits of each position) or a header's text. A corrupt low value
-maps a coordinate to another record of its column, or states a wrong k-mer count for a record, without reading outside
-the column. One header's or label's stated length can be allocated up to the bytes left in the file before its read
-fails. A client cannot reach any of this: it takes a corrupt `.seqs` on the server's disk.
+A load checks the low part's values (the low bits of each position) only for the order of the positions they make,
+and does not check a header's text. A corrupt low value that keeps the positions increasing maps a coordinate to
+another record of its column, or states a wrong k-mer count for a record, without reading outside the column. One
+header's or label's stated length can be allocated up to the bytes left in the file before its read fails. A client
+cannot reach any of this: it takes a corrupt `.seqs` on the server's disk.

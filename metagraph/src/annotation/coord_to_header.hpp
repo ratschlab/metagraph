@@ -65,6 +65,12 @@ class CoordToHeader {
     bool load(const std::string &filename_base);
     void serialize(const std::string &filename_base) const;
 
+    // Whether load() checks that the record ends of each column, as decoded, strictly increase
+    // within its length (on by default; a file whose ends do not fails its load). A test turns it
+    // off to load such a file and reach the lookups' own bounds, which refuse a record outside the
+    // column
+    void set_check_record_ends(bool check) { check_record_ends_ = check; }
+
     // The labels of the annotation columns this mapping was built for, in column order, as
     // `annotate --index-header-coords` states them: for its i-th file the label --anno-filename
     // gives it (the file name as passed). Null when none are stated (a file written before
@@ -90,7 +96,11 @@ class CoordToHeader {
     // alone was checked ("count_only")
     bool column_order_verified() const { return column_order_verified_; }
 
-    // global_coord -> (seq_id, local_coord)
+    // global_coord -> (seq_id, local_coord). Throws std::out_of_range for a column or coordinate
+    // out of range, and std::runtime_error for a corrupt mapping, which a load refuses (its
+    // coordinate ranks as no record of the column, or its record's predecessor does not end
+    // before it; sequence_range and num_kmers_in_sequence refuse alike a range that does not hold
+    // its coordinate or ends before its predecessor's end)
     std::pair<size_t, uint64_t> map_single_coord(Column col, uint64_t coord) const;
 
     // The sequence a global coordinate of a column falls in, with the first and last global
@@ -239,6 +249,7 @@ class CoordToHeader {
     // the trailer's labels while they are kept (until check_columns), and what it verified
     std::optional<std::vector<std::string>> column_labels_;
     bool column_order_verified_ = false;
+    bool check_record_ends_ = true;
 
     // find_header(): the entries name records of |headers_|, which only load() changes, and
     // load() drops the index first

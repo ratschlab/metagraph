@@ -3745,6 +3745,73 @@ class TestRecordMappingAtLoad(TestingBase):
                 self.assertEqual(1, res.returncode, res.stderr.decode())
                 self.assertIn(line, res.stderr.decode())
 
+    def test_record_ends_that_do_not_increase_are_refused_at_load(self):
+        # the review of 9726cb420: a column of 12 records of 5, 1, ..., 1 k-mers (16 k-mers, its
+        # 12 record ends stored inverted: the zeros 0-3, their 2-bit low values 0, 1, 2, 3 in the
+        # byte 0xE4). That byte zeroed repeats the zero at 0 four times and kept every size the
+        # load checked: the server served it, a /traverse in annotate mode looped on its record
+        # ranges, allocating, and /search answered other records. Now a server exits 1 before it
+        # is ready, naming the file, and the CLI exits 1
+        d = os.path.join(self.d, 'twelve')
+        os.makedirs(d)
+        rng = random.Random(9726)
+        records = [''.join(rng.choice('ACGT') for _ in range(35 if i == 0 else 31))
+                   for i in range(12)]
+        kmers = [s[j:j + 31] for s in records for j in range(len(s) - 30)]
+        self.assertEqual(16, len(set(kmers)))
+        fasta = os.path.join(d, 'twelve.fa')
+        with open(fasta, 'w') as f:
+            f.write(''.join(f'>t{i}\n{s}\n' for i, s in enumerate(records)))
+        for cmd in (['build', '-p', '1', '--mode', 'basic', '--graph', 'succinct', '-k', '31',
+                     '-o', 'graph', 'twelve.fa'],
+                    ['annotate', '-p', '1', '--anno-filename', '-i', 'graph.dbg', '--anno-type',
+                     'column', '--coordinates', '-o', 'anno', 'twelve.fa'],
+                    ['transform_anno', '-p', '1', '--anno-type', 'column_coord', '--coordinates',
+                     '-o', 'anno', 'anno.column.annodbg'],
+                    ['annotate', '-p', '1', '-i', 'graph.dbg', '--anno-filename',
+                     '--index-header-coords', '-o', 'anno', 'twelve.fa']):
+            res = subprocess.run(shlex.split(METAGRAPH) + cmd, cwd=d, stdout=subprocess.PIPE,
+                                 stderr=subprocess.STDOUT)
+            self.assertEqual(0, res.returncode, (cmd, res.stdout.decode()[-3000:]))
+        graph = os.path.join(d, 'graph.dbg')
+        anno = os.path.join(d, 'anno.column_coord.annodbg')
+        def query(mmap):
+            return [*shlex.split(METAGRAPH), 'query', '--query-mode', 'coords', *mmap, '-i', graph,
+                    '-a', anno, fasta]
+        res = subprocess.run(query([]), stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        self.assertEqual(0, res.returncode, res.stderr.decode())
+        self.assertIn('<t0>/5:0-0-4', res.stdout.decode())
+        self.assertIn('<t11>/1:0-0', res.stdout.decode())
+
+        seqs = os.path.join(d, 'anno.seqs')
+        with open(seqs, 'rb') as f:
+            data = bytearray(f.read())
+        # the number of columns, the 12 headers, the offsets' length (16) and low bits (2), the
+        # low part's size in bits (8) and width (2), then its data
+        at = 8 + 8 + sum(1 + len(f't{i}') for i in range(12))
+        self.assertEqual(16, int.from_bytes(data[at:at + 8], 'little'))
+        self.assertEqual([2, 8, 2], [data[at + 8], int.from_bytes(data[at + 9:at + 17], 'little'),
+                                     data[at + 17]])
+        self.assertEqual(0xE4, data[at + 18])
+        data[at + 18] = 0
+        with open(seqs, 'wb') as f:
+            f.write(data)
+        line = (f"Cannot load CoordToHeader from '{seqs}': could not read contents (possibly "
+                f"corrupted or incompatible) (caught: the coordinate offsets of column 0 decode "
+                f"their position 1 as 0, not above the previous 0 (their low part is corrupt))")
+        for mmap in ([], ['--mmap']):
+            with self.subTest(mmap=mmap):
+                # (60 s: the base served this file until stopped)
+                status, log = run_to_exit(['-i', graph, '-a', anno, *mmap],
+                                          os.path.join(d, f'served{"_mmap" if mmap else ""}.log'),
+                                          timeout=60)
+                self.assertEqual(1, status, log)
+                self.assertIn(line, log)
+                self.assertNotIn('Annotated graph loaded', log)
+                res = subprocess.run(query(mmap), stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+                self.assertEqual(1, res.returncode, res.stdout.decode())
+                self.assertIn(line, res.stderr.decode())
+
     def test_another_mapping_is_refused_at_start_up(self):
         cases = [
             ('column_coord', 'subset', True, "it has 1 columns, the annotation 2 labels"),
