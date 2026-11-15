@@ -20,6 +20,15 @@ single retrieval, the **graphlet**:
 * going further is a **new traversal**: the library builds the request from a walk's
   continuation, the server runs it. Nothing about the first retrieval is resumed.
 
+**Merging graphlets is not supported.** Every operation reads one retrieval, or compares
+two: ``subgraph()`` is a filtered view of one graphlet, ``compare()`` compares two
+retrievals of the same locus on the same index, and a continuation (``deepen()``,
+``next_request()``) returns a new graphlet that is not joined to its parent.
+``branching.on_reconverge: "merge"`` merges paths within one traversal only. Combining
+graphlets would need rules for their overlaps, their orientation, labels whose ids are
+local to each index, provenance and incomplete evidence; concatenating their records
+does not make a graphlet.
+
 The traversal itself (seed validation, the walk rule, label modes, termination reasons)
 is specified in ``metagraph/docs/SPEC-labeled-traversal-core.md`` (§5 to §7); the
 format and the library in ``metagraph/docs/DESIGN-traverse-graphlet.md``. MGT v1 is
@@ -132,11 +141,23 @@ run), and an attempt stopped at its duration bound while its response was built 
 ``AttemptAtBound`` (a 503 with ``usage``: it ran, so it is not retried under the same
 ``attempt_id`` -- refused while the server holds the id, it would run again after that).
 ``capabilities()`` and ``resolve()`` call the other two routes (on a multi-graph server
-``capabilities(graph=..., graph_path=...)`` describes one of its indexes),
+``capabilities(graph=..., graph_path=..., annotation_path=...)`` describes one of its
+pairs),
 ``server_capabilities()`` reads the server-wide document (``GET /capabilities``:
 the routes and features, ``feature_level``, the mode and graph names, the attempts),
 ``traverse_raw(request)`` sends a request you built yourself, and ``api_path`` is for a
 server behind a proxy prefix.
+
+On a multi-graph server a request names the pair it runs on: ``traverse(...,
+graph=..., graph_path=..., annotation_path=...)``, or the client's own pair given to
+``TraverseClient(..., graph=..., graph_path=..., annotation_path=...)``. ``graph_path``
+picks one graph of a name with several, ``annotation_path`` one annotation of a graph
+with several; the request carries ``graph`` and ``graph_path``, or, with an
+``annotation_path``, one ``pairs`` object, the only place ``/traverse`` takes it. The
+server answers in the envelope of that pair; the client reads its entry, and each
+graphlet keeps the pair's tags (``graph``, ``graph_path``, ``annotation_path``) in its
+envelope. Its continuations and replays run on that pair (below), not on the client's
+own.
 
 .. graphlet-example: client server
 
@@ -462,7 +483,7 @@ so that a large retrieval can be saved or spooled before (or without) building i
 
 .. code-block:: text
 
-   True J 3441
+   True J 3536
 
 Integrity
 ^^^^^^^^^
@@ -1189,8 +1210,10 @@ Support along a walk
 
 ``support_profile(arm, walk, kind='displayed')`` returns maximal ``SupportRun`` pieces
 (``from_bp``, ``to_bp``, ``labels``, ``exact``, ``total``) of the labels supporting the
-displayed bases; ``kind='route'`` adds every run on the walk over its own route
-interval. ``support_changes(arm, walk)`` says where the displayed support changes and
+displayed bases, each run's label from its ``evidence_from`` as its claim states it (on
+``merge``, ``b.fa`` and ``a.fa`` reach the walk's end through the merges at 36 and 62, so
+they support its displayed bases from there); ``kind='route'`` adds every run on the walk
+over its own route interval. ``support_changes(arm, walk)`` says where the displayed support changes and
 why: an end (with the walker's reason), a switch, a ``split`` (the label took another
 branch, with its first base), a ``merge`` (it joined through another parent). In
 ``annotate`` mode both kinds are the recorded sets, with ``exact`` false where a list
@@ -1211,15 +1234,11 @@ was cut and ``total`` the true count.
 
 .. code-block:: text
 
-   (0, 20) ['a.fa', 'b.fa', 'c.fa', 'both.fa']
-   (20, 36) ['a.fa', 'c.fa', 'both.fa']
-   (36, 46) ['a.fa', 'b.fa', 'c.fa', 'both.fa']
-   (46, 62) ['b.fa', 'c.fa', 'both.fa']
+   (0, 36) ['c.fa', 'both.fa']
+   (36, 62) ['b.fa', 'c.fa', 'both.fa']
    (62, 100) ['a.fa', 'b.fa', 'c.fa', 'both.fa']
    [(0, 100, 4)]
-   20 removed b.fa split ['T']
    36 added b.fa merge 2
-   46 removed a.fa split ['C']
    62 added a.fa merge 4
 
 Label summary
@@ -1301,8 +1320,9 @@ segments and walks that carry the selected labels, with the backing graphlet's o
 ids (nothing is renumbered). A view needs at least one label (``None`` or ``[]`` is a
 ``BadSelector``). It answers ``walks()``, ``claims()``, ``to_fasta()`` and
 ``summary()`` for the selected labels -- ``walks(top=k)`` ranks the view's walks and
-then keeps ``k`` of them -- and its completeness is the backing ``complete_to_bp``
-*qualified "for the selected labels"*. Its ``of`` names the backing body (the digest of
+then keeps ``k`` of them -- and, for a view of one arm (``arm=``), on that arm only: the
+other arm has no walks, claims or records there. Its completeness is the backing
+``complete_to_bp`` *qualified "for the selected labels"*. Its ``of`` names the backing body (the digest of
 its text, or the ``of=`` the caller gives, such as a store handle: then the body is not
 dumped for its digest). ``save()`` writes the unchanged backing body plus the view's
 selectors in the ``J`` line; ``load()`` returns the view again, and refuses a saved view
@@ -1360,8 +1380,13 @@ them exactly.
 builds the resubmittable request: one seed per walk (its continuation, with its labels
 named explicitly in ``constrain`` mode), the retrieval's normalized strategy with
 ``direction`` set to the arm, ``bounds.max_extension_bp = bp`` when given, and the
-keyword overrides deep-merged into the strategy (``release``, ``graph`` and
-``graph_path`` go to the request level). ``labels.change_cost`` is merged as one unit: an
+keyword overrides deep-merged into the strategy (``release`` and the pair's selectors
+``graph``, ``graph_path``, ``annotation_path``, ``graphs`` and ``pairs`` go to the request
+level). The request runs on the pair the retrieval was answered on, which a multi-graph
+server's envelope names: ``graph`` and ``graph_path``, or a ``pairs`` object with the
+``annotation_path``. A selector among the overrides replaces that pair whole
+(``graph=None`` names none), and ``deepen()`` adds the client's own pair only to a
+graphlet that names none (a single-graph server's). ``labels.change_cost`` is merged as one unit: an
 override that names another ``model`` replaces the retrieval's whole (the server reads only
 the fields of the model it names and refuses any other), one that names the same model, or
 none, updates its fields. ``None`` for a section the strategy holds as an object
@@ -2051,9 +2076,10 @@ digits):
   tells a caller that the retrieval can be run again. ``free(handle)`` deletes for good;
 * ``save(handle, path)`` / ``load(path)`` move entries through ``.mgt`` files
   (``load_graphlet(path)`` also returns the model it parsed, kept or not), and
-  ``list()`` describes the entries. ``request_of(g, graph=..., graph_path=...)`` keeps
-  the graph of a multi-graph server in the replay request (else the envelope's, when
-  the server echoed it); a request without one is valid on a single-graph server only;
+  ``list()`` describes the entries. ``request_of(g, graph=..., graph_path=...,
+  annotation_path=...)`` keeps the pair of a multi-graph server in the replay request
+  (else the pair the envelope names, where a multi-graph server answered); a request
+  without one is valid on a single-graph server only;
 * the disk TTL counts from the last use also across restarts (the entry file is
   rewritten once its recorded use lags by a tenth of the TTL). Processes may share a
   spool: a body is deleted only when no entry file names it any more, a handle another
@@ -2432,4 +2458,6 @@ An example whose directive carries the flag ``pending`` shows the intended behav
 of a library fix that is not merged yet; the runner reports its difference without
 failing, and ``--write --pending`` replaces its output once the fix is in. No example is
 pending today. The client example runs against a stand-in server that
-replays the committed fixture response.
+replays the committed fixture response. The branch's CI runs the check in its fixture
+checks (``.github/workflows/dev-branch.yml``), so an output that no longer matches the
+library fails there.

@@ -1247,17 +1247,18 @@ class GraphletStore:
             data = text.encode('utf-8')
             return _write_user_file(os.path.abspath(path), data, '.mgt-')
 
-    def load(self, path, request=None, *, parse_budget=None, graph=None, graph_path=None):
+    def load(self, path, request=None, *, parse_budget=None, graph=None, graph_path=None,
+             annotation_path=None):
         """A saved .mgt file -> a new handle (its J line restores envelope and view).
         Under parse limits (or |parse_budget|) a parse that stops raises and stores
-        nothing: the file is left as it is. |graph|, |graph_path|: the graph of a
-        multi-graph server the graphlet was retrieved from, kept in the replay request
-        (request_of())."""
+        nothing: the file is left as it is. |graph|, |graph_path|, |annotation_path|: the
+        pair of a multi-graph server the graphlet was retrieved from, kept in the replay
+        request (request_of())."""
         return self.load_graphlet(path, request, parse_budget=parse_budget, graph=graph,
-                                  graph_path=graph_path)[0]
+                                  graph_path=graph_path, annotation_path=annotation_path)[0]
 
     def load_graphlet(self, path, request=None, *, parse_budget=None, graph=None,
-                      graph_path=None):
+                      graph_path=None, annotation_path=None):
         """load() -> (the new handle, the graphlet the load parsed). The model is the one
         a resident entry holds; returned also when the store does not keep it in RAM
         (max_ram_mb), so that a caller needs no second parse of what it just loaded -- a
@@ -1268,21 +1269,23 @@ class GraphletStore:
             text = f.read()
         g = self._parsing(lambda b: parse(text, budget=b), self._parse_budget(parse_budget))
         h = self.put_graphlet(g, request if request is not None else
-                              self.request_of(g, graph=graph, graph_path=graph_path))
+                              self.request_of(g, graph=graph, graph_path=graph_path,
+                                              annotation_path=annotation_path))
         return h, g
 
     @staticmethod
-    def request_of(g, *, graph=None, graph_path=None):
+    def request_of(g, *, graph=None, graph_path=None, annotation_path=None):
         """The replayable request of a graphlet with an envelope: its seed as validated
         (sequence, the seed labels by name) and the normalized strategy. None when there
         is none -- also when the seed labels' names cannot be verified to resolve back
         to them (ops.resubmittable_names): a replay must not run under other labels.
 
-        |graph|, |graph_path| (else the envelope's, where the server echoed them): the
-        graph a multi-graph server ran it on, kept so that a replay runs on that graph
-        (without them a multi-graph server refuses the replay, or a client's other graph
-        answers). A request without them is valid on a
-        single-graph server only."""
+        |graph|, |graph_path|, |annotation_path| (else the pair the envelope names, where
+        a multi-graph server answered: client.answered_pair()): the pair it ran on, kept so
+        that a replay runs on that pair (without it a multi-graph server refuses the replay,
+        or a client's other pair answers), written by client.pair_members() -- `graph` and
+        `graph_path`, or a `pairs` object with the annotation_path. Given ones replace the
+        envelope's whole. A request without them is valid on a single-graph server only."""
         if not g.has_envelope:
             return None
         seed = {'sequence': g.seed.sequence}
@@ -1302,12 +1305,10 @@ class GraphletStore:
         req = {'seeds': [seed], 'strategy': strategy}
         if g.envelope.get('release'):
             req['release'] = g.envelope['release']
-        graph = graph or g.envelope.get('graph')
-        graph_path = graph_path or g.envelope.get('graph_path')
-        if graph:
-            req['graph'] = graph
-        if graph_path:
-            req['graph_path'] = graph_path
+        from .client import answered_pair, pair_members
+        if graph is None and graph_path is None and annotation_path is None:
+            graph, graph_path, annotation_path = answered_pair(g.envelope) or (None,) * 3
+        req.update(pair_members(graph, graph_path, annotation_path))
         return req
 
     def __contains__(self, handle):

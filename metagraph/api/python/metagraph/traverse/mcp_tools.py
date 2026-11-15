@@ -107,8 +107,9 @@ from . import coords as _C
 from . import derive, export, ops
 from ._codec import GraphletFormatError
 from .budget import LocalBudget, LocalBudgetExceeded, LocalLimits
-from .client import (AttemptAtBound, ServerInitializing, TraverseError, _ResponseCut,
-                     auto_coordinates, drop_coordinates_note)
+from .client import (SELECTORS, AttemptAtBound, ServerInitializing, TraverseError,
+                     _ResponseCut, auto_coordinates, drop_coordinates_note, pair_members,
+                     requested_pair, single_answer)
 from .model import (
     ARM_SIDES, AmbiguousLabel, IncompleteRecording, MissingEnvelope, NextRequest,
     UnknownLabel, UnverifiableLabelName,
@@ -356,9 +357,19 @@ class _Receipt(dict):
         return out
 
 
+def _traverse_answer(client, req):
+    """POST /traverse through |client| -> the answer as a single-graph server writes it: a
+    multi-graph server's envelope of one pair (SPEC-multigraph-envelope.md section 1) is read
+    as its entry with the envelope's usage beside it (single_answer(), as
+    TraverseClient.traverse() reads it), so that results[0] and the envelope the graphlet
+    keeps are the pair's answer; a refused entry raises its refusal (TraverseError, answered
+    as backend_error with its http_status)."""
+    return single_answer(client.traverse_raw(req))
+
+
 def _first_result(response):
-    """results[0] of a traversal response (traverse_fetch, traverse_continue): a response
-    without a result is empty_response, not a failed seed."""
+    """results[0] of a traversal response read by _traverse_answer() (traverse_fetch,
+    traverse_continue): a response without a result is empty_response, not a failed seed."""
     results = response.get('results') or []
     if not results:
         raise ToolError('empty_response', 'the server returned no result')
@@ -1276,7 +1287,7 @@ class GraphletTools:
             # deepen() and build_request() send it (never posted without one)
             req = _with_graph(req, client)
             identity = self._check_same_index(client, ident, allow_unverified_index, req)
-        response = self._backend(client.traverse_raw, req)
+        response = self._backend(_traverse_answer, client, req)
         result = _first_result(response)
         # coordinates the automatic rule asked for under a memory budget, in a seed that
         # stopped on it: how to walk further without them (the client's note)
@@ -1449,14 +1460,16 @@ class GraphletTools:
         """A replay or a continuation runs against the same index as its entry: the
         backend's capabilities must state the entry's identity (_same_index) before
         anything is submitted. -> the identity statement for the result. |req|: the request
-        about to be sent -- the capabilities read are those of the graph it names (a
+        about to be sent -- the capabilities read are those of the pair it names (a
         continuation with overrides={'graph': ...} is never checked against the client's
-        own graph and run on another); a request on the client's own graph reads the
+        own graph and run on another; one on the pair its parent was answered on reads that
+        pair's, annotation_path included); a request on the client's own graph reads the
         client's capabilities."""
-        graph = (req or {}).get('graph') or None
-        graph_path = (req or {}).get('graph_path') or None
-        if graph_path is not None or (graph is not None
-                                      and graph != getattr(client, 'graph', None)):
+        graph, graph_path, annotation_path = requested_pair(req) or (None, None, None)
+        if annotation_path is not None:
+            caps = self._backend(client.capabilities, graph, graph_path, annotation_path)
+        elif graph_path is not None or (graph is not None
+                                        and graph != getattr(client, 'graph', None)):
             caps = self._backend(client.capabilities, graph, graph_path)
         else:
             caps = self._backend(client.capabilities)
@@ -1546,7 +1559,7 @@ class GraphletTools:
         _check_receipt(_Receipt(dict({'handle': 'g_' + '0' * 12, 'parent': parent,
                                       'identity': identity}, **stated), optional),
                        max_bytes or self.max_bytes)
-        response = self._backend(client.traverse_raw, req)
+        response = self._backend(_traverse_answer, client, req)
         result = _first_result(response)
         if 'graphlet' not in result:
             return _seed_failed(result, parent=parent)
@@ -2544,15 +2557,22 @@ def _admit_paths(call, g, a):
 
 
 def _with_graph(req, client):
-    """|req| with the client's graph when it names none (a copy: a stored request is not
-    changed in place). A NextRequest keeps its attributes (notes, budgets)."""
-    graph = getattr(client, 'graph', None)
-    if not graph or 'graph' in req:
+    """|req| on the client's own pair when it names none (a copy: a stored request is not
+    changed in place): its graph, and graph_path and annotation_path where the client has
+    them (pair_members()). A request that names a pair (a continuation on its parent's,
+    a replay of one) keeps it. A NextRequest keeps its attributes (notes, budgets)."""
+    if any(k in req for k in SELECTORS):
+        return req
+    members = pair_members(getattr(client, 'graph', None),
+                           getattr(client, 'graph_path', None),
+                           getattr(client, 'annotation_path', None)) \
+        if getattr(client, 'graph', None) else {}
+    if not members:
         return req
     if isinstance(req, NextRequest):
-        req['graph'] = graph
+        req.update(members)
         return req
-    return dict(req, graph=graph)
+    return dict(req, **members)
 
 
 def _same_index(parent, other, what, allow_unverified=False):

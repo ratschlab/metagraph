@@ -6,7 +6,7 @@ splits / claims / events (and presence runs in annotate mode). Label columns hol
 (the stable join key) with the name beside them; ids are the format's ordinals.
 """
 
-from . import derive
+from . import derive, ops
 from .model import ARM_SIDES
 
 __all__ = ['frames', 'records']
@@ -47,12 +47,14 @@ def records(g):
                 'entered_by': r.entered_by, 'route_bp': r.route_bp,
                 'evidence_from': derive.evidence(a, r)[1], 'loss': r.loss,
                 'branches': r.branches})
-        for w in g.walks(a, by='id'):
+        # the walks' scalar facts, not whole walks: their chains and bases (quadratic on a
+        # comb) and claims (listed below) are not needed here
+        for walk, leaf, length_bp, path_reason, n_alive, n_full, complete, beyond \
+                in ops.walk_rows(g, a):
             out['walks'].append({
-                'arm': side, 'walk': w.path_id, 'leaf': w.leaf, 'length_bp': w.length_bp,
-                'path_reason': w.path_reason, 'n_alive': w.n_alive,
-                'n_full': len(w.labels_full), 'complete': w.complete,
-                'beyond_certified_bp': w.beyond_certified_bp})
+                'arm': side, 'walk': walk, 'leaf': leaf, 'length_bp': length_bp,
+                'path_reason': path_reason, 'n_alive': n_alive, 'n_full': n_full,
+                'complete': complete, 'beyond_certified_bp': beyond})
         for sp in derive.splits(a, g.mode):
             out['splits'].append({'arm': side, 'at_bp': sp.at_bp, 'segment': sp.segment,
                                   'children': list(sp.children),

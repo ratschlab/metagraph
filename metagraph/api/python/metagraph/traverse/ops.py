@@ -47,6 +47,7 @@ import math
 import sys
 
 from . import budget as _B
+from . import client as _client
 from . import coords as _C
 from . import derive
 from ._codec import REASON, RESOURCE_CODES, UNLIMITED, GraphletFormatError
@@ -1459,6 +1460,32 @@ def _leaf_end_counts(a):
     return {s: len(v) for s, v in _annotate_leaf_ends(a).items() if segs[s].leaf is not None}
 
 
+def _walk_end(a, p):
+    """(path_reason, complete, beyond_certified_bp) of the walk of path |p|: its leaf's
+    reason, whether it is certified (no resource stop at its leaf, within complete_to_bp),
+    and how far it reaches past complete_to_bp."""
+    code = a.segments[p.leaf].leaf.path_reason
+    return (REASON[code] if code else None,
+            (code is None or code not in RESOURCE_CODES) and p.length_bp <= a.complete_to_bp,
+            max(0, p.length_bp - a.complete_to_bp))
+
+
+def walk_rows(g, arm):
+    """The scalar facts of every walk of |arm|, in path order, as frames.records() states
+    them: (path_id, leaf, length_bp, path_reason, n_alive, n_full, complete,
+    beyond_certified_bp) -- the Walk fields of walks(by='id') with n_full =
+    len(labels_full) -- from the per-leaf records only, as rank_walks() reads them: no
+    chain, spelling or claim is built (every walk's chain and bases are quadratic on a
+    comb)."""
+    a = g.arm(arm)
+    out = []
+    for p, full, alive_ids, _ in _ranked_walks(g, a, 'id', None, True, 0):
+        path_reason, complete, beyond = _walk_end(a, p)
+        out.append((p.id, p.leaf, p.length_bp, path_reason, len(alive_ids), len(full),
+                    complete, beyond))
+    return out
+
+
 def _walk_objects(g, a, ranked, with_claims, b=None, out=None):
     """The Walk objects of |ranked|. Under a budget, chunk by chunk: each chunk is
     charged at its price before it is built (its chains, spellings and claims), so a
@@ -1530,13 +1557,11 @@ def _walk_objects(g, a, ranked, with_claims, b=None, out=None):
     seen = set()
     out = []
     for p, full, alive_ids, _ in ranked:
-        seg = a.segments[p.leaf]
         reasons = {}
         if g.mode == 'constrain':
             for e in derive.end_labels(a, p.leaf):
                 name = a.runs[e.run].reason
                 reasons[name] = reasons.get(name, 0) + 1
-        code = seg.leaf.path_reason
         if batch is None:
             chain = p.segments
             try:
@@ -1550,14 +1575,12 @@ def _walk_objects(g, a, ranked, with_claims, b=None, out=None):
             if p.leaf in seen:
                 chain = list(chain)          # a walk asked twice: each Walk owns its list
             seen.add(p.leaf)
+        path_reason, complete, beyond = _walk_end(a, p)
         fields = dict(
             path_id=p.id, leaf=p.leaf, segments=chain, length_bp=p.length_bp,
-            sequence=sequence, path_reason=REASON[code] if code else None,
+            sequence=sequence, path_reason=path_reason,
             end_reasons=reasons, claims=by_leaf.get(p.leaf, []), labels_full=full,
-            n_alive=len(alive_ids),
-            complete=(code is None or code not in RESOURCE_CODES)
-            and p.length_bp <= a.complete_to_bp,
-            beyond_certified_bp=max(0, p.length_bp - a.complete_to_bp))
+            n_alive=len(alive_ids), complete=complete, beyond_certified_bp=beyond)
         if rcs is None:
             out.append(Walk(**fields))
         else:
@@ -1880,25 +1903,54 @@ def _support_profile(g, arm, leaf, kind, b):
                 if run.to_bp > run.from_bp:
                     extra.append(run)
         if extra:
-            cuts = sorted({0, a.segments[seg_id].end_bp}
-                          | {x for f, t, _ in prof for x in (f, t)}
-                          | {x for r in extra for x in (r.from_bp, r.to_bp)})
-            if b is not None:
-                n = len(cuts)
-                widest = max((len(x[2]) for x in prof), default=0) + len(extra)
-                b.charge(sort_work(n) + n * (len(prof) + len(extra))
-                         + ((n * widest) >> _B.ID_SHIFT_C),
-                         n * (TUPLE + 2 * INT + set_bytes(widest)))
-            pieces = []
-            for f, t in zip(cuts, cuts[1:]):
-                base = next((s for pf, pt, s in prof if pf <= f < pt), frozenset())
-                add = {r.label for r in extra if r.from_bp <= f < r.to_bp}
-                pieces.append((f, t, frozenset(base | add)))
-            prof = _merge_runs(pieces)
+            prof = _route_profile(prof, extra, a.segments[seg_id].end_bp, b)
     elif kind != 'displayed':
         raise ValueError("kind is 'displayed' or 'route'")
     return _support_out(g, b, prof,
                         lambda r: SupportRun(r[0], r[1], _labels(g, r[2]), True, len(r[2])))
+
+
+def _route_profile(prof, extra, end, b=None):
+    """The route profile: the displayed profile |prof| [(from, to, set)] with the label of
+    every run of |extra| (each to_bp > from_bp) added over its own [from_bp, to_bp), as
+    maximal runs over [0, |end|). One sweep over the cuts -- the profile's boundaries and
+    the runs' ends, ascending -- with the runs covering the current piece counted per label
+    (a run covers [f, t) when from_bp <= f < to_bp): the profile and the runs are each read
+    once, where a scan of both per piece was quadratic (4,000 runs on one walk took
+    seconds). |b|: the cuts, the two orders of the runs, the counts and every piece's set
+    charged before they are made."""
+    cuts = sorted({0, end} | {x for f, t, _ in prof for x in (f, t)}
+                  | {x for r in extra for x in (r.from_bp, r.to_bp)})
+    m = len(extra)
+    if b is not None:
+        n = len(cuts)
+        widest = max((len(x[2]) for x in prof), default=0) + m
+        b.charge(sort_work(n) + 2 * sort_work(m) + n + len(prof) + 2 * m
+                 + ((n * widest) >> _B.ID_SHIFT_C),
+                 n * (TUPLE + 2 * INT + set_bytes(widest)) + 2 * list_bytes(m)
+                 + dict_bytes(m))
+    starts = sorted(extra, key=lambda r: r.from_bp)
+    ends = sorted(extra, key=lambda r: r.to_bp)
+    covering = {}                   # label -> the runs covering the current piece
+    pieces = []
+    k = i = j = 0
+    empty = frozenset()
+    for f, t in zip(cuts, cuts[1:]):
+        while k < len(prof) and prof[k][1] <= f:
+            k += 1
+        base = prof[k][2] if k < len(prof) and prof[k][0] <= f else empty
+        while i < m and starts[i].from_bp <= f:
+            covering[starts[i].label] = covering.get(starts[i].label, 0) + 1
+            i += 1
+        while j < m and ends[j].to_bp <= f:
+            lab = ends[j].label
+            if covering[lab] == 1:
+                del covering[lab]
+            else:
+                covering[lab] -= 1
+            j += 1
+        pieces.append((f, t, base.union(covering) if covering else frozenset(base)))
+    return _merge_runs(pieces)
 
 
 def support_changes(g, arm, leaf, *, budget=None):
@@ -2788,8 +2840,14 @@ def next_request(g, arm, leaves, bp=None, reduce_budget=True, reset_branches=Fal
     only when the rebuilt pool is the same for every walk (their continuations carry the
     same labels, or no switch is possible); otherwise IncompatibleContinuations names
     next_requests(), one request per walk. Keyword overrides deep-merge into the
-    strategy (labels.change_cost as described above); release, graph and graph_path are
-    request-level. Raises MissingEnvelope on
+    strategy (labels.change_cost as described above); release and the pair's selectors
+    (graph, graph_path, annotation_path, graphs, pairs) are request-level. The request runs
+    on the pair the retrieval was answered on: a multi-graph server's envelope names it
+    (graph, graph_path, annotation_path; client.answered_pair()), written by
+    client.pair_members() -- `graph` and `graph_path`, or a `pairs` object with the
+    annotation_path, which /traverse takes there only. A selector in the overrides replaces
+    that selection whole (graph=None: no pair named); annotation_path or graph_path without
+    a graph is a ValueError. A single-graph retrieval names no pair. Raises MissingEnvelope on
     a body-only graphlet. budget= (local limits) a LocalBudget, not the request's loss
     budget: the continuations, the rebuilt labels.extra and the switch searches are charged;
     a stop raises, with no partial. Any other value of budget= is a keyword override like
@@ -2874,7 +2932,7 @@ def _next_request(g, arm, leaves, bp, reduce_budget, reset_branches, lb, overrid
             _charge_entry_copy(lb, k_ov)
         final = copy.deepcopy(strategy)
         _merge_overrides(final, {k: v for k, v in overrides.items()
-                                 if k not in ('release', 'graph', 'graph_path')})
+                                 if k not in _REQUEST_LEVEL})
         flab = _section(final, 'labels')
         if lb is not None:
             lb.charge(W_ELEM * len(_entries_of(flab.get('change_cost'))))
@@ -3055,9 +3113,9 @@ def _next_request(g, arm, leaves, bp, reduce_budget, reset_branches, lb, overrid
     release = g.envelope.get('release')
     if release:
         request['release'] = release
-    for k in ('release', 'graph', 'graph_path'):
-        if k in overrides:
-            request[k] = overrides.pop(k)
+    if 'release' in overrides:
+        request['release'] = overrides.pop('release')
+    request.update(_pair_of_request(g, overrides))
     if lb is not None:
         _charge_entry_copy(lb, k_ov)          # the request's own copy of the override's
     # the same merge as |final|'s (a model change replaces change_cost; None for an object
@@ -3078,6 +3136,29 @@ def _next_request(g, arm, leaves, bp, reduce_budget, reset_branches, lb, overrid
         # |final| is dropped on return; the request's copies stay with the request
         _release_entry_copy(lb, k_env + k_ov)
     return request
+
+
+# the overrides of next_request() that are request members, never strategy fields
+_REQUEST_LEVEL = ('release',) + _client.SELECTORS
+
+
+def _pair_of_request(g, overrides):
+    """The selection members of a continuation (removed from |overrides|): the overrides'
+    selectors when they give any -- as given, a graph with its paths written by
+    pair_members() (`pairs` for an annotation_path), `graphs` and `pairs` passed on --
+    else the pair the retrieval was answered on (a multi-graph envelope's tags), else
+    none."""
+    given = {k: overrides.pop(k) for k in _client.SELECTORS if k in overrides}
+    if not given:
+        pair = _client.answered_pair(g.envelope)
+        return _client.pair_members(*pair) if pair else {}
+    if 'graphs' in given or 'pairs' in given:
+        if given.get('annotation_path') is not None:
+            raise ValueError('annotation_path names the pair of graph; with graphs or pairs '
+                             'give it in the pair object')
+        return {k: v for k, v in given.items() if k != 'annotation_path' and v is not None}
+    return _client.pair_members(given.get('graph'), given.get('graph_path'),
+                                given.get('annotation_path'))
 
 
 def next_requests(g, arm, leaves, bp=None, reduce_budget=True, reset_branches=False, *,
@@ -3352,8 +3433,14 @@ class GraphletView:
         return ids if top is None else ids[:top]
 
     def claims(self, arm=None, at_most_bp=None, strict=True, *, budget=None, resume=None):
+        """claims() of the backing graphlet for the view's labels, on the view's arms: |arm|
+        (the view's arm by default, both arms of a view of both) -- an arm outside the view
+        has no claims here, [] as walks() and to_fasta() answer for it (the backing arm's
+        claims were answered before)."""
         if arm is None and self.arm_side is not None:
             arm = self.arm_side
+        if arm is not None and self.backing.arm(arm).side not in self.segments:
+            return []
         return self.backing.claims(arm, self.labels, at_most_bp, strict, budget=budget,
                                    resume=resume)
 
