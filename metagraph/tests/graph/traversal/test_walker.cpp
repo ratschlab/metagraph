@@ -1006,12 +1006,29 @@ TEST(WalkerDerive, DerivationNarrowsAWideFirstKmerToItsCarriers) {
     seed.sequence = seed_seq;
     auto derived = traverse_seed(oracle, seed, Strategy());
     ASSERT_EQ(2u, derived.label_dict.size());
+    ASSERT_EQ(2u, derived.record_places.size());
+    for (const auto &place : derived.record_places) {
+        EXPECT_EQ(0u, place.origin);
+        EXPECT_EQ(1, place.dir);
+    }
     std::set<std::string> names;
     for (const auto &l : derived.label_dict) {
         EXPECT_EQ(LabelKind::HEADER, l.kind);
         names.insert(l.name);
     }
     EXPECT_EQ((std::set<std::string>{ "h_carrierA", "h_carrierB" }), names);
+}
+
+// A repeated seed follows the one chosen record place, not every seed copy.
+TEST(WalkerDerive, ChosenRecordPlaceUsesFirstCopy) {
+    const std::string record = "AAACTTTAAAG";
+    auto anno = build_anno_graph<DBGSuccinct, annot::ColumnCompressed<>>(
+        3, {record}, {"column"}, DeBruijnGraph::BASIC, true);
+    anno = with_coord_to_header(std::move(anno), {{"record"}}, {{record.size() - 2}});
+    auto result = run(*anno, "AAA", {"record"});
+    ASSERT_EQ(1u, result.record_places.size());
+    EXPECT_EQ(0u, result.record_places[0].origin);
+    EXPECT_EQ(1, result.record_places[0].dir);
 }
 
 // a header in two columns cannot be resubmitted by name: refused, with the lever
@@ -1187,6 +1204,9 @@ TYPED_TEST(WalkerRecordTest, ASeedHeldTwiceIsPlacedAtTheLowestCoordinate) {
         ASSERT_EQ(1u, res.label_dict.size());
         EXPECT_EQ("rec", res.label_dict[0].name);
         EXPECT_EQ(1u, res.label_dict[0].seq_id);
+        ASSERT_EQ(1u, res.record_places.size());
+        EXPECT_EQ(0u, res.record_places[0].origin); // local to rec, not the preceding record
+        EXPECT_EQ(1, res.record_places[0].dir);
         const ArmResult &left = res.arms[kLeft], &right = res.arms[kRight];
         check_invariants(left);
         check_invariants(right);
@@ -1379,6 +1399,12 @@ void check_reverse_complement_seed() {
 
             auto bwd = run(*anno, rc(forward), labels);
             ASSERT_EQ(1u, bwd.label_dict.size()) << mode;
+            ASSERT_EQ(1u, fwd.record_places.size());
+            ASSERT_EQ(1u, bwd.record_places.size());
+            EXPECT_EQ(T.size() + 5, fwd.record_places[0].origin);
+            EXPECT_EQ(1, fwd.record_places[0].dir);
+            EXPECT_EQ(T.size() + 5 + forward.size() - kK, bwd.record_places[0].origin);
+            EXPECT_EQ(-1, bwd.record_places[0].dir);
             EXPECT_EQ(LabelKind::HEADER, bwd.label_dict[0].kind);
             ASSERT_EQ(1u, bwd.arms[kRight].paths.size()) << mode;
             ASSERT_EQ(1u, bwd.arms[kLeft].paths.size()) << mode;

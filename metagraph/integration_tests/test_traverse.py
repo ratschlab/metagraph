@@ -288,6 +288,11 @@ class TestTraverseGraphList(TraverseServer):
             self.assertNotIn('annotation_path', item)
         self.assertNotIn(self.tempdir.name, json.dumps(items))
 
+    def test_traverse_opaque_pair_ids_match_python(self):
+        walks = self._traverse({'seeds': [{'sequence': self.X}]})['results'][0]['walks']
+        self.assertEqual(2, len(walks))
+        self._assert_opaque_pair_ids(walks)
+
     def test_search_opaque_pair_ids_match_python(self):
         response = self._post('search', {'FASTA': '>q\n' + self.X, 'top_labels': 10,
                                          'discovery_fraction': 1})

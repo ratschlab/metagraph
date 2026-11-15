@@ -716,7 +716,8 @@ int run_server(Config *config) {
                 std::vector<TraverseIndex> selected;
                 for (const std::string &name : names) {
                     for (const auto &files : indexes.at(name)) {
-                        selected.push_back({ name, graphs_cache.at(files).get() });
+                        selected.push_back({ name, graphs_cache.at(files).get(),
+                                             pair_ids.at({ name, files.first, files.second }) });
                     }
                 }
                 return Json::writeString(Json::StreamWriterBuilder(),
