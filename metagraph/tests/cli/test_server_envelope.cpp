@@ -877,8 +877,9 @@ TEST(ServerEnvelope, Samples71To75PartialRefusal) {
                     expected[tag] = entry[tag];
                 }
                 EXPECT_EQ(text(expected), text(entry));
-                if (answer)
+                if (answer) {
                     EXPECT_GT(r["priced_mb"].asUInt64(), r["max_memory_mb"].asUInt64());
+                }
                 // no row of the unit (a single-graph server's rows have no tags)
                 for (const Json::Value &row : object["results"]) {
                     EXPECT_NE(text(row.get("graph", Json::Value())), text(entry["graph"]));
