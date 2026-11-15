@@ -19,6 +19,9 @@ TEST(SearchCutJson, ReportsCountTieWithoutClaimingMedianOrder) {
     EXPECT_EQ(1u, entry["tied_returned"].asUInt64());
     EXPECT_FALSE(entry.isMember("nth_median"));
     EXPECT_TRUE(entry["graph"].isNull());
+    EXPECT_TRUE(entry["pair_id"].isNull());
+    EXPECT_FALSE(entry.isMember("graph_path"));
+    EXPECT_FALSE(entry.isMember("annotation_path"));
 }
 
 TEST(SearchCutJson, CompleteEmptyAndUnrecordedDiffer) {

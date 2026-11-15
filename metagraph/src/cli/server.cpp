@@ -492,6 +492,7 @@ int run_server(Config *config) {
                                             index = graphs_cache.at({ graph_fname, anno_fname }).get();
                                         }
 
+                                        const auto &pair_id = pair_ids.at({ name, graph_fname, anno_fname });
                                         auto json = process_search_request(search_request, *index);
                                         for (auto &sequence : json) {
                                             // Pair identity must accompany both the rows and their cut.
@@ -500,7 +501,7 @@ int run_server(Config *config) {
                                                     continue;
                                                 for (auto &value : sequence[field]) {
                                                     value["graph"] = name;
-                                                    value["pair_id"] = pair_ids.at({ name, graph_fname, anno_fname });
+                                                    value["pair_id"] = pair_id;
                                                 }
                                             }
                                         }

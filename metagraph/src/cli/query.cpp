@@ -302,7 +302,7 @@ Json::Value SeqSearchResult::to_json(bool verbose_output, size_t k) const {
 
     if (cut_) {
         Json::Value cut(Json::objectValue);
-        for (const char *tag : {"graph", "graph_path", "annotation_path", "index_fp"})
+        for (const char *tag : {"graph", "pair_id", "index_fp"})
             cut[tag] = Json::nullValue;
         cut["matched"] = Json::UInt64(cut_->matched);
         cut["returned"] = Json::UInt64(cut_->returned);
