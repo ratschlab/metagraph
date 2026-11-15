@@ -2,8 +2,11 @@
 #include <tsl/hopscotch_map.h>
 #include <server_http.hpp>
 #include <csignal>
+#include <map>
+#include <tuple>
 
 #include "common/logger.hpp"
+#include "common/configured_pair_id.hpp"
 #include "common/unix_tools.hpp"
 #include "common/utils/string_utils.hpp"
 #include "common/utils/file_utils.hpp"
@@ -225,6 +228,9 @@ int run_server(Config *config) {
 
     tsl::hopscotch_map<std::string, std::vector<std::pair<std::string, std::string>>> indexes;
 
+    // IDs are computed once per configured pair, never per result row.
+    std::map<std::tuple<std::string, std::string, std::string>, std::string> pair_ids;
+
     ThreadPool graphs_pool(get_num_threads(), 1000 /* max_num_tasks */);
     size_t num_server_threads = std::max(1u, get_num_threads());
     set_num_threads(std::max(1u, config->parallel_each));
@@ -272,6 +278,8 @@ int run_server(Config *config) {
             }
             std::getline(ss, annotation_path, ',');
 
+            pair_ids.emplace(std::make_tuple(name, graph_path, annotation_path),
+                             common::configured_pair_id(name, graph_path, annotation_path));
             indexes[name].emplace_back(std::move(graph_path), std::move(annotation_path));
             num_indexes++;
         }
