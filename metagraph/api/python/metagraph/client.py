@@ -47,8 +47,14 @@ class GraphClientJson:
                query_coords: bool = False,
                graphs: Union[None, List[str]] = None,
                align: bool = False,
+               partial_refusal: bool = False,
                **align_params) -> List[JsonDict]:
-        """See parameters for alignment `align_params` in align()"""
+        """See parameters for alignment `align_params` in align(). With `partial_refusal` a query
+        sequence whose search on a pair (a unit) would pass the server's answer budget
+        (--search-max-answer-memory-mb) is refused alone: its `cuts` entry for that pair states
+        `refused` and its rows are absent; without it such a request is refused whole (400
+        search_answer_too_large). GET /capabilities' `search.unit_refused` states whether the
+        server reads the field (SPEC-multigraph-envelope.md section 3)."""
 
         if discovery_fraction < 0.0 or discovery_fraction > 1.0:
             raise ValueError(
@@ -84,6 +90,8 @@ class GraphClientJson:
                       "query_coords": query_coords}
         if graphs is not None:
             param_dict["graphs"] = graphs
+        if partial_refusal:
+            param_dict["partial_refusal"] = True
 
         search_results = self._json_seq_query(sequence, param_dict, "search")
 
@@ -197,6 +205,7 @@ class GraphClient:
                query_coords: bool = False,
                graphs: Union[None, List[str]] = None,
                align: bool = False,
+               partial_refusal: bool = False,
                **align_params) -> pd.DataFrame:
         """
         :param      sequence:             The query sequence
@@ -217,6 +226,8 @@ class GraphClient:
         :type       graphs:               Union[None, List[str]]
         :param      align:                Align the query sequence to the joint graph and query labels for that alignment instead of the original sequence
         :type       align:                bool
+        :param      partial_refusal:      Let the server refuse a query sequence on a graph alone when its answer would pass the server's answer budget, instead of the whole request; the refused ones are warned about (helpers.SearchRefusedWarning) and listed in the frame's attrs["refused"], as their rows are absent [default: False]
+        :type       partial_refusal:      bool
         :param      align_params:         The parameters for alignment (see method align())
         :type       align_params:         dictionary
 
@@ -227,7 +238,8 @@ class GraphClient:
         json_obj = self._json_client.search(sequence, top_labels,
                                             discovery_fraction, with_signature,
                                             abundance_sum, query_counts, query_coords,
-                                            graphs, align, **align_params)
+                                            graphs, align, partial_refusal=partial_refusal,
+                                            **align_params)
 
         return helpers.df_from_search_result(json_obj)
 
@@ -308,6 +320,7 @@ class MultiGraphClient:
                query_coords: bool = False,
                graphs: Union[None, List[str]] = None,
                align: bool = False,
+               partial_refusal: bool = False,
                **align_params) -> Dict[str, Union[pd.DataFrame, Future]]:
         """
         Make search requests with each graph client.
@@ -325,7 +338,9 @@ class MultiGraphClient:
                 result[name] = graph_client.search(sequence, top_labels,
                                                    discovery_fraction, with_signature,
                                                    abundance_sum, query_counts, query_coords,
-                                                   graphs, align, **align_params)
+                                                   graphs, align,
+                                                   partial_refusal=partial_refusal,
+                                                   **align_params)
 
             return result
 
@@ -340,7 +355,8 @@ class MultiGraphClient:
             futures[name] = executor.submit(graph_client.search, sequence,
                                             top_labels, discovery_fraction, with_signature,
                                             abundance_sum, query_counts, query_coords,
-                                            graphs, align, **align_params)
+                                            graphs, align, partial_refusal=partial_refusal,
+                                            **align_params)
 
         print(f'Made {len(self.graphs)} requests with {num_processes} threads...')
 

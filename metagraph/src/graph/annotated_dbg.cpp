@@ -337,6 +337,18 @@ AnnotatedSequenceGraph::get_labels(node_index index) const {
     return annotator_->get_labels(graph_to_anno_index(index));
 }
 
+const char* refused_account(SearchCut::Refused refused) {
+    switch (refused) {
+        case SearchCut::Refused::VALUES:
+            return "values";
+        case SearchCut::Refused::ANSWER:
+            return "answer";
+        case SearchCut::Refused::NO:
+            break;
+    }
+    return nullptr;
+}
+
 uint64_t lower_median(std::vector<uint64_t> values) {
     values.erase(std::remove(values.begin(), values.end(), 0u), values.end());
     if (values.empty())
@@ -1296,7 +1308,7 @@ AnnotatedDBG::get_header_results(std::string_view sequence, size_t num_top_label
         for (size_t r = 0; r < top.size(); ++r) {
             returned.emplace(top[r].first.header, r);
         }
-        // the records' values, charged to the pair's values account (if any) as they grow
+        // the records' values, charged to the unit's values account (if any) as they grow
         charge_search(values_account, buffer_bytes(top.size(), sizeof(Values)));
         std::vector<Values> values(top.size(), Values(num_kmers, values_account));
         // (record index, its occurrences in the row) per row found, while the row is due
@@ -1427,7 +1439,7 @@ Result filter_and_aggregate(const RowEnumerator &enumerate_rows,
     // the values are built in
     using ValueType = std::tuple_element_t<2, typename Result::value_type>;
     // the store, this record's scratch (freed when its rows are returned; the values, which
-    // charge their buffers as they grow, move into them), charged to the pair's values account
+    // charge their buffers as they grow, move into them), charged to the unit's values account
     // (if any) as what it allocates before it is built: the dense index over the labels and the
     // values' buffer, or the hash table reserved for the labels kept (REVIEW 9726cb420 [P2],
     // lane T6-W2: the smaller of the two was charged, but the store picks its form by the
@@ -1690,7 +1702,7 @@ AnnotatedDBG::get_kmer_coordinates(std::string_view sequence,
         // its coordinates in that order, which its other positions repeat; its tuples are
         // released then, the list after its last position: per row at most 16 B a coordinate,
         // where a copy of the row per position held 8 B a coordinate per position
-        // the records' coordinates, charged to the pair's values account (if any) as they grow
+        // the records' coordinates, charged to the unit's values account (if any) as they grow
         charge_search(values, buffer_bytes(top.size(), sizeof(PositionCoords)));
         std::vector<PositionCoords> coords_of(top.size(), PositionCoords(num_kmers, values));
         std::vector<std::vector<std::pair<size_t, uint64_t>>> hits(rows_tuples.size());
@@ -1794,7 +1806,7 @@ AnnotatedDBG::get_top_label_signatures(std::string_view sequence,
                                            presence_fraction, false, cut);
         std::vector<std::tuple<Label, size_t, PresenceRuns>> presence_vectors;
         presence_vectors.reserve(label_counts.size());
-        // every position marked: one run, a copy per label (each charged to the pair's values
+        // every position marked: one run, a copy per label (each charged to the unit's values
         // account, if any)
         PresenceRuns all(num_kmers, values);
         all.add_run(0, num_kmers);

@@ -3777,18 +3777,29 @@ class TestPatternFixtures(unittest.TestCase):
                          path + '.total', 'an integer, or null while the index loads')
             def search_budget(c, path):
                 # lane T5b-Y4 (SPEC-multigraph-envelope.md sections 3 and 8): the /search answer
-                # budget (null: none), its 400's shape and the rule
-                check.keys(c, {'max_memory_mb', 'rule', 'too_large'}, path)
+                # budget (null: none), its 400's shape and the rule; lane T7-P1: the units
+                # refused alone (unit_refused) and the concurrency of the model totals
+                check.keys(c, {'handler_threads', 'max_memory_mb', 'pair_searches_at_once',
+                               'records_at_once', 'rule', 'too_large', 'unit_refused'}, path)
                 check.ok(c['max_memory_mb'] is None
                          or (is_int(c['max_memory_mb']) and c['max_memory_mb'] >= 1),
                          path + '.max_memory_mb', 'an integer of at least 1, or null')
+                for member in ('handler_threads', 'pair_searches_at_once', 'records_at_once'):
+                    check.ok(is_int(c[member]) and c[member] >= 1, path + '.' + member,
+                             'an integer of at least 1')
                 check.ok(c['rule']
                          == 'SPEC-multigraph-envelope.md section 3, the /search answer budget',
                          path + '.rule', 'the section that states it')
                 check.ok(c['too_large']
                          == {'status': 400, 'code': 'search_answer_too_large',
-                             'members': ['code', 'error', 'max_memory_mb']},
+                             'accounts': ['answer', 'values'],
+                             'members': ['account', 'code', 'error', 'max_memory_mb']},
                          path + '.too_large', 'the 400\'s shape')
+                check.ok(c['unit_refused']
+                         == {'field': 'partial_refusal', 'code': 'search_answer_too_large',
+                             'accounts': ['answer', 'values'],
+                             'members': ['account', 'code', 'max_memory_mb', 'priced_mb']},
+                         path + '.unit_refused', 'the refused cut entry\'s shape')
 
             def headers_unique(h, path):
                 # SPEC-multigraph-envelope.md section 9: true, false or null (a pair without

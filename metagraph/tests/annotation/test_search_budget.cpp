@@ -1,6 +1,10 @@
 #include <algorithm>
 #include <atomic>
 #include <limits>
+#include <map>
+#include <memory>
+#include <mutex>
+#include <numeric>
 #include <random>
 #include <string>
 #include <thread>
@@ -35,6 +39,7 @@ using graph::PositionCoords;
 using graph::SearchAccount;
 using graph::SearchAnswerTooLarge;
 using graph::SearchBudget;
+using graph::SearchUnitRefused;
 using annot::matrix::alloc_bytes;
 
 constexpr uint64_t kLarge = uint64_t(1) << 40;
@@ -519,6 +524,369 @@ TEST(SearchBudget, AColumnSearchChargesTheStoreItBuilds) {
             EXPECT_TRUE(small.passed());
         }
     }
+}
+
+// ---------------------------------------------------------------------------------------------
+// Lane T7-P1: the /search partial refusal per unit (a FASTA record on a pair;
+// DESIGN-search-partial-refusal.md sections 3 and 4). Each unit has its own values account; with
+// the request's `partial_refusal` a unit past the bound is refused alone (SearchUnitRefused, the
+// request open), without it the request is refused, and the 400 names "values" whenever a
+// unit's values would pass, else "answer".
+
+constexpr char kPair[] = "pair (a, a.dbg, a.annodbg)";
+
+// Test 1 (scope): a unit's account refuses its unit alone with the field, and the request with
+// it; once the request is refused every charge throws as its state says
+TEST(SearchBudget, AUnitIsRefusedAloneWithTheField) {
+    SearchBudget budget(100, true);
+    EXPECT_TRUE(budget.partial_refusal());
+    SearchAccount unit(&budget, 3, kPair);
+    EXPECT_TRUE(unit.unit());
+    EXPECT_EQ(3u, unit.record());
+    EXPECT_EQ("record 3 on pair (a, a.dbg, a.annodbg)", unit.where());
+    EXPECT_EQ("values", std::string(unit.name()));
+    EXPECT_EQ(1u, unit.threads());
+    unit.charge(60);
+    try {
+        unit.charge(41);
+        FAIL() << "not refused";
+    } catch (const SearchUnitRefused &e) {
+        EXPECT_EQ("values", std::string(e.account()));
+    }
+    // the unit alone: nothing more held, the request open, its other accounts go on
+    EXPECT_EQ(60u, unit.held());
+    EXPECT_TRUE(unit.refused());
+    EXPECT_FALSE(budget.passed());
+    SearchAccount other(&budget, 4, kPair);
+    other.charge(100);
+    budget.answer().charge(100);
+    // sticky: the refused unit refuses again, whatever the charge, and is noted once
+    EXPECT_THROW(unit.charge(1), SearchUnitRefused);
+    EXPECT_THROW(unit.charge_scratch(1), SearchUnitRefused);
+    ASSERT_EQ(1u, budget.unit_refusals().size());
+    const auto refusal = budget.unit_refusals()[0];
+    EXPECT_EQ(3u, refusal.record);
+    EXPECT_EQ("record 3 on pair (a, a.dbg, a.annodbg)", refusal.where);
+    EXPECT_EQ("values", std::string(refusal.account));
+    EXPECT_EQ(60u, refusal.held);
+    EXPECT_EQ(41u, refusal.charge);
+    // the request's answer past the bound refuses the request ("answer"), and every account
+    // stops at its next charge, the units' too
+    EXPECT_THROW(budget.answer().charge(1), SearchAnswerTooLarge);
+    EXPECT_TRUE(budget.passed());
+    EXPECT_EQ("answer", std::string(budget.account()));
+    EXPECT_EQ("the answer account", budget.first_passed());
+    EXPECT_EQ(100u, budget.first_held());
+    EXPECT_EQ(1u, budget.first_charge());
+    SearchAccount late(&budget, 5, kPair);
+    EXPECT_THROW(late.charge(1), SearchAnswerTooLarge);
+    EXPECT_THROW(other.charge(0 + 1), SearchAnswerTooLarge);
+    EXPECT_EQ(0u, late.held());
+    // a unit's values past the bound do not change a request refused on its answer
+    SearchAccount unit2(&budget, 6, kPair);
+    EXPECT_THROW(unit2.charge(1000), SearchAnswerTooLarge);
+    EXPECT_EQ("answer", std::string(budget.account()));
+}
+
+TEST(SearchBudget, AUnitRefusesTheRequestWithoutTheField) {
+    SearchBudget budget(100);
+    EXPECT_FALSE(budget.partial_refusal());
+    SearchAccount unit(&budget, 7, "the graph");
+    unit.charge(100);
+    try {
+        unit.charge(1);
+        FAIL() << "not refused";
+    } catch (const SearchAnswerTooLarge &e) {
+        EXPECT_EQ("values", std::string(e.account()));
+    }
+    EXPECT_FALSE(unit.refused());
+    EXPECT_TRUE(budget.passed());
+    EXPECT_EQ("values", std::string(budget.account()));
+    EXPECT_EQ("the values account of record 7 on the graph", budget.first_passed());
+    EXPECT_EQ(100u, budget.first_held());
+    EXPECT_EQ(1u, budget.first_charge());
+    EXPECT_TRUE(budget.unit_refusals().empty());
+    // every account stops at its next charge (the early stop of train 5b)
+    SearchAccount other(&budget, 8, "the graph");
+    EXPECT_THROW(other.charge(1), SearchAnswerTooLarge);
+    EXPECT_THROW(budget.answer().charge(1), SearchAnswerTooLarge);
+}
+
+// Without the field, a refusal on the answer side leaves the account pending: no object is
+// charged any more, the units' values accounts go on, and a unit's values past the bound then
+// name the 400 "values"; otherwise it names "answer"
+TEST(SearchBudget, AnAnswerSideRefusalLeavesTheAccountPending) {
+    for (bool values_pass : { false, true }) {
+        SCOPED_TRACE(values_pass);
+        SearchBudget budget(100);
+        SearchAccount unit(&budget, size_t(0), kPair);
+        unit.charge(50);
+        budget.answer().charge(90);
+        EXPECT_THROW(budget.answer().charge(11), SearchAnswerTooLarge);
+        EXPECT_TRUE(budget.passed());
+        EXPECT_EQ("answer", std::string(budget.account()));
+        // pending: the answer refuses, the units' values go on
+        EXPECT_THROW(budget.answer().charge(1), SearchAnswerTooLarge);
+        unit.charge(50);
+        SearchAccount later(&budget, 1, kPair);
+        later.charge(100);
+        if (values_pass) {
+            EXPECT_THROW(later.charge(1), SearchAnswerTooLarge);
+            EXPECT_EQ("values", std::string(budget.account()));
+            EXPECT_EQ("the values account of record 1 on pair (a, a.dbg, a.annodbg)",
+                      budget.first_passed());
+            EXPECT_EQ(100u, budget.first_held());
+            EXPECT_EQ(1u, budget.first_charge());
+            // and now every charge stops
+            EXPECT_THROW(unit.charge(1), SearchAnswerTooLarge);
+        } else {
+            EXPECT_EQ("answer", std::string(budget.account()));
+            EXPECT_EQ("the answer account", budget.first_passed());
+            EXPECT_EQ(90u, budget.first_held());
+            EXPECT_EQ(11u, budget.first_charge());
+        }
+    }
+    // the object check of a unit (its own object past the bound): the answer side too
+    SearchBudget budget(100);
+    budget.note_object_passed("record 2 on the graph", 101);
+    EXPECT_TRUE(budget.passed());
+    EXPECT_EQ("answer", std::string(budget.account()));
+    EXPECT_EQ("the answer account of record 2 on the graph", budget.first_passed());
+    EXPECT_EQ(0u, budget.first_held());
+    EXPECT_EQ(101u, budget.first_charge());
+    SearchAccount unit(&budget, 3, "the graph");
+    unit.charge(100);
+    EXPECT_THROW(budget.answer().charge(1), SearchAnswerTooLarge);
+}
+
+// Test 3 (edges): a unit charged exactly the bound is answered and a byte more refused; the same
+// for the request's account; a charge of UINT64_MAX saturates (nothing held); the saturating
+// helpers
+TEST(SearchBudget, TheEdgesOfTheUnitAndTheRequest) {
+    for (bool partial : { false, true }) {
+        SCOPED_TRACE(partial);
+        const uint64_t bound = 1 << 20;
+        SearchBudget budget(bound, partial);
+        SearchAccount exact(&budget, size_t(0), kPair);
+        exact.charge(bound - 7);
+        exact.charge(7);
+        EXPECT_FALSE(budget.passed());
+        SearchAccount over(&budget, 1, kPair);
+        over.charge(bound);
+        if (partial) {
+            EXPECT_THROW(over.charge(1), SearchUnitRefused);
+            EXPECT_FALSE(budget.passed());
+        } else {
+            EXPECT_THROW(over.charge(1), SearchAnswerTooLarge);
+            EXPECT_TRUE(budget.passed());
+        }
+        SearchBudget request(bound, partial);
+        request.answer().charge(bound);
+        EXPECT_FALSE(request.passed());
+        EXPECT_THROW(request.answer().charge(1), SearchAnswerTooLarge);
+        EXPECT_TRUE(request.passed());
+        EXPECT_EQ("answer", std::string(request.account()));
+        // the largest charge, on a unit and as a scratch
+        SearchBudget huge(kLarge, partial);
+        SearchAccount unit(&huge, 2, kPair);
+        unit.charge(5);
+        if (partial) {
+            EXPECT_THROW(unit.charge(std::numeric_limits<uint64_t>::max()), SearchUnitRefused);
+            ASSERT_EQ(1u, huge.unit_refusals().size());
+            EXPECT_EQ(5u, huge.unit_refusals()[0].held);
+            EXPECT_EQ(std::numeric_limits<uint64_t>::max(), huge.unit_refusals()[0].charge);
+        } else {
+            EXPECT_THROW(unit.charge(std::numeric_limits<uint64_t>::max()), SearchAnswerTooLarge);
+            EXPECT_EQ(std::numeric_limits<uint64_t>::max(), huge.first_charge());
+        }
+        EXPECT_EQ(5u, unit.held());
+    }
+    EXPECT_EQ(3u, graph::saturating_add(1, 2));
+    EXPECT_EQ(std::numeric_limits<uint64_t>::max(),
+              graph::saturating_add(std::numeric_limits<uint64_t>::max(), 1));
+    EXPECT_EQ(std::numeric_limits<uint64_t>::max(),
+              graph::saturating_add(std::numeric_limits<uint64_t>::max() - 3, 4));
+    EXPECT_EQ(0u, graph::mib_rounded_up(0));
+    EXPECT_EQ(1u, graph::mib_rounded_up(1));
+    EXPECT_EQ(1u, graph::mib_rounded_up(1 << 20));
+    EXPECT_EQ(2u, graph::mib_rounded_up((1 << 20) + 1));
+    EXPECT_EQ(uint64_t(1) << 44, graph::mib_rounded_up(std::numeric_limits<uint64_t>::max()));
+}
+
+// Test 2 (determinism): units with fixed charge sequences and object prices, a request's text,
+// run as the server runs them (a unit's values charged as its search goes; at its end, unless
+// the request is refused, its object checked against the bound and charged, or its stub's;
+// after every unit, the text) in 500 orders drawn from a seed, single-threaded, in both modes:
+// the status, the 400's account and the units refused (with their accounts and priced_mb) are
+// the same in every order; and the same on 8 real threads
+struct Unit {
+    std::vector<uint64_t> charges;
+    uint64_t object;  // its object's own price (tree and transient)
+};
+struct Outcome {
+    bool refused = false;
+    std::string account;
+    std::map<size_t, std::string> units;  // the units refused alone: their accounts
+    bool operator==(const Outcome &o) const {
+        return std::tie(refused, account, units) == std::tie(o.refused, o.account, o.units);
+    }
+};
+constexpr uint64_t kStub = 13;
+
+// one unit's end, as process_search_request's callback: the object check, then its charge
+void finish_unit(SearchBudget &budget, std::mutex &mutex, size_t u, const Unit &unit,
+                 bool values_refused, std::map<size_t, std::string> *refused) {
+    std::lock_guard<std::mutex> lock(mutex);
+    if (budget.passed())
+        return;
+    uint64_t price = unit.object;
+    if (values_refused) {
+        (*refused)[u] = "values";
+        price = kStub;
+    } else if (unit.object > budget.max_bytes()) {
+        const std::string where = "record " + std::to_string(u) + " on the graph";
+        if (!budget.partial_refusal()) {
+            budget.note_object_passed(where, unit.object);
+            return;
+        }
+        budget.note_unit_refused({ u, where, "answer", 0, unit.object });
+        (*refused)[u] = "answer " + std::to_string(graph::mib_rounded_up(unit.object));
+        price = kStub;
+    }
+    try {
+        budget.answer().charge(price);
+    } catch (const SearchAnswerTooLarge &) {}
+}
+
+Outcome outcome_of(SearchBudget &budget, const std::map<size_t, std::string> &refused,
+                   uint64_t text) {
+    if (!budget.passed()) {
+        try {
+            budget.answer().charge(text);
+        } catch (const SearchAnswerTooLarge &) {}
+    }
+    Outcome outcome;
+    outcome.refused = budget.passed();
+    if (outcome.refused) {
+        outcome.account = budget.account();
+    } else {
+        outcome.units = refused;
+    }
+    return outcome;
+}
+
+Outcome run_in_order(const std::vector<Unit> &units, uint64_t bound, bool partial,
+                     uint64_t text, std::mt19937 *order) {
+    SearchBudget budget(bound, partial);
+    std::mutex mutex;
+    std::map<size_t, std::string> refused;
+    std::vector<std::unique_ptr<SearchAccount>> accounts;
+    std::vector<size_t> next(units.size(), 0);
+    std::vector<bool> done(units.size(), false), values_refused(units.size(), false);
+    for (size_t u = 0; u < units.size(); ++u) {
+        accounts.push_back(std::make_unique<SearchAccount>(&budget, u, "the graph"));
+    }
+    std::vector<size_t> active(units.size());
+    std::iota(active.begin(), active.end(), 0);
+    while (!active.empty()) {
+        const size_t i = order ? (*order)() % active.size() : 0;
+        const size_t u = active[i];
+        bool end = next[u] == units[u].charges.size();
+        if (!end) {
+            try {
+                accounts[u]->charge(units[u].charges[next[u]++]);
+            } catch (const SearchUnitRefused &) {
+                values_refused[u] = true;
+                end = true;
+            } catch (const SearchAnswerTooLarge &) {
+                // the request refused: this unit stops
+                active.erase(active.begin() + i);
+                continue;
+            }
+        }
+        if (end) {
+            finish_unit(budget, mutex, u, units[u], values_refused[u], &refused);
+            active.erase(active.begin() + i);
+        }
+    }
+    return outcome_of(budget, refused, text);
+}
+
+Outcome run_on_threads(const std::vector<Unit> &units, uint64_t bound, bool partial,
+                       uint64_t text, size_t num_threads) {
+    SearchBudget budget(bound, partial);
+    std::mutex mutex;
+    std::map<size_t, std::string> refused;
+    std::atomic<size_t> next_unit = 0;
+    std::vector<std::thread> threads;
+    for (size_t t = 0; t < num_threads; ++t) {
+        threads.emplace_back([&]() {
+            for (size_t u; (u = next_unit++) < units.size(); ) {
+                SearchAccount account(&budget, u, "the graph");
+                bool values_refused = false;
+                try {
+                    for (uint64_t c : units[u].charges) {
+                        account.charge(c);
+                    }
+                } catch (const SearchUnitRefused &) {
+                    values_refused = true;
+                } catch (const SearchAnswerTooLarge &) {
+                    continue;
+                }
+                finish_unit(budget, mutex, u, units[u], values_refused, &refused);
+            }
+        });
+    }
+    for (auto &thread : threads) {
+        thread.join();
+    }
+    return outcome_of(budget, refused, text);
+}
+
+TEST(SearchBudget, TheUnitsRefusedAndTheAccountAreTheSameInEveryOrder) {
+    std::mt19937 rng(71);
+    size_t refused_requests[2] = { 0, 0 }, partly[2] = { 0, 0 }, values_named = 0,
+           answer_named = 0;
+    for (size_t instance = 0; instance < 60; ++instance) {
+        const uint64_t bound = 1000;
+        std::vector<Unit> units(2 + rng() % 10);
+        uint64_t objects = 0;
+        for (Unit &unit : units) {
+            unit.charges.resize(1 + rng() % 12);
+            for (uint64_t &c : unit.charges) {
+                c = rng() % (instance % 3 == 0 ? 300 : 120);
+            }
+            // now and then an object past the bound alone
+            unit.object = rng() % 7 == 0 ? bound + 1 + rng() % 500 : rng() % 250;
+            objects += unit.object;
+        }
+        const uint64_t text = instance % 4 == 0 ? rng() % 900 : rng() % 100;
+        for (bool partial : { false, true }) {
+            SCOPED_TRACE(::testing::Message() << "instance " << instance << " partial "
+                         << partial);
+            const Outcome expected = run_in_order(units, bound, partial, text, nullptr);
+            std::mt19937 order(1000 + instance);
+            for (size_t schedule = 0; schedule < 500; ++schedule) {
+                ASSERT_EQ(expected, run_in_order(units, bound, partial, text, &order))
+                        << "schedule " << schedule;
+            }
+            for (size_t round = 0; round < 5; ++round) {
+                ASSERT_EQ(expected, run_on_threads(units, bound, partial, text, 8))
+                        << "threads, round " << round;
+            }
+            refused_requests[partial] += expected.refused;
+            partly[partial] += !expected.units.empty();
+            if (expected.refused && !partial)
+                (expected.account == "values" ? values_named : answer_named)++;
+        }
+    }
+    // the instances reach every outcome
+    EXPECT_LT(0u, refused_requests[0]);
+    EXPECT_LT(0u, refused_requests[1]);
+    EXPECT_LT(0u, partly[1]);
+    EXPECT_EQ(0u, partly[0]);
+    EXPECT_LT(0u, values_named);
+    EXPECT_LT(0u, answer_named);
 }
 
 } // namespace

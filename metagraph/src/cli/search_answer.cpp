@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cstring>
+#include <initializer_list>
 #include <memory>
 #include <ostream>
 #include <streambuf>
@@ -284,6 +285,16 @@ SearchRecordPrice search_record_price(const SeqSearchResult &result, bool verbos
             + member("index_fp");
     if (result.get_cut().abundances)
         price.tree += member("nth_median") + member("tied_same_median");
+    if (result.get_cut().refused != graph::SearchCut::Refused::NO) {
+        // a refused unit's entry: {"account", "code", "max_memory_mb"[, "priced_mb"]}
+        price.tree += member("refused") + kJsonContainerBytes
+                + member("account")
+                + json_string(std::strlen(graph::refused_account(result.get_cut().refused)))
+                + member("code") + json_string(std::strlen(kSearchAnswerTooLarge))
+                + member("max_memory_mb")
+                + (result.get_cut().refused == graph::SearchCut::Refused::ANSWER
+                        ? member("priced_mb") : 0);
+    }
     if (!index_fp.empty())
         price.tree += json_string(index_fp.size());
     // the tags of a row or of the cut, and its node in the merged answer
@@ -389,25 +400,73 @@ uint64_t search_record_scratch(const SeqSearchResult &result, bool verbose_outpu
     return coord_ranges_bytes(longest);
 }
 
-SearchRecordPrice charge_search_record(graph::SearchAccount &answer, uint64_t *transient_charged,
-                                       const SeqSearchResult &result, bool verbose_output,
-                                       bool tagged, const std::string &graph,
-                                       const std::string &graph_path,
-                                       const std::string &annotation_path,
-                                       const std::string &index_fp) {
+SearchRecordPrice measure_search_record(graph::SearchAccount &answer, uint64_t *transient_charged,
+                                        const SeqSearchResult &result, bool verbose_output,
+                                        bool tagged, const std::string &graph,
+                                        const std::string &graph_path,
+                                        const std::string &annotation_path,
+                                        const std::string &index_fp) {
     // the scratch of the price's measurement, before it is allocated
     const uint64_t scratch = search_record_scratch(result, verbose_output);
     if (scratch > *transient_charged) {
         answer.charge(scratch - *transient_charged);
         *transient_charged = scratch;
     }
+    return search_record_price(result, verbose_output, tagged, graph, graph_path,
+                               annotation_path, index_fp);
+}
+
+void charge_search_price(graph::SearchAccount &answer, uint64_t *transient_charged,
+                         const SearchRecordPrice &price) {
     // the record's object, before it is built
-    const SearchRecordPrice price = search_record_price(result, verbose_output, tagged, graph,
-                                                        graph_path, annotation_path, index_fp);
     const uint64_t transient = std::max(*transient_charged, price.transient);
-    answer.charge(price.tree + transient - *transient_charged);
+    answer.charge(graph::saturating_add(price.tree, transient - *transient_charged));
     *transient_charged = transient;
+}
+
+SearchRecordPrice charge_search_record(graph::SearchAccount &answer, uint64_t *transient_charged,
+                                       const SeqSearchResult &result, bool verbose_output,
+                                       bool tagged, const std::string &graph,
+                                       const std::string &graph_path,
+                                       const std::string &annotation_path,
+                                       const std::string &index_fp) {
+    const SearchRecordPrice price = measure_search_record(answer, transient_charged, result,
+                                                          verbose_output, tagged, graph,
+                                                          graph_path, annotation_path, index_fp);
+    charge_search_price(answer, transient_charged, price);
     return price;
+}
+
+bool charge_search_unit(graph::SearchBudget &budget, uint64_t *transient_charged,
+                        SeqSearchResult *result, bool verbose_output, bool tagged,
+                        const std::string &graph, const std::string &graph_path,
+                        const std::string &annotation_path, const std::string &index_fp,
+                        const std::string &pair) {
+    SearchRecordPrice price = measure_search_record(budget.answer(), transient_charged, *result,
+                                                    verbose_output, tagged, graph, graph_path,
+                                                    annotation_path, index_fp);
+    if (result->get_cut().refused == graph::SearchCut::Refused::NO) {
+        // the unit's object check: its own object (a function of the unit alone), never an
+        // increment over the pair's
+        const uint64_t own = graph::saturating_add(price.tree, price.transient);
+        if (own > budget.max_bytes()) {
+            const size_t record = result->get_sequence().id;
+            std::string where = "record " + std::to_string(record) + " on " + pair;
+            if (!budget.partial_refusal()) {
+                budget.note_object_passed(where, own);
+                return false;
+            }
+            budget.note_unit_refused({ record, std::move(where), "answer", 0, own });
+            result->refuse(graph::SearchCut::Refused::ANSWER, budget.max_bytes() >> 20,
+                           graph::mib_rounded_up(own));
+            // the stub's (no row: nothing measured)
+            price = search_record_price(*result, verbose_output, tagged, graph, graph_path,
+                                        annotation_path, index_fp);
+        }
+    }
+    charge_search_price(budget.answer(), transient_charged, price);
+    budget.note_unit_built();
+    return true;
 }
 
 uint64_t json_text_length(const Json::Value &root, const Json::StreamWriterBuilder &builder) {
@@ -446,27 +505,43 @@ std::string search_answer_text(const Json::Value &answer, graph::SearchAccount &
     return json_text_of_length(answer, builder, length);
 }
 
-Json::Value search_answer_too_large_json(uint64_t max_mb) {
+Json::Value search_answer_too_large_json(uint64_t max_mb, const char *account) {
     Json::Value body(Json::objectValue);
-    body["code"] = "search_answer_too_large";
+    body["account"] = account;
+    body["code"] = kSearchAnswerTooLarge;
     body["error"] = graph::SearchAnswerTooLarge::message(max_mb);
     body["max_memory_mb"] = Json::UInt64(max_mb);
     return body;
 }
 
-Json::Value search_capabilities_json(uint64_t max_mb) {
+Json::Value search_capabilities_json(uint64_t max_mb, uint64_t pair_searches_at_once,
+                                     uint64_t records_at_once, uint64_t handler_threads) {
+    auto names = [](std::initializer_list<const char *> list) {
+        Json::Value array(Json::arrayValue);
+        for (const char *name : list) {
+            array.append(name);
+        }
+        return array;
+    };
     Json::Value c(Json::objectValue);
+    c["handler_threads"] = Json::UInt64(handler_threads);
     c["max_memory_mb"] = max_mb ? Json::Value(Json::UInt64(max_mb)) : Json::Value();
+    c["pair_searches_at_once"] = Json::UInt64(pair_searches_at_once);
+    c["records_at_once"] = Json::UInt64(records_at_once);
     c["rule"] = kSearchBudgetRule;
     Json::Value refusal(Json::objectValue);
     refusal["status"] = 400;
-    refusal["code"] = "search_answer_too_large";
-    Json::Value members(Json::arrayValue);
-    for (const char *name : { "code", "error", "max_memory_mb" }) {
-        members.append(name);
-    }
-    refusal["members"] = std::move(members);
+    refusal["code"] = kSearchAnswerTooLarge;
+    refusal["accounts"] = names({ "answer", "values" });
+    refusal["members"] = names({ "account", "code", "error", "max_memory_mb" });
     c["too_large"] = std::move(refusal);
+    // the units refused alone with the request's field (its presence is the marker)
+    Json::Value unit(Json::objectValue);
+    unit["field"] = "partial_refusal";
+    unit["code"] = kSearchAnswerTooLarge;
+    unit["accounts"] = names({ "answer", "values" });
+    unit["members"] = names({ "account", "code", "max_memory_mb", "priced_mb" });
+    c["unit_refused"] = std::move(unit);
     return c;
 }
 

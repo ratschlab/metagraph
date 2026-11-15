@@ -25,6 +25,7 @@
 #include "load/load_annotated_graph.hpp"
 #include "graph/alignment/score_kmer_presence_mask.hpp"
 #include "cli/align.hpp"
+#include "cli/search_answer.hpp"
 
 
 namespace mtg {
@@ -415,7 +416,8 @@ Json::Value SeqSearchResult::to_json(bool verbose_output, size_t k) const {
 
 Json::Value SeqSearchResult::cut_to_json() const {
     Json::Value cut(Json::objectValue);
-    // a cut without an N-th row (complete, or N = 0) states its score and median null
+    // a cut without an N-th row (complete, or N = 0, or a unit refused, whose counts refuse()
+    // set to 0) states its score and median null
     const bool nth_row = !cut_.complete && cut_.returned;
     cut["returned"] = Json::UInt64(cut_.returned);
     cut["complete"] = cut_.complete;
@@ -429,7 +431,37 @@ Json::Value SeqSearchResult::cut_to_json() const {
                 : Json::Value();
         cut["tied_same_median"] = Json::UInt64(cut_.tied_same_median);
     }
+    if (cut_.refused != graph::SearchCut::Refused::NO) {
+        // the unit refused alone (SPEC-multigraph-envelope.md section 3, lane T7-P1)
+        Json::Value refused(Json::objectValue);
+        refused["account"] = graph::refused_account(cut_.refused);
+        refused["code"] = kSearchAnswerTooLarge;
+        refused["max_memory_mb"] = Json::UInt64(cut_.refused_max_mb);
+        if (cut_.refused == graph::SearchCut::Refused::ANSWER)
+            refused["priced_mb"] = Json::UInt64(cut_.refused_priced_mb);
+        cut["refused"] = std::move(refused);
+    }
     return cut;
+}
+
+void SeqSearchResult::refuse(graph::SearchCut::Refused account, uint64_t max_mb,
+                             uint64_t priced_mb) {
+    assert(account != graph::SearchCut::Refused::NO);
+    // no row is sent: the rows and their values freed, the variant's type kept
+    std::visit([](auto &rows) { std::decay_t<decltype(rows)>().swap(rows); }, result_);
+    // the cut states no row (returned 0, not complete, no N-th row, no tie); |abundances|,
+    // the member set, is the computed cut's
+    cut_.returned = 0;
+    cut_.complete = false;
+    cut_.nth_score = 0;
+    cut_.tied = 0;
+    cut_.tied_returned = 0;
+    cut_.nth_median = 0;
+    cut_.nth_median_read = false;
+    cut_.tied_same_median = 0;
+    cut_.refused = account;
+    cut_.refused_max_mb = max_mb;
+    cut_.refused_priced_mb = account == graph::SearchCut::Refused::ANSWER ? priced_mb : 0;
 }
 
 
@@ -510,8 +542,11 @@ std::string SeqSearchResult::to_string(const std::string delimiter,
 }
 
 
-// |values| (null: none): a /search's values account of this pair, which the per-position
-// modes charge with their rows' values as they grow (graph::SearchAccount)
+// |values| (null: none): a /search's values account of this unit (the sequence on this pair),
+// which the per-position modes charge with their rows' values as they grow
+// (graph::SearchAccount). With the request's `partial_refusal` a charge past the bound refuses
+// the unit alone (graph::SearchUnitRefused): the result is its refused stub, no row and the
+// cut computed before the first charge (SeqSearchResult::refuse; lane T7-P1)
 SeqSearchResult execute_query(QuerySequence&& sequence,
                               QueryMode query_mode,
                               size_t num_top_labels,
@@ -525,63 +560,80 @@ SeqSearchResult execute_query(QuerySequence&& sequence,
     // above the thresholds)
     graph::SearchCut cut;
 
-    switch (query_mode) {
-        case SIGNATURE: {
-            // Get labels with presence/absence signatures
-            result = anno_graph.get_top_label_signatures(sequence.sequence,
+    try {
+        switch (query_mode) {
+            case SIGNATURE: {
+                // Get labels with presence/absence signatures
+                result = anno_graph.get_top_label_signatures(sequence.sequence,
+                                                             num_top_labels,
+                                                             discovery_fraction,
+                                                             presence_fraction,
+                                                             &cut, values);
+                break;
+            }
+            case COORDS: {
+                // Get labels with k-mer coordinates
+                result = anno_graph.get_kmer_coordinates(sequence.sequence,
                                                          num_top_labels,
                                                          discovery_fraction,
                                                          presence_fraction,
                                                          &cut, values);
-            break;
-        }
-        case COORDS: {
-            // Get labels with k-mer coordinates
-            result = anno_graph.get_kmer_coordinates(sequence.sequence,
-                                                     num_top_labels,
-                                                     discovery_fraction,
-                                                     presence_fraction,
-                                                     &cut, values);
-            break;
-        }
-        case COUNTS: {
-            // Get labels with k-mer counts
-            result = anno_graph.get_kmer_counts(sequence.sequence,
-                                                num_top_labels,
-                                                discovery_fraction,
-                                                presence_fraction,
-                                                &cut, values);
-            break;
-        }
-        case MATCHES: {
-            // Get labels with label counts
-            result = anno_graph.get_top_labels(sequence.sequence,
-                                               num_top_labels,
+                break;
+            }
+            case COUNTS: {
+                // Get labels with k-mer counts
+                result = anno_graph.get_kmer_counts(sequence.sequence,
+                                                    num_top_labels,
+                                                    discovery_fraction,
+                                                    presence_fraction,
+                                                    &cut, values);
+                break;
+            }
+            case MATCHES: {
+                // Get labels with label counts
+                result = anno_graph.get_top_labels(sequence.sequence,
+                                                   num_top_labels,
+                                                   discovery_fraction,
+                                                   presence_fraction,
+                                                   false,
+                                                   &cut);
+                break;
+            }
+            case COUNTS_SUM: {
+                // Get labels with label counts / kmer counts
+                result = anno_graph.get_top_labels(sequence.sequence,
+                                                   num_top_labels,
+                                                   discovery_fraction,
+                                                   presence_fraction,
+                                                   true,
+                                                   &cut);
+                break;
+            }
+            case LABELS: {
+                // Default, just get labels
+                result = anno_graph.get_labels(sequence.sequence,
                                                discovery_fraction,
-                                               presence_fraction,
-                                               false,
-                                               &cut);
-            break;
+                                               presence_fraction);
+                cut.abundances = anno_graph.has_kmer_abundances();
+                cut.returned = std::get<SeqSearchResult::LabelVec>(result).size();
+                break;
+            }
         }
-        case COUNTS_SUM: {
-            // Get labels with label counts / kmer counts
-            result = anno_graph.get_top_labels(sequence.sequence,
-                                               num_top_labels,
-                                               discovery_fraction,
-                                               presence_fraction,
-                                               true,
-                                               &cut);
-            break;
+    } catch (const graph::SearchUnitRefused &) {
+        // the unit refused alone: its stub, with the rows' type of the mode and the cut the
+        // search computed (search_top_n writes it before the first values charge)
+        assert(values);
+        switch (query_mode) {
+            case SIGNATURE: result = SeqSearchResult::LabelSigVec(); break;
+            case COORDS: result = SeqSearchResult::LabelCountCoordsVec(); break;
+            case COUNTS: result = SeqSearchResult::LabelCountAbundancesVec(); break;
+            case MATCHES:
+            case COUNTS_SUM: result = SeqSearchResult::LabelCountVec(); break;
+            case LABELS: result = SeqSearchResult::LabelVec(); break;
         }
-        case LABELS: {
-            // Default, just get labels
-            result = anno_graph.get_labels(sequence.sequence,
-                                           discovery_fraction,
-                                           presence_fraction);
-            cut.abundances = anno_graph.has_kmer_abundances();
-            cut.returned = std::get<SeqSearchResult::LabelVec>(result).size();
-            break;
-        }
+        SeqSearchResult stub(std::move(sequence), std::move(result), {}, cut);
+        stub.refuse(graph::SearchCut::Refused::VALUES, values->budget()->max_bytes() >> 20);
+        return stub;
     }
 
     // Create seq search instance and move sequence into it
@@ -1381,13 +1433,20 @@ Alignment align_sequence(std::string *seq,
 }
 
 
+// |values| (null: none): a /search's values account of this unit (the sequence on this pair;
+// graph::SearchAccount): the search charges it (execute_query), then the result's rows as it
+// is handed over (search_record_rows_bytes; the alignment attached first). These are the
+// unit's two refusal sites: with the request's `partial_refusal` a charge past the bound turns
+// the result into its refused stub, which keeps the alignment; a stub is not charged again.
+// |alignment|: the sequence's alignment made beforehand (the batched path), when
+// |aligner_config| is null
 SeqSearchResult query_sequence(QuerySequence&& sequence,
                                const AnnotatedDBG &anno_graph,
                                const Config &config,
                                const align::DBGAlignerConfig *aligner_config,
-                               graph::SearchAccount *values) {
+                               graph::SearchAccount *values,
+                               std::optional<Alignment> &&alignment = std::nullopt) {
     // Align sequence and modify sequence struct to store alignment results
-    std::optional<Alignment> alignment;
     if (aligner_config)
         alignment = align_sequence(&sequence.sequence, anno_graph.get_graph(), *aligner_config);
 
@@ -1397,8 +1456,21 @@ SeqSearchResult query_sequence(QuerySequence&& sequence,
             config.num_top_labels, config.discovery_fraction,
             config.presence_fraction, anno_graph, values);
 
-    if (aligner_config)
-        result.get_alignment() = alignment;
+    if (alignment)
+        result.get_alignment() = std::move(alignment);
+
+    if (values) {
+        // the unit's rows, held from now until its object is built
+        if (result.get_cut().refused == graph::SearchCut::Refused::NO) {
+            try {
+                values->charge(search_record_rows_bytes(result));
+            } catch (const graph::SearchUnitRefused &) {
+                result.refuse(graph::SearchCut::Refused::VALUES,
+                              values->budget()->max_bytes() >> 20);
+            }
+        }
+        values->budget()->note_values(values->held());
+    }
 
     return result;
 }
@@ -1409,14 +1481,16 @@ size_t batched_query_fasta(seq_io::FastaParser &fasta_parser,
                            const Config &config,
                            const graph::AnnotatedDBG &anno_graph,
                            const graph::align::DBGAlignerConfig *aligner_config,
-                           graph::SearchAccount *values);
+                           graph::SearchBudget *budget,
+                           const std::string &pair);
 
 size_t query_fasta(const std::string &file,
                    const std::function<void(SeqSearchResult &&)> &callback,
                    const Config &config,
                    const graph::AnnotatedDBG &anno_graph,
                    const graph::align::DBGAlignerConfig *aligner_config,
-                   graph::SearchAccount *values) {
+                   graph::SearchBudget *budget,
+                   const std::string &pair) {
     logger->trace("Parsing sequences from file '{}'", file);
 
     seq_io::FastaParser fasta_parser(file, config.forward_and_reverse);
@@ -1452,7 +1526,7 @@ size_t query_fasta(const std::string &file,
         if (config.query_mode != COORDS && !anno_graph.get_coord_to_header()) {
             // Construct a query graph and query against it
             return batched_query_fasta(fasta_parser, callback, config, anno_graph, aligner_config,
-                                       values);
+                                       budget, pair);
         } else {
             // TODO: Implement batch mode for query_coords queries
             logger->warn("Querying coordinates in batch mode is currently not supported. Querying sequentially...");
@@ -1475,9 +1549,15 @@ size_t query_fasta(const std::string &file,
     for (const seq_io::kseq_t &kseq : fasta_parser) {
         thread_pool.enqueue([&](QuerySequence &sequence) {
             try {
+                // the values account of this record's unit (a /search's), on the task's
+                // stack: the result's values detach from it (shrink) and the callback consumes
+                // the result before the task returns
+                std::optional<graph::SearchAccount> unit;
+                if (budget)
+                    unit.emplace(budget, sequence.id, pair);
                 // Callback with the SeqSearchResult
                 callback(query_sequence(std::move(sequence), anno_graph,
-                                        config, aligner_config, values));
+                                        config, aligner_config, unit ? &*unit : nullptr));
             } catch (...) {
                 std::lock_guard<std::mutex> lock(error_mutex);
                 if (!error)
@@ -1499,7 +1579,8 @@ size_t batched_query_fasta(seq_io::FastaParser &fasta_parser,
                            const Config &config,
                            const graph::AnnotatedDBG &anno_graph,
                            const graph::align::DBGAlignerConfig *aligner_config,
-                           graph::SearchAccount *values) {
+                           graph::SearchBudget *budget,
+                           const std::string &pair) {
     auto it = fasta_parser.begin();
     auto end = fasta_parser.end();
 
@@ -1584,12 +1665,21 @@ size_t batched_query_fasta(seq_io::FastaParser &fasta_parser,
             #pragma omp parallel for num_threads(threads_per_batch) schedule(dynamic)
             for (size_t i = 0; i < seq_batch->size(); ++i) {
                 try {
+                    // the values account of this record's unit (a /search's), as
+                    // query_fasta's tasks make it
+                    std::optional<graph::SearchAccount> unit;
+                    if (budget)
+                        unit.emplace(budget, (*seq_batch)[i].id, pair);
+                    // the alignment made on the full graph is attached before the rows are
+                    // handed over (query_sequence)
                     SeqSearchResult search_result
                         = query_sequence(std::move((*seq_batch)[i]), *query_graph, config,
-                                         config.batch_align ? aligner_config : NULL, values);
-
-                    if (alignments_batch.size())
-                        search_result.get_alignment() = std::move(alignments_batch[i]);
+                                         config.batch_align ? aligner_config : NULL,
+                                         unit ? &*unit : nullptr,
+                                         alignments_batch.size()
+                                             ? std::optional<Alignment>(
+                                                       std::move(alignments_batch[i]))
+                                             : std::nullopt);
 
                     callback(std::move(search_result));
                 } catch (...) {

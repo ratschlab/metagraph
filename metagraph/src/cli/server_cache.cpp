@@ -304,6 +304,7 @@ std::string make_search_cache_key(const SearchRequest &request,
         << "amn:" << config.alignment_max_nodes_per_seq_char << '|'
         << "tl:" << config.num_top_labels << '|'
         << "al:" << (request.align ? '1' : '0') << '|'
+        << "pr:" << (request.partial_refusal ? '1' : '0') << '|'
         << "f:" << fasta.size() << ':' << fasta;
     return oss.str();
 }

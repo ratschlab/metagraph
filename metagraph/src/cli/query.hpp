@@ -188,9 +188,21 @@ class SeqSearchResult {
      * nth_score, tied, tied_returned, and on an annotation with k-mer counts nth_median and
      * tied_same_median. A complete cut states nth_score (and nth_median) null and its counts
      * 0; a cut whose N-th score has one label (tied 1) states nth_median null, no median
-     * having been read for it.
+     * having been read for it. A unit refused alone (refuse()) states no row (returned 0,
+     * complete false, nth_score and nth_median null, the counts 0, the member set of its
+     * computed cut) and `refused`: {account, code, max_memory_mb, and with the answer account
+     * priced_mb}.
      */
     Json::Value cut_to_json() const;
+
+    /**
+     * Refuses this result's unit (its sequence on its pair) alone, with a /search's field
+     * `partial_refusal` (lane T7-P1): its rows are dropped (their buffers freed; the variant
+     * keeps its type), its alignment and sequence are kept, and its cut is marked with the
+     * account that refused it, the bound and, for the answer account, the unit's own object's
+     * price (both in MiB).
+     */
+    void refuse(graph::SearchCut::Refused account, uint64_t max_mb, uint64_t priced_mb = 0);
 
     /**
      * Returns a string representing the individual query result for the represented sequence.
@@ -238,9 +250,18 @@ enum QueryMode {
  * @param config        config object
  * @param anno_graph    annotated de Bruijn graph
  * @param aligner_config alignment config
- * @param values        a /search's values account of this pair (null: none, the CLI's): the
- *                      per-position modes charge their rows' values to it as they grow, and
- *                      past its bound the query throws graph::SearchAnswerTooLarge
+ * @param budget        a /search's answer budget (null: none, the CLI's;
+ *                      SPEC-multigraph-envelope.md section 3): each record's task makes the
+ *                      values account of its unit (the record on this pair, named |pair| in
+ *                      the log) on its own stack; the per-position modes charge their rows'
+ *                      values to it as they grow, and each record's rows are charged to it as
+ *                      its result is handed over. Past the bound the query throws
+ *                      graph::SearchAnswerTooLarge (the request refused); with the request's
+ *                      `partial_refusal` the unit is refused alone and its callback receives
+ *                      the refused stub (SeqSearchResult::refuse). The callback consumes the
+ *                      result before the task returns
+ * @param pair          the pair, as the log names it ("pair (<name>, <graph>, <annotation>)"
+ *                      or "the graph")
  *
  * @return the number of base pairs (characters) in query file
  */
@@ -249,7 +270,8 @@ size_t query_fasta(const std::string &file_path,
                    const Config &config,
                    const graph::AnnotatedDBG &anno_graph,
                    const graph::align::DBGAlignerConfig *aligner_config,
-                   graph::SearchAccount *values = nullptr);
+                   graph::SearchBudget *budget = nullptr,
+                   const std::string &pair = "");
 
 int query_graph(Config *config);
 

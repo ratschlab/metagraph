@@ -14,6 +14,9 @@ struct SearchRequest {
     std::string fasta;
     Config config;
     bool align;
+    // a unit (a FASTA record on a pair) past the answer budget is refused alone and reported in
+    // its cut entry, not the whole request (SPEC-multigraph-envelope.md section 3, lane T7-P1)
+    bool partial_refusal = false;
 };
 
 SearchRequest parse_search_request(const Json::Value &json, const Config &server_config);

@@ -6,8 +6,11 @@
 #include <cstddef>
 #include <cstdint>
 #include <limits>
+#include <mutex>
 #include <stdexcept>
 #include <string>
+#include <tuple>
+#include <vector>
 
 
 namespace mtg {
@@ -17,8 +20,9 @@ namespace graph {
  * A /search answer priced past the server's bound (--search-max-answer-memory-mb;
  * SPEC-multigraph-envelope.md section 3, the /search answer budget): nothing partial is sent
  * (the server: 400 search_answer_too_large). The message is the same whichever account passed
- * the bound, so that the answer never depends on the order the work charged in; |account|
- * ("values" or "answer") is for the server's log only.
+ * the bound; |account| ("values" or "answer") is the one that threw. The 400 names the
+ * request's account, SearchBudget::account(), a function of the request (lane T7-P1), never
+ * of the order the work charged in.
  */
 class SearchAnswerTooLarge : public std::runtime_error {
   public:
@@ -42,27 +46,70 @@ class SearchAnswerTooLarge : public std::runtime_error {
     const char *account_;
 };
 
+/**
+ * A unit of a /search request (one FASTA record on one pair) refused alone, with the request's
+ * field `partial_refusal` (SPEC-multigraph-envelope.md section 3, the /search answer budget):
+ * its values account passed the bound. Not a SearchAnswerTooLarge: the request goes on, and the
+ * search that threw it (cli::execute_query, cli::query_sequence) answers the unit's refused stub
+ * (no row, its cut marked). |account|: "values".
+ */
+class SearchUnitRefused : public std::runtime_error {
+  public:
+    explicit SearchUnitRefused(const char *account)
+          : std::runtime_error(std::string("search: a record's ") + account
+                               + " account on a pair passed the bound: the unit is refused alone"),
+            account_(account) {}
+
+    const char* account() const { return account_; }
+
+  private:
+    const char *account_;
+};
+
+// |a| + |b|, UINT64_MAX where the sum would pass the range
+inline uint64_t saturating_add(uint64_t a, uint64_t b) {
+    return a > std::numeric_limits<uint64_t>::max() - b ? std::numeric_limits<uint64_t>::max()
+                                                        : a + b;
+}
+
+// |bytes| in MiB, rounded up
+inline uint64_t mib_rounded_up(uint64_t bytes) {
+    return (bytes >> 20) + ((bytes & ((uint64_t(1) << 20) - 1)) != 0);
+}
+
 class SearchBudget;
 
 /**
- * One account of a /search request (SearchBudget): the values a pair's rows hold (one per
- * pair) or the request's answer (its JSON tree and text). Charged BEFORE what it prices is
- * allocated, from any thread; it only grows (nothing is released while the request runs), so
- * that whether a charge passes the bound never depends on the order the threads charge in. A
- * charge that would take it past the bound throws SearchAnswerTooLarge and marks the request
- * (SearchBudget::passed); from then on every charge of the request throws, so that the work
- * still running stops at its next charge. A model of the heap (the deployed build's sizes),
- * never a measurement.
+ * One account of a /search request (SearchBudget): the request's answer (its JSON tree and
+ * text; SearchBudget::answer()), or the values of one unit, a FASTA record on a pair (its rows
+ * and their per-position values; lane T7-P1). Charged BEFORE what it prices is allocated, from
+ * any thread; it only grows (nothing is released while it runs), so that whether a charge passes
+ * the bound never depends on the order the threads charge in. A model of the heap (the deployed
+ * build's sizes), never a measurement.
+ *
+ * A charge that would take it past the bound:
+ * - a unit's values account, with `partial_refusal`: marks the unit refused (sticky: every
+ *   further charge of it throws again) and throws SearchUnitRefused; the request goes on;
+ * - otherwise (a unit's values without the field, or the answer account): marks the request
+ *   (SearchBudget::note_passed) and throws SearchAnswerTooLarge; the request is refused 400
+ *   (SearchBudget::passed), and the accounts the request's state closes (SearchBudget::
+ *   check_open) throw at their next charge, so that the work still running stops.
  */
 class SearchAccount {
   public:
-    // |where|: what the account is of, for the log (a values account's pair); |threads|: how
-    // many tasks of its work run at once (a values account: the pair's records, on the pair's
-    // threads), for charge_scratch
+    // An account of the request: |where|, what it is of, for the log; |threads|, how many
+    // tasks of its work run at once, for charge_scratch
     SearchAccount(SearchBudget *budget, const char *name, std::string where = "",
                   size_t threads = 1)
           : budget_(budget), name_(name), where_(std::move(where)),
             threads_(std::max<size_t>(threads, 1)) {}
+    // The values account of a unit: FASTA record |record| (its index in the body) on |pair|
+    // ("pair (<name>, <graph>, <annotation>)", or "the graph" on a single-graph server), one
+    // task (its scratch charged once)
+    SearchAccount(SearchBudget *budget, size_t record, const std::string &pair)
+          : budget_(budget), name_("values"),
+            where_("record " + std::to_string(record) + " on " + pair),
+            threads_(1), record_(record) {}
     SearchAccount(const SearchAccount &) = delete;
     SearchAccount& operator=(const SearchAccount &) = delete;
 
@@ -81,76 +128,178 @@ class SearchAccount {
     const char* name() const { return name_; }
     const std::string& where() const { return where_; }
     SearchBudget* budget() const { return budget_; }
+    // a unit's account (its record's index), and whether the unit was refused
+    bool unit() const { return record_ != kNoRecord; }
+    size_t record() const { return record_; }
+    bool refused() const { return refused_.load(std::memory_order_relaxed); }
+
+    static constexpr size_t kNoRecord = std::numeric_limits<size_t>::max();
 
   private:
     SearchBudget *budget_;
     const char *name_;
     std::string where_;
     size_t threads_;
+    size_t record_ = kNoRecord;
     std::atomic<uint64_t> held_ { 0 };
     std::atomic<uint64_t> scratch_ { 0 };
+    std::atomic<bool> refused_ { false };
 };
 
 /**
  * The accounts of one /search request, each bounded by |max_bytes| (the server's
  * --search-max-answer-memory-mb, in bytes): the answer's (answer()), and a values account per
- * pair the pair's work makes (SearchAccount(&budget, "values")). |passed| once any of them
- * would have passed the bound; the server then answers the request 400
- * search_answer_too_large, whatever else its work raised.
+ * unit, a FASTA record on a pair (SearchAccount(&budget, record, pair), made by the unit's
+ * task). |partial_refusal|: the request's field (SPEC-multigraph-envelope.md section 3): a unit
+ * whose values, or whose own object, would pass the bound is refused alone and reported in its
+ * cut entry; without it any such unit refuses the whole request.
+ *
+ * The request's state (lane T7-P1), a function of the request, never of the order its work
+ * charges in (the design note's section 4):
+ * - OPEN;
+ * - VALUES: refused, without the field, by a unit's values; every charge throws (the work
+ *   stops early, as before the field existed);
+ * - ANSWER: refused, with the field, by the request's answer account; every charge throws;
+ * - ANSWER_PENDING: refused, without the field, on the answer side (a unit's object alone, or
+ *   the request's answer account): no object is built or charged any more, and the units not
+ *   yet finished run their searches, charging their own values accounts, so that whether some
+ *   unit's values would pass is learned in every order (then VALUES).
+ * The 400 names `account()`: "values" in VALUES, else "answer".
  */
 class SearchBudget {
   public:
-    explicit SearchBudget(uint64_t max_bytes) : max_bytes_(max_bytes), answer_(this, "answer") {}
+    explicit SearchBudget(uint64_t max_bytes, bool partial_refusal = false)
+          : max_bytes_(max_bytes), partial_refusal_(partial_refusal), answer_(this, "answer") {}
     SearchBudget(const SearchBudget &) = delete;
     SearchBudget& operator=(const SearchBudget &) = delete;
 
     uint64_t max_bytes() const { return max_bytes_; }
-    bool passed() const { return passed_.load(std::memory_order_acquire); }
+    bool partial_refusal() const { return partial_refusal_; }
+    // the request is refused (400 search_answer_too_large), whatever else its work raised
+    bool passed() const { return state_.load(std::memory_order_acquire) != OPEN; }
+    // the account the 400 names, once the request's work has ended: "values" or "answer"
+    const char* account() const {
+        return state_.load(std::memory_order_acquire) == VALUES ? "values" : "answer";
+    }
     SearchAccount& answer() { return answer_; }
 
-    // marks the request: |account|, holding |held| bytes, would have passed the bound with a
-    // charge of |charge| bytes (the first one is kept for the log, read once the request's
-    // work has ended)
-    void note_passed(const SearchAccount &account, uint64_t held, uint64_t charge) {
-        bool expected = false;
-        if (passed_.compare_exchange_strong(expected, true, std::memory_order_acq_rel)) {
-            first_passed_ = std::string("the ") + account.name() + " account";
-            if (!account.where().empty())
-                first_passed_ += " of " + account.where();
-            first_held_ = held;
-            first_charge_ = charge;
-        }
+    // throws SearchAnswerTooLarge if the request's state closes |account| (every account once
+    // the request is refused, but the units' values accounts while the account is pending)
+    void check_open(const SearchAccount &account) const {
+        const int state = state_.load(std::memory_order_acquire);
+        if (state == OPEN || (state == ANSWER_PENDING && &account != &answer_))
+            return;
+        throw SearchAnswerTooLarge(max_bytes_, account.name());
     }
-    const std::string& first_passed() const { return first_passed_; }
-    // what the first account to pass the bound held before the charge refused, and that charge
-    uint64_t first_held() const { return first_held_; }
-    uint64_t first_charge() const { return first_charge_; }
 
-    // the most a pair's values account held (noted as each pair's work ends), for the log
+    // marks the request refused: |account|, holding |held| bytes, would have passed the bound
+    // with a charge of |charge| bytes (the first one of each kind is kept for the log, read
+    // once the request's work has ended)
+    void note_passed(const SearchAccount &account, uint64_t held, uint64_t charge) {
+        std::string where = std::string("the ") + account.name() + " account";
+        if (!account.where().empty())
+            where += " of " + account.where();
+        refuse(&account != &answer_, std::move(where), held, charge);
+    }
+    // without the field: the object of the unit |where| (one record on one pair) alone, priced
+    // |price| bytes, would pass the bound (the answer side; the request is refused)
+    void note_object_passed(const std::string &where, uint64_t price) {
+        refuse(false, "the answer account of " + where, 0, price);
+    }
+
+    // a unit refused alone (with the field), for the log: record |record| on its pair
+    // (|where|), its |account| ("values" or "answer"), what it held before the charge refused
+    // and that charge (for "answer": 0 and the unit's object's price)
+    struct UnitRefusal {
+        size_t record;
+        std::string where;
+        const char *account;
+        uint64_t held;
+        uint64_t charge;
+    };
+    void note_unit_refused(UnitRefusal refusal) {
+        std::lock_guard<std::mutex> lock(mutex_);
+        unit_refusals_.push_back(std::move(refusal));
+    }
+    // the units refused alone, by record and pair (read once the request's work has ended)
+    std::vector<UnitRefusal> unit_refusals() const {
+        std::lock_guard<std::mutex> lock(mutex_);
+        std::vector<UnitRefusal> refusals = unit_refusals_;
+        std::sort(refusals.begin(), refusals.end(), [](const auto &a, const auto &b) {
+            return std::tie(a.record, a.where) < std::tie(b.record, b.where);
+        });
+        return refusals;
+    }
+
+    // the account the 400 names (account()): its first refusal, for the log
+    const std::string& first_passed() const { return first(account()).where; }
+    // what that account held before the charge refused, and that charge
+    uint64_t first_held() const { return first(account()).held; }
+    uint64_t first_charge() const { return first(account()).charge; }
+
+    // the most a unit's values account held (noted as each unit's work ends), for the log
     void note_values(uint64_t bytes) {
         uint64_t max = values_max_.load(std::memory_order_relaxed);
         while (bytes > max
                 && !values_max_.compare_exchange_weak(max, bytes, std::memory_order_relaxed)) {}
     }
     uint64_t values_max() const { return values_max_.load(std::memory_order_relaxed); }
+    // the units whose object (or refused stub) was built, for the log
+    void note_unit_built() { units_.fetch_add(1, std::memory_order_relaxed); }
+    size_t units() const { return units_.load(std::memory_order_relaxed); }
 
   private:
+    enum State : int { OPEN, VALUES, ANSWER, ANSWER_PENDING };
+    struct First {
+        bool noted = false;
+        std::string where;
+        uint64_t held = 0;
+        uint64_t charge = 0;
+    };
+
+    void refuse(bool values, std::string where, uint64_t held, uint64_t charge) {
+        std::lock_guard<std::mutex> lock(mutex_);
+        First &first = values ? first_values_ : first_answer_;
+        if (!first.noted)
+            first = { true, std::move(where), held, charge };
+        const int state = state_.load(std::memory_order_relaxed);
+        if (values) {
+            if (state != ANSWER)
+                state_.store(VALUES, std::memory_order_release);
+        } else if (state == OPEN) {
+            state_.store(partial_refusal_ ? ANSWER : ANSWER_PENDING, std::memory_order_release);
+        }
+    }
+    const First& first(const char *account) const {
+        return account[0] == 'v' ? first_values_ : first_answer_;
+    }
+
     const uint64_t max_bytes_;
-    std::atomic<bool> passed_ { false };
-    std::string first_passed_;
-    uint64_t first_held_ = 0;
-    uint64_t first_charge_ = 0;
+    const bool partial_refusal_;
+    std::atomic<int> state_ { OPEN };
+    mutable std::mutex mutex_;
+    First first_values_;
+    First first_answer_;
+    std::vector<UnitRefusal> unit_refusals_;
     std::atomic<uint64_t> values_max_ { 0 };
+    std::atomic<size_t> units_ { 0 };
     SearchAccount answer_;
 };
 
 inline void SearchAccount::charge(uint64_t bytes) {
-    if (budget_->passed())
-        throw SearchAnswerTooLarge(budget_->max_bytes(), name_);
+    budget_->check_open(*this);
+    if (refused())
+        throw SearchUnitRefused(name_);
     const uint64_t max = budget_->max_bytes();
     uint64_t held = held_.load(std::memory_order_relaxed);
     do {
         if (bytes > max || held > max - bytes) {
+            if (unit() && budget_->partial_refusal()) {
+                // the unit alone: the request goes on
+                if (!refused_.exchange(true, std::memory_order_relaxed))
+                    budget_->note_unit_refused({ record_, where_, name_, held, bytes });
+                throw SearchUnitRefused(name_);
+            }
             budget_->note_passed(*this, held, bytes);
             throw SearchAnswerTooLarge(max, name_);
         }

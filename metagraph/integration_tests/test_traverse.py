@@ -3073,7 +3073,9 @@ class TestTraverseAPI(TestTraverseBase):
         # name (H4, section 9.1; test_multigraph.py's TestLabelsDisjoint checks it), true here:
         # the headers acc1-acc3, the column the file's path; 'search': the /search answer
         # budget (lane T5b-Y4, SPEC-multigraph-envelope.md sections 3 and 8; placed as
-        # column_labels), at its default here
+        # column_labels), at its default here, with the units refused alone and the concurrency
+        # of this server (lane T7-P1: -p 2, the default --threads-each 1, the handler threads
+        # -p's; a single-graph server runs /search on its handler thread)
         self.assertEqual({'algorithm_version', 'attempts', 'column_labels', 'compression_level',
                           'content_encodings', 'deadline_check', 'expect_server_instance',
                           'feature_level', 'features', 'graph_summary', 'graphs',
@@ -3082,10 +3084,17 @@ class TestTraverseAPI(TestTraverseBase):
                           'pair_summary', 'pattern', 'ready', 'release', 'request_intake',
                           'resolve', 'routes', 'schema_version', 'search', 'server_instance'},
                          set(c))
-        self.assertEqual({'max_memory_mb': 4096,
+        self.assertEqual({'handler_threads': 2, 'max_memory_mb': 4096,
+                          'pair_searches_at_once': 2, 'records_at_once': 1,
                           'rule': 'SPEC-multigraph-envelope.md section 3, the /search answer budget',
                           'too_large': {'status': 400, 'code': 'search_answer_too_large',
-                                        'members': ['code', 'error', 'max_memory_mb']}},
+                                        'accounts': ['answer', 'values'],
+                                        'members': ['account', 'code', 'error', 'max_memory_mb']},
+                          'unit_refused': {'field': 'partial_refusal',
+                                           'code': 'search_answer_too_large',
+                                           'accounts': ['answer', 'values'],
+                                           'members': ['account', 'code', 'max_memory_mb',
+                                                       'priced_mb']}},
                          c['search'])
         self.assertEqual({'max_request_body_mb': None,
                           'body_too_large': {'status': 413, 'code': 'body_too_large',

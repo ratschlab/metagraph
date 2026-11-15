@@ -111,6 +111,8 @@ The answer keeps its upstream shape (a list of `{seq_description, results, ...}`
   - on COUNTS annotations also `nth_median` and `tied_same_median` (the labels with the N-th score and median).
     The median is read only where the N-th score is shared: a cut with `tied` 1 states `nth_median` null (and
     `tied_same_median` 1).
+  - a unit refused alone (the request's `partial_refusal`, the answer budget below) states `refused`, its rows
+    absent; an answered entry has no `refused` member.
 - `kmers_in_target` (since MetaGraph master #634, 2026-05-17; single-graph and multi-graph servers alike): on the
   rows of a coordinate query (`query_coords`: the rows that carry `kmer_coords`) of a pair that has a `.seqs`
   (CoordToHeader) record mapping, a non-negative integer, the target record's k-mer count (its length − k + 1,
@@ -139,40 +141,82 @@ The answer keeps its upstream shape (a list of `{seq_description, results, ...}`
   before any cached answer is looked up and before any pair is searched (train 4; it was answered 200 with the
   body `null`, nothing searched). A `graphs` that is not a list is still read as no field, and an unknown name
   is refused first (`graph_unknown`).
-- **The answer budget** (lane T5b-Y4, owner decision 2026-11-13; the design note
-  `DESIGN-search-answer-budget.md` of train 5a, option (a)). `--search-max-answer-memory-mb` (4,096 MiB by
-  default, an integer in [0, 1048576], 0 = no bound; the CLI's `metagraph query` has none) bounds what one
-  `POST /search` holds, in every mode (plain, `abundance_sum`, `with_signature`, `query_counts`,
-  `query_coords`, with or without `align`). Two accounts, each bounded by the flag, are charged BEFORE what
-  they price is built:
-  - the values of each pair: the rows of every FASTA record of the body on that pair, their per-position
-    values (signature runs, count runs, coordinates) charged before each of their buffers grows, and each
-    record's rows (labels, entries, its name and sequence) as its result is handed over; held until the
-    pair's answer is built;
-  - the answer of the request: each record's JSON object (its rows, the pair tags, its cut, its node in the
-    merged answer on a multi-graph server) before it is built, then the answer's text at its exact length,
-    beside it the transport's copy (or gzip's and its state) and, with `--cache-size` above 0, the cache's
-    copy, before the text is written. The text is the one written without a budget, byte for byte.
+- **The answer budget** (lane T5b-Y4, owner decision 2026-11-13; per unit with `partial_refusal` since lane
+  T7-P1, owner decision 2026-11-14, `DESIGN-search-partial-refusal.md`). `--search-max-answer-memory-mb` (4,096
+  MiB by default, an integer in [0, 1048576], 0 = no bound; the CLI's `metagraph query` has none) bounds what one
+  `POST /search` holds, in every mode (plain, `abundance_sum`, `with_signature`, `query_counts`, `query_coords`,
+  with or without `align`). A **unit** is one FASTA record of the body on one pair (on a single-graph server, on
+  its one pair). Three kinds of charge, each bounded by the flag, are made BEFORE what they price is built:
+  - the values of each unit: its rows' per-position values (signature runs, count runs, coordinates) charged
+    before each of their buffers grows (a column-label search's store as the scratch it allocates), and its rows
+    (labels, entries, its name and sequence) as its result is handed over. A unit's values are freed once its
+    object is built: no unit's values wait for the pair's other records;
+  - the object check of each unit: its own JSON object (its rows, the pair tags, its cut, and the most building
+    one of its rows holds beside it) priced alone against the bound, before it is built;
+  - the answer of the request: each unit's object (or a refused unit's entry) before it is built, beside them
+    the most one object of a pair held while it was built and measured, then the answer's text at its exact
+    length, beside it the transport's copy (or gzip's and its state) and, with `--cache-size` above 0, the
+    cache's copy, before the text is written. The text is the one written without a budget, byte for byte.
 
   A model of the deployed build's heap (as `/resolve`'s answer account, `SPEC-labeled-traversal-core.md`
   §4.6), never a measurement, so a request near the bound may be refused where it would have fit. Not charged:
   the rows decoded before the top-N cut, the index (mmap pages or an `in_ram` load) and the body (its own cap).
-  When either account would pass the bound, the whole request is refused **400**:
+
+  `partial_refusal` (a boolean, false when absent, read as `with_signature`; part of the result cache's key)
+  decides how a unit past the bound is reported:
+  - **With it**, a unit whose values or own object would pass the bound is **refused alone**. Its rows are
+    absent, and its entry in its record's `cuts` states `returned` 0, `complete` false, `nth_score` null, `tied`
+    and `tied_returned` 0 (and, where the pair's cut states them, `nth_median` null and `tied_same_median` 0) and
+
+    ```json
+    "refused": {"account": "values", "code": "search_answer_too_large", "max_memory_mb": 4096}
+    ```
+
+    `account` is `"values"` (its values passed the bound while it was searched or as its rows were handed over)
+    or `"answer"` (its own object was priced past the bound before it was built); with `"answer"` also
+    `priced_mb`, that object's price in MiB rounded up (a function of the unit alone). Every other unit's rows
+    (a contiguous run in `results`, in pair order) and entry are the bytes of the answer without a budget, and
+    so are the record's other members (`seq_description`, and with `align` the first pair's alignment members,
+    which a refused unit keeps). The status is 200, also when every unit is refused. A refused entry never
+    means "nothing matched": the caller did not get that unit's rows, and the same request is refused in the
+    same units again. Retry the record alone on that pair with fewer `top_labels`, a larger
+    `discovery_fraction` or no per-position values.
+  - **Without it**, a unit whose values or own object would pass the bound refuses the whole request.
+  - In both modes the request's answer passing the bound refuses the whole request.
+
+  The whole request is refused **400**:
 
   ```json
-  {"error":"search: the answer would hold more than --search-max-answer-memory-mb 4096 MiB: nothing partial is sent; ask for fewer top_labels, a larger discovery_fraction, fewer or shorter FASTA records, or no per-position values (with_signature, query_counts, query_coords)","code":"search_answer_too_large","max_memory_mb":4096}
+  {"error":"search: the answer would hold more than --search-max-answer-memory-mb 4096 MiB: nothing partial is sent; ask for fewer top_labels, a larger discovery_fraction, fewer or shorter FASTA records, or no per-position values (with_signature, query_counts, query_coords)","account":"values","code":"search_answer_too_large","max_memory_mb":4096}
   ```
 
-  written `error` first, then `code` and `max_memory_mb` (the flag's value), as the intake refusals (section
-  8). The text is the same whichever account passed, and on a multi-graph server no pair is named (`/search`
-  has no per-pair entries: one pair's values over the bound, or the pairs' JSON together over it, refuses the
-  whole request; the pairs still running stop at their next charge). The refusals that need no work come
-  first (the body cap, the body's JSON, the fields, the selection, a cached answer); a request that passes
-  the bound during its work is refused so whatever else its work raised (another pair's error, a load
-  refused `index_changed`), so the answer never depends on the order the pairs charged in. The same request
-  is refused again (the code is final: change the request) and is not cached. `in_ram` changes nothing: the
-  same charges, the same refusal. Below the bound every answer is the one without a budget, byte for byte.
-  Stated by GET /capabilities as `search` (section 8).
+  written `error` first, then `account`, `code` and `max_memory_mb` (the flag's value), as the intake refusals
+  (section 8). The text is the same whichever account passed, and no pair or unit is named. `account` is a
+  function of the request (the design note's section 4), never of the order its work charged in: with
+  `partial_refusal` it is always `"answer"`; without it `"values"` when some unit's values would pass the bound,
+  else `"answer"` (a unit's own object, or the request's answer). The work still running stops at its next
+  charge once the request is refused on a unit's values (without the field) or on its answer (with it); after a
+  refusal on the answer side without the field, the units not yet finished run their searches (their values
+  charged, no object built), so that the account named is learned in every order. The refusals that need no
+  work come first (the body cap, the body's JSON, the fields, the selection, a cached answer). Without
+  `partial_refusal` a request refused by the budget is so refused whatever else its work raised (another pair's
+  error, a load refused `index_changed`). With it a refused unit is no error: another pair's error is answered
+  as without a budget (the first failing pair in pair order), and only the request's answer passing the bound
+  wins over it. The same request is refused again (the code is final: change the request), and a 400 is not
+  cached; a partly refused 200 is cached as any answer. `in_ram` changes nothing: the same charges, the same
+  refusals. Below the bound every answer is the one without a budget, byte for byte, in both modes. Since lane
+  T7-P1 the values are bounded per unit, not per pair: a request refused before only because a pair's records
+  together passed the bound, each record within it, is answered.
+
+  These are model totals, not bounds (the design note's section 5.1 lists what they miss): the values held at
+  once are at most `pair_searches_at_once` x `records_at_once` x the bound over every request, the answers
+  `handler_threads` x the bound, the bodies `handler_threads` x `--max-request-body-mb`. Stated by GET
+  /capabilities as `search` (section 8).
+
+  Reference instances (tests/data/multigraph_contract, real runs at the bound 1 MiB): samples 57-60, the 400
+  without the field in each mode (`"answer"` in 57-59, where each unit's own object passes; `"values"` in 60);
+  71, a multi-graph answer with one unit refused `"values"`; 72, the same on a single-graph server; 73, every unit
+  refused; 74, a unit refused `"answer"` with `priced_mb`; 75, the 400 `"answer"` with the field.
 
 ## 4. Deadlines and the work cutoff (E4, E20)
 
@@ -489,19 +533,33 @@ alone); the unpaged list above it is refused 400 `column_labels_too_large` (`mem
 once, at its first place in the answers' order (section 3). Its presence is the marker: an engine without it
 ignores the parameters and answers the whole array (`SPEC-labeled-traversal-core.md` §10.3, `GET /column_labels`).
 From lane T5b-Y4 the block also states `search`, the `/search` answer budget (section 3), the same object a
-single-graph server states at the top level of `GET /capabilities`:
+single-graph server states at the top level of `GET /capabilities` (lane T7-P1 added `unit_refused`, the 400's
+`account` and the concurrency members):
 
 ```json
 "search": {
+  "handler_threads": 2,
   "max_memory_mb": 4096,
+  "pair_searches_at_once": 2,
+  "records_at_once": 2,
   "rule": "SPEC-multigraph-envelope.md section 3, the /search answer budget",
-  "too_large": {"status": 400, "code": "search_answer_too_large", "members": ["code", "error", "max_memory_mb"]}
+  "too_large": {"status": 400, "code": "search_answer_too_large", "accounts": ["answer", "values"], "members": ["account", "code", "error", "max_memory_mb"]},
+  "unit_refused": {"field": "partial_refusal", "code": "search_answer_too_large", "accounts": ["answer", "values"], "members": ["account", "code", "max_memory_mb", "priced_mb"]}
 }
 ```
 
-`max_memory_mb` is `--search-max-answer-memory-mb` (`null` when 0, no bound), `too_large` the refusal's status,
-code and body members (a set, sorted; the body writes `error` first), `rule` this section's reference. Its
-presence is the marker: an engine without it has no budget. Not part of any fingerprint.
+`max_memory_mb` is `--search-max-answer-memory-mb` (`null` when 0, no bound), `too_large` the whole-request
+refusal's status, code, accounts and body members (sets, sorted; the body writes `error` first), `rule` this
+section's reference. `unit_refused` states the request field that refuses a unit alone and its entry's
+`refused`: its code, accounts and members (`priced_mb` only with `account` `"answer"`); its presence is the
+marker that the engine reads the field (an engine without it ignores the field and refuses the whole request).
+The concurrency the model totals of section 3 depend on: `pair_searches_at_once`, the pair searches the server
+runs at once over every request (a multi-graph server's graphs' pool, `-p`, which the fan-outs of `/resolve`
+and `/pattern` share; a single-graph server runs /search on its handler thread: `handler_threads`);
+`records_at_once`, the records one pair search runs at once (`--threads-each`); `handler_threads`, the HTTP
+handler threads (`--http-threads`, else `-p`), the most requests the server handles at once (/search has no cap
+of its own). They are stated with or without a bound. The block's presence is the marker: an engine without it
+has no budget. Not part of any fingerprint.
 A single-graph server, which states its request registry as `routes.requests`, states `expect_server_instance`
 (the same list) at the top level of `GET /capabilities`, beside `routes.requests` (the pattern of `headers_unique`:
 one reader serves both modes), and `request_intake` there too. An engine without the key refuses the field 400 (unknown field), so clients send it

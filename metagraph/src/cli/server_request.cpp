@@ -11,7 +11,8 @@ SearchRequest parse_search_request(const Json::Value &json, const Config &server
         throw std::invalid_argument("No input sequences received from client");
 
     SearchRequest request{json["FASTA"].asString(), server_config,
-                          json.get("align", false).asBool()};
+                          json.get("align", false).asBool(),
+                          json.get("partial_refusal", false).asBool()};
     auto &config = request.config;
     config.discovery_fraction
             = json.get("discovery_fraction", config.discovery_fraction).asDouble();

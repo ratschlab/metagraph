@@ -195,10 +195,13 @@ class Config {
     uint64_t max_column_labels_bytes = 16ull << 20;
     static constexpr uint64_t kMaxColumnLabelsBytes = 1ull << 40;
     // The most memory one POST /search answer holds, in MiB (0 = no bound;
-    // SPEC-multigraph-envelope.md section 3, the /search answer budget): what each pair's rows
-    // hold and the request's JSON answer and its text, each priced before it is built; past it
-    // the whole request is refused 400 search_answer_too_large. Stated by GET /capabilities
-    // (search.max_memory_mb). The CLI has none
+    // SPEC-multigraph-envelope.md section 3, the /search answer budget): what each unit (a FASTA
+    // record on a pair) holds, its rows and their values, and its own JSON object, and the
+    // request's JSON answer and its text, each priced before it is built. A unit past it is
+    // refused alone (its cut entry states `refused`) with the request's `partial_refusal`, and
+    // refuses the whole request 400 search_answer_too_large without it; the request's answer
+    // past it refuses the whole request. Stated by GET /capabilities (search.max_memory_mb). The
+    // CLI has none
     uint64_t search_max_answer_memory_mb = 4096;
     // The server's maxima of a request's budgets (bounds.max_memory_mb, bounds.max_work_units;
     // SPEC-labeled-traversal-core.md §10.3): 0 = off (a request's budgets as given, an omitted
