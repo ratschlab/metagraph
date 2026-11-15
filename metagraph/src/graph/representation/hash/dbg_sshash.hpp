@@ -89,16 +89,14 @@ class DBGSSHash : public DeBruijnGraph {
     template <bool with_rc = true>
     std::pair<node_index, bool> kmer_to_node_with_rc(std::string_view kmer) const;
 
-    void call_outgoing_kmers(node_index node,
-                             const OutgoingEdgeCallback& callback) const override;
+    Edges outgoing_kmers(node_index node) const override;
 
     template <bool with_rc = true>
     void call_outgoing_kmers_with_rc(
             node_index node,
             const std::function<void(node_index, char, bool)>& callback) const;
 
-    void call_incoming_kmers(node_index node,
-                             const IncomingEdgeCallback& callback) const override;
+    Edges incoming_kmers(node_index node) const override;
 
     template <bool with_rc = true>
     void call_incoming_kmers_with_rc(
@@ -114,16 +112,14 @@ class DBGSSHash : public DeBruijnGraph {
     // The stored node of a k-mer or of its reverse complement
     node_index get_base_node(node_index node) const;
 
-    void adjacent_outgoing_nodes(node_index node,
-                                 const std::function<void(node_index)>& callback) const override;
+    Nodes adjacent_outgoing_nodes(node_index node) const override;
 
     template <bool with_rc = true>
     void
     adjacent_outgoing_nodes_with_rc(node_index node,
                                     const std::function<void(node_index, bool)>& callback) const;
 
-    void adjacent_incoming_nodes(node_index node,
-                                 const std::function<void(node_index)>& callback) const override;
+    Nodes adjacent_incoming_nodes(node_index node) const override;
 
     template <bool with_rc = true>
     void

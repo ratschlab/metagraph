@@ -102,8 +102,8 @@ uint64_t presence_mask_length(const graph::PresenceRuns &mask) {
         length += 1 + decimal_length(end - begin);
         pos = end;
     });
-    if (mask.size > pos)
-        length += 1 + decimal_length(mask.size - pos);
+    if (mask.size() > pos)
+        length += 1 + decimal_length(mask.size() - pos);
     return length;
 }
 
@@ -123,8 +123,8 @@ RunsText count_runs_text(const graph::CountRuns &counts, bool verbose) {
             text.bytes += (end - first) * decimal_length(value);
             covered += end - first;
         });
-        text.bytes += counts.size - covered;
-        text.bytes += counts.size ? counts.size - 1 : 0;
+        text.bytes += counts.size() - covered;
+        text.bytes += counts.size() ? counts.size() - 1 : 0;
         return text;
     }
     counts.call_runs([&](size_t first, size_t end, size_t value) {
@@ -153,8 +153,8 @@ RunsText dense_coords_text(const graph::PositionCoords &coords) {
         if (length > kInlineString)
             text.long_bytes += alloc_bytes(length + 1);
     });
-    text.bytes += coords.size ? coords.size - 1 : 0;
-    text.strings = coords.size;
+    text.bytes += coords.size() ? coords.size() - 1 : 0;
+    text.strings = coords.size();
     return text;
 }
 
@@ -220,7 +220,7 @@ class AppendingBuffer : public std::streambuf {
 
 
 uint64_t presence_mask_text_length(const graph::PresenceRuns &mask, bool verbose) {
-    return verbose ? mask.size : presence_mask_length(mask);
+    return verbose ? mask.size() : presence_mask_length(mask);
 }
 
 uint64_t count_runs_text_length(const graph::CountRuns &counts, bool verbose) {
@@ -321,10 +321,10 @@ SearchRecordPrice search_record_price(const SeqSearchResult &result, bool verbos
     } else if (const auto *v = std::get_if<LabelSigVec>(&rows)) {
         for (const auto &[label, count, mask] : *v) {
             // the mask's string (or, verbose, the mask itself and its string of every bit)
-            const uint64_t length = verbose_output ? mask.size : presence_mask_length(mask);
+            const uint64_t length = verbose_output ? mask.size() : presence_mask_length(mask);
             const uint64_t transient = built_string(length)
                     + (verbose_output
-                       ? alloc_bytes(graph::PresenceRuns::dense_bytes(mask.size)
+                       ? alloc_bytes(graph::PresenceRuns::dense_bytes(mask.size())
                                      + sizeof(uint64_t))
                        : 0);
             row(label, member(SeqSearchResult::SIGNATURE_FIELD) + kJsonContainerBytes
@@ -337,7 +337,7 @@ SearchRecordPrice search_record_price(const SeqSearchResult &result, bool verbos
             const RunsText text = count_runs_text(abundances, verbose_output);
             // the run strings (or, verbose, every position's count) and their join
             const uint64_t transient = (verbose_output
-                       ? buffer_bytes(abundances.size, sizeof(size_t))
+                       ? buffer_bytes(abundances.size(), sizeof(size_t))
                        : 3 * buffer_bytes(text.strings, kStringBytes) + text.long_bytes)
                     + 4 * alloc_bytes(text.bytes + 1);
             row(label, member(SeqSearchResult::KMER_COUNT_FIELD)
@@ -355,9 +355,9 @@ SearchRecordPrice search_record_price(const SeqSearchResult &result, bool verbos
                 // position (reserved) and their join
                 const RunsText text = dense_coords_text(coords);
                 length = text.bytes;
-                transient = buffer_bytes(coords.size, sizeof(graph::PositionCoords::Coords))
+                transient = buffer_bytes(coords.size(), sizeof(graph::PositionCoords::Coords))
                         + coords_copy_bytes(coords)
-                        + buffer_bytes(coords.size, kStringBytes) + text.long_bytes;
+                        + buffer_bytes(coords.size(), kStringBytes) + text.long_bytes;
             } else {
                 // collapse_coord_ranges: a string per range (a vector at its last growth) and
                 // the ranges open (two vectors of at most a position's coordinates, grown by

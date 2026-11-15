@@ -978,7 +978,7 @@ inline uint64_t retained_path_bytes(size_t k, size_t length) {
  * in request order (§5.3: one share per shard; a request runs on one shard), so that the same
  * request on the same index stops at the same step (§5.5). A step is one range evaluation (a
  * tighten_range, successful or not, or a W-rule rank set), one edge examined by a scan, or one
- * outgoing edge examined by the extension (§4.2: every edge DeBruijnGraph::call_outgoing_kmers
+ * outgoing edge examined by the extension (§4.2: every edge DeBruijnGraph::outgoing_kmers
  * reports for a node the DFS expands, allowed or not); extraction charges no steps (its work is
  * linear in the contexts it releases, which max_contexts caps, plus the invalid candidates it
  * skips) but reads the clock.
@@ -1975,12 +1975,12 @@ struct Result {
  *  - for L > k with Request::extend_paths (phase 2, §4.2): the anchors above (positions
  *    [0, k) on node ranges and W), listed in answer order once they are counted EXACT and
  *    admitted (<= max_anchors), then extended one by one by a depth-first search along
- *    DeBruijnGraph::call_outgoing_kmers on the graph given to PatternSearch (the wrapper on
+ *    DeBruijnGraph::outgoing_kmers on the graph given to PatternSearch (the wrapper on
  *    a wrapped PRIMARY graph, so a path may pass between stored and virtual k-mers), keeping
  *    only the outgoing k-mers whose last base is in Pattern::allowed(position, spelled), to
  *    position L. Every complete path is a context; the search never scores and stops at the
  *    first disallowed base, so it is complete within its budget. Outgoing edges come from
- *    the valid-edge mask's graph (DBGSuccinct::call_outgoing_kmers skips dummy and pruned
+ *    the valid-edge mask's graph (DBGSuccinct::outgoing_kmers skips dummy and pruned
  *    k-mers), so a path exists only where all its k-mers were retained; without the mask the
  *    only dummy an outgoing edge of a k-mer can reach is a sink (base '$'), which no pattern
  *    position allows.

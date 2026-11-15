@@ -54,7 +54,7 @@ std::vector<size_t> positions_of(const PositionCoords &coords) {
 }
 
 int32_t score_of(size_t k, const PresenceRuns &mask) {
-    return graph::align::score_kmer_presence_mask(k, mask.size, [&](const auto &callback) {
+    return graph::align::score_kmer_presence_mask(k, mask.size(), [&](const auto &callback) {
         mask.call_runs(callback);
     });
 }
@@ -128,7 +128,7 @@ TEST(AnnotatedSearchPositions, PresenceRunsStandForTheirMask) {
             const sdsl::bit_vector mask = random_mask(rng, size, kind);
             const PresenceRuns runs(mask);
             SCOPED_TRACE(::testing::Message() << size << " " << kind);
-            ASSERT_EQ(size, runs.size);
+            ASSERT_EQ(size, runs.size());
             ASSERT_EQ(mask, runs.to_dense());
             ASSERT_EQ(sdsl::util::cnt_one_bits(mask), runs.count());
             ASSERT_LE(runs.heap_bytes(), PresenceRuns::dense_bytes(size));
@@ -368,7 +368,7 @@ void check_positions(const graph::AnnotatedDBG &index, size_t k,
         ASSERT_EQ(coords.size(), masks.size());
         for (size_t r = 0; r < coords.size(); ++r) {
             const auto &[label, count, positions, length] = coords[r];
-            ASSERT_EQ(num_kmers, positions.size);
+            ASSERT_EQ(num_kmers, positions.size());
             auto dense_coords = positions.to_dense();
             for (auto &c : dense_coords) {
                 std::sort(c.begin(), c.end());
@@ -385,7 +385,7 @@ void check_positions(const graph::AnnotatedDBG &index, size_t k,
             })) << label;
         }
         for (const auto &[label, count, values] : counts) {
-            ASSERT_EQ(num_kmers, values.size);
+            ASSERT_EQ(num_kmers, values.size());
             const auto dense_counts = values.to_dense();
             EXPECT_LE(1u, find(label, [&](const Occurrences &e) {
                 if (e.matched() != count)
@@ -398,7 +398,7 @@ void check_positions(const graph::AnnotatedDBG &index, size_t k,
             })) << label;
         }
         for (const auto &[label, count, mask] : masks) {
-            ASSERT_EQ(num_kmers, mask.size);
+            ASSERT_EQ(num_kmers, mask.size());
             const auto dense_mask = mask.to_dense();
             EXPECT_LE(1u, find(label, [&](const Occurrences &e) {
                 if (e.matched() != count)
@@ -487,7 +487,7 @@ TEST(AnnotatedSearchPositions, ManyRecordsOneMatchEach) {
         const auto &[label, count, mask] = masks[r];
         const size_t i = std::stoul(label.substr(1));
         EXPECT_EQ(1u, count);
-        EXPECT_EQ(num_kmers, mask.size);
+        EXPECT_EQ(num_kmers, mask.size());
         EXPECT_FALSE(mask.is_dense());
         EXPECT_EQ((std::vector<std::pair<size_t, size_t>>{ { i * k, i * k + 1 } }), runs_of(mask));
         const std::string before = i ? fmt::format("o{}", i * k) : "";

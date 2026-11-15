@@ -3100,11 +3100,12 @@ class PatternRun {
     // wrapper with that sequence as the spelling hint (it is the node's sequence, read once
     // for the anchor and then extended base by base)
     void call_outgoing(node_index node, const std::string &spelled,
-                       const DeBruijnGraph::OutgoingEdgeCallback &callback) const {
-        if (canonical_) {
-            canonical_->call_outgoing_kmers(node, spelled.substr(spelled.size() - k_), callback);
-        } else {
-            graph_.call_outgoing_kmers(node, callback);
+                       const std::function<void(node_index, char)> &callback) const {
+        const DeBruijnGraph::Edges edges = canonical_
+                ? canonical_->outgoing_kmers(node, spelled.substr(spelled.size() - k_))
+                : graph_.outgoing_kmers(node);
+        for (auto [next, c] : edges) {
+            callback(next, c);
         }
     }
 
@@ -4298,11 +4299,12 @@ class SegmentRun {
     // the outgoing k-mers of |node|, whose k-mer is the last k bases of |spelled| (the spelling
     // hint on the wrapper of a PRIMARY graph)
     void call_outgoing(node_index node, const std::string &spelled,
-                       const DeBruijnGraph::OutgoingEdgeCallback &callback) const {
-        if (canonical_) {
-            canonical_->call_outgoing_kmers(node, spelled.substr(spelled.size() - k_), callback);
-        } else {
-            graph_.call_outgoing_kmers(node, callback);
+                       const std::function<void(node_index, char)> &callback) const {
+        const DeBruijnGraph::Edges edges = canonical_
+                ? canonical_->outgoing_kmers(node, spelled.substr(spelled.size() - k_))
+                : graph_.outgoing_kmers(node);
+        for (auto [next, c] : edges) {
+            callback(next, c);
         }
     }
 
@@ -4413,7 +4415,7 @@ class SegmentRun {
      * node are called from its bwd and each one's first base read through bwd steps, the node's
      * (bwd, bwd^(K-1)) pair making the one its bwd names cost 2 (first_cost_ for any other, and
      * for the root's own pair); on the wrapper of a PRIMARY graph through
-     * CanonicalDBG::call_incoming_kmers with the node's k-mer as the hint, k - 2 bwd steps per
+     * CanonicalDBG::incoming_kmers with the node's k-mer as the hint, k - 2 bwd steps per
      * edge (what DBGSuccinct's own first base costs). |begin|: the root's least start. False
      * when a stop ended it.
      */
@@ -4474,11 +4476,11 @@ class SegmentRun {
             bool charged = true;
             if (canonical_) {
                 const std::string kmer = spelled.substr(t - horizon, k_);
-                canonical_->call_incoming_kmers(level.node, kmer, [&](node_index prev, char c) {
+                for (auto [prev, c] : canonical_->incoming_kmers(level.node, kmer)) {
                     if (!charged || !(charged = charge_left(1, k_ - 2)))
-                        return;
+                        continue;
                     add(c, prev, BwdPair());
-                });
+                }
             } else {
                 const edge_index first = level.pair.first;
                 const edge_index last = level.pair.second;

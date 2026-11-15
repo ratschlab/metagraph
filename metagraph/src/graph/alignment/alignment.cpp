@@ -667,13 +667,13 @@ void Alignment::reverse_complement(const DeBruijnGraph &graph,
             for (size_t i = num_first_steps; i < offset_; ++i) {
                 node_index next_node = 0;
                 char last_char;
-                canonical->call_outgoing_kmers(nodes_[0], [&](node_index next, char c) {
+                for (auto [next, c] : canonical->outgoing_kmers(nodes_[0])) {
                     if (c == boss::BOSS::kSentinel)
-                        return;
+                        continue;
 
                     next_node = next;
                     last_char = c;
-                });
+                }
 
                 if (!next_node) {
                     *this = Alignment();
@@ -708,14 +708,14 @@ void Alignment::reverse_complement(const DeBruijnGraph &graph,
             // trim off ending from reverse complement (corresponding to the added prefix)
             for (size_t i = 0; i < offset_; ++i) {
                 size_t indegree = 0;
-                graph.adjacent_incoming_nodes(nodes_[0], [&](node_index prev) {
+                for (node_index prev : graph.adjacent_incoming_nodes(nodes_[0])) {
                     ++indegree;
 
                     // TODO: there are multiple possible reverse complements, which
                     // do we pick? Currently we pick the first one
                     if (indegree == 1)
                         nodes_[0] = prev;
-                });
+                }
 
                 if (!indegree) {
                     *this = Alignment();
@@ -1091,11 +1091,10 @@ void Alignment::load_from_json(const Json::Value &alignment,
         if (nodes_.size() == 1) {
             sequence_ = graph.get_node_sequence(nodes_.back()).substr(offset_);
         } else {
-            graph.call_outgoing_kmers(*(nodes_.rbegin() + 1),
-                                      [&](auto node, char c) {
+            for (auto [node, c] : graph.outgoing_kmers(*(nodes_.rbegin() + 1))) {
                 if (node == nodes_.back())
                     sequence_.push_back(c);
-            });
+            }
         }
         const Json::Value &edits = mapping[i]["edit"];
 
@@ -1375,10 +1374,10 @@ std::string spell_path(const DeBruijnGraph &graph,
                 num_dummy = 0;
             } else {
                 char next = '\0';
-                graph.call_outgoing_kmers(path[i - 1], [&](auto next_node, char c) {
+                for (auto [next_node, c] : graph.outgoing_kmers(path[i - 1])) {
                     if (next_node == path[i])
                         next = c;
-                });
+                }
 
                 if (!next) {
                     logger->error("Invalid edge {} {}\t{} {}",

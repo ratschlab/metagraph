@@ -203,7 +203,7 @@ mask_nodes_by_label(const AnnotatedDBG &anno_graph,
         CounterLocks counter_locks;
         std::atomic_thread_fence(std::memory_order_release);
 
-        // the positions a label's signature marks, in ascending order
+        // the positions a signature marks, in ascending order
         auto call_marked = [](const PresenceRuns &b, const auto &callback) {
             b.call_runs([&](size_t begin, size_t end) {
                 for (size_t i = begin; i < end; ++i) {

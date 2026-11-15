@@ -75,8 +75,7 @@ class GraphClientJson:
 
             sequence = aligned_sequences
 
-        param_dict = {"count_labels": True,
-                      "discovery_fraction": discovery_fraction,
+        param_dict = {"discovery_fraction": discovery_fraction,
                       "top_labels": top_labels,
                       "with_signature": with_signature,
                       "abundance_sum": abundance_sum,

@@ -62,9 +62,9 @@ DBGBitmap::traverse_back(node_index node, char prev_char) const {
     return to_node(kmer);
 }
 
-void DBGBitmap::call_outgoing_kmers(node_index node,
-                                    const OutgoingEdgeCallback &callback) const {
+DeBruijnGraph::Edges DBGBitmap::outgoing_kmers(node_index node) const {
     assert(in_graph(node));
+    Edges edges;
 
     const auto &kmer = node_to_kmer(node);
 
@@ -74,8 +74,9 @@ void DBGBitmap::call_outgoing_kmers(node_index node,
 
         auto next_index = to_node(next_kmer);
         if (next_index != npos)
-            callback(next_index, c);
+            edges.emplace_back(next_index, c);
     }
+    return edges;
 }
 
 size_t DBGBitmap::outdegree(node_index node) const {
@@ -149,9 +150,9 @@ bool DBGBitmap::has_multiple_outgoing(node_index node) const {
     return false;
 }
 
-void DBGBitmap::call_incoming_kmers(node_index node,
-                                    const OutgoingEdgeCallback &callback) const {
+DeBruijnGraph::Edges DBGBitmap::incoming_kmers(node_index node) const {
     assert(in_graph(node));
+    Edges edges;
 
     const auto &kmer = node_to_kmer(node);
 
@@ -161,8 +162,9 @@ void DBGBitmap::call_incoming_kmers(node_index node,
 
         auto next_index = to_node(prev_kmer);
         if (next_index != npos)
-            callback(next_index, c);
+            edges.emplace_back(next_index, c);
     }
+    return edges;
 }
 
 size_t DBGBitmap::indegree(node_index node) const {

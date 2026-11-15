@@ -236,12 +236,12 @@ int assemble(Config *config) {
                 std::ostringstream ostr;
                 if (config->output_compacted) {
                     ostr << fmt::format("S\t{}\t{}\n", path.back(), unitig);
-                    graph->call_incoming_kmers(path.front(), [&](uint64_t node, char c) {
+                    for (auto [node, c] : graph->incoming_kmers(path.front())) {
                         if (c != graph::boss::BOSS::kSentinel) {
                             ostr << fmt::format("L\t{}\t+\t{}\t+\t{}M\n",
                                                 node, path.back(), overlap);
                         }
-                    });
+                    }
                 } else {
                     for (size_t i = 0; i < path.size(); ++i) {
                         ostr << fmt::format("S\t{}\t{}\n", path[i],
@@ -250,12 +250,12 @@ int assemble(Config *config) {
                             ostr << fmt::format("L\t{}\t+\t{}\t+\t{}M\n",
                                                 path[i - 1], path[i], overlap);
                     }
-                    graph->call_incoming_kmers(path.front(), [&](uint64_t node, char c) {
+                    for (auto [node, c] : graph->incoming_kmers(path.front())) {
                         if (c != graph::boss::BOSS::kSentinel) {
                             ostr << fmt::format("L\t{}\t+\t{}\t+\t{}M\n",
                                                 node, path.front(), overlap);
                         }
-                    });
+                    }
                 }
                 std::lock_guard<std::mutex> lock(str_mutex);
                 gfa_file << ostr.str();

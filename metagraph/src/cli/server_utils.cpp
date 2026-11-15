@@ -946,6 +946,16 @@ Json::Value parse_json_string(const std::string &msg) {
     return json;
 }
 
+void check_request_fields(const Json::Value &request,
+                          std::initializer_list<std::string_view> known) {
+    if (!request.isObject())
+        throw std::invalid_argument("The request must be a JSON object");
+    for (const std::string &name : request.getMemberNames()) {
+        if (std::find(known.begin(), known.end(), name) == known.end())
+            throw std::invalid_argument("Unknown field '" + name + "'");
+    }
+}
+
 std::string json_str_with_error_msg(const std::string &msg) {
     Json::Value root;
     root["error"] = msg;

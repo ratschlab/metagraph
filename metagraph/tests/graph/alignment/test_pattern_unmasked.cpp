@@ -1242,12 +1242,12 @@ size_t sentinel_edges(const DeBruijnGraph &graph) {
         if (kmer.find('$') != std::string::npos) {
             continue;
         }
-        canonical.call_outgoing_kmers(node, kmer, [&](node_index, char c) {
+        for (auto [next, c] : canonical.outgoing_kmers(node, kmer)) {
             sentinels += c == BOSS::kSentinel;
-        });
-        canonical.call_incoming_kmers(node, kmer, [&](node_index, char c) {
+        }
+        for (auto [prev, c] : canonical.incoming_kmers(node, kmer)) {
             sentinels += c == BOSS::kSentinel;
-        });
+        }
     }
     return sentinels;
 }

@@ -5,13 +5,15 @@ Labeled traversal (experimental)
 
 .. note::
 
-   This page describes the two routes as the ``master`` branch serves them. The server of the
-   ``gr/labeled-traversal`` branch, which the staging service runs, answers them in another way
-   in several places. It also serves them on a list of graphs. It has
-   ``GET /traverse/capabilities``, graphlet output, cancellation and budgets. It walks a header
-   label by membership unless the request sets ``support`` to ``trace``, and it resolves a name
-   that is both a column and a header to the column. Several limits and their defaults differ
-   too. Its routes are specified in ``metagraph/docs/SPEC-labeled-traversal-core.md`` and
+   This page describes the route as the ``master`` branch serves it. The server of the
+   ``gr/labeled-traversal`` branch, which the staging service runs, answers it in another way
+   in several places. It also serves ``POST /resolve``, which finds and selects seeds and gives
+   them ids. On a list of graphs it answers in an envelope with one entry per pair, and it
+   bounds the time of the pairs in another way. It has ``GET /traverse/capabilities``, graphlet
+   output, cancellation and budgets. It walks a header label by membership unless the request
+   sets ``support`` to ``trace``, and it resolves a name that is both a column and a header to
+   the column. Several limits and their defaults differ too, the split limit of a path among
+   them. Its routes are specified in ``metagraph/docs/SPEC-labeled-traversal-core.md`` and
    ``metagraph/docs/SPEC-multigraph-envelope.md``, its graphlet output in
    ``metagraph/docs/DESIGN-traverse-graphlet.md``. Where this page and those documents differ,
    the documents describe the staging server.
@@ -19,7 +21,7 @@ Labeled traversal (experimental)
 Labeled traversal extends a sequence in the graph along the labels that contain it. Use it to
 get the flanks of a gene in each record or sample that carries the gene.
 
-It has two server routes:
+It has one server route:
 
 .. list-table::
    :header-rows: 1
@@ -27,21 +29,20 @@ It has two server routes:
    * - Route
      - Method
      - Answer
-   * - ``/resolve``
-     - POST
-     - which labels contain which part of a query, and seeds to start from
    * - ``/traverse``
      - POST
      - the extension of one or more seeds to the left and to the right
 
-Both routes are experimental. Their request and response fields can change in a later release
+The route is experimental. Its request and response fields can change in a later release
 without notice.
 
-A server on a single index serves both routes. A server started with a list of graphs does not.
+A server on a single index serves the route:
 
 .. code-block:: text
 
     metagraph server_query -i graph.dbg -a annotation.annodbg
+
+So does a server started with a list of graphs. See `A list of graphs`_.
 
 A request is a JSON object. The server refuses a field it does not know with HTTP 400, so a
 misspelled field is never ignored.
@@ -49,26 +50,86 @@ misspelled field is never ignored.
 Example
 -------
 
-Find a seed for a query and the records that contain it:
+Find the records that contain a query with ``/search`` and ``with_signature``:
 
 .. code-block:: text
 
-    curl -s http://localhost:5555/resolve -d '{
-      "sequence": "ATGGAATTGCCC...",
-      "discover": {"kind": "header"},
-      "select": {"max_seeds": 1}
+    curl -s http://localhost:5555/search -d '{
+      "FASTA": ">query\nATGGAATTGCCC...",
+      "with_signature": true,
+      "discovery_fraction": 0
     }'
 
-Then extend that seed by 2,000 bp on each side. Take ``seed_id``, ``sequence`` and ``labels``
-from ``selection.seeds[0]`` of the first answer:
+Each entry of ``results`` names a record in ``sample`` and gives its ``kmer_count``, the
+number of query k-mers in that record. Its ``signature.presence_mask`` lists runs of k-mers
+along the query, ``x`` for present and ``o`` for absent. For example, ``x423o31x329`` means
+423 k-mers present, then 31 absent, then 329 present.
+
+Then extend the query by 2,000 bp on each side. Use the query as the seed's ``sequence``. A
+seed is at most 10,000 bp long, so send a part of a longer query. For the seed's ``labels``,
+take the records that hold every k-mer of the seed. In their mask, the seed's k-mers lie
+within one ``x`` run. When the seed is the whole query, the mask is a single ``x`` run:
 
 .. code-block:: text
 
     curl -s http://localhost:5555/traverse -d '{
-      "seeds": [{"seed_id": "4c1f...", "sequence": "ATGGAATTGCCC...",
+      "seeds": [{"sequence": "ATGGAATTGCCC...",
                  "labels": ["NZ_CM008882.1"]}],
       "strategy": {"bounds": {"max_extension_bp": 2000}}
     }'
+
+One difference remains. ``/search`` checks the seed's k-mers one by one. ``/traverse`` keeps
+a header label only when its record holds them at consecutive coordinates. ``/traverse`` drops
+a record that holds them out of order and reports it in ``dropped_labels``. A seed left
+without a label reports ``no_carrier``.
+
+A list of graphs
+----------------
+
+A server started with a list of graphs walks every selected graph. The ``graphs`` field selects
+them by name, as in ``/search``:
+
+.. code-block:: json
+
+    {
+      "graphs": ["bacteria", "plants"],
+      "seeds": [{"sequence": "ATGGAATTGCCC...", "labels": ["NZ_CM008882.1"]}]
+    }
+
+Without ``graphs``, the server walks every graph of a list with at most 10 names. A longer list
+needs the field. A name can hold several graphs. All of them are walked.
+
+Each entry of ``results`` then holds ``walks`` instead of one walk:
+
+.. code-block:: json
+
+    {
+      "strategy": {...},
+      "results": [
+        {"walks": [
+          {"graph": "bacteria", "seed": {...}, "label_dict": [...], "arms": {...}, "elapsed_ms": 12.5}
+        ]}
+      ]
+    }
+
+A walk has the fields of `The response`_ and the name of its ``graph``. ``walks`` holds one walk
+per graph that has the seed and at least one of its labels. Each graph follows the labels it
+has. A graph adds no walk in these cases:
+
+- A k-mer of the seed is not in the graph.
+- The graph has none of the named labels.
+- No label is on every k-mer of the seed.
+
+``walks`` is empty when no graph adds a walk. When a graph cannot determine the labels of a
+seed for another cause, its walk holds the ``error`` instead (``too_wide``, ``time_budget``,
+``ambiguous_header``).
+
+The server refuses a named label that no selected graph has with HTTP 400. A malformed seed and
+an ambiguous label fail the whole request, as on a single index. The graphs are walked in parallel.
+The walks of a request share its time. Each walk gets the budget or a fair part of the time left,
+whichever is less. The part is the time left times the server's threads, divided by the walks not
+yet finished. So the graphs that hold the seed share the time, and a graph without it leaves its
+part to the others.
 
 Terms
 -----
@@ -98,92 +159,7 @@ Path, segment
     arm is a tree. A segment is one unbranched piece of that tree.
 
 Interval
-    A half-open range of k-mer positions ``[begin, end)`` in the query or seed.
-
-``/resolve``
-------------
-
-.. code-block:: json
-
-    {
-      "sequence": "ATGGAATTGCCC...",
-      "discover": {"max_labels": 1000, "kind": "header"},
-      "select": {"max_seeds": 10, "min_block_bp": 0, "max_labels_per_seed": 1000}
-    }
-
-.. list-table::
-   :header-rows: 1
-
-   * - Field
-     - Meaning
-     - Default
-   * - ``sequence``
-     - The query. It is at most ``--resolve-max-query-bp`` long, 1,000,000 bp unless set.
-     - required
-   * - ``labels``
-     - The labels to report on, at most 100,000. Give either ``labels`` or ``discover``.
-     - none
-   * - ``discover``
-     - Find the labels instead of naming them. Give either ``labels`` or ``discover``.
-     - none
-   * - ``discover.max_labels``
-     - Keep this many labels, those on the most k-mers first. The order is the one ``/search`` uses with ``with_signature``.
-     - 1000
-   * - ``discover.kind``
-     - ``column`` or ``header``.
-     - ``column``
-   * - ``select``
-     - Also select seeds. See below.
-     - none
-   * - ``select.max_seeds``
-     - Select at most this many seeds, at most 1000.
-     - 10
-   * - ``select.min_block_bp``
-     - Each seed is at least this long, and at least k.
-     - 0
-   * - ``select.max_labels_per_seed``
-     - Keep at most this many labels per seed. The response counts the dropped labels and lists them when there are at most 1000.
-     - 1000
-
-Seed selection picks intervals of the query one at a time. The first seed is the interval that
-lies inside the runs of the most labels. Each further seed is the interval that lies inside the
-runs of the most labels that have no seed yet. Selection stops when every label has a seed, at
-``max_seeds`` seeds, or when no interval of ``min_block_bp`` is left.
-
-When a seed has more labels than ``max_labels_per_seed``, the kept ones depend only on the
-label names. The same request therefore keeps the same labels every time.
-
-The response:
-
-.. code-block:: json
-
-    {
-      "k": 31, "regime": "basic", "num_kmers": 783,
-      "graph_runs": [[0, 783]],
-      "labels": [{"label": "NZ_CM008882.1", "kind": "header", "kmers_supported": 783,
-                  "runs": [[0, 783]]}],
-      "labels_truncated": null,
-      "selection": {
-        "seeds": [{"seed_id": "4c1f...", "sequence": "ATGG...", "kmer_interval": [0, 783],
-                   "labels": ["NZ_CM008882.1"],
-                   "label_population": {"supporting_total": 1, "dropped_count": 0}}]
-      }
-    }
-
-- ``graph_runs`` are the intervals of query k-mers that are in the graph.
-- A label's ``runs`` are the longest intervals of k-mers that carry the label.
-- With ``discover``, ``labels_truncated`` gives how many labels were kept and how many were
-  found.
-- ``discover`` leaves out ambiguous names, which ``/traverse`` would refuse.
-- ``selection.seeds`` lists the seeds in the order they were picked. Seeds can overlap.
-- With ``select.min_block_bp`` set to the query's length, the one seed is the whole query. Its
-  labels are those on all its k-mers. When no label is on all of them, there is no seed.
-
-A selected seed can be sent to ``/traverse`` as it is, with its ``seed_id``. One difference
-remains. ``/resolve`` checks the seed's k-mers one by one. ``/traverse`` keeps a header label only
-when its record holds them at consecutive coordinates. ``/traverse`` drops a record that holds
-them out of order and reports it in ``dropped_labels``. A seed left without a label reports
-``no_carrier``.
+    A half-open range of k-mer positions ``[begin, end)`` in the seed.
 
 ``/traverse``
 -------------
@@ -192,7 +168,7 @@ them out of order and reports it in ``dropped_labels``. A seed left without a la
 
     {
       "seeds": [
-        {"seed_id": "4c1f...", "sequence": "ATGGAATTGCCC...", "labels": ["NZ_CM008882.1", "562"]}
+        {"sequence": "ATGGAATTGCCC...", "labels": ["NZ_CM008882.1", "562"]}
       ],
       "strategy": {
         "direction": "both",
@@ -211,9 +187,6 @@ them out of order and reports it in ``dropped_labels``. A seed left without a la
    * - ``seeds``
      - At most ``--traverse-max-seeds`` seeds. Each is at most 10,000 bp long.
      - required
-   * - ``seeds[].seed_id``
-     - Your id for the seed. The response says whether it equals the id the server computes.
-     - none
    * - ``seeds[].labels``
      - The labels to follow, at most 100,000. Without it, the server takes the labels on every k-mer of the seed.
      - taken from the seed
@@ -229,11 +202,14 @@ them out of order and reports it in ``dropped_labels``. A seed left without a la
    * - ``branching.max_label_branches``
      - How many times a column label can go on along more than one successor. An integer up to 1,000,000, or ``"unlimited"``.
      - 0
+   * - ``branching.max_splits_per_path``
+     - How many times one path can split. An integer up to 1,000,000, or ``"unlimited"``.
+     - ``"unlimited"``
    * - ``bounds.max_extension_bp``
      - How far each arm extends.
      - 5000
    * - ``bounds.time_budget_ms``
-     - The time for one seed, at least 1. A request can take this time once per seed. The server lowers it to ``--traverse-max-time-ms``.
+     - The time for one seed, at least 1. A request can take this time once per seed. This holds on a server with a list of graphs too. A walk there can get less than the budget. See `A list of graphs`_. The server lowers it to ``--traverse-max-time-ms``.
      - ``--traverse-max-time-ms``
 
 How a walk proceeds
@@ -290,12 +266,13 @@ forbid, the column labels of the path end and its header labels go on.
 Column labels have been walked on test data only. Every traversal run on the staging server so
 far named records.
 
-**Bounds.** Fixed limits bound the work for one seed, besides the extension length and the time
-budget:
+**Bounds.** These limits bound the work for one seed, besides the extension length and the time
+budget. The first two lines are fixed:
 
 - 1,000,000 steps. Reaching this limit, or the time budget, stops the whole seed.
 - 1000 live paths and 10,000 paths per arm. Reaching one of these limits stops that arm.
-- 64 splits per path. Reaching this limit ends that path only.
+- ``max_splits_per_path`` splits per path, when the request sets it. Reaching this limit ends
+  that path only.
 
 Any of these limits marks the arm ``truncated``. ``complete_to_bp`` is then the extension up to
 which every walk is present.
@@ -310,7 +287,6 @@ The response
       "results": [
         {
           "seed": {
-            "seed_id": "4c1f...", "validated_seed_id": "4c1f...", "seed_id_mismatch": false,
             "length_bp": 813, "num_kmers": 783,
             "labels": ["NZ_CM008882.1"],
             "labels_from_seed": false, "labels_supporting_total": 1,
@@ -323,11 +299,12 @@ The response
             "right": {
               "status": "complete",
               "complete_to_bp": 5000,
-              "frontier_remaining": {"live_paths": 0},
+              "frontier_remaining": {"live_paths": 0, "live_labels": 0},
               "segments": [
                 {"id": 0, "parents": [], "from_bp": 0, "length_bp": 1200, "sequence": "GCAT...",
                  "labels": [0], "labels_at_end": [0],
-                 "events": [{"at_bp": 1200, "type": "label_end", "label": 0, "reason": "record_end"}]}
+                 "events": [{"at_bp": 1200, "type": "label_end", "label": 0, "reason": "record_end",
+                             "successors": 1}]}
               ],
               "splits": [],
               "paths": [{"id": 0, "segments": [0], "length_bp": 1200,
@@ -340,11 +317,11 @@ The response
       ]
     }
 
+``results`` holds one entry per seed, in the order of the request.
+
 The seed:
 
 - ``seed.labels`` holds the names of the labels the walk follows.
-- ``validated_seed_id`` is the id the server computes from the seed and its labels. ``/resolve``
-  gives the same id. ``seed_id_mismatch`` says whether your ``seed_id`` differs from it.
 - ``labels_dropped`` counts the labels taken from the seed beyond ``max_seed_labels``.
 - ``dropped_labels`` lists the named labels that are not on every k-mer of the seed.
 
@@ -363,14 +340,19 @@ An arm:
 - A split has the kind ``divergence`` when its labels part. It has the kind ``ambiguous`` when
   one label goes on along several children.
 - ``cap_trigger`` gives the ``reason``, ``at_bp`` and ``demand`` of the bound that stopped a
-  ``truncated`` arm.
+  ``truncated`` arm, and the ``segment`` of the first path it stopped.
+- ``frontier_remaining`` counts the paths a bound stopped before the extension length, and the
+  distinct labels on them.
+- An event's ``successors`` is the number of successors the node has in the graph, whatever
+  their labels. It is absent where the walk did not look at them: at the extension length, and
+  where a bound stopped the arm. An end by the split limit states it.
 
 A seed whose labels cannot be determined gets an error in its place. The other seeds are still
 walked.
 
 .. code-block:: json
 
-    {"seed": {"seed_id": "...", "length_bp": 813, "labels_from_seed": true},
+    {"seed": {"length_bp": 813, "labels_from_seed": true},
      "error": {"cause": "no_carrier", "message": "...", "limit": 783, "observed": 412}}
 
 .. list-table::

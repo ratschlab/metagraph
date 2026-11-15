@@ -1027,7 +1027,8 @@ TEST(BitmapVector, MoveKeepsOwnedStorage) {
     EXPECT_TRUE(editable[17]);
 }
 
-TEST(BitmapVector, MoveLoadedFromMappedStreamIsWritable) {
+template <class Bitmap>
+void test_move_loaded_from_mapped_stream_is_writable() {
     const auto filename = test_dump_basename + "_mapped_move";
     sdsl::bit_vector original(1024, 0);
     original[7] = true;
@@ -1035,7 +1036,7 @@ TEST(BitmapVector, MoveLoadedFromMappedStreamIsWritable) {
         std::ofstream out(filename, std::ios::binary);
         original.serialize(out);
     }
-    for (bool adaptive : { false, true }) {
+    {
         // An owned vector copies its payload even from a mapped stream.
         sdsl::shared_mapper_ifstream in(filename, std::ios::binary);
         sdsl::bit_vector mapped;
@@ -1047,26 +1048,27 @@ TEST(BitmapVector, MoveLoadedFromMappedStreamIsWritable) {
         // The view refers to the mapping, after the 8-byte size header.
         ASSERT_EQ(reinterpret_cast<const std::byte *>(check_in.mapper()->data()) + 8,
                   view.bytes().data());
-        std::unique_ptr<bitmap_dyn> editable;
-        if (adaptive)
-            editable = std::make_unique<bitmap_adaptive>(std::move(mapped));
-        else
-            editable = std::make_unique<bitmap_vector>(std::move(mapped));
-        editable->set(7, false);
-        editable->set(17, true);
+        Bitmap editable(std::move(mapped));
+        editable.set(7, false);
+        editable.set(17, true);
         bitmap_vector added(1024, false);
         added.set(31, true);
-        *editable |= added;
-        EXPECT_FALSE((*editable)[7]);
-        EXPECT_TRUE((*editable)[17]);
-        EXPECT_TRUE((*editable)[31]);
-        EXPECT_EQ(2u, editable->num_set_bits());
+        editable |= added;
+        EXPECT_FALSE(editable[7]);
+        EXPECT_TRUE(editable[17]);
+        EXPECT_TRUE(editable[31]);
+        EXPECT_EQ(2u, editable.num_set_bits());
         EXPECT_EQ(original, view.to_owned());
     }
     std::ifstream in(filename, std::ios::binary);
     sdsl::bit_vector restored;
     restored.load(in);
     EXPECT_EQ(original, restored);
+}
+
+TEST(BitmapVector, MoveLoadedFromMappedStreamIsWritable) {
+    test_move_loaded_from_mapped_stream_is_writable<bitmap_vector>();
+    test_move_loaded_from_mapped_stream_is_writable<bitmap_adaptive>();
 }
 
 TEST(BitmapVector, SharedMappedViewOwnsMutationSeparately) {

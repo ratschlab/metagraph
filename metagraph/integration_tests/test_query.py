@@ -1824,10 +1824,10 @@ print(rc, peak if sys.platform == 'darwin' else peak * 1024)
 
 class TestQueryPositionsHeldSparsely(TestingBase):
     """The per-position query modes (signature, counts, coords) on a coordinate index with a
-    record mapping (.seqs, r237's form) hold each returned record's values at the positions it
-    matches only (train 5a X2): a query of many records' first k-mers returns every record,
-    each matched at one position, so a value of the query's k-mers per record would need more
-    than 1 GiB in each mode; the query stays far below and writes every record's value."""
+    record mapping (.seqs) hold each returned record's values at the positions it matches
+    only. A query made of many records' first k-mers returns every record, each matched at
+    one position, so a value per k-mer of the query and record would take more than 1 GiB in
+    each mode; the query stays far below that and writes every record's value."""
     k = 31
     record_length = 60
     num_records = 16700        # signature: 16,700 records x 517,670 k-mers / 8 > 1 GiB

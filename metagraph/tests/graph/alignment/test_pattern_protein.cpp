@@ -160,10 +160,10 @@ uint64_t oracle_paths(const DeBruijnGraph &graph, const std::vector<std::string>
             ++paths;
             return;
         }
-        graph.call_outgoing_kmers(node, [&](node_index next, char c) {
+        for (auto [next, c] : graph.outgoing_kmers(node)) {
             if (sets[position].find(c) != std::string::npos)
                 walk(next, position + 1);
-        });
+        }
     };
     graph.call_kmers([&](node_index node, const std::string &kmer) {
         for (size_t i = 0; i < k; ++i) {
@@ -577,10 +577,10 @@ std::multiset<std::string> oracle_walks(const DeBruijnGraph &graph,
             walks.insert(spelled);
             return;
         }
-        graph.call_outgoing_kmers(node, [&](node_index next, char c) {
+        for (auto [next, c] : graph.outgoing_kmers(node)) {
             if (sets[spelled.size()].find(c) != std::string::npos)
                 walk(next, spelled + c);
-        });
+        }
     };
     graph.call_kmers([&](node_index node, const std::string &kmer) {
         for (size_t i = 0; i < k; ++i) {

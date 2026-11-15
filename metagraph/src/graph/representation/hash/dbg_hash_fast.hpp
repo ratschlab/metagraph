@@ -39,14 +39,12 @@ class DBGHashFast : public DeBruijnGraph {
         hash_dbg_->call_nodes(callback, stop_early, num_threads, batch_size);
     }
 
-    void call_outgoing_kmers(node_index node,
-                             const OutgoingEdgeCallback &callback) const override final {
-        hash_dbg_->call_outgoing_kmers(node, callback);
+    Edges outgoing_kmers(node_index node) const override final {
+        return hash_dbg_->outgoing_kmers(node);
     }
 
-    void call_incoming_kmers(node_index node,
-                             const IncomingEdgeCallback &callback) const override final {
-        hash_dbg_->call_incoming_kmers(node, callback);
+    Edges incoming_kmers(node_index node) const override final {
+        return hash_dbg_->incoming_kmers(node);
     }
 
     // Traverse the outgoing edge

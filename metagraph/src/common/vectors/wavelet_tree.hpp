@@ -226,7 +226,17 @@ class wavelet_tree_sdsl : public wavelet_tree {
 };
 
 
-typedef wavelet_tree_sdsl<sdsl::wt_huff<sdsl::packed_vector_view<1>>> wavelet_tree_stat;
+namespace mtg::detail {
+// The bit vector and its rank and select samples are views, so a load from a
+// mapped file shares them instead of copying.
+using wt_huff_stat = sdsl::wt_huff<
+        sdsl::packed_vector_view<1>,
+        sdsl::rank_support_v<1, 1, sdsl::packed_vector_view<1>, sdsl::packed_vector_view>,
+        sdsl::select_support_mcl<1, 1, sdsl::packed_vector_view<1>, sdsl::packed_vector_view>,
+        sdsl::select_support_mcl<0, 1, sdsl::packed_vector_view<1>, sdsl::packed_vector_view>>;
+} // namespace mtg::detail
+
+typedef wavelet_tree_sdsl<mtg::detail::wt_huff_stat> wavelet_tree_stat;
 
 typedef wavelet_tree_sdsl<sdsl::wt_huff<mtg::detail::rrr_storage<63>>> wavelet_tree_small;
 

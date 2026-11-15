@@ -893,8 +893,9 @@ void merge_row_disk_annotations(const std::vector<std::string> &files,
         LEncoder le;
         matrices[j] = std::make_unique<RowDisk>();
 
-        sdsl::shared_mapper_ifstream in(files[j], std::ios::binary);
-        if (!le.load(in)) {
+        // RowDisk::load needs a stream from open_ifstream to recover the file name.
+        std::unique_ptr<std::ifstream> in = utils::open_ifstream(files[j], true);
+        if (!le.load(*in)) {
             logger->error("Can't load label encoder from {}", files[j]);
             exit(1);
         }
@@ -908,7 +909,7 @@ void merge_row_disk_annotations(const std::vector<std::string> &files,
         }
 
         offsets[j + 1] = le.size();
-        if (!matrices[j]->load(in)) {
+        if (!matrices[j]->load(*in)) {
             logger->error("Can't load matrix from {}", files[j]);
             exit(1);
         }

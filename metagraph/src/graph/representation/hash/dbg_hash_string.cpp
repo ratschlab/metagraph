@@ -62,24 +62,23 @@ DBGHashString::traverse_back(node_index node, char prev_char) const {
     return kmer_to_node(prev_char + kmer);
 }
 
-void DBGHashString
-::call_outgoing_kmers(node_index node,
-                      const OutgoingEdgeCallback &callback) const {
+DeBruijnGraph::Edges DBGHashString::outgoing_kmers(node_index node) const {
     assert(in_graph(node));
+    Edges edges;
 
     auto prefix = get_node_sequence(node).substr(1);
 
     for (char c : alphabet_) {
         auto next = kmer_to_node(prefix + c);
         if (next != npos)
-            callback(next, c);
+            edges.emplace_back(next, c);
     }
+    return edges;
 }
 
-void DBGHashString
-::call_incoming_kmers(node_index node,
-                      const IncomingEdgeCallback &callback) const {
+DeBruijnGraph::Edges DBGHashString::incoming_kmers(node_index node) const {
     assert(in_graph(node));
+    Edges edges;
 
     std::string suffix = get_node_sequence(node);
     suffix.pop_back();
@@ -87,8 +86,9 @@ void DBGHashString
     for (char c : alphabet_) {
         auto prev = kmer_to_node(c + suffix);
         if (prev != npos)
-            callback(prev, c);
+            edges.emplace_back(prev, c);
     }
+    return edges;
 }
 
 size_t DBGHashString::outdegree(node_index node) const {
