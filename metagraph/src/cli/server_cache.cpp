@@ -83,10 +83,6 @@ void ServerQueryCache::Handle::set_exception(std::exception_ptr eptr) {
     producer_.reset();
 }
 
-bool ServerQueryCache::Handle::abandon_if_alone() {
-    return cache_->abandon_if_alone(entry_);
-}
-
 void ServerQueryCache::Handle::mark_delivered() {
     cache_->on_delivery(entry_, DeliveryState::DELIVERED);
 }
@@ -170,22 +166,6 @@ void ServerQueryCache::release_waiter(const std::shared_ptr<Entry> &entry) {
     // pinned entries), so nothing needs to be evicted now
     if (entry->in_cache)
         pinned_bytes_ -= entry->size_bytes;
-}
-
-bool ServerQueryCache::abandon_if_alone(const std::shared_ptr<Entry> &entry) {
-    // a detached entry (the disabled cache's, or one this producer abandoned before): no other
-    // request can reach it
-    if (max_size_bytes_ == 0)
-        return true;
-    std::lock_guard<std::mutex> lock(mutex_);
-    if (!entry->in_cache)
-        return true;
-    // the waiters change under this mutex only: none attaches between this reading and the
-    // discard
-    if (entry->waiters.load(std::memory_order_relaxed) > 1)
-        return false;
-    discard_locked(entry);
-    return true;
 }
 
 bool ServerQueryCache::on_result_ready(const std::shared_ptr<Entry> &entry,

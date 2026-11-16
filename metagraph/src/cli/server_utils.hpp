@@ -51,11 +51,14 @@ class CappedHttpServer : public HttpServer {
 // parts that need no HTTP library, are in server_checks.hpp
 
 /**
- * Whether the client of |request| is gone: peer_closed() on its socket. Safe from the
- * handler's thread: while a handler runs, the HTTP server has no read pending on the socket
- * (the next read starts after the response was sent), the only other thread that can touch it
- * is the content timeout's, whose shutdown is safe beside a peek, and the connection, with its
- * descriptor, lives as long as the handler holds the Request.
+ * Whether the client of |request| is gone: peer_closed() on its socket. Safe from any thread
+ * while the handler runs, also from several at once (a /search asks it from its pool's and
+ * OpenMP's threads, lane T7-P2): it only reads the socket's state (recv MSG_PEEK|MSG_DONTWAIT,
+ * which consumes nothing, and getsockopt), which may run beside another such call; while a
+ * handler runs, the HTTP server has no read pending on the socket (the next read starts after
+ * the response was sent); the only other thread that can touch it is the content timeout's,
+ * whose close() is a shutdown and a cancel (the descriptor stays open), safe beside a peek; and
+ * the connection, with its descriptor, lives as long as the handler holds the Request.
  */
 bool client_gone(const HttpServer::Request &request);
 

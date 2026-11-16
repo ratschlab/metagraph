@@ -1263,12 +1263,6 @@ int run_server(Config *config) {
     CappedHttpServer server;
     server.set_max_connections(config->max_connections);
 
-    // Whether the client of |request| is gone or the server stops (a shutdown is treated as a
-    // client gone, class Shutdown)
-    auto gone_of = [&shutdown](const shared_ptr<HttpServer::Request> &request) {
-        return [r = request.get(), &shutdown]() { return shutdown.stopping() || client_gone(*r); };
-    };
-
     // Keep the cache handle alive until the asynchronous response write completes.
     server.resource["^/search"]["POST"] = [&](shared_ptr<HttpServer::Response> response,
                                               shared_ptr<HttpServer::Request> request) {
@@ -1355,17 +1349,17 @@ int run_server(Config *config) {
                 };
                 // The request's stop (lane T7-P2; SPEC-multigraph-envelope.md section 3): once
                 // its client is gone or the server stops, no further record, batch or pair
-                // starts (those running finish) and nothing is written. With the result cache a
-                // producer whose client is gone stops only when no other request waits for its
-                // entry, which then leaves the cache, so that a duplicate arriving later
-                // computes the answer itself; a shutdown stops it whatever waits (nothing is
-                // written to any of them)
-                SearchStop stop([&, gone = gone_of(request)]() {
+                // starts (those running finish) and nothing is written. With the result cache
+                // (a handle) a client gone stops nothing: the request computes to its end and
+                // stores its answer, so that the client's retry is a hit (Fable review M1); a
+                // shutdown stops it, its waiters with it (nothing is written to any of them).
+                // The reason is the one answered first
+                SearchStop stop([&, r = request.get()]() -> const char * {
                     if (shutdown.stopping())
-                        return true;
-                    if (!gone())
-                        return false;
-                    return !handle_holder || handle_holder->abandon_if_alone();
+                        return "shutdown";
+                    if (handle_holder)
+                        return nullptr;
+                    return client_gone(*r) ? "client gone" : nullptr;
                 });
                 Json::Value result;
                 std::string serialized;
@@ -1417,9 +1411,14 @@ int run_server(Config *config) {
                                 const std::string &anno_fname = targets[t].second.second;
                                 futures.push_back(graphs_pool.enqueue([&,config,t,graph_fname=graph_fname,anno_fname=anno_fname]() {
                                     // a pair of a stopped request does not start (nothing
-                                    // waited for, loaded or searched)
-                                    if (stop())
-                                        return std::exception_ptr();
+                                    // waited for, loaded or searched); asked under a try as
+                                    // the rest of the task (a throw fails the request alone)
+                                    try {
+                                        if (stop())
+                                            return std::exception_ptr();
+                                    } catch (...) {
+                                        return std::current_exception();
+                                    }
                                     logger->trace("Request {}: Started querying graph {}. In total graphs being queried at the moment: {}",
                                                   request_id, graph_fname, graphs_being_queried.fetch_add(1) + 1);
                                     size_t index_size_reserved = 0;
@@ -1550,13 +1549,13 @@ int run_server(Config *config) {
                     // stopped (lane T7-P2): nothing is written (ClientGone; answer_request logs
                     // this text as "Request <id>: <text>; no response written") and nothing of
                     // the budget is logged, neither a unit refused nor a refusal nobody reads.
-                    // How far it got: the most records any pair started of the request's
-                    // records (counted here, on this path only), and the pairs whose search
-                    // began
+                    // Why (the reason the stop answered first) and how far it got: the most
+                    // records any pair started of the request's records (counted here, on this
+                    // path only: the search read no further), and the pairs whose search began
+                    const char *why = stop.reason();
                     throw ClientGone(fmt::format(
                             "{}, /search stopped: {} of {} records started, {} of {} pairs "
-                            "started", shutdown.stopping() ? "shutdown" : "client gone",
-                            stop.records_started(),
+                            "started", why ? why : "client gone", stop.records_started(),
                             count_query_records(search_request.fasta,
                                                 search_request.config.forward_and_reverse),
                             stop.pairs_started(), config->fnames.empty() ? 1 : targets.size()));
@@ -1625,6 +1624,12 @@ int run_server(Config *config) {
             }
             return process_align_request(content, anno_graph.get()->get_graph(), *config);
         });
+    };
+
+    // Whether the client of |request| is gone or the server stops (a shutdown is treated as a
+    // client gone, class Shutdown)
+    auto gone_of = [&shutdown](const shared_ptr<HttpServer::Request> &request) {
+        return [r = request.get(), &shutdown]() { return shutdown.stopping() || client_gone(*r); };
     };
 
     // The index of a /resolve, /traverse or /pattern request on |pair| of a multi-graph server:

@@ -232,30 +232,37 @@ class SeqSearchResult {
 
 /**
  * The stop of a /search (lane T7-P2): its client gone or the server stopping (the server's
- * predicate; with the result cache, its producer only when no other request waits for the
- * entry). Asked before each record's work starts (query_fasta's tasks), before each batch and
- * each of its records (batched_query_fasta) and before each pair's search (the server's
- * fan-out). Once the predicate answered true it answers true without asking again: no further
- * record, batch or pair starts; those already running finish. Thread-safe. It keeps how far the
+ * predicate, which answers the reason the work stops, or null while it goes on; with the result
+ * cache, a shutdown only). Asked before each record's work starts (query_fasta's tasks), before
+ * each batch is read, each of its alignments, its query graph and each of its records
+ * (batched_query_fasta) and before each pair's search (the server's fan-out). Once the predicate
+ * answered a reason it answers true without asking again: no further record, batch or pair
+ * starts; those already running finish. Thread-safe. It keeps the first reason, and how far the
  * request got, for the log: the most records any one pair started, and the pairs started.
  */
 class SearchStop {
   public:
-    explicit SearchStop(std::function<bool()> predicate) : predicate_(std::move(predicate)) {}
+    explicit SearchStop(std::function<const char *()> predicate)
+          : predicate_(std::move(predicate)) {}
     SearchStop(const SearchStop &) = delete;
     SearchStop& operator=(const SearchStop &) = delete;
 
-    // whether the work stops now: asks the predicate until it answered true once
+    // whether the work stops now: asks the predicate until it answered a reason once
     bool operator()() {
         if (stopped())
             return true;
-        if (!predicate_ || !predicate_())
+        const char *reason = predicate_ ? predicate_() : nullptr;
+        if (!reason)
             return false;
-        stopped_.store(true, std::memory_order_release);
+        // the first reason answered (two threads may ask at once)
+        const char *none = nullptr;
+        reason_.compare_exchange_strong(none, reason, std::memory_order_acq_rel);
         return true;
     }
     // whether it answered true (no call of the predicate)
-    bool stopped() const { return stopped_.load(std::memory_order_acquire); }
+    bool stopped() const { return reason_.load(std::memory_order_acquire) != nullptr; }
+    // the reason the predicate answered first (null while not stopped)
+    const char* reason() const { return reason_.load(std::memory_order_acquire); }
 
     // a pair's search started |records| of its records (the most of any pair is kept)
     void note_records_started(size_t records) {
@@ -269,8 +276,8 @@ class SearchStop {
     size_t pairs_started() const { return pairs_started_.load(std::memory_order_relaxed); }
 
   private:
-    std::function<bool()> predicate_;
-    std::atomic<bool> stopped_ { false };
+    std::function<const char *()> predicate_;
+    std::atomic<const char *> reason_ { nullptr };
     std::atomic<size_t> records_started_ { 0 };
     std::atomic<size_t> pairs_started_ { 0 };
 };
@@ -325,10 +332,12 @@ enum QueryMode {
  * @param pair_index    the pair's place in the answer (the order of a record's `cuts`
  *                      entries; the order of the units refused alone in the log)
  * @param stop          a /search's stop (null: none, the CLI's; lane T7-P2): asked before each
- *                      record's work starts (and, on the batched path, before each batch); once
- *                      it answered true no further record starts, the records running finish,
- *                      the records this call started are noted in it, and SearchStopped is
- *                      thrown, whatever else the records raised
+ *                      record's work starts (and, on the batched path, before each batch, each
+ *                      alignment and each query graph); once it answered true no further record
+ *                      starts, the records running finish, the records this call started are
+ *                      noted in it (on the batched path, those whose query on their batch's
+ *                      query graph began), and SearchStopped is thrown, whatever else the
+ *                      records raised
  *
  * @return the number of base pairs (characters) in query file
  */

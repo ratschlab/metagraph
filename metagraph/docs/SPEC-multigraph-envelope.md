@@ -130,14 +130,18 @@ The answer keeps its upstream shape (a list of `{seq_description, results, ...}`
 - The result cache key includes the selected names (with their pairs), so a pair listed under two names never
   returns rows tagged with the other name.
 - **A client gone** (lane T7-P2): once the client has closed, reset or half-closed its connection, or the server
-  shuts down, a `/search` starts no further record, batch or pair (each asks before it starts; a record in progress
-  finishes) and nothing is written, as on `/traverse`, `/resolve` and `/pattern`. With `--cache-size` above 0 a
-  request whose answer an identical request waits for computes on for it, and one that stopped leaves the cache (an
-  identical request after it computes the answer); a shutdown stops it whatever waits. The server logs
+  shuts down, a `/search` starts no further record, batch or pair (each asks before it starts: on the batched path
+  also each alignment and each batch's query graph; a record in progress finishes), writes nothing and closes the
+  connection, as on `/traverse`, `/resolve` and `/pattern`. A request whose work has all started (every record on
+  every pair) is not stopped: it is answered as before (to a gone client, a write that fails). With `--cache-size`
+  above 0 a client gone stops nothing: the request computes to its end and stores its answer, so that a retry is a
+  hit; only a shutdown stops it (and the identical requests waiting for it, written nothing either). The server logs
   `[Server] Request <id>: <client gone|shutdown>, /search stopped: <r> of <n> records started, <p> of <P> pairs
-  started; no response written` (<r>: the most records one pair started; <n>: the request's records; <P>: the pairs
-  selected, 1 on a single-graph server; <p>: those whose search began). No capability states it: a client that is
-  there gets the same answer.
+  started; no response written` (the reason the stop answered first; <r>: the most records one pair started, on the
+  batched path the records whose query on their batch's query graph began; <n>: the request's records, with
+  `--fwd-and-reverse` each record and its reverse complement; <P>: the pairs selected, 1 on a single-graph server;
+  <p>: those whose search began). No capability states it: a client that is there, and has not half-closed, gets the
+  same answer.
 - `GET /column_labels` (H3), which tags nothing with a name, lists each distinct pair once, at its first place in
   the answers' order (the names in byte order, each name's pairs in the list's order), its labels in column
   order (section 8).

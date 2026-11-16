@@ -1013,12 +1013,14 @@ TEST(query_fasta, a_unit_without_a_budget_has_no_account) {
 // batch and each of its records), lets the records running finish, notes how many it started
 // and throws SearchStopped. A stop that never fires, or none, answers as before.
 
-// the results of |fasta| by record (the server's callback, keeping each), with |budget| and
-// |stop| (null: none); |callbacks| counts the results handed over
+// the results of |fasta| by record (the server's callback, keeping each), with |budget|,
+// |stop| (null: none) and |aligner| (null: no alignment); |callbacks| counts the results handed
+// over
 std::map<size_t, cli::SeqSearchResult>
 search_with_stop(const std::string &fasta, const cli::Config &config,
                  const graph::AnnotatedDBG &index, graph::SearchBudget *budget,
-                 cli::SearchStop *stop, std::atomic<size_t> *callbacks) {
+                 cli::SearchStop *stop, std::atomic<size_t> *callbacks,
+                 const graph::align::DBGAlignerConfig *aligner = nullptr) {
     std::mutex mutex;
     std::map<size_t, cli::SeqSearchResult> results;
     cli::query_fasta(fasta, [&](cli::SeqSearchResult &&result) {
@@ -1026,7 +1028,7 @@ search_with_stop(const std::string &fasta, const cli::Config &config,
         std::lock_guard<std::mutex> lock(mutex);
         const size_t id = result.get_sequence().id;
         results.emplace(id, std::move(result));
-    }, config, index, nullptr, budget, "the graph", 0, stop);
+    }, config, index, aligner, budget, "the graph", 0, stop);
     return results;
 }
 
@@ -1088,7 +1090,10 @@ TEST(SearchStop, NoRecordStartsOnceStopped) {
             // a stop that never fires (with a budget): every record, as without one
             graph::SearchBudget large(uint64_t(1) << 40, true);
             std::atomic<size_t> asked { 0 };
-            cli::SearchStop never([&]() { asked.fetch_add(1); return false; });
+            cli::SearchStop never([&]() -> const char * {
+                asked.fetch_add(1);
+                return nullptr;
+            });
             callbacks = 0;
             const auto all = search_with_stop(fasta.name(), *config, *index, &large, &never,
                                               &callbacks);
@@ -1105,18 +1110,25 @@ TEST(SearchStop, NoRecordStartsOnceStopped) {
             // asked once per record (and on the batched path once per batch read and started)
             EXPECT_EQ(num_records + (c.batch ? 2 : 0), asked.load());
 
-            // a stop that fires at its |n|-th question, from the first to past the last
+            // a stop that fires at its |n|-th question, from the first to past the last. With a
+            // budget whose bound nothing reaches, so that the stop is asked beside the values
+            // accounts the tasks make; nothing about the budget is asserted (this callback
+            // charges no answer and nothing passes 1 TiB, so it would hold without the stop,
+            // and the budget is the request's own: no count across requests to leak into)
             for (size_t n : { size_t(1), size_t(2), size_t(6), size_t(num_records) }) {
                 SCOPED_TRACE(::testing::Message() << "stop at question " << n);
                 graph::SearchBudget budget(uint64_t(1) << 40, true);
                 std::atomic<size_t> questions { 0 };
-                cli::SearchStop stop([&]() { return questions.fetch_add(1) + 1 >= n; });
+                cli::SearchStop stop([&]() -> const char * {
+                    return questions.fetch_add(1) + 1 >= n ? "the test's" : nullptr;
+                });
                 callbacks = 0;
                 std::map<size_t, cli::SeqSearchResult> got;
                 EXPECT_THROW(got = search_with_stop(fasta.name(), *config, *index, &budget,
                                                     &stop, &callbacks),
                              cli::SearchStopped);
                 EXPECT_TRUE(stop.stopped());
+                EXPECT_STREQ("the test's", stop.reason());
                 // the predicate is not asked again once it answered true
                 const size_t asked_then = questions.load();
                 EXPECT_TRUE(stop());
@@ -1129,16 +1141,11 @@ TEST(SearchStop, NoRecordStartsOnceStopped) {
                 EXPECT_LE(started, n - 1);
                 if (t == 1) {
                     // one thread: the records start in order, each after one question (the
-                    // batched path asks twice before its batch's records)
+                    // batched path asks twice before its batch's records: when it reads the
+                    // batch and before its query graph)
                     const size_t before = c.batch ? 2 : 0;
                     EXPECT_EQ(n - 1 > before ? n - 1 - before : 0, started);
                 }
-                // nothing held: query_fasta returned once every task (and the values account
-                // on its stack) had ended; nothing was refused or charged to the answer
-                EXPECT_FALSE(budget.passed());
-                EXPECT_TRUE(budget.unit_refusals().empty());
-                EXPECT_EQ(0u, budget.answer().held());
-                EXPECT_EQ(started, callbacks.load());
             }
         }
     }
@@ -1158,7 +1165,9 @@ TEST(SearchStop, AStopAfterTheLastRecordStopsNothing) {
     config->discovery_fraction = 0;
     std::atomic<size_t> callbacks { 0 };
     std::atomic<size_t> questions { 0 };
-    cli::SearchStop stop([&]() { return questions.fetch_add(1) >= 1; });
+    cli::SearchStop stop([&]() -> const char * {
+        return questions.fetch_add(1) >= 1 ? "the test's" : nullptr;
+    });
     const auto results = search_with_stop(fasta.name(), *config, *index, nullptr, &stop,
                                           &callbacks);
     ASSERT_EQ(1u, results.size());
@@ -1167,6 +1176,136 @@ TEST(SearchStop, AStopAfterTheLastRecordStopsNothing) {
     EXPECT_EQ(1u, stop.records_started());
     // a later question (the server's next pair) fires; this call is over
     EXPECT_TRUE(stop());
+}
+
+
+// the batched path with alignments on the full graph and one batch or several (Fable review
+// m2): each alignment asks the stop first and the batch asks again before its query graph, so a
+// stop during a batch's alignments makes neither the alignments left nor its query graph; the
+// batches are read one at a time, each asked for. The records started are those whose query on
+// their batch's query graph began
+TEST(SearchStop, TheBatchedPathStopsInItsAlignmentsAndBetweenBatches) {
+    std::mt19937 rng(31);
+    auto random_sequence = [&](size_t length) {
+        std::string s(length, 'A');
+        for (char &c : s) {
+            c = "ACGT"[rng() % 4];
+        }
+        return s;
+    };
+    const size_t k = 7;
+    std::vector<test::CoordinateRecord> records;
+    for (size_t i = 0; i < 12; ++i) {
+        records.push_back({ random_sequence(40 + rng() % 30), "column_" + std::to_string(i % 4),
+                            "record_" + std::to_string(i) });
+    }
+    const size_t num_records = 24;
+    std::vector<size_t> lengths;
+    utils::TempFile fasta;
+    for (size_t q = 0; q < num_records; ++q) {
+        // a substitution, so that the alignment is not the exact match
+        std::string sequence = records[q % 12].sequence + records[(q + 5) % 12].sequence;
+        sequence[sequence.size() / 2] = sequence[sequence.size() / 2] == 'A' ? 'C' : 'A';
+        fasta.ofstream() << ">q" << q << "\n" << sequence << "\n";
+        lengths.push_back(sequence.size());
+    }
+    fasta.ofstream().close();
+    // no record mapping and a mode other than coords: the batched path
+    auto index = test::coordinate_test_graph(k, records, false, false, false, false);
+    auto config = query_config("signature");
+    config->discovery_fraction = 0;
+    config->num_top_labels = 1000;
+    const auto aligner = std::make_unique<graph::align::DBGAlignerConfig>(
+            cli::initialize_aligner_config(*config, index->get_graph()));
+
+    const unsigned int threads = get_num_threads();
+    for (unsigned long long batch : { 100'000'000ull, 250ull }) {
+        config->query_batch_size = batch;
+        // the batches as batched_query_fasta reads them: records while the bytes read are
+        // within the batch size
+        size_t batches = 0;
+        for (size_t q = 0; q < num_records; ++batches) {
+            for (size_t bytes = 0; q < num_records && bytes <= batch; ++q) {
+                bytes += lengths[q];
+            }
+        }
+        if (batch > 1000) {
+            ASSERT_EQ(1u, batches);
+        } else {
+            // two or three records a batch
+            ASSERT_LE(num_records / 3, batches);
+            ASSERT_GE(num_records / 2, batches);
+        }
+        for (unsigned int t : { 1u, 4u }) {
+            SCOPED_TRACE(::testing::Message() << "batch " << batch << " threads " << t);
+            set_num_threads(t);
+            std::atomic<size_t> callbacks { 0 };
+            const auto base = search_with_stop(fasta.name(), *config, *index, nullptr, nullptr,
+                                               &callbacks, aligner.get());
+            ASSERT_EQ(num_records, base.size());
+            for (const auto &[id, result] : base) {
+                ASSERT_TRUE(result.get_alignment()) << id;
+            }
+
+            // a stop that never fires: every record and its alignment, as without one; asked
+            // when each batch is read, before each alignment, before each query graph and
+            // before each record's query
+            std::atomic<size_t> asked { 0 };
+            cli::SearchStop never([&]() -> const char * {
+                asked.fetch_add(1);
+                return nullptr;
+            });
+            callbacks = 0;
+            const auto all = search_with_stop(fasta.name(), *config, *index, nullptr, &never,
+                                              &callbacks, aligner.get());
+            ASSERT_EQ(num_records, all.size());
+            for (const auto &[id, result] : base) {
+                EXPECT_EQ(compact_json(result.to_json(false, k)),
+                          compact_json(all.at(id).to_json(false, k))) << id;
+                EXPECT_EQ(compact_json(result.cut_to_json()),
+                          compact_json(all.at(id).cut_to_json())) << id;
+                ASSERT_TRUE(all.at(id).get_alignment()) << id;
+                EXPECT_EQ(result.get_alignment()->cigar, all.at(id).get_alignment()->cigar)
+                        << id;
+                EXPECT_EQ(result.get_alignment()->score, all.at(id).get_alignment()->score)
+                        << id;
+            }
+            EXPECT_FALSE(never.stopped());
+            EXPECT_EQ(num_records, never.records_started());
+            EXPECT_EQ(2 * batches + 2 * num_records, asked.load());
+
+            // a stop that fires at its |n|-th question
+            std::vector<size_t> ns { 1, 2, 3, 2 * batches + 2 * num_records };
+            if (batches == 1) {
+                // one batch: question 1 reads it, 2 to num_records + 1 are its alignments,
+                // num_records + 2 its query graph, then its records' queries. A stop anywhere
+                // up to its first record starts none
+                ns = { 2, 1 + num_records / 2, num_records + 1, num_records + 2,
+                       num_records + 3 };
+            }
+            for (size_t n : ns) {
+                SCOPED_TRACE(::testing::Message() << "stop at question " << n);
+                std::atomic<size_t> questions { 0 };
+                cli::SearchStop stop([&]() -> const char * {
+                    return questions.fetch_add(1) + 1 >= n ? "the test's" : nullptr;
+                });
+                callbacks = 0;
+                std::map<size_t, cli::SeqSearchResult> got;
+                EXPECT_THROW(got = search_with_stop(fasta.name(), *config, *index, nullptr,
+                                                    &stop, &callbacks, aligner.get()),
+                             cli::SearchStopped);
+                EXPECT_TRUE(stop.stopped());
+                const size_t started = stop.records_started();
+                EXPECT_EQ(started, callbacks.load());
+                EXPECT_LT(started, num_records);
+                EXPECT_LE(started, n - 1);
+                if (batches == 1 || n == 1) {
+                    EXPECT_EQ(0u, started);
+                }
+            }
+        }
+    }
+    set_num_threads(threads);
 }
 
 } // namespace

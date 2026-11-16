@@ -1,19 +1,20 @@
 """A /search whose client is gone (lane T7-P2; SPEC-multigraph-envelope.md section 3): once the
-client has closed its connection, or the server shuts down, the request starts no further record,
-batch or pair (a record in progress finishes), writes nothing and logs one line:
+client has closed, reset or half-closed its connection, or the server shuts down, the request
+starts no further record, batch or pair (a record in progress finishes), writes nothing and logs
+one line:
 
   [Server] Request <id>: <client gone|shutdown>, /search stopped: <r> of <n> records started,
   <p> of <P> pairs started; no response written
 
 so that its handler, its threads and its budget accounts are free for the next request long
-before the request would have ended. With the result cache, a producer another identical request
-waits for computes on for it, and a stopped one leaves the cache: an identical request after it
-computes the answer itself.
+before the request would have ended. With the result cache on, a client gone stops nothing: the
+request computes to its end and stores its answer, so that the client's retry is a hit (Fable
+review M1); a shutdown stops it.
 
 The fixture is slow by construction: a telomere-like pair (50 records each holding (CCCTAA)n, so
 that each repeat k-mer has about 330 coordinates in every record) searched with many records of
-the repeat, query_coords. Each test measures the request without a disconnect first and states
-the numbers it saw (stderr).
+the repeat, query_coords. Each test measures the request without a disconnect first, closes at a
+fraction of that time and states the numbers it saw (stderr).
 """
 
 import json
@@ -39,6 +40,10 @@ ROW_DIFF_BRWT_COORD = '.row_diff_brwt_coord.annodbg'
 STOP = re.compile(r'Request (\d+): (client gone|shutdown), /search stopped: (\d+) of (\d+) '
                   r'records started, (\d+) of (\d+) pairs started; no response written\n')
 STARTED = re.compile(r'\[Server\] /search request (\d+) from ')
+# the client closes at this fraction of the undisturbed request's time, which must be at least
+# MIN_FULL_S for the stop to be told from the request's end
+CLOSE_AT = 0.15
+MIN_FULL_S = 1.5
 
 
 def note(*args):
@@ -154,7 +159,13 @@ class TestSearchStop(TestingBase):
             if re.search(rf'Request {request_id}\b', line) or re.search(rf'request {request_id} ', line):
                 self.assertTrue(STOP.search(line + '\n') or STARTED.search(line), line)
 
-    def disconnect(self, server, body, after_s=0.5, then=None):
+    def close_after(self, full_s):
+        """when the client closes, after its request started: CLOSE_AT of the undisturbed
+        request's |full_s|, which must be long enough to observe a stop"""
+        self.assertGreater(full_s, MIN_FULL_S, 'the fixture runs too fast here to observe a stop')
+        return CLOSE_AT * full_s
+
+    def disconnect(self, server, body, after_s, then=None):
         """|body| sent and its client gone after |after_s| (|then| called right after the
         close): (request id, the stop line's match, the seconds from the close to the line, the
         log's length before)"""
@@ -201,7 +212,9 @@ class TestSearchStop(TestingBase):
             second['r'] = server.post('search', small)
             second['s'] = time.monotonic() - closed
 
-        request_id, m, stop_s, before = self.disconnect(server, body, then=next_request)
+        close_s = self.close_after(full_s)
+        request_id, m, stop_s, before = self.disconnect(server, body, close_s,
+                                                        then=next_request)
         self.assertEqual('client gone', m.group(2))
         started, records, pairs_started, pairs = (int(m.group(i)) for i in (3, 4, 5, 6))
         self.assertEqual(self.single_records, records)
@@ -210,13 +223,13 @@ class TestSearchStop(TestingBase):
         self.assertEqual(200, second['r'].status_code)
         self.assertEqual(small_ref.text, second['r'].text)
         second_s = second['s']
-        note(f'single graph -p 1 --threads-each 2: full {full_s:.2f} s; stopped {stop_s:.2f} s '
-             f'after the close ({started} of {records} records started); the next request '
-             f'answered {second_s:.2f} s after the close')
+        note(f'single graph -p 1 --threads-each 2: full {full_s:.2f} s; closed at {close_s:.2f} '
+             f's, stopped {stop_s:.2f} s after the close ({started} of {records} records '
+             f'started); the next request answered {second_s:.2f} s after the close')
         # the stop comes within a record or two of the close, not at the request's end, and the
         # handler is free then: the next request is answered while the first would still run
-        self.assertLess(0.5 + stop_s, 0.6 * full_s)
-        self.assertLess(0.5 + second_s, 0.6 * full_s)
+        self.assertLess(close_s + stop_s, 0.6 * full_s)
+        self.assertLess(close_s + second_s, 0.6 * full_s)
         self.stopped_quietly(server, before, request_id)
         # and the undisturbed request is answered as before, byte for byte
         r, _ = self.timed(server, body)
@@ -227,7 +240,8 @@ class TestSearchStop(TestingBase):
         server = self.server(multi=True, p=2, e=2)
         body = self.body(self.multi_records, multi=True)
         reference, full_s = self.timed(server, body)
-        request_id, m, stop_s, before = self.disconnect(server, body)
+        close_s = self.close_after(full_s)
+        request_id, m, stop_s, before = self.disconnect(server, body, close_s)
         self.assertEqual('client gone', m.group(2))
         started, records, pairs_started, pairs = (int(m.group(i)) for i in (3, 4, 5, 6))
         self.assertEqual(self.multi_records, records)
@@ -235,10 +249,10 @@ class TestSearchStop(TestingBase):
         self.assertLess(pairs_started, pairs)
         self.assertGreaterEqual(pairs_started, 1)
         self.assertLessEqual(started, records)
-        note(f'multi graph -p 2 --threads-each 2, {pairs} pairs: full {full_s:.2f} s; stopped '
-             f'{stop_s:.2f} s after the close ({started} of {records} records, {pairs_started} '
-             f'of {pairs} pairs started)')
-        self.assertLess(0.5 + stop_s, 0.6 * full_s)
+        note(f'multi graph -p 2 --threads-each 2, {pairs} pairs: full {full_s:.2f} s; closed at '
+             f'{close_s:.2f} s, stopped {stop_s:.2f} s after the close ({started} of {records} '
+             f'records, {pairs_started} of {pairs} pairs started)')
+        self.assertLess(close_s + stop_s, 0.6 * full_s)
         self.stopped_quietly(server, before, request_id)
         r, _ = self.timed(server, body)
         self.assertEqual(reference.text, r.text)
@@ -252,7 +266,7 @@ class TestSearchStop(TestingBase):
         before = len(server.text())
         sock = self.send(server, body)
         self.wait_for(server, before, STARTED, 30)
-        time.sleep(0.5)
+        time.sleep(self.close_after(full_s))
         signalled = time.monotonic()
         server.process.send_signal(signal.SIGTERM)
         self.assertEqual(0, server.process.wait(timeout=60))
@@ -280,9 +294,10 @@ class TestSearchStop(TestingBase):
              f'({m.group(3)} of {m.group(4)} records started)')
 
     def test_cache_waiter_gets_the_whole_answer(self):
-        """--cache-size above 0: a duplicate that waits for the producer's entry keeps it going
-        when the producer's client leaves; the duplicate gets the answer byte for byte"""
-        reference, _ = self.single_reference()
+        """--cache-size above 0: the producer computes on when its client leaves, and a duplicate
+        that waits for its entry gets the answer byte for byte"""
+        reference, full_s = self.single_reference()
+        self.close_after(full_s)
         body = self.body(self.single_records)
         server = self.server(['--cache-size', '1'], p=2, e=2)
         before = len(server.text())
@@ -303,34 +318,179 @@ class TestSearchStop(TestingBase):
         # the duplicate's handler parses its body and attaches to the entry within this
         time.sleep(1.0)
         sock.close()
+        at_close = len(server.text())
         waiter.join(timeout=300)
         r = answer['r']
         self.assertEqual(200, r.status_code, r.text[:2000])
         self.assertEqual(reference, r.text)
         text = server.text()[before:]
         self.assertIsNone(STOP.search(text), text[-3000:])
-        self.assertRegex(text, rf'Request {producer}: cache STORE')
+        # stored after the close: the producer ran on past its client's leaving
+        store = re.search(rf'Request {producer}: cache STORE', server.text())
+        self.assertTrue(store, text[-3000:])
+        self.assertGreaterEqual(store.start(), at_close)
         dup = self.request_ids(server, before)[1]
         self.assertRegex(text, rf'Request {dup}: cache HIT')
 
-    def test_cache_late_duplicate_computes(self):
-        """--cache-size above 0: a stopped producer (nobody waited) leaves the cache; an identical
-        request after it computes the answer itself"""
+    def test_cache_retry_gets_the_stored_answer(self):
+        """--cache-size above 0 (Fable review M1): a client that closes and sends its request
+        again gets the stored answer. The first request computes to its end although its client
+        left and stores it; the retry is a hit (as a waiter, or after the store), the answer byte
+        for byte the undisturbed one's"""
         reference, full_s = self.single_reference()
         body = self.body(self.single_records)
         server = self.server(['--cache-size', '1'], p=2, e=2)
-        request_id, m, stop_s, before = self.disconnect(server, body)
+        close_s = self.close_after(full_s)
+        before = len(server.text())
+        sock = self.send(server, body)
+        self.wait_for(server, before, STARTED, 30)
+        first = self.request_ids(server, before)[0]
+        time.sleep(close_s)
+        sock.close()
+        at_close = len(server.text())
+        closed = time.monotonic()
+        time.sleep(0.05)
+        r = server.post('search', body)
+        retry_s = time.monotonic() - closed
+        self.assertEqual(200, r.status_code, r.text[:2000])
+        self.assertEqual(reference, r.text)
+        text = server.text()[before:]
+        self.assertIsNone(STOP.search(text), text[-3000:])
+        store = re.search(rf'Request {first}: cache STORE', server.text())
+        self.assertTrue(store, text[-3000:])
+        self.assertGreaterEqual(store.start(), at_close)
+        retry = self.request_ids(server, before)[1]
+        self.assertRegex(text, rf'Request {retry}: cache HIT')
+        self.assertNotRegex(text, rf'Request {retry}: cache STORE')
+        note(f'cache retry: full {full_s:.2f} s; closed at {close_s:.2f} s, the retry (sent 0.05 '
+             f's after the close) answered {retry_s:.2f} s after the close')
+        # the retry waited for the rest of the first request, not for a computation of its own
+        self.assertLess(close_s + retry_s, 1.5 * full_s)
+
+    def test_half_close_is_a_client_gone(self):
+        """A client that half-closes (shutdown SHUT_WR) after its request reads as gone, as on
+        /traverse (Fable review M2, accepted): nothing is written to it and the connection is
+        closed; the stop line says client gone"""
+        _, full_s = self.single_reference()
+        self.close_after(full_s)
+        server = self.server(p=1, e=2)
+        body = self.body(self.single_records)
+        before = len(server.text())
+        sock = self.send(server, body)
+        sock.shutdown(socket.SHUT_WR)
+        sent = time.monotonic()
+        sock.settimeout(60)
+        received = b''
+        try:
+            while True:
+                chunk = sock.recv(65536)
+                if not chunk:
+                    break
+                received += chunk
+        except ConnectionResetError:
+            pass  # closed (a reset): nothing more to read either
+        closed_s = time.monotonic() - sent
+        sock.close()
+        self.assertEqual(b'', received)
+        m, _ = self.wait_for(server, before, STOP, 30)
         self.assertEqual('client gone', m.group(2))
         self.assertLess(int(m.group(3)), int(m.group(4)))
-        after = len(server.text())
-        r, late_s = self.timed(server, body)
-        self.assertEqual(reference, r.text)
-        text = server.text()[after:]
-        late = self.request_ids(server, after)[0]
-        self.assertRegex(text, rf'Request {late}: cache STORE')
-        self.assertNotRegex(text, rf'Request {late}: cache HIT')
-        note(f'cache: stopped {stop_s:.2f} s after the close; the late duplicate computed in '
-             f'{late_s:.2f} s (undisturbed {full_s:.2f} s)')
+        self.stopped_quietly(server, before, int(m.group(1)))
+        note(f'half-close: full {full_s:.2f} s; the connection closed {closed_s:.2f} s after the '
+             f'half-close, nothing read ({m.group(3)} of {m.group(4)} records started)')
+        self.assertLess(closed_s, 0.6 * full_s)
+
+    def test_in_ram_wait_is_abandoned(self):
+        """`in_ram` on a server on mmap whose --mem-cap-gb holds one pair: a request waiting for
+        the memory another request's load holds abandons the wait once its client is gone (it
+        loads nothing), while the other request runs on to its answer"""
+        size = os.path.getsize(self.graph) + os.path.getsize(self.anno)
+        server = self.server(['--mmap', '--mem-cap-gb', f'{1.5 * size / 1e9:.9f}', '-v'],
+                             multi=True, p=2, e=2)
+        holder = dict(self.body(self.single_records), graphs=['t00'], in_ram=True)
+        waiting = dict(self.body(self.multi_records), graphs=['t01'], in_ram=True)
+        before = len(server.text())
+        answer = {}
+
+        def hold():
+            answer['r'] = server.post('search', holder)
+            answer['at'] = time.monotonic()
+
+        holding = threading.Thread(target=hold)
+        holding.start()
+        loading = re.compile(r'Request (\d+): Loading graph ')
+        m, _ = self.wait_for(server, before, loading, 60)
+        holder_id = int(m.group(1))
+        after_load = len(server.text())
+        sock = self.send(server, waiting)
+        m, _ = self.wait_for(server, after_load, STARTED, 30)
+        waiting_id = int(m.group(1))
+        # its pair's task began (and waits for the memory)
+        self.wait_for(server, after_load,
+                      re.compile(rf'Request {waiting_id}: Started querying graph '), 30)
+        time.sleep(0.3)
+        sock.close()
+        closed = time.monotonic()
+        m, seen = self.wait_for(server, after_load, STOP, 60)
+        stop_s = seen - closed
+        self.assertEqual(waiting_id, int(m.group(1)))
+        self.assertEqual(('client gone', 0, self.multi_records, 0, 1),
+                         (m.group(2), *(int(m.group(i)) for i in (3, 4, 5, 6))))
+        holding.join(timeout=300)
+        r = answer['r']
+        self.assertEqual(200, r.status_code, r.text[:2000])
+        # the wait was abandoned (no load of the waiting request's), and before the holder's
+        # answer released the memory
+        text = server.text()[before:]
+        self.assertNotRegex(text, rf'Request {waiting_id}: Loading graph ')
+        self.assertLess(seen, answer['at'])
+        self.assertRegex(text, rf'Request {holder_id}: Loaded and searched graph ')
+        note(f'in_ram wait: stopped {stop_s:.2f} s after the close, the holder answered '
+             f'{answer["at"] - seen:.2f} s later')
+        self.assertLess(stop_s, 1.0)
+
+    def test_stop_wins_over_a_refusal(self):
+        """A request refused on the answer side (no partial_refusal: once its answer account
+        passed, its units' searches run on, building nothing, and it is refused 400
+        search_answer_too_large at its end) whose client leaves after the pass and before the end
+        is stopped silently: the stop line, no refusal or budget line"""
+        # an unbounded run's budget line: the most one unit's values held, and the answer's
+        # bytes a record
+        server = self.server(['--search-max-answer-memory-mb', '100000'], p=1, e=2)
+        before = len(server.text())
+        self.timed(server, self.body(self.single_records))
+        m = re.compile(r'answer budget: values at most (\d+) B a unit, answer (\d+) B').search(
+                server.text(), before)
+        self.assertTrue(m, server.text()[before:][-3000:])
+        values, answer = int(m.group(1)), int(m.group(2))
+        self.stop_server(server)
+        # enough records for an answer of 2.5 times a unit's values, and a bound of 1.2 times
+        # them: every unit's values fit, the answer passes at about half the records
+        records = -(-int(2.5 * values) * self.single_records // answer)
+        bound_mb = -(-int(1.2 * values) >> 20)
+        body = self.body(records)
+        server = self.server(['--search-max-answer-memory-mb', str(bound_mb)], p=1, e=2)
+        t = time.monotonic()
+        r = server.post('search', body)
+        refused_s = time.monotonic() - t
+        self.assertEqual(400, r.status_code, r.text[:2000])
+        self.assertIn('search_answer_too_large', r.text)
+        # closed at three quarters of the refused request's time: after the pass, before the end
+        close_s = 0.75 * refused_s
+        self.assertGreater(refused_s, 4 * MIN_FULL_S, 'too fast here to close between the two')
+        request_id, m, stop_s, before = self.disconnect(server, body, close_s)
+        self.assertEqual('client gone', m.group(2))
+        self.assertEqual(records, int(m.group(4)))
+        self.assertLess(int(m.group(3)), records)
+        self.stopped_quietly(server, before, request_id)
+        text = server.text()[before:]
+        self.assertNotIn('search_answer_too_large', text)
+        self.assertNotIn('answer budget', text)
+        self.assertNotIn('unit refused', text)
+        note(f'stop over a refusal: values at most {values} B a unit, {records} records, bound '
+             f'{bound_mb} MiB; refused after {refused_s:.2f} s; closed at {close_s:.2f} s, '
+             f'stopped {stop_s:.2f} s after the close ({m.group(3)} of {m.group(4)} records)')
+        self.assertLess(stop_s, 0.15 * refused_s)
 
     def stop_server(self, server):
         server.stop()

@@ -1564,13 +1564,13 @@ size_t query_fasta(const std::string &file,
         if (stop && stop->stopped())
             break;
         thread_pool.enqueue([&](QuerySequence &sequence) {
-            // a /search whose client is gone (or a server that stops) starts no further
-            // record: asked before the record's work and its account (the records running
-            // finish)
-            if (stop && (*stop)())
-                return;
-            started.fetch_add(1, std::memory_order_relaxed);
             try {
+                // a /search whose client is gone (or a server that stops) starts no further
+                // record: asked before the record's work and its account (the records running
+                // finish)
+                if (stop && (*stop)())
+                    return;
+                started.fetch_add(1, std::memory_order_relaxed);
                 // the values account of this record's unit (a /search's), on the task's
                 // stack: the result's values detach from it (shrink) and the callback consumes
                 // the result before the task returns
@@ -1634,16 +1634,23 @@ size_t batched_query_fasta(seq_io::FastaParser &fasta_parser,
         if (!error)
             error = std::move(e);
     };
-    // the records whose query started (a /search's stop: lane T7-P2)
+    // the records whose query on their batch's query graph started (a /search's stop: lane
+    // T7-P2; an alignment on the full graph or a query graph built counts no record)
     std::atomic<size_t> started { 0 };
     omp_set_max_active_levels(2);
     #pragma omp parallel num_threads(parallel_each)
     #pragma omp single
     while (it != end) {
         // a /search whose client is gone (or a server that stops) reads and starts no further
-        // batch (the batches running finish their records started)
-        if (stop && (*stop)())
+        // batch (the batches running finish their records started); a throw of the stop is kept
+        // as the batches' errors are, and ends the reading
+        try {
+            if (stop && (*stop)())
+                break;
+        } catch (...) {
+            keep_error(std::current_exception());
             break;
+        }
         uint64_t num_bytes_read = 0;
 
         // A generator that can be called multiple times until all sequences
@@ -1661,11 +1668,6 @@ size_t batched_query_fasta(seq_io::FastaParser &fasta_parser,
         {
           std::unique_ptr<std::vector<QuerySequence>> seq_batch(seq_batch_p);
           try {
-            // asked again when the batch's task starts: neither its alignments nor its query
-            // graph are made once stopped (the throw ends the task; the stop is raised after
-            // the parallel region, whatever was kept)
-            if (stop && (*stop)())
-                throw SearchStopped();
             Timer batch_timer;
             std::vector<Alignment> alignments_batch;
             // Align sequences ahead of time on full graph if we don't have batch_align
@@ -1677,6 +1679,10 @@ size_t batched_query_fasta(seq_io::FastaParser &fasta_parser,
                 #pragma omp parallel for num_threads(threads_per_batch) schedule(dynamic)
                 for (size_t i = 0; i < seq_batch->size(); ++i) {
                     try {
+                        // no alignment starts once a /search stopped (asked as before each
+                        // record's query)
+                        if (stop && (*stop)())
+                            continue;
                         // Set alignment for this seq_batch
                         alignments_batch[i] = align_sequence(&(*seq_batch)[i].sequence,
                                                              anno_graph.get_graph(), *aligner_config);
@@ -1687,6 +1693,11 @@ size_t batched_query_fasta(seq_io::FastaParser &fasta_parser,
                 logger->trace("Sequences alignment took {} sec", batch_timer.elapsed());
                 batch_timer.reset();
             }
+
+            // nor the batch's query graph (the throw ends the task; the stop is raised after
+            // the parallel region, whatever was kept)
+            if (stop && (*stop)())
+                throw SearchStopped();
 
             // Construct the query graph for this batch
             auto query_graph = construct_query_graph(
@@ -1705,11 +1716,11 @@ size_t batched_query_fasta(seq_io::FastaParser &fasta_parser,
 
             #pragma omp parallel for num_threads(threads_per_batch) schedule(dynamic)
             for (size_t i = 0; i < seq_batch->size(); ++i) {
-                // and before each record's query, as query_fasta's tasks ask
-                if (stop && (*stop)())
-                    continue;
-                started.fetch_add(1, std::memory_order_relaxed);
                 try {
+                    // and before each record's query, as query_fasta's tasks ask
+                    if (stop && (*stop)())
+                        continue;
+                    started.fetch_add(1, std::memory_order_relaxed);
                     // the values account of this record's unit (a /search's), as
                     // query_fasta's tasks make it
                     std::optional<graph::SearchAccount> unit;
