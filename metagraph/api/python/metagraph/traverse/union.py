@@ -2197,6 +2197,7 @@ class _Trie:
         self.kids = [{}]                # node -> {char: edge}
         self.depth = [0]
         self.e_from, self.e_to, self.e_len, self.e_ref, self.e_cover = [], [], [], [], []
+        self.bases_read = 0             # bases the insertion compared or indexed (a count)
         self.walk_end = {}              # node -> [(pi, leaf seg, path id)]
         self.stub_end = {}              # node -> [(pi, stub seg, merge seg)]
         self.merge_at = {}              # node -> [(pi, merge seg)]
@@ -2245,6 +2246,12 @@ class _Trie:
         s = self.parts[pi].graphlet.arms[self.side].segments[seg]
         return s.walk[off:off + self.e_len[e]]
 
+    def _ref_walk(self, e):
+        """(the walk edge |e|'s bases are read from, their offset in it): an edge's bases
+        are compared and indexed there, never sliced whole (GPT review M5)."""
+        pi, seg, off = self.e_ref[e]
+        return self.parts[pi].graphlet.arms[self.side].segments[seg].walk, off
+
     def _new_node(self, depth):
         self.kids.append({})
         self.depth.append(depth)
@@ -2265,7 +2272,9 @@ class _Trie:
         pi, seg, off = self.e_ref[e]
         lower_cover = {k: (s, o + m) for k, (s, o) in self.e_cover[e].items()}
         low = self._new_edge(mid, t, n - m, (pi, seg, off + m), lower_cover)
-        first = self._bases(low)[0]
+        src, o = self._ref_walk(low)
+        first = src[o]
+        self.bases_read += 1
         self.kids[mid][first] = low
         self.e_to[e] = mid
         self.e_len[e] = m
@@ -2285,15 +2294,21 @@ class _Trie:
                 e = self._new_edge(node, t, n - i, (pi, s.id, i), {pi: (s.id, i)})
                 self.kids[node][ch] = e
                 return t
-            eb = self._bases(e)
-            m = 1
-            lim = min(len(eb), n - i)
-            if w.startswith(eb[:lim], i):
+            # the edge's bases against w from i, in place in the walk they are read from:
+            # a full match costs the bases it consumes, a mismatch at most the segment's
+            # remaining bases (and it ends the insertion), so a segment costs O(its bases)
+            # however long the edges it meets (GPT review M5)
+            src, o = self._ref_walk(e)
+            el = self.e_len[e]
+            lim = min(el, n - i)
+            self.bases_read += lim
+            if src.startswith(w[i:i + lim], o):
                 m = lim
             else:
-                while m < lim and eb[m] == w[i + m]:
+                m = 1
+                while m < lim and src[o + m] == w[i + m]:
                     m += 1
-            if m < len(eb):
+            if m < el:
                 self._split(e, m)
             self.e_cover[e][pi] = (s.id, i)
             node = self.e_to[e]

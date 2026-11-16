@@ -1760,10 +1760,36 @@ def comb_part(n):
     return g
 
 
+def spine_part(n):
+    """The comb's flank in one segment: comb_part(n)'s spine 'A' + 'G' * n as a single
+    walk (one segment, one P run), the shape of the GPT review's M5 (another part segmenting
+    the same flank base by base)."""
+    from metagraph.traverse import parse
+    from tests.test_traverse_scale import comb_annotate
+    ref = T.graphlet('merge')
+    lines = comb_annotate(0).splitlines()
+    for i, line in enumerate(lines):
+        f = line.split()
+        if f[0] == 'A':
+            f[3] = f[-1] = str(n + 1)
+        elif f[0] == 'G':
+            f[3], f[-1] = str(n + 1), 'A' + 'G' * n
+        elif f[0] == 'P':
+            f[2] = str(n + 1)
+        else:
+            continue
+        lines[i] = ' '.join(f)
+    g = parse('\n'.join(lines) + '\n')
+    g.envelope = copy.deepcopy(ref.envelope)
+    g.seed_summary = copy.deepcopy(ref.seed_summary)
+    return g
+
+
 class TestScale(unittest.TestCase):
     """P5: construction, walks(top=3) and print() linear on a comb, n = 250, 1000 and 2000,
     checked as ratios to n = 250, never as seconds: a linear cost grows 4 and 8 times, a
-    quadratic one 16 and 64 times; the bound is three times linear. A second part that
+    quadratic one 16 and 64 times; the bound is three times linear. Timed in process CPU time
+    (time.process_time()): wall time on a loaded machine counts the time others run. A second part that
     stops after 2 bp makes every walk's figures carry a stop below the walk's end."""
 
     SIZES = (250, 1000, 2000)
@@ -1786,14 +1812,14 @@ class TestScale(unittest.TestCase):
 
             def timed(query):
                 u = union_pairs(parts)
-                t0 = time.perf_counter()
+                t0 = time.process_time()
                 query(u)
-                return time.perf_counter() - t0
+                return time.process_time() - t0
 
             def build():
-                t0 = time.perf_counter()
+                t0 = time.process_time()
                 union_pairs(parts)
-                return time.perf_counter() - t0
+                return time.process_time() - t0
 
             gc.disable()
             try:
@@ -1815,6 +1841,55 @@ class TestScale(unittest.TestCase):
             for what, t, t0 in zip(('construction', 'walks(top=3)', 'print'), cost[n], base):
                 self.assertLess(t / t0, bound, '%s at n=%d: %.4f s against %.4f s at n=%d'
                                 % (what, n, t, t0, self.SIZES[0]))
+
+    def test_one_flank_segmented_two_ways_is_linear(self):
+        """GPT review M5: one part holds the comb's spine as one segment, the other is the
+        comb (a segment per base of it), 752 / 1,502 / 3,002 / 6,002 bases. The insertion
+        compares each segment with the edges it meets in place: the bases it reads (the
+        trie's count) and the bases _bases() slices stay within the input's, and the CPU
+        time grows linearly (ratios to n = 250 below three times linear). At these sizes a
+        quadratic copy costs little time, so the counts are the test; the time a guard."""
+        import gc
+        import time
+        sizes = (250, 500, 1000, 2000)
+        cost, sliced = {}, {}
+        orig = U._Trie._bases
+
+        def counted(trie, e):
+            text = orig(trie, e)
+            sliced[n] = sliced.get(n, 0) + len(text)
+            return text
+
+        for n in sizes:
+            parts = [{'pair': 'A', 'graphlet': spine_part(n)},
+                     {'pair': 'B', 'graphlet': comb_part(n)}]
+            bases = sum(s.length_bp for p in parts for s in p['graphlet'].arms['right'].segments)
+            self.assertEqual(bases, 3 * n + 2)
+            U._Trie._bases = counted
+            try:
+                u = union_pairs(parts)
+            finally:
+                U._Trie._bases = orig
+            self.assertLessEqual(sliced.get(n, 0), bases, n)
+            self.assertLessEqual(u._arms['right'].bases_read, 2 * bases, n)
+            (w,) = [w for w in u.walks('right') if w.held_in == ('A', 'B')]
+            self.assertEqual((w.length_bp, w.whole_in, u.spell('right', w.id)),
+                             (n + 1, ('A', 'B'), 'A' + 'G' * n))
+
+            def build():
+                t0 = time.process_time()
+                union_pairs(parts)
+                return time.process_time() - t0
+
+            gc.disable()
+            try:
+                cost[n] = self.best(build)
+            finally:
+                gc.enable()
+        for n in sizes[1:]:
+            self.assertLess(cost[n] / cost[sizes[0]], 3.0 * n / sizes[0],
+                            'n=%d: %.4f s against %.4f s at n=%d'
+                            % (n, cost[n], cost[sizes[0]], sizes[0]))
 
 
 class _FanOutClient:
