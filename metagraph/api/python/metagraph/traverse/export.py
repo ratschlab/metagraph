@@ -957,18 +957,26 @@ def _to_gfa(g, with_seed, bud, done=None):
 UNION_TOKEN_CHARS = '%,;=@/:>~+|[]$'
 
 
+class _UnionEscapes(dict):
+    """union_escape()'s str.translate() table: every ASCII character preset; any other
+    character its UTF-8 bytes as %XX, made when it is read and not kept."""
+    __slots__ = ()
+
+    def __missing__(self, cp):
+        return ''.join(['%%%02X' % x for x in chr(cp).encode('utf-8')])
+
+
+_UNION_ESCAPES = _UnionEscapes(
+    (c, chr(c) if 0x21 <= c <= 0x7e and chr(c) not in UNION_TOKEN_CHARS else '%%%02X' % c)
+    for c in range(128))
+
+
 def union_escape(text):
     """|text| as a header token or GFA tag value: every byte outside '!'..'~' (the space,
     control characters and the UTF-8 bytes of non-ASCII characters) and '%' and the token
-    characters ,;=@/:>~+|[]$ written as %XX (upper-case hex)."""
-    out = []
-    for byte in str(text).encode('utf-8'):
-        ch = chr(byte)
-        if byte < 0x21 or byte > 0x7e or ch in UNION_TOKEN_CHARS:
-            out.append('%%%02X' % byte)
-        else:
-            out.append(ch)
-    return ''.join(out)
+    characters ,;=@/:>~+|[]$ written as %XX (upper-case hex). Linear, with no object per
+    character (str.translate(): Opus fix review N2): about the output's size beside it."""
+    return str(text).translate(_UNION_ESCAPES)
 
 
 def union_unescape(token):

@@ -2111,8 +2111,10 @@ Every query whose work grows with the trie, the walks, the segments or the label
 ``to_fasta()`` and ``to_gfa()``; ``print(u)`` is charged under an ambient budget as
 ``statements()`` is. Each charges its cold price: what a cache holds (the walk figures, a
 part segment's label intervals, a part's name index) is charged as if it were built, so a
-call stops at the same row whatever ran before it. A stitched part's own ``evidence()``
-runs under the union call's budget. Exempt, as accessors of what the union stores per
+call stops at the same row whatever ran before it, and under an ambient budget alone as
+with ``budget=``; a call given ``budget=`` inside ``local_budget()`` charges only its own.
+A stitched part's own ``evidence()`` runs under the union call's budget, and a stop there
+names the union's operation and levers. Exempt, as accessors of what the union stores per
 part: ``arms()``, ``provenance()``, ``memory_bytes()`` and the attributes (``parts``,
 ``absent``, ``pairs``, ``expected``, ``digest``, ``seed``, ``alphabet``).
 

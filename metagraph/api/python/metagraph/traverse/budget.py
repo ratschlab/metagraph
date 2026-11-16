@@ -758,6 +758,40 @@ def unbudgeted():
 
 
 @contextmanager
+def part_of(b):
+    """Run the enclosed code -- a model's own budgeted call, made by an operation that runs
+    under |b| (a pair union reading a stitched part's evidence) -- with |b| as the ambient
+    budget, charged and stated as that operation: a stop raised there names the
+    operation's op, phase, progress and levers, not the inner call's (which has levers the
+    operation does not), and the inner call's nested scope leaves none of them behind.
+    |b| None: the code runs as it is."""
+    if b is None:
+        yield None
+        return
+    saved = (b.sub_op, b.levers, b.phase, b.done)
+    b.done = dict(saved[3])
+    token = _AMBIENT.set(b)
+    try:
+        yield b
+    except LocalBudgetExceeded as e:
+        s = e.stop
+        if any(s is x for x in b.stops):
+            s.op = saved[0] or b.op or 'local'
+            s.phase = saved[2] or 'setup'
+            s.done = dict(saved[3])
+            if s.deterministic:
+                s.actions = list(_ACTIONS_ALWAYS) + [a for a in saved[1] if a not in
+                                                     _ACTIONS_ALWAYS] + list(_ACTIONS_TAIL)
+            # the inner call's rows are not the operation's
+            e.partial = None
+            e.restate()
+        raise
+    finally:
+        _AMBIENT.reset(token)
+        b.sub_op, b.levers, b.phase, b.done = saved
+
+
+@contextmanager
 def local_budget(limits=None, **kw):
     """Run the enclosed code under one budget (a LocalBudget, LocalLimits or the keyword
     limits): every library call without an explicit budget= charges it. Context-local

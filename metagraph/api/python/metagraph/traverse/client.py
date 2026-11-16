@@ -265,8 +265,9 @@ def single_answer(out):
     read as its entry -- the pair's answer with its tags (graph, graph_path, annotation_path,
     index_fp, outcome) -- plus the envelope's `usage` (on /traverse the attempt's, which the
     envelope states at its top level); an entry refused raises TraverseError with its
-    refusal's http_status and error. Any other answer (a single-graph server's, an envelope
-    over several pairs) is returned as it is."""
+    refusal's http_status and error, a refusal that is not an object ResponseFormatError.
+    Any other answer (a single-graph server's, an envelope over several pairs) is returned
+    as it is."""
     if not isinstance(out, dict) or 'envelope_version' not in out:
         return out
     answers = out.get('answers')
@@ -275,6 +276,10 @@ def single_answer(out):
     entry = answers[0]
     if entry.get('outcome') == 'refused':
         refusal = entry.get('refusal') or {}
+        if not isinstance(refusal, dict):
+            # not shaped as a refusal (Opus fix review N3)
+            raise ResponseFormatError('the refused entry\'s refusal is a JSON %s, not an '
+                                      'object' % _json_kind(refusal), out)
         raise TraverseError(refusal.get('http_status'), refusal.get('error'), refusal)
     answer = dict(entry)
     if 'usage' in out:
@@ -283,7 +288,8 @@ def single_answer(out):
 
 
 def _json_kind(v):
-    return {list: 'array', str: 'string', bool: 'boolean', type(None): 'null'}.get(
+    return {list: 'array', dict: 'object', str: 'string', bool: 'boolean',
+            type(None): 'null'}.get(
         type(v), 'number' if isinstance(v, (int, float)) else type(v).__name__)
 
 
@@ -925,6 +931,11 @@ class TraverseClient:
         if not isinstance(out.get('results', []), list) or not all(
                 isinstance(r, dict) for r in out.get('results', [])):
             raise ResponseFormatError('the answer\'s results are not a list of objects', out)
+        for i, r in enumerate(out.get('results', [])):
+            # a graphlet is MGT text (Opus fix review N3)
+            if 'graphlet' in r and not isinstance(r['graphlet'], str):
+                raise ResponseFormatError('results[%d].graphlet is a JSON %s, not a string'
+                                          % (i, _json_kind(r['graphlet'])), out)
         envelope = {k: v for k, v in out.items() if k != 'results'}
         graphlets, errors = [], []
         for i, r in enumerate(out.get('results', [])):

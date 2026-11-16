@@ -257,13 +257,13 @@ class TestRoutes(unittest.TestCase):
         self.assertTrue(ops.label_intervals_cut(a, 'right', 6))
         u = union_pairs([{'pair': 'A', 'graphlet': a}, {'pair': 'B', 'graphlet': b}])
         (w,) = [w for w in u.walks('right') if w.length_bp == 70 and w.whole_in == ('B',)]
-        sa, sb = u.carriers('right', w.id)
-        self.assertEqual((sa.how, sa.route.how, sa.route.to_bp, sa.labels_cut,
-                          sa.route.labels_cut, len(sa.route.labels)),
-                         ('merges', 'held', 70, False, True, 2))
         self.assertIn('labels 2+, 1 of them from 0 bp', str(u.carriers('right', w.id)).split(
             '\n')[0])
         self.assertIn('labels=A:2+/1,B:2+/1', u.to_fasta('right', walks=[w.id]))
+        sa, sb = u.carriers('right', w.id)
+        self.assertEqual((sa.how, sa.route.how, sa.route.to_bp, sa.labels_cut,
+                          getattr(sa.route, 'labels_cut', None), len(sa.route.labels)),
+                         ('merges', 'held', 70, False, True, 2))
         # GFA states each union segment's own cut: each pair's merged segment (62-70 bp)
         gfa = u.to_gfa().split('\n')
         merged = [x for x in u.segments('right') if (x.from_bp, x.to_bp) == (62, 70)]
@@ -278,13 +278,14 @@ class TestRoutes(unittest.TestCase):
         g.arms['right'].segments[6].entry_total += 1
         u = union_pairs(parts)
         (w,) = [w for w in u.walks('right') if w.length_bp == 70]
-        s = next(s for s in u.carriers('right', w.id) if s.pair == 'gT')
-        self.assertEqual((s.how, s.route.how, s.labels_cut, s.route.labels_cut),
-                         ('merges', 'held', False, True))
         self.assertIn('gT:3+/0', u.to_fasta('right', walks=[w.id]))
+        s = next(s for s in u.carriers('right', w.id) if s.pair == 'gT')
+        self.assertEqual((s.how, s.route.how, s.labels_cut,
+                          getattr(s.route, 'labels_cut', None)),
+                         ('merges', 'held', False, True))
         # at a depth before the merged segment the route's labels are the stub's, uncut
         s = next(s for s in u.carriers('right', w.id, at_bp=40) if s.pair == 'gT')
-        self.assertFalse(s.route.labels_cut)
+        self.assertIs(getattr(s.route, 'labels_cut', None), False)
 
     def test_labels_before_a_zero_length_leaf(self):
         # GPT review m1: a walk ending at a zero-length merge leaf (7 bp); its labels at a
@@ -846,14 +847,20 @@ class TestSummaryBound(unittest.TestCase):
             got[mb] = n
         return got
 
-    def test_every_ceiling_on_the_locus(self):
-        u = locus()
-        got = self.sweep(u, range(1, 2400))
+    def boundary(self, u, upto):
+        """Every ceiling from 1 to |upto|: refused below the least answer, which is answered
+        at exactly the size the refusal names."""
+        got = self.sweep(u, range(1, upto))
         least = min(mb for mb, n in got.items() if n is not None)
         self.assertTrue(all(got[mb] is None for mb in range(1, least)))
         self.assertEqual(got[least], least)
         refused(self, 'summary_too_small', lambda: u.summary(max_bytes=least - 1),
                 U.TEXTS['summary_too_small'] % (least, least - 1, least))
+        return least
+
+    def test_every_ceiling_on_the_locus(self):
+        u = locus()
+        self.boundary(u, 2400)
         # the exact boundary of the whole answer: at its size it is whole, one byte less
         # leaves something out and says so
         full = u.summary(max_bytes=10 ** 6)
@@ -863,6 +870,15 @@ class TestSummaryBound(unittest.TestCase):
         less = u.summary(max_bytes=n - 1)
         self.assertLessEqual(len(U.C.canonical_json(less)), n - 1)
         self.assertEqual(less['notes'], ['top walks cut (max_bytes)'])
+
+    def test_a_union_without_arms(self):
+        # absent records only: the least answer carries the empty arms, not the note that
+        # they are left out (Opus fix review N7)
+        u = union_pairs([{'pair': 'g%d' % i, 'result': absent_result('not_in_graph')}
+                         for i in range(3)], seed='A' * 30)
+        self.assertEqual(u.arms(), [])
+        least = self.boundary(u, 1500)
+        self.assertEqual(u.summary(max_bytes=least).get('arms'), {})
 
     def test_the_services_sweep_on_r237(self):
         # the service's repro: r237 (2 parts, 9 absent, 11 expected), 2404..6000 bp in steps
@@ -1358,32 +1374,139 @@ class TestBudgets(unittest.TestCase):
         """GPT review M3: each budgeted method charges the same cold (a fresh union) and
         warm (after an unbudgeted call filled its caches), so a budget one unit or one byte
         short of a cold call's charge stops the warm call too, at the same row, and the
-        cold call's charge lets both finish."""
+        cold call's charge lets both finish. (At d958961a8 the five methods without
+        budget= fail in their own subtest on the signature; the rest pass there.)"""
         def run(u, fn, **lim):
             try:
                 fn(u, budget=LocalBudget(**lim))
                 return 'done'
             except LocalBudgetExceeded as e:
-                p = e.partial
-                return ('stop', e.stop.kind if hasattr(e.stop, 'kind') else None,
+                p, s = e.partial, e.stop
+                return ('stop', s.resource, s.op, s.phase, s.used, s.needed_at_least,
                         None if p is None else repr(p.rows))
 
         for name, fn in self.BUDGETED:
-            b = LocalBudget()
-            fn(locus(), budget=b)
-            work, peak = b.used_work, b.peak_bytes
-            warm = locus()
-            fn(warm)
-            again = LocalBudget()
-            fn(warm, budget=again)
-            self.assertEqual((again.used_work, again.peak_bytes), (work, peak), name)
-            for lim in ({'work_units': work - 1}, {'memory_mb': (peak - 1) / (1 << 20)}):
-                cold = run(locus(), fn, **lim)
-                self.assertNotEqual(cold, 'done', (name, lim))
-                self.assertEqual(run(warm, fn, **lim), cold, (name, lim))
-            for lim in ({'work_units': work}, {'memory_mb': peak / (1 << 20)}):
-                self.assertEqual((run(locus(), fn, **lim), run(warm, fn, **lim)),
-                                 ('done', 'done'), (name, lim))
+            with self.subTest(name):
+                b = LocalBudget()
+                fn(locus(), budget=b)
+                work, peak = b.used_work, b.peak_bytes
+                warm = locus()
+                fn(warm)
+                again = LocalBudget()
+                fn(warm, budget=again)
+                self.assertEqual((again.used_work, again.peak_bytes), (work, peak))
+                for lim in ({'work_units': work - 1}, {'memory_mb': (peak - 1) / (1 << 20)}):
+                    cold = run(locus(), fn, **lim)
+                    self.assertNotEqual(cold, 'done', lim)
+                    self.assertEqual(run(warm, fn, **lim), cold, lim)
+                for lim in ({'work_units': work}, {'memory_mb': peak / (1 << 20)}):
+                    self.assertEqual((run(locus(), fn, **lim), run(warm, fn, **lim)),
+                                     ('done', 'done'), lim)
+
+    def test_the_ambient_budget_alone_and_around_another(self):
+        """Opus fix review N1: under an ambient budget alone (local_budget(), no budget=)
+        every budgeted method charges the same cold and warm, as with budget=; and a call
+        given budget= inside local_budget() charges only its own budget, the ambient one
+        nothing (a part's segment labels were built under the ambient budget, outside the
+        price the union charges for them). Locus, and a union with a stitched part."""
+        from metagraph.traverse import local_budget
+        from tests.test_traverse_union_stitched import pairs, role, stitched
+        cases = (('locus', locus, self.BUDGETED + (('str', None),)),
+                 ('comb_chain', lambda: union_pairs(pairs(stitched('comb_chain'),
+                                                          role('comb_chain', 'reference'))),
+                  [x for x in self.BUDGETED if x[0] != 'label(name)']))
+        for case, make, ops_ in cases:
+            for name, fn in ops_:
+                call = fn or (lambda u: str(u))
+                with self.subTest(case=case, op=name):
+                    got = []
+                    for warm in (False, True):
+                        u = make()
+                        if warm:
+                            call(u)
+                        with local_budget() as a:
+                            call(u)
+                        got.append((a.used_work, a.peak_bytes))
+                    self.assertEqual(got[0], got[1])
+                    self.assertGreater(got[0][0], 0)
+                    if fn is None:
+                        continue
+                    alone = LocalBudget()
+                    fn(make(), budget=alone)
+                    inner, u = LocalBudget(), make()
+                    with local_budget() as a:
+                        fn(u, budget=inner)
+                    self.assertEqual((a.used_work, a.peak_bytes), (0, 0))
+                    self.assertEqual((inner.used_work, inner.peak_bytes),
+                                     (alone.used_work, alone.peak_bytes))
+                    self.assertEqual((alone.used_work, alone.peak_bytes), got[0])
+
+    def test_a_stitched_parts_evidence_is_the_union_calls(self):
+        """Decision 2 (train 7): a stitched part's own evidence() runs under the union
+        call's budget, cold as warm, the ambient budget untouched; a stop inside it is the
+        union call's -- op union_evidence, the union's levers (Opus fix review N5) -- and its
+        nested scope leaves neither its name nor its levers to a later stop."""
+        from metagraph.traverse import StitchedGraphlet, local_budget
+        from tests.test_traverse_union_stitched import pairs, role, stitched
+        make = lambda: union_pairs(pairs(stitched('comb_chain'), role('comb_chain',
+                                                                       'reference')))
+        own, sg = LocalBudget(), stitched('comb_chain')
+        with local_budget(own):
+            sg.evidence('right')
+        cold = LocalBudget()
+        make().evidence('right', budget=cold)
+        warm = make()
+        warm.evidence('right')
+        for p in warm.parts:
+            if isinstance(p.graphlet, StitchedGraphlet):
+                p.graphlet.evidence('right')
+        again, inner, u = LocalBudget(), LocalBudget(), make()
+        warm.evidence('right', budget=again)
+        with local_budget() as a:
+            u.evidence('right', budget=inner)
+        self.assertEqual((again.used_work, again.peak_bytes), (cold.used_work, cold.peak_bytes))
+        self.assertEqual((inner.used_work, inner.peak_bytes), (cold.used_work, cold.peak_bytes))
+        self.assertEqual((a.used_work, a.peak_bytes), (0, 0))
+        self.assertGreaterEqual(cold.used_work, own.used_work)
+        # every stop of a sweep of work limits names the union's call
+        for lim in range(1, cold.used_work, max(1, cold.used_work // 25)):
+            try:
+                make().evidence('right', budget=LocalBudget(work_units=lim))
+            except LocalBudgetExceeded as e:
+                self.assertEqual((e.stop.op, e.stop.actions),
+                                 ('union_evidence', ['raise_local_budget', 'process_locally']),
+                                 lim)
+                self.assertIsNone(e.partial)
+        # a part whose evidence() opens its own scope with levers the union has not: a stop
+        # inside it, and one of the union's after it, both state the union's call
+        from metagraph.traverse import budget as B
+
+        def scoped(self, arm=None, *, budget=None):
+            def body(b):
+                b.charge(4321, 1000)
+                return real(self, arm)
+            return B.run_scoped(budget, 'evidence', ('select_walks', 'narrow_arm'), body)
+        real = StitchedGraphlet.evidence
+        StitchedGraphlet.evidence = scoped
+        try:
+            full = LocalBudget()
+            make().evidence('right', budget=full)
+            stops = []
+            for lim in range(1, full.used_work, max(1, full.used_work // 40)):
+                try:
+                    make().evidence('right', budget=LocalBudget(work_units=lim))
+                except LocalBudgetExceeded as e:
+                    s = e.stop
+                    stops.append((lim, s.needed_at_least - s.used == 4321))
+                    self.assertEqual((s.op, s.actions), ('union_evidence', [
+                        'raise_local_budget', 'process_locally']), lim)
+                    self.assertNotIn('select_walks', str(e))
+        finally:
+            StitchedGraphlet.evidence = real
+        # stops inside the part's evidence, and stops of the union's own after it
+        inside = [lim for lim, x in stops if x]
+        self.assertTrue(inside)
+        self.assertTrue(any(lim > max(inside) for lim, x in stops if not x))
 
     def test_the_ambient_budget(self):
         """A budget set by local_budget() is every budgeted method's (print(u) included,
@@ -1484,6 +1607,12 @@ class TestBudgets(unittest.TestCase):
             return [{'pair': 'gM', 'graphlet': T.graphlet('merge')},
                     {'pair': 'g', 'error': 'X' * 10 ** 6}, {'pair': 'h', 'result': r}]
 
+        def escaped_tag():
+            # Opus fix review N2: an absent record's tag of 100,000 token characters, each
+            # escaped to three bytes in every header and GFA line naming it
+            return [{'pair': 'gM', 'graphlet': T.graphlet('merge')},
+                    {'pair': '/:' * 50000, 'error': 'boom'}]
+
         def peak(fn, warm):
             gc.collect()
             gc.disable()
@@ -1514,9 +1643,9 @@ class TestBudgets(unittest.TestCase):
         ceiling = [4096]
         for name, make in (('split11', split11), ('r237', lambda: r237_union()[0]),
                            ('comb', comb), ('long tags', long_tags),
-                           ('long errors', long_errors)):
+                           ('long errors', long_errors), ('escaped tag', escaped_tag)):
             # the long statements never fit 4096 bytes: summary() is measured whole there
-            ceiling[0] = 1 << 21 if name.startswith('long') else 4096
+            ceiling[0] = 4096 if name in ('split11', 'r237', 'comb') else 1 << 21
             b = LocalBudget()
             union_pairs(make(), budget=b)
             parts, other = make(), make()
@@ -1534,6 +1663,42 @@ class TestBudgets(unittest.TestCase):
                 u, w = union_pairs(make()), union_pairs(make())
                 got = peak(lambda: fn(u), lambda: fn(w))
                 self.assertLessEqual(got, b.peak_bytes, (name, op))
+
+    def test_the_account_bounds_a_long_seed(self):
+        """Opus fix review N2: seed= of 1 Mbp over absent records only: its case-mapped copy
+        and the digest's JSON and bytes of it are charged before they are made; the queries
+        of the arm-less union are bounded too (warm free lists, as above)."""
+        import gc
+        import tracemalloc
+
+        def make():
+            return [{'pair': 'g', 'error': 'x'},
+                    {'pair': 'h', 'result': absent_result('not_in_graph', seed_len=10 ** 6)}]
+        seed = 'acgt' * 250000
+
+        def peak(fn):
+            gc.collect()
+            gc.disable()
+            try:
+                fn()
+                tracemalloc.start()
+                base = tracemalloc.get_traced_memory()[0]
+                fn()
+                return tracemalloc.get_traced_memory()[1] - base
+            finally:
+                tracemalloc.stop()
+                gc.enable()
+        b = LocalBudget()
+        union_pairs(make(), seed=seed, budget=b)
+        parts = make()
+        self.assertLessEqual(peak(lambda: union_pairs(parts, seed=seed)), b.peak_bytes)
+        u = union_pairs(make(), seed=seed)
+        for name, fn in (('summary', lambda **k: u.summary(1 << 21, **k)),
+                         ('to_gfa', lambda **k: u.to_gfa(**k)),
+                         ('evidence', lambda **k: u.evidence(**k))):
+            b = LocalBudget()
+            fn(budget=b)
+            self.assertLessEqual(peak(fn), b.peak_bytes, name)
 
     def test_the_account_bounds_a_gzip_load(self):
         """GPT review M4: load() of a gzip file charges the decompressor's working buffers
@@ -2104,8 +2269,12 @@ class TestTraversePairs(unittest.TestCase):
     def test_a_malformed_answer_is_that_pairs_error(self):
         # GPT review m4: an answer that is not a response object (a JSON array, results
         # that are not objects) is that pair's ResponseFormatError; the other pairs are
-        # still requested, and a programming error is still raised
-        from metagraph.traverse import ResponseFormatError, TraverseClient, TraverseResponse
+        # still requested, and a programming error is still raised. Opus fix review N3: a
+        # graphlet that is not text and a refusal that is not an object too
+        import metagraph.traverse as MT
+        from metagraph.traverse import TraverseClient, TraverseResponse
+        # (the base had no ResponseFormatError: the test then fails on the fan-out itself)
+        ResponseFormatError = getattr(MT, 'ResponseFormatError', MT.TraverseError)
         caps = self.CAPS
 
         class Client(TraverseClient):
@@ -2137,6 +2306,21 @@ class TestTraversePairs(unittest.TestCase):
         c = Client({'g1': {'results': []}, 'g2': KeyError('a library bug'), 'g3': []})
         with self.assertRaises(KeyError):
             c.traverse_pairs('ACGT', coordinates=None)
+        shapes = {
+            'results[0].graphlet is a JSON number, not a string': {'results': [{'graphlet': 5}]},
+            'results[0].graphlet is a JSON null, not a string': {'results': [{'graphlet': None}]},
+            "the refused entry's refusal is a JSON string, not an object":
+                {'envelope_version': 1, 'answers': [{'outcome': 'refused', 'refusal': 'no'}]},
+            "the refused entry's refusal is a JSON array, not an object":
+                {'envelope_version': 1, 'answers': [{'outcome': 'refused', 'refusal': ['x']}]}}
+        for text, bad in shapes.items():
+            c = Client({'g1': bad, 'g2': {'results': []}, 'g3': {'results': []}})
+            r = c.traverse_pairs('ACGT', coordinates=None)
+            self.assertEqual(c.sent, ['g1', 'g2', 'g3'], text)
+            e = r.results[0]['error']
+            self.assertIsInstance(e, ResponseFormatError, text)
+            self.assertEqual(str(e), 'not a /traverse response: ' + text)
+            self.assertEqual(e.body, bad)
 
 
 class TestLoadGzip(unittest.TestCase):

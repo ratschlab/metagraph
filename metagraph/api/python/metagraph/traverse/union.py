@@ -813,6 +813,18 @@ class PairUnion:
                     raise _refuse('different_alphabet', None, tags[id(cls_of[id(e.desc)])],
                                   C.alphabet_key(_root(e.graphlet)), ref_tag,
                                   C.alphabet_key(_root(ref.graphlet)))
+        if b is not None:
+            # the inputs' variable-length metadata (error strings, absent results, stated
+            # pairs, envelopes, the seed checks), before the seed checks case-map it and the
+            # identities, sort keys and the digest serialize it (GPT review M4): _M_META
+            # copies of its canonical JSON at its bound, and 1 lwu per 8 bytes of it; the
+            # seed (seed=, else the first part's): its case-mapped copy, kept, and the
+            # digest's JSON of it (the encoder's chunk and their join) and its UTF-8 bytes
+            # (Opus fix review N2)
+            meta = sum(map(_elem_meta, elems)) + _json_bound(exp) + _json_bound(
+                [k for _, _, k in so])
+            n = len(seed) if seed is not None else len(parts[0].graphlet.seed.sequence)
+            b.charge((meta >> 3) + (n >> 6), _M_META * meta + 4 * (STR + n))
         # different_seed
         alphabet = parts[0].graphlet.alphabet if parts else None
         if parts:
@@ -840,14 +852,6 @@ class PairUnion:
                     if sq is not None:
                         sq = C.case_mapped(sq, alphabet) if alphabet else sq.upper()
                         _check_seed(useed, ref_tag, sq, 'absent', tag, alphabet)
-        if b is not None:
-            # the inputs' variable-length metadata (error strings, absent results, stated
-            # pairs, envelopes, the seed checks), before the identities, sort keys and the
-            # digest serialize it (GPT review M4): _M_META copies of its canonical JSON at
-            # its bound, and 1 lwu per 8 bytes of it
-            meta = sum(map(_elem_meta, elems)) + _json_bound(exp) + _json_bound(
-                [k for _, _, k in so])
-            b.charge(meta >> 3, _M_META * meta)
         # duplicate_pair (and the no-ops)
         kept = _dedupe(elems, cls_of, tags)
         # not_expected
@@ -1076,9 +1080,12 @@ class PairUnion:
                           depth=sid)
             got = cache.get(sid)
             if got is None:
-                got = cache[sid] = (_ops.label_intervals(g, a.side, sid),
-                                    frozenset(a.segments[sid].end),
-                                    _ops.label_intervals_cut(g, a.side, sid))
+                # built without a budget: its price is charged above, to the union call's
+                # budget, and an ambient one is not charged again (Opus fix review N1)
+                with _B.unbudgeted():
+                    got = cache[sid] = (_ops.label_intervals(g, a.side, sid),
+                                        frozenset(a.segments[sid].end),
+                                        _ops.label_intervals_cut(g, a.side, sid))
             return got
         return info
 
@@ -1172,7 +1179,9 @@ class PairUnion:
         for p in self.parts:
             for n in sorted({l.name for l in p.graphlet.labels}):
                 seen[n].append(p.tag)
-        return {n: tuple(t) for n, t in sorted(seen.items(), key=lambda x: x[0].encode('utf-8'))
+        # UTF-8 byte order is code point order: the names sort as they are, with no copy of
+        # each as its bytes (Opus fix review N4)
+        return {n: tuple(t) for n, t in sorted(seen.items(), key=lambda x: x[0])
                 if len(t) > 1}
 
     def _mapping_warnings(self):
@@ -1600,28 +1609,32 @@ class PairUnion:
         if by not in ('pairs', 'length', 'id'):
             raise ValueError("by is 'pairs', 'length' or 'id', not %r" % (by,))
         side = self._side(arm)
+        b = _B.resolve(budget)
+        if b is None:
+            return self._walks(side, by, top, pairs, labels, min_bp, spell, stubs, None,
+                               resume)
+        with b.scope('walks'):
+            return self._walks(side, by, top, pairs, labels, min_bp, spell, stubs, b, resume)
+
+    def _walks(self, side, by, top, pairs, labels, min_bp, spell, stubs, b, resume):
+        if b is not None and (pairs or labels):
+            # the selectors, caller-sized, bound into the arguments a resume token is
+            # checked against: their repr, its JSON and UTF-8 bytes in the token's digest, at
+            # twice their JSON bound (Opus fix review N4)
+            n = 2 * (_json_bound(list(pairs or ())) + _json_bound(list(labels or ())))
+            b.charge(n >> 6, 4 * (STR + n))
         args = [side, by, top, sorted(pairs) if pairs else None,
                 [repr(x) for x in labels] if labels else None, min_bp, spell, stubs]
         start = C.resume_pos(self.digest, 'walks', args, resume, 1)[0]
         if side not in self._arms:
             return []
-        b = _B.resolve(budget)
         out = []
         try:
-            return self._walks(side, by, top, pairs, labels, min_bp, spell, stubs, b, start,
-                               out)
+            return self._walks_body(self._arms[side], by, top, pairs, labels, min_bp, spell,
+                                    stubs, b, start, out)
         except LocalBudgetExceeded as e:
             raise e.restate(partial=Partial(out, C.token(self.digest, 'walks', args,
                                                            start + len(out))))
-
-    def _walks(self, side, by, top, pairs, labels, min_bp, spell, stubs, b, start, out):
-        t = self._arms[side]
-        if b is not None:
-            with b.scope('walks'):
-                return self._walks_body(t, by, top, pairs, labels, min_bp, spell, stubs, b,
-                                        start, out)
-        return self._walks_body(t, by, top, pairs, labels, min_bp, spell, stubs, None, start,
-                                out)
 
     def _walks_body(self, t, by, top, pairs, labels, min_bp, spell, stubs, b, start, out):
         # the walks are selected and ranked on their figures (one trie pass); only the
@@ -1835,14 +1848,21 @@ class PairUnion:
                             'held_in': list(figs[i].held_in)}) for i in order[:10]]
         no_pairs, no_arms = 'pairs left out (max_bytes)', 'arms left out (max_bytes)'
         cut = ['top walks cut (max_bytes)'] if ranked else []
+
+        def least_after(o, notes):
+            # the smallest answer that goes on from |o|: the arms with no top walk listed
+            # (and the note of the cut, where a walk is ranked), or the note that they are
+            # left out -- for a union without arms, its empty arms (Opus fix review N7)
+            return min(size(dict(o, arms=arms), notes + cut), size(o, notes + [no_arms]))
+
         with_pairs = dict(base, pairs=pairs)
-        if size(with_pairs, [no_arms]) <= max_bytes:
+        if least_after(with_pairs, []) <= max_bytes:
             out, notes = with_pairs, []
-        elif size(base, [no_pairs, no_arms]) <= max_bytes:
+        elif least_after(base, [no_pairs]) <= max_bytes:
             out, notes = dict(base), [no_pairs]
         else:
             # the smallest answer: the statements and the notes of what is left out
-            least = min(size(with_pairs, [no_arms]), size(base, [no_pairs, no_arms]))
+            least = min(least_after(with_pairs, []), least_after(base, [no_pairs]))
             raise _refuse('summary_too_small', None, least, max_bytes, least)
         cand = dict(out, arms=arms)
         if size(cand, notes + cut) <= max_bytes:
@@ -2156,13 +2176,12 @@ def _summary_part(p, below):
 def _part_block(p, side, b=None):
     """A part's evidence block: its own (ops.evidence_block()); a stitched part's
     StitchedGraphlet.evidence() where it has a junction on |side| (every arm: None), run
-    under the union call's budget |b| as the ambient one, its root's otherwise (no junction
-    is read there)."""
+    under the union call's budget |b| as the ambient one and stated as the union's call (a
+    stop there names the union's operation and levers: Opus fix review N5), its root's
+    otherwise (no junction is read there)."""
     g = p.graphlet
     if _arm_junctions(g, side):
-        if b is None:
-            return g.evidence(side)
-        with _B.local_budget(b):
+        with _B.part_of(b):
             return g.evidence(side)
     g = _root(g)
     return _ops.evidence_block(g, side if side is None or side in g.arms else None)
