@@ -4,6 +4,7 @@ STITCH_FIXTURES), the stitched graphlet as one pair's part beside its reference 
 Where no junction is read the union answers as with the root alone; past a junction nothing
 reads complete or exact."""
 
+import copy
 import gc
 import json
 import re
@@ -435,6 +436,307 @@ class TestStitchedPart(unittest.TestCase):
         u = union_pairs(pairs(sg, None))
         self.assertGreaterEqual(u.memory_bytes(),
                                 K.models_memory_bytes([p.graphlet for p in sg.parts]))
+
+
+# ------------------------------------------------------------------ the review of 7cbee3b03
+
+def _edited_splits45(mirrored=False):
+    """splits45 with the reference's first parent at its merge the stub (a union walk that
+    spells the stub through the junction into the child), on the right arm or mirrored onto
+    the left (each body's arm renamed, the child seeded with the mirrored continuation)."""
+    p, c, ref = (role('splits45', r) for r in ('parent', 'child', 'reference'))
+    merge = ref.arms['right'].segments[5]
+    merge.parents = (4, 2)
+    merge.partition = list(reversed(merge.partition))
+    if mirrored:
+        def mirror(g):
+            a = g.arms.pop('right')
+            a.side = 'left'
+            g.arms['left'] = a
+            a.cache.clear()
+            return g
+        p, c, ref = mirror(p), mirror(c), mirror(ref)
+        c.seed.sequence = derive.continuation_sequence(p, p.arms['left'], 5)
+    return stitch(p, c), p, ref
+
+
+def _zero_leaf_root(first_parent_of_m=1, z_bases=''):
+    """A root on limits' model: ACG -> {C, G} -> M 'AA' -> {C, G} -> Z, Z a merge leaf of
+    |z_bases| (zero-length: a merge at the radius, max_steps, with a continuation)."""
+    from array import array
+    from metagraph.traverse.model import Run, Segment
+
+    def seg(i, parents, f, w, entry, end, children, partition=(), leaf=None, split=None):
+        return Segment(i, tuple(parents), f, len(w), w, w[0] if w else None,
+                       array('I', entry), len(entry), array('I', end),
+                       [array('I', x) for x in partition], split, [], [], leaf, list(children),
+                       0)
+    g = copy.deepcopy(T.graphlet('limits'))
+    a = g.arms['right']
+    old_leaf = a.segments[3].leaf
+    mp = (1, 2) if first_parent_of_m == 1 else (2, 1)
+    segs = [seg(0, (), 0, 'ACG', [0, 1, 2], [0, 1, 2], [1, 2], split=False),
+            seg(1, (0,), 3, 'C', [0, 1], [0], [3]),
+            seg(2, (0,), 3, 'G', [2], [2], [3]),
+            seg(3, mp, 4, 'AA', [0, 2], [0, 2], [4, 5],
+                partition=[[0], [2]] if mp == (1, 2) else [[2], [0]], split=False),
+            seg(4, (3,), 6, 'C', [0, 2], [0, 2], [6]),
+            seg(5, (3,), 6, 'G', [0, 2], [0, 2], [6]),
+            seg(6, (4, 5), 7, z_bases, [0, 2], [0, 2], [], partition=[[0, 2], [0, 2]],
+                leaf=copy.deepcopy(old_leaf))]
+    for s in segs:
+        s.depth = 0 if not s.parents else segs[s.parents[0]].depth + 1
+    a.segments = segs
+    n = 7 + len(z_bases)
+    a.runs = [Run(0, 6, 0, 0, n, 'S', 'max_steps', None, False, False, 0, None, None, None,
+                  0, 0, 0.0, None),
+              Run(1, 1, 1, 0, 4, 'B', 'loss_budget', None, False, False, 0, None, None, None,
+                  2, 0, 0.0, 2.0),
+              Run(2, 6, 2, 0, n, 'S', 'max_steps', None, False, False, 7, None, None, None,
+                  0, 0, 0.0, None)]
+    a.cap_trigger.segment = 6
+    a.complete_to_bp = 7
+    a.cache.clear()
+    return g
+
+
+class TestReviewFixes(unittest.TestCase):
+    """The review of the assembly at 7cbee3b03 (REVIEW-opus-py-7cbee3b03.md): M1, minors 1-4,
+    the nits, and the claims it found untested."""
+
+    def test_a_child_end_the_graph_holds_is_never_graph(self):
+        """M1: annotate_loop's child walk (1, 0) ends with path reason D; the reference goes
+        on with A. With an unfollowed hairpin for A at that end (annotate records a skipped
+        hairpin so) the graph holds A: uncertified. Without it, a real dead end: graph."""
+        from metagraph.traverse.model import Event
+        name, side = 'annotate_loop', 'right'
+        p, c, ref = (role(name, r) for r in ('parent', 'child', 'reference'))
+        sg = stitch(p, c)
+        sw = next(w for w in sg.walks(side, by='id') if len(w.key) == 2)
+        rp = next(q for q in derive.paths(ref.arms[side]) if ref.spell(side, q.id) == sw.sequence)
+        ref.arms[side].segments[rp.leaf].walk += 'A'
+        ref.arms[side].segments[rp.leaf].length_bp += 1
+        ref.arms[side].cache.clear()
+        got = {}
+        for hairpin in (True, False):
+            child = copy.deepcopy(c)
+            a = child.arms[side]
+            s = a.segments[derive.paths(a)[sw.key[1]].leaf]
+            s.leaf.path_reason = 'D'
+            if hairpin:
+                s.events.append(Event(at_bp=s.end_bp, type='hairpin', char='A', total=0,
+                                      followed=False))
+            a.cache.clear()
+            u = union_pairs(pairs(stitch(p, child), ref))
+            (w,) = [w for w in u.walks(side, stubs=True)
+                    if u.spell(side, w.id) == sw.sequence + 'A']
+            sp = next(x for x in u.carriers(side, w.id) if x.pair == 'A')
+            self.assertEqual((sp.how, sp.to_bp, [j.at_bp for j in sp.junctions]),
+                             ('ends', sw.length_bp, [sg.junctions[0].at_bp]))
+            got[hairpin] = sp.absence
+        self.assertEqual(got, {True: 'uncertified', False: 'graph'})
+
+    def test_a_route_crossing_at_a_zero_length_leaf(self):
+        """Minor 1: the walk a child continues ends at a zero-length merge leaf Z that the
+        route reaches through the merge M: it crosses into the child as at a leaf with bases."""
+        p = _zero_leaf_root()
+        child = T.graphlet('limits')
+        child = copy.deepcopy(child)
+        for s, w in zip(child.arms['right'].segments, ['ACG', 'CAAA', 'GAAA', '']):
+            s.walk = w
+        child.seed.sequence = 'ACAAG'
+        child.seed.num_seed_labels = 1
+        child.arms['right'].cache.clear()
+        sg = stitch(p, child)
+        self.assertEqual([j.at_bp for j in sg.junctions], [7])
+        ref = _zero_leaf_root(first_parent_of_m=2, z_bases='ACG')
+        got = {}
+        for label, a in (('stitched', sg), ('root', p)):
+            u = union_pairs(pairs(a, ref))
+            (w,) = [w for w in u.walks('right', stubs=True)
+                    if u.spell('right', w.id) == 'ACGGAACACG']
+            sp = next(x for x in u.carriers('right', w.id) if x.pair == 'A')
+            r = sp.route
+            got[label] = (sp.how, r.how, r.to_bp, r.goes_on, r.complete, r.certified_to_bp,
+                          [j.at_bp for j in sp.junctions], w.held_in)
+        self.assertEqual(got['stitched'], ('merges', 'held', 10, True, False, 7, [7],
+                                           ('A', 'B')))
+        self.assertEqual(got['root'], ('merges', 'ends', 7, False, False, 7, [], ('B',)))
+
+    def test_walk_causes_reach_every_statement(self):
+        """Minor 2: a whole span past a junction states its stitched walk's walk-scope
+        causes in its junctions; summary() states each junction's walk_causes as the stitched
+        graphlet's summary does; FASTA, GFA and the coverage note carry them (loop_branch:
+        candidate_changed)."""
+        from metagraph.traverse._stitch import WALK_CAUSES
+        for name in NAMES:
+            with self.subTest(name):
+                sg = stitched(name)
+                u = union_pairs(pairs(sg, None))
+                for side in sg.arms():
+                    sws = {w.key: w for w in sg.walks(side, by='id')}
+                    for w in u.walks(side):
+                        (sp,) = u.carriers(side, w.id)
+                        if not sp.junctions:
+                            continue
+                        mine = {c for j in sp.junctions for c in j.causes
+                                if c in WALK_CAUSES and c != 'exact_gated'}
+                        theirs = {c[0] for c in sws[sp.walk].causes if c[0] != 'exact_gated'}
+                        self.assertEqual(mine, theirs, sp.walk)
+                want = {(j['at_bp'], j['walk']): j['walk_causes']
+                        for j in sg.summary(max_bytes=10 ** 6)['junctions']}
+                from metagraph.traverse._stitch import walk_name
+                got = {(j['at_bp'], walk_name(x.walk)): j['walk_causes'] for j, x in zip(
+                    u.summary(max_bytes=10 ** 6)['pairs']['A']['junctions'], sg.junctions)}
+                self.assertEqual(got, want)
+        u = union_pairs(pairs(stitched('loop_branch'), role('loop_branch', 'reference')))
+        self.assertIn(' junctions=A@115:qualified:exact_gated|candidate_changed ', u.to_fasta())
+        self.assertIn('(qualified: exact_gated; walk causes below: candidate_changed)',
+                      u.to_gfa())
+        self.assertIn('walk causes below: candidate_changed',
+                      u.coverage('right').per_pair['A']['note'])
+
+    def test_the_form_kept_does_not_depend_on_the_order(self):
+        """Minor 3: two forms of one stitched graphlet (equal digests) whose children differ
+        in seed_id only: the union keeps the same form in either order (§2.10)."""
+        p, c = role('keep_forbid', 'parent'), role('keep_forbid', 'child')
+        c2 = copy.deepcopy(c)
+        c2.seed_summary = copy.deepcopy(c2.seed_summary)
+        c2.seed_summary['seed']['seed_id'] = 'zzz-other-id'
+        s1, s2 = stitch(p, c), stitch(p, c2)
+        self.assertEqual(s1.digest, s2.digest)
+        ref = role('keep_forbid', 'reference')
+        outs = []
+        for order in ((s1, s2), (s2, s1)):
+            u = union_pairs([{'pair': 'A', 'graphlet': x} for x in order]
+                            + [{'pair': 'B', 'graphlet': ref}])
+            self.assertEqual(len(u.parts), 2)
+            outs.append((u.digest, answers(u), repr(u.provenance())))
+        self.assertEqual(outs[0], outs[1])
+
+    def test_an_arm_without_a_junction_is_judged_by_the_root(self):
+        """Minor 4: fork_right's junction is on the right arm; the root states index_fp and
+        the child none (allow_unverified_index). evidence('left') reads no junction: exact
+        as the root alone."""
+        p, c = role('fork_right', 'parent'), role('fork_right', 'child')
+        p.index_fp = 'f' * 64
+        sg = stitch(p, c, allow_unverified_index=True)
+        self.assertFalse(sg.identity['verified'])
+        alone = union_pairs([{'pair': 'A', 'graphlet': p}])
+        u = union_pairs([{'pair': 'A', 'graphlet': sg}])
+        self.assertTrue(alone.evidence('left')['exact'])
+        self.assertEqual(u.evidence('left')['exact'], alone.evidence('left')['exact'])
+        self.assertEqual(u.evidence('left')['exact'], sg.evidence('left')['exact'])
+        self.assertFalse(u.evidence('right')['exact'])
+
+    def test_traverse_pairs_reports_a_body_that_does_not_parse(self):
+        """Nit: a pair's body that does not parse is that pair's {pair, error}."""
+        from metagraph.traverse._codec import GraphletFormatError
+        from tests.test_traverse_union import TestTraversePairs, _FanOutClient
+        bad = GraphletFormatError(3, 'not MGT')
+        cl = _FanOutClient.make(TestTraversePairs.CAPS, {'g1': 'answer', 'g2': bad, 'g3': 'x'})
+        r = cl.traverse_pairs('ACGT')
+        self.assertEqual(r.results, ['answer', {'pair': {'graph': 'g2'}, 'error': bad}, 'x'])
+
+    def test_a_junction_certified_below_its_depth(self):
+        """A root certified below the junction (a lowered complete_to_bp on keep_forbid, and
+        beam_sibling, whose walk stopped at a cap at 1 bp): every span past the junction is
+        certified to the root's certificate, the stitched walk's certified_to_bp."""
+        p, c = role('keep_forbid', 'parent'), role('keep_forbid', 'child')
+        p.arms['right'].complete_to_bp = 12
+        cases = [(stitch(p, c), role('keep_forbid', 'reference'), 12),
+                 (stitched('beam_sibling'), role('beam_sibling', 'reference'), 1)]
+        for sg, ref, cert in cases:
+            u = union_pairs(pairs(sg, ref))
+            sws = {w.key: w for w in sg.walks('right', by='id')}
+            seen = 0
+            for w in u.walks('right', stubs=True):
+                for sp in u.carriers('right', w.id):
+                    if sp.pair == 'A' and sp.junctions:
+                        seen += 1
+                        self.assertEqual(sp.certified_to_bp, cert)
+                        if sp.how == 'whole':
+                            self.assertEqual(sws[sp.walk].certified_to_bp, cert)
+            self.assertGreater(seen, 0)
+
+    def test_a_walk_ending_at_a_graft_node(self):
+        """A union walk that ends where the child continues (keep_forbid's parent beside the
+        stitched graphlet): the stitched part extends there into the child, reading the
+        junction, with the parent's labels (no child base is read)."""
+        p, c = role('keep_forbid', 'parent'), role('keep_forbid', 'child')
+        sg = stitch(p, c)
+        (j,) = sg.junctions
+        u = union_pairs([{'pair': 'A', 'graphlet': sg},
+                         {'pair': 'B', 'graphlet': role('keep_forbid', 'parent')}])
+        (w,) = [w for w in u.walks('right') if w.length_bp == j.at_bp
+                and next(x for x in u.carriers('right', w.id) if x.pair == 'A').junctions]
+        a, b = u.carriers('right', w.id)
+        self.assertEqual((a.how, a.to_bp, a.walk, a.complete, a.certified_to_bp),
+                         ('extends', j.at_bp, j.walk + (0,), False, j.at_bp))
+        self.assertEqual((b.how, b.walk), ('whole', j.walk[0]))
+        self.assertEqual([(x.label.ref, x.from_bp) for x in a.labels],
+                         [(x.label.ref, x.from_bp) for x in b.labels])
+
+    def test_labels_before_a_junction_are_the_parents(self):
+        """carriers(at_bp=) at a depth before the junction on a span past it: the parent's
+        labels along the continued walk, as the root alone gives them there."""
+        for name in ('keep_forbid', 'chain3', 'sibling_merge'):
+            with self.subTest(name):
+                sg = stitched(name)
+                p = role(name, 'parent')
+                u, up = union_pairs(pairs(sg, None)), union_pairs(pairs(p, None))
+                plain = walks_by_spelling(up, 'right')
+                checked = 0
+                for w in u.walks('right'):
+                    (sp,) = u.carriers('right', w.id)
+                    if not sp.junctions:
+                        continue
+                    at = sp.junctions[0].at_bp
+                    spelled = u.spell('right', w.id, with_seed=True)
+                    pw = plain.get(('walk', spelled[:len(spelled) - w.length_bp + at]))
+                    if pw is None or at < 2:
+                        continue
+                    (mine,) = u.carriers('right', w.id, at_bp=at - 1)
+                    (root,) = up.carriers('right', pw.id, at_bp=at - 1)
+                    self.assertEqual(mine.labels, root.labels)
+                    checked += 1
+                self.assertGreater(checked, 0)
+
+    def test_walks_by_labels_never_select_past_a_junction(self):
+        """walks(labels=) keeps a walk a label carries whole (from 0 bp); a stitched part's
+        labels past a junction start there, so no walk with bases past a junction is
+        selected by them (graphlets.rst says so). The stitched graphlet itself selects
+        keep_forbid's continued walk by acc1; the union does not."""
+        for name in NAMES:
+            sg = stitched(name)
+            u = union_pairs(pairs(sg, None))
+            for side in u.arms():
+                for lab in sg.labels:
+                    for w in u.walks(side, labels=[{'pair': 'A', 'ref': lab.ref}]):
+                        (sp,) = u.carriers(side, w.id)
+                        self.assertTrue(not sp.junctions
+                                        or sp.junctions[0].at_bp >= w.length_bp,
+                                        (name, lab.name, w.id))
+        sg = stitched('keep_forbid')
+        acc1 = next(x for x in sg.labels if x.name == 'acc1')
+        self.assertEqual([w.key for w in sg.walks('right', by='id', labels=['acc1'])],
+                         [(1, 0)])
+        u = union_pairs(pairs(sg, None))
+        self.assertEqual(u.walks('right', labels=[{'pair': 'A', 'ref': acc1.ref}]), [])
+
+    def test_a_left_arm_crossing(self):
+        """splits45's crossing mirrored onto the left arm: the same facts as on the right."""
+        got = []
+        for mirrored, side in ((False, 'right'), (True, 'left')):
+            sg, _, ref = _edited_splits45(mirrored)
+            u = union_pairs(pairs(sg, ref))
+            (w,) = [w for w in u.walks(side) if w.length_bp == 50]
+            sp = next(x for x in u.carriers(side, w.id) if x.pair == 'A')
+            r = sp.route
+            got.append((sp.how, sp.to_bp, r.how, r.to_bp, r.goes_on, r.complete,
+                        r.certified_to_bp, [j.at_bp for j in sp.junctions]))
+        self.assertEqual(got[0], ('merges', 31, 'held', 50, True, False, 45, [45]))
+        self.assertEqual(got[0], got[1])
 
 
 if __name__ == '__main__':

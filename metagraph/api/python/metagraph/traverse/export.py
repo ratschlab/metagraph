@@ -1051,9 +1051,12 @@ def _union_tokens(u, w, absent_tok, modes_tok, mapping_tok):
     lst('diverges', [_span_token(s) for s in w.spans if s.how == 'diverges'])
     lst('certified', ['%s:%d' % (e(s.pair), s.certified_to_bp) for s in w.spans
                       if s.how != 'none'])
-    # a stitched part's junctions the walk reads (experimental; every verdict qualified)
-    lst('junctions', ['%s@%d:%s' % (e(s.pair), j.at_bp, j.verdict) for s in w.spans
-                      for j in s.junctions])
+    # a stitched part's junctions the walk reads (experimental; every verdict qualified),
+    # with their cause codes and the walk-scope causes below them ('|' between codes,
+    # which are [a-z_]+)
+    lst('junctions', ['%s@%d:%s%s' % (e(s.pair), j.at_bp, j.verdict,
+                                      ':' + '|'.join(j.causes) if j.causes else '')
+                      for s in w.spans for j in s.junctions])
     labs = []
     for s in w.spans:
         if s.pair in held:
@@ -1140,10 +1143,15 @@ def union_gfa(u, with_seed, labels, at_bp, bud):
     from ._stitch import StitchedGraphlet, walk_name
     for p in u.parts:
         if isinstance(p.graphlet, StitchedGraphlet) and p.graphlet.junctions:
+            below = u._below_codes(p.tag)
             lines.append(_comment(
                 'stitched (experimental): %s joins %s; nothing past a junction is complete '
                 'or exact' % (p.tag, ', '.join(
-                    '%s walk %s at %d bp (%s)' % (j.arm, walk_name(j.walk), j.at_bp, j.verdict)
+                    '%s walk %s at %d bp (%s%s%s)' % (
+                        j.arm, walk_name(j.walk), j.at_bp, j.verdict,
+                        ': ' + ', '.join(c[0] for c in j.causes) if j.causes else '',
+                        '; walk causes below: %s' % ', '.join(below[j.part])
+                        if below.get(j.part) else '')
                     for j in p.graphlet.junctions))))
     from .union import SCOPE, TURN_OFFS, _core_sentence
     for side in (u.arms() or [None]):

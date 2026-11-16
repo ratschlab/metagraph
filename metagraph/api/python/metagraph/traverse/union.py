@@ -44,6 +44,7 @@ from ._codec import REASON, GraphletFormatError
 from .attempts import TraverseResponse
 from .budget import (BASE_SHIFT, DICT, DICT_KEY, INT, LIST_ITEM, SET, SET_ITEM, STR, TUPLE,
                      W_ELEM, W_ROW, W_STEP, LocalBudgetExceeded, Partial)
+from ._stitch import _RANK as _CAUSE_RANK
 from ._stitch import StitchedGraphlet
 from .client import answered_pair
 from .model import ARM_SIDES, BadSelector, Graphlet, UnknownLabel
@@ -264,7 +265,9 @@ class PairSpan:
 class SpanJunction:
     """A junction of a stitched part that a span reads (§2.3): where the child continues a
     walk (|at_bp|, outward from the seed), the junction's |verdict| ('qualified': every verdict
-    in this phase), the child's part key (Part.key) and the junction's cause codes."""
+    in this phase), the child's part key (Part.key), and the cause codes: the junction's own,
+    then the walk-scope causes (W8) of the child's walk the span reads (none where the span
+    names no walk there: a merges or diverges span in the child)."""
     at_bp: int
     verdict: str
     part: tuple
@@ -382,11 +385,15 @@ class _Src:
     """One retrieval the trie reads: part |pi|'s graphlet, or one part of a stitched part
     (|key| its Part.key, |offset| its Part.offset_bp, |parent| the source it continues,
     |leaf| the parent's segment ending the walk it continues, |junction| that Junction)."""
-    __slots__ = ('pi', 'tag', 'graphlet', 'offset', 'key', 'parent', 'leaf', 'junction')
+    __slots__ = ('pi', 'tag', 'graphlet', 'offset', 'key', 'parent', 'leaf', 'junction',
+                 'wcauses', 'below')
 
     def __init__(self, pi, tag, graphlet, offset, key, parent, leaf, junction):
         self.pi, self.tag, self.graphlet, self.offset = pi, tag, graphlet, offset
         self.key, self.parent, self.leaf, self.junction = key, parent, leaf, junction
+        # a child: its walks' walk-scope causes (path id -> [(code, sentence, local bp)],
+        # StitchedGraphlet's W8) and the codes on the stitched walks through its junction
+        self.wcauses, self.below = {}, ()
 
 
 def _describe(x):
@@ -559,9 +566,10 @@ def union_pairs(results, *, seed=None, expected_pairs=None, seqs_order=None, bud
 
     results: a list of Graphlet | StitchedGraphlet (experimental, §2.3) | TraverseResponse
     (one seed) | {response, index} | {response, sequence} | {pair, graphlet} | {pair,
-    result[, error][, sequence]} | {pair, error}. seed: the oriented seed sequence; required only when no result carries a
-    graphlet. expected_pairs: the pairs the request was sent to (graph names or pair
-    objects); None: not known, and every statement is then over the pairs given.
+    result[, error][, sequence]} | {pair, error}. seed: the oriented seed sequence;
+    required only when no result carries a graphlet. expected_pairs: the pairs the request
+    was sent to (graph names or pair objects); None: not known, and every statement is then
+    over the pairs given.
     seqs_order: pair (a graph name, or a (graph, graph_path, annotation_path) tuple) ->
     'verified' | 'count_only' | None, as GET /capabilities states it; a pair not given
     reads 'unknown'. budget= (local limits): the trie pass is charged; a stop raises with no
@@ -943,8 +951,21 @@ class PairUnion:
                     derive.uses(b, pg, pa, 'paths')
                     leaf = derive.paths(pa)[pid].leaf
                 index[sp.key] = len(self._src)
-                self._src.append(_Src(pi, p.tag, sp.graphlet, sp.offset_bp, sp.key, parent,
-                                      leaf, js.get(sp.key)))
+                src = _Src(pi, p.tag, sp.graphlet, sp.offset_bp, sp.key, parent, leaf,
+                           js.get(sp.key))
+                if sp.key:
+                    # the walk-scope causes the stitched graphlet states (review minor 2),
+                    # computed once here (W8 per walk, charged when computed)
+                    ca = sp.graphlet.arms[sp.key[-1][0]]
+                    src.wcauses = {q.id: tuple(g._walk_causes(sp.key, q.id, b))
+                                   for q in derive.paths(ca)}
+                    src.below = tuple(g._causes_below(src.junction, b))
+                self._src.append(src)
+
+    def _below_codes(self, tag):
+        """A stitched part's junctions (by the child's part key) -> the walk-scope cause codes
+        on the stitched walks through each (StitchedGraphlet.summary()'s walk_causes)."""
+        return {s.key: s.below for s in self._src if s.key and s.tag == tag}
 
     def _resolve(self, t, pi, node):
         """(source, stop, below) of part |pi| on the union walk ending at trie node |node|:
@@ -1110,7 +1131,7 @@ class PairUnion:
             raise ValueError('at_bp is a depth in bp (an int >= 0), not %r' % (at_bp,))
         per = collections.OrderedDict()
         for p in self.parts:
-            per[p.tag] = _part_category(p, side, depth)
+            per[p.tag] = _part_category(p, side, depth, self._below_codes(p.tag))
         for a in self.absent:
             per[a.tag] = _absent_entry(a)
         for t in self._not_included:
@@ -1682,7 +1703,7 @@ class PairUnion:
             return len(C.canonical_json(o)) <= max_bytes
 
         cand = dict(out)
-        cand['pairs'] = {p.tag: _summary_part(p) for p in self.parts}
+        cand['pairs'] = {p.tag: _summary_part(p, self._below_codes(p.tag)) for p in self.parts}
         cand['pairs'].update({a.tag: {'absent': a.category, 'seed_check': a.seed_check}
                               for a in self.absent})
         cand['pairs'].update({t: {'not_included': True} for t in self._not_included})
@@ -1927,7 +1948,14 @@ def _part_rank(e):
     """Which of two forms of one retrieval is kept: the envelope-stated one, then the
     envelope's canonical JSON, then the seed summary's (the caller's seed_id) and the
     stated pair: a total order over what the union reports of a part."""
-    g = _root(e.graphlet)
+    g = e.graphlet
+    if isinstance(g, StitchedGraphlet):
+        # every part's envelope and seed summary (review minor 3): two forms of one
+        # stitched graphlet may differ in a child's seed_id
+        gs = _sub_graphlets(g)
+        return (e.by != 'envelope', C.canonical_json([x.envelope for x in gs]),
+                C.canonical_json([x.seed_summary or {} for x in gs]),
+                C.canonical_json(e.stated or {}))
     return (e.by != 'envelope', C.canonical_json(g.envelope),
             C.canonical_json(g.seed_summary or {}), C.canonical_json(e.stated or {}))
 
@@ -1958,25 +1986,32 @@ def _arm_junctions(g, side):
     return tuple(j for j in g.junctions if side is None or j.arm == side)
 
 
-def _junction_note(g, side):
+def _junction_note(g, side, below):
     """The coverage note of a stitched part's junctions on |side|, or None: its category is
-    its root's (stitching certifies nothing past a junction)."""
+    its root's (stitching certifies nothing past a junction). |below|: part key -> the
+    walk-scope cause codes on the stitched walks through that junction."""
     js = _arm_junctions(g, side)
     if not js:
         return None
+    depths = sorted({j.at_bp for j in js})
     verdicts = sorted({j.verdict for j in js})
-    return 'stitched (experimental): junction%s at %s bp, %s; nothing past a junction is ' \
-        'certified' % ('s' if len(js) > 1 else '', ', '.join(str(j.at_bp) for j in js),
-                       ' or '.join(verdicts))
+    codes = sorted({c for j in js for c in below.get(j.part, ())}, key=_CAUSE_RANK.get)
+    return 'stitched (experimental): junction%s at %s bp, %s%s; nothing past a junction is ' \
+        'certified' % ('s' if len(depths) > 1 else '', ', '.join(map(str, depths)),
+                       ' or '.join(verdicts),
+                       '; walk causes below: %s' % ', '.join(codes) if codes else '')
 
 
-def _summary_part(p):
+def _summary_part(p, below):
     out = {'part': True, 'mode': p.graphlet.mode, 'k': p.graphlet.k,
            'stated_by': p.pair_stated_by}
     js = _arm_junctions(p.graphlet, None)
     if js:
+        # as StitchedGraphlet.summary() states them: the junction's causes, and the
+        # walk-scope causes on the stitched walks through it
         out['junctions'] = [{'arm': j.arm, 'at_bp': j.at_bp, 'verdict': j.verdict,
-                             'causes': [c[0] for c in j.causes]} for j in js]
+                             'causes': [c[0] for c in j.causes],
+                             'walk_causes': list(below.get(j.part, ()))} for j in js]
     return out
 
 
@@ -1995,17 +2030,26 @@ def _combined_evidence(parts, side):
     """composite.combined_evidence() over the parts, a stitched part's block by
     _part_block()."""
     if not any(_arm_junctions(p.graphlet, side) for p in parts):
-        return C.combined_evidence([(p.tag, _root(p.graphlet), p.identity.get('verified'))
+        return C.combined_evidence([(p.tag, _root(p.graphlet), _part_verified(p, side))
                                     for p in parts], side)
     blocks = {}
     exact = True
     for p in parts:
         blk = _part_block(p, side)
         blocks[p.tag] = blk
-        exact = exact and bool(blk.get('exact')) and bool(p.identity.get('verified'))
+        exact = exact and bool(blk.get('exact')) and bool(_part_verified(p, side))
     return {'parts': blocks,
             'outcome': C.weakest_outcome([x.get('outcome') for x in blocks.values()]),
             'exact': exact and bool(blocks)}
+
+
+def _part_verified(p, side):
+    """Whether part |p|'s identity is verified for an answer on |side| (every arm: None):
+    a stitched part's own identity where it has a junction there, its root's otherwise (no
+    junction is read, so the root answers alone; review minor 4)."""
+    if isinstance(p.graphlet, StitchedGraphlet) and not _arm_junctions(p.graphlet, side):
+        return _identity_statement(p.graphlet.root)['verified']
+    return p.identity.get('verified')
 
 
 def _identity_statement(g):
@@ -2040,11 +2084,11 @@ def _cut60(text):
     return b[:57].decode('utf-8', 'ignore') + '...'
 
 
-def _part_category(p, side, depth):
+def _part_category(p, side, depth, below=None):
     """A part's coverage entry; a stitched part's is its root's, with a note naming its
-    junctions on |side|."""
+    junctions on |side| (|below|: _junction_note())."""
     got = _root_category(_root(p.graphlet), side, depth)
-    note = _junction_note(p.graphlet, side) if side is not None else None
+    note = _junction_note(p.graphlet, side, below or {}) if side is not None else None
     if note:
         got['note'] = note if not got.get('note') else '%s; %s' % (got['note'], note)
     return got
@@ -2566,6 +2610,14 @@ def _absence_at(src, g, a, segs_here, d, c, code=None):
     only a dead end is the graph's, every other turn-off 'uncertified' (§2.3): the child's
     own seed re-entry and edge history may block where the reference goes on."""
     if src.key:
+        # a base the child blocked or a hairpin it did not follow is there in the graph
+        # (review M1): uncertified, never graph
+        if c is not None:
+            for s in segs_here:
+                for ev in s.events:
+                    if ev.at_bp == d and ev.char == c and (
+                            ev.type == 'blocked' or (ev.type == 'hairpin' and not ev.followed)):
+                        return 'uncertified'
         return 'graph' if code is not None and code[0] == 'D' else 'uncertified'
     return _absence(g, a, segs_here, d, c, code)
 
@@ -2578,10 +2630,19 @@ def _past_junction(un, src, span):
         return span
     js = []
     s = src
+    # the walk read in each child: the span's own in the last (whole, ends, extends; to its
+    # end for extends), the continued walk in the others
+    pid = span.walk if span.how in ('whole', 'ends', 'extends') else None
+    limit = span.to_bp - src.offset if span.how == 'extends' else None
     while s.key:
         j = s.junction
-        js.append(SpanJunction(j.at_bp, j.verdict, j.part, tuple(c[0] for c in j.causes)))
+        own = [c[0] for c in s.wcauses.get(pid, ()) if limit is None or c[2] <= limit] \
+            if pid is not None else []
+        codes = tuple(c[0] for c in j.causes)
+        js.append(SpanJunction(j.at_bp, j.verdict, j.part, codes + tuple(
+            c for c in sorted(set(own), key=_CAUSE_RANK.get) if c not in codes)))
         first = s
+        pid, limit = s.key[-1][1], None
         s = un._src[s.parent]
     js.reverse()
     # the root's certificate on the walk the first child continues: its certified_to_bp
@@ -2728,11 +2789,25 @@ def _route(un, t, pi, part, a, stub, m, j, d, below, into, with_labels, at_bp, b
         while i < len(w) and n < len(rest) and w[i] == rest[n]:
             i += 1
             n += 1
-        kid = t.continued.get((pi, cur)) if s.leaf is not None and i == len(w) else None
+        kid = via = None
+        if i == len(w) and t.continued:
+            if s.leaf is not None:
+                kid = t.continued.get((pi, cur))
+            elif (not any(segs[c].length_bp or segs[c].children for c in s.children)
+                  if n == len(rest) else _step(segs, cur, rest[n]) is None):
+                # the walk a child continues ends at a zero-length leaf child of this
+                # segment (a merge at the radius): nothing else here spells the next base
+                via = next((c for c in s.children if not segs[c].length_bp
+                            and segs[c].leaf is not None and (pi, c) in t.continued), None)
+                if via is not None:
+                    kid = t.continued[(pi, via)]
         if kid is not None:
             # the route reaches the end of a walk a stitched child continues: it goes on
             # in the child's tree, from its root segment (its offset is this leaf's end),
             # as a span there does (PairUnion._resolve())
+            if via is not None:
+                route.append((via, segs[via].parents.index(cur)))
+                _note_merge(t, pi, segs[via], merges, off)
             pi, part = kid, un._src[kid]
             g, a, off = part.graphlet, part.graphlet.arms[t.side], part.offset
             segs = a.segments

@@ -1011,6 +1011,9 @@ class TraverseClient:
                                                   sel) if v},)
             else:
                 expected = ({'index_ns': ns},) if ns is not None else ()
+        # traverse() parses each pair's graphlets (the parser loads _codec): imported here, so
+        # that importing the client stays light
+        from ._codec import GraphletFormatError
         results = []
         for t in targets:
             try:
@@ -1018,10 +1021,12 @@ class TraverseClient:
                                              graph=t[0], graph_path=t[1],
                                              annotation_path=t[2], coordinates=coordinates,
                                              not_after_ms=not_after_ms))
-            except (TraverseError, OSError) as e:
-                # a refused request (TraverseError) or a transport failure (an OSError: a
-                # connection refused, a timeout, a cut response); anything else -- a bad
-                # argument, a library bug -- is raised, not reported as every pair failing
+            except (TraverseError, OSError, GraphletFormatError) as e:
+                # a refused request (TraverseError), a transport failure (an OSError: a
+                # connection refused, a timeout, a cut response) or a body that does not
+                # parse (GraphletFormatError: this pair's answer only); anything else -- a
+                # bad argument, a library bug -- is raised, not reported as every pair
+                # failing
                 pair = {k: v for k, v in zip(('graph', 'graph_path', 'annotation_path'), t)
                         if v} or (expected[0] if expected else {})
                 results.append({'pair': pair, 'error': e})
