@@ -964,7 +964,8 @@ depends on notes `next_request()` returned: a child made another way is judged b
   read `exact` there (§6 T4). In phase 1a-S no answer that depends on a junction reads `exact`, and a `qualified`
   verdict never stands beside `complete: true` or exact evidence that the causes do not justify. An answer that depends
   on no junction, `stitch(g)` without a child or a root walk no child continues, states the root's own evidence, `exact`
-  where the root's is, so `stitch(g)` still answers as `g` (T2). Each part keeps its `K` records, its `Q`
+  where the root's is, so `stitch(g)` still answers as `g` (T2). The verdict is `None` for a walk no junction joins,
+  and its evidence is the root's. Each part keeps its `K` records, its `Q`
   (`resource_stop`), its dropped seed labels (`X`), its cut lists (`label_lists`, `inexact_counts`), its dropped branch
   events (`evidence.complete_to_bp`), its `coordinates` limitation and its delivery (`spooled`), all listed under its
   key. None is summed or dropped. A local-budget stop follows the library's rule (`budget.py`): `LocalBudgetExceeded`,
@@ -1633,7 +1634,8 @@ class Junction:  arm: str; walk: tuple; at_bp: int; overlap_bp: int; part: tuple
 @dataclass(slots=True)
 class StitchedWalk:  key: tuple; arm: str; length_bp: int; sequence: Optional[str]; path_reason: Optional[str];
                      end_reasons: dict; labels_full: list[Label]; n_alive: int; complete: bool;
-                     verdict: str                               # 'exact' | 'qualified': its junctions and own causes
+                     verdict: Optional[str]                     # 'exact' | 'qualified': its junctions and own causes;
+                                                                # None for a walk no junction joins (its evidence is the root's)
                      certified_to_bp: int; beyond_certified_bp: int; junctions: tuple[int, ...];
                      pieces: tuple[tuple[tuple, int, int, int], ...]   # (part key, path_id, from_bp, to_bp)
                      causes: tuple                                      # this walk's own causes (§3.4)
@@ -1957,8 +1959,9 @@ graphlets.rst examples run in `run_examples.py` (CI's fixture-checks job).
   walks below w equal the uninterrupted retrieval's subtree of w's prefix, per path, and every junction says `exact`
   once it is switched on (`exact_gated` before). A whitelist entry without its passing fixture is not shipped as
   `exact`. (b) One fixture per cause, each asserting the stated cause and `qualified`: `sibling_merge_unknown` (two
-  radius-ended walks under `merge` that reconverge beyond R); `trace_restart`; `strategy_differs` (a changed quorum
-  knob, a reset branch allowance); `extra_foreign`; `switching`; `not_continued`; both `seed_reentry` sub-cases (a
+  radius-ended walks under `merge` that reconverge beyond R); `trace_restart`; `strategy_differs` with
+  `label_count_knob` (a changed quorum knob); `branches_unequal` (a reset branch allowance: W2 leaves
+  `max_label_branches` to W3–W4); `extra_foreign`; `switching`; `not_continued`; both `seed_reentry` sub-cases (a
   circular record); `split_limit_restarted`, also with unequal split counts on a merge's parents (`splits45`, Appendix
   G.5: k 11, constrain, `forbid`, `merge`, `max_label_branches` 0, `max_splits_per_path` 2, radius 45; one split on w's
   displayed chain, two on the other parent's; the stitched walks are 85 bp, the reference stops at 50 bp with

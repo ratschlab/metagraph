@@ -1486,6 +1486,129 @@ rather than constrain the new traversal to the wrong label:
 
    refused
 
+Stitching a continuation
+^^^^^^^^^^^^^^^^^^^^^^^^
+
+.. note::
+
+   Experimental. Stitching is phase 1a-S of ``docs/DESIGN-graphlet-merge.md`` (§3): every
+   verdict is ``qualified``, ``exact`` comes in a later release, and the API may change
+   until then.
+
+A continuation is a new traversal seeded with a walk's continuation (``next_request()``,
+``TraverseClient.deepen()``). ``stitch(parent, child)`` joins it to the walk it continues,
+on one pair, as a ``StitchedGraphlet``. The retrievals are held unchanged, and every
+answer is computed from them.
+
+- **Offsets.** When the parent's walk ends at outward position L, the child's outward
+  base i is position L + i of the stitched walk. Positions are outward from the root
+  seed's boundary on both arms, and chains add their offsets.
+- **Orientation.** In walking order a stitched walk is the parent's walk, then the
+  child's. In natural orientation the right flank reads the parent's then the child's,
+  and the left flank the child's then the parent's. No reverse complement is involved.
+- **The continuation's length.** The child's seed is the walk's last n bases, n =
+  min(``continuation_bp``, max(k, L - b), seed length + L), b being where the last label
+  alive at the walk's end was entered. When L < k it reaches into the root seed. It is
+  the overlap of the two parts (``Junction.overlap_bp``), spelled once.
+- **Walk keys.** A stitched walk is named by its walk ids along the chain: ``(3,)`` is
+  root walk 3, and ``(3, 0)`` walk 0 of the child that continues root walk 3. Label ids
+  are local to each part, so labels are selected by ref or name.
+
+.. graphlet-example: stitch
+
+.. code-block:: python
+
+   from metagraph.traverse import stitch
+
+   def triple(name, role):
+       """A committed stitching triple: its parent, child or uninterrupted reference."""
+       with open('stitch/%s.%s.json' % (name, role)) as f:
+           response = json.load(f)
+       return Graphlet.from_response(response['results'][0], response)
+
+   parent, child = triple('keep_forbid', 'parent'), triple('keep_forbid', 'child')
+   sg = stitch(parent, child)
+   j = sg.junctions[0]
+   print(j.walk, j.at_bp, j.overlap_bp, j.verdict, [code for code, _ in j.causes])
+   for w in sg.walks('right', by='id'):
+       print(w.key, w.length_bp, w.verdict, w.certified_to_bp, w.complete)
+   print(sg.spell('right', (0, 0)) == parent.spell('right', 0) + child.spell('right', 0))
+
+.. code-block:: text
+
+   (0,) 20 20 qualified ['exact_gated']
+   (0, 0) 40 qualified 20 False
+   (1,) 20 None 20 True
+   True
+
+A continuation restarts what one uninterrupted walk would carry on: its branch state and
+loss budget, its edge history, seed re-entry, merges with other walks and, under
+``trace``, the followed occurrence. So every junction and every stitched walk state why
+the walks below the junction may differ from one uninterrupted walk of the parent's
+request, as named causes:
+
+- at the junction: ``trace_restart``, ``strategy_differs`` (a field a continuation keeps
+  differs), ``extra_foreign``, ``switching`` (a change cost other than ``forbid``),
+  ``branches_unequal``, ``label_count_knob``, ``sibling_merge_unknown`` (under ``merge``,
+  another walk went on past the junction), ``not_continued``, ``seed_dropped`` and
+  ``no_bases``;
+- on a walk, each with its position: ``rule_violation`` (a step the uninterrupted walk
+  blocks), ``candidate_changed`` (a successor the child admitted is one the uninterrupted
+  walk blocks, so its split or ambiguity there may not happen), ``seed_reentry`` (the
+  child stopped on a node of its own seed; ``same_stop`` or ``earlier_stop``),
+  ``split_limit_restarted`` and ``decisions_unrecorded`` (the walk ends at or beyond the
+  child's evidence boundary).
+
+Where the rules find no difference, the one cause is ``exact_gated``: they are computed,
+but ``exact`` is switched on only after a comparison against uninterrupted traversals.
+Until then a stitched walk is certified at most to its first junction, no walk that
+reaches into a child is ``complete``, and the evidence of an answer that reads a junction
+reads ``walks: partial`` and ``label_evidence: qualified`` and is never ``exact``. A walk
+no junction joins has the verdict ``None`` and the root's evidence, and ``stitch(g)``
+without a child answers as ``g``. In the next triple the parent's walk returns to a node
+it passed before, having used its one branch allowance there; the child, seeded without
+it, finds its label ambiguous at once and stops, while the uninterrupted walk goes on to
+145 bp:
+
+.. graphlet-example: stitch-causes
+
+.. code-block:: python
+
+   sg = stitch(triple('loop_branch', 'parent'), triple('loop_branch', 'child'))
+   w = sg.walk('right', (1, 0))
+   print(w.length_bp, w.certified_to_bp, w.complete, w.verdict)
+   for code, sentence, at_bp in w.causes:
+       print(code, at_bp)
+   ev = sg.evidence('right', walks=[(1, 0)])
+   print(ev['outcome']['walks'], ev['outcome']['label_evidence'], ev['exact'])
+   print(sg.to_fasta('right', walks=[(1, 0)]).splitlines()[0])
+
+.. code-block:: text
+
+   115 115 False qualified
+   candidate_changed 115
+   partial qualified False
+   >right_1.0 length_bp=115 reason=branch labels=1 seed=yes walk=1.0 junctions=115 verdict=qualified certified_to=115
+
+The checks run in this order, and the first that fails raises ``CombineRefused`` with its
+``code``: ``not_combinable`` (also a ``TypeError``), ``view_unsupported``, the missing
+envelope, ``different_index``, ``index_unverifiable`` (a manifest digest on one side only;
+``allow_unverified_index=True`` stitches it and states the identity unverified),
+``different_pair``, ``different_graph``, ``different_mode``, ``not_one_arm``,
+``wrong_arm``, ``no_continuation``, ``not_a_continuation``, ``ambiguous_walk``,
+``already_continued`` and ``foreign_seed_labels``. Without ``walk=``, the continued walk
+is the one walk of the arm whose continuation is the child's seed. Stitching the same
+retrieval again at a walk returns the stitched graphlet unchanged. ``walks()``,
+``spell()``, ``continuation()``, ``next_request()``, ``to_fasta()`` (with ``walk=``,
+``junctions=``, ``verdict=`` and ``certified_to=`` in each header), ``completeness()``,
+``evidence()``, ``summary()``, ``provenance()``, ``digest`` and ``memory_bytes()`` are
+offered; claims and support across a junction, saving a stitched graphlet, and the
+queries that read one retrieval's records (``dump()``, ``to_json()``, ``compare()``,
+``subgraph()``, ``to_gfa()``, ``label_walks()``, ``routes()``, ``label_summary()``,
+``splits()``) are not, and are refused with ``not_offered``. ``provenance()`` lists each
+part's replay request: replaying a stitched graphlet replays its parts and stitches them
+again.
+
 Comparing retrievals
 ^^^^^^^^^^^^^^^^^^^^
 
