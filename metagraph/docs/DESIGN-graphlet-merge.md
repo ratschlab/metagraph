@@ -318,6 +318,12 @@ The codes, in that order: `bad_expected`, `bad_seqs_order`, `not_combinable`, `v
     `certified_to_bp` for a walk the part holds whole. Its absence is `graph` at a dead end and `uncertified`
     otherwise, never `walk_rule` or `under_strategy`: the child's own seed re-entry or edge history may stop it where
     an uninterrupted walk goes on.
+  - *A route that reaches a continued walk.* A route through a merge of the root (or of any part) that reaches the
+    end of a walk a child continues goes on in that child's tree, from its root segment, along the union walk's
+    remaining bases; it reads the junction, so the span is neither complete nor certified past it (the
+    coordinator's decision of 2026-11-16). Stopping the route there would state that the pair's walk ends where the
+    stitched graphlet goes on. The tests build the case from `splits45` by making the reference's first parent at its
+    merge the stub (no committed fixture has it).
   - *Labels.* Not joined across a junction (D.1, phase 1b): a child's span labels start at the junction, and at a
     depth no child base reaches they are the parent's along the continued walk. The union therefore states less than
     `StitchedWalk.labels_full`.
