@@ -913,10 +913,12 @@ passed the randomized comparison), and a walk reads `exact_gated` where its junc
 **What the rules read.** W2–W5 and the split check of W8 read the two normalized strategies. A field they read that
 either envelope does not state (W5's knobs; in constrain mode also `labels.change_cost`, `labels.extra`,
 `branching.max_label_branches` and `branching.max_splits_per_path`), or that one part states and the other does not, is
-the junction cause `strategy_unknown`, not a pass: a missing `max_splits_per_path` is unknown, not unlimited. It is no
-refusal, since every verdict is `qualified` anyway; nothing below it is `exact`, the prospective result included. W2
-compares the fields both state. W6's `keep` or `merge` is read from each part's `H` record, so a difference there is
-`strategy_differs` even where the envelopes do not state `branching.on_reconverge`.
+the junction cause `strategy_unknown`, not a pass: a missing `max_splits_per_path` is unknown, not unlimited. So is a
+field W2 compares (every field the server's normalized strategy states, but the allowed ones) that neither envelope
+states; a null field is not stated. It is no refusal, since every verdict is `qualified` anyway; nothing below it is
+`exact`, the prospective result included. W2 compares the fields both state. W6's `keep` or `merge` is read from each
+part's `H` record, so a difference there is `strategy_differs` even where the envelopes do not state
+`branching.on_reconverge`.
 
 - **W1.** `support: kmer` on both parts.
 - **W2.** The two normalized strategies are equal except in the allowed fields: `direction`; the radius and the
@@ -1533,9 +1535,9 @@ notes do.
 | `not_one_arm` | `the child walked both arms: a continuation walks only the arm it continues (next_request() sets direction to it)` |
 | `wrong_arm` | `the child walked the %s arm, not the %s arm named by arm=` |
 | `no_continuation` | today's `_continuation` text: `walk %d of the %s arm has no continuation (it ended for a semantic reason, not at the radius or a cap)` |
-| `not_a_continuation` | with `walk=`: `the child's seed is not the continuation of walk %s of the %s arm: a stitched child is seeded with that walk's continuation (continuation(), next_request())`; without: `the child's seed is the continuation of no walk of the %s arm: a stitched child is seeded with a walk's continuation (continuation(), next_request())` |
+| `not_a_continuation` | with `walk=`: `the child's seed is not the continuation of walk %s of the %s arm: a stitched child is seeded with that walk's continuation (continuation(), next_request())`; a `walk=` the arm does not have (out of range, or below a walk not continued): `walk= names no walk of the %s arm (%s): a stitched child is seeded with a walk's continuation (continuation(), next_request())`; without: `the child's seed is the continuation of no walk of the %s arm: a stitched child is seeded with a walk's continuation (continuation(), next_request())` |
 | `ambiguous_walk` | `the child's seed is the continuation of walks %s of the %s arm: name the one it continues with walk=` |
-| `already_continued` | `walk %s of the %s arm is already continued by another child (part %s, digest %s): one child per walk` (the digest of the subtree there, as `stitch()` of it alone states it); the same bodies, a part's from another request: `walk %s of the %s arm is continued by this body from another request (%s differs): equal bodies are not equal retrievals, and the two would continue differently` (`%s` a field path, `… of part %s` for a part below the child's root). An identical subtree (every part's key, body and retrieval identity) is a no-op |
+| `already_continued` | `walk %s of the %s arm is already continued by another child (part %s, digest %s): one child per walk` (the digest of the subtree there, as `stitch()` of it alone states it; a plain graphlet is compared with the part at the walk only, a stitched child with the whole subtree there); the same bodies, a part's from another request: `walk %s of the %s arm is continued by this body from another request (%s differs): equal bodies are not equal retrievals, and the two would continue differently` (`%s` a field path, `… of part %s` for a part below the child's root). An identical subtree (every part's key, body and retrieval identity) is a no-op |
 | `foreign_seed_labels` | `the child seeds %s, not alive at the end of walk %s of the %s arm: their runs would start new lineages at %d bp, not continue the walk's` |
 | `summary_too_small` | `the summary's statements alone take %d bytes, more than max_bytes=%d: they are never cut; pass max_bytes >= %d` (`summary()` cuts junctions from the end first) |
 | `not_offered` | `dump()`: `a stitched graphlet is not an MGT document: save() writes its parts unchanged in a bundle, and each part dumps on its own (parts[i].graphlet.dump())`; `to_json()`: `to_json() is detail "full" of one server result, and a stitched graphlet has none: export its parts`; `compare()`: `compare() reads one retrieval per side: compare the parts`; any other: `%s() is not offered on a stitched graphlet` |
@@ -1556,8 +1558,8 @@ notes do.
 | `sibling_merge_unknown` | W6, naming the sibling walks | junction | both |
 | `not_continued` | W7, naming the labels | junction | constrain |
 | `seed_dropped` | W7, naming the labels and the `X` reasons | junction | constrain |
-| `no_bases` | W8 cannot be checked: a part from the root to the child has `output.sequences: false`; W8 is not run below the junction | junction | both |
-| `strategy_unknown` | W2–W5 or the split check of W8 cannot be judged: an envelope does not state a field they read (W5's knobs; in constrain mode also `labels.change_cost`, `labels.extra`, `branching.max_label_branches`, `branching.max_splits_per_path`), or one part states it and the other does not; naming them (`(both)`, `(the parent)`, `(the child)`) | junction | both |
+| `no_bases` | W8 cannot be checked: a part from the root to the child has `output.sequences: false`, named (`on the route from the root to this child, part right:0 carries no bases …`); W8 is not run below the junction | junction | both |
+| `strategy_unknown` | W2–W5 or the split check of W8 cannot be judged: an envelope does not state a field they read (W5's knobs; in constrain mode also `labels.change_cost`, `labels.extra`, `branching.max_label_branches`, `branching.max_splits_per_path`), one part states it and the other does not, or a field W2 compares neither states (a null field is not stated); naming them (`(both)`, `(the parent)`, `(the child)`) | junction | both |
 | `rule_violation` | W8: the walk takes a step in B (it reuses an ancestor's edge or enters a root-seed node); stated with `at_bp`. The walk is not cut and no end is invented | walk | both |
 | `candidate_changed` | W8: a successor the child admitted at a node of the walk's route, without taking it, is a step in B: a branch event's successor or another child of a split. The child's ambiguity, split or refusal there may not happen in the reference (the external review's counterexample: the child stops at 0 bp, the reference goes on to 145 bp); stated with `at_bp` and the character | walk | both |
 | `exact_gated` | at a junction: W1–W7 hold there, and W8 is judged per walk below it; on a walk: its junctions are `exact_gated` and W8 holds for it. `exact` is not switched on (phase 1a-S, OQ19): the rules found no difference and have not yet passed the randomized comparison (Appendix E.2, T11). `summary()` and `completeness()` state, per junction, the walk-scope causes on the walks below it (`walk_causes`) | junction, walk | both |
@@ -1768,9 +1770,9 @@ class CombineRefused(ValueError):  code: str     # every refusal of §2.3 and §
   seed and C's continuation P's seed (k 15, radius 25, `continuation_bp` 15, Appendix G.6). Then both orders pass
   the preconditions, give different stitched graphlets, and are judged by W1–W8; W8 qualifies a walk that re-enters
   the root seed.
-- **Idempotent for identical retrievals.** Stitching the same retrieval again at the same walk is a no-op (for a
-  StitchedGraphlet child: the same subtree, every part's key, body and retrieval identity); a different body or
-  subtree, or the same bodies from another request, there is refused `already_continued` (§3.1).
+- **Idempotent for identical retrievals.** Stitching the same retrieval again at the same walk is a no-op, whatever
+  continues it there (for a StitchedGraphlet child: the same subtree, every part's key, body and retrieval identity);
+  a different body or subtree, or the same bodies from another request, there is refused `already_continued` (§3.1).
 - **Identity element.** `stitch(g)` (no child) answers every offered query as `g` does, with keys `(w,)` for path
   ids `w` (tested on every fixture, §6 T2).
 
