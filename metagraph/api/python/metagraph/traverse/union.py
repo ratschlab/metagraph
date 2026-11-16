@@ -2925,9 +2925,14 @@ def _labels_for(un, part, a, chain, end, with_labels, at_bp=None, b=None):
         end = min(end, at_bp)
     g = part.graphlet
     segs = a.segments
-    # trim the chain to the segments at or before |end|
+    # trim the chain to the segments at or before |end|: a segment with bases from |end| on,
+    # and a zero-length one beyond it (a merge node or leaf deeper than the cut: its empty
+    # intervals would hide the labels alive at |end|, GPT review m1)
     k = len(chain)
-    while k > 1 and segs[chain[k - 1][0]].from_bp >= end and segs[chain[k - 1][0]].length_bp:
+    while k > 1:
+        s = segs[chain[k - 1][0]]
+        if not (s.from_bp >= end if s.length_bp else s.from_bp > end):
+            break
         k -= 1
     chain = chain[:k]
     if not chain:

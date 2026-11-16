@@ -244,6 +244,29 @@ class TestRoutes(unittest.TestCase):
     """§2.4 'Routes through merges': a route that ends at a part leaf takes the part walk's
     own complete and certificate there."""
 
+    def test_labels_before_a_zero_length_leaf(self):
+        # GPT review m1: a walk ending at a zero-length merge leaf (7 bp); its labels at a
+        # depth before the leaf are those a leaf with a base there gives (the leaf lies
+        # beyond the cut either way), never the zero-length leaf's empty intervals
+        from tests.test_traverse_union_stitched import _zero_leaf_root
+
+        def at_depths(z):
+            g = _zero_leaf_root(z_bases=z)
+            u = union_pairs([{'pair': 'A', 'graphlet': g}])
+            (w,) = [w for w in u.walks('right') if u.spell('right', w.id) == 'ACGCAAC' + z]
+            return g, u, w, [[(x.label.name, x.from_bp) for x in
+                              u.carriers('right', w.id, at_bp=at)[0].labels]
+                             for at in range(1, 8)]
+
+        g, u, w, zero = at_depths('')
+        self.assertEqual(zero, at_depths('T')[3])
+        self.assertTrue(all(zero))
+        # at 1 bp: the labels alive on the first base
+        self.assertEqual(sorted(n for n, _ in zero[0]),
+                         sorted(g.labels[i].name for i in ops.alive_at(g, 'right', 0, 0)))
+        fa = u.to_fasta('right', walks=[w.id], at_bp=1).split('\n')[0]
+        self.assertIn('labels=A:3/3', fa)
+
     def test_a_route_held_to_a_leaf_a_resource_stopped(self):
         m = copy.deepcopy(T.graphlet('merge'))
         (leaf,) = [s for s in m.arms['right'].segments if s.leaf is not None]
