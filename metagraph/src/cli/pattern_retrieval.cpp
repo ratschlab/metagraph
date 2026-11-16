@@ -440,6 +440,8 @@ Json::Value label_json(const ContextLabel &cl, const LabelRef &label, const std:
 } // namespace
 
 
+uint64_t context_descriptor_bytes(size_t k) { return context_bytes(k); }
+
 uint64_t path_descriptor_bytes(size_t k, size_t length) {
     const uint64_t n = length >= k ? length - k + 1 : 1;
     return context_bytes(k) + 3 * static_cast<uint64_t>(length) + kPathKmerBytes * n;
@@ -839,6 +841,13 @@ bool retrieval::Admission::admit(uint64_t bytes) {
     }
     held_ += bytes;
     return true;
+}
+
+void retrieval::Admission::settle(uint64_t price, uint64_t held) {
+    assert(held <= price && price <= held_);
+    const uint64_t back = price - std::min(held, price);
+    held_ -= std::min(back, held_);
+    account_.release(back);
 }
 
 uint64_t retrieval::Admission::take() {
@@ -1284,6 +1293,8 @@ LabelsAnswer PatternRetrieval::retrieve_rows(const std::vector<RetrievalContext>
     // the labels are built: from now on they are written only
     pending.settle();
     m.finish_work(a, rows_read, pattern_units, discovery_ms, placement_ms);
+    // the descriptors stay with the result objects (the route settles them, §12.1)
+    a.descriptors = descriptors;
     return a;
 }
 
@@ -1974,6 +1985,8 @@ LabelsAnswer PatternRetrieval::retrieve_paths(const std::vector<RetrievalPath> &
     a.unrepresentable = names.unrepresentable();
     pending.settle();
     m.finish_work(a, rows_read, pattern_units, discovery_ms, placement_ms);
+    // the descriptors stay with the result objects (the route settles them, §12.1)
+    a.descriptors = descriptors;
     return a;
 }
 

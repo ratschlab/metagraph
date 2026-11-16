@@ -1863,7 +1863,7 @@ PatternAnswer answer_pattern(
      * LabelOracle::key_of), since the other orientation's row carries no labels.
      */
     auto context_json = [&](const Context &c, const Pattern &pattern,
-                            RetrievalContext *collected = nullptr) {
+                            RetrievalContext *collected = nullptr, uint64_t *own = nullptr) {
         const size_t length = pattern.length();
         Json::Value r;
         std::string kmer = graph.get_node_sequence(c.node);
@@ -1906,8 +1906,12 @@ PatternAnswer answer_pattern(
             r["mismatches"] = uint_json(c.mismatches);
             r["substitutions"] = substitutions_json(pattern, c, r["instance"].asString());
         }
-        // in the answer from now on: the work time is read with it counted
-        volume.add(compact_json_bytes(r));
+        // in the answer from now on: the work time is read with it counted; its own text, the
+        // charge it is held at once written (§12.1)
+        const uint64_t text = compact_json_bytes(r);
+        volume.add(text);
+        if (own)
+            *own = text;
         return r;
     };
 
@@ -1919,7 +1923,8 @@ PatternAnswer answer_pattern(
      * the strand or orientation as for contexts. The rows are named without reading them, as a
      * context's row (§7.10).
      */
-    auto path_json = [&](const Context &c, size_t length, RetrievalPath *collected = nullptr) {
+    auto path_json = [&](const Context &c, size_t length, RetrievalPath *collected = nullptr,
+                         uint64_t *own = nullptr) {
         const size_t n = length - k + 1;
         if (length <= k || c.path.size() != n || c.sequence.size() != length
                 || c.path.front() != c.node || c.offset != 0) {
@@ -1975,9 +1980,19 @@ PatternAnswer answer_pattern(
         }
         r["nodes"] = std::move(nodes);
         r["rows"] = std::move(rows);
-        // in the answer from now on: the work time is read with it counted
-        volume.add(compact_json_bytes(r));
+        // in the answer from now on: the work time is read with it counted; its own text, the
+        // charge it is held at once written (§12.1)
+        const uint64_t text = compact_json_bytes(r);
+        volume.add(text);
+        if (own)
+            *own = text;
         return r;
+    };
+
+    // what a result object charged |price| while it was a tree is held at once written (§12.1;
+    // tests: at its price, RetrievalHooks::hold_at_price)
+    auto held_bytes = [&](uint64_t price, uint64_t own) {
+        return hooks && hooks->hold_at_price ? price : held_result_bytes(price, own);
     };
 
     struct Answered {
@@ -1990,6 +2005,13 @@ PatternAnswer answer_pattern(
         // label-free path, a label-free context without a predicate) written in the engine's
         // callback, the others when the pattern ends
         HeldResults held;
+        // the objects in |results| as the account holds them when the pattern's work ends:
+        // |charge| bytes, |price| each (512 + 2k, or path_descriptor_bytes), and each object's
+        // own text (|own|, as built); hold_results settles each at held_result_bytes. 0: none
+        // charged (a label-free context, a withheld list, a refused slot)
+        uint64_t charge = 0;
+        uint64_t price = 0;
+        std::vector<uint64_t> own;
         // the contexts the engine released (results.size(), or more when the memory account
         // admitted only the first of them: output.labels "all", or a long pattern's label-free
         // paths; with a predicate's pass, the raw contexts released into it)
@@ -2035,12 +2057,16 @@ PatternAnswer answer_pattern(
             plain.begin();
             a.result = search.enumerate(pattern, req.request, budget, [&](const Context &c) {
                 ++a.released;
-                if (!plain.admit(path_descriptor_bytes(k, length))) {
+                const uint64_t price = path_descriptor_bytes(k, length);
+                if (!plain.admit(price)) {
                     return;
                 }
                 // final as built (no label, no predicate with long_search "paths"): its text
-                // now, its tree freed (§12.1)
-                a.held.add(path_json(c, length), writer);
+                // now, its tree freed, its charge settled to its written text (§12.1), so that
+                // the next objects find the room its tree took
+                uint64_t own = 0;
+                a.held.add(path_json(c, length, nullptr, &own), writer);
+                plain.settle(price, held_bytes(price, own));
             });
             a.plain_cut = a.held.built() < a.released;
             // the objects answered stay charged until the request ends (§12.1), as the
@@ -2076,13 +2102,17 @@ PatternAnswer answer_pattern(
                 if (!retrieval->admit_path(length))
                     return;
                 collected.emplace_back();
-                a.results.append(path_json(c, length, &collected.back()));
+                uint64_t own = 0;
+                a.results.append(path_json(c, length, &collected.back(), &own));
+                a.own.push_back(own);
             });
             if (!a.result->refusal && a.result->extraction) {
                 a.labels = retrieval->retrieve_paths(collected, a.released, length, mode,
                                                      *a.result->extraction, graph_name,
                                                      req.require_verified);
                 a.label_paths = true;
+                a.charge = a.labels->descriptors;
+                a.price = path_descriptor_bytes(k, length);
             }
         } else {
             const size_t length = pattern.length();
@@ -2095,13 +2125,17 @@ PatternAnswer answer_pattern(
                 if (!retrieval->admit_context())
                     return;
                 collected.emplace_back();
-                a.results.append(context_json(c, pattern, &collected.back()));
+                uint64_t own = 0;
+                a.results.append(context_json(c, pattern, &collected.back(), &own));
+                a.own.push_back(own);
             });
             // the labels of what was released (nothing when it was withheld), work
             // still: the reads end where the deadline's work time does (§5.3)
             if (!a.result->refusal && a.result->extraction) {
                 a.labels = retrieval->retrieve(collected, a.released, length, mode,
                                                *a.result->extraction, graph_name);
+                a.charge = a.labels->descriptors;
+                a.price = context_descriptor_bytes(k);
             }
         }
     };
@@ -2304,7 +2338,9 @@ PatternAnswer answer_pattern(
                 c.node = t.node;
                 c.base_node = t.base_node;
                 collected.emplace_back();
-                Json::Value r = context_json(c, pattern, &collected.back());
+                uint64_t own = 0;
+                Json::Value r = context_json(c, pattern, &collected.back(), &own);
+                a.own.push_back(own);
                 if (projection != Projection::NONE) {
                     // why it was selected: the predicate's labels in the set it was evaluated
                     // on, and per label the orientation whose row carries it, their bytes
@@ -2328,15 +2364,21 @@ PatternAnswer answer_pattern(
                 s.output_withheld = "output_budget";
             }
         }
-        if (s.output_withheld)
+        if (s.output_withheld) {
             a.results = Json::Value(Json::arrayValue);
+            a.own.clear();
+        }
         if (projection == Projection::NONE) {
             // the result objects the answer keeps stay charged until the request ends (§19.9),
-            // as a projection's descriptors do: the bound is the request's; those of a withheld
-            // list are discarded, their charge with them
+            // as a projection's descriptors do: the bound is the request's, at their text once
+            // the pattern ends (§12.1); those of a withheld list are discarded, their charge
+            // with them
             const uint64_t objects = retrieval->end_release();
             if (s.output_withheld) {
                 account.release(objects);
+            } else {
+                a.charge = objects;
+                a.price = context_descriptor_bytes(k);
             }
         }
 
@@ -2362,6 +2404,8 @@ PatternAnswer answer_pattern(
                                                 graph_name)
                     : retrieval->retrieve(collected, released, length, mode, given,
                                           graph_name);
+            a.charge = a.labels->descriptors;
+            a.price = context_descriptor_bytes(k);
         }
         retrieval->end_selection();
         finish();
@@ -2576,13 +2620,17 @@ PatternAnswer answer_pattern(
                 }
                 break;
             }
-            Json::Value r = path_json(path_sink->paths()[j], length);
+            uint64_t own = 0;
+            Json::Value r = path_json(path_sink->paths()[j], length, nullptr, &own);
             if (sel && projection != Projection::NONE)
                 path_selection_json(*sel, j, &r);
             a.results.append(std::move(r));
+            a.own.push_back(own);
         }
-        if (s.withheld)
+        if (s.withheld) {
             a.results = Json::Value(Json::arrayValue);
+            a.own.clear();
+        }
         if (x) {
             if (listed < x->returned)
                 x->complete = false;
@@ -2607,6 +2655,12 @@ PatternAnswer answer_pattern(
         if (!s.labels)
             volume.add(compact_json_bytes(s.rows_refused));
         end(listed);
+        // the sink leaves the listed paths' descriptors with their result objects, to settle
+        // once they are held as text (§12.1)
+        if (listed) {
+            a.charge = listed * path_descriptor_bytes(k, length);
+            a.price = path_descriptor_bytes(k, length);
+        }
         s.memory_bytes = retrieval->memory_peak();
         a.supported = std::move(s);
         return sel;
@@ -2725,6 +2779,9 @@ PatternAnswer answer_pattern(
         a.result->refusal = std::move(refusal);
         a.results = Json::Value(Json::arrayValue);
         a.held = HeldResults(keep_trees);
+        // (its charges stay as an answered entry's, at their price: nothing is settled)
+        a.charge = 0;
+        a.own.clear();
         a.released = 0;
         a.labels.reset();
         a.label_paths = false;
@@ -2742,6 +2799,21 @@ PatternAnswer answer_pattern(
      * (refuse_unrepresentable).
      */
     auto hold_results = [&](Answered &a) {
+        if (a.charge) {
+            // each object's charge falls from its price to its written text (held_result_bytes)
+            if (a.own.size() != a.results.size() || a.charge != a.own.size() * a.price) {
+                throw std::logic_error("pattern: " + std::to_string(a.charge) + " bytes held for "
+                                       + std::to_string(a.results.size()) + " result objects "
+                                       "of " + std::to_string(a.price) + " bytes each");
+            }
+            uint64_t held = 0;
+            for (uint64_t own : a.own) {
+                held += held_bytes(a.price, own);
+            }
+            account.release(a.charge - held);
+            a.charge = 0;
+        }
+        std::vector<uint64_t>().swap(a.own);
         if (a.results.empty())
             return;
         if (a.labels && a.labels->withheld) {
@@ -2823,7 +2895,10 @@ PatternAnswer answer_pattern(
             }
             if (a.labels && a.labels->unrepresentable)
                 refuse_unrepresentable(a, *a.labels->unrepresentable);
+            const uint64_t before = account.held();
             hold_results(a);
+            if (hooks && hooks->held_hook)
+                hooks->held_hook(answered.size(), before, account.held());
         }
         a.usage = pattern_usage.elapsed();
         a.memory_peak = account.peak();
