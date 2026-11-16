@@ -1028,9 +1028,11 @@ def _span_token(s, sep='@'):
 
 
 def _held_labels(s):
-    """(labels, cut) of a span held whole: its own (whole, extends) or its route's."""
+    """(labels, cut) of a span held whole: its own (whole, extends) or its route's, with
+    the route's cut flag (GPT review M2)."""
     if s.how == 'merges':
-        return (s.route.labels if s.route is not None else ()), s.labels_cut
+        r = s.route
+        return (r.labels, r.labels_cut) if r is not None else ((), False)
     return s.labels or (), s.labels_cut
 
 

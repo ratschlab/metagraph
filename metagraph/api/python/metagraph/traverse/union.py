@@ -236,6 +236,7 @@ class Route:
     labels: tuple               # SpanLabel (carriers(), labels='full'); () otherwise
     complete: bool
     certified_to_bp: int
+    labels_cut: bool = False    # the route's labels read a cut list (a lower bound)
 
 
 @dataclass(slots=True)
@@ -2875,18 +2876,19 @@ def _route(un, t, pi, part, a, stub, m, j, d, below, into, with_labels, at_bp, b
         lpos = pos - off
         here = [segs[x] for x, _ in route if segs[x].from_bp <= lpos <= segs[x].end_bp]
         absence = _absence_at(part, g, a, here, lpos, c, code)
-    labels = ()
+    labels, lcut = (), False
     if with_labels:
         # the labels at the route's end (or |at_bp|) are those of the leg holding that
-        # depth: never joined across a junction (D.1)
+        # depth: never joined across a junction (D.1); their cut flag is the route's (GPT
+        # review M2), not the stub's
         e = pos if at_bp is None else min(pos, at_bp)
         k = len(legs) - 1
         while k > 0 and e <= legs[k][1].offset:
             k -= 1
         _, lsrc, la, lchain, lroute = legs[k]
-        labels, _ = _labels_src(un, lsrc, la, lambda: lchain + lroute, pos, at_bp, b)
+        labels, lcut = _labels_src(un, lsrc, la, lambda: lchain + lroute, pos, at_bp, b)
     return Route(pos, how, goes_on, reasons, absence, tuple(merges), labels, complete,
-                 cert), part
+                 cert, lcut), part
 
 
 def _step(segs, cur, ch):
@@ -3017,6 +3019,15 @@ def _carrying_labels(s):
     return ()
 
 
+def _shown_labels(s):
+    """(labels, cut) a span shows: a merges span its route's (the labels where the route
+    ends, with the route's cut flag), any other its own."""
+    if s.how == 'merges':
+        r = s.route
+        return (r.labels, r.labels_cut) if r is not None else ((), False)
+    return s.labels, s.labels_cut
+
+
 def _carrier_line(s):
     if s.how in ('whole', 'extends'):
         mid = 'to %d' % s.to_bp
@@ -3033,12 +3044,12 @@ def _carrier_line(s):
         mid = 'at %d' % s.to_bp
         if s.how == 'ends' and s.end_reasons.get('path_reason'):
             mid += '  %s' % s.end_reasons['path_reason']
-    labs = s.labels if s.how != 'merges' else (s.route.labels if s.route else ())
+    labs, cut = _shown_labels(s)
     lab = ''
     if labs is not None and s.how in ('whole', 'extends', 'merges', 'ends'):
         n = len(labs)
         whole = sum(1 for x in labs if x.from_bp == 0)
-        lab = 'labels %d%s' % (n, '+' if s.labels_cut else '')
+        lab = 'labels %d%s' % (n, '+' if cut else '')
         if n:
             lab += ', %d of them from 0 bp' % whole if whole != n else ', from 0 bp'
     tail = []

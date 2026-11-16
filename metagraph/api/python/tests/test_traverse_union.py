@@ -244,6 +244,48 @@ class TestRoutes(unittest.TestCase):
     """§2.4 'Routes through merges': a route that ends at a part leaf takes the part walk's
     own complete and certificate there."""
 
+    def test_a_route_states_its_own_label_cut(self):
+        # GPT review M2: a route through a merge reads the labels where it ends, and its
+        # cut flag is that list's, not the stub's: carriers, FASTA labels=
+        a = T.graphlet('annotate')
+        for seg in a.arms['right'].segments[:6]:
+            for p in seg.presence:
+                p.total = len(p.labels)     # uncut before the merged segment 6
+        b = copy.deepcopy(a)
+        b.arms['right'].segments[6].parents = (4, 5)    # b displays the other parent
+        b.arms['right'].segments[6].partition.reverse()
+        self.assertTrue(ops.label_intervals_cut(a, 'right', 6))
+        u = union_pairs([{'pair': 'A', 'graphlet': a}, {'pair': 'B', 'graphlet': b}])
+        (w,) = [w for w in u.walks('right') if w.length_bp == 70 and w.whole_in == ('B',)]
+        sa, sb = u.carriers('right', w.id)
+        self.assertEqual((sa.how, sa.route.how, sa.route.to_bp, sa.labels_cut,
+                          sa.route.labels_cut, len(sa.route.labels)),
+                         ('merges', 'held', 70, False, True, 2))
+        self.assertIn('labels 2+, 1 of them from 0 bp', str(u.carriers('right', w.id)).split(
+            '\n')[0])
+        self.assertIn('labels=A:2+/1,B:2+/1', u.to_fasta('right', walks=[w.id]))
+        # GFA states each union segment's own cut: each pair's merged segment (62-70 bp)
+        gfa = u.to_gfa().split('\n')
+        merged = [x for x in u.segments('right') if (x.from_bp, x.to_bp) == (62, 70)]
+        self.assertEqual(sorted(sup.pair for x in merged for sup in x.support), ['A', 'B'])
+        for x in merged:
+            (sup,) = x.support
+            line = next(y for y in gfa if y.startswith('S\ts%d\t' % x.id))
+            self.assertIn('pl:Z:%s=2+' % sup.pair, line)
+        # constrain: the merged segment's entry list is cut, the stub's is not
+        parts = stated(gA='annotate', gT='merge_ties')
+        g = parts[1]['graphlet']
+        g.arms['right'].segments[6].entry_total += 1
+        u = union_pairs(parts)
+        (w,) = [w for w in u.walks('right') if w.length_bp == 70]
+        s = next(s for s in u.carriers('right', w.id) if s.pair == 'gT')
+        self.assertEqual((s.how, s.route.how, s.labels_cut, s.route.labels_cut),
+                         ('merges', 'held', False, True))
+        self.assertIn('gT:3+/0', u.to_fasta('right', walks=[w.id]))
+        # at a depth before the merged segment the route's labels are the stub's, uncut
+        s = next(s for s in u.carriers('right', w.id, at_bp=40) if s.pair == 'gT')
+        self.assertFalse(s.route.labels_cut)
+
     def test_labels_before_a_zero_length_leaf(self):
         # GPT review m1: a walk ending at a zero-length merge leaf (7 bp); its labels at a
         # depth before the leaf are those a leaf with a base there gives (the leaf lies
