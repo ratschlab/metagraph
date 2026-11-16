@@ -441,7 +441,38 @@ bool charge_search_unit(graph::SearchBudget &budget, uint64_t *transient_charged
                         SeqSearchResult *result, bool verbose_output, bool tagged,
                         const std::string &graph, const std::string &graph_path,
                         const std::string &annotation_path, const std::string &index_fp,
-                        const std::string &pair) {
+                        const std::string &pair, size_t pair_index) {
+    // the unit's object alone past the bound (its own price |own|, a function of the unit
+    // alone): with the field the unit is refused alone, its stub priced (no row: nothing to
+    // measure); without it the request is refused on the answer side
+    auto object_passed = [&](uint64_t own) {
+        const size_t record = result->get_sequence().id;
+        std::string where = "record " + std::to_string(record) + " on " + pair;
+        if (!budget.partial_refusal()) {
+            budget.note_object_passed(where, own);
+            return false;
+        }
+        budget.note_unit_refused({ record, std::move(where), "answer", 0, own, pair_index });
+        result->refuse(graph::SearchCut::Refused::ANSWER, budget.max_bytes() >> 20,
+                       graph::mib_rounded_up(own));
+        return true;
+    };
+    if (result->get_cut().refused == graph::SearchCut::Refused::NO) {
+        // what measuring the price holds (search_record_scratch) is part of the object's own
+        // price: past the bound alone, the object is past it too, and is refused before it is
+        // measured, nothing charged, its price stated as that scratch (a lower bound; review
+        // m1 of ae3865df7: charged to the answer account it refused the whole request)
+        const uint64_t scratch = search_record_scratch(*result, verbose_output);
+        if (scratch > budget.max_bytes()) {
+            if (!object_passed(scratch))
+                return false;
+            charge_search_price(budget.answer(), transient_charged,
+                                search_record_price(*result, verbose_output, tagged, graph,
+                                                    graph_path, annotation_path, index_fp));
+            budget.note_unit_built();
+            return true;
+        }
+    }
     SearchRecordPrice price = measure_search_record(budget.answer(), transient_charged, *result,
                                                     verbose_output, tagged, graph, graph_path,
                                                     annotation_path, index_fp);
@@ -450,15 +481,8 @@ bool charge_search_unit(graph::SearchBudget &budget, uint64_t *transient_charged
         // increment over the pair's
         const uint64_t own = graph::saturating_add(price.tree, price.transient);
         if (own > budget.max_bytes()) {
-            const size_t record = result->get_sequence().id;
-            std::string where = "record " + std::to_string(record) + " on " + pair;
-            if (!budget.partial_refusal()) {
-                budget.note_object_passed(where, own);
+            if (!object_passed(own))
                 return false;
-            }
-            budget.note_unit_refused({ record, std::move(where), "answer", 0, own });
-            result->refuse(graph::SearchCut::Refused::ANSWER, budget.max_bytes() >> 20,
-                           graph::mib_rounded_up(own));
             // the stub's (no row: nothing measured)
             price = search_record_price(*result, verbose_output, tagged, graph, graph_path,
                                         annotation_path, index_fp);

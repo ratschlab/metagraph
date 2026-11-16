@@ -6,6 +6,7 @@
 #include <mutex>
 #include <numeric>
 #include <random>
+#include <set>
 #include <string>
 #include <thread>
 #include <tuple>
@@ -711,6 +712,153 @@ TEST(SearchBudget, TheEdgesOfTheUnitAndTheRequest) {
     EXPECT_EQ(1u, graph::mib_rounded_up(1 << 20));
     EXPECT_EQ(2u, graph::mib_rounded_up((1 << 20) + 1));
     EXPECT_EQ(uint64_t(1) << 44, graph::mib_rounded_up(std::numeric_limits<uint64_t>::max()));
+}
+
+// Review m3 of ae3865df7: the units refused alone are listed (and logged) in the answer's
+// order, by record and then by the pair's place in the answer (the order of the record's `cuts`
+// entries), not by the pairs' names: a pair "zz" answered before a pair "aa" comes first
+TEST(SearchBudget, TheUnitsRefusedAreInTheAnswersOrder) {
+    SearchBudget budget(100, true);
+    const std::string zz = "pair (zz, z.dbg, z.annodbg)";
+    const std::string aa = "pair (aa, a.dbg, a.annodbg)";
+    // refused in another order than the answer's: record 1 first, then aa before zz
+    SearchAccount r1_zz(&budget, 1, zz, 0);
+    SearchAccount r0_aa(&budget, size_t(0), aa, 1);
+    SearchAccount r0_zz(&budget, size_t(0), zz, 0);
+    EXPECT_EQ(1u, r0_aa.pair_index());
+    for (SearchAccount *account : { &r1_zz, &r0_aa, &r0_zz }) {
+        EXPECT_THROW(account->charge(101), SearchUnitRefused);
+    }
+    // an object refused on the answer side, noted with its pair's place (the same unit noted
+    // twice, which the engine never does, orders by its account: the order is total)
+    budget.note_unit_refused({ 0, "record 0 on " + aa, "answer", 0, 500, 1 });
+    std::vector<std::tuple<size_t, size_t, std::string, std::string>> listed;
+    for (const auto &refusal : budget.unit_refusals()) {
+        listed.emplace_back(refusal.record, refusal.pair, refusal.where, refusal.account);
+    }
+    using Row = std::tuple<size_t, size_t, std::string, std::string>;
+    EXPECT_EQ((std::vector<Row> {
+                  Row { 0, 0, "record 0 on " + zz, "values" },
+                  Row { 0, 1, "record 0 on " + aa, "answer" },
+                  Row { 0, 1, "record 0 on " + aa, "values" },
+                  Row { 1, 0, "record 1 on " + zz, "values" } }),
+              listed);
+    // a unit made without a pair's place (a single-graph server) is at place 0
+    SearchAccount single(&budget, 2, "the graph");
+    EXPECT_EQ(0u, single.pair_index());
+}
+
+// Review untested claim 8 of ae3865df7: real threads charging units and the request's answer
+// at once (the server's pairs charge the answer account concurrently; a pair's own objects one
+// at a time): the units refused alone are exactly those whose own charges pass the bound, the
+// answer account holds exactly what was charged, whatever the interleaving; without the field
+// the request is refused "values" exactly when some unit passes
+TEST(SearchBudget, ManyThreadsChargeUnitsAndTheAnswerAtOnce) {
+    std::mt19937 rng(83);
+    const uint64_t bound = 10'000;
+    for (size_t round = 0; round < 20; ++round) {
+        std::vector<std::vector<uint64_t>> charges(500 + rng() % 1500);
+        std::set<size_t> expected;
+        for (size_t u = 0; u < charges.size(); ++u) {
+            charges[u].resize(1 + rng() % 40);
+            uint64_t sum = 0;
+            bool passes = false;
+            for (uint64_t &c : charges[u]) {
+                c = rng() % (round % 2 ? 600 : 300);
+                if (!passes && sum + c > bound)
+                    passes = true;
+                sum += c;
+            }
+            if (passes)
+                expected.insert(u);
+        }
+        for (bool partial : { true, false }) {
+            SCOPED_TRACE(::testing::Message() << "round " << round << " partial " << partial);
+            // an answer bound the objects never reach: it holds exactly their sum
+            SearchBudget budget(partial ? bound : std::numeric_limits<uint64_t>::max() / 2,
+                                partial);
+            const uint64_t unit_bound = budget.max_bytes();
+            std::atomic<size_t> next = 0;
+            std::atomic<uint64_t> answered = 0;
+            std::vector<std::thread> threads;
+            std::mutex mutex;
+            std::set<size_t> refused;
+            for (size_t t = 0; t < 16; ++t) {
+                threads.emplace_back([&, t]() {
+                    for (size_t u; (u = next++) < charges.size(); ) {
+                        SearchAccount account(&budget, u, "the graph", t % 3);
+                        try {
+                            for (uint64_t c : charges[u]) {
+                                account.charge(c);
+                                if (c % 7 == 0)
+                                    std::this_thread::yield();
+                            }
+                        } catch (const SearchUnitRefused &) {
+                            std::lock_guard<std::mutex> lock(mutex);
+                            refused.insert(u);
+                            continue;
+                        } catch (const SearchAnswerTooLarge &) {
+                            continue;
+                        }
+                        // the unit's object, on the shared answer account (no mutex; at most
+                        // 3 x 2,000 B in all, under the bound)
+                        if (partial) {
+                            const uint64_t object = 1 + u % 3;
+                            try {
+                                budget.answer().charge(object);
+                                answered += object;
+                            } catch (const SearchAnswerTooLarge &) {
+                                answered += uint64_t(1) << 40;  // fails the test below
+                            }
+                        }
+                    }
+                });
+            }
+            for (auto &thread : threads) {
+                thread.join();
+            }
+            if (partial) {
+                EXPECT_FALSE(budget.passed());
+                EXPECT_EQ(expected, refused);
+                EXPECT_EQ(expected.size(), budget.unit_refusals().size());
+                EXPECT_EQ(answered.load(), budget.answer().held());
+                size_t previous = 0;
+                for (const auto &refusal : budget.unit_refusals()) {
+                    EXPECT_LE(previous, refusal.record);
+                    previous = refusal.record;
+                    EXPECT_LE(refusal.held, unit_bound);
+                    EXPECT_LT(unit_bound - refusal.held, refusal.charge);
+                }
+            } else {
+                // the bound is out of reach: nothing refused
+                EXPECT_FALSE(budget.passed());
+                EXPECT_TRUE(refused.empty());
+            }
+        }
+        // without the field at the units' bound: refused "values" exactly when one passes
+        SearchBudget strict(bound, false);
+        std::atomic<size_t> next = 0;
+        std::vector<std::thread> threads;
+        for (size_t t = 0; t < 16; ++t) {
+            threads.emplace_back([&]() {
+                for (size_t u; (u = next++) < charges.size(); ) {
+                    SearchAccount account(&strict, u, "the graph");
+                    try {
+                        for (uint64_t c : charges[u]) {
+                            account.charge(c);
+                        }
+                    } catch (const SearchAnswerTooLarge &) {}
+                }
+            });
+        }
+        for (auto &thread : threads) {
+            thread.join();
+        }
+        EXPECT_EQ(!expected.empty(), strict.passed()) << round;
+        if (strict.passed()) {
+            EXPECT_EQ("values", std::string(strict.account()));
+        }
+    }
 }
 
 // Test 2 (determinism): units with fixed charge sequences and object prices, a request's text,

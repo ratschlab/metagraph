@@ -81,20 +81,22 @@ SearchRecordPrice charge_search_record(graph::SearchAccount &answer, uint64_t *t
                                        const std::string &index_fp);
 
 // One unit's object (a FASTA record on a pair; lane T7-P1), as process_search_request charges
-// each in turn before it builds it: measure_search_record, then the unit's object check, its
-// own price (tree and transient, saturating) against the bound: past it, with the request's
-// `partial_refusal` (|budget|) the unit is refused alone (|*result| becomes its stub,
-// SeqSearchResult::refuse with the account "answer" and the price in MiB rounded up, and the
-// refusal is noted for the log) and the stub's price is charged; without it the request is
-// refused on the answer side (SearchBudget::note_object_passed) and false is returned, nothing
-// charged and no object to build. Otherwise (and for a stub refused on its values) the price
-// is charged (charge_search_price) and the unit counted. |pair|: the pair as the log names it.
-// Past the request's bound throws graph::SearchAnswerTooLarge
+// each in turn before it builds it: the unit's object check, its own price against the bound
+// (first the scratch of measuring it alone, search_record_scratch, before it is measured or
+// charged; then measure_search_record and its tree and transient, saturating): past it, with
+// the request's `partial_refusal` (|budget|) the unit is refused alone (|*result| becomes its
+// stub, SeqSearchResult::refuse with the account "answer" and the price in MiB rounded up, the
+// scratch's when that alone passed, and the refusal is noted for the log) and the stub's price
+// is charged; without it the request is refused on the answer side (SearchBudget::
+// note_object_passed) and false is returned, no object to build. Otherwise (and for a stub
+// refused on its values) the price is charged (charge_search_price) and the unit counted.
+// |pair|: the pair as the log names it; |pair_index|: its place in the answer (the log's
+// order). Past the request's bound throws graph::SearchAnswerTooLarge
 bool charge_search_unit(graph::SearchBudget &budget, uint64_t *transient_charged,
                         SeqSearchResult *result, bool verbose_output, bool tagged,
                         const std::string &graph, const std::string &graph_path,
                         const std::string &annotation_path, const std::string &index_fp,
-                        const std::string &pair);
+                        const std::string &pair, size_t pair_index = 0);
 
 // The bytes of the per-position strings SeqSearchResult::to_json writes for a row (with
 // |verbose| as --verbose-output), computed without writing them: its signature's presence_mask,

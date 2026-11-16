@@ -9,6 +9,7 @@
 #include <mutex>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 #include <tuple>
 #include <vector>
 
@@ -104,12 +105,14 @@ class SearchAccount {
           : budget_(budget), name_(name), where_(std::move(where)),
             threads_(std::max<size_t>(threads, 1)) {}
     // The values account of a unit: FASTA record |record| (its index in the body) on |pair|
-    // ("pair (<name>, <graph>, <annotation>)", or "the graph" on a single-graph server), one
-    // task (its scratch charged once)
-    SearchAccount(SearchBudget *budget, size_t record, const std::string &pair)
+    // ("pair (<name>, <graph>, <annotation>)", or "the graph" on a single-graph server), the
+    // pair's place in the answer |pair_index| (the order of its `cuts` entries), one task (its
+    // scratch charged once)
+    SearchAccount(SearchBudget *budget, size_t record, const std::string &pair,
+                  size_t pair_index = 0)
           : budget_(budget), name_("values"),
             where_("record " + std::to_string(record) + " on " + pair),
-            threads_(1), record_(record) {}
+            threads_(1), record_(record), pair_index_(pair_index) {}
     SearchAccount(const SearchAccount &) = delete;
     SearchAccount& operator=(const SearchAccount &) = delete;
 
@@ -131,6 +134,7 @@ class SearchAccount {
     // a unit's account (its record's index), and whether the unit was refused
     bool unit() const { return record_ != kNoRecord; }
     size_t record() const { return record_; }
+    size_t pair_index() const { return pair_index_; }
     bool refused() const { return refused_.load(std::memory_order_relaxed); }
 
     static constexpr size_t kNoRecord = std::numeric_limits<size_t>::max();
@@ -141,6 +145,7 @@ class SearchAccount {
     std::string where_;
     size_t threads_;
     size_t record_ = kNoRecord;
+    size_t pair_index_ = 0;
     std::atomic<uint64_t> held_ { 0 };
     std::atomic<uint64_t> scratch_ { 0 };
     std::atomic<bool> refused_ { false };
@@ -209,24 +214,30 @@ class SearchBudget {
 
     // a unit refused alone (with the field), for the log: record |record| on its pair
     // (|where|), its |account| ("values" or "answer"), what it held before the charge refused
-    // and that charge (for "answer": 0 and the unit's object's price)
+    // and that charge (for "answer": 0 and the unit's object's price), and the pair's place in
+    // the answer (|pair|: the order of the record's `cuts` entries)
     struct UnitRefusal {
         size_t record;
         std::string where;
         const char *account;
         uint64_t held;
         uint64_t charge;
+        size_t pair = 0;
     };
     void note_unit_refused(UnitRefusal refusal) {
         std::lock_guard<std::mutex> lock(mutex_);
         unit_refusals_.push_back(std::move(refusal));
     }
-    // the units refused alone, by record and pair (read once the request's work has ended)
+    // the units refused alone, in the answer's order: by record, then by the pair's place in
+    // the answer (as the record's `cuts` entries; read once the request's work has ended)
     std::vector<UnitRefusal> unit_refusals() const {
         std::lock_guard<std::mutex> lock(mutex_);
         std::vector<UnitRefusal> refusals = unit_refusals_;
         std::sort(refusals.begin(), refusals.end(), [](const auto &a, const auto &b) {
-            return std::tie(a.record, a.where) < std::tie(b.record, b.where);
+            return std::make_tuple(a.record, a.pair, std::string_view(a.where),
+                                   std::string_view(a.account))
+                    < std::make_tuple(b.record, b.pair, std::string_view(b.where),
+                                      std::string_view(b.account));
         });
         return refusals;
     }
@@ -297,7 +308,8 @@ inline void SearchAccount::charge(uint64_t bytes) {
             if (unit() && budget_->partial_refusal()) {
                 // the unit alone: the request goes on
                 if (!refused_.exchange(true, std::memory_order_relaxed))
-                    budget_->note_unit_refused({ record_, where_, name_, held, bytes });
+                    budget_->note_unit_refused({ record_, where_, name_, held, bytes,
+                                                 pair_index_ });
                 throw SearchUnitRefused(name_);
             }
             budget_->note_passed(*this, held, bytes);

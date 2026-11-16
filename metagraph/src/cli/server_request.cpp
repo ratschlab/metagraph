@@ -10,9 +10,15 @@ SearchRequest parse_search_request(const Json::Value &json, const Config &server
     if (json["FASTA"].isNull())
         throw std::invalid_argument("No input sequences received from client");
 
+    // `partial_refusal` changes what a 200 means (a unit may be answered as refused): only a
+    // JSON boolean is read, anything else given is refused (lane T7-P1, review m4)
+    const Json::Value &partial_refusal = json["partial_refusal"];
+    if (json.isMember("partial_refusal") && !partial_refusal.isBool())
+        throw std::invalid_argument("partial_refusal should be a boolean (true or false)");
+
     SearchRequest request{json["FASTA"].asString(), server_config,
                           json.get("align", false).asBool(),
-                          json.get("partial_refusal", false).asBool()};
+                          partial_refusal.isBool() && partial_refusal.asBool()};
     auto &config = request.config;
     config.discovery_fraction
             = json.get("discovery_fraction", config.discovery_fraction).asDouble();

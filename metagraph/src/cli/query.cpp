@@ -1482,7 +1482,8 @@ size_t batched_query_fasta(seq_io::FastaParser &fasta_parser,
                            const graph::AnnotatedDBG &anno_graph,
                            const graph::align::DBGAlignerConfig *aligner_config,
                            graph::SearchBudget *budget,
-                           const std::string &pair);
+                           const std::string &pair,
+                           size_t pair_index);
 
 size_t query_fasta(const std::string &file,
                    const std::function<void(SeqSearchResult &&)> &callback,
@@ -1490,7 +1491,8 @@ size_t query_fasta(const std::string &file,
                    const graph::AnnotatedDBG &anno_graph,
                    const graph::align::DBGAlignerConfig *aligner_config,
                    graph::SearchBudget *budget,
-                   const std::string &pair) {
+                   const std::string &pair,
+                   size_t pair_index) {
     logger->trace("Parsing sequences from file '{}'", file);
 
     seq_io::FastaParser fasta_parser(file, config.forward_and_reverse);
@@ -1526,7 +1528,7 @@ size_t query_fasta(const std::string &file,
         if (config.query_mode != COORDS && !anno_graph.get_coord_to_header()) {
             // Construct a query graph and query against it
             return batched_query_fasta(fasta_parser, callback, config, anno_graph, aligner_config,
-                                       budget, pair);
+                                       budget, pair, pair_index);
         } else {
             // TODO: Implement batch mode for query_coords queries
             logger->warn("Querying coordinates in batch mode is currently not supported. Querying sequentially...");
@@ -1554,7 +1556,7 @@ size_t query_fasta(const std::string &file,
                 // the result before the task returns
                 std::optional<graph::SearchAccount> unit;
                 if (budget)
-                    unit.emplace(budget, sequence.id, pair);
+                    unit.emplace(budget, sequence.id, pair, pair_index);
                 // Callback with the SeqSearchResult
                 callback(query_sequence(std::move(sequence), anno_graph,
                                         config, aligner_config, unit ? &*unit : nullptr));
@@ -1580,7 +1582,8 @@ size_t batched_query_fasta(seq_io::FastaParser &fasta_parser,
                            const graph::AnnotatedDBG &anno_graph,
                            const graph::align::DBGAlignerConfig *aligner_config,
                            graph::SearchBudget *budget,
-                           const std::string &pair) {
+                           const std::string &pair,
+                           size_t pair_index) {
     auto it = fasta_parser.begin();
     auto end = fasta_parser.end();
 
@@ -1669,7 +1672,7 @@ size_t batched_query_fasta(seq_io::FastaParser &fasta_parser,
                     // query_fasta's tasks make it
                     std::optional<graph::SearchAccount> unit;
                     if (budget)
-                        unit.emplace(budget, (*seq_batch)[i].id, pair);
+                        unit.emplace(budget, (*seq_batch)[i].id, pair, pair_index);
                     // the alignment made on the full graph is attached before the rows are
                     // handed over (query_sequence)
                     SeqSearchResult search_result

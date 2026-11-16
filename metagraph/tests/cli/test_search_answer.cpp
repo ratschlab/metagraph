@@ -750,5 +750,86 @@ TEST(SearchAnswer, TheScratchOfThePriceIsChargedBeforeItIsMeasured) {
     EXPECT_EQ(0u, less.answer().held());
 }
 
+// Review m1 of ae3865df7: a unit whose price's measuring scratch alone passes the bound (the
+// REVIEW 9726cb420 record: two successive positions of 30,000 coordinates, whose values fit
+// 1 MiB while measuring its price would hold 1,966,080 B of open ranges) is refused before it
+// is measured, nothing of it charged: with the field alone (an entry refused "answer",
+// priced_mb the scratch's, a lower bound of its price; the request open), without it the
+// request on the answer side, naming the unit (it was a charge of the request's answer
+// account, which refused the whole request with the field too)
+TEST(SearchAnswer, AUnitWhoseMeasuringAlonePassesIsRefusedBeforeItIsMeasured) {
+    PositionCoords coords(2);
+    for (size_t i = 0; i < 2; ++i) {
+        for (uint64_t c = 0; c < 30000; ++c) {
+            coords.add(i, 5000 + c + i);
+        }
+    }
+    coords.shrink();
+    SeqSearchResult::LabelCountCoordsVec rows;
+    rows.emplace_back("a", 2, coords, 0);
+    const SeqSearchResult unit(QuerySequence { 4, "q", std::string(32, 'A') }, std::move(rows));
+    const uint64_t scratch = cli::search_record_scratch(unit, false);
+    ASSERT_EQ(cli::coord_ranges_bytes(30000), scratch);
+    ASSERT_LT(uint64_t(1) << 20, scratch);
+    const std::string pair = "pair (g, g.dbg, g.annodbg)";
+    for (bool partial : { false, true }) {
+        SCOPED_TRACE(partial);
+        SearchBudget budget(1 << 20, partial);
+        SeqSearchResult copy = unit;
+        uint64_t transient_charged = 0;
+        const bool built = cli::charge_search_unit(budget, &transient_charged, &copy, false,
+                                                   true, "g", "g.dbg", "g.annodbg", "", pair,
+                                                   3);
+        EXPECT_EQ(0u, transient_charged);
+        if (!partial) {
+            EXPECT_FALSE(built);
+            EXPECT_TRUE(budget.passed());
+            EXPECT_EQ("answer", std::string(budget.account()));
+            EXPECT_EQ("the answer account of record 4 on " + pair, budget.first_passed());
+            EXPECT_EQ(0u, budget.first_held());
+            EXPECT_EQ(scratch, budget.first_charge());
+            EXPECT_EQ(0u, budget.answer().held());
+            EXPECT_EQ(0u, budget.units());
+            EXPECT_TRUE(budget.unit_refusals().empty());
+            continue;
+        }
+        EXPECT_TRUE(built);
+        EXPECT_FALSE(budget.passed());
+        EXPECT_EQ(graph::SearchCut::Refused::ANSWER, copy.get_cut().refused);
+        EXPECT_EQ(2u, copy.get_cut().refused_priced_mb);
+        EXPECT_EQ(graph::mib_rounded_up(scratch), copy.get_cut().refused_priced_mb);
+        EXPECT_EQ(1u, copy.get_cut().refused_max_mb);
+        ASSERT_EQ(1u, budget.unit_refusals().size());
+        const auto refusal = budget.unit_refusals()[0];
+        EXPECT_EQ(4u, refusal.record);
+        EXPECT_EQ(3u, refusal.pair);
+        EXPECT_EQ("record 4 on " + pair, refusal.where);
+        EXPECT_EQ("answer", std::string(refusal.account));
+        EXPECT_EQ(0u, refusal.held);
+        EXPECT_EQ(scratch, refusal.charge);
+        // charged: the stub's tree alone (the record's scratch never was)
+        const cli::SearchRecordPrice stub = cli::search_record_price(copy, false, true, "g",
+                                                                     "g.dbg", "g.annodbg", "");
+        EXPECT_EQ(0u, stub.transient);
+        EXPECT_EQ(stub.tree, budget.answer().held());
+        EXPECT_EQ(1u, budget.units());
+        // the next unit of the pair is checked and charged as if the refused one were not there
+        SeqSearchResult::LabelCountCoordsVec small_rows;
+        PositionCoords small(1);
+        small.add(0, 7);
+        small_rows.emplace_back("b", 1, small, 0);
+        SeqSearchResult next(QuerySequence { 5, "r", std::string(31, 'C') },
+                             std::move(small_rows));
+        const cli::SearchRecordPrice price = cli::search_record_price(next, false, true, "g",
+                                                                      "g.dbg", "g.annodbg", "");
+        EXPECT_TRUE(cli::charge_search_unit(budget, &transient_charged, &next, false, true, "g",
+                                            "g.dbg", "g.annodbg", "", pair, 3));
+        EXPECT_EQ(graph::SearchCut::Refused::NO, next.get_cut().refused);
+        EXPECT_EQ(stub.tree + price.tree + price.transient, budget.answer().held());
+    }
+    // --verbose-output: measuring holds nothing; the unit's own price is checked as before
+    EXPECT_EQ(0u, cli::search_record_scratch(unit, true));
+}
+
 } // namespace
 } // namespace mtg::test

@@ -626,6 +626,33 @@ TEST(ServerSearchRequest, ResolvesDefaultsAndOverridesWithoutChangingServerConfi
     EXPECT_EQ(config.query_mode, COORDS);
 }
 
+TEST(ServerSearchRequest, PartialRefusalIsABoolean) {
+    char program[] = "metagraph", command[] = "server_query", input[] = "fixture.csv";
+    char *argv[] = {program, command, input};
+    Config config(3, argv);
+    Json::Value json;
+    json["FASTA"] = ">q\nACGT\n";
+    EXPECT_FALSE(parse_search_request(json, config).partial_refusal);
+    json["partial_refusal"] = true;
+    EXPECT_TRUE(parse_search_request(json, config).partial_refusal);
+    json["partial_refusal"] = false;
+    EXPECT_FALSE(parse_search_request(json, config).partial_refusal);
+
+    // Neither coerced nor left to jsoncpp: a number, a string, null or an array is a 400.
+    const Json::Value not_booleans[] = {Json::Value(1), Json::Value(0), Json::Value("true"),
+                                        Json::Value(Json::nullValue),
+                                        Json::Value(Json::arrayValue)};
+    for (const auto &value : not_booleans) {
+        json["partial_refusal"] = value;
+        try {
+            parse_search_request(json, config);
+            ADD_FAILURE() << "accepted partial_refusal " << value.toStyledString();
+        } catch (const std::invalid_argument &e) {
+            EXPECT_STREQ(e.what(), "partial_refusal should be a boolean (true or false)");
+        }
+    }
+}
+
 TEST(ServerSearchRequest, ModePrecedenceAndIgnoredFlagsShareCacheIdentity) {
     char program[] = "metagraph", command[] = "server_query", input[] = "fixture.csv";
     char *argv[] = {program, command, input};

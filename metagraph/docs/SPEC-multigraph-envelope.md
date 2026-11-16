@@ -162,8 +162,9 @@ The answer keeps its upstream shape (a list of `{seq_description, results, ...}`
   §4.6), never a measurement, so a request near the bound may be refused where it would have fit. Not charged:
   the rows decoded before the top-N cut, the index (mmap pages or an `in_ram` load) and the body (its own cap).
 
-  `partial_refusal` (a boolean, false when absent, read as `with_signature`; part of the result cache's key)
-  decides how a unit past the bound is reported:
+  `partial_refusal` (a JSON boolean, false when absent; any other value, a number, a string or `null`, is
+  refused 400 `{"error":"partial_refusal should be a boolean (true or false)"}` before any work; part of the
+  result cache's key) decides how a unit past the bound is reported:
   - **With it**, a unit whose values or own object would pass the bound is **refused alone**. Its rows are
     absent, and its entry in its record's `cuts` states `returned` 0, `complete` false, `nth_score` null, `tied`
     and `tied_returned` 0 (and, where the pair's cut states them, `nth_median` null and `tied_same_median` 0) and
@@ -174,10 +175,12 @@ The answer keeps its upstream shape (a list of `{seq_description, results, ...}`
 
     `account` is `"values"` (its values passed the bound while it was searched or as its rows were handed over)
     or `"answer"` (its own object was priced past the bound before it was built); with `"answer"` also
-    `priced_mb`, that object's price in MiB rounded up (a function of the unit alone). Every other unit's rows
-    (a contiguous run in `results`, in pair order) and entry are the bytes of the answer without a budget, and
-    so are the record's other members (`seq_description`, and with `align` the first pair's alignment members,
-    which a refused unit keeps). The status is 200, also when every unit is refused. A refused entry never
+    `priced_mb`, that object's price in MiB rounded up (a function of the unit alone; when what measuring that
+    price holds, the open coordinate ranges of a `query_coords` row, alone passes the bound, the price is not
+    measured and `priced_mb` states that scratch, a lower bound). Every other unit's rows (a contiguous run in
+    `results`, in pair order) and entry are the bytes of the answer without a budget, and so are the record's
+    other members (`seq_description`, and with `align` the first pair's alignment members, which a refused unit
+    keeps). The status is 200, also when every unit is refused. A refused entry never
     means "nothing matched": the caller did not get that unit's rows, and the same request is refused in the
     same units again. Retry the record alone on that pair with fewer `top_labels`, a larger
     `discovery_fraction` or no per-position values.
@@ -202,8 +205,9 @@ The answer keeps its upstream shape (a list of `{seq_description, results, ...}`
   `partial_refusal` a request refused by the budget is so refused whatever else its work raised (another pair's
   error, a load refused `index_changed`). With it a refused unit is no error: another pair's error is answered
   as without a budget (the first failing pair in pair order), and only the request's answer passing the bound
-  wins over it. The same request is refused again (the code is final: change the request), and a 400 is not
-  cached; a partly refused 200 is cached as any answer. `in_ram` changes nothing: the same charges, the same
+  wins over it: a request whose answer passes the bound is refused 400 `search_answer_too_large` (`account`
+  `"answer"`) also when another pair failed. The same request is refused again (the code is final: change the
+  request), and a 400 is not cached; a partly refused 200 is cached as any answer. `in_ram` changes nothing: the same charges, the same
   refusals. Below the bound every answer is the one without a budget, byte for byte, in both modes. Since lane
   T7-P1 the values are bounded per unit, not per pair: a request refused before only because a pair's records
   together passed the bound, each record within it, is answered.
@@ -552,7 +556,8 @@ single-graph server states at the top level of `GET /capabilities` (lane T7-P1 a
 refusal's status, code, accounts and body members (sets, sorted; the body writes `error` first), `rule` this
 section's reference. `unit_refused` states the request field that refuses a unit alone and its entry's
 `refused`: its code, accounts and members (`priced_mb` only with `account` `"answer"`); its presence is the
-marker that the engine reads the field (an engine without it ignores the field and refuses the whole request).
+marker that the engine reads the field (an engine without it ignores the field and refuses the whole request);
+it is stated with or without a bound (with `max_memory_mb` `null` the field is read and changes nothing).
 The concurrency the model totals of section 3 depend on: `pair_searches_at_once`, the pair searches the server
 runs at once over every request (a multi-graph server's graphs' pool, `-p`, which the fan-outs of `/resolve`
 and `/pattern` share; a single-graph server runs /search on its handler thread: `handler_threads`);

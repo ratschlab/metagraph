@@ -262,6 +262,8 @@ enum QueryMode {
  *                      result before the task returns
  * @param pair          the pair, as the log names it ("pair (<name>, <graph>, <annotation>)"
  *                      or "the graph")
+ * @param pair_index    the pair's place in the answer (the order of a record's `cuts`
+ *                      entries; the order of the units refused alone in the log)
  *
  * @return the number of base pairs (characters) in query file
  */
@@ -271,7 +273,8 @@ size_t query_fasta(const std::string &file_path,
                    const graph::AnnotatedDBG &anno_graph,
                    const graph::align::DBGAlignerConfig *aligner_config,
                    graph::SearchBudget *budget = nullptr,
-                   const std::string &pair = "");
+                   const std::string &pair = "",
+                   size_t pair_index = 0);
 
 int query_graph(Config *config);
 

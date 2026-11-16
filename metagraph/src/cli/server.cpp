@@ -88,6 +88,9 @@ struct SearchSource {
     std::string graph_path;
     std::string annotation_path;
     std::string index_fp;
+    // the pair's place in the answer (the order of a record's `cuts` entries, and of the units
+    // refused alone in the log)
+    size_t index = 0;
 };
 
 /**
@@ -166,7 +169,7 @@ Json::Value process_search_request(const SearchRequest &request,
                 if (!charge_search_unit(*budget, &transient_charged, &seq_result,
                                         config.verbose_output, source.tagged, source.graph,
                                         source.graph_path, source.annotation_path,
-                                        source.index_fp, pair)) {
+                                        source.index_fp, pair, source.index)) {
                     return;
                 }
             }
@@ -187,7 +190,7 @@ Json::Value process_search_request(const SearchRequest &request,
             json["cuts"].append(std::move(cut));
             objects.emplace_back(seq_result.get_sequence().id, std::move(json));
         },
-        config, anno_graph, aligner_config.get(), budget, pair
+        config, anno_graph, aligner_config.get(), budget, pair, source.index
     );
 
     // Ensure JSON results are sorted by their ID
@@ -220,9 +223,10 @@ HttpError search_budget_refusal(const graph::SearchBudget &budget, size_t reques
 }
 
 // The units of a /search refused alone (the request's `partial_refusal`), one log line each
-// (lane T7-P1): the record (its index in the body) and the pair, the account that passed the
-// bound, what it held before the charge and the charge (for the answer account: 0 and the
-// unit's own object's price)
+// (lane T7-P1), in the answer's order (by record, then by the pair's place in the record's
+// `cuts`): the record (its index in the body) and the pair, the account that passed the bound,
+// what it held before the charge and the charge (for the answer account: 0 and the unit's own
+// object's price, or the scratch of measuring it when that alone passed)
 void log_unit_refusals(const graph::SearchBudget &budget, size_t request_id) {
     for (const auto &unit : budget.unit_refusals()) {
         logger->info("[Server] Request {}: unit refused: {}: the {} account passed the bound of "
@@ -1370,6 +1374,7 @@ int run_server(Config *config) {
                             sources[t].graph_path = pair.first;
                             sources[t].annotation_path = pair.second;
                             sources[t].index_fp = fp_of_pair(pair);
+                            sources[t].index = t;
                         }
                         struct PendingQueries {
                             std::vector<std::shared_future<std::exception_ptr>> futures;

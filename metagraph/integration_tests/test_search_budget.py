@@ -20,7 +20,9 @@ Each test learns a request's charge from the server's log ("answer budget: value
 unit, answer M B, bound B MiB, R of U units refused"; the accounts only grow, so the bound a
 request needs is the larger of the two) or fixes a bound its fixture passes by far. Each refusal's
 log line states the account whose charge passed the bound (a unit's with its record and pair), what
-it held before that charge, and the charge; each unit refused alone has a line of its own.
+it held before that charge, and the charge; each unit refused alone has a line of its own, in the
+answer's order (by record, then the pair's place among the record's cuts). `partial_refusal` is a
+JSON boolean; any other value is refused 400.
 """
 
 import ctypes
@@ -235,6 +237,20 @@ class TestSearchAnswerBudget(TestingBase):
             for name in cls.telomere_names:
                 f.write(f'{name},{cls.pairs["pt"][0]},{cls.pairs["pt"][1]}\n')
             f.write(f'u,{cls.pairs["pa"][0]},{cls.pairs["pa"][1]}\n')
+        # polyA: a record holding the k-mer A^31 17,000 times and a record of unique sequence,
+        # so that a query_coords row holds 17,000 coordinates at one position (test 24)
+        cls.polya_unique = ''.join(rng.choice('ACGT') for _ in range(400))
+        cls.fasta['pp'] = f'{d}/pp.fa'
+        with open(cls.fasta['pp'], 'w') as f:
+            f.write(f'>pp0\n{"A" * (17000 + cls.k - 1)}\n>pp1\n{cls.polya_unique}\n')
+        cls.pairs['pp'] = cls._coord_pair(d, 'pp')
+        # names whose unit lines sort otherwise than the answer's order (test 26): p with two
+        # pairs listed against their paths' order (pb's, then pa's), and p+, whose lines sort
+        # before p's ('+' before ',') while the name sorts after it
+        cls.order_csv = f'{d}/order.csv'
+        with open(cls.order_csv, 'w') as f:
+            for name, pair in (('p', 'pb'), ('p', 'pa'), ('p+', 'pc')):
+                f.write(f'{name},{cls.pairs[pair][0]},{cls.pairs[pair][1]}\n')
         cls.servers = []
 
     @classmethod
@@ -991,6 +1007,135 @@ class TestSearchAnswerBudget(TestingBase):
         self.assertEqual((200, first.content), (second.status_code, second.content))
         self.assertIn('cache HIT', server.text())
         self.stop(server)
+
+    def test_the_measuring_scratch_alone_past_the_bound(self):
+        """test 24 (review m1): query_coords, a record whose row holds 17,000 coordinates at one
+        position (polyA): its values within the bound of 1 MiB, the scratch of measuring its
+        object (the open coordinate ranges, 2.5 buffers of 32,768 ranges of 24 B: 1,966,080 B)
+        past it. With the field the unit is refused alone "answer" before it is measured,
+        priced_mb that scratch in MiB rounded up (2), the other record answered byte for byte as
+        alone; without it 400 "answer", the log naming the unit"""
+        polya, unique = ('polya', 'A' * self.k), ('unique', self.polya_unique[50:250])
+        body = self.body('query_coords', [polya, unique], top_labels=1000)
+        unbounded = self.server(['--search-max-answer-memory-mb', '0'], pair='pp')
+        alone, alone_parsed = self.reference(unbounded, self.body('query_coords', [unique],
+                                                                   top_labels=1000))
+        _, both = self.reference(unbounded, body)
+        self.stop(unbounded)
+        self.assertEqual(1, both[0]['cuts'][0]['returned'])
+        default = self.server(pair='pp')
+        _, (values, _) = self.answered(default, body)
+        self.stop(default)
+        self.assertLess(values, MIB)
+        scratch = 1966080
+        bounded = self.bounded(1, pair='pp')
+        text, units, (_, answer, refused, built) = self.partial(bounded, body)
+        self.assertEqual([(0, 'the graph', 'answer', 0, scratch)], units)
+        self.assertEqual((1, 2), (refused, built))
+        self.assertLess(answer, MIB)
+        expected = {'cuts': [refused_entry(both[0]['cuts'][0], 'answer', 1, 2)], 'results': [],
+                    'seq_description': 'polya'}
+        self.assertEqual(styled([expected] + alone_parsed), text)
+        self.assertTrue(text.endswith(',' + alone[1:]))
+        before = len(bounded.text())
+        self.assertEqual('the answer account of record 0 on the graph',
+                         self.refused(bounded, body, 1, 'answer'))
+        [line] = [m for m in REFUSAL.finditer(bounded.text()) if m.start() >= before]
+        self.assertEqual((0, scratch), (int(line.group(4)), int(line.group(6))))
+        self.stop(bounded)
+
+    def test_the_answer_account_beside_another_pairs_error(self):
+        """test 25 (review m2, section 3.3): with the field, the request's answer account past
+        the bound while the pairs work (the objects of 100 records of 100 k-mers on pa, each
+        within it, no unit refused) beside another pair's error (a coordinate query on pn): 400
+        "answer", not the pair's error, which a server without a budget answers. (A unit whose own
+        object passes is refused alone and charges only its stub; an answer that passes only with
+        its text, priced after every pair has answered, never meets the error: such requests get
+        the pair's error.)"""
+        many = [self.first_kmers('pa', 100)] * 100
+        body = self.body('query_coords', many, graphs=['pa', 'pn'])
+        unbounded = self.server(['--search-max-answer-memory-mb', '0'], multi=True)
+        reference = unbounded.post('search', body)
+        self.stop(unbounded)
+        self.assertEqual(400, reference.status_code)
+        self.assertIn('Annotation does not support k-mer coordinate queries', reference.text)
+        default = self.server(multi=True)
+        _, (values, answer) = self.answered(default, dict(body, graphs=['pa']))
+        self.stop(default)
+        self.assertLess(values, MIB)
+        self.assertGreater(answer, MIB)
+        bounded = self.bounded(1, multi=True)
+        for field in ({'partial_refusal': True}, {}):
+            before = len(bounded.text())
+            self.assertEqual('the answer account',
+                             self.refused(bounded, dict(body, **field), 1, 'answer'))
+            self.assertEqual([], self.units(bounded, before))
+        self.stop(bounded)
+
+    def test_the_unit_lines_in_the_answers_order(self):
+        """test 26 (review m3): the unit lines in the order of the cuts (by record, then the
+        pair's place in the answer), not in their text's byte order: the name p with two pairs
+        listed against their paths' order (pb's, then pa's) beside p+ (pc's), whose lines sort
+        first; two records, each refused alone on every pair"""
+        record = self.whole('pa', 2) + self.whole('pb', 2) + self.whole('pc', 2)
+        body = self.body('query_coords', [('r0', record), ('r1', record)], graphs=['p+', 'p'])
+        unbounded = self.server(['--search-max-answer-memory-mb', '0'], multi=True,
+                                csv=self.order_csv)
+        _, reference = self.reference(unbounded, body)
+        self.stop(unbounded)
+        order = (('p', 'pb'), ('p', 'pa'), ('p+', 'pc'))
+        self.assertEqual([(name, self.pairs[pair][0]) for name, pair in order],
+                         [(cut['graph'], cut['graph_path']) for cut in reference[0]['cuts']])
+        wheres = [f'pair ({name}, {self.pairs[pair][0]}, {self.pairs[pair][1]})'
+                  for name, pair in order]
+        self.assertEqual(wheres[::-1], sorted(wheres))
+        bounded = self.bounded(1, multi=True, csv=self.order_csv)
+        text, units, (_, _, refused, built) = self.partial(bounded, body)
+        self.assertEqual((6, 6), (refused, built))
+        self.assertEqual([(i, where, 'values') for i in (0, 1) for where in wheres],
+                         [u[:3] for u in units])
+        every = {(i, name): ('values', None) for i in (0, 1) for name in ('p', 'p+')}
+        self.assertEqual(styled(with_refused(reference, every, 1)), text)
+        self.stop(bounded)
+
+    def test_partial_refusal_is_a_boolean(self):
+        """test 27 (review m4): partial_refusal true or false, or absent; any other value (a
+        number, a string, null, an array) refused 400 {"error": ...} (the generic refusal of a
+        bad field) before any work, on a server with a bound and on one without"""
+        body = self.body('plain', [self.records['pa'][0]])
+        for server in (self.bounded(1), self.server(['--search-max-answer-memory-mb', '0'])):
+            answers = set()
+            for value in (True, False, None):
+                r = server.post('search', body if value is None
+                                else dict(body, partial_refusal=value))
+                self.assertEqual(200, r.status_code, r.text[:2000])
+                answers.add(r.content)
+            self.assertEqual(1, len(answers))
+            for value in (1, 0, 'true', None, []):
+                before = len(server.text())
+                r = server.post('search', dict(body, partial_refusal=value))
+                self.assertEqual((400, {'error': 'partial_refusal should be a boolean (true or '
+                                                 'false)'}), (r.status_code, r.json()))
+                self.assertNotIn('answer budget', server.text()[before:])
+            self.stop(server)
+
+    def test_a_name_listed_twice(self):
+        """test 28 (review, untested claim 7): a name listed twice in `graphs` is one name (the
+        list is deduplicated before any pair is queried): one entry a record, one unit line"""
+        body = self.body('query_coords', [self.whole('pa', 2), self.records['pa'][0]],
+                         graphs=['pa', 'pa'])
+        unbounded = self.server(['--search-max-answer-memory-mb', '0'], multi=True)
+        once = unbounded.post('search', dict(body, graphs=['pa']))
+        twice = unbounded.post('search', body)
+        self.stop(unbounded)
+        self.assertEqual((200, once.content), (twice.status_code, twice.content))
+        self.assertEqual([['pa'], ['pa']],
+                         [[cut['graph'] for cut in obj['cuts']] for obj in json.loads(twice.text)])
+        bounded = self.bounded(1, multi=True)
+        _, units, (_, _, refused, built) = self.partial(bounded, body)
+        self.assertEqual([(0, self.pair_name('pa'), 'values')], [u[:3] for u in units])
+        self.assertEqual((1, 2), (refused, built))
+        self.stop(bounded)
 
 
 if __name__ == '__main__':
