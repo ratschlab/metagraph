@@ -879,6 +879,238 @@ class TestBudgets(unittest.TestCase):
                     v.walks('right', resume=e.partial.resume)
 
 
+SPLIT_MODES = [(m, r) for m in ('annotate', 'constrain') for r in ('merge', 'keep')]
+UNION_DOCS = sorted(f[:-len('.graphlet.json')] for f in os.listdir(UNION)
+                    if f.endswith('.graphlet.json'))
+
+
+def split_union(mode, rec):
+    """Graph A's and graph B's parts of the split index, the unsplit index's retrieval, and
+    the union of A and B (both expected)."""
+    a, b, al = (union_doc('%s_%s_%s' % (x, mode, rec)) for x in ('a', 'b', 'all'))
+    return a, b, al, union_pairs([{'pair': 'A', 'graphlet': a}, {'pair': 'B', 'graphlet': b}],
+                                 expected_pairs=['A', 'B'])
+
+
+def dag_spellings(g, side):
+    """Every root-to-leaf spelling of an arm's segment DAG (through every parent of a merge),
+    in walking order: what the retrieval walked, displayed or not."""
+    segs = g.arms[side].segments
+    kids = {s.id: [] for s in segs}
+    for s in segs:
+        for p in s.parents:
+            kids[p].append(s.id)
+    out = []
+
+    def go(i, acc):
+        acc += segs[i].walk
+        if not kids[i]:
+            out.append(acc)
+        for c in kids[i]:
+            go(c, acc)
+
+    for s in segs:
+        if not s.parents:
+            go(s.id, '')
+    return out
+
+
+def split_record(header):
+    return T.cli_record('split_all', header)
+
+
+class TestSplitGraphs(unittest.TestCase):
+    """P6, the split-graph oracle and the non-claim: one tiny index split by record into two
+    graphs (A: a1 and the plasmid pl; B: b1, b2 and pl) and the unsplit index, keep and merge,
+    annotate and constrain."""
+
+    def test_every_union_spelling_is_a_prefix_of_the_unsplit_retrieval(self):
+        for mode, rec in SPLIT_MODES:
+            a, b, al, u = split_union(mode, rec)
+            for side in u.arms():
+                dag = dag_spellings(al, side)
+                for w in u.walks(side, by='id', stubs=True):
+                    sp = u.spell(side, w.id, 'walk')
+                    self.assertTrue(any(d.startswith(sp) for d in dag), (mode, rec, side, w.id))
+
+    def test_the_shared_record_is_carried_by_both_pairs(self):
+        flank = split_record('pl')[30:]             # pl after the 30 bp seed
+        for mode, rec in SPLIT_MODES:
+            a, b, al, u = split_union(mode, rec)
+            (w,) = [w for w in u.walks('right', by='id') if u.spell('right', w.id) == flank]
+            self.assertEqual(w.held_in, ('A', 'B'), (mode, rec))
+            if mode == 'constrain' and rec == 'keep':
+                # pl's own label carries it whole in both pairs
+                for s in u.carriers('right', w.id):
+                    self.assertIn(('pl', 0), [(x.label.name, x.from_bp) for x in s.labels])
+
+    def test_a_walk_no_graph_holds_whole_is_not_in_the_union(self):
+        a1, b1 = split_record('a1'), split_record('b1')
+        cross = a1[30:126] + b1[50:]                # S M1 C M2 U J (a1), then T (b1)
+        for mode, rec in SPLIT_MODES:
+            a, b, al, u = split_union(mode, rec)
+            walked = cross in dag_spellings(al, 'right')
+            # the unsplit annotate retrieval walks it; no label carries it in constrain mode
+            self.assertEqual(walked, mode == 'annotate', (mode, rec))
+            spellings = [u.spell('right', w.id, 'walk')
+                         for w in u.walks('right', by='id', stubs=True)]
+            self.assertNotIn(cross, spellings)
+            self.assertFalse(any(s.startswith(cross) for s in spellings))
+            # the statements, FASTA and GFA state the non-claim
+            self.assertIn(U.SCOPE, u.coverage('right').sentence)
+            self.assertEqual(u.statements('right').scope, U.SCOPE)
+            heads = [h for h in u.to_fasta().split('\n') if h.startswith('>')]
+            self.assertTrue(heads and all(h.endswith(' scope=within_one_graph') for h in heads))
+            self.assertIn('# scope: ' + U.SCOPE, u.to_gfa().split('\n'))
+
+    def kmers(self, headers):
+        out = set()
+        for h in headers:
+            r = split_record(h)
+            out.update(r[i:i + 15] for i in range(len(r) - 14))
+        return out
+
+    def test_annotate_every_walk_of_one_graph_is_in_the_union(self):
+        graphs = {'A': self.kmers(['pl', 'a1']), 'B': self.kmers(['pl', 'b1', 'b2'])}
+        for rec in ('merge', 'keep'):
+            a, b, al, u = split_union('annotate', rec)
+            seed = al.seed.sequence
+            spelled = {u.spell('right', w.id): w for w in u.walks('right', by='id')}
+            one_graph = 0
+            for w in al.walks('right', by='id'):
+                sp = al.spell('right', w.path_id)
+                whole = seed + sp
+                ks = {whole[i:i + 15] for i in range(len(whole) - 14)}
+                for g, kmers in graphs.items():
+                    if ks <= kmers:
+                        one_graph += 1
+                        self.assertIn(sp, spelled, (rec, w.path_id))
+                        self.assertIn(g, spelled[sp].held_in)
+            self.assertGreaterEqual(one_graph, 2)
+
+    def test_constrain_walks_of_a_graphs_record_are_in_its_part(self):
+        records = {'A': {'pl', 'a1'}, 'B': {'pl', 'b1', 'b2'}}
+        for rec in ('merge', 'keep'):
+            a, b, al, u = split_union('constrain', rec)
+            parts = {'A': a, 'B': b}
+            for w in al.walks('right', by='id'):
+                sp = al.spell('right', w.path_id)
+                for g, names in records.items():
+                    if {l.name for l in w.labels_full} & names:
+                        part = parts[g]
+                        self.assertIn(sp, [part.spell('right', x.path_id)
+                                           for x in part.walks('right', by='id')], (rec, g))
+
+
+class TestAbsence(unittest.TestCase):
+    """P10: each absence value of §2.4 on the union fixtures."""
+
+    def spans(self, u, side, spelling):
+        (w,) = [w for w in u.walks(side, by='id', stubs=True) if u.spell(side, w.id) == spelling]
+        return {s.pair: s for s in u.carriers(side, w.id)}
+
+    def test_graph_under_annotate_per_path(self):
+        a, b, al, u = split_union('annotate', 'keep')
+        # a1's allele C is not in graph B, nor U after M2 on pl's allele A
+        s = self.spans(u, 'right', split_record('a1')[30:])['B']
+        self.assertEqual((s.how, s.to_bp, s.absence), ('diverges', 25, 'graph'))
+        s = self.spans(u, 'right', split_record('pl')[30:81] + split_record('a1')[81:])['B']
+        self.assertEqual((s.how, s.to_bp, s.absence), ('diverges', 51, 'graph'))
+
+    def test_under_strategy_in_constrain_and_under_united_histories(self):
+        for mode, rec in (('constrain', 'keep'), ('constrain', 'merge'), ('annotate', 'merge')):
+            a, b, al, u = split_union(mode, rec)
+            # group A's 126 bp walk, which graph B does not follow
+            (w,) = [w for w in u.walks('right', by='id') if w.length_bp == 126]
+            s = {x.pair: x for x in u.carriers('right', w.id)}['B']
+            self.assertEqual((s.how, s.absence), ('diverges', 'under_strategy'), (mode, rec))
+
+    def test_dead_end_is_graph_also_at_the_certificate_edge(self):
+        b = union_doc('b_annotate_keep')
+        z = split_record('b2')[30:]
+        z = split_record('pl')[30:] + z[len(split_record('pl')) - 30:]   # pl's allele, then Z
+        a = union_doc('a_annotate_keep')
+        r76 = union_doc('a_annotate_keep_r76')
+        u = union_pairs([{'pair': 'A', 'graphlet': a}, {'pair': 'B', 'graphlet': b},
+                         {'pair': 'R76', 'graphlet': r76}])
+        s = self.spans(u, 'right', z)
+        # A's graph ends where pl ends, B's goes on with Z: a dead end inside A's certificate
+        self.assertEqual((s['A'].how, s['A'].to_bp, s['A'].end_reasons['path_reason'],
+                          s['A'].absence), ('ends', 76, 'dead_end', 'graph'))
+        # cut at the radius there: at the certificate's edge, uncertified
+        self.assertEqual((s['R76'].how, s['R76'].to_bp, s['R76'].end_reasons['path_reason'],
+                          s['R76'].absence), ('ends', 76, 'max_extension_bp', 'uncertified'))
+        # a dead end at the certificate's edge is still the graph's (it comes first)
+        edge = copy.deepcopy(a)
+        edge.arms['right'].complete_to_bp = 76
+        u = union_pairs([{'pair': 'A', 'graphlet': edge}, {'pair': 'B', 'graphlet': b}])
+        s = self.spans(u, 'right', z)['A']
+        self.assertEqual((s.to_bp, s.absence), (76, 'graph'))
+
+    def test_walk_rule_against_another_k(self):
+        r11, r21 = union_doc('repeat11'), union_doc('repeat21')
+        u = union_pairs([{'pair': 'k11', 'graphlet': r11}, {'pair': 'k21', 'graphlet': r21}])
+        whole = r21.spell('right', 0)               # the record's 96 bp after the seed
+        s = self.spans(u, 'right', whole)
+        # k 11 meets the repeat's (k+1)-mers again and stops by edge reuse; k 21 spells on
+        self.assertEqual((s['k11'].how, s['k11'].to_bp, s['k11'].end_reasons['path_reason'],
+                          s['k11'].absence), ('ends', 67, 'edge_reuse', 'walk_rule'))
+        self.assertEqual((s['k11'].k, s['k21'].k, s['k11'].regime), (11, 21, 'basic'))
+        self.assertIn('ends=k11@67:edge_reuse/walk_rule', u.to_fasta('right'))
+
+    def test_an_event_decides_only_its_own_character(self):
+        r11, r21 = union_doc('repeat11'), union_doc('repeat21')
+        whole = r21.spell('right', 0)
+        other = copy.deepcopy(r11)
+        for seg in other.arms['right'].segments:
+            for ev in seg.events:
+                if ev.type == 'blocked':
+                    self.assertEqual(ev.char, whole[ev.at_bp])
+                    # the event blocked another character: it decides nothing for this one
+                    ev.char = next(c for c in 'ACGT' if c != ev.char)
+        u = union_pairs([{'pair': 'k11', 'graphlet': other}, {'pair': 'k21', 'graphlet': r21}])
+        s = self.spans(u, 'right', whole)['k11']
+        self.assertEqual((s.to_bp, s.absence), (67, 'graph'))
+
+
+class TestMixedFixtures(unittest.TestCase):
+    """P11 on the union fixtures: parts at two k, and an arm one pair did not walk."""
+
+    def test_two_k(self):
+        u = union_pairs([{'pair': 'A15', 'graphlet': union_doc('a_annotate_merge')},
+                         {'pair': 'A21', 'graphlet': union_doc('a21_annotate_merge')}])
+        s = u.coverage('right').sentence
+        self.assertTrue(s.startswith('right arm, to 200 bp: complete, qualified, in A15 '
+                                     '[annotate, kmer, k 15] ('), s)
+        self.assertIn('A21 [annotate, kmer, k 21] (', s)
+        for w in u.walks('right', by='id', stubs=True):
+            self.assertEqual({sp.pair: sp.k for sp in u.carriers('right', w.id)},
+                             {'A15': 15, 'A21': 21})
+        # one record at two k: the same walks, each whole in both pairs
+        for w in u.walks('right', by='id'):
+            self.assertEqual(w.whole_in, ('A15', 'A21'))
+
+    def test_arm_not_walked(self):
+        u = union_pairs([{'pair': 'A', 'graphlet': union_doc('a_annotate_merge')},
+                         {'pair': 'B', 'graphlet': union_doc('b_annotate_merge_right')}])
+        c = u.coverage('left')
+        self.assertEqual(c.per_pair['B'], {'category': 'arm_not_walked', 'certified_to_bp': 0,
+                                           'note': 'direction right'})
+        for w in u.walks('left', by='id'):
+            s = {x.pair: x for x in u.carriers('left', w.id)}['B']
+            self.assertEqual((s.how, s.to_bp, s.absence), ('none', 0, 'under_strategy'))
+
+    def test_union_of_each_fixture_is_that_fixture(self):
+        # P2 on the union fixtures
+        for name in UNION_DOCS:
+            g = union_doc(name)
+            u = union_pairs([g])
+            for side in g.arms:
+                parts = sorted(g.spell(side, w.path_id) for w in g.walks(side, by='id'))
+                self.assertEqual(sorted(u.spell(side, w.id) for w in u.walks(side, by='id')),
+                                 parts, (name, side))
+
+
 R237 = os.path.join(UNION, 'r237')
 # the body sha256 of each part as the service's record states it (the README of r237/)
 R237_BODIES = {'bact_other': 'cda902d0df71afab3d9fe1bcf33a04630468c22a1748777941686867fcc31eea',
