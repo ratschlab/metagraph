@@ -20,19 +20,23 @@ single retrieval, the **graphlet**:
 * going further is a **new traversal**: the library builds the request from a walk's
   continuation, the server runs it. Nothing about the first retrieval is resumed.
 
-**Graphlets are not merged.** One combination is offered: the graphlets of one seed
+**Graphlets are not merged.** Two combinations are offered. The graphlets of one seed
 answered on several pairs (the graphs of a release, or two databases) can be combined by
 sequence (`Combining one seed across pairs`_). The result keeps every retrieval unchanged
 and states, with every answer, how complete each pair is, which pairs carry each walk and
 how far, that a pair not following a walk did not follow it under its own request, and
 that labels are each pair's own. Every path it gives is held whole by one graph; inferred
 paths that switch graphs where the parts allow it, with every switch named, come in a
-later release. Every other combination is not offered, with the reason (`What is not
-combined`_). Every other operation reads one retrieval, or compares two: ``subgraph()`` is
-a filtered view of one graphlet, ``compare()`` compares two retrievals of the same locus
-on the same index, and a continuation (``deepen()``, ``next_request()``) returns a new
-graphlet that is not joined to its parent. ``branching.on_reconverge: "merge"`` merges
-paths within one traversal only.
+later release. A continuation can be stitched to the walk it continues (`Stitching a
+continuation`_, experimental); the result states, at each junction and walk, why its walks
+may differ from one uninterrupted walk (``qualified``, with named causes); ``exact`` comes
+in a later release. Combining two retrievals of one pair is planned; every other
+combination is not offered, with the reason (`What is not combined`_). Every other
+operation reads one retrieval, or compares two: ``subgraph()`` is a filtered view of one
+graphlet, ``compare()`` compares two retrievals of the same locus on the same index, and a
+continuation (``deepen()``, ``next_request()``) returns a new graphlet, which only
+``stitch()`` joins to its parent. ``branching.on_reconverge: "merge"`` merges paths within
+one traversal only.
 
 The traversal itself (seed validation, the walk rule, label modes, termination reasons)
 is specified in ``metagraph/docs/SPEC-labeled-traversal-core.md`` (§5 to §7); the
@@ -2056,7 +2060,9 @@ traversals.
 operation                                                status
 =======================================================  ===========================================
 one seed across pairs (``union_pairs``)                  offered (`Combining one seed across pairs`_)
-a continuation stitched to the walk it continues          designed, built next
+a continuation stitched to the walk it continues         offered, experimental (`Stitching a
+                                                         continuation`_): every verdict
+                                                         ``qualified``
 two retrievals of one pair                               designed, built later: until then
                                                          ``union_pairs()`` refuses them
                                                          (``duplicate_pair``) and ``compare()``
