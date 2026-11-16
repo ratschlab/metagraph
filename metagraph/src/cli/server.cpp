@@ -1818,7 +1818,8 @@ int run_server(Config *config) {
                                    const shared_ptr<HttpServer::Request> &request,
                                    const std::function<bool()> &gone,
                                    PatternDelivery *delivery,
-                                   std::shared_ptr<RequestEntry> *tracked) {
+                                   std::shared_ptr<RequestEntry> *tracked,
+                                   std::vector<std::optional<PatternEntries>> *patterns) {
         Timer timer;
         // the request's CPU time and page faults: this thread's own part (the parse, the
         // checks, the envelope, an inline pair) and each pooled pair's work on its thread
@@ -1893,12 +1894,16 @@ int run_server(Config *config) {
                 // a pooled pair's budget is capped at the work cutoff, stated when it binds
                 if (const auto cut = control.cutoff_cap())
                     pair_delivery->set_cutoff_cap(*cut);
-                Json::Value answer = process_pattern_request(json, lease->index(), *config,
-                                                             &identity, pair_delivery);
+                // the answer held as text (SPEC-pattern-search.md §12.1): its head becomes
+                // the entry, its patterns are written into it by the envelope's writing
+                PatternAnswer answer = process_pattern_answer(json, lease->index(), *config,
+                                                              &identity, pair_delivery);
                 if (in_ram)
-                    answer["timing"]["load_ms"] = lease->load_ms();
-                result.memory_bytes = answer["work"]["memory_bytes"].asUInt64();
-                result.entry = envelope_entry_answered(selected, identity.fp, std::move(answer));
+                    answer.head["timing"]["load_ms"] = lease->load_ms();
+                result.memory_bytes = answer.head["work"]["memory_bytes"].asUInt64();
+                result.entry = envelope_entry_answered(selected, identity.fp,
+                                                       std::move(answer.head));
+                result.patterns = std::move(answer.patterns);
                 result.answered = true;
             } catch (const PairNotStarted &) {
                 result.not_started = true;
@@ -1963,6 +1968,8 @@ int run_server(Config *config) {
         context.request_id = handles.request_id;
         context.server_instance = attempts.server_instance();
         context.deadline = deadlines.json();
+        // each answered pair's patterns, beside its entry in the envelope's order
+        *patterns = std::move(outcome.patterns);
         Json::Value out = post_envelope("/pattern", names, std::move(outcome.entries), context,
                                         timer.elapsed() * 1000);
         put_thread_usage(&out["timing"], pairs.size() > 1
@@ -2027,6 +2034,19 @@ int run_server(Config *config) {
         control.on_written = [&](int status, std::optional<size_t> bytes) {
             record_response(tracked, status, bytes);
         };
+        // the answer's result objects are held as text (SPEC-pattern-search.md §12.1): the
+        // response is written from the answer's head (or the envelope) and its entries with
+        // their texts, byte for byte the text of the whole tree, each text freed once copied;
+        // no tree of a result object is built here
+        std::optional<PatternEntries> single;
+        std::vector<std::optional<PatternEntries>> enveloped;
+        control.write = [&](const Json::Value &result, const std::function<void()> &check) {
+            if (single)
+                return pattern_answer_text(result, std::move(*single), check);
+            if (!enveloped.empty())
+                return pattern_envelope_text(result, std::move(enveloped), check);
+            return json_text(result, true, check);
+        };
         process_request(response, request, request_id, [&](const std::string &content) {
             return translated([&]() {
                 if (!config->fnames.size() && anno_graph.wait_for(0s) != std::future_status::ready)
@@ -2035,7 +2055,7 @@ int run_server(Config *config) {
                     slot = take_slot(pattern_slots);
                 if (config->fnames.size()) {
                     return multi_graph_pattern(content, request_id, request, gone, &delivery,
-                                               &tracked);
+                                               &tracked, &enveloped);
                 }
                 const AnnotatedDBG &index = *anno_graph.get();
                 const IndexIdentity identity = identity_of(index);
@@ -2070,9 +2090,9 @@ int run_server(Config *config) {
                 }
                 if (entry)
                     entry->pair_running(0);
-                Json::Value answer;
+                PatternAnswer answer;
                 try {
-                    answer = process_pattern_request(json, index, *config, &identity, &delivery);
+                    answer = process_pattern_answer(json, index, *config, &identity, &delivery);
                 } catch (...) {
                     if (entry) {
                         entry->pair_outcome(0, "refused");
@@ -2080,18 +2100,20 @@ int run_server(Config *config) {
                     }
                     throw;
                 }
+                Json::Value &head = answer.head;
                 if (entry) {
                     entry->pair_outcome(0, "answered");
-                    entry->pair_ended(0, answer["work"]["memory_bytes"].asUInt64(),
-                                      answer["timing"].get("cpu_ms", Json::Value()).isNumeric()
+                    entry->pair_ended(0, head["work"]["memory_bytes"].asUInt64(),
+                                      head["timing"].get("cpu_ms", Json::Value()).isNumeric()
                                           ? std::optional<double>(
-                                                  answer["timing"]["cpu_ms"].asDouble())
+                                                  head["timing"]["cpu_ms"].asDouble())
                                           : std::nullopt);
                 }
                 // in_ram: a single-graph server's index is the one it holds, nothing is loaded
                 if (json.isObject() && json.isMember("in_ram"))
-                    answer["timing"]["load_ms"] = 0.0;
-                return answer;
+                    head["timing"]["load_ms"] = 0.0;
+                single = std::move(answer.patterns);
+                return std::move(head);
             });
         }, /* compact */ true, &control);
     };

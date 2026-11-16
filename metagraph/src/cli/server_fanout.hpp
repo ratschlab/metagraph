@@ -18,6 +18,7 @@
 #include <json/json.h>
 
 #include "common/threads/thread_usage.hpp"
+#include "server_checks.hpp"
 #include "server_selection.hpp"
 #include "traverse_attempts.hpp"
 
@@ -393,6 +394,9 @@ struct PairResult {
     bool aborted = false;
     // the pair's final account (the answer's work.memory_bytes, or what it held)
     std::optional<uint64_t> memory_bytes;
+    // /pattern: an answered pair's entries with their results' texts (|entry| then holds no
+    // "patterns": the envelope's writing splices them in, pattern_envelope_text)
+    std::optional<PatternEntries> patterns;
     // the job's CPU time and page faults on its thread (from the job's start)
     common::ThreadUsage usage = common::ThreadUsage::zero();
 };
@@ -491,6 +495,8 @@ struct FanoutSettings {
 // What the fan-out answered: the entries in pair order, and the request's state
 struct FanoutOutcome {
     std::vector<Json::Value> entries;
+    // beside each entry: its PairResult::patterns (/pattern's answered pairs), else nullopt
+    std::vector<std::optional<PatternEntries>> patterns;
     // the client left (or the server stops) before the answer: nothing is written
     bool client_gone = false;
     // the completed pairs' CPU time and page faults
