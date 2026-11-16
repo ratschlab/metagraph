@@ -317,20 +317,33 @@ The codes, in that order: `bad_expected`, `bad_seqs_order`, `not_combinable`, `v
     certified to `min(certified_to_bp, the first junction's certified depth)`, which is the stitched walk's
     `certified_to_bp` for a walk the part holds whole. Its absence is `graph` at a dead end and `uncertified`
     otherwise, never `walk_rule` or `under_strategy`: the child's own seed re-entry or edge history may stop it where
-    an uninterrupted walk goes on.
+    an uninterrupted walk goes on. A dead end where the child recorded a blocked base or an unfollowed hairpin for
+    the next base (annotate mode records a skipped hairpin so, with path reason `D`) is not a dead end of the graph:
+    `uncertified` there too. Each `SpanJunction` carries the junction's own cause codes, then the walk-scope causes
+    (B.2, W8) of the stitched walk's pieces the span reads (to its `to_bp` for an `extends` span), in rank order;
+    a `merges` or `diverges` span in a child names no walk there and adds none.
   - *A route that reaches a continued walk.* A route through a merge of the root (or of any part) that reaches the
     end of a walk a child continues goes on in that child's tree, from its root segment, along the union walk's
     remaining bases; it reads the junction, so the span is neither complete nor certified past it (the
     coordinator's decision of 2026-11-16). Stopping the route there would state that the pair's walk ends where the
-    stitched graphlet goes on. The tests build the case from `splits45` by making the reference's first parent at its
-    merge the stub (no committed fixture has it).
+    stitched graphlet goes on. The continued walk may end at a leaf with bases or at a zero-length merge leaf that
+    the route reaches by its last step or by running out of bases at its parent; both cross. The tests build the
+    case from `splits45` by making the reference's first parent at its merge the stub (no committed fixture has it),
+    on the right arm and mirrored onto the left, and from a synthetic zero-length leaf on `limits`' model.
   - *Labels.* Not joined across a junction (D.1, phase 1b): a child's span labels start at the junction, and at a
     depth no child base reaches they are the parent's along the continued walk. The union therefore states less than
-    `StitchedWalk.labels_full`.
-  - *Statements.* The pair's coverage category is its root's, with a note naming its junctions on the arm; its
-    evidence block is `StitchedGraphlet.evidence(arm)` on an arm with a junction (exact false), its root's otherwise;
-    `summary()` lists its junctions, `provenance()` each child's entry (`stitched`), FASTA the `junctions=` token
-    (A.5) and GFA a comment line per stitched pair.
+    `StitchedWalk.labels_full`, and `walks(labels=)`, which keeps the walks a label carries whole, never selects a
+    walk with bases past a junction.
+  - *Statements.* The pair's coverage category is its root's, with a note naming its junctions on the arm and the
+    walk causes below them (`StitchedGraphlet._causes_below`); its evidence block is
+    `StitchedGraphlet.evidence(arm)` on an arm with a junction (exact false), its root's otherwise, `exact` then
+    judged on the root's identity statement alone; `summary()` lists its junctions with their `walk_causes`, as
+    `StitchedGraphlet.summary()` does, `provenance()` each child's entry (`stitched`), FASTA the `junctions=` token
+    with the span's cause codes (A.5) and GFA a comment line per stitched pair with the junction causes and the walk
+    causes below.
+  - *Order.* Two forms of one stitched graphlet with one digest (children that differ in a seed summary, say
+    `seed_id`) are one retrieval; the form kept ranks on the canonical JSON of every sub-part's envelope and seed
+    summary (A.4), so the answers do not depend on the order given (§2.10).
   - *Identity.* A stitched part beside a plain graphlet of its pair is `duplicate_pair` (`stitch(g)` and `g`
     included); the same stitched graphlet twice is a no-op; every part of it must carry bases (`no_bases`).
 
@@ -1474,8 +1487,10 @@ its result as canonical JSON without `seed_id`); a failed record's, (the pair ke
 - A `merges` token is `<tag>@<to_bp>><trie node>` (`s31`, or `s30$` for a merge segment without bases), followed by
   `~<route to_bp>[:<end reason>]/<absence>` when the route stops short.
 - `certified=` each pair's `certified_to_bp`, as `<tag>:<bp>`.
-- `junctions=` the junctions of a stitched part that the walk's span reads, as `<tag>@<at_bp>:<verdict>`
-  (`junctions=A@20:qualified`; every verdict `qualified` in this phase, §2.3).
+- `junctions=` the junctions of a stitched part that the walk's span reads, as
+  `<tag>@<at_bp>:<verdict>[:<code>|<code>...]`, the codes those of `SpanJunction.causes` (`[a-z_]+`, so `|` needs
+  no escape): `junctions=A@115:qualified:exact_gated|candidate_changed`; every verdict `qualified` in this phase,
+  §2.3.
 - `labels=` label entries per pair as `<alive>/<carrying the whole walk>`, `+` marking a lower bound (cut lists). The
   full lists with their `from_bp` are `carriers()`'s; `to_fasta()` writes the counts only.
 - `modes=` whenever a part is not in annotate mode (`modes=g1:constrain,g7:annotate` when they differ).
@@ -1566,7 +1581,8 @@ them equal; if they are ever implemented, a non-zero window becomes a `qualified
 @dataclass(frozen=True)
 class PairPart:    tag: str; key: tuple; pair_stated_by: str         # tag: unique (A.4); 'envelope' | 'caller'
                    seqs_order: str                                  # 'verified' | 'count_only' | 'none' | 'unknown'
-                   graphlet: Graphlet; identity: dict; retrieval: tuple; digest: str   # retrieval identity: A.4
+                   graphlet: Graphlet | StitchedGraphlet            # a stitched part: §2.3
+                   identity: dict; retrieval: tuple; digest: str    # retrieval identity: A.4
 @dataclass(frozen=True)
 class PairAbsent:  tag: str; key: tuple; pair_stated_by: str; category: str; detail: dict; seqs_order: str
                    seed_check: str                                  # 'sent' | 'stated' | 'unchecked' (§2.3)
@@ -1604,7 +1620,9 @@ class PairSpan:    pair: str; mode: str; how: str; to_bp: int       # whole | ex
                    k: int; regime: str
                    junctions: tuple[SpanJunction, ...] = ()         # a stitched part's junctions the span reads
 @dataclass(frozen=True)
-class SpanJunction: at_bp: int; verdict: str; part: tuple; causes: tuple[str, ...]   # Part.key; cause codes
+class SpanJunction: at_bp: int; verdict: str; part: tuple; causes: tuple[str, ...]   # Part.key; the junction's
+                                                                    # cause codes, then the walk-scope causes of
+                                                                    # the child walk read (§2.3, B.2)
 class Carriers(list):                                               # carriers(): a list of PairSpan
     def __str__(self) -> str: ...                                   # one line per pair, as in §2.2
 @dataclass(slots=True)
@@ -1666,7 +1684,7 @@ class StitchedGraphlet:
     to_fasta(arm=None, walks=None, with_seed=True, orientation='natural', width=None, *, coordinates=None,
              budget=None) -> str        # coordinates as Graphlet.to_fasta (model.py:571), per piece (Appendix D.2)
     completeness() -> dict                # per arm: the root's complete_to_bp and one extension per junction
-    evidence(arm=None) -> dict            # §3.5
+    evidence(arm=None, walks=None) -> dict   # §3.5; walks=: only what those walks (keys, on arm) read
     summary(max_bytes=2048, *, budget=None) -> dict
     provenance() -> list[dict]            # §3.6
     save(path, *, budget=None)            # [1c] the bundle, Appendix D.3; metagraph.traverse.load(path) returns it

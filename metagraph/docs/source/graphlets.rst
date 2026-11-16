@@ -1892,18 +1892,27 @@ junction, answers every union query as ``g`` (only its digest differs). Past a j
 the stitched graphlet itself states:
 
 * each span names the junctions it reads (``PairSpan.junctions``: ``SpanJunction`` with
-  ``at_bp``, ``verdict``, the child's part key and the junction's cause codes), is never
-  complete, and is certified at most to the first junction (the stitched walk's
-  ``certified_to_bp``); a route through a merge that reaches a continued walk goes on in the
-  child, and reads its junction;
-* absence is ``graph`` only at a dead end, otherwise ``uncertified``: the child's own seed
+  ``at_bp``, ``verdict``, the child's part key and the cause codes: the junction's own, then
+  the walk-scope causes of the child's walk the span reads), is never complete, and is
+  certified at most to the first junction (the stitched walk's ``certified_to_bp``); a route
+  through a merge that reaches a continued walk (at a leaf with bases or a zero-length one)
+  goes on in the child, and reads its junction;
+* absence is ``graph`` only at a dead end where no recorded event (a blocked base, a skipped
+  hairpin) shows the graph holding the base, otherwise ``uncertified``: the child's own seed
   re-entry and edge history may stop it where an uninterrupted walk goes on;
 * labels are the child's own from the junction on (``from_bp`` at least the junction's): the
   union does not join labels across a junction, so it states less than
-  ``StitchedWalk.labels_full``, which keeps a label whole on every piece and continued;
-* the pair's coverage category is its root's, with a note naming the junctions, and
-  ``evidence()`` gives the stitched graphlet's own block (its junctions and causes) for an
-  arm with a junction; ``exact`` is false there;
+  ``StitchedWalk.labels_full``, which keeps a label whole on every piece and continued; so
+  ``walks(arm, labels=[...])`` never selects a walk with bases past a junction (the stitched
+  graphlet's own ``walks(labels=...)`` can);
+* the pair's coverage category is its root's, with a note naming the junctions and the walk
+  causes below them; ``summary()`` lists each junction with its ``walk_causes``, as the
+  stitched graphlet's summary does; ``evidence()`` gives the stitched graphlet's own block
+  (its junctions and causes) for an arm with a junction, where ``exact`` is false, and judges
+  an arm without one as the root alone;
+* two forms of one stitched graphlet (one digest, children that differ in a seed summary)
+  are one retrieval; the form kept is chosen on every sub-part's envelope and seed summary,
+  so it does not depend on the order given;
 * each segment's support names the sub-part that spells it (``SegmentSupport.part``, its
   ``Part.key``), and FASTA and GFA state the junctions (below).
 
@@ -2054,11 +2063,14 @@ FASTA and GFA
 ``to_fasta()`` writes one record per union walk, its header the walk's provenance as
 ``key=value`` tokens (``held=``, ``whole=``, ``extends=``, ``merges=``, ``ends=``,
 ``diverges=`` with each span's absence, ``certified=``, ``junctions=`` for a stitched
-part's junctions the walk reads as ``<pair>@<bp>:qualified``, ``labels=``, ``modes=``,
+part's junctions the walk reads as ``<pair>@<bp>:qualified[:<code>|<code>...]``, its cause
+codes as in ``SpanJunction.causes``, ``labels=``, ``modes=``,
 ``absent=``, ``not_included=``, ``mapping=``, and always ``scope=within_one_graph``); pair
 names escape the reserved characters as ``%XX``. ``to_gfa()`` writes the statements as
-comment lines (a stitched part's junctions among them: ``# stitched (experimental): A
-joins right walk 0 at 20 bp (qualified); nothing past a junction is complete or exact``),
+comment lines (a stitched part's junctions among them, with their causes and the walk
+causes below them: ``# stitched (experimental): A joins right walk 1 at 115 bp (qualified:
+exact_gated; walk causes below: candidate_changed); nothing past a junction is complete or
+exact``),
 then one tree per arm on the seed strand: union segments linked to their
 children only, the seed once per arm (``seed_l``, ``seed_r``), a stub's merge a tag
 (``mg``, ``mt``) and not a link. Every path the file admits is therefore spelled whole by
