@@ -1571,8 +1571,18 @@ int run_server(Config *config) {
                     throw;
                   }
                 } catch (...) {
-                    if (handle_holder)
-                        handle_holder->set_exception(std::current_exception());
+                    if (handle_holder) {
+                        // a stopped producer's waiters (with the cache only a shutdown stops
+                        // a request) are written nothing either, each logging its own line
+                        // (answer_request's "Request <id>: <text>; no response written") that
+                        // names the request it waited for, not that request's counts
+                        const char *why = stop.reason();
+                        handle_holder->set_exception(why
+                                ? std::make_exception_ptr(ClientGone(fmt::format(
+                                        "{}, /search stopped while waiting for request {}",
+                                        why, request_id)))
+                                : std::current_exception());
+                    }
                     throw;
                 }
                 if (budget) {
