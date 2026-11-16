@@ -89,6 +89,15 @@ class ServerQueryCache {
         bool set_result(std::string response);
         void set_exception(std::exception_ptr eptr);
 
+        // Producer-only (lane T7-P2: a /search whose client is gone stops only when no other
+        // request waits for its result): when this producer is its entry's only waiter, the
+        // entry leaves lookup now, so that a later acquire of its key is a new producer, and
+        // true (again on every later call); otherwise false, the entry unchanged. Atomic with
+        // acquire(): a duplicate either waits on the entry already (false) or misses after
+        // it left. The producer still publishes as before (its result or exception then
+        // reaches no other request).
+        bool abandon_if_alone();
+
         // Record delivery success or failure. Success is permanent; failures
         // get retention preference without extending the window on their own.
         void mark_delivered();
@@ -169,6 +178,7 @@ class ServerQueryCache {
         make_pending_entry(const std::string &key);
 
     void release_waiter(const std::shared_ptr<Entry> &entry);
+    bool abandon_if_alone(const std::shared_ptr<Entry> &entry);
     bool on_result_ready(const std::shared_ptr<Entry> &entry, size_t size);
     void discard(const std::shared_ptr<Entry> &entry);
     void discard_locked(const std::shared_ptr<Entry> &entry);

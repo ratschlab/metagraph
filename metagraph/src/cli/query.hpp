@@ -1,9 +1,11 @@
 #ifndef __QUERY_GRAPH_HPP__
 #define __QUERY_GRAPH_HPP__
 
+#include <atomic>
 #include <cstdlib>
 #include <functional>
 #include <memory>
+#include <stdexcept>
 #include <string>
 #include <vector>
 #include <utility>
@@ -228,6 +230,64 @@ class SeqSearchResult {
 };
 
 
+/**
+ * The stop of a /search (lane T7-P2): its client gone or the server stopping (the server's
+ * predicate; with the result cache, its producer only when no other request waits for the
+ * entry). Asked before each record's work starts (query_fasta's tasks), before each batch and
+ * each of its records (batched_query_fasta) and before each pair's search (the server's
+ * fan-out). Once the predicate answered true it answers true without asking again: no further
+ * record, batch or pair starts; those already running finish. Thread-safe. It keeps how far the
+ * request got, for the log: the most records any one pair started, and the pairs started.
+ */
+class SearchStop {
+  public:
+    explicit SearchStop(std::function<bool()> predicate) : predicate_(std::move(predicate)) {}
+    SearchStop(const SearchStop &) = delete;
+    SearchStop& operator=(const SearchStop &) = delete;
+
+    // whether the work stops now: asks the predicate until it answered true once
+    bool operator()() {
+        if (stopped())
+            return true;
+        if (!predicate_ || !predicate_())
+            return false;
+        stopped_.store(true, std::memory_order_release);
+        return true;
+    }
+    // whether it answered true (no call of the predicate)
+    bool stopped() const { return stopped_.load(std::memory_order_acquire); }
+
+    // a pair's search started |records| of its records (the most of any pair is kept)
+    void note_records_started(size_t records) {
+        size_t most = records_started_.load(std::memory_order_relaxed);
+        while (records > most && !records_started_.compare_exchange_weak(
+                    most, records, std::memory_order_relaxed)) {}
+    }
+    size_t records_started() const { return records_started_.load(std::memory_order_relaxed); }
+    // a pair's search began
+    void note_pair_started() { pairs_started_.fetch_add(1, std::memory_order_relaxed); }
+    size_t pairs_started() const { return pairs_started_.load(std::memory_order_relaxed); }
+
+  private:
+    std::function<bool()> predicate_;
+    std::atomic<bool> stopped_ { false };
+    std::atomic<size_t> records_started_ { 0 };
+    std::atomic<size_t> pairs_started_ { 0 };
+};
+
+// A /search stopped by its SearchStop (lane T7-P2): thrown once the records already running
+// have finished, whatever else they raised; the server writes nothing (its client is gone, or
+// the server stops)
+class SearchStopped : public std::runtime_error {
+  public:
+    SearchStopped() : std::runtime_error("the /search stopped: its client is gone") {}
+};
+
+// The records of the FASTA text |fasta| as query_fasta reads them (with |forward_and_reverse|
+// each record and its reverse complement): a stopped /search's log line states them
+size_t count_query_records(const std::string &fasta, bool forward_and_reverse);
+
+
 enum QueryMode {
     LABELS = 0,
     MATCHES,
@@ -264,6 +324,11 @@ enum QueryMode {
  *                      or "the graph")
  * @param pair_index    the pair's place in the answer (the order of a record's `cuts`
  *                      entries; the order of the units refused alone in the log)
+ * @param stop          a /search's stop (null: none, the CLI's; lane T7-P2): asked before each
+ *                      record's work starts (and, on the batched path, before each batch); once
+ *                      it answered true no further record starts, the records running finish,
+ *                      the records this call started are noted in it, and SearchStopped is
+ *                      thrown, whatever else the records raised
  *
  * @return the number of base pairs (characters) in query file
  */
@@ -274,7 +339,8 @@ size_t query_fasta(const std::string &file_path,
                    const graph::align::DBGAlignerConfig *aligner_config,
                    graph::SearchBudget *budget = nullptr,
                    const std::string &pair = "",
-                   size_t pair_index = 0);
+                   size_t pair_index = 0,
+                   SearchStop *stop = nullptr);
 
 int query_graph(Config *config);
 

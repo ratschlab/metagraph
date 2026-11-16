@@ -1483,7 +1483,15 @@ size_t batched_query_fasta(seq_io::FastaParser &fasta_parser,
                            const graph::align::DBGAlignerConfig *aligner_config,
                            graph::SearchBudget *budget,
                            const std::string &pair,
-                           size_t pair_index);
+                           size_t pair_index,
+                           SearchStop *stop);
+
+size_t count_query_records(const std::string &fasta, bool forward_and_reverse) {
+    size_t records = 0;
+    seq_io::read_fasta_from_string(fasta, [&](seq_io::kseq_t *) { ++records; },
+                                   forward_and_reverse);
+    return records;
+}
 
 size_t query_fasta(const std::string &file,
                    const std::function<void(SeqSearchResult &&)> &callback,
@@ -1492,7 +1500,8 @@ size_t query_fasta(const std::string &file,
                    const graph::align::DBGAlignerConfig *aligner_config,
                    graph::SearchBudget *budget,
                    const std::string &pair,
-                   size_t pair_index) {
+                   size_t pair_index,
+                   SearchStop *stop) {
     logger->trace("Parsing sequences from file '{}'", file);
 
     seq_io::FastaParser fasta_parser(file, config.forward_and_reverse);
@@ -1528,7 +1537,7 @@ size_t query_fasta(const std::string &file,
         if (config.query_mode != COORDS && !anno_graph.get_coord_to_header()) {
             // Construct a query graph and query against it
             return batched_query_fasta(fasta_parser, callback, config, anno_graph, aligner_config,
-                                       budget, pair, pair_index);
+                                       budget, pair, pair_index, stop);
         } else {
             // TODO: Implement batch mode for query_coords queries
             logger->warn("Querying coordinates in batch mode is currently not supported. Querying sequentially...");
@@ -1547,9 +1556,20 @@ size_t query_fasta(const std::string &file,
     // one /search aborted the server, GPT review 5 #7, H4's verification)
     std::mutex error_mutex;
     std::exception_ptr error;
+    // the records whose work started (a /search's stop: lane T7-P2)
+    std::atomic<size_t> started { 0 };
     ThreadPool thread_pool(get_num_threads(), 1000);
     for (const seq_io::kseq_t &kseq : fasta_parser) {
+        // once stopped, the rest of the body is not read (the flag only: the tasks ask)
+        if (stop && stop->stopped())
+            break;
         thread_pool.enqueue([&](QuerySequence &sequence) {
+            // a /search whose client is gone (or a server that stops) starts no further
+            // record: asked before the record's work and its account (the records running
+            // finish)
+            if (stop && (*stop)())
+                return;
+            started.fetch_add(1, std::memory_order_relaxed);
             try {
                 // the values account of this record's unit (a /search's), on the task's
                 // stack: the result's values detach from it (shrink) and the callback consumes
@@ -1570,6 +1590,12 @@ size_t query_fasta(const std::string &file,
     }
     // wait while all threads finish processing the current file
     thread_pool.join();
+    if (stop) {
+        stop->note_records_started(started.load(std::memory_order_relaxed));
+        // stopped: whatever the records raised, nobody is answered
+        if (stop->stopped())
+            throw SearchStopped();
+    }
     if (error)
         std::rethrow_exception(error);
 
@@ -1583,7 +1609,8 @@ size_t batched_query_fasta(seq_io::FastaParser &fasta_parser,
                            const graph::align::DBGAlignerConfig *aligner_config,
                            graph::SearchBudget *budget,
                            const std::string &pair,
-                           size_t pair_index) {
+                           size_t pair_index,
+                           SearchStop *stop) {
     auto it = fasta_parser.begin();
     auto end = fasta_parser.end();
 
@@ -1607,10 +1634,16 @@ size_t batched_query_fasta(seq_io::FastaParser &fasta_parser,
         if (!error)
             error = std::move(e);
     };
+    // the records whose query started (a /search's stop: lane T7-P2)
+    std::atomic<size_t> started { 0 };
     omp_set_max_active_levels(2);
     #pragma omp parallel num_threads(parallel_each)
     #pragma omp single
     while (it != end) {
+        // a /search whose client is gone (or a server that stops) reads and starts no further
+        // batch (the batches running finish their records started)
+        if (stop && (*stop)())
+            break;
         uint64_t num_bytes_read = 0;
 
         // A generator that can be called multiple times until all sequences
@@ -1628,6 +1661,11 @@ size_t batched_query_fasta(seq_io::FastaParser &fasta_parser,
         {
           std::unique_ptr<std::vector<QuerySequence>> seq_batch(seq_batch_p);
           try {
+            // asked again when the batch's task starts: neither its alignments nor its query
+            // graph are made once stopped (the throw ends the task; the stop is raised after
+            // the parallel region, whatever was kept)
+            if (stop && (*stop)())
+                throw SearchStopped();
             Timer batch_timer;
             std::vector<Alignment> alignments_batch;
             // Align sequences ahead of time on full graph if we don't have batch_align
@@ -1667,6 +1705,10 @@ size_t batched_query_fasta(seq_io::FastaParser &fasta_parser,
 
             #pragma omp parallel for num_threads(threads_per_batch) schedule(dynamic)
             for (size_t i = 0; i < seq_batch->size(); ++i) {
+                // and before each record's query, as query_fasta's tasks ask
+                if (stop && (*stop)())
+                    continue;
+                started.fetch_add(1, std::memory_order_relaxed);
                 try {
                     // the values account of this record's unit (a /search's), as
                     // query_fasta's tasks make it
@@ -1705,6 +1747,13 @@ size_t batched_query_fasta(seq_io::FastaParser &fasta_parser,
         }
 
         num_bp += num_bytes_read;
+    }
+    if (stop) {
+        stop->note_records_started(started.load(std::memory_order_relaxed));
+        // stopped: whatever the batches raised (their SearchStopped among them), nobody is
+        // answered
+        if (stop->stopped())
+            throw SearchStopped();
     }
     if (error)
         std::rethrow_exception(error);

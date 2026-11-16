@@ -524,6 +524,96 @@ TEST(ServerQueryCache, AbandonedProducerCanBeRetried) {
     EXPECT_EQ(*retry.get(), "success");
 }
 
+// Lane T7-P2: a /search producer whose client is gone stops only when no other request waits
+// for its entry (abandon_if_alone); the entry then leaves lookup, so that a duplicate arriving
+// later computes the answer itself and never gets the stop
+TEST(ServerQueryCache, AProducerAloneAbandonsItsEntry) {
+    ServerQueryCache cache(1ull << 20);
+    auto producer = cache.acquire("gone");
+    ASSERT_TRUE(producer.is_miss());
+    EXPECT_TRUE(cache.contains("gone"));
+    EXPECT_TRUE(producer.abandon_if_alone());
+    EXPECT_FALSE(cache.contains("gone"));
+    EXPECT_EQ(0u, cache.entry_count());
+    // and again on every later call
+    EXPECT_TRUE(producer.abandon_if_alone());
+    // a duplicate after the abandonment: a producer of its own
+    auto late = cache.acquire("gone");
+    ASSERT_TRUE(late.is_miss());
+    // the stopped producer's stop reaches no one, and the new entry is not touched by it
+    producer.set_exception(std::make_exception_ptr(std::runtime_error("client gone")));
+    EXPECT_THROW(producer.get(), std::runtime_error);
+    EXPECT_TRUE(cache.contains("gone"));
+    late.set_result("answer");
+    producer = ServerQueryCache::Handle();
+    late.mark_delivered();
+    late = ServerQueryCache::Handle();
+    auto hit = cache.acquire("gone");
+    EXPECT_FALSE(hit.is_miss());
+    EXPECT_EQ(*hit.get(), "answer");
+    EXPECT_EQ(1u, cache.entry_count());
+    // the abandoned entry left nothing behind in the accounting: the one entry, pinned by the hit
+    EXPECT_EQ(cache.size_bytes(), cache.pinned_bytes());
+}
+
+TEST(ServerQueryCache, AProducerWithAWaiterComputesOn) {
+    ServerQueryCache cache(1ull << 20);
+    auto producer = cache.acquire("shared");
+    auto waiter = cache.acquire("shared");
+    ASSERT_TRUE(producer.is_miss());
+    ASSERT_FALSE(waiter.is_miss());
+    EXPECT_FALSE(producer.abandon_if_alone());
+    EXPECT_TRUE(cache.contains("shared"));
+    // the producer goes on: the waiter gets its whole result
+    producer.set_result("whole answer");
+    EXPECT_EQ(*waiter.get(), "whole answer");
+    // once the waiter has its answer and left, the producer is alone (an entry with a result is
+    // never abandoned by the server, which asks only while it computes)
+    waiter.mark_delivered();
+    waiter = ServerQueryCache::Handle();
+    EXPECT_TRUE(cache.contains("shared"));
+}
+
+TEST(ServerQueryCache, AWaiterArrivingAsTheProducerAbandonsEitherWaitsOrComputes) {
+    // the abandonment and an acquire of the same key race: the duplicate either attached
+    // before (the producer computes on: false) or misses after (true), never both
+    for (size_t round = 0; round < 200; ++round) {
+        ServerQueryCache cache(1ull << 20);
+        auto producer = cache.acquire("race");
+        std::promise<void> go;
+        std::shared_future<void> start = go.get_future().share();
+        ServerQueryCache::Handle duplicate;
+        std::thread arriving([&]() {
+            start.wait();
+            duplicate = cache.acquire("race");
+        });
+        go.set_value();
+        const bool abandoned = producer.abandon_if_alone();
+        arriving.join();
+        if (abandoned) {
+            ASSERT_TRUE(duplicate.is_miss()) << round;
+            producer.set_exception(std::make_exception_ptr(std::runtime_error("client gone")));
+            duplicate.set_result("computed again");
+            EXPECT_EQ(*duplicate.get(), "computed again");
+        } else {
+            ASSERT_FALSE(duplicate.is_miss()) << round;
+            producer.set_result("computed once");
+            EXPECT_EQ(*duplicate.get(), "computed once");
+        }
+    }
+}
+
+TEST(ServerQueryCache, ADisabledCacheProducerIsAlwaysAlone) {
+    ServerQueryCache cache(0);
+    auto producer = cache.acquire("k");
+    auto other = cache.acquire("k");
+    ASSERT_TRUE(producer.is_miss());
+    ASSERT_TRUE(other.is_miss());
+    EXPECT_TRUE(producer.abandon_if_alone());
+    other.set_result("answer");
+    EXPECT_EQ(*other.get(), "answer");
+}
+
 TEST(ServerQueryCache, MoveAssignmentAbandonsPreviousComputation) {
     ServerQueryCache cache(1024);
     auto producer = cache.acquire("old");

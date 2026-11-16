@@ -103,12 +103,15 @@ struct SearchSource {
  * answer account before it is built (lane T7-P1). With the request's `partial_refusal` a unit
  * whose values or own object would pass the bound is answered as its refused stub (no row; its
  * cut entry states `refused`); without it the request is refused (|budget| passed, a
- * graph::SearchAnswerTooLarge thrown, or nothing more built).
+ * graph::SearchAnswerTooLarge thrown, or nothing more built). With |stop| (the request's: its
+ * client gone or the server stopping; lane T7-P2) no record starts once it answered true, and
+ * SearchStopped is thrown once the records running have finished.
  */
 Json::Value process_search_request(const SearchRequest &request,
                                    const graph::AnnotatedDBG &anno_graph,
                                    const SearchSource &source,
-                                   graph::SearchBudget *budget = nullptr) {
+                                   graph::SearchBudget *budget = nullptr,
+                                   SearchStop *stop = nullptr) {
     const auto &config = request.config;
 
     // Throw client an error if they try to query coordinates/kmer-counts on unsupported indexes
@@ -190,7 +193,7 @@ Json::Value process_search_request(const SearchRequest &request,
             json["cuts"].append(std::move(cut));
             objects.emplace_back(seq_result.get_sequence().id, std::move(json));
         },
-        config, anno_graph, aligner_config.get(), budget, pair, source.index
+        config, anno_graph, aligner_config.get(), budget, pair, source.index, stop
     );
 
     // Ensure JSON results are sorted by their ID
@@ -1260,6 +1263,12 @@ int run_server(Config *config) {
     CappedHttpServer server;
     server.set_max_connections(config->max_connections);
 
+    // Whether the client of |request| is gone or the server stops (a shutdown is treated as a
+    // client gone, class Shutdown)
+    auto gone_of = [&shutdown](const shared_ptr<HttpServer::Request> &request) {
+        return [r = request.get(), &shutdown]() { return shutdown.stopping() || client_gone(*r); };
+    };
+
     // Keep the cache handle alive until the asynchronous response write completes.
     server.resource["^/search"]["POST"] = [&](shared_ptr<HttpServer::Response> response,
                                               shared_ptr<HttpServer::Request> request) {
@@ -1344,6 +1353,20 @@ int run_server(Config *config) {
                     if (budget && budget->passed())
                         throw graph::SearchAnswerTooLarge(budget->max_bytes(), budget->account());
                 };
+                // The request's stop (lane T7-P2; SPEC-multigraph-envelope.md section 3): once
+                // its client is gone or the server stops, no further record, batch or pair
+                // starts (those running finish) and nothing is written. With the result cache a
+                // producer whose client is gone stops only when no other request waits for its
+                // entry, which then leaves the cache, so that a duplicate arriving later
+                // computes the answer itself; a shutdown stops it whatever waits (nothing is
+                // written to any of them)
+                SearchStop stop([&, gone = gone_of(request)]() {
+                    if (shutdown.stopping())
+                        return true;
+                    if (!gone())
+                        return false;
+                    return !handle_holder || handle_holder->abandon_if_alone();
+                });
                 Json::Value result;
                 std::string serialized;
                 try {
@@ -1354,8 +1377,9 @@ int run_server(Config *config) {
                         try {
                             SearchSource source;
                             source.index_fp = single_identity.fp;
+                            stop.note_pair_started();
                             result = process_search_request(search_request, *anno_graph.get(),
-                                                            source, budget.get());
+                                                            source, budget.get(), &stop);
                         } catch (...) {
                             graphs_being_queried--;
                             throw;
@@ -1392,6 +1416,10 @@ int run_server(Config *config) {
                                 const std::string &graph_fname = targets[t].second.first;
                                 const std::string &anno_fname = targets[t].second.second;
                                 futures.push_back(graphs_pool.enqueue([&,config,t,graph_fname=graph_fname,anno_fname=anno_fname]() {
+                                    // a pair of a stopped request does not start (nothing
+                                    // waited for, loaded or searched)
+                                    if (stop())
+                                        return std::exception_ptr();
                                     logger->trace("Request {}: Started querying graph {}. In total graphs being queried at the moment: {}",
                                                   request_id, graph_fname, graphs_being_queried.fetch_add(1) + 1);
                                     size_t index_size_reserved = 0;
@@ -1418,7 +1446,11 @@ int run_server(Config *config) {
                                             // a pair whose files changed since start-up is
                                             // refused before its memory is waited for
                                             refuse_changed_pair({ graph_fname, anno_fname });
-                                            reservations.reserve(index_size);
+                                            // the wait for the memory is abandoned once the
+                                            // request stops (as lease_index's)
+                                            if (!reservations.reserve(index_size,
+                                                                      [&]() { return stop(); }))
+                                                throw SearchStopped();
                                             index_size_reserved = index_size;
                                             logger->trace("Request {}: Loading graph {} of size {} GB to RAM...",
                                                           request_id, graph_fname, index_size / 1e9);
@@ -1445,12 +1477,17 @@ int run_server(Config *config) {
                                                         config_copy, preparation, std::move(mapping));
                                             });
                                             index = index_loaded.get();
+                                            // asked again after the load: a search not begun
+                                            if (stop())
+                                                throw SearchStopped();
                                         } else {
                                             index = graphs_cache.at({ graph_fname, anno_fname }).get();
                                         }
 
+                                        stop.note_pair_started();
                                         answers[t] = process_search_request(search_request, *index,
-                                                                            sources[t], budget.get());
+                                                                            sources[t], budget.get(),
+                                                                            &stop);
                                         logger->trace("Request {}: {} graph {} {} in {} sec",
                                                       request_id, in_ram ? "Loaded and searched" : "Searched",
                                                       graph_fname, anno_fname, timer.elapsed());
@@ -1467,10 +1504,18 @@ int run_server(Config *config) {
                                 }));
                             }
                         }
+                        // every pair's task ended (as PendingQueries waits for them): a stopped
+                        // request is stopped whatever its pairs raised; otherwise the first
+                        // failing pair in pair order
+                        std::exception_ptr failed;
                         for (auto &future : futures) {
-                            if (auto ex = future.get())
-                                std::rethrow_exception(ex);
+                            if (auto ex = future.get(); ex && !failed)
+                                failed = ex;
                         }
+                        if (stop.stopped())
+                            throw SearchStopped();
+                        if (failed)
+                            std::rethrow_exception(failed);
                         refuse_if_passed();
                         // the rows and the cuts of every query sequence in the pairs' order
                         for (Json::Value &json : answers) {
@@ -1501,6 +1546,20 @@ int run_server(Config *config) {
                     serialized = budget
                             ? search_answer_text(result, budget->answer(), handle_holder != nullptr)
                             : Json::writeString(Json::StreamWriterBuilder(), result);
+                  } catch (const SearchStopped &) {
+                    // stopped (lane T7-P2): nothing is written (ClientGone; answer_request logs
+                    // this text as "Request <id>: <text>; no response written") and nothing of
+                    // the budget is logged, neither a unit refused nor a refusal nobody reads.
+                    // How far it got: the most records any pair started of the request's
+                    // records (counted here, on this path only), and the pairs whose search
+                    // began
+                    throw ClientGone(fmt::format(
+                            "{}, /search stopped: {} of {} records started, {} of {} pairs "
+                            "started", shutdown.stopping() ? "shutdown" : "client gone",
+                            stop.records_started(),
+                            count_query_records(search_request.fasta,
+                                                search_request.config.forward_and_reverse),
+                            stop.pairs_started(), config->fnames.empty() ? 1 : targets.size()));
                   } catch (...) {
                     // a request priced past the bound is refused, whatever else its work
                     // raised; the units refused alone are logged whatever the request's
@@ -1566,12 +1625,6 @@ int run_server(Config *config) {
             }
             return process_align_request(content, anno_graph.get()->get_graph(), *config);
         });
-    };
-
-    // Whether the client of |request| is gone or the server stops (a shutdown is treated as a
-    // client gone, class Shutdown)
-    auto gone_of = [&shutdown](const shared_ptr<HttpServer::Request> &request) {
-        return [r = request.get(), &shutdown]() { return shutdown.stopping() || client_gone(*r); };
     };
 
     // The index of a /resolve, /traverse or /pattern request on |pair| of a multi-graph server:

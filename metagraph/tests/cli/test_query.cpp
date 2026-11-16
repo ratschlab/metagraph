@@ -1,5 +1,8 @@
 #include <algorithm>
+#include <atomic>
+#include <fstream>
 #include <functional>
+#include <iterator>
 #include <map>
 #include <memory>
 #include <mutex>
@@ -26,6 +29,7 @@
 #include "cli/config/config.hpp"
 #include "cli/query.hpp"
 #include "common/seq_tools/reverse_complement.hpp"
+#include "common/threads/threading.hpp"
 #include "common/vector.hpp"
 #include "common/vectors/bit_vector_adaptive.hpp"
 #include "graph/annotated_dbg.hpp"
@@ -1002,6 +1006,167 @@ TEST(query_fasta, a_unit_without_a_budget_has_no_account) {
     ASSERT_EQ(1u, results.size());
     EXPECT_EQ(graph::SearchCut::Refused::NO, results.at(0).get_cut().refused);
     EXPECT_FALSE(results.at(0).cut_to_json().isMember("refused"));
+}
+
+// Lane T7-P2, a /search whose client is gone: query_fasta with a stop starts no record once the
+// stop answered true (asked before each record's work, and on the batched path before each
+// batch and each of its records), lets the records running finish, notes how many it started
+// and throws SearchStopped. A stop that never fires, or none, answers as before.
+
+// the results of |fasta| by record (the server's callback, keeping each), with |budget| and
+// |stop| (null: none); |callbacks| counts the results handed over
+std::map<size_t, cli::SeqSearchResult>
+search_with_stop(const std::string &fasta, const cli::Config &config,
+                 const graph::AnnotatedDBG &index, graph::SearchBudget *budget,
+                 cli::SearchStop *stop, std::atomic<size_t> *callbacks) {
+    std::mutex mutex;
+    std::map<size_t, cli::SeqSearchResult> results;
+    cli::query_fasta(fasta, [&](cli::SeqSearchResult &&result) {
+        callbacks->fetch_add(1);
+        std::lock_guard<std::mutex> lock(mutex);
+        const size_t id = result.get_sequence().id;
+        results.emplace(id, std::move(result));
+    }, config, index, nullptr, budget, "the graph", 0, stop);
+    return results;
+}
+
+TEST(SearchStop, NoRecordStartsOnceStopped) {
+    std::mt19937 rng(29);
+    auto random_sequence = [&](size_t length) {
+        std::string s(length, 'A');
+        for (char &c : s) {
+            c = "ACGT"[rng() % 4];
+        }
+        return s;
+    };
+    const size_t k = 7;
+    std::vector<test::CoordinateRecord> records;
+    for (size_t i = 0; i < 12; ++i) {
+        records.push_back({ random_sequence(40 + rng() % 30), "column_" + std::to_string(i % 4),
+                            "record_" + std::to_string(i) });
+    }
+    const size_t num_records = 40;
+    utils::TempFile fasta;
+    for (size_t q = 0; q < num_records; ++q) {
+        fasta.ofstream() << ">q" << q << "\n" << records[q % 12].sequence
+                         << records[(q + 5) % 12].sequence << "\n";
+    }
+    fasta.ofstream().close();
+    // the records as the server counts them for its log line
+    std::ifstream in(fasta.name());
+    const std::string text((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+    ASSERT_EQ(num_records, cli::count_query_records(text, false));
+    ASSERT_EQ(2 * num_records, cli::count_query_records(text, true));
+
+    const unsigned int threads = get_num_threads();
+    // the sequential path (a record mapping; query_coords) and the batched one (no record
+    // mapping, a mode other than coords): one batch, its records queried after its graph
+    struct Case {
+        bool record_mapping;
+        std::string mode;
+        unsigned long long batch;
+    };
+    for (const Case &c : { Case { true, "coords", 0 }, Case { true, "signature", 0 },
+                           Case { false, "matches", 100'000'000 },
+                           Case { false, "signature", 100'000'000 } }) {
+        auto index = test::coordinate_test_graph(k, records, false, false, false,
+                                                 c.record_mapping);
+        auto config = query_config(c.mode);
+        config->discovery_fraction = 0;
+        config->num_top_labels = 1000;
+        config->query_batch_size = c.batch;
+        for (unsigned int t : { 1u, 4u }) {
+            SCOPED_TRACE(::testing::Message() << c.mode << " record_mapping " << c.record_mapping
+                         << " batch " << c.batch << " threads " << t);
+            set_num_threads(t);
+            std::atomic<size_t> callbacks { 0 };
+            const auto base = search_with_stop(fasta.name(), *config, *index, nullptr, nullptr,
+                                               &callbacks);
+            ASSERT_EQ(num_records, base.size());
+            ASSERT_EQ(num_records, callbacks.load());
+
+            // a stop that never fires (with a budget): every record, as without one
+            graph::SearchBudget large(uint64_t(1) << 40, true);
+            std::atomic<size_t> asked { 0 };
+            cli::SearchStop never([&]() { asked.fetch_add(1); return false; });
+            callbacks = 0;
+            const auto all = search_with_stop(fasta.name(), *config, *index, &large, &never,
+                                              &callbacks);
+            ASSERT_EQ(num_records, all.size());
+            EXPECT_EQ(num_records, callbacks.load());
+            for (const auto &[id, result] : base) {
+                EXPECT_EQ(compact_json(result.to_json(false, k)),
+                          compact_json(all.at(id).to_json(false, k))) << id;
+                EXPECT_EQ(compact_json(result.cut_to_json()),
+                          compact_json(all.at(id).cut_to_json())) << id;
+            }
+            EXPECT_FALSE(never.stopped());
+            EXPECT_EQ(num_records, never.records_started());
+            // asked once per record (and on the batched path once per batch read and started)
+            EXPECT_EQ(num_records + (c.batch ? 2 : 0), asked.load());
+
+            // a stop that fires at its |n|-th question, from the first to past the last
+            for (size_t n : { size_t(1), size_t(2), size_t(6), size_t(num_records) }) {
+                SCOPED_TRACE(::testing::Message() << "stop at question " << n);
+                graph::SearchBudget budget(uint64_t(1) << 40, true);
+                std::atomic<size_t> questions { 0 };
+                cli::SearchStop stop([&]() { return questions.fetch_add(1) + 1 >= n; });
+                callbacks = 0;
+                std::map<size_t, cli::SeqSearchResult> got;
+                EXPECT_THROW(got = search_with_stop(fasta.name(), *config, *index, &budget,
+                                                    &stop, &callbacks),
+                             cli::SearchStopped);
+                EXPECT_TRUE(stop.stopped());
+                // the predicate is not asked again once it answered true
+                const size_t asked_then = questions.load();
+                EXPECT_TRUE(stop());
+                EXPECT_EQ(asked_then, questions.load());
+                // no record started after the stop: those started (each handed over) are fewer
+                // than all, and at most the questions answered false
+                const size_t started = stop.records_started();
+                EXPECT_EQ(started, callbacks.load());
+                EXPECT_LT(started, num_records);
+                EXPECT_LE(started, n - 1);
+                if (t == 1) {
+                    // one thread: the records start in order, each after one question (the
+                    // batched path asks twice before its batch's records)
+                    const size_t before = c.batch ? 2 : 0;
+                    EXPECT_EQ(n - 1 > before ? n - 1 - before : 0, started);
+                }
+                // nothing held: query_fasta returned once every task (and the values account
+                // on its stack) had ended; nothing was refused or charged to the answer
+                EXPECT_FALSE(budget.passed());
+                EXPECT_TRUE(budget.unit_refusals().empty());
+                EXPECT_EQ(0u, budget.answer().held());
+                EXPECT_EQ(started, callbacks.load());
+            }
+        }
+    }
+    set_num_threads(threads);
+}
+
+// a stop that would fire only after every record has started is never asked again by
+// query_fasta: the record is answered, nothing thrown (the server's next pair would see it)
+TEST(SearchStop, AStopAfterTheLastRecordStopsNothing) {
+    const size_t k = 7;
+    std::vector<test::CoordinateRecord> records { { "ACGTTGCATTGACCGTAGGCTTAACGGT", "c", "r" } };
+    auto index = test::coordinate_test_graph(k, records);
+    utils::TempFile fasta;
+    fasta.ofstream() << ">q\n" << records[0].sequence << "\n";
+    fasta.ofstream().close();
+    auto config = query_config("coords");
+    config->discovery_fraction = 0;
+    std::atomic<size_t> callbacks { 0 };
+    std::atomic<size_t> questions { 0 };
+    cli::SearchStop stop([&]() { return questions.fetch_add(1) >= 1; });
+    const auto results = search_with_stop(fasta.name(), *config, *index, nullptr, &stop,
+                                          &callbacks);
+    ASSERT_EQ(1u, results.size());
+    EXPECT_EQ(1u, questions.load());
+    EXPECT_FALSE(stop.stopped());
+    EXPECT_EQ(1u, stop.records_started());
+    // a later question (the server's next pair) fires; this call is over
+    EXPECT_TRUE(stop());
 }
 
 } // namespace
