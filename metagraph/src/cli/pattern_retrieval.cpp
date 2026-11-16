@@ -2010,26 +2010,21 @@ void apply_labels(Json::Value *entry, LabelsAnswer &&answer, Mode mode) {
         return;
     }
 
-    Json::Value &results = e["results"];
     if (answer.withheld) {
         // all_or_count: all or nothing (§5.2)
         e["withheld"] = reason_json(*answer.withheld);
         e["retrieval_complete"] = false;
         e["returned"] = 0;
         e["cut"] = Json::Value();
-        results = Json::Value(Json::arrayValue);
+        e["results"] = Json::Value(Json::arrayValue);
         e["by_label"] = Json::Value();
         return;
     }
     // the memory cut is the one that set the list's length (the engine's max_contexts cut,
-    // when there was one, released more); the route built the admitted contexts only
+    // when there was one, released more); the route built the admitted contexts only (their
+    // labels merged into them when the pattern ended, §12.1)
     if (answer.cut && mode == Mode::PARTIAL)
         e["cut"] = reason_json(*answer.cut);
-    for (Json::ArrayIndex i = 0; i < results.size() && i < answer.result_fields.size(); ++i) {
-        for (const std::string &name : answer.result_fields[i].getMemberNames()) {
-            results[i][name] = std::move(answer.result_fields[i][name]);
-        }
-    }
     // complete only when the release was and every label of every context came with it
     e["retrieval_complete"] = e["retrieval_complete"].asBool() && answer.complete;
 }

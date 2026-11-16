@@ -59,7 +59,9 @@
 #include <json/json.h>
 
 #include "graph/alignment/pattern_search.hpp"
+#include "json_helpers.hpp"
 #include "pattern_retrieval.hpp"
+#include "server_checks.hpp"
 
 
 namespace mtg {
@@ -311,6 +313,76 @@ Json::Value parse_pattern_body(const std::string &content, uint64_t max_values =
 double validate_pattern_request(const Json::Value &json, const PatternLimits &limits);
 
 /**
+ * One pattern's result objects as its answer holds them (SPEC §12.1): each the compact JSON text
+ * of its final tree (byte for byte json_text(tree, true): a CompactJsonWriter writes it), in
+ * answer order, the tree freed once written -- a result object is held as a tree only while it is
+ * built and while later fields may still be added to it (its labels, its selection's). With
+ * |keep_trees| (the tree API, process_pattern_request: the tests and the CLI) each tree is kept
+ * beside its text, outside the memory account. built() counts the objects the pattern built,
+ * also those it dropped after (drop()): the entry states its list from that count, as it stated
+ * it from the list of trees before (a withheld list is emptied there, `returned` 0). The charges
+ * of the objects are the caller's (the memory account, §3 of the design T7-D2).
+ */
+class HeldResults {
+  public:
+    explicit HeldResults(bool keep_trees = false) : keep_trees_(keep_trees) {}
+
+    // |tree| is final: its text is written now (and the tree kept with keep_trees)
+    void add(Json::Value &&tree, CompactJsonWriter &writer);
+    // |n| objects built and not held (their list is withheld or refused)
+    void add_dropped(size_t n) { built_ += n; }
+    // the texts and trees held are freed; the count stays
+    void drop();
+
+    size_t built() const { return built_; }
+    const std::vector<std::string>& texts() const { return texts_; }
+    // the texts, moved out (the entry's text takes them), and the kept trees (keep_trees)
+    std::vector<std::string> take_texts();
+    Json::Value take_trees();
+
+  private:
+    bool keep_trees_;
+    size_t built_ = 0;
+    std::vector<std::string> texts_;
+    Json::Value trees_ = Json::Value(Json::arrayValue);
+};
+
+/**
+ * One /pattern answer as the server writes it (SPEC §12.1): |head|, the answer without its
+ * member "patterns", and its entries in request order with their results' texts
+ * (PatternEntries), which the writer splices in (pattern_answer_text, server_checks.hpp): byte
+ * for byte json_text(answer, true). The server may add members to |head| (timing.load_ms; a
+ * multi-graph entry's tags), never "patterns".
+ */
+struct PatternAnswer {
+    Json::Value head;
+    PatternEntries patterns;
+};
+
+/**
+ * Answers one /pattern request (the JSON contract of pattern_contract_version 1) on the
+ * single graph of |anno_graph| under |limits|, stating |release|; the server's form: each result
+ * object held as its compact text once nothing changes it (PatternAnswer), no tree of a result
+ * object kept beside it. Otherwise as process_pattern_request.
+ */
+PatternAnswer process_pattern_answer(
+        const Json::Value &json,
+        const graph::AnnotatedDBG &anno_graph,
+        const PatternLimits &limits,
+        const std::string &release,
+        const IndexIdentity *identity = nullptr,
+        PatternDelivery *delivery = nullptr,
+        const std::function<graph::pattern::Deadline::Clock::time_point()> &clock = nullptr,
+        const RetrievalHooks *hooks = nullptr);
+
+// The same with the caps (pattern_limits) and the release (--index-release) of |config|
+PatternAnswer process_pattern_answer(const Json::Value &json,
+                                     const graph::AnnotatedDBG &anno_graph,
+                                     const Config &config,
+                                     const IndexIdentity *identity = nullptr,
+                                     PatternDelivery *delivery = nullptr);
+
+/**
  * Answers one /pattern request (the JSON contract of pattern_contract_version 1) on the
  * single graph of |anno_graph| under |limits|, stating |release|. The deadline starts on
  * entry (the body was parsed), read from |clock| (the steady clock when null; injectable so
@@ -323,6 +395,10 @@ double validate_pattern_request(const Json::Value &json, const PatternLimits &li
  * annotation rows only for output.labels "all" or "predicate_only" in a retrieval mode, and
  * for a predicate's selection in every mode (PatternRetrieval);
  * |hooks| (tests): a record mapping instead of the index's, a hook on every read.
+ * The tree API (the tests, the CLI): the answer as one tree, built from the trees of its result
+ * objects kept beside their texts (HeldResults), and checked against the server's form: its
+ * json_text(answer, true) must equal the text the server writes (process_pattern_answer's,
+ * spliced) byte for byte, else it throws std::logic_error (in every build type).
  */
 Json::Value process_pattern_request(
         const Json::Value &json,

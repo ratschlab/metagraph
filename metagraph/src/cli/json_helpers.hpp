@@ -15,9 +15,11 @@
 #include <limits>
 #include <memory>
 #include <optional>
+#include <ostream>
 #include <set>
 #include <sstream>
 #include <stdexcept>
+#include <streambuf>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -751,6 +753,65 @@ inline uint64_t json_escaped_size(std::string_view s) {
     }
     return n;
 }
+
+// The writer settings of every JSON text the server writes: compact (no indentation, the
+// traversal routes and /pattern) or the default writer's indentation (json_text,
+// server_checks.hpp, and CompactJsonWriter take them from here, so that they cannot differ)
+inline Json::StreamWriterBuilder json_writer_builder(bool compact) {
+    Json::StreamWriterBuilder builder;
+    if (compact)
+        builder["indentation"] = "";
+    return builder;
+}
+
+/**
+ * Many values written one after the other as compact JSON text, each byte for byte what
+ * json_text(value, true) writes (json_writer_builder(true), one writer reused), into a buffer
+ * that keeps its capacity between values: /pattern writes each result object once nothing
+ * changes it any more (SPEC-pattern-search.md §12.1), up to max_paths or max_contexts of them
+ * per pattern, where a writer and a stream per value would cost more than the value. Used by
+ * one thread.
+ */
+class CompactJsonWriter {
+  public:
+    CompactJsonWriter()
+          : writer_(json_writer_builder(true).newStreamWriter()), buf_(&text_), stream_(&buf_) {}
+    CompactJsonWriter(const CompactJsonWriter &) = delete;
+    CompactJsonWriter& operator=(const CompactJsonWriter &) = delete;
+
+    // the compact text of |value|, at its exact size
+    std::string text(const Json::Value &value) {
+        text_.clear();
+        writer_->write(value, &stream_);
+        return std::string(text_);
+    }
+
+  private:
+    // appends what the writer hands over to |out| (no buffer of its own: nothing to flush)
+    class Appender : public std::streambuf {
+      public:
+        explicit Appender(std::string *out) : out_(out) {}
+
+      protected:
+        int_type overflow(int_type c) override {
+            if (!traits_type::eq_int_type(c, traits_type::eof()))
+                out_->push_back(traits_type::to_char_type(c));
+            return traits_type::not_eof(c);
+        }
+        std::streamsize xsputn(const char_type *s, std::streamsize n) override {
+            out_->append(s, static_cast<size_t>(n));
+            return n;
+        }
+
+      private:
+        std::string *out_;
+    };
+
+    std::unique_ptr<Json::StreamWriter> writer_;
+    std::string text_;
+    Appender buf_;
+    std::ostream stream_;
+};
 
 } // namespace cli
 } // namespace mtg

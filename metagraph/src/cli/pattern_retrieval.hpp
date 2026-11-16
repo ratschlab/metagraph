@@ -363,7 +363,7 @@ struct LabelsAnswer {
     Json::Value work = Json::Value(Json::objectValue);
     Json::Value timing = Json::Value(Json::objectValue);
     // per admitted context, in order: support, labels_status, labels_total, labels (merged
-    // into the result objects); empty when nothing was read
+    // into the result objects by the route when the pattern ends); empty when nothing was read
     std::vector<Json::Value> result_fields;
     // all_or_count: the results are withheld for this reason (rows refused, a truncated
     // anchor, a budget or deadline stop of the reads)
@@ -856,10 +856,12 @@ class PatternRetrieval {
 };
 
 /**
- * Merges |answer| into the pattern's |entry| (written by the route for the engine's result,
- * with every released context in `results`): the label fields, the counts, the results'
- * labels, and — when the reads did not complete — withheld (all_or_count), the cut
- * (partial), retrieval_complete, stop and determinism.
+ * Merges |answer| into the pattern's |entry| (written by the route for the engine's result):
+ * the label fields, the counts, and — when the reads did not complete — withheld
+ * (all_or_count: `returned` 0, `results` empty), the cut (partial), retrieval_complete, stop and
+ * determinism. The results' labels (|answer|.result_fields) are not merged here: the route
+ * merges each into its result object when the pattern ends, before the object is written as
+ * its text (SPEC-pattern-search.md §12.1).
  */
 void apply_labels(Json::Value *entry, LabelsAnswer &&answer, graph::pattern::Mode mode);
 
