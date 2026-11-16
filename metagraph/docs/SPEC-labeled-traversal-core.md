@@ -4582,11 +4582,14 @@ search's routes, `POST /pattern` and `GET /pattern/capabilities`, are `SPEC-patt
     "too_large": {"status": 400, "code": "column_labels_too_large", "members": [...]}, "total"}`, in the
     `multigraph` block on a multi-graph server and at the top level on a single-graph one, as `request_intake`
     (`SPEC-multigraph-envelope.md` §8). Without it a server ignores the parameters and answers the whole array.
-- **The `/search` answer budget** (lane T5b-Y4, owner decision 2026-11-13): `--search-max-answer-memory-mb`
-  (4,096 MiB by default, in [0, 1048576], 0 = none) bounds what one `POST /search` answer holds, each pair's
-  rows and the request's JSON answer with its text, priced before they are built; past it the whole request
-  is refused **400** `search_answer_too_large`, nothing partial sent. A size limit on one request, as the body
-  cap, not an admission cap. `SPEC-multigraph-envelope.md` §3 states it; GET /capabilities states it as
+- **The `/search` answer budget** (lane T5b-Y4, owner decision 2026-11-13; per unit since lane T7-P1):
+  `--search-max-answer-memory-mb` (4,096 MiB by default, in [0, 1048576], 0 = none) bounds what one `POST
+  /search` answer holds, each unit's rows (a FASTA record on a pair) and its own JSON object, and the request's
+  JSON answer with its text, priced before they are built. A unit past it is refused alone with the request's
+  `partial_refusal` (its `cuts` entry states `refused`, its rows absent, the request answered 200), else the
+  whole request is refused **400** `search_answer_too_large` (its `account` "values" or "answer"), nothing
+  partial sent; the request's answer past it refuses the whole request. A size limit on one request, as the
+  body cap, not an admission cap. `SPEC-multigraph-envelope.md` §3 states it; GET /capabilities states it as
   `search` (§8 there).
 - **Deployment** (`DESIGN-traverse-graphlet.md` §17.5):
   - `--http-threads` (`-p` when not given) must exceed the concurrent long calls by one at least (the engine's

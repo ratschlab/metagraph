@@ -436,16 +436,38 @@
  },
  "schema_version": 1,
  "search": {
+  "handler_threads": 2,
   "max_memory_mb": 4096,
+  "pair_searches_at_once": 2,
+  "records_at_once": 1,
   "rule": "SPEC-multigraph-envelope.md section 3, the /search answer budget",
   "too_large": {
+   "accounts": [
+    "answer",
+    "values"
+   ],
    "code": "search_answer_too_large",
    "members": [
+    "account",
     "code",
     "error",
     "max_memory_mb"
    ],
    "status": 400
+  },
+  "unit_refused": {
+   "accounts": [
+    "answer",
+    "values"
+   ],
+   "code": "search_answer_too_large",
+   "field": "partial_refusal",
+   "members": [
+    "account",
+    "code",
+    "max_memory_mb",
+    "priced_mb"
+   ]
   }
  },
  "server_instance": "94466d8492136038"

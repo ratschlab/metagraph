@@ -2563,9 +2563,13 @@ class Server:
         for _ in range(10):
             self.port = free_port()
             self.log = open(log_path, 'ab')
+            # -p, --threads-each and --http-threads explicit: GET /capabilities' search block
+            # states the concurrency they set (lane T7-P1), so a stored answer must not depend
+            # on a default
             self.process = subprocess.Popen(
                 [binary, 'server_query'] + args
-                + ['--port', str(self.port), '--address', '127.0.0.1', '-p', '2'],
+                + ['--port', str(self.port), '--address', '127.0.0.1', '-p', '2',
+                   '--threads-each', '1', '--http-threads', '2'],
                 stdout=self.log, stderr=subprocess.STDOUT)
             if self._wait_ready(300):
                 return

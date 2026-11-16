@@ -28,10 +28,11 @@ namespace graph {
  * store 32-bit positions; a query of 2^32 or more k-mers is held as the vector from
  * the start.
  *
- * Each takes an optional account (a /search's values account of its pair, SearchAccount;
- * null: none, the CLI's): every growth of its buffers is charged to it BEFORE it is made, as
- * the net bytes it adds (the new buffer less the one it replaces; the coordinates' own lists
- * too), so that a charge that does not fit throws SearchAnswerTooLarge with nothing more held.
+ * Each takes an optional account (a /search's values account of its unit, the query sequence
+ * on this pair, SearchAccount; null: none, the CLI's): every growth of its buffers is charged
+ * to it BEFORE it is made, as the net bytes it adds (the new buffer less the one it replaces;
+ * the coordinates' own lists too), so that a charge that does not fit throws
+ * (SearchAnswerTooLarge or SearchUnitRefused) with nothing more held.
  * Copies share the account; shrink() (after the last position) detaches it.
  */
 

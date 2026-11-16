@@ -26,6 +26,9 @@ class SeqSearchResult;
 // the rule a client reads the budget by (GET /capabilities' search.rule)
 constexpr char kSearchBudgetRule[]
         = "SPEC-multigraph-envelope.md section 3, the /search answer budget";
+// the code of a /search refused whole (400) or of a unit refused alone (its cut entry's
+// `refused`)
+constexpr char kSearchAnswerTooLarge[] = "search_answer_too_large";
 
 // What one FASTA record's result holds beyond its values' buffers (which the values account
 // was charged with as they grew): its place in the pair's results, its name, sequence and
@@ -56,17 +59,44 @@ SearchRecordPrice search_record_price(const SeqSearchResult &result, bool verbos
 uint64_t search_record_scratch(const SeqSearchResult &result, bool verbose_output);
 
 // Charges |answer| (the request's answer account) for one record's object before the server
-// builds it, as process_search_request does for each record in turn: the scratch measuring its
-// price holds (search_record_scratch), before it is measured, then its tree and its transient;
-// the transient (and the scratch, which it covers) as the most any record's took so far,
-// |*transient_charged|, which it raises (the records' objects are built one at a time).
-// Returns the price; past the bound throws graph::SearchAnswerTooLarge
+// builds it, in two steps: measure_search_record charges the scratch measuring its price holds
+// (search_record_scratch), before it is measured, and returns the price; charge_search_price
+// charges its tree and its transient, the transient (and the scratch, which it covers) as the
+// most any record of the pair took so far, |*transient_charged|, which both raise (the
+// objects of a pair are built one at a time). charge_search_record makes both. Past the bound
+// they throw graph::SearchAnswerTooLarge
+SearchRecordPrice measure_search_record(graph::SearchAccount &answer, uint64_t *transient_charged,
+                                        const SeqSearchResult &result, bool verbose_output,
+                                        bool tagged, const std::string &graph,
+                                        const std::string &graph_path,
+                                        const std::string &annotation_path,
+                                        const std::string &index_fp);
+void charge_search_price(graph::SearchAccount &answer, uint64_t *transient_charged,
+                         const SearchRecordPrice &price);
 SearchRecordPrice charge_search_record(graph::SearchAccount &answer, uint64_t *transient_charged,
                                        const SeqSearchResult &result, bool verbose_output,
                                        bool tagged, const std::string &graph,
                                        const std::string &graph_path,
                                        const std::string &annotation_path,
                                        const std::string &index_fp);
+
+// One unit's object (a FASTA record on a pair; lane T7-P1), as process_search_request charges
+// each in turn before it builds it: the unit's object check, its own price against the bound
+// (first the scratch of measuring it alone, search_record_scratch, before it is measured or
+// charged; then measure_search_record and its tree and transient, saturating): past it, with
+// the request's `partial_refusal` (|budget|) the unit is refused alone (|*result| becomes its
+// stub, SeqSearchResult::refuse with the account "answer" and the price in MiB rounded up, the
+// scratch's when that alone passed, and the refusal is noted for the log) and the stub's price
+// is charged; without it the request is refused on the answer side (SearchBudget::
+// note_object_passed) and false is returned, no object to build. Otherwise (and for a stub
+// refused on its values) the price is charged (charge_search_price) and the unit counted.
+// |pair|: the pair as the log names it; |pair_index|: its place in the answer (the log's
+// order). Past the request's bound throws graph::SearchAnswerTooLarge
+bool charge_search_unit(graph::SearchBudget &budget, uint64_t *transient_charged,
+                        SeqSearchResult *result, bool verbose_output, bool tagged,
+                        const std::string &graph, const std::string &graph_path,
+                        const std::string &annotation_path, const std::string &index_fp,
+                        const std::string &pair, size_t pair_index = 0);
 
 // The bytes of the per-position strings SeqSearchResult::to_json writes for a row (with
 // |verbose| as --verbose-output), computed without writing them: its signature's presence_mask,
@@ -90,15 +120,22 @@ std::string json_text_of_length(const Json::Value &root,
 std::string search_answer_text(const Json::Value &answer, graph::SearchAccount &account,
                                bool cached);
 
-// The refusal of a /search priced past the bound: {"error": the message, "code":
-// "search_answer_too_large", "max_memory_mb": the bound}, which the server writes error first
-// (error_first_json_text) with status 400
-Json::Value search_answer_too_large_json(uint64_t max_mb);
+// The refusal of a /search priced past the bound: {"error": the message, "account": |account|
+// ("values" or "answer", SearchBudget::account()), "code": "search_answer_too_large",
+// "max_memory_mb": the bound}, which the server writes error first (error_first_json_text)
+// with status 400
+Json::Value search_answer_too_large_json(uint64_t max_mb, const char *account);
 
-// GET /capabilities' `search` block: {"max_memory_mb": the bound (null when 0, none),
-// "rule": kSearchBudgetRule, "too_large": {"status": 400, "code": "search_answer_too_large",
-// "members": ["code", "error", "max_memory_mb"]}}
-Json::Value search_capabilities_json(uint64_t max_mb);
+// GET /capabilities' `search` block (lane T7-P1): {"handler_threads": the HTTP handler threads,
+// "max_memory_mb": the bound (null when 0, none), "pair_searches_at_once": the pair searches
+// the server runs at once over every request, "records_at_once": the records one pair search
+// runs at once, "rule": kSearchBudgetRule, "too_large": {"status": 400, "code":
+// "search_answer_too_large", "accounts": ["answer", "values"], "members": ["account", "code",
+// "error", "max_memory_mb"]}, "unit_refused": {"field": "partial_refusal", "code":
+// "search_answer_too_large", "accounts": ["answer", "values"], "members": ["account", "code",
+// "max_memory_mb", "priced_mb"]}}
+Json::Value search_capabilities_json(uint64_t max_mb, uint64_t pair_searches_at_once,
+                                     uint64_t records_at_once, uint64_t handler_threads);
 
 } // namespace cli
 } // namespace mtg

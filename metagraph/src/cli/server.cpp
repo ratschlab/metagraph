@@ -88,21 +88,30 @@ struct SearchSource {
     std::string graph_path;
     std::string annotation_path;
     std::string index_fp;
+    // the pair's place in the answer (the order of a record's `cuts` entries, and of the units
+    // refused alone in the log)
+    size_t index = 0;
 };
 
 /**
  * The rows of every FASTA record of |request| on one pair, as SearchSource states them. With
  * |budget| (the server's --search-max-answer-memory-mb; null: none) the pair's work is priced
  * before it is built (SPEC-multigraph-envelope.md section 3, the /search answer budget): what
- * the records' rows hold, to a values account of this pair (the per-position values as they
- * grow, each record's rows as its result is handed over), and each record's JSON object, to
- * the request's answer account, before it is built; past the bound graph::SearchAnswerTooLarge
- * is thrown and |budget| marked (passed), nothing returned.
+ * each record's rows hold, to the values account of its unit (the record on this pair; the
+ * per-position values as they grow, its rows as its result is handed over; query_fasta), and
+ * each record's JSON object, checked alone against the bound, then charged to the request's
+ * answer account before it is built (lane T7-P1). With the request's `partial_refusal` a unit
+ * whose values or own object would pass the bound is answered as its refused stub (no row; its
+ * cut entry states `refused`); without it the request is refused (|budget| passed, a
+ * graph::SearchAnswerTooLarge thrown, or nothing more built). With |stop| (the request's: its
+ * client gone or the server stopping; lane T7-P2) no record starts once it answered true, and
+ * SearchStopped is thrown once the records running have finished.
  */
 Json::Value process_search_request(const SearchRequest &request,
                                    const graph::AnnotatedDBG &anno_graph,
                                    const SearchSource &source,
-                                   graph::SearchBudget *budget = nullptr) {
+                                   graph::SearchBudget *budget = nullptr,
+                                   SearchStop *stop = nullptr) {
     const auto &config = request.config;
 
     // Throw client an error if they try to query coordinates/kmer-counts on unsupported indexes
@@ -125,20 +134,11 @@ Json::Value process_search_request(const SearchRequest &request,
         ));
     }
 
-    // Need mutex while appending to vector
-    std::vector<SeqSearchResult> search_results;
-    std::mutex result_mutex;
-    // the values account of this pair (the answer budget's; none without one), noted in the
-    // budget once the pair's rows are built; the pair's records run on get_num_threads()
-    // threads at once (query_fasta), each with its scratch
-    std::unique_ptr<graph::SearchAccount> values;
-    if (budget) {
-        values = std::make_unique<graph::SearchAccount>(budget, "values",
-                source.tagged ? fmt::format("pair ({}, {}, {})", source.graph,
-                                            source.graph_path, source.annotation_path)
-                              : std::string("the graph"),
-                get_num_threads());
-    }
+    // the pair as the budget's log names it (a unit: "record <i> on <pair>")
+    const std::string pair = !budget ? std::string()
+            : source.tagged ? fmt::format("pair ({}, {}, {})", source.graph, source.graph_path,
+                                          source.annotation_path)
+                            : std::string("the graph");
 
     // writing to temporary file in order to reuse query code. This is not optimal and
     // may turn out to be an issue in production. However, adapting FastaParser to
@@ -148,80 +148,96 @@ Json::Value process_search_request(const SearchRequest &request,
     tf.ofstream() << request.fasta;
     tf.ofstream().close();
 
-    // Query sequences and callback by appending result to vector with mutex for thread safety;
-    // each result is moved in (taken as an rvalue: a const reference would copy its per-position
-    // values, held twice beside the account; REVIEW 9726cb420, lane T6-W2)
-    query_fasta(tf.name(),
-        [&](SeqSearchResult &&result) {
-            // the record's rows, held from now until the pair's answer is built
-            if (values)
-                values->charge(search_record_rows_bytes(result));
-            std::lock_guard<std::mutex> lock(result_mutex);
-            search_results.emplace_back(std::move(result));
-        },
-        config, anno_graph, aligner_config.get(), values.get()
-    );
-
-    // Ensure JSON results are sorted by their ID
-    std::sort(search_results.begin(), search_results.end(),
-              [](const SeqSearchResult &lhs, const SeqSearchResult &rhs) {
-                  return lhs.get_sequence().id < rhs.get_sequence().id;
-              });
-
-    // Create full JSON object: per query sequence its rows, tagged with their pair on a
-    // multi-graph server, and the cut its top N was taken with (one entry, for this pair)
+    // Each record's object (its rows, tagged with their pair on a multi-graph server, and the
+    // cut its top N was taken with: one entry, for this pair), built as its unit completes and
+    // kept by its record's id; the record's result and its values are freed when the callback
+    // returns (lane T7-P1: no record's values wait for the pair's other records). The objects
+    // of one pair are built one at a time (the mutex), as the answer account's per-pair
+    // transient assumes
     auto string_or_null = [](bool stated, const std::string &value) {
         return stated ? Json::Value(value) : Json::Value();
     };
-    Json::Value search_response(Json::arrayValue);
-    // the most one record's rows held while they were built (charged as it grows)
+    std::vector<std::pair<size_t, Json::Value>> objects;
+    std::mutex result_mutex;
+    // the most one record's object held while it was built and measured (charged as it grows)
     uint64_t transient_charged = 0;
-    for (const auto &seq_result : search_results) {
-        if (budget) {
-            // the record's object, before it is built, and the scratch of its price's
-            // measurement, before that is measured
-            charge_search_record(budget->answer(), &transient_charged, seq_result,
-                                 config.verbose_output, source.tagged, source.graph,
-                                 source.graph_path, source.annotation_path, source.index_fp);
-        }
-        Json::Value json = seq_result.to_json(config.verbose_output, anno_graph.get_graph().get_k());
-        if (source.tagged) {
-            for (Json::Value &row : json["results"]) {
-                row["graph"] = source.graph;
-                row["graph_path"] = source.graph_path;
-                row["annotation_path"] = source.annotation_path;
+    const size_t k = anno_graph.get_graph().get_k();
+    query_fasta(tf.name(),
+        [&](SeqSearchResult &&seq_result) {
+            std::lock_guard<std::mutex> lock(result_mutex);
+            if (budget) {
+                // the request is refused: no object is built (the values are freed now)
+                if (budget->passed())
+                    return;
+                if (!charge_search_unit(*budget, &transient_charged, &seq_result,
+                                        config.verbose_output, source.tagged, source.graph,
+                                        source.graph_path, source.annotation_path,
+                                        source.index_fp, pair, source.index)) {
+                    return;
+                }
             }
-        }
-        Json::Value cut = seq_result.cut_to_json();
-        cut["graph"] = string_or_null(source.tagged, source.graph);
-        cut["graph_path"] = string_or_null(source.tagged, source.graph_path);
-        cut["annotation_path"] = string_or_null(source.tagged, source.annotation_path);
-        cut["index_fp"] = string_or_null(!source.index_fp.empty(), source.index_fp);
-        json["cuts"] = Json::Value(Json::arrayValue);
-        json["cuts"].append(std::move(cut));
+            Json::Value json = seq_result.to_json(config.verbose_output, k);
+            if (source.tagged) {
+                for (Json::Value &row : json["results"]) {
+                    row["graph"] = source.graph;
+                    row["graph_path"] = source.graph_path;
+                    row["annotation_path"] = source.annotation_path;
+                }
+            }
+            Json::Value cut = seq_result.cut_to_json();
+            cut["graph"] = string_or_null(source.tagged, source.graph);
+            cut["graph_path"] = string_or_null(source.tagged, source.graph_path);
+            cut["annotation_path"] = string_or_null(source.tagged, source.annotation_path);
+            cut["index_fp"] = string_or_null(!source.index_fp.empty(), source.index_fp);
+            json["cuts"] = Json::Value(Json::arrayValue);
+            json["cuts"].append(std::move(cut));
+            objects.emplace_back(seq_result.get_sequence().id, std::move(json));
+        },
+        config, anno_graph, aligner_config.get(), budget, pair, source.index, stop
+    );
+
+    // Ensure JSON results are sorted by their ID
+    std::sort(objects.begin(), objects.end(),
+              [](const auto &lhs, const auto &rhs) { return lhs.first < rhs.first; });
+
+    Json::Value search_response(Json::arrayValue);
+    for (auto &[id, json] : objects) {
         search_response.append(std::move(json));
     }
-    if (values)
-        budget->note_values(values->held());
-
     return search_response;
 }
 
 // A /search whose answer was priced past --search-max-answer-memory-mb (|budget| passed;
 // SPEC-multigraph-envelope.md section 3): 400 search_answer_too_large, its members written in
-// the order error, code, the bound (error_first_json_text), the whole request refused whatever
-// else its work raised (the answer never depends on the order its pairs charged in). Nothing
-// partial is sent. The log states the account whose charge passed the bound (a values
-// account's with its pair), what it held before that charge, and the charge
+// the order error, then account, code and the bound (error_first_json_text), the whole request
+// refused whatever else its work raised. `account` is the request's (SearchBudget::account(),
+// lane T7-P1), a function of the request, never of the order its work charged in. Nothing
+// partial is sent. The log states that account's first refusal (a unit's values account with
+// its record and pair, or the answer account), what it held before the charge and the charge
 HttpError search_budget_refusal(const graph::SearchBudget &budget, size_t request_id) {
     logger->info("[Server] Request {}: search_answer_too_large: {} passed the bound of {} MiB: "
                  "held {} B ({:.1f} MiB) before a charge of {} B ({:.1f} MiB)",
                  request_id, budget.first_passed(), budget.max_bytes() >> 20,
                  budget.first_held(), budget.first_held() / double(1 << 20),
                  budget.first_charge(), budget.first_charge() / double(1 << 20));
-    Json::Value body = search_answer_too_large_json(budget.max_bytes() >> 20);
+    Json::Value body = search_answer_too_large_json(budget.max_bytes() >> 20, budget.account());
     std::string text = error_first_json_text(body);
     return HttpError(400, std::move(body), std::move(text));
+}
+
+// The units of a /search refused alone (the request's `partial_refusal`), one log line each
+// (lane T7-P1), in the answer's order (by record, then by the pair's place in the record's
+// `cuts`): the record (its index in the body) and the pair, the account that passed the bound,
+// what it held before the charge and the charge (for the answer account: 0 and the unit's own
+// object's price, or the scratch of measuring it when that alone passed)
+void log_unit_refusals(const graph::SearchBudget &budget, size_t request_id) {
+    for (const auto &unit : budget.unit_refusals()) {
+        logger->info("[Server] Request {}: unit refused: {}: the {} account passed the bound of "
+                     "{} MiB: held {} B ({:.1f} MiB) before a charge of {} B ({:.1f} MiB)",
+                     request_id, unit.where, unit.account, budget.max_bytes() >> 20,
+                     unit.held, unit.held / double(1 << 20),
+                     unit.charge, unit.charge / double(1 << 20));
+    }
 }
 
 // TODO: implement alignment_result.to_json as in process_search_request
@@ -818,6 +834,9 @@ int run_server(Config *config) {
     set_num_threads(std::max(1u, config->parallel_each));
     config->parallel_each = 1;  // query one batch at a time
     logger->info("[Server] Threads per graph: {}", get_num_threads());
+    // how many records one /search pair search runs at once (query_fasta's pool, or the batched
+    // path's threads of its one batch at a time), stated in GET /capabilities' `search`
+    const size_t search_records_at_once = std::max(1u, get_num_threads());
 
     VectorMap<std::pair<std::string, std::string>, std::unique_ptr<AnnotatedDBG>> graphs_cache;
     bool loaded_with_mmap = utils::with_mmap();
@@ -1314,12 +1333,34 @@ int run_server(Config *config) {
                 // compute throws, propagate the exception to any duplicate
                 // waiters via set_exception() before re-throwing.
                 // The answer budget (--search-max-answer-memory-mb; 0: none): the request's
-                // accounts, made before any pair's work and outliving it
+                // accounts, made before any pair's work and outliving it; with the request's
+                // `partial_refusal` a unit (a record on a pair) is refused alone
                 std::unique_ptr<graph::SearchBudget> budget;
                 if (config->search_max_answer_memory_mb) {
                     budget = std::make_unique<graph::SearchBudget>(
-                            config->search_max_answer_memory_mb << 20);
+                            config->search_max_answer_memory_mb << 20,
+                            search_request.partial_refusal);
                 }
+                // a request refused on the answer side without `partial_refusal` (its units'
+                // searches ran to their end, building nothing): refused as when a charge throws
+                auto refuse_if_passed = [&]() {
+                    if (budget && budget->passed())
+                        throw graph::SearchAnswerTooLarge(budget->max_bytes(), budget->account());
+                };
+                // The request's stop (lane T7-P2; SPEC-multigraph-envelope.md section 3): once
+                // its client is gone or the server stops, no further record, batch or pair
+                // starts (those running finish) and nothing is written. With the result cache
+                // (a handle) a client gone stops nothing: the request computes to its end and
+                // stores its answer, so that the client's retry is a hit (Fable review M1); a
+                // shutdown stops it, its waiters with it (nothing is written to any of them).
+                // The reason is the one answered first
+                SearchStop stop([&, r = request.get()]() -> const char * {
+                    if (shutdown.stopping())
+                        return "shutdown";
+                    if (handle_holder)
+                        return nullptr;
+                    return client_gone(*r) ? "client gone" : nullptr;
+                });
                 Json::Value result;
                 std::string serialized;
                 try {
@@ -1330,13 +1371,15 @@ int run_server(Config *config) {
                         try {
                             SearchSource source;
                             source.index_fp = single_identity.fp;
+                            stop.note_pair_started();
                             result = process_search_request(search_request, *anno_graph.get(),
-                                                            source, budget.get());
+                                                            source, budget.get(), &stop);
                         } catch (...) {
                             graphs_being_queried--;
                             throw;
                         }
                         graphs_being_queried--;
+                        refuse_if_passed();
                     } else {
                         // each pair's answer in its place of |targets|, merged in that order
                         // once every pair has answered (not in the order the pairs finish)
@@ -1349,6 +1392,7 @@ int run_server(Config *config) {
                             sources[t].graph_path = pair.first;
                             sources[t].annotation_path = pair.second;
                             sources[t].index_fp = fp_of_pair(pair);
+                            sources[t].index = t;
                         }
                         struct PendingQueries {
                             std::vector<std::shared_future<std::exception_ptr>> futures;
@@ -1366,6 +1410,15 @@ int run_server(Config *config) {
                                 const std::string &graph_fname = targets[t].second.first;
                                 const std::string &anno_fname = targets[t].second.second;
                                 futures.push_back(graphs_pool.enqueue([&,config,t,graph_fname=graph_fname,anno_fname=anno_fname]() {
+                                    // a pair of a stopped request does not start (nothing
+                                    // waited for, loaded or searched); asked under a try as
+                                    // the rest of the task (a throw fails the request alone)
+                                    try {
+                                        if (stop())
+                                            return std::exception_ptr();
+                                    } catch (...) {
+                                        return std::current_exception();
+                                    }
                                     logger->trace("Request {}: Started querying graph {}. In total graphs being queried at the moment: {}",
                                                   request_id, graph_fname, graphs_being_queried.fetch_add(1) + 1);
                                     size_t index_size_reserved = 0;
@@ -1392,7 +1445,11 @@ int run_server(Config *config) {
                                             // a pair whose files changed since start-up is
                                             // refused before its memory is waited for
                                             refuse_changed_pair({ graph_fname, anno_fname });
-                                            reservations.reserve(index_size);
+                                            // the wait for the memory is abandoned once the
+                                            // request stops (as lease_index's)
+                                            if (!reservations.reserve(index_size,
+                                                                      [&]() { return stop(); }))
+                                                throw SearchStopped();
                                             index_size_reserved = index_size;
                                             logger->trace("Request {}: Loading graph {} of size {} GB to RAM...",
                                                           request_id, graph_fname, index_size / 1e9);
@@ -1419,12 +1476,17 @@ int run_server(Config *config) {
                                                         config_copy, preparation, std::move(mapping));
                                             });
                                             index = index_loaded.get();
+                                            // asked again after the load: a search not begun
+                                            if (stop())
+                                                throw SearchStopped();
                                         } else {
                                             index = graphs_cache.at({ graph_fname, anno_fname }).get();
                                         }
 
+                                        stop.note_pair_started();
                                         answers[t] = process_search_request(search_request, *index,
-                                                                            sources[t], budget.get());
+                                                                            sources[t], budget.get(),
+                                                                            &stop);
                                         logger->trace("Request {}: {} graph {} {} in {} sec",
                                                       request_id, in_ram ? "Loaded and searched" : "Searched",
                                                       graph_fname, anno_fname, timer.elapsed());
@@ -1441,10 +1503,19 @@ int run_server(Config *config) {
                                 }));
                             }
                         }
+                        // every pair's task ended (as PendingQueries waits for them): a stopped
+                        // request is stopped whatever its pairs raised; otherwise the first
+                        // failing pair in pair order
+                        std::exception_ptr failed;
                         for (auto &future : futures) {
-                            if (auto ex = future.get())
-                                std::rethrow_exception(ex);
+                            if (auto ex = future.get(); ex && !failed)
+                                failed = ex;
                         }
+                        if (stop.stopped())
+                            throw SearchStopped();
+                        if (failed)
+                            std::rethrow_exception(failed);
+                        refuse_if_passed();
                         // the rows and the cuts of every query sequence in the pairs' order
                         for (Json::Value &json : answers) {
                             if (result.empty()) {
@@ -1474,11 +1545,29 @@ int run_server(Config *config) {
                     serialized = budget
                             ? search_answer_text(result, budget->answer(), handle_holder != nullptr)
                             : Json::writeString(Json::StreamWriterBuilder(), result);
+                  } catch (const SearchStopped &) {
+                    // stopped (lane T7-P2): nothing is written (ClientGone; answer_request logs
+                    // this text as "Request <id>: <text>; no response written") and nothing of
+                    // the budget is logged, neither a unit refused nor a refusal nobody reads.
+                    // Why (the reason the stop answered first) and how far it got: the most
+                    // records any pair started of the request's records (counted here, on this
+                    // path only: the search read no further), and the pairs whose search began
+                    const char *why = stop.reason();
+                    throw ClientGone(fmt::format(
+                            "{}, /search stopped: {} of {} records started, {} of {} pairs "
+                            "started", why ? why : "client gone", stop.records_started(),
+                            count_query_records(search_request.fasta,
+                                                search_request.config.forward_and_reverse),
+                            stop.pairs_started(), config->fnames.empty() ? 1 : targets.size()));
                   } catch (...) {
                     // a request priced past the bound is refused, whatever else its work
-                    // raised
-                    if (budget && budget->passed())
-                        throw search_budget_refusal(*budget, request_id);
+                    // raised; the units refused alone are logged whatever the request's
+                    // answer (with `partial_refusal` another pair's error answers it)
+                    if (budget) {
+                        log_unit_refusals(*budget, request_id);
+                        if (budget->passed())
+                            throw search_budget_refusal(*budget, request_id);
+                    }
                     throw;
                   }
                 } catch (...) {
@@ -1488,11 +1577,14 @@ int run_server(Config *config) {
                 }
                 if (budget) {
                     // what the request charged (each account only grows: the larger of the
-                    // two is the bound it needs)
+                    // most a unit's values held and the answer is the bound it needs), and
+                    // the units refused alone (with `partial_refusal`)
+                    log_unit_refusals(*budget, request_id);
                     logger->info("[Server] Request {}: answer budget: values at most {} B a "
-                                 "pair, answer {} B, bound {} MiB", request_id,
-                                 budget->values_max(), budget->answer().held(),
-                                 budget->max_bytes() >> 20);
+                                 "unit, answer {} B, bound {} MiB, {} of {} units refused",
+                                 request_id, budget->values_max(), budget->answer().held(),
+                                 budget->max_bytes() >> 20, budget->unit_refusals().size(),
+                                 budget->units());
                 }
                 if (handle_holder) {
                     bool retained = handle_holder->set_result(serialized);
@@ -3129,9 +3221,14 @@ int run_server(Config *config) {
             if (!multi)
                 c["column_labels"] = column_labels;
             // the /search answer budget (SPEC-multigraph-envelope.md section 3): its bound, its
-            // 400 and the rule; placed as column_labels
-            const Json::Value search_budget
-                    = search_capabilities_json(config->search_max_answer_memory_mb);
+            // 400, the units refused alone with `partial_refusal`, the concurrency its model
+            // total depends on (lane T7-P1: a multi-graph server's pairs run on the graphs'
+            // pool, -p; a single-graph server's /search on its handler thread) and the rule;
+            // placed as column_labels
+            const Json::Value search_budget = search_capabilities_json(
+                    config->search_max_answer_memory_mb,
+                    multi ? num_server_threads : http_threads, search_records_at_once,
+                    http_threads);
             if (!multi)
                 c["search"] = search_budget;
             c["release"] = config->index_release;

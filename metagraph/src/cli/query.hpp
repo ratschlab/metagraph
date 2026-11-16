@@ -1,9 +1,11 @@
 #ifndef __QUERY_GRAPH_HPP__
 #define __QUERY_GRAPH_HPP__
 
+#include <atomic>
 #include <cstdlib>
 #include <functional>
 #include <memory>
+#include <stdexcept>
 #include <string>
 #include <vector>
 #include <utility>
@@ -188,9 +190,21 @@ class SeqSearchResult {
      * nth_score, tied, tied_returned, and on an annotation with k-mer counts nth_median and
      * tied_same_median. A complete cut states nth_score (and nth_median) null and its counts
      * 0; a cut whose N-th score has one label (tied 1) states nth_median null, no median
-     * having been read for it.
+     * having been read for it. A unit refused alone (refuse()) states no row (returned 0,
+     * complete false, nth_score and nth_median null, the counts 0, the member set of its
+     * computed cut) and `refused`: {account, code, max_memory_mb, and with the answer account
+     * priced_mb}.
      */
     Json::Value cut_to_json() const;
+
+    /**
+     * Refuses this result's unit (its sequence on its pair) alone, with a /search's field
+     * `partial_refusal` (lane T7-P1): its rows are dropped (their buffers freed; the variant
+     * keeps its type), its alignment and sequence are kept, and its cut is marked with the
+     * account that refused it, the bound and, for the answer account, the unit's own object's
+     * price (both in MiB).
+     */
+    void refuse(graph::SearchCut::Refused account, uint64_t max_mb, uint64_t priced_mb = 0);
 
     /**
      * Returns a string representing the individual query result for the represented sequence.
@@ -216,6 +230,71 @@ class SeqSearchResult {
 };
 
 
+/**
+ * The stop of a /search (lane T7-P2): its client gone or the server stopping (the server's
+ * predicate, which answers the reason the work stops, or null while it goes on; with the result
+ * cache, a shutdown only). Asked before each record's work starts (query_fasta's tasks), before
+ * each batch is read, each of its alignments, its query graph and each of its records
+ * (batched_query_fasta) and before each pair's search (the server's fan-out). Once the predicate
+ * answered a reason it answers true without asking again: no further record, batch or pair
+ * starts; those already running finish. Thread-safe. It keeps the first reason, and how far the
+ * request got, for the log: the most records any one pair started, and the pairs started.
+ */
+class SearchStop {
+  public:
+    explicit SearchStop(std::function<const char *()> predicate)
+          : predicate_(std::move(predicate)) {}
+    SearchStop(const SearchStop &) = delete;
+    SearchStop& operator=(const SearchStop &) = delete;
+
+    // whether the work stops now: asks the predicate until it answered a reason once
+    bool operator()() {
+        if (stopped())
+            return true;
+        const char *reason = predicate_ ? predicate_() : nullptr;
+        if (!reason)
+            return false;
+        // the first reason answered (two threads may ask at once)
+        const char *none = nullptr;
+        reason_.compare_exchange_strong(none, reason, std::memory_order_acq_rel);
+        return true;
+    }
+    // whether it answered true (no call of the predicate)
+    bool stopped() const { return reason_.load(std::memory_order_acquire) != nullptr; }
+    // the reason the predicate answered first (null while not stopped)
+    const char* reason() const { return reason_.load(std::memory_order_acquire); }
+
+    // a pair's search started |records| of its records (the most of any pair is kept)
+    void note_records_started(size_t records) {
+        size_t most = records_started_.load(std::memory_order_relaxed);
+        while (records > most && !records_started_.compare_exchange_weak(
+                    most, records, std::memory_order_relaxed)) {}
+    }
+    size_t records_started() const { return records_started_.load(std::memory_order_relaxed); }
+    // a pair's search began
+    void note_pair_started() { pairs_started_.fetch_add(1, std::memory_order_relaxed); }
+    size_t pairs_started() const { return pairs_started_.load(std::memory_order_relaxed); }
+
+  private:
+    std::function<const char *()> predicate_;
+    std::atomic<const char *> reason_ { nullptr };
+    std::atomic<size_t> records_started_ { 0 };
+    std::atomic<size_t> pairs_started_ { 0 };
+};
+
+// A /search stopped by its SearchStop (lane T7-P2): thrown once the records already running
+// have finished, whatever else they raised; the server writes nothing (its client is gone, or
+// the server stops)
+class SearchStopped : public std::runtime_error {
+  public:
+    SearchStopped() : std::runtime_error("the /search stopped: its client is gone") {}
+};
+
+// The records of the FASTA text |fasta| as query_fasta reads them (with |forward_and_reverse|
+// each record and its reverse complement): a stopped /search's log line states them
+size_t count_query_records(const std::string &fasta, bool forward_and_reverse);
+
+
 enum QueryMode {
     LABELS = 0,
     MATCHES,
@@ -238,9 +317,27 @@ enum QueryMode {
  * @param config        config object
  * @param anno_graph    annotated de Bruijn graph
  * @param aligner_config alignment config
- * @param values        a /search's values account of this pair (null: none, the CLI's): the
- *                      per-position modes charge their rows' values to it as they grow, and
- *                      past its bound the query throws graph::SearchAnswerTooLarge
+ * @param budget        a /search's answer budget (null: none, the CLI's;
+ *                      SPEC-multigraph-envelope.md section 3): each record's task makes the
+ *                      values account of its unit (the record on this pair, named |pair| in
+ *                      the log) on its own stack; the per-position modes charge their rows'
+ *                      values to it as they grow, and each record's rows are charged to it as
+ *                      its result is handed over. Past the bound the query throws
+ *                      graph::SearchAnswerTooLarge (the request refused); with the request's
+ *                      `partial_refusal` the unit is refused alone and its callback receives
+ *                      the refused stub (SeqSearchResult::refuse). The callback consumes the
+ *                      result before the task returns
+ * @param pair          the pair, as the log names it ("pair (<name>, <graph>, <annotation>)"
+ *                      or "the graph")
+ * @param pair_index    the pair's place in the answer (the order of a record's `cuts`
+ *                      entries; the order of the units refused alone in the log)
+ * @param stop          a /search's stop (null: none, the CLI's; lane T7-P2): asked before each
+ *                      record's work starts (and, on the batched path, before each batch, each
+ *                      alignment and each query graph); once it answered true no further record
+ *                      starts, the records running finish, the records this call started are
+ *                      noted in it (on the batched path, those whose query on their batch's
+ *                      query graph began), and SearchStopped is thrown, whatever else the
+ *                      records raised
  *
  * @return the number of base pairs (characters) in query file
  */
@@ -249,7 +346,10 @@ size_t query_fasta(const std::string &file_path,
                    const Config &config,
                    const graph::AnnotatedDBG &anno_graph,
                    const graph::align::DBGAlignerConfig *aligner_config,
-                   graph::SearchAccount *values = nullptr);
+                   graph::SearchBudget *budget = nullptr,
+                   const std::string &pair = "",
+                   size_t pair_index = 0,
+                   SearchStop *stop = nullptr);
 
 int query_graph(Config *config);
 

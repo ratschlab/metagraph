@@ -17,6 +17,7 @@
 #include "cli/search_answer.hpp"
 #include "cli/server_checks.hpp"
 #include "cli/server_envelope.hpp"
+#include "cli/server_request.hpp"
 #include "cli/traverse.hpp"
 #include "graph/annotated_dbg.hpp"
 #include "graph/traversal/walker.hpp"
@@ -535,9 +536,11 @@ TEST(ServerEnvelope, Sample12MultigraphBlock) {
     // (and the cap on a request's explicit seeds, --resolve-max-explicit-seeds 1024)
     const ResolveDiscoveryBounds defaults { 1'000'000, 1024, 10'000, 10'000, 1024 };
     // and the /search answer budget at its default (lane T5b-Y4), which the server places in
-    // the block beside the members multigraph_capabilities_json states
+    // the block beside the members multigraph_capabilities_json states, with the units refused
+    // alone and the concurrency of the recording server, -p 2 --threads-each 2 --http-threads 2,
+    // staging's (lane T7-P1)
     Json::Value expected = multigraph_capabilities_json(0, {}, intake, column_labels, defaults);
-    expected["search"] = search_capabilities_json(4096);
+    expected["search"] = search_capabilities_json(4096, 2, 2, 2);
     EXPECT_EQ(text(body["multigraph"]), text(expected));
     // request_intake (H1): the byte cap as the top-level member states it
     EXPECT_EQ(text(body["max_request_body_mb"]),
@@ -795,12 +798,16 @@ TEST(ServerEnvelope, Samples57To60SearchAnswerTooLarge) {
         { "59_search_400_answer_too_large_query_counts.json", "query_counts" },
         { "60_search_400_answer_too_large_query_coords.json", "query_coords" },
     };
-    const Json::Value refusal = search_answer_too_large_json(1);
-    const std::string expected = error_first_json_text(refusal);
-    EXPECT_EQ(0u, expected.find("{\"error\":"));
     for (const auto &[name, mode] : samples) {
         SCOPED_TRACE(name);
         const Json::Value s = sample(name);
+        // the account the 400 names (lane T7-P1): the request's, without partial_refusal
+        const std::string account = s["body"]["account"].asString();
+        EXPECT_TRUE(account == "values" || account == "answer") << account;
+        const Json::Value refusal = search_answer_too_large_json(1, account.c_str());
+        const std::string expected = error_first_json_text(refusal);
+        EXPECT_EQ(0u, expected.find("{\"error\":"));
+        EXPECT_FALSE(s["request"].isMember("partial_refusal"));
         EXPECT_EQ("POST /search", s["route"].asString());
         EXPECT_EQ(400, s["status"].asInt());
         EXPECT_EQ(text(refusal), text(s["body"]));
@@ -810,11 +817,97 @@ TEST(ServerEnvelope, Samples57To60SearchAnswerTooLarge) {
         }
         EXPECT_EQ(10000u, s["request"]["top_labels"].asUInt64());
         EXPECT_EQ(2u, s["request"]["graphs"].size());
-        // the members in the server's order: error, code, max_memory_mb
+        // the members in the server's order: error, account, code, max_memory_mb
         const std::string raw = sample_text(name);
         const size_t at = raw.find("\"body\": {");
         ASSERT_NE(std::string::npos, at);
-        EXPECT_LT(raw.find("\"error\":", at), raw.find("\"code\":", at));
+        EXPECT_LT(raw.find("\"error\":", at), raw.find("\"account\":", at));
+        EXPECT_LT(raw.find("\"account\":", at), raw.find("\"code\":", at));
         EXPECT_LT(raw.find("\"code\":", at), raw.find("\"max_memory_mb\":", at));
     }
+}
+
+// Samples 71-75 (lane T7-P1, /search partial refusal per (record, pair); SPEC-multigraph-envelope.md
+// section 3): the requests state partial_refusal as SearchRequest reads it; each refused unit's
+// cut entry is its stub's (SeqSearchResult::refuse, cut_to_json and the pair's tags), byte for
+// byte, priced_mb with account "answer" alone; a record whose every unit was refused is the
+// stub's object (no row); an answered entry states no `refused`. Sample 75: with the field, the
+// whole request's 400 names "answer"
+TEST(ServerEnvelope, Samples71To75PartialRefusal) {
+    char program[] = "metagraph", command[] = "server_query", input[] = "graphs.csv";
+    char *argv[] = { program, command, input };
+    const Config config(3, argv);
+    const std::vector<std::pair<std::string, size_t>> samples {
+        { "71_search_partial_refusal_multi.json", 1 },
+        { "72_search_partial_refusal_single.json", 1 },
+        { "73_search_partial_refusal_every_unit.json", 2 },
+        { "74_search_partial_refusal_answer.json", 1 },
+    };
+    for (const auto &[name, num_refused] : samples) {
+        SCOPED_TRACE(name);
+        const Json::Value s = sample(name);
+        EXPECT_EQ("POST /search", s["route"].asString());
+        EXPECT_EQ(200, s["status"].asInt());
+        EXPECT_TRUE(parse_search_request(s["request"], config).partial_refusal);
+        EXPECT_FALSE(parse_search_request(without(s["request"], { "partial_refusal" }), config)
+                             .partial_refusal);
+        size_t refused = 0;
+        for (Json::ArrayIndex i = 0; i < s["body"].size(); ++i) {
+            const Json::Value &object = s["body"][i];
+            const std::string description = object["seq_description"].asString();
+            size_t refused_here = 0;
+            for (const Json::Value &entry : object["cuts"]) {
+                if (!entry.isMember("refused"))
+                    continue;
+                ++refused_here;
+                const Json::Value &r = entry["refused"];
+                const bool answer = r["account"].asString() == "answer";
+                EXPECT_TRUE(answer || r["account"].asString() == "values");
+                EXPECT_EQ(answer, r.isMember("priced_mb"));
+                mtg::graph::SearchCut cut;
+                cut.abundances = entry.isMember("nth_median");
+                SeqSearchResult stub(QuerySequence { i, description, "" },
+                                     SeqSearchResult::LabelVec(), std::nullopt, cut);
+                stub.refuse(answer ? mtg::graph::SearchCut::Refused::ANSWER
+                                   : mtg::graph::SearchCut::Refused::VALUES,
+                            r["max_memory_mb"].asUInt64(),
+                            answer ? r["priced_mb"].asUInt64() : 0);
+                Json::Value expected = stub.cut_to_json();
+                for (const char *tag : { "graph", "graph_path", "annotation_path", "index_fp" }) {
+                    expected[tag] = entry[tag];
+                }
+                EXPECT_EQ(text(expected), text(entry));
+                if (answer) {
+                    EXPECT_GT(r["priced_mb"].asUInt64(), r["max_memory_mb"].asUInt64());
+                }
+                // no row of the unit (a single-graph server's rows have no tags)
+                for (const Json::Value &row : object["results"]) {
+                    EXPECT_NE(text(row.get("graph", Json::Value())), text(entry["graph"]));
+                }
+            }
+            if (refused_here == object["cuts"].size()) {
+                // every unit of the record refused: the stub's object, the entries appended
+                SeqSearchResult stub(QuerySequence { i, description, "" },
+                                     SeqSearchResult::LabelVec(), std::nullopt,
+                                     mtg::graph::SearchCut());
+                stub.refuse(mtg::graph::SearchCut::Refused::VALUES, 1);
+                Json::Value expected = stub.to_json(false, 31);
+                expected["cuts"] = object["cuts"];
+                EXPECT_EQ(text(expected), text(object));
+            }
+            refused += refused_here;
+        }
+        EXPECT_EQ(num_refused, refused);
+    }
+    const Json::Value s = sample("75_search_400_answer_too_large_partial_refusal.json");
+    EXPECT_EQ("POST /search", s["route"].asString());
+    EXPECT_EQ(400, s["status"].asInt());
+    EXPECT_TRUE(parse_search_request(s["request"], config).partial_refusal);
+    EXPECT_EQ(text(search_answer_too_large_json(1, "answer")), text(s["body"]));
+    const std::string raw = sample_text("75_search_400_answer_too_large_partial_refusal.json");
+    const size_t at = raw.find("\"body\": {");
+    ASSERT_NE(std::string::npos, at);
+    EXPECT_LT(raw.find("\"error\":", at), raw.find("\"account\":", at));
+    EXPECT_LT(raw.find("\"account\":", at), raw.find("\"code\":", at));
+    EXPECT_LT(raw.find("\"code\":", at), raw.find("\"max_memory_mb\":", at));
 }

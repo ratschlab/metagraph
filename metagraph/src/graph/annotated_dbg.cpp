@@ -335,6 +335,18 @@ AnnotatedSequenceGraph::get_labels(node_index index) const {
     return annotator_->get_labels(graph_to_anno_index(index));
 }
 
+const char* refused_account(SearchCut::Refused refused) {
+    switch (refused) {
+        case SearchCut::Refused::VALUES:
+            return "values";
+        case SearchCut::Refused::ANSWER:
+            return "answer";
+        case SearchCut::Refused::NO:
+            break;
+    }
+    return nullptr;
+}
+
 uint64_t lower_median(std::vector<uint64_t> values) {
     values.erase(std::remove(values.begin(), values.end(), 0u), values.end());
     if (values.empty())
@@ -870,7 +882,7 @@ constexpr size_t kRowBlock = 256;
 // still can be returned hold more than half of it and are more than the query returns,
 // the fold keeps only the counts, and the rows are read again after the cut for the
 // returned records. Debug builds have no budget, so that the tests check both ways.
-// (Staging: one fold per query record on one graph, a task of the pair's values account;
+// (Staging: one fold per query record on one graph, a task of the unit's values account;
 // what the fold holds before the cut is not charged to that account, so that the cut is
 // made before the first charge. Lane T7-M5.)
 #ifdef NDEBUG
@@ -889,7 +901,7 @@ std::atomic<uint64_t> folds_counts_only = 0;
  * The buffers that hold the values of the returned records after the cut, until they are
  * those records' values: the runs of the rows read again for them, the values at the
  * repeated rows, and a record's values before they are sorted. Each is charged to the
- * pair's values account (null: none, the CLI's) before it grows, as the scratch of the
+ * unit's values account (null: none, the CLI's) before it grows, as the scratch of the
  * task (SearchAccount::charge_scratch: the most one task holds at once, times the tasks that
  * run at once), and released when it is freed. The values themselves charge as they grow
  * (PresenceRuns, CountRuns, PositionCoords). What the fold holds before the cut is not
@@ -1692,7 +1704,7 @@ AnnotatedDBG::get_header_results(std::string_view sequence, size_t num_top_label
         auto top = top_records(fold, *coord_to_header_, min_count, num_top_labels, false, cut);
         const HeaderCounts counts = header_counts(top);
 
-        // the records' values, charged to the pair's values account (if any) as they grow,
+        // the records' values, charged to the unit's values account (if any) as they grow,
         // and what they are built from after the cut, as its scratch
         charge_search(values_account, buffer_bytes(top.size(), sizeof(Values)));
         CutScratch scratch(values_account);
@@ -1812,7 +1824,7 @@ Result filter_and_aggregate(const RowEnumerator &enumerate_rows,
     // the values are built in
     using ValueType = std::tuple_element_t<2, typename Result::value_type>;
     // the store, this record's scratch (freed when its rows are returned; the values, which
-    // charge their buffers as they grow, move into them), charged to the pair's values account
+    // charge their buffers as they grow, move into them), charged to the unit's values account
     // (if any) as what it allocates before it is built: the dense index over the labels and the
     // values' buffer, or the hash table reserved for the labels kept (REVIEW 9726cb420 [P2],
     // lane T6-W2: the smaller of the two was charged, but the store picks its form by the
@@ -2030,7 +2042,7 @@ AnnotatedDBG::get_kmer_coordinates(std::string_view sequence,
         auto top = top_records(fold, *coord_to_header_, min_count, num_top_labels, false, cut);
         const HeaderCounts counts = header_counts(top);
 
-        // the records' coordinates, charged to the pair's values account (if any) as they
+        // the records' coordinates, charged to the unit's values account (if any) as they
         // grow, and what they are built from after the cut, as its scratch
         charge_search(values, buffer_bytes(top.size(), sizeof(PositionCoords)));
         CutScratch scratch(values);
@@ -2161,7 +2173,7 @@ AnnotatedDBG::get_top_label_signatures(std::string_view sequence,
                                            presence_fraction, false, cut);
         std::vector<std::tuple<Label, size_t, PresenceRuns>> presence_vectors;
         presence_vectors.reserve(label_counts.size());
-        // every position marked: one run, a copy per label (each charged to the pair's values
+        // every position marked: one run, a copy per label (each charged to the unit's values
         // account, if any)
         PresenceRuns all(num_kmers, values);
         all.add_run(0, num_kmers);

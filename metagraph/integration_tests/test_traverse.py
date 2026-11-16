@@ -3073,7 +3073,9 @@ class TestTraverseAPI(TestTraverseBase):
         # name (H4, section 9.1; test_multigraph.py's TestLabelsDisjoint checks it), true here:
         # the headers acc1-acc3, the column the file's path; 'search': the /search answer
         # budget (lane T5b-Y4, SPEC-multigraph-envelope.md sections 3 and 8; placed as
-        # column_labels), at its default here
+        # column_labels), at its default here, with the units refused alone and the concurrency
+        # of this server (lane T7-P1: -p 2, the default --threads-each 1, the handler threads
+        # -p's; a single-graph server runs /search on its handler thread)
         self.assertEqual({'algorithm_version', 'attempts', 'column_labels', 'compression_level',
                           'content_encodings', 'deadline_check', 'expect_server_instance',
                           'feature_level', 'features', 'graph_summary', 'graphs',
@@ -3082,10 +3084,17 @@ class TestTraverseAPI(TestTraverseBase):
                           'pair_summary', 'pattern', 'ready', 'release', 'request_intake',
                           'resolve', 'routes', 'schema_version', 'search', 'server_instance'},
                          set(c))
-        self.assertEqual({'max_memory_mb': 4096,
+        self.assertEqual({'handler_threads': 2, 'max_memory_mb': 4096,
+                          'pair_searches_at_once': 2, 'records_at_once': 1,
                           'rule': 'SPEC-multigraph-envelope.md section 3, the /search answer budget',
                           'too_large': {'status': 400, 'code': 'search_answer_too_large',
-                                        'members': ['code', 'error', 'max_memory_mb']}},
+                                        'accounts': ['answer', 'values'],
+                                        'members': ['account', 'code', 'error', 'max_memory_mb']},
+                          'unit_refused': {'field': 'partial_refusal',
+                                           'code': 'search_answer_too_large',
+                                           'accounts': ['answer', 'values'],
+                                           'members': ['account', 'code', 'max_memory_mb',
+                                                       'priced_mb']}},
                          c['search'])
         self.assertEqual({'max_request_body_mb': None,
                           'body_too_large': {'status': 413, 'code': 'body_too_large',
@@ -5491,6 +5500,15 @@ class TestTraverseMultiGraph(TestTraverseBase):
             block['request_intake']['max_connections'] \
                 = caps['multigraph']['request_intake']['max_connections']
             block['column_labels']['total'] = caps['multigraph']['column_labels']['total']
+            # T7-P1: the /search model total's concurrency is this server's: the sample's ran
+            # -p 2 --threads-each 2 --http-threads 2, this one -p 2 (the handler threads are -p,
+            # --threads-each 1)
+            search = caps['multigraph']['search']
+            concurrency = ('handler_threads', 'pair_searches_at_once', 'records_at_once')
+            self.assertEqual((2, 2, 2), tuple(block['search'][k] for k in concurrency))
+            self.assertEqual((2, 2, 1), tuple(search[k] for k in concurrency))
+            for k in concurrency:
+                block['search'][k] = search[k]
             return block
         # B's second pair and C's second annotation have no manifest
         self.assertIsNone(c['composite_fp'])

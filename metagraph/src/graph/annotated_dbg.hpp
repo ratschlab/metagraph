@@ -29,21 +29,35 @@ namespace graph {
  * (|abundances|) also the N-th returned row's median abundance and the labels with the N-th
  * score and that median. The median is read only where the N-th score is shared (|tied| > 1,
  * |nth_median_read|): a cut whose N-th score has one label orders no tie by median and states
- * none. A complete cut leaves the members after |complete| at 0, which a writer states as null
- * (the score and the median) or 0 (the counts); so does a cut with no row returned (N = 0),
- * which has no N-th row.
+ * none. A complete cut leaves the score, the counts and the median at 0, which a writer states
+ * as null (the score and the median) or 0 (the counts); so does a cut with no row returned (N = 0),
+ * which has no N-th row. A unit refused alone (|refused|) states no row: its cut keeps
+ * |abundances| (the member set its entry states) and is written as refused.
  */
 struct SearchCut {
+    // the account that refused the unit (this query sequence on this pair) alone, with a
+    // /search's field `partial_refusal` (SPEC-multigraph-envelope.md section 3, lane T7-P1)
+    enum class Refused : uint8_t { NO, VALUES, ANSWER };
+
     size_t returned = 0;
-    bool complete = true;
     size_t nth_score = 0;
     size_t tied = 0;
     size_t tied_returned = 0;
-    bool abundances = false;
     uint64_t nth_median = 0;
     size_t tied_same_median = 0;
+    // a refused unit: the bound (--search-max-answer-memory-mb) and, refused by the answer
+    // account, its own object's price, both in MiB (rounded up)
+    uint64_t refused_max_mb = 0;
+    uint64_t refused_priced_mb = 0;
+    // (the flags last, so that the cut takes the bytes it took before |refused|)
+    bool complete = true;
+    bool abundances = false;
     bool nth_median_read = false;
+    Refused refused = Refused::NO;
 };
+
+// "values" or "answer" (the refused cut entry's `account`), null for Refused::NO
+const char* refused_account(SearchCut::Refused refused);
 
 /**
  * The lower median of a label's abundances over the query's k-mer positions where it is
@@ -306,9 +320,11 @@ class AnnotatedDBG : public AnnotatedSequenceGraph {
     // The per-position queries below hold each row's values only where it matches
     // (PresenceRuns, CountRuns, PositionCoords): their memory and time grow with the
     // (row, position) matches, not with the rows returned times the query's k-mers.
-    // |values| (null: none): a /search's values account of this pair (SearchAccount), charged
-    // with the rows' values before each of their buffers grows; past its bound the query
-    // throws SearchAnswerTooLarge, nothing returned.
+    // |values| (null: none): a /search's values account of the query sequence on this pair
+    // (its unit, SearchAccount), charged with the rows' values before each of their buffers
+    // grows; past its bound the query throws SearchAnswerTooLarge (the request refused) or
+    // SearchUnitRefused (the unit alone, with the request's `partial_refusal`), nothing
+    // returned; the cut (|cut|) is written before the first charge.
 
     // returns tuples (label, num_kmer_matches, kmer_abundances)
     std::vector<std::tuple<Label, size_t, CountRuns>>
