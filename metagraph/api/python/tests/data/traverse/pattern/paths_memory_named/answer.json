@@ -162,9 +162,13 @@
     "-"
    ],
    "timing": {
-    "cpu_ms": 0.061208,
-    "elapsed_ms": 0.060084,
-    "extension_ms": 0.0245
+    "cpu_ms": 0.074917,
+    "elapsed_ms": 0.07225,
+    "extension_ms": 0.021417,
+    "page_faults": {
+     "major": 0,
+     "minor": 0
+    }
    },
    "withheld": null,
    "work": {
@@ -172,7 +176,7 @@
     "extension_branches": 0,
     "extension_edges": 18,
     "mask_scans": 0,
-    "memory_bytes": 5476,
+    "memory_bytes": 4064,
     "ranges_visited": 62,
     "steps": 80
    }
@@ -492,23 +496,31 @@
     "-"
    ],
    "timing": {
-    "cpu_ms": 0.12575,
-    "elapsed_ms": 0.12475
+    "cpu_ms": 0.144209,
+    "elapsed_ms": 0.142375,
+    "page_faults": {
+     "major": 0,
+     "minor": 0
+    }
    },
    "withheld": null,
    "work": {
     "mask_scans": 0,
-    "memory_bytes": 5476,
+    "memory_bytes": 4064,
     "ranges_visited": 122,
     "steps": 122
    }
   }
  ],
  "timing": {
-  "cpu_ms": 0.214125,
-  "elapsed_ms": 0.1965
+  "cpu_ms": 0.260958,
+  "elapsed_ms": 0.233084,
+  "page_faults": {
+   "major": 0,
+   "minor": 0
+  }
  },
  "work": {
-  "memory_bytes": 5476
+  "memory_bytes": 4064
  }
 }

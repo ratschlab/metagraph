@@ -191,16 +191,19 @@ NDM_PEP_STOP_X = 'TARMADKLRX'
 # strings); a selective predicate (an E. coli column, not P. aeruginosa's) that keeps 60 of them;
 # a typo; and the server variant's cap on a predicate's names (masked_small_predicate_cap)
 GCG12 = 'GCGGCGGCGGCG'
-# label-free paths in the request's memory account (SPEC §12.1): the GCG repeat and 88 Ns (L =
-# 100, n = 70 k-mers; searched on the forward strand, the reverse orientation's anchor window
-# being all N) has 47 paths on the mini. With max_memory_mb 1 (1,048,576 bytes) a path's result
-# object costs 512 + 2k + 3L + 192n = 14,314 bytes and a walk kept for the release 128 + 8n + L =
-# 788: a first copy's 47 objects fit and stay until the request ends (672,758 bytes); a second
-# copy's list ends at 24, where the 25th object does not fit beside the 23 walks still held; a
-# third copy's walks pass half of the 32,282 bytes then left at the 21st (20 kept), and one
-# object fits beside those 20
-GCG12_N88 = GCG12 + 'N' * 88
-GCG12_N88_PATHS = 47
+# label-free paths in the request's memory account (SPEC §12.1, §31): the GCG repeat and 260 Ns
+# (L = 272, n = 242 k-mers; searched on the forward strand, the reverse orientation's anchor
+# window being all N) has 48 paths on the mini. With max_memory_mb 1 (1,048,576 bytes) a path's
+# result object costs 512 + 2k + 3L + 192n = 47,854 bytes while it is built and, once written,
+# three copies of its text and 128 bytes (13,496 to 13,676: held_result_bytes), and a walk kept
+# for the release 128 + 8n + L = 2,336: a first copy's 48 objects fit and stay until the request
+# ends (652,086 bytes); a second copy's list ends at 22, where the 23rd object does not fit beside
+# the 26 walks still held and the 22 written (298,772 bytes); a third copy's walks pass half of
+# the 97,718 bytes then left at the 21st (20 kept), and one object fits beside those 20. (Until
+# T7-D2 the pattern was the repeat and 88 Ns, 47 paths, each object held at its price: §31 holds
+# a written object at about a third of it there, so three copies of that pattern all fit)
+GCG12_N260 = GCG12 + 'N' * 260
+GCG12_N260_PATHS = 48
 MINI_COLUMNS = ['1296536', '158836', '287', '470', '546', '562', '573', '615', '72407']
 SELECTIVE = {'and': [{'any': ['562']}, {'none': ['287']}]}
 SELECTIVE_COUNT = 60
@@ -1476,16 +1479,17 @@ FIXTURES = [
                             field('stop', {'phase': 'extension', 'reason': 'max_steps'})),
                  expect_all(cut('max_steps'), field('returned', 0), unknown_counts,
                             field('stop', {'phase': 'discovery', 'reason': 'max_steps'})))),
-    # (the three below rest on the memory model of SPEC §12.1, the arithmetic at GCG12_N88;
-    # their expects fail loudly if the account stops elsewhere)
+    # (the three below rest on the memory model of SPEC §12.1 and §31, the arithmetic at
+    # GCG12_N260; their expects fail loudly if the account stops elsewhere)
     post('paths_memory', 'masked',
-         {'patterns': [p(GCG12_N88, 'iupac', ident=f'GCG12-N88-{i}') for i in range(3)],
+         {'patterns': [p(GCG12_N260, 'iupac', ident=f'GCG12-N260-{i}') for i in range(3)],
           'mode': 'partial', 'strands': 'forward', 'long_search': 'paths', 'max_memory_mb': 1,
           'output': {'labels': 'none'}}, 200,
          'label-free paths in the request\'s memory account (max_memory_mb 1, SPEC §12.1): three '
-         'copies of a pattern of 47 paths (L = 100); the first copy\'s result objects fit and stay '
-         'in the account until the request ends, so the second copy\'s list ends where the next '
-         'object does not fit beside the walks still held (24 returned, stop {output, '
+         'copies of a pattern of 48 paths (L = 272); the first copy\'s result objects fit and stay '
+         'in the account until the request ends (as their written text, SPEC §31), so the second '
+         'copy\'s list ends where the next object does not fit beside the walks still held and the '
+         'objects written (22 returned, stop {output, '
          'max_memory}, cut max_memory, the paths exact) and the third copy\'s kept walks pass '
          'half of what is left (stop {extension, max_memory}, the paths at_least, extension '
          'stopped, the one object that fits beside the 20 walks kept released, cut max_memory); '
@@ -1494,10 +1498,10 @@ FIXTURES = [
          '(SPEC §8.7)',
          expect_all(
              lambda a: check('max_memory_mb' not in a['limits'], a['limits']),
-             entries(expect_all(paths_count('exact', GCG12_N88_PATHS, 'completed'), complete,
-                                field('returned', GCG12_N88_PATHS)),
-                     expect_all(paths_count('exact', GCG12_N88_PATHS, 'completed'),
-                                cut('max_memory'), field('returned', 24),
+             entries(expect_all(paths_count('exact', GCG12_N260_PATHS, 'completed'), complete,
+                                field('returned', GCG12_N260_PATHS)),
+                     expect_all(paths_count('exact', GCG12_N260_PATHS, 'completed'),
+                                cut('max_memory'), field('returned', 22),
                                 field('stop', {'phase': 'output', 'reason': 'max_memory'})),
                      expect_all(paths_count('at_least', 21, 'stopped'), cut('max_memory'),
                                 field('returned', 1),
@@ -1507,7 +1511,7 @@ FIXTURES = [
                      * 3),
              peaks_so_far)),
     post('paths_memory_withheld', 'masked',
-         {'patterns': [p(GCG12_N88, 'iupac', ident=f'GCG12-N88-{i}') for i in range(3)],
+         {'patterns': [p(GCG12_N260, 'iupac', ident=f'GCG12-N260-{i}') for i in range(3)],
           'strands': 'forward', 'long_search': 'paths', 'max_memory_mb': 1,
           'output': {'labels': 'none'}}, 200,
          'the same in all_or_count: the first copy listed whole, its objects kept; the second\'s '
@@ -1516,9 +1520,9 @@ FIXTURES = [
          'second did and is answered alike',
          expect_all(
              lambda a: check('max_memory_mb' not in a['limits'], a['limits']),
-             entries(expect_all(paths_count('exact', GCG12_N88_PATHS, 'completed'), complete,
-                                field('returned', GCG12_N88_PATHS)),
-                     *[expect_all(paths_count('exact', GCG12_N88_PATHS, 'completed'),
+             entries(expect_all(paths_count('exact', GCG12_N260_PATHS, 'completed'), complete,
+                                field('returned', GCG12_N260_PATHS)),
+                     *[expect_all(paths_count('exact', GCG12_N260_PATHS, 'completed'),
                                   withheld('output_budget'), field('returned', 0),
                                   field('cut', None),
                                   field('stop', {'phase': 'output', 'reason': 'max_memory'}))]
@@ -2044,21 +2048,23 @@ FIXTURES = [
          entries(expect_all(supported_paths('at_least', 0, search='stopped'),
                             cut('max_annotation_work'), field('returned', 0)))),
     post('supported_paths_memory', 'masked',
-         {'patterns': [p(GCG12 + 'N' * 34, 'iupac', ident=f'GCG12-N34-{i}') for i in range(6)],
+         {'patterns': [p(GCG12 + 'N' * 34, 'iupac', ident=f'GCG12-N34-{i}') for i in range(12)],
           'mode': 'partial', 'strands': 'forward', 'long_search': 'supported_paths',
           'max_memory_mb': 1, 'output': {'labels': 'all'}}, 200,
-         'the memory stops of the supported-path search, with a 1 MB account: six copies of a '
-         'pattern of 47 supported paths; each listed path\'s result stays in the account, so the '
-         'fifth copy\'s list ends where its paths no longer fit (stop {output, max_memory}, '
-         'cut max_memory, the counts exact) and the sixth stops in the search at a row the '
-         'account cannot hold (stop {extension, max_memory}, a rows_refused entry of phase '
-         'extension, the supported paths at_least, the ones completed before it listed)',
+         'the memory stops of the supported-path search, with a 1 MB account: twelve copies of a '
+         'pattern of 47 supported paths; each listed path\'s result stays in the account (its '
+         'labels, and its object as its written text, SPEC §31), so the ninth, tenth and eleventh '
+         'copies\' lists end where their paths no longer fit their half of what is left (stop '
+         '{output, max_memory}, cut max_memory, the counts exact) and the twelfth stops in the '
+         'search at a row the account cannot hold (stop {extension, max_memory}, a rows_refused '
+         'entry of phase extension, the supported paths at_least, the ones completed before it '
+         'listed)',
          entries(*([expect_all(supported_paths('exact', 47, 'record_verified', 'completed'),
                                field('returned', 47), field('stop', None),
-                               field('cut', None))] * 4),
-                 expect_all(supported_paths('exact', 47, 'record_verified', 'completed'),
-                            cut('max_memory'),
-                            field('stop', {'phase': 'output', 'reason': 'max_memory'})),
+                               field('cut', None))] * 8),
+                 *([expect_all(supported_paths('exact', 47, 'record_verified', 'completed'),
+                               cut('max_memory'),
+                               field('stop', {'phase': 'output', 'reason': 'max_memory'}))] * 3),
                  expect_all(supported_paths('at_least', search='stopped'), cut('max_memory'),
                             field('stop', {'phase': 'extension', 'reason': 'max_memory'}),
                             lambda e: check([r['phase'] for r in e['rows_refused']]

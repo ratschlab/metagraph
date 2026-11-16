@@ -258,7 +258,8 @@ What this build serves (milestone 1, and increment 3 where marked), against the 
   `information_bits` and its palindrome test cost O(L) time inside the deadline that no step charges and no clock
   reading interrupts (a few ns per base; many long patterns can therefore end in a 503 after `time_budget_ms`).
   What a path search holds of it (`long_search: "paths"`: the walks kept for the release and the result objects
-  built, O(L) each) is bounded by the request's memory account, with or without labels (§12.1).
+  built, O(L) each, each held as its written text once built, §31) is bounded by the request's memory account, with
+  or without labels (§12.1).
   Its `low_complexity_pattern` diagnostic reads the clock (since the review GPT-3, §7.8, §18): before every piece
   of 128 bases but the first.
 - A peptide's length L is in bases (3 per residue): with k = 31, peptides of up to 10 residues are within one
@@ -657,7 +658,7 @@ labels alone — a row truncated or refused, a stop of the annotation reads or o
 | `deadline` | `all_or_count`, L ≤ k: the work time passed in discovery or a deferred scan, or in the release or while its contexts were handed to the route (all or nothing: a deadline during the hand-over withholds all of them, the counts kept) | as stopped | a larger `time_budget_ms`, or as for `discovery_budget` |
 | `paths_later_increment` | either retrieval mode, L > k without `long_search: "paths"` or `"supported_paths"`, unless the anchors are `exact` 0 (§7.7); whatever stopped the anchors is in `stop` | the anchors' | ask with `long_search: "paths"` (increment 4, §12.1); a request that does not keeps this answer |
 | `anchors_above_threshold` | increment 4, `long_search: "paths"` (or `"supported_paths"`, §20.5), L > k, either retrieval mode (`partial` too): the anchors `exact` and more than `max_anchors` (on a graph without its mask also `bounds` with U > `max_anchors`, the note `threshold_upper_bound` when their `lower` ≤ `max_anchors`), so the extension was not admitted (§12.1) | the anchors' (`exact`, or without the mask `bounds`); `counts.paths` `unknown`, `extension: "not_admitted"` | raise `max_anchors`, or narrow the pattern's anchor window (its first k bases, and its last k with `strands` `both` or `reverse`) |
-| `annotation_budget` | increment 3, `all_or_count`, `labels: "all"`: a row the memory account refused (`rows_refused`), or the reads stopped at `max_annotation_work`; increment 5s, `all_or_count` whatever the projection: the supported-path search's reads stopped (`stop {extension, max_annotation_work \| max_memory}`, §20.5; `max_memory` also a level of its depth-first stack, §30), or a predicate's mirror reads (`stop {selection, …}`, §20.9) | `exact` (5s: `counts.supported_paths` `at_least`) | raise `max_memory_mb` or `max_annotation_work`, narrow the pattern, or `partial`; after a `max_memory` stop without a `rows_refused` entry (a frame of the search or a level of its depth-first stack, §30) `max_annotation_work` does not help: only `max_memory_mb` or a shorter or narrower pattern does (`partial` lists the supported paths completed before the stop); at the default `max_memory_mb`, which is also its cap (`--pattern-max-memory-mb`, 256 MiB unless the server sets another), the client cannot raise it: a shorter or narrower pattern, a request of its own for a pattern that follows others (their result objects stay in the account until the request ends, §14.4), or `partial` |
+| `annotation_budget` | increment 3, `all_or_count`, `labels: "all"`: a row the memory account refused (`rows_refused`), or the reads stopped at `max_annotation_work`; increment 5s, `all_or_count` whatever the projection: the supported-path search's reads stopped (`stop {extension, max_annotation_work \| max_memory}`, §20.5; `max_memory` also a level of its depth-first stack, §30), or a predicate's mirror reads (`stop {selection, …}`, §20.9) | `exact` (5s: `counts.supported_paths` `at_least`) | raise `max_memory_mb` or `max_annotation_work`, narrow the pattern, or `partial`; after a `max_memory` stop without a `rows_refused` entry (a frame of the search or a level of its depth-first stack, §30) `max_annotation_work` does not help: only `max_memory_mb` or a shorter or narrower pattern does (`partial` lists the supported paths completed before the stop); at the default `max_memory_mb`, which is also its cap (`--pattern-max-memory-mb`, 256 MiB unless the server sets another), the client cannot raise it: a shorter or narrower pattern, a request of its own for a pattern that follows others (their result objects stay in the account until the request ends, at their written text, §14.4, §31), or `partial` |
 | `anchor_labels_truncated` | increment 3, `all_or_count`, `labels: "all"`: a row carried more labels than `max_labels_per_anchor` (`anchors_truncated` lists each, with its total) | `exact` | raise `max_labels_per_anchor` to the largest total, or `partial` |
 | `output_budget` | increment 3, `all_or_count`, `labels: "all"`: the memory account could not hold the answer (the contexts' descriptors or the labels and occurrences built for them); increment 4, `long_search: "paths"` with any projection: the walks the extension keeps for the release did not fit their half of the account, or a level of its depth-first stack did not fit the account (`stop {extension, max_memory}`, the paths `at_least`; §30), or without labels a path's result object did not fit (`stop {output, max_memory}`; §12.1); increment 5b: also a selected context's result object, with any projection; increment 5s: the supported paths kept did not fit their half of the account (§20.7) | `exact` (increment 4 after a stop of the extension: `at_least`) | raise `max_memory_mb`, narrow the pattern, or `partial` |
 | `predicate_above_threshold` | increment 5b, `all_or_count` with a predicate: the raw count `exact` (without the mask: its upper bound) above `max_predicate_contexts`; nothing was read (§19.6, §19.8). Increment 5s: more supported walks to hold for `"either"` than `max_predicate_contexts` (§20.9) | the raw count's | narrow the pattern, scope or strands, raise `max_predicate_contexts` up to its cap, or `partial` (it tests the first `max_predicate_contexts`) |
@@ -945,7 +946,7 @@ releases anchors (a path search cut before any extension, by `stop_at_threshold`
 <!-- schema: answer_work -->
 | field | type | meaning |
 |---|---|---|
-| `memory_bytes` | integer | the request's memory account at its peak: every pattern's charges (§14.4, §20.7, §20.9, §12.1's label-free paths and result objects, §30's depth-first stack of the extension of a pattern longer than k), whatever the mode, labelled or not, whether or not the request named `max_memory_mb` (the account exists for every request; a budget that does not bind changes nothing in it); at least every entry's `work.memory_bytes`. A model of what the request held, not its process memory: the engine's ranges, the decoded rows of a read beyond what it charges, the answer's tree and text and the index pages it touched are not in it (`timing.page_faults` counts the pages read). 0 when nothing was charged (a count of patterns of at most k bases or without the extension, a label-free list of anchors; since §30 a pattern longer than k under `long_search` `"paths"` or `"supported_paths"` charges its depth-first stack in every mode, `count` included). Deterministic (the same request on the same index gives the same value) unless a time stop cut the work |
+| `memory_bytes` | integer | the request's memory account at its peak: every pattern's charges (§14.4, §20.7, §20.9, §12.1's label-free paths and result objects, §30's depth-first stack of the extension of a pattern longer than k), whatever the mode, labelled or not, whether or not the request named `max_memory_mb` (the account exists for every request; a budget that does not bind changes nothing in it); at least every entry's `work.memory_bytes`. A model of what the request held, not its process memory: the engine's ranges, the decoded rows of a read beyond what it charges, the answer's text beyond its result objects (which are in it at their written text, three copies of each, §31: the text held, its copy in the body and the transport's copy) and the index pages it touched are not in it (`timing.page_faults` counts the pages read). 0 when nothing was charged (a count of patterns of at most k bases or without the extension, a label-free list of anchors; since §30 a pattern longer than k under `long_search` `"paths"` or `"supported_paths"` charges its depth-first stack in every mode, `count` included). Deterministic (the same request on the same index gives the same value) unless a time stop cut the work |
 
 ### 8.2 `index`
 
@@ -1537,7 +1538,11 @@ result object 14,314 bytes, a kept walk 788): `paths_memory` (`partial`: the fir
 the second's list ended by the route at 24, `stop {output, max_memory}`, `cut: max_memory`, the paths `exact`;
 the third's extension stopped by its kept walks, `stop {extension, max_memory}`, the paths `at_least` 21, the one
 object that fits beside the 20 walks kept released) and `paths_memory_withheld` (`all_or_count`: the second and
-the third `withheld: output_budget` with `stop {output, max_memory}`, the second's objects freed with it); and
+the third `withheld: output_budget` with `stop {output, max_memory}`, the second's objects freed with it; since §31
+both use three copies of `GCGGCGGCGGCG` + N × 260 on `+`, 48 paths of L = 272 each, a result object 47,854 bytes while
+it is built and 13,496 to 13,676 once written, a kept walk 2,336: three copies of the 88-N pattern all fit once
+written objects hold their text, and the cases are kept with the second's list ended at 22 and the third
+`at_least` 21, one object listed); and
 `paths_memory_named` (`max_memory_mb` named alone: NDM-40's paths answered as without it, the entry of `paths`;
 NDM-F, L ≤ k, which the field does not act on, keeps `annotation_not_read`, §8.10) and `paths_memory_count` (the
 same request in mode `count`, where nothing is kept or built; since §30 the extension's depth-first stack is in the
@@ -1823,7 +1828,9 @@ none); `counts.occurrences` the deduplicated `record_verified` occurrences summe
 
 **Memory and the deadline** (labels: §14.4's account). A released path costs 512 + 2k + 3L + 192n bytes, charged
 before its result object is built (`partial`: at most half of the account; the first that does not fit ends the
-list: `cut: max_memory` and `stop {output, max_memory}`, `all_or_count` withheld `output_budget`); a path's label
+list: `cut: max_memory` and `stop {output, max_memory}`, `all_or_count` withheld `output_budget`) and held until
+its pattern ends, then settled to its written text (§31: three copies of the text the route built for it and 128
+bytes, at most the price; its labels keep their own charges); a path's label
 list costs 32 + 8 per label (its ids; each label built for the answer then 256 + its name's length, §14.4; when
 either does not fit: `stop {output, max_memory}`, that path and the later ones
 `output_budget`). Rows are read one per read, each once per step, work units as for contexts. The walks the
@@ -1839,12 +1846,13 @@ either stop, `partial` releases the walks kept before it (a prefix of the answer
 `cut: max_memory`), `all_or_count` withholds `output_budget`. Each walk is freed and its charge released as the
 release hands it over, so the result objects find the room the walks took. Without labels (`output.labels:
 "none"`) each path's result object is charged as with labels (512 + 2k + 3L + 192n), before it is built, from
-all that the account has left (no reads to keep room for); the first that does not fit ends the list: `partial`
-returns the objects built (`cut: max_memory`, `stop {output, max_memory}` unless the extension's stop is stated),
+all that the account has left (no reads to keep room for), and settled to its written text as soon as it is
+written, one by one in the release (§31), so the next objects of the list find the room its tree took; the first
+that does not fit ends the list: `partial` returns the objects built (`cut: max_memory`, `stop {output, max_memory}` unless the extension's stop is stated),
 `all_or_count` withholds `output_budget`. A memory stop ends only its own pattern: the next starts with what the
 account has left (the walks and, in `all_or_count`, the discarded objects of a stopped pattern are freed with
-it; the objects `partial` returned stay until the request ends, §19.9). Without labels `max_memory_mb` is not
-echoed (§4.1), and `work.memory_bytes` (stated in every answered entry since 2026-10-21, §8.7) is the account's
+it; the objects `partial` returned stay until the request ends, at their written text, §19.9, §31). Without
+labels `max_memory_mb` is not echoed (§4.1), and `work.memory_bytes` (stated in every answered entry since 2026-10-21, §8.7) is the account's
 peak whether or not the request named it: the answer of a request the account holds is the one of a request
 without it, byte for byte. The work time is read before each annotation read and between its
 chunks, before each path's label list (`stop {output, time}`), before each path's verification (`stop {placement,
@@ -2090,7 +2098,9 @@ Served by this build (`src/cli/pattern_retrieval.cpp`, design §4.3, §5.2–§5
   is past its maximum nothing more fits: the reads stop and the later patterns' contexts are not admitted.
 - **The memory account** (`max_memory_mb`, one per request, over all its patterns) is a deterministic model in
   bytes, never a measurement, so that where a request stops does not depend on the allocator: a released
-  context 512 + 2k (its descriptor and its result object), a dictionary label 192 + 2 × its name's length
+  context 512 + 2k (its descriptor and its result object; once its pattern ends and the object is written, its
+  written text, §31: three copies of the object's own text and 128 bytes, at most 512 + 2k), a dictionary label
+  192 + 2 × its name's length
   (its name in the dictionary and in the placement's copy of it; charged inside the read that names it), the rows' label lists and coordinates as the `DecodeBudget` charges
   them (held until the pattern's labels are built), a statement of a row (a `rows_refused` or
   `anchors_truncated` entry) 384 + k, a label of a result 256 + its name's length (its copy of the name), a
@@ -3136,7 +3146,7 @@ beside §14.4's items:
 | a listed context's `selection_labels` and `selection_strands` | 32 + the names' lengths + 4 per label (the ids kept until the results name them); 32 + 24 per label (a byte kept per label, its string in the answer) | when it is decided |
 | a label of the listed contexts' label order | 48 | likewise, once per distinct label |
 | `"predicate_only"`'s dictionary | 192 + 2 × the length, per distinct predicate label on the listed rows | likewise |
-| a selected context's result object | 512 + 2k (§14.4) | before it is built |
+| a selected context's result object | 512 + 2k (§14.4) while it is built; then its written text (§31: three copies of its own text and 128, at most 512 + 2k) | before it is built; settled when its pattern ends |
 
 **The deadline** (§7.6): read while the names are bound (every 4,096), every 4,096 contexts and before every
 lookup batch of 64, before every row read (and between its paced pieces), every 64 decisions, before the label
@@ -3148,7 +3158,8 @@ stop would not skip them.
 
 The engine's own retention for the raw release (24-byte descriptors, up to `max_predicate_contexts`) is outside
 the account, as the label-free descriptors of §7.6 are (a long pattern's kept walks are in it, §12.1). The result
-objects that a pattern's answer keeps stay charged until the request ends, whatever the projection: the result
+objects that a pattern's answer keeps stay charged until the request ends (at their written text once their
+pattern ends, §31), whatever the projection: the result
 object of a context the pass selected (with `output.labels: "none"` as with a projection, whose labels hold its
 descriptor, §14.4) and the objects of a label-free path list (`output.labels: "none"`, `long_search: "paths"`,
 §12.1). A constant `true` normal form has no pass: its contexts are answered as the unfiltered request (§19.6) and
@@ -3513,8 +3524,9 @@ answered entry of a pattern longer than k has `rows_refused` (§14.4), in every 
   out of it (§30). A frame, a row or a level that does not fit: `stop {extension, max_memory}`. A path that does
   not fit its half: the list ends before it (`partial`: `cut: max_memory`, `stop {output, max_memory}`;
   `all_or_count`: `withheld: output_budget`). The returned paths' result objects stay in the account until the
-  request ends, as a released path's (§14.4), so the later patterns of a request have less (fixture
-  `supported_paths_memory`).
+  request ends, as a released path's (§14.4), at their written text once their pattern ends (§31: the descriptor
+  falls to three copies of the object's own text and 128 bytes; its labels and occurrence runs keep their
+  charges), so the later patterns of a request have less (fixture `supported_paths_memory`).
 - **The deadline**: before every row read (and between its paced pieces), every 4,096 merge rounds, every 4,096
   runs mapped to occurrences, every 64 result objects built; a time stop is `stop {extension, time}` (or
   `{output, time}`), `determinism: "time_limited"`.
@@ -3670,7 +3682,7 @@ Measured with this build's server on the masked copy of the mini (the fixtures o
 | `supported_paths_count` | NDM-40 and NDM-F, `count`, `labels: "all"` | NDM-40's supported paths counted (22 rows read), note `projection_not_read`; NDM-F (L ≤ k) as without the option, `annotation_not_read` |
 | `supported_paths_partial` / `_above_threshold` | NDM-40, `max_paths` 1 | `partial`: the `+` path, `cut: max_paths`; `all_or_count`: `withheld: count_above_threshold` |
 | `supported_paths_work_budget` (`_partial`) | NDM-40, `max_annotation_work` 1 | the first anchor's row read (491 units), `stop {extension, max_annotation_work}`, `supported_paths` `at_least` 0 (`search: "stopped"`), `withheld: annotation_budget` (`cut: max_annotation_work`) |
-| `supported_paths_memory` | six copies of `GCGGCGGCGGCG` + N × 34 (`+`, 47 supported paths each), `partial`, `labels: "all"`, `max_memory_mb` 1 | the first four listed whole; the fifth's list ends at 33 (`stop {output, max_memory}`, `cut: max_memory`, counts `exact`); the sixth stops at a row of 27,376 bytes the account cannot hold (27,312 before §30: the extension's stack takes its share of the account) (`rows_refused` phase `extension`, `stop {extension, max_memory}`), 15 supported paths `at_least`, all 15 listed |
+| `supported_paths_memory` | twelve copies of `GCGGCGGCGGCG` + N × 34 (`+`, 47 supported paths each), `partial`, `labels: "all"`, `max_memory_mb` 1 | the first eight listed whole; the lists of the ninth, tenth and eleventh end at 40, 31 and 23 (`stop {output, max_memory}`, `cut: max_memory`, counts `exact`); the twelfth stops at a row of 27,216 bytes the account cannot hold (`rows_refused` phase `extension`, `stop {extension, max_memory}`), 20 supported paths `at_least`, 17 listed. Until §31 six copies: the first four whole, the fifth's list ended at 33, the sixth stopped at a row of 27,376 bytes (27,312 before §30: the extension's stack takes its share of the account), 15 `at_least`, all 15 listed |
 | `supported_paths_predicate` / `_label` | the chimera, `any(562)` | `best`: no supported walk, `tested` 0, `selected` 0; `label_intersection`: both walks selected |
 | `supported_paths_predicate_context` / `_either` | NDM-40, `none(546)` | `"context"`: the `-` walk (its 7 supporting columns lack 546) selected, 1 of 2; `"either"`: 0 (the `+` walk, which 546 supports, is the `-` walk's mirror, found by the search on the other strand: `mirror_rows` 0) |
 | `supported_paths_predicate_mirror` | NDM-40, `strands: "reverse"`, `any(546)`, `"either"`, `predicate_only` | the mirror walk looked up (`predicate_lookups` 1) and read (`mirror_rows` 11 of `annotation_rows` 22); the `-` walk selected by its mirror's support, `selection_strands: ["reverse_complement"]`, its own `labels` [] |
@@ -5153,9 +5165,11 @@ request and the index, not of thread interleaving.
   and 356,015 on the Protein build; with `max_memory_mb` m, ⌊m × 2^20 / 178⌋ and ⌊m × 2^20 / 754⌋) now stops
   `{extension, max_memory}` where it went on before, bounded by `max_steps` and the work time alone.
 - The same at the anchor's own level: a pattern with anchors that finds less than a level's price left in the account
-  (an earlier pattern's result objects hold the rest) stops there, `at_least` 0. Before, mode `count` counted its
-  walks `exact`, a retrieval mode stopped at its first kept walk (`at_least` 1), and a pattern without a walk
-  answered `exact` 0.
+  (an earlier pattern's result objects and labels hold the rest) stops there, `at_least` 0. Before, mode `count`
+  counted its walks `exact`, a retrieval mode stopped at its first kept walk (`at_least` 1), and a pattern without a
+  walk answered `exact` 0. Since §31 an earlier pattern's result objects are held at their written text, a fraction
+  of the price this bullet was written against: B-M1's case (A^5000 then A^700 at 1 MiB on a self-loop, the review
+  of 2026-11-16), which stopped the second pattern here, answers it `exact` 1.
 - `annotation_not_read` (§8.10): `max_memory_mb` named alone acts on a `"paths"` entry of a pattern longer than k in
   mode `count` too, so that entry no longer carries the note (fixture `paths_memory_count`).
 - Where a memory stop lands: the stack takes its share of the account, so a pattern the account stopped before
@@ -5173,7 +5187,7 @@ Tests: `PatternSearch.ExtensionMemoryAccount`, `PatternSearch.ExtensionStackBoun
 `PatternSegments.ArmStacksInTheSink` (`test_pattern_segments.cpp`), `PatternProtein.ExtensionStackInTheMemoryAccount`
 (`test_pattern_protein.cpp`, the Protein build), `PatternPaths.TheMemoryAccountHoldsTheExtensionStack` (also: the stop
 ends only its pattern), `PatternPaths.TheMemoryAccountBoundsLabelFreePaths` (also: an earlier pattern's objects leave
-less than a level), `PatternPaths.UnderPathsAStackStopPrecedesTheFirstWalk` (`tests/cli/test_pattern_paths.cpp`),
+less than a level, held at their price since §31, `RetrievalHooks::hold_at_price`), `PatternPaths.UnderPathsAStackStopPrecedesTheFirstWalk` (`tests/cli/test_pattern_paths.cpp`),
 `PatternSupport.AStopAtALevelOfTheStackIsTheSearchsOwn` (`test_pattern_support.cpp`: the engine's refused level beside
 the tracker's held frame, released as the tracker's stops),
 `PatternSupportedRoute.AStopAtALevelOfTheStackIsTheSearchsMemoryStop` (`test_pattern_supported_route.cpp`: the answer
@@ -5184,3 +5198,110 @@ validator (`api/python/tests/test_pattern_fixtures.py`). Fixtures regenerated (�
 `_partial`, `_above_threshold`, `_label`, `_primary` and the `_predicate` ones), and `supported_paths_memory`'s stop
 (above); on the Protein build `pattern_protein/entry` (the entries of `long` and `long_class` 3,966 bytes, 1,950 and
 2,888 before).
+
+## 31. Result objects held as their written text (the owner's decision of 2026-11-16)
+
+The owner's decision of 2026-11-16 ("Compact answer in train 7"): a finished answer is held as compact text, not as a
+JSON tree. Until then every result object stayed a tree (a `Json::Value` with its arrays and strings) from the moment
+it was built until the response was written, charged its price (512 + 2k a context, §14.4; 512 + 2k + 3L + 192n a
+path, §12.1) for as long as the request ran, and the server serialized the whole tree once at the end.
+
+**The representation.** A result object is written as its compact JSON text once nothing changes it any more: a
+label-free path (`long_search: "paths"`, `output.labels: "none"`) and a label-free context without a predicate in the
+engine's callback, as it is built; every other object (labelled contexts and paths, a predicate's selected contexts
+and its projection's, the supported paths) when its pattern ends, after its labels and its selection fields are
+merged into it. Its tree is freed. A list withheld after its pattern's work (its labels withheld, a label-free list
+cut in `all_or_count`) is counted, not written. The server writes the response from the answer's head (the members
+around the results) and the held texts in one copy, byte for byte the compact text of the whole tree (`json_text`),
+each text freed once copied; a multi-graph server holds each answered pair's entries so until the envelope is written
+(§24). No tree of a result object is built on the server's path. The CLI and the tests (`process_pattern_request`,
+the tree API) keep each tree beside its text and check on every call, in every build type, that the text written
+from the texts is the text of the tree (`std::logic_error` otherwise).
+
+**The charge.** While a result object is a tree it is charged its price, before it is built, as before. Once it is
+written it is held at `held_result_bytes` (`src/cli/pattern.hpp`):
+
+    min(price, 3 × own + 128)
+
+- `own`: the compact length of the fields the route built for the object, measured as it is built. The fields merged
+  into it later (`labels`, `labels_status`, `labels_total`, `labels_excluded_unverified`, `support`,
+  `selection_labels`, `selection_strands`) keep the charges §14.4, §19.9 and §20.7 give them.
+- 3 (`kWrittenTextCopies`): the copies of the text the request holds at its peak: the text itself, its copy in the
+  response body (written in one piece while every text is still held) and the transport's copy of the body (made
+  before the body is freed; a compressed response holds its smaller compressed copy instead). Freed texts do not give
+  their pages back to the operating system, so the three are counted at once. With one copy (the text alone) the
+  account would admit about three times the text and the server's peak would exceed that of the trees before (the
+  table below).
+- 128 (`kHeldResultBytes`): the string, its heap block's header and rounding, and its slot in its pattern's vector of
+  texts.
+- Never more than the price, so that settling only releases.
+
+A label-free path is settled one by one in the release, as it is written (`Admission::settle`): the next objects of
+its list find the room its tree took. Every other object is settled when its pattern ends, from the charge the route
+holds for it: the labelled retrieval's descriptors, the selection's result objects, the supported paths' listed
+descriptors. A label-free context without a predicate is charged nothing, as before; a slot refused after its work
+(`unrepresentable_label`) keeps its charges; the answer volume (§7.6) is unchanged. Nothing else changes: the walks
+and their half of the account, the extension's depth-first stack (§30), the labels, rows, occurrence runs, the
+selection's pass and every other structure keep their charges and their order.
+
+**Memory measured** (the decision's condition: the server's peak at the cap must not exceed that of the trees). One
+`server_query` per request (`-p 2 --threads-each 2`, macOS, peak RSS by `/usr/bin/time -l`; idle 61 MB) on a DNA graph
+of k = 31 with a 10 Mbp random filler (node ids and rows of 7 and 8 digits) and two 900-base alleles that differ at
+ten sites; the request: 16 copies of an 840-base IUPAC pattern with 1,024 paths each, `long_search: "paths"`,
+`output.labels: "none"`, the default account (256 MiB):
+
+| mode, response | the trees (26cf7fe2d) | §31 (3 copies) | one copy (not adopted) |
+|---|---|---|---|
+| `partial`, identity | 382 MB; body 24.7 MB, 1,674 paths | 345 MB; 89.2 MB, 6,122 paths | 817 MB; 238.6 MB, 16,384 paths |
+| `partial`, gzip | 358 MB; 2.0 MB | 268 MB; 7.2 MB | 610 MB; 19.4 MB |
+| `all_or_count`, identity | 1,785 MB; 14.9 MB, 1,024 paths | 332 MB; 74.6 MB, 5,120 paths | 818 MB; 238.6 MB |
+| `all_or_count`, gzip | 1,785 MB; 1.2 MB | 260 MB; 6.1 MB | 610 MB; 19.4 MB |
+
+Before §31 an `all_or_count` list the account cut kept its trees, uncharged, until the answer was assembled (1.8 GB
+of process memory at a 256 MiB account); §31 frees them as the list is withheld.
+
+**Client-visible change.**
+- `work.memory_bytes` (the request's and every entry's, §8.1, §8.7) falls where result objects were part of the peak:
+  every label-free path entry (each object is settled before the next is built), the entries after a pattern that
+  answered objects, and the request's own where its peak came after its first pattern. The members of `work` and
+  their meaning are unchanged: a deterministic model.
+- At the same `max_memory_mb` an answer holds more. A list the account cut lists more objects (a written object holds
+  about a third of its price or less); a memory stop caused by earlier patterns' result objects comes later or not at
+  all; a pattern after a list that now holds more can find less left and stop earlier. B-M1 (the review of
+  2026-11-16: A^5000 then A^700 at 1 MiB on a self-loop): the first path's tree, 974,754 bytes, left the second
+  pattern less than its stack (`stop {extension, max_memory}` at its anchor's level, `at_least` 0); written, the
+  first holds about 90 KB, and the second answers `exact` 1, listed.
+- The body at the cap is larger: on the graph above 3.6 times the body of the trees in `partial` (89.2 MB against
+  24.7 MB) and 5.0 times in `all_or_count` (74.6 MB against 14.9 MB). The factor follows the text a result object has
+  against its price: a path's price is 192 bytes per k-mer, its text about 2 × (digits + 1) bytes per k-mer for its
+  `nodes` and `rows` arrays, so the longer a graph's node ids and rows (the larger the graph), the larger the text and
+  the factor. A client that reads an answer whole should expect a body of up to a third of the account.
+- Unchanged: the stack's stop (L-memory-0001: A^100000 on a self-loop, `long_search: "paths"`, `max_memory_mb` 1,
+  still stops `{extension, max_memory}` at a level, in every mode), the walks' stop, every stop a pattern's own
+  structures cause, and every count of a pattern the account does not bind.
+
+**Fixtures** (§11, the Linux answers regenerated; 178 in all, 11 stored bodies changed). Three keep their names,
+cases and expects with a new request, since their old one no longer reaches the account's stops once written objects
+hold about a third of their price: `paths_memory` and `paths_memory_withheld` search three copies of `GCGGCGGCGGCG` +
+N × 260 (48 paths of L = 272) instead of N × 88 (47 paths of L = 100), three copies of which all fit now; in
+`partial` the second copy's list ends at 22 (24 before) and the third stops its extension with 21 paths `at_least`,
+one listed; in `all_or_count` the second and third are withheld as before. `supported_paths_memory` searches twelve
+copies instead of six (the table of §20 above). `labels_all_rows_refused` lists more before its refused rows (the
+second, third and fourth patterns 273, 82 and 24 contexts, 207, 51 and 9 before; only the fourth refuses rows now, 15
+at `label_discovery`, where the third refused 2 at `placement` and the fourth 9 before). `work.memory_bytes` alone
+falls in `paths`, `unmasked_paths` and `paths_memory_named` (5,476 to 4,064), `paths_labels` (47,270 to 44,518),
+`paths_require_support` (45,204 to 44,518), `peptide` (82,360 to 82,238) and `supported_paths_label` (67,137,909 to
+67,135,782). No other stored body changed; the Protein build's `pattern_protein/entry` is unchanged (its peak is the
+extension's stack, §30). The validator's mutations of `supported_paths_memory` follow its entries (the twelfth's
+`rows_refused`, the ninth's stop).
+
+Tests: `PatternRoute.HeldResultsAreTheTreesTexts`, `PatternRoute.TheAnswerTextIsTheTreesText`,
+`PatternRoute.TheServersAnswerHoldsTextsOnly` (`tests/cli/test_pattern_route.cpp`: the texts are the trees' texts, the
+answer's text is the tree's, the server's answer holds no result tree); `PatternPaths.EarlierAnswersHoldTheirTextOnly`
+(B-M1, `partial` and `all_or_count`), `PatternPaths.LMemory0001StopsAtALevelOfTheStack` (every mode),
+`PatternPaths.HeldPathsAreChargedTheirText`, `PatternPaths.HeldResultsAreSettledAtTheirText` (labelled and selected
+contexts, a projection, supported paths, the settlement byte for byte through `RetrievalHooks::held_hook`),
+`PatternPaths.TheRouteCutsALabelFreeListAtAnObjectsPrice`, and `PatternPaths.TheMemoryAccountBoundsLabelFreePaths`,
+`PatternPaths.TheRouteCutPrecedesALaterTimeStopOfTheRelease` and
+`PatternSelection.ResultObjectsWithoutLabelsAreChargedUntilTheRequestEnds` on the new charge (the cuts a test index
+reaches only with the objects held at their price through `RetrievalHooks::hold_at_price`).

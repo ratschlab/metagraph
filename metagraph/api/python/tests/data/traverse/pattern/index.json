@@ -710,7 +710,7 @@
    "status": 200,
    "hand_made": false,
    "headers": {},
-   "shows": "label-free paths in the request's memory account (max_memory_mb 1, SPEC §12.1): three copies of a pattern of 47 paths (L = 100); the first copy's result objects fit and stay in the account until the request ends, so the second copy's list ends where the next object does not fit beside the walks still held (24 returned, stop {output, max_memory}, cut max_memory, the paths exact) and the third copy's kept walks pass half of what is left (stop {extension, max_memory}, the paths at_least, extension stopped, the one object that fits beside the 20 walks kept released, cut max_memory); max_memory_mb named alone acts on these entries (SPEC §8.10): no annotation_not_read, not echoed; work.memory_bytes the account's peak so far, as in every answered entry (SPEC §8.7)"
+   "shows": "label-free paths in the request's memory account (max_memory_mb 1, SPEC §12.1): three copies of a pattern of 48 paths (L = 272); the first copy's result objects fit and stay in the account until the request ends (as their written text, SPEC §31), so the second copy's list ends where the next object does not fit beside the walks still held and the objects written (22 returned, stop {output, max_memory}, cut max_memory, the paths exact) and the third copy's kept walks pass half of what is left (stop {extension, max_memory}, the paths at_least, extension stopped, the one object that fits beside the 20 walks kept released, cut max_memory); max_memory_mb named alone acts on these entries (SPEC §8.10): no annotation_not_read, not echoed; work.memory_bytes the account's peak so far, as in every answered entry (SPEC §8.7)"
   },
   "paths_memory_withheld": {
    "server": "masked",
@@ -1196,7 +1196,7 @@
    "status": 200,
    "hand_made": false,
    "headers": {},
-   "shows": "the memory stops of the supported-path search, with a 1 MB account: six copies of a pattern of 47 supported paths; each listed path's result stays in the account, so the fifth copy's list ends where its paths no longer fit (stop {output, max_memory}, cut max_memory, the counts exact) and the sixth stops in the search at a row the account cannot hold (stop {extension, max_memory}, a rows_refused entry of phase extension, the supported paths at_least, the ones completed before it listed)"
+   "shows": "the memory stops of the supported-path search, with a 1 MB account: twelve copies of a pattern of 47 supported paths; each listed path's result stays in the account (its labels, and its object as its written text, SPEC §31), so the ninth, tenth and eleventh copies' lists end where their paths no longer fit their half of what is left (stop {output, max_memory}, cut max_memory, the counts exact) and the twelfth stops in the search at a row the account cannot hold (stop {extension, max_memory}, a rows_refused entry of phase extension, the supported paths at_least, the ones completed before it listed)"
   },
   "supported_paths_require_support": {
    "server": "masked",

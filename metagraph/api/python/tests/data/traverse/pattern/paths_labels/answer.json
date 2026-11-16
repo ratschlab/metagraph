@@ -841,17 +841,17 @@
     "-"
    ],
    "timing": {
-    "cpu_ms": 4.067792,
-    "elapsed_ms": 0.13325,
-    "extension_ms": 0.018292,
-    "label_discovery_ms": 0.645166,
-    "label_intersection_ms": 0.102166,
+    "cpu_ms": 2.944,
+    "elapsed_ms": 0.111666,
+    "extension_ms": 0.011916,
+    "label_discovery_ms": 0.422916,
+    "label_intersection_ms": 0.075792,
     "page_faults": {
      "major": 0,
-     "minor": 135
+     "minor": 6
     },
-    "placement_ms": 0.544958,
-    "verification_ms": 0.431167
+    "placement_ms": 0.266542,
+    "verification_ms": 0.312833
    },
    "withheld": null,
    "work": {
@@ -1155,17 +1155,17 @@
     "-"
    ],
    "timing": {
-    "cpu_ms": 1.575,
-    "elapsed_ms": 0.145875,
-    "extension_ms": 0.065667,
-    "label_discovery_ms": 0.696,
-    "label_intersection_ms": 0.002333,
+    "cpu_ms": 1.322375,
+    "elapsed_ms": 0.0735,
+    "extension_ms": 0.03525,
+    "label_discovery_ms": 0.590333,
+    "label_intersection_ms": 0.001458,
     "page_faults": {
      "major": 0,
      "minor": 0
     },
-    "placement_ms": 0.532708,
-    "verification_ms": 0.011208
+    "placement_ms": 0.457708,
+    "verification_ms": 0.023833
    },
    "withheld": null,
    "work": {
@@ -1176,7 +1176,7 @@
     "extension_branches": 0,
     "extension_edges": 43,
     "mask_scans": 0,
-    "memory_bytes": 47270,
+    "memory_bytes": 44518,
     "ranges_visited": 62,
     "steps": 105,
     "verification_steps": 177
@@ -1184,14 +1184,14 @@
   }
  ],
  "timing": {
-  "cpu_ms": 5.737208,
-  "elapsed_ms": 5.663917,
+  "cpu_ms": 4.319792,
+  "elapsed_ms": 4.28575,
   "page_faults": {
    "major": 0,
-   "minor": 135
+   "minor": 6
   }
  },
  "work": {
-  "memory_bytes": 47270
+  "memory_bytes": 44518
  }
 }
