@@ -1035,16 +1035,18 @@ void call_selected_coords(const MultiIntMatrix &matrix, const annot::CoordToHead
 // position of the row as the positions are visited in order (call_in_order): it is not
 // spread over the positions first, so nothing grows with a row's positions times its
 // values, and nothing is sorted (review M1/m3 of lane T7-M5, Q-M16). A record visits the
-// positions of the rows it has values at only (review A-m1). The values held, and the
-// rows a record visits, are charged to |scratch| as they grow. The positions of the
-// repeated rows (4 B a position and 4 B a row, made only when records are returned) are
-// not: they are the query's, as its rows and positions are.
+// positions of the rows it has values at only (review A-m1), merged by position, or, when
+// that would take longer, all positions of the query in one pass (review M5-m1). The
+// values held, the rows a record merges and the table of the pass are charged to
+// |scratch| as they grow. The positions of the repeated rows (4 B a position and 4 B a
+// row, made only when records are returned) are not: they are the query's, as its rows
+// and positions are.
 class RepeatedValues {
   public:
     RepeatedValues(const MultiIntMatrix &matrix, const annot::CoordToHeader &mapping,
                    const QueryRows &q, std::span<const size_t> positions,
                    const HeaderCounts &counts, bool count, CutScratch *scratch)
-          : hits_(counts.size()), scratch_(scratch) {
+          : q_(q), query_positions_(positions), hits_(counts.size()), scratch_(scratch) {
         if (counts.empty())
             return;
         // the positions of each repeated row, ascending: those of row j are
@@ -1076,10 +1078,14 @@ class RepeatedValues {
         });
     }
 
+    ~RepeatedValues() { scratch_->free(range_of_row_); }
+
     // Call |callback|(position, value) for the values of counts[r], in ascending order of
     // position and, at a position, of value (a row's coordinates are in ascending order).
     // Once: the values are freed after. The positions of a record's one row are walked
-    // directly, those of several rows merged by position (a heap of the rows).
+    // directly. Those of several rows are merged by position (a heap of the rows: a step
+    // of log2(rows) per position of the rows), unless one pass over all positions of the
+    // query is shorter (a record at most rows of a periodic query).
     template <class Callback>
     void call_in_order(size_t r, const Callback &callback) {
         auto &hits = hits_[r];
@@ -1096,12 +1102,58 @@ class RepeatedValues {
                 }
             }
         } else {
-            merge_rows(hits, callback);
+            size_t num_rows = 0;
+            uint64_t num_positions = 0;
+            for (size_t h = 0; h < hits.size(); ++num_rows) {
+                const uint32_t j = hits[h].first;
+                num_positions += offsets_[j + 1] - offsets_[j];
+                for ( ; h < hits.size() && hits[h].first == j; ++h) {}
+            }
+            const double heap_steps = static_cast<double>(num_positions)
+                                        * std::log2(static_cast<double>(num_rows));
+            if (heap_steps < static_cast<double>(q_.row_of.size())
+                    || hits.size() > std::numeric_limits<uint32_t>::max()) {
+                merge_rows(hits, callback);
+            } else {
+                pass_in_order(hits, callback);
+            }
         }
         scratch_->free(hits);
     }
 
   private:
+    // Call |callback| for the values in |hits| in one pass over the query's positions,
+    // finding a repeated row's values in |hits| through a table of each repeated row's
+    // range in |hits| (8 B a row, charged once and reset after each record)
+    template <class Callback>
+    void pass_in_order(const std::vector<std::pair<uint32_t, uint64_t>> &hits,
+                       const Callback &callback) {
+        if (range_of_row_.empty()) {
+            scratch_->reserve(range_of_row_, q_.repeated.size());
+            range_of_row_.resize(q_.repeated.size());
+        }
+        auto set_ranges = [&](bool clear) {
+            for (size_t h = 0; h < hits.size(); ) {
+                const uint32_t j = hits[h].first;
+                const size_t begin = h;
+                for ( ; h < hits.size() && hits[h].first == j; ++h) {}
+                range_of_row_[j] = clear ? std::make_pair(uint32_t(0), uint32_t(0))
+                                         : std::make_pair(uint32_t(begin), uint32_t(h));
+            }
+        };
+        set_ranges(false);
+        for (size_t i = 0; i < q_.row_of.size(); ++i) {
+            const uint32_t d = q_.row_of[i];
+            if (q_.weight[d] > 1) {
+                const auto [begin, end] = range_of_row_[q_.repeated_of[d]];
+                for (uint32_t h = begin; h < end; ++h) {
+                    callback(query_positions_[i], hits[h].second);
+                }
+            }
+        }
+        set_ranges(true);
+    }
+
     // Call |callback| for the values in |hits| of several rows, merged by position: a heap
     // of the rows by their next position (no position is in two rows), charged to the
     // scratch as it grows
@@ -1145,9 +1197,14 @@ class RepeatedValues {
         scratch_->free(rows);
     }
 
+    // the query's rows and positions, held by the caller
+    const QueryRows &q_;
+    std::span<const size_t> query_positions_;
     // the query positions of the repeated rows, by row, and the start of each row's in it
     std::vector<uint32_t> positions_;
     std::vector<uint32_t> offsets_;
+    // pass_in_order's table: the range in a record's hits of each repeated row
+    std::vector<std::pair<uint32_t, uint32_t>> range_of_row_;
     // (index of the repeated row, value) of each record, by row
     std::vector<std::vector<std::pair<uint32_t, uint64_t>>> hits_;
     CutScratch *scratch_;
