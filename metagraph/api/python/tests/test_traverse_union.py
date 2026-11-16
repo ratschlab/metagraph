@@ -389,6 +389,27 @@ class TestExports(unittest.TestCase):
         self.assertIn('ends=gA@70:max_extension_bp/uncertified', fa)
         self.assertIn('labels=gA:2+/', fa)          # a cut list: a lower bound
 
+    def test_fasta_labels_at_a_depth(self):
+        # at_bp= gives the labels= counts at that depth, as carriers(at_bp=) lists them
+        u = locus()
+        for at in (None, 40, 10):
+            fa = u.to_fasta('right', at_bp=at)
+            for head in fa.split('\n')[::2]:
+                if not head:
+                    continue
+                wid = int(head.split(' ')[0].split('.u')[1])
+                tok = next(t for t in head.split(' ') if t.startswith('labels='))
+                want = []
+                for s in u.carriers('right', wid, at_bp=at):
+                    w = u.walks('right', stubs=True, by='id')[wid]
+                    if s.pair not in w.held_in:
+                        continue
+                    labs = s.route.labels if s.how == 'merges' else s.labels
+                    want.append('%s:%d%s/%d' % (s.pair, len(labs), '+' if s.labels_cut else '',
+                                                sum(1 for x in labs if x.from_bp == 0)))
+                self.assertEqual(tok, 'labels=' + ','.join(want), (at, wid))
+        self.assertNotEqual(u.to_fasta('right', at_bp=10), u.to_fasta('right'))
+
     def test_escaping_round_trips(self):
         for name in ('café', 'a,b;c=d@e/f:g>h~i+j|k[l]m$n%o p', 'tab\tx'):
             esc = X.union_escape(name)
@@ -1453,6 +1474,38 @@ class TestAbsence(unittest.TestCase):
         u = union_pairs([{'pair': 'A', 'graphlet': h}, {'pair': 'B', 'graphlet': b}])
         s = self.spans(u, 'right', z)['A']
         self.assertEqual((s.how, s.to_bp, s.absence), ('ends', 76, 'under_strategy'))
+        # G.5's shape: that hairpin dead end skipped the very base the other pair spells
+        from metagraph.traverse.model import Event
+        leaf.events = list(leaf.events) + [Event(76, 'hairpin', char=z[76], followed=False)]
+        u = union_pairs([{'pair': 'A', 'graphlet': h}, {'pair': 'B', 'graphlet': b}])
+        s = self.spans(u, 'right', z)['A']
+        self.assertEqual((s.how, s.to_bp, s.absence), ('ends', 76, 'walk_rule'))
+        self.assertIn('ends=A@76:dead_end/walk_rule', u.to_fasta('right'))
+
+    def test_walk_rule_from_a_skipped_hairpin_against_follow(self):
+        # ambiguous_split (canonical, k 15) followed a hairpin at 25 bp of its left arm into
+        # the child spelling 'A'; the same graph under hairpins: skip records the hairpin
+        # (followed false) and has no such child (here its other child spells 'G' there)
+        follow = T.graphlet('ambiguous_split')
+        skip = copy.deepcopy(follow)
+        segs = skip.arms['left'].segments
+        (ev,) = [e for e in segs[0].events if e.type == 'hairpin']
+        self.assertEqual((ev.at_bp, ev.char, ev.followed, segs[1].walk[0]), (25, 'A', True, 'A'))
+        ev.followed = False
+        segs[1].walk = 'G' + segs[1].walk[1:]
+        u = union_pairs([{'pair': 'follow', 'graphlet': follow},
+                         {'pair': 'skip', 'graphlet': skip}])
+        whole = follow.spell('left', 0, 'walk')
+        self.assertTrue(whole.startswith(segs[0].walk + 'A'))
+        s = self.spans(u, 'left', whole[::-1])
+        self.assertEqual((s['follow'].how, s['skip'].how, s['skip'].to_bp, s['skip'].absence),
+                         ('whole', 'diverges', 25, 'walk_rule'))
+        self.assertEqual((s['skip'].k, s['skip'].regime), (15, 'canonical'))
+        # followed, the same event decides nothing: the pair has the child
+        ev.followed = True
+        u = union_pairs([{'pair': 'follow', 'graphlet': follow},
+                         {'pair': 'skip', 'graphlet': skip}])
+        self.assertNotEqual(self.spans(u, 'left', whole[::-1])['skip'].absence, 'walk_rule')
 
     def test_walk_rule_against_another_k(self):
         r11, r21 = union_doc('repeat11'), union_doc('repeat21')
@@ -1790,6 +1843,32 @@ class TestR237RoundTrip(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.parts, cls.u = r237_union()
+
+    def test_a_merge_that_splits_at_once(self):
+        # bact_pseudomonadota's stubs at 35 bp (left) and 52 bp (right) enter zero-length
+        # merge segments with two children: the trie node is the end of the union segment
+        # there, 's<id>$', in the span, the merges token and mt:Z
+        u = self.u
+        got = []
+        for side in u.arms():
+            for w in u.walks(side, stubs=True, by='id'):
+                for s in u.carriers(side, w.id):
+                    if s.how == 'merges' and s.into.endswith('$'):
+                        a = u._part_of[s.pair].graphlet.arms[side]
+                        (m,) = [c for c in a.segments[s.stub_end].children
+                                if a.segments[c].parents[0] != s.stub_end]
+                        got.append((side, s.pair, s.to_bp, s.into, a.segments[m].length_bp,
+                                    len(a.segments[m].children), s.route.how,
+                                    s.route.goes_on))
+        self.assertEqual(got, [('left', 'bact_pseudomonadota', 35, 's12$', 0, 2, 'held', True),
+                               ('right', 'bact_pseudomonadota', 52, 's61$', 0, 2, 'held',
+                                True)])
+        fa, gfa = u.to_fasta(stubs=True), u.to_gfa()
+        self.assertIn('merges=bact_pseudomonadota@35>s12$', fa)
+        self.assertIn('merges=bact_pseudomonadota@52>s61$', fa)
+        self.assertIn('\tmt:Z:s12$', gfa)
+        self.assertIn('\tmt:Z:s61$', gfa)
+        check_gfa_paths(self, u, gfa)
 
     def test_parts_load_as_delivered(self):
         import hashlib

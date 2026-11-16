@@ -1099,7 +1099,7 @@ def union_fasta(u, arm, walks, with_seed, orientation, width, at_bp, stubs, bud)
         if side not in u._arms:
             continue
         t = u._arms[side]
-        for w in u._walks_full(side, bud, True, walks, stubs):
+        for w in u._walks_full(side, bud, True, walks, stubs, at_bp):
             if bud is not None:
                 n = w.length_bp + len(u._seed_seq)
                 bud.charge(W_RECORD + (n >> 8) + len(w.spans), 3 * (STR + n) + STR + 400)

@@ -1309,10 +1309,10 @@ class PairUnion:
         return UnionWalk(wid, t.side, kind, length, seq, tuple(t.useg[u].id for u in path),
                          tuple(spans), whole, held)
 
-    def _walks_full(self, side, b, with_labels, ids=None, stubs=True):
+    def _walks_full(self, side, b, with_labels, ids=None, stubs=True, at_bp=None):
         """The union walks of |side| built whole on demand, one at a time in id order (only
-        |ids| when given; stub walks only with |stubs|), each charged before it is built;
-        nothing is kept."""
+        |ids| when given; stub walks only with |stubs|; span labels at |at_bp|, default each
+        span's end), each charged before it is built; nothing is kept."""
         t = self._arms[side]
         figs = self._figures(side, b)
         want = None if ids is None else set(ids)
@@ -1324,7 +1324,7 @@ class PairUnion:
                 continue
             if b is not None:
                 self._charge_walk(b, t, node, with_labels)
-            w = self._walk(t, wid, node, with_labels, b=b)
+            w = self._walk(t, wid, node, with_labels, at_bp=at_bp, b=b)
             yield w
             # the consumer has moved on: the walk before this one is gone (this one is
             # still bound to its loop variable while the next is built)
@@ -1510,7 +1510,8 @@ class PairUnion:
                  *, paths='supported', max_transitions=1, max_paths=1000, at_bp=None,
                  stubs=False, budget=None):
         """One record per union walk (§2.9), its header stating its provenance, coverage and
-        scope as key=value tokens (Appendix A.5)."""
+        scope as key=value tokens (Appendix A.5). at_bp: the labels= counts are the span
+        labels at that depth, as carriers(at_bp=) gives them (default each span's end)."""
         self._check_paths(paths, max_transitions, max_paths)
         from . import export
         return _B.run_scoped(budget, 'union_to_fasta', (), lambda b: export.union_fasta(
