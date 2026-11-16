@@ -3231,6 +3231,23 @@ class TestMultiGraphServer(TestingBase):
         again = graphlet_lib.union_pairs(r.results[::-1], seed=r.seed,
                                          expected_pairs=r.expected_pairs, seqs_order=r.seqs_order)
         self.assertEqual(u.digest, again.digest)
+        # pairs=None: one request per pair GET /capabilities lists, every one expected and
+        # included; ecoli's answer the same part, kleb and pseudo absent records whose seed
+        # this client sent
+        every = client.traverse_pairs(seed, strategy, timing=False)
+        listed_pairs = client.server_capabilities()['graph_summary']['pairs']
+        self.assertEqual(len({(p['graph'], p.get('graph_path'), p.get('annotation_path'))
+                              for p in listed_pairs}), len(every.expected_pairs))
+        self.assertEqual(len(every.expected_pairs), len(every.results))
+        whole = graphlet_lib.union_pairs(every.results, seed=every.seed,
+                                         expected_pairs=every.expected_pairs,
+                                         seqs_order=every.seqs_order)
+        self.assertEqual((len(every.results), ()),
+                         (len(whole.parts) + len(whole.absent), whole._not_included))
+        self.assertLessEqual({'kleb', 'pseudo'}, {a.tag for a in whole.absent})
+        self.assertTrue(all(a.seed_check == 'sent' for a in whole.absent))
+        (mine,) = [p for p in whole.parts if p.tag == 'ecoli']
+        self.assertEqual(u.parts[0].digest, mine.digest)
         # every pair lacks the seed: the arm-less union of absent records, built from seed=;
         # without seed= it is refused no_seed
         lacking = client.traverse_pairs(seed, strategy, pairs=['kleb', 'pseudo'], timing=False)
