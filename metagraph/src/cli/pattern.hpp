@@ -352,8 +352,9 @@ class HeldResults {
   public:
     explicit HeldResults(bool keep_trees = false) : keep_trees_(keep_trees) {}
 
-    // |tree| is final: its text is written now (and the tree kept with keep_trees)
-    void add(Json::Value &&tree, CompactJsonWriter &writer);
+    // |tree| is final: its text is written now and the tree freed (kept with keep_trees);
+    // taken by value, so that the caller's tree dies here, once its text is written
+    void add(Json::Value tree, CompactJsonWriter &writer);
     // |n| objects built and not held (their list is withheld or refused)
     void add_dropped(size_t n) { built_ += n; }
     // the texts and trees held are freed; the count stays

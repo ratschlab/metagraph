@@ -2408,6 +2408,34 @@ TEST(PatternRoute, HeldResultsAreTheTreesTexts) {
     EXPECT_EQ(3u, kept.built());
 }
 
+// A text whose writing fails (the buffer's allocation: here a writer whose buffer fails past 64
+// bytes) throws, and so does every later text of that writer, never an empty or cut text; an
+// object whose text failed is not held (the review of 66558cb1f, m2). Without the stream's
+// check (no exceptions, no good()) the stream swallows the bad_alloc and a cut text, then
+// empty ones, would be returned
+TEST(PatternRoute, AFailedTextThrows) {
+    Json::Value small;
+    small["a"] = 1;
+    CompactJsonWriter writer(64);
+    EXPECT_EQ(compact(small), writer.text(small));
+    EXPECT_THROW(writer.text(awkward_object(0)), std::bad_alloc);
+    EXPECT_THROW(writer.text(small), std::exception);
+    EXPECT_THROW(writer.text(small), std::exception);
+
+    CompactJsonWriter failing(64);
+    HeldResults held;
+    held.add(small, failing);
+    EXPECT_THROW(held.add(awkward_object(1), failing), std::bad_alloc);
+    EXPECT_THROW(held.add(small, failing), std::exception);
+    EXPECT_EQ(1u, held.built());
+    ASSERT_EQ(1u, held.texts().size());
+    EXPECT_EQ(compact(small), held.texts()[0]);
+
+    // a writer without the limit writes the same objects whole
+    CompactJsonWriter whole;
+    EXPECT_EQ(compact(awkward_object(0)), whole.text(awkward_object(0)));
+}
+
 // The writing of an answer from its held texts (pattern_answer_text, pattern_envelope_text) is
 // byte for byte json_text of the whole tree: members around "patterns" and "results", entries
 // with and without texts, an empty or withheld list, a count's entry without results
@@ -2491,6 +2519,21 @@ TEST(PatternRoute, TheAnswerTextIsTheTreesText) {
     EXPECT_EQ(compact(full), pattern_envelope_text(envelope, answers));
     answers.pop_back();
     EXPECT_THROW(pattern_envelope_text(envelope, answers), std::logic_error);
+
+    // an envelope whose every pair is refused or not reached: no texts, each entry as it is
+    Json::Value none;
+    none["route"] = "/pattern";
+    none["answered"] = 0;
+    none["answers"].append(refused);
+    Json::Value unreached;
+    unreached["graph"] = "c";
+    unreached["outcome"] = "refused";
+    unreached["refusal"]["code"] = "not_reached";
+    unreached["refusal"]["reason"] = "cutoff";
+    none["answers"].append(unreached);
+    none["not_reached"].append("c");
+    EXPECT_EQ(compact(none),
+              pattern_envelope_text(none, { std::nullopt, std::nullopt }, [&]() { checks++; }));
 }
 
 // what a value's members say once the run's clock is left out: its timing members and every

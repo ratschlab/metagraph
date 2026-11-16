@@ -1773,6 +1773,64 @@ TEST(PatternPaths, HeldResultsAreSettledAtTheirText) {
     }
 }
 
+// A list withheld after its pattern's work gives its result objects' charges back whole (SPEC
+// §31; the review of 66558cb1f, M1): all_or_count, supported paths with their labels, under
+// label names long enough that the labels of the listed paths can fail where their descriptors
+// fit. A sweep of the account's size: where the labels' output does not fit the list is
+// withheld (output_budget) after its paths' descriptors were kept as their result objects, and
+// the pattern's end releases them whole (before - after = the paths listed x the price);
+// where the sink could not keep every path nothing was kept (before = after). Mutation tried:
+// the objects settled to their text before they are dropped: fails
+TEST(PatternPaths, AWithheldListGivesItsObjectsBack) {
+    std::mt19937 rng(17);
+    std::vector<Record> records;
+    for (int i = 0; i < 6; ++i) {
+        std::string seq;
+        for (int j = 0; j < 120; ++j) {
+            seq += "ACGT"[rng() % 4];
+        }
+        records.push_back({ std::string(4096, i % 2 ? 'o' : 'e'), "r" + std::to_string(i), seq });
+    }
+    const size_t k = 5;
+    Index idx = build<annot::RowDiffColumnAnnotator>(k, records, true);
+    const uint64_t price = path_descriptor_bytes(k, 8);
+    const std::string request = "{\"patterns\": [{\"iupac\": \"ACNNNNNT\"}], \"long_search\": "
+                                "\"supported_paths\", \"output\": {\"labels\": \"all\"}, "
+                                "\"mode\": \"all_or_count\"}";
+    // the whole answer's account, for the sweep's end
+    Held whole;
+    const Json::Value full = run(idx, request, whole.hooks());
+    const uint64_t paths = full["patterns"][0]["returned"].asUInt64();
+    ASSERT_LT(1u, paths) << full["patterns"][0];
+    // from the account that holds the list's descriptors in the sink's half up, in steps of a
+    // descriptor, until three lists were given back or the whole answer fits
+    size_t given_back = 0, nothing_kept = 0;
+    for (uint64_t max = 2 * paths * price; given_back < 3; max += price) {
+        ASSERT_LT(max, full["work"]["memory_bytes"].asUInt64());
+        Held held;
+        RetrievalHooks hooks = held.hooks();
+        hooks.max_memory_bytes = max;
+        const Json::Value out = run(idx, request, hooks);
+        const Json::Value &e = out["patterns"][0];
+        SCOPED_TRACE(max);
+        ASSERT_EQ(1u, held.at.size());
+        if (e["withheld"].isNull() || e["withheld"]["reason"].asString() != "output_budget")
+            continue;
+        EXPECT_EQ(0u, e["returned"].asUInt64());
+        EXPECT_EQ(0u, e["results"].size());
+        const uint64_t released = held.at[0].first - held.at[0].second;
+        if (released) {
+            // the list's descriptors were kept: every path the release named, given back
+            EXPECT_EQ("exact", e["counts"]["supported_paths"]["relation"].asString());
+            EXPECT_EQ(paths * price, released);
+            ++given_back;
+        } else {
+            ++nothing_kept;
+        }
+    }
+    EXPECT_LT(0u, given_back);
+}
+
 // Under "paths" a stop at a level of the depth-first stack comes before the pattern's first
 // complete walk (SPEC §30): every walk completes at the full depth L - k, beside the whole
 // stack, and only the kept walks are admitted while the extension runs. A sweep of the account

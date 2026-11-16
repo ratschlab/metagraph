@@ -1568,7 +1568,7 @@ Json::Value dummy_fraction_json(const DummyFraction &f) {
     return v;
 }
 
-void HeldResults::add(Json::Value &&tree, CompactJsonWriter &writer) {
+void HeldResults::add(Json::Value tree, CompactJsonWriter &writer) {
     texts_.push_back(writer.text(tree));
     if (keep_trees_)
         trees_.append(std::move(tree));
@@ -2528,11 +2528,13 @@ PatternAnswer answer_pattern(
         } else {
             path_sink->begin_pattern(mode, rq.max_paths);
         }
+        // the descriptors the sink leaves with the listed paths' result objects
         auto end = [&](size_t listed) {
             if (selecting)
                 path_selection->end_pattern();
-            path_sink->end_pattern(listed);
+            const uint64_t kept = path_sink->end_pattern(listed);
             path_tracker->end_pattern();
+            return kept;
         };
         a.result = search.count(pattern, rq, budget);
         if (a.result->refusal) {
@@ -2654,11 +2656,11 @@ PatternAnswer answer_pattern(
         s.rows_refused = path_tracker->rows_refused();
         if (!s.labels)
             volume.add(compact_json_bytes(s.rows_refused));
-        end(listed);
         // the sink leaves the listed paths' descriptors with their result objects, to settle
-        // once they are held as text (§12.1)
+        // once they are held as text (§12.1); hold_results checks them against the objects
+        const uint64_t kept = end(listed);
         if (listed) {
-            a.charge = listed * path_descriptor_bytes(k, length);
+            a.charge = kept;
             a.price = path_descriptor_bytes(k, length);
         }
         s.memory_bytes = retrieval->memory_peak();
@@ -2794,21 +2796,28 @@ PatternAnswer answer_pattern(
      * The end of a pattern's work: nothing changes its result objects any more (§12.1). Those
      * still held as trees are merged with their labels (the projection's result fields, which
      * apply_labels merged at the assembly before) and written as their texts, the trees freed;
-     * an all_or_count list whose labels are withheld is not written (apply_labels empties it,
-     * the retrieval released its charge), only counted. A refused slot holds none
-     * (refuse_unrepresentable).
+     * an all_or_count list whose labels are withheld is not written (apply_labels empties it),
+     * only counted, and the charges its objects still hold are given back whole (the labelled
+     * retrieval gave its own back already; the supported paths' sink leaves the listed paths'
+     * with them). A refused slot holds none (refuse_unrepresentable). The writing reads the
+     * delivery's check (the respond deadline, a client gone) every kReleaseClockStride objects,
+     * as the finalisation's writing did before §31.
      */
     auto hold_results = [&](Answered &a) {
+        const bool withheld = a.labels && a.labels->withheld;
         if (a.charge) {
-            // each object's charge falls from its price to its written text (held_result_bytes)
+            // each object's charge falls from its price to its written text (held_result_bytes),
+            // or to nothing when the list is withheld
             if (a.own.size() != a.results.size() || a.charge != a.own.size() * a.price) {
                 throw std::logic_error("pattern: " + std::to_string(a.charge) + " bytes held for "
                                        + std::to_string(a.results.size()) + " result objects "
                                        "of " + std::to_string(a.price) + " bytes each");
             }
             uint64_t held = 0;
-            for (uint64_t own : a.own) {
-                held += held_bytes(a.price, own);
+            if (!withheld) {
+                for (uint64_t own : a.own) {
+                    held += held_bytes(a.price, own);
+                }
             }
             account.release(a.charge - held);
             a.charge = 0;
@@ -2816,11 +2825,13 @@ PatternAnswer answer_pattern(
         std::vector<uint64_t>().swap(a.own);
         if (a.results.empty())
             return;
-        if (a.labels && a.labels->withheld) {
+        if (withheld) {
             a.held.add_dropped(a.results.size());
         } else {
             std::vector<Json::Value> *fields = a.labels ? &a.labels->result_fields : nullptr;
             for (Json::ArrayIndex i = 0; i < a.results.size(); ++i) {
+                if (delivery && i % Budget::kReleaseClockStride == 0)
+                    delivery->check();
                 Json::Value &r = a.results[i];
                 if (fields && i < fields->size()) {
                     Json::Value &f = (*fields)[i];
@@ -2828,6 +2839,7 @@ PatternAnswer answer_pattern(
                         r[name] = std::move(f[name]);
                     }
                 }
+                // (moved into add, which frees it once written)
                 a.held.add(std::move(r), writer);
             }
         }

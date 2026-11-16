@@ -875,6 +875,70 @@ TEST(ServerFanout, CompletedPairSurvivesABlockedSibling) {
     reservations.release(1);
 }
 
+// A /pattern pair resolved unfinished at the cutoff whose worker publishes its answer later
+// (SPEC-pattern-search.md §31, the review of 66558cb1f): the late entry and its results' texts
+// die with its result, the outcome holds no texts beside the unfinished entry, and the envelope
+// written from the outcome holds that entry as it is, the answered pair's texts spliced into
+// its own entry
+TEST(ServerFanout, ALatePatternPairLeavesNoTexts) {
+    const RequestDeadlines d = deadlines_now(300);
+    const std::vector<SelectedPair> pairs { kPairs[0], kPairs[1] };
+    auto entry = std::make_shared<RequestEntry>(std::nullopt, "/pattern", "inst",
+                                                std::chrono::system_clock::now(),
+                                                refs_of(pairs));
+    auto texts = [](const std::string &id) {
+        PatternEntries p;
+        Json::Value e;
+        e["id"] = id;
+        e["returned"] = 1;
+        p.entries.push_back(e);
+        p.results.push_back({ "{\"node\":" + std::to_string(id.size()) + "}" });
+        return p;
+    };
+    Gate gate;
+    std::atomic<bool> published { false };
+    FanoutOutcome out;
+    {
+        Threads threads;
+        out = run_fanout(settings_of(pairs, d, "/pattern"), entry, [&](PairControl &control) {
+            EXPECT_TRUE(control.start_running());
+            PairResult r = answered(control, control.index() ? 12 : 11);
+            r.patterns = texts(control.index() ? "late" : "early");
+            if (control.index()) {
+                gate.wait();
+                published = true;
+            }
+            return r;
+        }, threads.launch());
+        ASSERT_FALSE(published);
+        ASSERT_EQ(2u, out.entries.size());
+        ASSERT_EQ(2u, out.patterns.size());
+        EXPECT_EQ("answered", out.entries[0]["outcome"].asString());
+        ASSERT_TRUE(out.patterns[0]);
+        EXPECT_EQ("early", out.patterns[0]->entries[0]["id"].asString());
+        EXPECT_EQ("unfinished", out.entries[1]["refusal"]["code"].asString());
+        EXPECT_FALSE(out.patterns[1]);
+        gate.open();
+    }
+    wait_for_workers();
+    EXPECT_TRUE(published);
+    // what the late pair published is nowhere in the outcome
+    EXPECT_FALSE(out.patterns[1]);
+    EXPECT_EQ("unfinished", out.entries[1]["refusal"]["code"].asString());
+    Json::Value envelope;
+    envelope["route"] = "/pattern";
+    envelope["answers"].append(out.entries[0]);
+    envelope["answers"].append(out.entries[1]);
+    Json::Value whole = envelope;
+    Json::Value early = out.patterns[0]->entries[0];
+    early["results"].append(Json::Value());
+    early["results"][0]["node"] = 5;
+    whole["answers"][0]["patterns"].append(early);
+    Json::StreamWriterBuilder builder;
+    builder["indentation"] = "";
+    EXPECT_EQ(Json::writeString(builder, whole), pattern_envelope_text(envelope, out.patterns));
+}
+
 // A pair started and not finished at the cutoff (an uninterruptible piece of work): unfinished
 // with its usage so far and told to stop; its worker ends after the answer, and the registry
 // states the end with its final usage — the entry stays running until then
