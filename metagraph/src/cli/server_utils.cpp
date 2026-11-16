@@ -698,7 +698,8 @@ void split_object_text(const Json::Value &object, const std::string &key,
 /**
  * |prefix|, the texts of |results| separated by commas (|commas|; else pieces written one after
  * the other), then |suffix|: the text of a /traverse response whose results (each seed's,
- * written once built) are an array's elements between the two. The exact size is reserved at once, so the text never grows by doubling, whose last
+ * written once built) are an array's elements between the two, or of a /pattern answer's
+ * pieces. The exact size is reserved at once, so the text never grows by doubling, whose last
  * step held an old and a new buffer of up to its size beside the texts; and each text is freed
  * once copied: what was copied and what is left to copy are the response once, where texts
  * kept alive beside it until the handler returned would stay through the compression and the
@@ -809,8 +810,10 @@ void push_with_array(std::vector<std::string> *pieces, const Json::Value &object
 void push_pattern_answer(std::vector<std::string> *pieces, const Json::Value &head,
                          PatternEntries &&patterns, const std::function<void()> &check,
                          double *max_gap_ms) {
-    if (patterns.entries.size() != patterns.results.size())
-        throw std::logic_error("pattern_answer_text: the entries and their results differ in number");
+    if (patterns.entries.size() != patterns.results.size()) {
+        throw std::logic_error("pattern_answer_text: the entries and their results differ in "
+                               "number");
+    }
     std::string before, after;
     split_object_text(head, "patterns", check, max_gap_ms, &before, &after);
     pieces->push_back(before + '[');
