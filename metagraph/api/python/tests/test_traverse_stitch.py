@@ -388,8 +388,17 @@ class TestRefusals(unittest.TestCase):
                 walk=0)
         with self.assertRaises(BadSelector):
             stitch(self.P, self.C, walk='0')
-        with self.assertRaises(IndexError):
-            stitch(self.P, self.C, walk=7)
+        # a walk= the arm does not have: CombineRefused, not IndexError
+        refused(self, 'not_a_continuation', 'walk= names no walk of the right arm (the right '
+                'arm of part root has 2 walks, no walk 7): a stitched child is seeded with a '
+                'walk\'s continuation (continuation(), next_request())', stitch, self.P, self.C,
+                walk=7)
+        _, p3, c3 = triple('chain3')
+        g3 = load('chain3', 'grandchild')
+        refused(self, 'not_a_continuation', 'walk= names no walk of the right arm (no walk 3.0 '
+                'on the right arm: walk 3 is not continued here): a stitched child is seeded '
+                'with a walk\'s continuation (continuation(), next_request())', stitch,
+                stitch(p3, c3), g3, walk=(3, 0))
 
     def test_already_continued(self):
         _, lp, lc = triple('loop_branch')
@@ -411,12 +420,38 @@ class TestRefusals(unittest.TestCase):
         # the identical retrieval again: a no-op, the stitched graphlet itself
         self.assertIs(sg, stitch(sg, load('loop_branch', 'child')))
 
+    def test_retrieval_identity_is_not_cached_for_a_child(self):
+        """The child's retrieval identity is computed at each stitch, not cached by id():
+        the same object (so the same address) from another request is refused (the review
+        of the assembled train, M2)."""
+        p, c = load('keep_forbid', 'parent'), load('keep_forbid', 'child')
+        sg = stitch(p, c)
+        x = copy.copy(c)
+        self.assertIs(sg, stitch(sg, x))
+        x.envelope = copy.deepcopy(c.envelope)
+        x.envelope['strategy']['branching']['min_successor_labels'] = 7
+        refused(self, 'already_continued', 'walk 0 of the right arm is continued by this body '
+                'from another request (strategy.branching.min_successor_labels differs): equal '
+                'bodies are not equal retrievals, and the two would continue differently',
+                stitch, sg, x)
+        self.assertNotIn(('rid', id(x)), sg._jcore)
+
     def test_already_continued_compares_the_subtree(self):
         """The no-op rule compares the whole subtree, digests and retrieval identities (the
         review's exp5); the text names the existing subtree's digest."""
         p, c, g = load('chain3', 'parent'), load('chain3', 'child'), load('chain3', 'grandchild')
         sga = stitch(p, stitch(c, g))
         self.assertIs(sga, stitch(sga, stitch(c, g)))
+        # a plain graphlet is compared with the part at the walk only, whatever continues it
+        # (the review of the assembled train, minor 5)
+        sg3 = stitch(stitch(p, c), g)
+        self.assertIs(sg3, stitch(sg3, c))
+        self.assertIs(sg3, stitch(sg3, g))
+        self.assertIs(sg3, stitch(sg3, load('chain3', 'child')))
+        refused(self, 'already_continued', 'walk 0 of the right arm is continued by this body '
+                'from another request (strategy.branching.min_successor_labels differs): equal '
+                'bodies are not equal retrievals, and the two would continue differently',
+                stitch, sg3, load('chain3', 'child', quorum))
         # the grandchild is the same body from another request
         refused(self, 'already_continued', 'walk 0 of the right arm is continued by this body '
                 'from another request (strategy.branching.min_successor_labels of part '
@@ -914,6 +949,10 @@ class TestOracleTriples(unittest.TestCase):
         constrain = w5 + (', labels.change_cost (both), labels.extra (both), '
                           'branching.max_label_branches (both), branching.max_splits_per_path '
                           '(both)')
+        # then the 14 other fields W2 compares, which neither states
+        constrain += ' and 14 more'
+        w5 += (', exhaustive (both), schema_version (both), support (both), '
+               'bounds.max_live_paths (both) and 12 more')
         cases = {'splits45': (('strategy_unknown',), constrain),
                  'quorum_changed': (('strategy_unknown',), constrain),
                  'trace': (('trace_restart', 'strategy_unknown'), constrain),
@@ -953,6 +992,33 @@ class TestOracleTriples(unittest.TestCase):
         self.assertEqual([('strategy_unknown', sentence('branching.max_splits_per_path (the '
                                                         'parent)'))],
                          [(x[0], x[1]) for x in j.causes])
+        # a null field is not stated: unknown, not a difference
+        def null_splits(resp):
+            resp['strategy']['branching']['max_splits_per_path'] = None
+        j = stitch(load('splits45', 'parent', null_splits), load('splits45', 'child')).junctions[0]
+        self.assertEqual([('strategy_unknown', sentence('branching.max_splits_per_path (the '
+                                                        'parent)'))],
+                         [(x[0], x[1]) for x in j.causes])
+        # a field W2 compares that both envelopes omit is unknown too (the review of the
+        # assembled train, minor 6)
+        for block, name in (('branching', 'hairpins'), ('frontier', 'order')):
+            with self.subTest(name):
+                j = stitch(load('keep_forbid', 'parent', without(block, name)),
+                           load('keep_forbid', 'child', without(block, name))).junctions[0]
+                self.assertEqual([('strategy_unknown', sentence('%s.%s (both)' % (block, name)))],
+                                 [(x[0], x[1]) for x in j.causes])
+
+    def test_no_bases_names_the_parts(self):
+        """no_bases names the parts without bases on the route from the root."""
+        text = ('on the route from the root to this child, %s no bases (output.sequences '
+                'false): the rule check (W8) cannot run below this junction')
+        arm, p, c = triple('no_bases')
+        self.assertEqual([text % 'parts root, right:0 carry'],
+                         [x[1] for x in stitch(p, c).junctions[0].causes])
+        arm, p, c = triple('no_bases_parent')
+        sg = stitch(stitch(p, c), load('no_bases_parent', 'grandchild'))
+        self.assertEqual([[text % 'part root carries']] * 2,
+                         [[x[1] for x in j.causes] for j in sg.junctions])
 
     def test_seed_dropped(self):
         """W7: a label alive at the end of the walk that the child named and dropped (X) is

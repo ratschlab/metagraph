@@ -70,6 +70,8 @@ _T_INDEX_UNVERIFIABLE_PARTS = (
     'verified (not proven different), so the child is not stitched automatically; pass '
     'allow_unverified_index=True to stitch it anyway (the result then states the identity '
     'unverified)')
+_T_NO_WALK = ('walk= names no walk of the %s arm (%s): a stitched child is seeded with a '
+              'walk\'s continuation (continuation(), next_request())')
 _T_DIFFERENT_PAIR = ('the child was answered on pair %s, its parent on pair %s: a '
                      'continuation runs on its parent\'s pair')
 _T_DIFFERENT_GRAPH = ('the child\'s graph is not its parent\'s (%s %r vs %r): its walks '
@@ -135,8 +137,8 @@ _GATED = ('exact_gated', 'W1-W7 hold at this junction, and W8 is judged per walk
           'walks\' causes), but exact is not switched on: the junction rules found no '
           'difference from one uninterrupted walk and have not yet passed the randomized '
           'comparison against uninterrupted traversals')
-_NO_BASES = ('no_bases', 'a part from the root to this child carries no bases '
-             '(output.sequences false): the rule check (W8) cannot run below this junction')
+_T_NO_BASES = ('on the route from the root to this child, %s carr%s no bases '
+               '(output.sequences false): the rule check (W8) cannot run below this junction')
 _GATED_WALK = ('exact_gated', 'W1-W8 hold for this walk and its junctions, but exact is not '
                'switched on: the rules found no difference from one uninterrupted walk and '
                'have not yet passed the randomized comparison', None)
@@ -337,6 +339,19 @@ _W5_KNOBS = (('branching', 'min_successor_labels', lambda v: v > 1),
              ('branching', 'min_successor_fraction', lambda v: v != 0),
              ('bounds', 'min_live_labels', lambda v: v > 1),
              ('frontier', 'on_overflow', lambda v: v != 'stop'))
+# W2: the fields of the server's normalized strategy (schema_version 1) that W2 compares,
+# every one the server states in either mode (the committed CLI responses) but the allowed
+# ones; one absent from both envelopes is strategy_unknown too (max_live_paths not where
+# both stop on overflow, when W2 allows it)
+_W2_STATED = (('exhaustive',), ('schema_version',), ('support',),
+              ('bounds', 'max_live_paths'), ('bounds', 'min_live_labels'),
+              ('branching', 'bubble_window_bp'), ('branching', 'hairpins'),
+              ('branching', 'max_splits_per_path'), ('branching', 'min_successor_fraction'),
+              ('branching', 'min_successor_labels'), ('branching', 'on_reconverge'),
+              ('branching', 'tip_window_bp'), ('frontier', 'on_overflow'),
+              ('frontier', 'order'), ('labels', 'change_cost'), ('labels', 'max_seed_labels'),
+              ('labels', 'max_switch_sources'), ('labels', 'mode'),
+              ('labels', 'seed_label_kind'), ('labels', 'switch_on'))
 _REQUIRED = {'annotate': tuple((b, n) for b, n, _ in _W5_KNOBS),
              'constrain': tuple((b, n) for b, n, _ in _W5_KNOBS) + (
                  ('labels', 'change_cost'), ('labels', 'extra'),
@@ -344,8 +359,11 @@ _REQUIRED = {'annotate': tuple((b, n) for b, n, _ in _W5_KNOBS),
 
 
 def _has(st, path):
+    """Whether |st| states field |path| ((block, name) or (name,)) with a value."""
+    if len(path) == 1:
+        return st.get(path[0]) is not None
     block = st.get(path[0])
-    return isinstance(block, dict) and path[1] in block
+    return isinstance(block, dict) and block.get(path[1]) is not None
 
 
 def _paths_of(d, prefix=()):
@@ -361,10 +379,10 @@ def _paths_of(d, prefix=()):
 
 def _common(a, b):
     """|a| restricted to the fields |b| has too (recursively), for W2's comparison of two
-    strategies of which one may not state every field."""
+    strategies of which one may not state every field; a null field is not stated."""
     out = {}
     for k, v in a.items():
-        if k not in b:
+        if k not in b or v is None or b[k] is None:
             continue
         if isinstance(v, dict) and isinstance(b[k], dict):
             out[k] = _common(v, b[k])
@@ -454,6 +472,8 @@ class StitchedGraphlet:
         self.digest = self._digest_of([(p.key, p) for p in self._parts])
 
     def _rid(self, g):
+        """The retrieval identity of |g|, a graphlet this one holds (cached by id(), which
+        is safe only for held objects)."""
         got = self._jcore.get(('rid', id(g)))
         if got is None:
             got = self._jcore[('rid', id(g))] = _K.retrieval_identity(g)
@@ -503,7 +523,7 @@ class StitchedGraphlet:
         pg = part.graphlet
         ckey = part.key + ((side, pid),)
         if ckey in self._by_key:
-            self._same_child(ckey, cparts, key, side)
+            self._same_child(ckey, cparts, key, side, isinstance(child, StitchedGraphlet))
             return self
         leaf = derive.paths(pg.arms[side])[pid].leaf
         L = pg.arms[side].segments[leaf].end_bp
@@ -526,21 +546,26 @@ class StitchedGraphlet:
                                       else ())
         return StitchedGraphlet(parts, identity, inherited, b)
 
-    def _same_child(self, ckey, cparts, key, side):
-        """At a continued walk: returns when the child is the subtree already there (every
-        part's key, body and retrieval identity equal: a no-op), else already_continued."""
-        have = [(p.key[len(ckey):], p) for p in self._parts if p.key[:len(ckey)] == ckey]
+    def _same_child(self, ckey, cparts, key, side, subtree):
+        """At a continued walk: returns when the child is already there (a no-op), else
+        already_continued. A stitched child (|subtree|) must be the whole subtree there, every
+        part's key, body and retrieval identity equal; a plain graphlet the part at the walk,
+        whatever continues it. The child's retrieval identity is computed, never cached: the
+        cache is keyed by the graphlets this one holds."""
+        tree = [(p.key[len(ckey):], p) for p in self._parts if p.key[:len(ckey)] == ckey]
+        have = tree if subtree else [((), self._by_key[ckey])]
         new = [(p.key, p) for p in cparts]
         if [(k, p.digest) for k, p in have] == [(k, p.digest) for k, p in new]:
             for (k, a), (_, c) in zip(have, new):
-                diff = _K.first_difference(self._rid(a.graphlet), self._rid(c.graphlet))
+                diff = _K.first_difference(self._rid(a.graphlet),
+                                           _K.retrieval_identity(c.graphlet))
                 if diff is not None:
                     raise CombineRefused('already_continued', _T_ALREADY_REQUEST % (
                         walk_name(key), side, diff if not k else '%s of part %s' % (
                             diff, part_name(ckey + k))))
             return
         raise CombineRefused('already_continued', _T_ALREADY % (
-            walk_name(key), side, part_name(ckey), self._digest_of(have)))
+            walk_name(key), side, part_name(ckey), self._digest_of(tree)))
 
     def _check_index(self, cparts, labels, allow, b=None):
         """different_index over every part on both sides (each distinct index identity of
@@ -595,7 +620,10 @@ class StitchedGraphlet:
             if owner is not None and side not in owner.graphlet.arms:
                 raise CombineRefused('not_a_continuation', _T_NOT_A_CONTINUATION_OF % (
                     walk_name(key), side))
-            part, pid = self._part_of_walk(side, key)
+            try:
+                part, pid = self._part_of_walk(side, key)
+            except IndexError as e:
+                raise CombineRefused('not_a_continuation', _T_NO_WALK % (side, e)) from None
             g = part.graphlet
             a = g.arms[side]
             leaf = derive.paths(a)[pid].leaf
@@ -653,8 +681,8 @@ class StitchedGraphlet:
             raise KeyError('arm %r was not requested in this retrieval' % side)
         n = len(derive.paths(g.arms[side]))
         if not 0 <= key[-1] < n:
-            raise IndexError('the %s arm of part %s has %d walks, no walk %d'
-                             % (side, part_name(pkey), n, key[-1]))
+            raise IndexError('the %s arm of part %s has %d walk%s, no walk %d'
+                             % (side, part_name(pkey), n, '' if n == 1 else 's', key[-1]))
         return part, key[-1]
 
     def _union_labels(self):
@@ -777,9 +805,23 @@ class StitchedGraphlet:
                 unknown.append('%s (%s)' % ('.'.join(path), 'both' if not (hp or hc) else
                                             'the parent' if not hp else 'the child'))
         named = {u.split(' ')[0] for u in unknown}
+        both_stop = _knob(sp, 'frontier', 'on_overflow') == 'stop' and \
+            _knob(sc, 'frontier', 'on_overflow') == 'stop'
+        for path in _W2_STATED:
+            dotted = '.'.join(path)
+            if dotted in named or (both_stop and path == ('bounds', 'max_live_paths')):
+                continue
+            if not (_has(sp, path) or _has(sc, path)):
+                named.add(dotted)
+                unknown.append('%s (both)' % dotted)
         for who, x, y in (('the child', wp, wc), ('the parent', wc, wp)):
             for path in _paths_of(x):
                 dotted = '.'.join(path)
+                mine = x
+                for k in path:
+                    mine = mine.get(k) if isinstance(mine, dict) else None
+                if mine is None:
+                    continue                # not stated here (both: an unknown W2 field)
                 node = y
                 for k in path:
                     node = node.get(k) if isinstance(node, dict) else None
@@ -909,8 +951,12 @@ class StitchedGraphlet:
                            % (at, ', '.join(walk_name(pre + (w,)) for w in sib[:_SHOWN])
                               + (' and %d more' % (len(sib) - _SHOWN)
                                  if len(sib) > _SHOWN else ''))))
-        if not all(self._bases(self._by_key[key[:i]].graphlet) for i in range(len(key) + 1)):
-            causes.append(_NO_BASES)
+        bare = [part_name(key[:i]) for i in range(len(key) + 1)
+                if not self._bases(self._by_key[key[:i]].graphlet)]
+        if bare:
+            causes.append(('no_bases', _T_NO_BASES % (
+                ('part ' if len(bare) == 1 else 'parts ') + ', '.join(bare),
+                'ies' if len(bare) == 1 else 'y')))
         if not causes:
             causes.append(_GATED)
         causes.sort(key=lambda c: _RANK[c[0]])
