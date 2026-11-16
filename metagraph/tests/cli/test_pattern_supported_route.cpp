@@ -2460,7 +2460,10 @@ TEST(PatternSupportedRoute, BudgetAndClockSweeps) {
 // "-" at_least 0: its anchor not extended), all_or_count withheld annotation_budget (as the
 // tracker's own stops; a kept walk's under "paths" is output_budget), partial cut max_memory
 // listing the supported path completed before it. With a predicate (the selection's release of
-// the engine's stop) alike
+// the engine's stop) alike. The answer cannot tell a level's stop from a frame's (they are
+// released alike by design): the account is chosen by the argument above, and
+// PatternSupport.AStopAtALevelOfTheStackIsTheSearchsOwn (test_pattern_support.cpp) tells them
+// apart by the engine's refused admission
 TEST(PatternSupportedRoute, AStopAtALevelOfTheStackIsTheSearchsMemoryStop) {
     const size_t k = 5;
     const size_t L = 22;

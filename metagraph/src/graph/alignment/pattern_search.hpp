@@ -995,9 +995,11 @@ inline uint64_t retained_path_bytes(size_t k, size_t length) {
  * the stack's charge is at its largest) the account's peak covers that capacity. Where
  * something else is admitted at a shallower depth after a deeper branch was left (a support
  * tracker's frames and rows under "supported_paths"; the segment search's memoised states),
- * real memory can exceed the account by at most the deepest stack charge of the current
- * anchor (arm), less what the stack holds then. The DFS frontier of discovery (O(k) per base
- * search) is not charged.
+ * the stack's containers can hold more than the account charges them, by at most the deepest
+ * stack charge of the current anchor (arm) less what the stack holds then. This bounds the
+ * stack's own containers only (a support tracker's popped frames keep their buffers until the
+ * pattern ends, SPEC §20.7). The DFS frontier of discovery (O(k) per base search) is not
+ * charged.
  */
 #if _PROTEIN_GRAPH
 constexpr uint64_t kExtensionLevelBytes = 754;
