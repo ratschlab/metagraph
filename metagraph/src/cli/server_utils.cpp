@@ -831,6 +831,51 @@ void push_pattern_answer(std::vector<std::string> *pieces, const Json::Value &he
     pieces->push_back(']' + after);
 }
 
+/**
+ * The compact text of a multi-graph |envelope| whose answered entries hold their answers apart
+ * (|answers|, one per entry of "answers": an entry with one is written by |push_held| from it,
+ * moved in and then reset; an entry without one, a refused or not reached pair, as its own
+ * text): the envelope's members around "answers", its entries between `[` and `]` with their
+ * commas, written in one splice of the pieces (|reserve| of them reserved, 0: none). Byte for
+ * byte json_text of the envelope holding every answer. |what| and |held| name the caller and its
+ * answers in the logic_error of a count that differs. /pattern's (pattern_envelope_text) and
+ * /resolve's (envelope_text_with_members)
+ */
+template <class Held, class PushHeld>
+std::string envelope_text_of(const Json::Value &envelope,
+                             std::vector<std::optional<Held>> &&answers, const char *what,
+                             const char *held, size_t reserve, const PushHeld &push_held,
+                             const std::function<void()> &check, double *max_gap_ms) {
+    const Json::Value &entries = envelope["answers"];
+    if (!entries.isArray() || entries.size() != answers.size()) {
+        throw std::logic_error(std::string(what) + ": the envelope's answers and their "
+                               + held + " differ in number");
+    }
+    Json::Value outer(Json::objectValue);
+    for (const std::string &name : envelope.getMemberNames()) {
+        if (name != "answers")
+            outer[name] = envelope[name];
+    }
+    std::string before, after;
+    split_object_text(outer, "answers", check, max_gap_ms, &before, &after);
+    std::vector<std::string> pieces;
+    pieces.reserve(reserve);
+    pieces.push_back(before + '[');
+    for (Json::ArrayIndex i = 0; i < answers.size(); ++i) {
+        if (i)
+            pieces.emplace_back(",");
+        if (answers[i]) {
+            push_held(&pieces, entries[i], std::move(*answers[i]));
+            answers[i].reset();
+        } else {
+            pieces.push_back(json_text(entries[i], true, check, max_gap_ms));
+        }
+    }
+    pieces.push_back(']' + after);
+    return splice_results(std::string(), std::move(pieces), std::string(), check, max_gap_ms,
+                          false);
+}
+
 } // namespace
 
 std::string pattern_answer_text(const Json::Value &head, PatternEntries patterns,
@@ -844,33 +889,13 @@ std::string pattern_answer_text(const Json::Value &head, PatternEntries patterns
 std::string pattern_envelope_text(const Json::Value &envelope,
                                   std::vector<std::optional<PatternEntries>> answers,
                                   const std::function<void()> &check, double *max_gap_ms) {
-    const Json::Value &entries = envelope["answers"];
-    if (!entries.isArray() || entries.size() != answers.size()) {
-        throw std::logic_error("pattern_envelope_text: the envelope's answers and their "
-                               "patterns differ in number");
-    }
-    Json::Value outer(Json::objectValue);
-    for (const std::string &name : envelope.getMemberNames()) {
-        if (name != "answers")
-            outer[name] = envelope[name];
-    }
-    std::string before, after;
-    split_object_text(outer, "answers", check, max_gap_ms, &before, &after);
-    std::vector<std::string> pieces;
-    pieces.push_back(before + '[');
-    for (Json::ArrayIndex i = 0; i < answers.size(); ++i) {
-        if (i)
-            pieces.emplace_back(",");
-        if (answers[i]) {
-            push_pattern_answer(&pieces, entries[i], std::move(*answers[i]), check, max_gap_ms);
-            answers[i].reset();
-        } else {
-            pieces.push_back(json_text(entries[i], true, check, max_gap_ms));
-        }
-    }
-    pieces.push_back(']' + after);
-    return splice_results(std::string(), std::move(pieces), std::string(), check, max_gap_ms,
-                          false);
+    return envelope_text_of(envelope, std::move(answers), "pattern_envelope_text", "patterns", 0,
+                            [&](std::vector<std::string> *pieces, const Json::Value &entry,
+                                PatternEntries &&patterns) {
+                                push_pattern_answer(pieces, entry, std::move(patterns), check,
+                                                    max_gap_ms);
+                            },
+                            check, max_gap_ms);
 }
 
 std::string assemble_traverse_response(const Json::Value &envelope,
@@ -969,38 +994,20 @@ std::string envelope_text_with_members(const Json::Value &envelope,
                                        std::vector<std::optional<HeldMembers>> answers,
                                        const std::function<void()> &check,
                                        double *max_gap_ms) {
-    const Json::Value &entries = envelope["answers"];
-    if (!entries.isArray() || entries.size() != answers.size()) {
-        throw std::logic_error("envelope_text_with_members: the envelope's answers and their "
-                               "held members differ in number");
-    }
-    Json::Value outer(Json::objectValue);
-    for (const std::string &name : envelope.getMemberNames()) {
-        if (name != "answers")
-            outer[name] = envelope[name];
-    }
-    std::vector<std::string> around = json_text_around(outer, { "answers" }, check, max_gap_ms);
+    // the pieces reserved, so that no growth holds an old and a new vector of them
     size_t count = 2 + answers.size();
     for (const std::optional<HeldMembers> &held : answers) {
         if (held)
             count += pieces_of(*held);
     }
-    std::vector<std::string> pieces;
-    pieces.reserve(count);
-    pieces.push_back(around[0] + '[');
-    for (Json::ArrayIndex i = 0; i < answers.size(); ++i) {
-        if (i)
-            pieces.emplace_back(",");
-        if (answers[i]) {
-            push_with_members(&pieces, entries[i], std::move(*answers[i]), check, max_gap_ms);
-            answers[i].reset();
-        } else {
-            pieces.push_back(json_text(entries[i], true, check, max_gap_ms));
-        }
-    }
-    pieces.push_back(']' + around[1]);
-    return splice_results(std::string(), std::move(pieces), std::string(), check, max_gap_ms,
-                          false);
+    return envelope_text_of(envelope, std::move(answers), "envelope_text_with_members",
+                            "held members", count,
+                            [&](std::vector<std::string> *pieces, const Json::Value &entry,
+                                HeldMembers &&held) {
+                                push_with_members(pieces, entry, std::move(held), check,
+                                                  max_gap_ms);
+                            },
+                            check, max_gap_ms);
 }
 
 GraphListEntry parse_graph_list_line(const std::string &text, size_t line) {
