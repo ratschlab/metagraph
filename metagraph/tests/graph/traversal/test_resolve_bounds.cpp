@@ -11,6 +11,8 @@
 #include <map>
 #include <optional>
 #include <random>
+#include <set>
+#include <sstream>
 #include <string>
 #include <tuple>
 #include <type_traits>
@@ -2585,16 +2587,154 @@ std::pair<SupportProfile, SeedSelection> priced_profile(size_t labels, size_t ru
     return { std::move(p), std::move(sel) };
 }
 
-// The answer as the route holds it after its account priced it (T4 review R1, F3): the tree, its
-// text written into a buffer reserved to its exact size (ResolveWriting), then without the tree
-// the gzip body (the traversal routes' level 1) and a copy of the body for the transport, or of
-// the text where nothing is compressed. The allocator's live bytes of the tree and text, and
-// jemalloc's peak over all of it, within the price (profile_to_json's, then charge_answer_text's);
-// the price within 1.15x of that peak on the shapes of many small elements (intervals, short
-// names: about 1.05x on macOS, whose maps are smaller than the model's), where three copies of
-// every text byte priced 1.15-1.4x. Long names are priced for the text and a copy of it at its
-// last growth beside it once the tree is freed: about 2x what a plain copy holds
-TEST(ResolveAnswer, ThePriceCoversTheTree) {
+// The bytes of each object |answer| holds as text: graph_runs and unknown_labels whole, each
+// label, candidate and seed (an array's pieces between its `[` and `]`, a selection's between its
+// policy and counts and its end)
+std::vector<uint64_t> object_texts(const cli::ResolveAnswer &answer) {
+    std::vector<uint64_t> own;
+    for (const auto &[name, pieces] : answer.held.members) {
+        if (name == "graph_runs" || name == "unknown_labels") {
+            EXPECT_EQ(1u, pieces.size()) << name;
+            own.push_back(pieces.at(0).size());
+            continue;
+        }
+        EXPECT_LE(2u, pieces.size()) << name;
+        for (size_t i = 1; i + 1 < pieces.size(); ++i) {
+            own.push_back(pieces[i].size());
+        }
+    }
+    return own;
+}
+
+// Each object of a /resolve answer is held as its compact text, written when it is built (T7-D3,
+// SPEC-labeled-traversal-core.md §4.6): the server's form (profile_answer) holds graph_runs,
+// labels, candidates and the selection as text and none of them in its head; written
+// (json_text_with_members) it is byte for byte the tree's text (profile_to_json, the tree API,
+// which checks the same on every call); an array's element after the first holds its comma, so
+// that the array is `[`, its elements and `]`
+TEST(ResolveAnswer, HeldTextsAreTheTreesTexts) {
+    for (bool trace : { false, true }) {
+        for (const char *format : { "intervals", "rle" }) {
+            for (auto [labels, runs, name, seeds] : { std::make_tuple(0, 0, 1, 0),
+                                                       std::make_tuple(1, 1, 1, 1),
+                                                       std::make_tuple(300, 4, 20, 3),
+                                                       std::make_tuple(40, 2, 300, 4) }) {
+                auto [p, sel] = priced_profile(labels, runs, name, seeds, trace);
+                // names a writer escapes: quotes, a backslash, control characters, DEL, 2-, 3-
+                // and 4-byte UTF-8
+                if (!p.labels.empty()) {
+                    p.labels[0].label.name = "q\"b\\s\n\t\x01\x7f \xc3\xa9 \xe2\x82\xac \xf0\x9f\x98\x80";
+                    for (FrozenSeed &seed : sel.seeds) {
+                        seed.labels[0] = p.labels[0].label.name;
+                    }
+                }
+                const std::string what = std::string(format) + (trace ? " trace " : " kmer ")
+                        + std::to_string(labels) + "x" + std::to_string(runs) + " seeds "
+                        + std::to_string(seeds);
+                for (const SeedSelection *selection : { (const SeedSelection *)&sel,
+                                                        (const SeedSelection *)nullptr }) {
+                    const std::string tree = compact(cli::profile_to_json(p, selection, format));
+                    cli::ResolveAnswer answer = cli::profile_answer(p, selection, format);
+                    std::vector<std::string> keys;
+                    for (const auto &[key, pieces] : answer.held.members) {
+                        keys.push_back(key);
+                        EXPECT_FALSE(answer.head.isMember(key)) << what << " " << key;
+                        if (key == "labels" || key == "candidates") {
+                            ASSERT_LE(2u, pieces.size()) << what;
+                            EXPECT_EQ("[", pieces.front()) << what;
+                            EXPECT_EQ("]", pieces.back()) << what;
+                        }
+                        // an element after the first holds its comma, the first none
+                        for (size_t i = 1; i + 1 < pieces.size(); ++i) {
+                            EXPECT_EQ(i > 1, pieces[i][0] == ',') << what << " " << key << " " << i;
+                        }
+                    }
+                    std::vector<std::string> expected { "graph_runs", "labels", "candidates" };
+                    if (selection)
+                        expected.push_back("selection");
+                    EXPECT_EQ(expected, keys) << what;
+                    EXPECT_EQ(tree, cli::json_text_with_members(answer.head,
+                                                                std::move(answer.held)))
+                            << what;
+                }
+            }
+        }
+    }
+}
+
+// The account of an answer held as text (T7-D3): each object charged at its tree's price before
+// it is built (as before), then, written, held at held_result_bytes: three copies of its text and
+// 128 B. On the shapes of many small elements (intervals, short names) that is below every
+// object's price, so the account then holds exactly 64 KiB (the members beside the objects) and
+// three copies of each object's text and 128 B; an object of long strings is held at its price
+// (about twice its text), below that. Its peak is one object's price above what it held before
+// that object; made under its peak and refused a byte below it, at part "answer"
+TEST(ResolveAnswer, AnObjectIsHeldAtItsText) {
+    for (bool trace : { false, true }) {
+        for (const char *format : { "intervals", "rle" }) {
+            for (auto [labels, runs, name, seeds] : { std::make_tuple(2000, 3, 12, 0),
+                                                       std::make_tuple(20, 2000, 40, 0),
+                                                       std::make_tuple(300, 100, 20, 30),
+                                                       std::make_tuple(40, 2, 1100, 4) }) {
+                const auto [p, sel] = priced_profile(labels, runs, name, seeds, trace);
+                const SeedSelection *selection = seeds ? &sel : nullptr;
+                const std::string what = std::string(format) + (trace ? " trace " : " kmer ")
+                        + std::to_string(labels) + "x" + std::to_string(runs) + " names "
+                        + std::to_string(name);
+                AnswerAccount account(uint64_t(1) << 40);
+                const cli::ResolveAnswer answer = cli::profile_answer(p, selection, format,
+                                                                      nullptr, &account);
+                uint64_t three_copies = 64 << 10;
+                for (uint64_t own : object_texts(answer)) {
+                    three_copies += 3 * own + 128;
+                }
+                if (name <= 40 && std::string(format) == "intervals") {
+                    EXPECT_EQ(three_copies, account.held()) << what;
+                } else if (name > 1000) {
+                    // the long names held at their price
+                    EXPECT_LT(account.held(), three_copies) << what;
+                } else {
+                    EXPECT_LE(account.held(), three_copies) << what;
+                }
+                // released after each object, unless its price binds (long names)
+                if (name <= 40) {
+                    EXPECT_GT(account.peak(), account.held()) << what;
+                } else {
+                    EXPECT_GE(account.peak(), account.held()) << what;
+                }
+                // then writing it: at least three copies of the text
+                AnswerAccount written = account;
+                cli::charge_answer_text(&written);
+                EXPECT_GE(written.held(), 3 * compact(cli::profile_to_json(p, selection, format)).size())
+                        << what;
+                // made under its peak, refused a byte below it, at the answer's part
+                AnswerAccount exact(written.peak());
+                cli::profile_answer(p, selection, format, nullptr, &exact);
+                cli::charge_answer_text(&exact);
+                EXPECT_EQ(written.held(), exact.held()) << what;
+                AnswerAccount short_one(written.peak() - 1);
+                try {
+                    cli::profile_answer(p, selection, format, nullptr, &short_one);
+                    cli::charge_answer_text(&short_one);
+                    ADD_FAILURE() << what << ": not refused";
+                } catch (const AnswerTooLarge &e) {
+                    EXPECT_EQ("answer", e.part()) << what;
+                }
+            }
+        }
+    }
+}
+
+// The answer as the route holds it after its account priced it (T7-D3; before, the tree: T4
+// review R1, F3): its objects' texts, each written once its tree was built (the tree freed then),
+// then the body written from them into a buffer reserved to its exact size, each text freed once
+// copied (json_text_with_members, the route's writing), then the gzip body (the traversal routes'
+// level 1) or the transport's copy of the body. The allocator's live bytes of the held texts, and
+// jemalloc's peak over all of it, within the account (profile_answer's charges, then
+// charge_answer_text's); the account and that peak printed (the account three copies of the text
+// and 128 B an object, where the tree was priced within 1.15x of its own peak). The body is the
+// tree's text
+TEST(ResolveAnswer, ThePriceCoversTheTexts) {
     size_t measured = 0;
     for (bool trace : { false, true }) {
         for (const char *format : { "intervals", "rle" }) {
@@ -2608,7 +2748,7 @@ TEST(ResolveAnswer, ThePriceCoversTheTree) {
                         + std::to_string(name);
                 const std::string plain = compact(cli::profile_to_json(p, &sel, format));
                 AnswerAccount account(uint64_t(1) << 40);
-                uint64_t tree_and_text = 0;
+                uint64_t texts_held = 0;
                 uint64_t peak = 0;
                 for (bool gzip : { true, false }) {
 #if USE_JEMALLOC
@@ -2618,16 +2758,16 @@ TEST(ResolveAnswer, ThePriceCoversTheTree) {
                     const std::optional<int64_t> before = live_heap_bytes();
                     AnswerAccount priced(uint64_t(1) << 40);
                     {
-                        Json::Value out = cli::profile_to_json(p, &sel, format, nullptr, &priced);
+                        cli::ResolveAnswer out = cli::profile_answer(p, &sel, format, nullptr,
+                                                                     &priced);
                         cli::charge_answer_text(&priced);
-                        std::string text = cli::json_text(out, true, {}, nullptr,
-                                                          cli::compact_json_size(out));
                         const std::optional<int64_t> after = live_heap_bytes();
                         if (before && after && *after > *before)
-                            tree_and_text = std::max<uint64_t>(tree_and_text, *after - *before);
-                        // the same answer as without an account
+                            texts_held = std::max<uint64_t>(texts_held, *after - *before);
+                        std::string text = cli::json_text_with_members(out.head,
+                                                                       std::move(out.held));
+                        // the same answer as the tree's
                         EXPECT_EQ(plain, text) << what;
-                        out = Json::Value();
                         std::string body = gzip ? cli::compress_string(text, 1, true)
                                                 : std::move(text);
                         if (gzip)
@@ -2642,31 +2782,18 @@ TEST(ResolveAnswer, ThePriceCoversTheTree) {
 #endif
                     account = priced;
                 }
-                if (tree_and_text)
+                if (texts_held)
                     ++measured;
-                // the text at least once in the price
-                EXPECT_GE(account.held(), plain.size()) << what;
-                EXPECT_GE(account.held(), tree_and_text) << what << ": priced " << account.held()
-                                                         << ", the heap held " << tree_and_text;
+                // three copies of the text at least
+                EXPECT_GE(account.held(), 3 * plain.size()) << what;
+                EXPECT_GE(account.held(), texts_held) << what << ": priced " << account.held()
+                                                      << ", the texts held " << texts_held;
                 if (peak) {
                     EXPECT_LE(peak, account.held()) << what << ": priced " << account.held()
                                                     << ", jemalloc's peak " << peak;
-                    if (name <= 40 && std::string(format) == "intervals") {
-                        EXPECT_LE(account.held() * 100, peak * 115) << what << ": priced "
-                                << account.held() << ", jemalloc's peak " << peak;
-                    }
                     std::cerr << what << ": priced " << account.held() << ", jemalloc's peak "
-                              << peak << " (x" << double(account.held()) / peak << ")"
-                              << std::endl;
-                }
-                // an account a byte short of the price refuses it, at the answer's part
-                AnswerAccount short_one(account.held() - 1);
-                try {
-                    cli::profile_to_json(p, &sel, format, nullptr, &short_one);
-                    cli::charge_answer_text(&short_one);
-                    ADD_FAILURE() << what << ": not refused";
-                } catch (const AnswerTooLarge &e) {
-                    EXPECT_EQ("answer", e.part()) << what;
+                              << peak << " (x" << double(account.held()) / peak << "), text "
+                              << plain.size() << std::endl;
                 }
             }
         }
@@ -3223,4 +3350,110 @@ TEST(ResolveBoundsRoute, AnExplicitLabelsMemoryStopIsStated) {
     EXPECT_FALSE(out.isMember("limits"));
 }
 
+// ---- the answer held as text (T7-D3, SPEC-labeled-traversal-core.md §4.6)
+
+// Sample 39's shape before T7-D3: 40 records, each a 2,000 bp query with a SNP every 32 bp (at
+// 16 + 32 i: about 62 windows of one k-mer each, the same for every record), the 40 labels named
+// explicitly, under --resolve-max-discover-memory-mb 1. Labels of 62 intervals and 62 candidates
+// of 40 short names were priced as trees at about 1.4 MiB: the base refused sample 39's request
+// of this shape, 400 resolve_answer_too_large (answer). Held as text (three copies of its 54 KB
+// and 128 B an object) it fits, and is answered as without a bound
+TEST(ResolveBoundsRoute, AnAnswerThatFitsAsTextIsAnswered) {
+    const std::string q = random_seq(2000, 3939);
+    std::vector<std::string> seqs, names;
+    std::mt19937 gen(3940);
+    for (size_t l = 0; l < 40; ++l) {
+        std::string record = q;
+        for (size_t i = 16; i < record.size(); i += 32) {
+            record[i] = "ACGT"[(std::string("ACGT").find(record[i]) + 1 + gen() % 3) % 4];
+        }
+        seqs.push_back(record);
+        names.push_back("rec" + std::to_string(l));
+    }
+    auto anno = build_anno_graph<DBGSuccinct, annot::ColumnCompressed<>>(kK, seqs, names);
+    Json::Value request;
+    request["sequence"] = q;
+    for (const std::string &name : names) {
+        request["labels"].append(name);
+    }
+    const Json::Value plain = cli::process_resolve_request(request, *anno, "r1", 0, nullptr,
+                                                           nullptr, {});
+    ASSERT_EQ(40u, plain["labels"].size());
+    ASSERT_LE(60u, plain["labels"][0]["runs"].size());
+    ASSERT_LE(60u, plain["candidates"].size());
+    ASSERT_EQ(40u, plain["candidates"][0]["labels"].size());
+    const cli::ResolveTimeLimits one_mib { 0, cli::kResolveFinalizeMs, 0, 1 };
+    const Json::Value got = cli::process_resolve_request(request, *anno, "r1", 0, nullptr,
+                                                         nullptr, one_mib);
+    EXPECT_FALSE(got.isMember("stop"));
+    Json::Value a = untimed(plain), b = untimed(got);
+    // (the pass's batches decoded smaller under the bound: work.memory_bytes apart)
+    a.removeMember("work");
+    b.removeMember("work");
+    EXPECT_EQ(compact(a), compact(b));
+    // the server's form: written from its texts, the same bytes
+    cli::ResolveAnswer served = cli::process_resolve_answer(request, *anno, "r1", 0, nullptr,
+                                                            nullptr, one_mib);
+    Json::Value written;
+    std::istringstream text(cli::json_text_with_members(served.head, std::move(served.held)));
+    Json::CharReaderBuilder reader;
+    std::string errors;
+    ASSERT_TRUE(Json::parseFromStream(reader, text, &written, &errors)) << errors;
+    written = untimed(written);
+    written.removeMember("work");
+    // (compared as text: the reader reads a small unsigned integer as a signed one)
+    EXPECT_EQ(compact(b), compact(written));
+}
+
+// What the server holds of a /resolve answer (process_resolve_answer): its head without the
+// members held as text (graph_runs, labels, candidates, the selection, unknown_labels on a
+// multi-graph server's pair) and their texts; no tree of a held object. Written, the answer of the
+// tree API (process_resolve_request), for a discovery (rle), a discovery with a selection, and a
+// pair's unknown labels
+TEST(ResolveBoundsRoute, TheServersAnswerHoldsTextsOnly) {
+    const Records r = make_records<DBGSuccinct, annot::ColumnCompressed<>>(40, 5, 3941);
+    const auto index = with_mapping(r);
+    Json::Value discovery;
+    discovery["sequence"] = r.q;
+    discovery["discover"]["kind"] = "header";
+    discovery["discover"]["max_labels"] = 5;
+    discovery["run_format"] = "rle";
+    Json::Value selected = discovery;
+    selected.removeMember("run_format");
+    selected["select"]["policy"] = "longest_first";
+    selected["select"]["max_seeds"] = 4;
+    Json::Value unknown;
+    unknown["sequence"] = r.q;
+    unknown["labels"].append("not a label of this pair");
+    for (const auto &[request, dropped] : { std::make_pair(discovery, false),
+                                            std::make_pair(selected, false),
+                                            std::make_pair(unknown, true) }) {
+        SCOPED_TRACE(compact(request).substr(0, 200));
+        cli::ResolveAnswer answer = cli::process_resolve_answer(
+                request, *index, "r1", 0, nullptr, nullptr, {}, nullptr, nullptr, dropped);
+        std::set<std::string> keys;
+        for (const auto &[key, pieces] : answer.held.members) {
+            keys.insert(key);
+            EXPECT_FALSE(answer.head.isMember(key)) << key;
+            EXPECT_FALSE(pieces.empty()) << key;
+        }
+        std::set<std::string> expected { "graph_runs", "labels", "candidates" };
+        if (request.isMember("select"))
+            expected.insert("selection");
+        if (dropped)
+            expected.insert("unknown_labels");
+        EXPECT_EQ(expected, keys);
+        const std::string text = cli::json_text_with_members(answer.head, std::move(answer.held));
+        Json::Value written;
+        std::istringstream in(text);
+        Json::CharReaderBuilder reader;
+        std::string errors;
+        ASSERT_TRUE(Json::parseFromStream(reader, in, &written, &errors)) << errors;
+        const Json::Value tree = cli::process_resolve_request(
+                request, *index, "r1", 0, nullptr, nullptr, {}, nullptr, nullptr, dropped);
+        EXPECT_EQ(compact(untimed(tree)), compact(untimed(written)));
+    }
+}
+
 } // namespace
+
