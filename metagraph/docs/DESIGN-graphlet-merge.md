@@ -636,18 +636,18 @@ union_pairs(results, *, seed=None, expected_pairs=None, seqs_order=None, budget=
     # seqs_order: pair -> 'verified' | 'count_only' | None, from GET /capabilities; a pair not given: 'unknown'
     # A new object every time; parts held by reference, never copied or modified.
 
-class PairUnion:                          # every method also takes budget= (keyword-only, see below)
+class PairUnion:                          # budget= (keyword-only) where the work grows with walks or segments (F.1)
     parts -> tuple[PairPart]              # canonical order (§2.10)
     absent -> tuple[PairAbsent]
     pairs -> tuple[str]                   # every tag (unique, Appendix A.4): parts, absent records, missing pairs
     expected -> tuple[str] | None
     seed -> SeedInfo                      # the common oriented seed; each part's own seed record in parts
     alphabet; arms() -> list[str]         # the arms any part walked
-    statements(arm=None, at_bp=None, *, paths='supported') -> Statements   # the five statements (§2.1)
-    coverage(arm, at_bp=None) -> Coverage                 # §2.6
-    labels(pair=None) -> list[PairLabel]
-    label(selector) -> PairLabel          # {'pair', 'ref'} | {'pair', 'name'} | {'name'} when only one pair has it
-    shared_names() -> dict                # name -> tags, for names seen in two or more parts
+    statements(arm=None, at_bp=None, *, paths='supported', budget=None) -> Statements   # the five statements (§2.1)
+    coverage(arm, at_bp=None, *, budget=None) -> Coverage  # §2.6
+    labels(pair=None, *, budget=None) -> list[PairLabel]
+    label(selector, *, budget=None) -> PairLabel   # {'pair', 'ref'} | {'pair', 'name'} | {'name'} when one pair has it
+    shared_names(*, budget=None) -> dict  # name -> tags, for names seen in two or more parts
     segments(arm, *, budget=None, resume=None) -> list[UnionSegment]
     walks(arm, *, paths='supported'|'inferred', max_transitions=1, max_paths=1000, top=None, by='pairs'|'length'|'id',
           pairs=None, labels=None, min_bp=0, spell=False, stubs=False, budget=None, resume=None)
@@ -658,7 +658,7 @@ class PairUnion:                          # every method also takes budget= (key
     to_fasta(arm=None, walks=None, with_seed=True, orientation='natural', width=None, *, paths='supported',
              max_transitions=1, max_paths=1000, at_bp=None, stubs=False, budget=None) -> str
     to_gfa(*, paths='supported', with_seed=True, labels='counts'|'full', at_bp=None, budget=None) -> str
-    evidence(arm=None) -> dict
+    evidence(arm=None, *, budget=None) -> dict
     summary(max_bytes=4096, *, paths='supported', budget=None) -> dict   # the statements first and whole
     __str__() -> str                      # the statements as sentences: print(union)
     provenance() -> list[dict]
@@ -676,10 +676,10 @@ class PairUnion:                          # every method also takes budget= (key
 **Tags.** Every pair is named by its display tag, unique in the union (Appendix A.4); selectors take a tag, and
 `parts[i].key` gives the full pair key.
 
-**Budgets.** Every operation takes `budget=`, keyword-only, with the library's
-semantics (`budget.py`): a stop raises `LocalBudgetExceeded`; the lists whose order allows it (`walks()`,
-`segments()`, `carriers()`) carry a `Partial` of whole rows with a resume token for `resume=`, and the others stop
-without one. `union_pairs()` charges construction (the trie pass) to its `budget=`.
+**Budgets.** Every operation whose work grows with the walks or segments takes `budget=`, keyword-only (the list and
+the exempt accessors: F.1), with the library's semantics (`budget.py`): a stop raises `LocalBudgetExceeded`; the lists
+whose order allows it (`walks()`, `segments()`, `carriers()`) carry a `Partial` of whole rows with a resume token for
+`resume=`, and the others stop without one. `union_pairs()` charges construction (the trie pass) to its `budget=`.
 
 **The queries.**
 
