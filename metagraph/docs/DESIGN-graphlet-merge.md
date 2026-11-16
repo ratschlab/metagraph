@@ -1027,7 +1027,9 @@ depends on notes `next_request()` returned: a child made another way is judged b
   events (`evidence.complete_to_bp`), its `coordinates` limitation and its delivery (`spooled`), all listed under its
   key. None is summed or dropped. A local-budget stop follows the library's rule (`budget.py`): `LocalBudgetExceeded`,
   with a `Partial` of whole rows and a resume token bound to the stitched graphlet's digest for the lists whose order
-  allows it, and no partial otherwise.
+  allows it, and no partial otherwise. `completeness()` and `evidence()` run the walk rule (W8) over every walk they
+  read, so both take `budget=` and charge it as `summary()` does, each walk's causes at their cold price whether the
+  stitched graphlet holds them or not (F.1). The prospective hook is uncharged.
 
 ### 3.6 Exports, provenance and replay
 
@@ -1686,8 +1688,8 @@ class StitchedGraphlet:
     next_requests(...)                                            # delegate to the part owning the walk(s)
     to_fasta(arm=None, walks=None, with_seed=True, orientation='natural', width=None, *, coordinates=None,
              budget=None) -> str        # coordinates as Graphlet.to_fasta (model.py:571), per piece (Appendix D.2)
-    completeness() -> dict                # per arm: the root's complete_to_bp and one extension per junction
-    evidence(arm=None, walks=None) -> dict   # §3.5; walks=: only what those walks (keys, on arm) read
+    completeness(*, budget=None) -> dict  # per arm: the root's complete_to_bp and one extension per junction
+    evidence(arm=None, walks=None, *, budget=None) -> dict   # §3.5; walks=: only what those walks (keys, on arm) read
     summary(max_bytes=2048, *, budget=None) -> dict
     provenance() -> list[dict]            # §3.6
     save(path, *, budget=None)            # [1c] the bundle, Appendix D.3; metagraph.traverse.load(path) returns it
@@ -2145,6 +2147,25 @@ graphlets.rst examples run in `run_examples.py` (CI's fixture-checks job).
   concatenated. Every operation takes `budget=` and charges the parts' cold prices plus the junction work, with prices
   in `budget.py` (the cost model states each one).
 - **Bundle.** The sum of the parts' standalone texts plus about 100 bytes per part.
+
+**Budgets, both classes.** A public method of `PairUnion` or `StitchedGraphlet` whose work grows with the walks or
+segments takes `budget=` (keyword-only; `None` is the ambient `local_budget()`) and charges it. Every derivation a call
+reads is charged at its cold price whether a cache holds it or not, the object's own derivations (a union's walk
+figures and segment labels, a stitched graphlet's rows, rule-check contexts and walk causes) as the parts' are, so
+a call charges the same, and stops at the same row, whatever earlier calls cached; warm calls pay more than they
+spend.
+
+- **`PairUnion`.** `statements()`, `segments()`, `walks()`, `spell()`, `carriers()`, `to_fasta()`, `to_gfa()`,
+  `summary()`, `labels()`, `label()`, `shared_names()`, `coverage()` and `evidence()`; `print(u)` charges the ambient
+  budget. A stitched part inside a union runs under the union call's budget as its ambient budget.
+- **`StitchedGraphlet`.** `stitch()`, `walks()`, `walk()`, `spell()`, `continuation()`, `next_request()`,
+  `next_requests()`, `to_fasta()`, `summary()`, `evidence()` and `completeness()`. `walk()` charges the walk it builds
+  as `walks()` charges each; `summary()` reads the evidence under its own budget.
+- **Exempt.** The accessors that return stored fields or measure the object: on `PairUnion` `arms()`,
+  `provenance()`, `memory_bytes()` and the stored attributes (`parts`, `absent`, `pairs`, `expected`, `digest`,
+  `seed`, `alphabet`); on `StitchedGraphlet` `arms()`, `arm_of()`, `label()`, `provenance()`, `memory_bytes()` and
+  the stored attributes (`parts`, `root`, `junctions`, `labels`, `identity`, `digest`, `seed`, `k`, `regime`,
+  `alphabet`, `mode`, `support`). The prospective test hook (§3.5) is uncharged.
 
 ### F.2 Code plan
 

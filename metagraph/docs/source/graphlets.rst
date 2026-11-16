@@ -1626,6 +1626,18 @@ part's replay request: replaying a stitched graphlet replays its parts and stitc
 again. A stitched graphlet can be one pair's part of a union (`A stitched graphlet as a
 part`_).
 
+Every method whose work grows with the walks or segments takes ``budget=`` (`Local
+budgets`_): ``stitch()``, ``walks()``, ``walk()``, ``spell()``, ``continuation()``,
+``next_request()``, ``next_requests()``, ``to_fasta()``, ``summary()``, ``evidence()`` and
+``completeness()``. The stitched graphlet keeps what its queries derive (the arm's rows,
+each junction's rule-check context, each walk's causes), and a call charges each at its
+cold price whether it is kept or not, so it charges the same, and stops at the same row,
+whatever earlier calls cached. ``walk()`` charges the walk it builds as ``walks()``
+charges each, and ``summary()`` reads the evidence under its own budget. The accessors
+that return stored fields or measure the object take no budget: ``arms()``,
+``arm_of()``, ``label()``, ``provenance()``, ``memory_bytes()``, ``parts``, ``root``,
+``junctions``, ``labels``, ``identity`` and ``digest``.
+
 Comparing retrievals
 ^^^^^^^^^^^^^^^^^^^^
 

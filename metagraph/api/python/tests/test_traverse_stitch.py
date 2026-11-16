@@ -1162,6 +1162,40 @@ class TestOracleTriples(unittest.TestCase):
         self.assertEqual([[c[0] for c in j['causes']] for j in one['junctions']],
                          [['exact_gated']])
 
+    def test_either_arm_first(self):
+        """The rule check's windows are kept per part and arm: the root walks both arms,
+        and its left tails must never stand in for its right ones. The right child retakes
+        the parent's seed edges (its walk edited, same length), so its walk breaks the rule
+        at 25 bp whichever arm is queried first (GPT review M1)."""
+        def retaken(resp):
+            r = resp['results'][0]
+            rows = r['graphlet'].split('\n')
+            for i, line in enumerate(rows):
+                if line.startswith('G '):
+                    f = line.split(' ')
+                    f[-1] = 'TGCAGGTTCTATTATT' + 'ACGTACGTACGTAC'
+                    rows[i] = ' '.join(f)
+            r['graphlet'] = '\n'.join(rows)
+            r.pop('graphlet_bytes', None)
+            r.pop('graphlet_lines', None)
+
+        def make():
+            return stitch(stitch(load('fork_right', 'parent'),
+                                 load('fork_right', 'child', retaken)),
+                          load('fork_left', 'child'))
+        answers = []
+        for order in (('right', 'left'), ('left', 'right')):
+            sg = make()
+            got = {side: [(w.key, w.causes) for w in sg.walks(side, by='id')]
+                   for side in order}
+            got['evidence'] = sg.evidence()
+            got['summary'] = sg.summary()
+            answers.append(got)
+        self.assertEqual(answers[0], answers[1])
+        causes = dict(answers[0]['right'])[(0, 0)]
+        self.assertEqual([('rule_violation', 25)], [(c[0], c[2]) for c in causes])
+        self.assertEqual((), dict(answers[0]['left'])[(0, 0)])
+
 
 # ---------------------------------------------------------------------------------- T5
 
@@ -1399,12 +1433,169 @@ class TestBudgets(unittest.TestCase):
                 lambda b: stitch(p, c).spell(arm, (0, 0), budget=b),
                 lambda b: stitch(p, c).to_fasta(budget=b),
                 lambda b: stitch(p, c).summary(budget=b),
-                lambda b: stitch(p, c).walk(arm, (0, 0), budget=b)]
+                lambda b: stitch(p, c).walk(arm, (0, 0), budget=b),
+                lambda b: stitch(p, c).walks(arm, budget=b),
+                lambda b: stitch(p, c).evidence(budget=b),
+                lambda b: stitch(p, c).completeness(budget=b),
+                lambda b: stitch(p, c).continuation(arm, (1,), budget=b),
+                lambda b: stitch(p, c).next_request(arm, (1,), budget=b),
+                lambda b: stitch(p, c).next_requests(arm, [(1,)], budget=b)]
         for i, op in enumerate(ops_):
             with self.subTest(i):
                 op(LocalBudget())
                 with self.assertRaises(LocalBudgetExceeded):
                     op(LocalBudget(work_units=1))
+                # without budget=, the ambient one
+                with MT.local_budget() as b:
+                    op(None)
+                self.assertGreater(b.used_work, 0)
+
+    # objects built from freshly parsed parts (their own caches cold too): a chain of comb
+    # continuations (61 walks, two junctions in a row), its first junction alone, and a
+    # root with a child on each arm (tails per arm)
+
+    @staticmethod
+    def _comb():
+        _, p, c = triple('comb_chain')
+        return stitch(stitch(p, c), load('comb_chain', 'grandchild'))
+
+    @staticmethod
+    def _comb_one():
+        _, p, c = triple('comb_chain')
+        return stitch(p, c)
+
+    @staticmethod
+    def _fork():
+        return stitch(stitch(load('fork_right', 'parent'), load('fork_right', 'child')),
+                      load('fork_left', 'child'))
+
+    def _budgeted(self):
+        """(name, make, op): every public StitchedGraphlet method that takes budget=, each on
+        an object make() builds."""
+        arm = 'right'
+        comb, comb_one, fork = self._comb, self._comb_one, self._fork
+        g3 = load('comb_chain', 'grandchild')
+        deep = (20, 19, 19)             # through both junctions, with a continuation
+        return [
+            ('stitch()', comb_one, lambda sg, b: stitch(sg, g3, budget=b)),
+            ('.stitch()', comb_one, lambda sg, b: sg.stitch(g3, budget=b)),
+            ('walks id', comb, lambda sg, b: sg.walks(arm, by='id', budget=b)),
+            ('walks support', comb, lambda sg, b: sg.walks(arm, budget=b)),
+            ('walks labels', comb, lambda sg, b: sg.walks(arm, by='length', min_bp=60,
+                                                          budget=b)),
+            ('walk', comb, lambda sg, b: sg.walk(arm, deep, budget=b)),
+            ('spell', comb, lambda sg, b: sg.spell(arm, deep, 'walk', True, budget=b)),
+            ('continuation', comb, lambda sg, b: sg.continuation(arm, deep, budget=b)),
+            ('next_request', comb, lambda sg, b: sg.next_request(arm, deep, budget=b)),
+            ('next_requests', comb, lambda sg, b: sg.next_requests(arm, [deep], budget=b)),
+            ('to_fasta', comb, lambda sg, b: sg.to_fasta(budget=b)),
+            ('to_fasta walks', comb, lambda sg, b: sg.to_fasta(arm, [deep, (19,)], budget=b)),
+            ('summary', comb, lambda sg, b: sg.summary(budget=b)),
+            ('evidence', comb, lambda sg, b: sg.evidence(budget=b)),
+            ('evidence walks', comb, lambda sg, b: sg.evidence(arm, [deep], budget=b)),
+            ('completeness', comb, lambda sg, b: sg.completeness(budget=b)),
+            ('fork walk left', fork, lambda sg, b: sg.walk('left', (0, 0), budget=b)),
+            ('fork walk right', fork, lambda sg, b: sg.walk('right', (0, 0), budget=b)),
+            ('fork summary', fork, lambda sg, b: sg.summary(budget=b)),
+            ('fork evidence', fork, lambda sg, b: sg.evidence(budget=b)),
+            ('fork completeness', fork, lambda sg, b: sg.completeness(budget=b)),
+            ('fork to_fasta', fork, lambda sg, b: sg.to_fasta(budget=b))]
+
+    def test_walk_charges_its_row_and_spelling(self):
+        """walk() charges the walk it builds as walks() charges each walk it returns (its
+        row, pieces and spelling), beside the rows and causes it reads (GPT review M3: a
+        warmed walk() returned its sequence charging nothing)."""
+        class Log(LocalBudget):
+            def __init__(self):
+                super().__init__()
+                self.log = []
+
+            def charge(self, work, nbytes=0):
+                self.log.append((work, nbytes))
+                return super().charge(work, nbytes)
+        for make, arm, keys in ((self._comb, 'right', [(19,), (20, 19, 19)]),
+                                (self._fork, 'left', [(0, 0), (1,)])):
+            sg = self._warm(make())
+            listed = Log()
+            sg.walks(arm, by='id', budget=listed)
+            for key in keys:
+                one = Log()
+                w = sg.walk(arm, key, budget=one)
+                price = StitchedGraphlet._walk_price(w.length_bp, sg._chain(arm, key))
+                self.assertIn(price, one.log, key)
+                self.assertIn(price, listed.log, key)
+                self.assertGreaterEqual(price[1], 3 * len(w.sequence))
+
+    def test_summary_charges_the_evidence_it_reads(self):
+        """summary() states evidence()'s outcome and exact and reads it under its own budget
+        (not unbudgeted, not charged twice): it charges at least what evidence() does."""
+        for make in (self._comb, self._comb_one, self._fork):
+            sg = make()
+            ev, sm = LocalBudget(), LocalBudget()
+            sg.evidence(budget=ev)
+            sg.summary(budget=sm)
+            self.assertGreaterEqual(sm.used_work, ev.used_work)
+            self.assertGreaterEqual(sm.peak_bytes, ev.peak_bytes)
+
+    @staticmethod
+    def _warm(sg):
+        """Every query of |sg| once, unbudgeted, both arms: every cache it keeps filled."""
+        for side in sg.arms():
+            for w in sg.walks(side, by='id'):
+                sg.walk(side, w.key)
+                sg.spell(side, w.key)
+            sg.walks(side)
+            sg.evidence(side)
+        sg.evidence()
+        sg.completeness()
+        sg.summary()
+        sg.to_fasta()
+        return sg
+
+    @staticmethod
+    def _did(op, sg, b):
+        """What a budgeted call did: its charge, or its stop (with the partial's rows)."""
+        try:
+            op(sg, b)
+            return ('done', b.used_work, b.peak_bytes)
+        except LocalBudgetExceeded as e:
+            s = e.stop
+            rows = None if e.partial is None else [w.key for w in e.partial.rows]
+            return ('stop', s.resource, s.op, s.phase, s.used, s.needed_at_least, rows)
+
+    def test_cold_and_warm_charge_the_same(self):
+        """A call charges the same whether its derivations are cached or not, a hit paying
+        the cold price, and so stops at the same point (GPT review M3): every public method
+        that takes budget=, on a fresh object and on one every query has warmed, at its whole
+        charge and at work and memory limits below it."""
+        for name, make, op in self._budgeted():
+            with self.subTest(name):
+                cold = LocalBudget()
+                op(make(), cold)
+                warm = LocalBudget()
+                op(self._warm(make()), warm)
+                self.assertEqual((cold.used_work, cold.peak_bytes),
+                                 (warm.used_work, warm.peak_bytes))
+                again = self._warm(make())
+                op(again, LocalBudget())
+                twice = LocalBudget()
+                op(again, twice)
+                self.assertEqual((cold.used_work, cold.peak_bytes),
+                                 (twice.used_work, twice.peak_bytes))
+                work, peak = cold.used_work, cold.peak_bytes
+                limits = sorted({1, work // 7, work // 3, work // 2, (3 * work) // 4,
+                                 work - 1, work} - {0})
+                for lim in limits:
+                    stops = [self._did(op, sg, LocalBudget(work_units=lim))
+                             for sg in (make(), self._warm(make()))]
+                    self.assertEqual(stops[0], stops[1], (name, 'work', lim))
+                    self.assertEqual(lim >= work, stops[0][0] == 'done', (name, lim))
+                for frac in (0.25, 0.5, 0.9):
+                    mb = peak * frac / 2 ** 20
+                    stops = [self._did(op, sg, LocalBudget(memory_mb=mb))
+                             for sg in (make(), self._warm(make()))]
+                    self.assertEqual(stops[0], stops[1], (name, 'memory', frac))
+                    self.assertEqual('stop', stops[0][0], (name, frac))
 
     def test_account_bounds_the_peak(self):
         """On a chain of comb continuations (each part splits at every node)."""

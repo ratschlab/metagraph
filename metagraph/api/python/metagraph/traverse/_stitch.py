@@ -40,8 +40,8 @@ from . import derive
 from . import export as _export
 from . import ops as _ops
 from ._codec import REASON
-from .budget import (STR, W_ELEM, W_ROW, W_STEP, LocalBudgetExceeded, Partial, list_bytes,
-                     record_bytes, set_bytes)
+from .budget import (STR, TUPLE, W_ELEM, W_ROW, W_STEP, LocalBudgetExceeded, Partial,
+                     dict_bytes, list_bytes, record_bytes, set_bytes)
 from .client import answered_pair
 from .composite import CombineRefused, NotCombinable
 from .model import (ARM_SIDES, AmbiguousLabel, BadSelector, Continuation, Graphlet, Label,
@@ -112,6 +112,7 @@ _T_LABEL_ID = ('label ids are local to each part of a stitched graphlet: select 
                'name')
 
 _SHOWN = 8          # labels a refusal names (then "and N more"), as next_request's notes
+_EV_BLOCK = 1024    # bytes of a part's evidence block (888 deep on the stitch fixtures)
 
 
 def _label_list(labels):
@@ -254,6 +255,19 @@ def _kmers(seq, k, regime):
     if regime != 'basic':
         out |= {_rc(x) for x in out}
     return out
+
+
+def _kmers_price(seq, k, regime):
+    """(lwu, bytes) of _kmers(seq, k, regime): a step per k-mer and orientation, the set and
+    its strings."""
+    n = max(0, len(seq) - k + 1) * (1 if regime == 'basic' else 2)
+    return n, set_bytes(n) + n * (STR + k)
+
+
+def _tails_price(g, side):
+    """(lwu, bytes) of _tails(g, side): an element per segment, the list and its strings."""
+    n = len(g.arms[side].segments)
+    return W_ELEM * n, list_bytes(n) + n * (STR + g.k)
 
 
 def _seed_walking(g, side):
@@ -458,7 +472,10 @@ class StitchedGraphlet:
         self._parts = tuple(parts)
         self._by_key = {p.key: p for p in self._parts}
         self.identity = identity
+        # the queries' derivations (contexts, walk causes, rows, tails, root nodes) and,
+        # under the same keys, their cold prices with the derivations each read (_uses)
         self._cache = {}
+        self._price = {}
         self._jcore = {}
         root = self._parts[0].graphlet
         self.k, self.regime, self.alphabet = root.k, root.regime, root.alphabet
@@ -979,6 +996,34 @@ class StitchedGraphlet:
         """Whether junction |j| would be exact once exact is switched on (prospective)."""
         return len(j.causes) == 1 and j.causes[0][0] == 'exact_gated'
 
+    # ---------------------------------------------------------------- derivations
+
+    def _uses(self, b, ck):
+        """Charge |b| this graphlet's cached derivation |ck| at its cold price, then the
+        derivations it read, each once per call (budget.uses_of(), as derive.uses() charges
+        a model's): a hit pays what computing it charges, in the same order, so a call
+        charges the same and stops at the same point whatever earlier calls cached. No-op
+        without a budget."""
+        if b is None:
+            return
+        work, nbytes, deps = self._price[ck]
+        if b.uses_of(self, 'stitched', work, nbytes, depth=ck):
+            for d in deps:
+                self._uses(b, d)
+
+    def _computing(self, b, ck, price):
+        """Charge |b| derivation |ck| at |price| (work, bytes) before it is computed (once
+        per call)."""
+        if b is not None:
+            b.uses_of(self, 'stitched', price[0], price[1], depth=ck)
+
+    def _keep(self, ck, got, price, deps=()):
+        """Cache derivation |ck| with its cold price and the derivations it read, in the
+        order it read them."""
+        self._price[ck] = (price[0], price[1], tuple(deps))
+        self._cache[ck] = got
+        return got
+
     # ---------------------------------------------------------------- the rule check (W8)
 
     def _context(self, key, b=None):
@@ -987,19 +1032,24 @@ class StitchedGraphlet:
         of the chain), the root seed's nodes, the child seed's nodes, and the split count
         the reference carries into the child (the counts at the continued leaves, summed
         along the chain)."""
-        got = self._cache.get(('ctx', key))
+        ck = ('ctx', key)
+        got = self._cache.get(ck)
         if got is not None:
+            self._uses(b, ck)
             return got
         side, pid = key[-1]
         ppart = self._by_key[key[:-1]]
         pg = ppart.graphlet
+        cg = self._by_key[key].graphlet
         a = pg.arms[side]
         leaf = derive.paths(a)[pid].leaf
         route = _ancestors(a, leaf)
-        if b is not None:
-            n = sum(a.segments[s].length_bp for s in route) + pg.k * len(route)
-            b.charge(W_ELEM * len(route) + n, set_bytes(n) + n * (STR + pg.k + 1))
-        tails = self._tails(ppart.key, side)
+        n = sum(a.segments[s].length_bp for s in route) + pg.k * len(route)
+        cw, cm = _kmers_price(cg.seed.sequence, cg.k, cg.regime)
+        price = (W_ELEM * len(route) + n + cw, set_bytes(n) + n * (STR + pg.k + 1) + cm)
+        self._computing(b, ck, price)
+        deps = [('tails', ppart.key, side)]
+        tails = self._tails(ppart.key, side, b)
         edges = set()
         for s in route:
             seg = a.segments[s]
@@ -1007,6 +1057,7 @@ class StitchedGraphlet:
             for i in range(seg.length_bp):
                 edges.add(_ops.edge_key(pg.regime, _natural(side, window[i:i + pg.k + 1]))[0])
         if ppart.key:
+            deps.append(('ctx', ppart.key))
             up = self._context(ppart.key, b)
             chain_edges = up['edges'] + (frozenset(edges),)
             count = up['count']
@@ -1014,33 +1065,46 @@ class StitchedGraphlet:
             chain_edges = (frozenset(edges),)
             count = 0
         count += _split_counts(a)[leaf]
-        cg = self._by_key[key].graphlet
+        deps.append(('root_nodes',))
         got = {'edges': chain_edges, 'count': count,
-               'root_nodes': self._root_nodes(),
+               'root_nodes': self._root_nodes(b),
                'child_nodes': _kmers(cg.seed.sequence, cg.k, cg.regime),
                'max_splits': _knob(_strategy(pg), 'branching', 'max_splits_per_path')}
-        self._cache[('ctx', key)] = got
-        return got
+        return self._keep(ck, got, price, deps)
 
-    def _root_nodes(self):
-        got = self._cache.get('root_nodes')
-        if got is None:
-            root = self.root
-            got = self._cache['root_nodes'] = _kmers(root.seed.sequence, root.k, root.regime)
-        return got
+    def _root_nodes(self, b=None):
+        """The root seed's nodes (k-mers, natural orientation), cached."""
+        ck = ('root_nodes',)
+        got = self._cache.get(ck)
+        if got is not None:
+            self._uses(b, ck)
+            return got
+        root = self.root
+        price = _kmers_price(root.seed.sequence, root.k, root.regime)
+        self._computing(b, ck, price)
+        return self._keep(ck, _kmers(root.seed.sequence, root.k, root.regime), price)
 
-    def _tails(self, key, side):
-        got = self._cache.get(('tails', key))
-        if got is None:
-            got = self._cache[('tails', key)] = _tails(self._by_key[key].graphlet, side)
-        return got
+    def _tails(self, key, side, b=None):
+        """_tails() of part |key|'s arm |side|, cached per part and arm (the root walks
+        both)."""
+        ck = ('tails', key, side)
+        got = self._cache.get(ck)
+        if got is not None:
+            self._uses(b, ck)
+            return got
+        g = self._by_key[key].graphlet
+        price = _tails_price(g, side)
+        self._computing(b, ck, price)
+        return self._keep(ck, _tails(g, side), price)
 
     def _walk_causes(self, key, pid, b=None):
         """The walk-scope causes (§3.4 W8) of walk |pid| of child part |key|, in the child's
         own outward coordinates: [(code, sentence, at_bp local)], the first of each kind on
         the walk's route (the DAG ancestors of its leaf through any parent). Cached."""
-        got = self._cache.get(('w8', key, pid))
+        ck = ('w8', key, pid)
+        got = self._cache.get(ck)
         if got is not None:
+            self._uses(b, ck)
             return got
         side = key[-1][0]
         part = self._by_key[key]
@@ -1051,13 +1115,13 @@ class StitchedGraphlet:
         leaf = derive.paths(a)[pid].leaf
         route = _ancestors(a, leaf)
         on_route = set(route)
-        if b is not None:
-            n = sum(segs[s].length_bp for s in route)
-            b.charge(W_ELEM * (len(route) + len(a.branch_events)) + n,
-                     set_bytes(len(route)) + 4 * (STR + k + 1))
+        n = sum(segs[s].length_bp for s in route)
+        price = (W_ELEM * (len(route) + len(a.branch_events)) + n,
+                 set_bytes(len(route)) + 4 * (STR + k + 1))
+        self._computing(b, ck, price)
         ctx = self._context(key, b)
         edges, root_nodes, child_nodes = ctx['edges'], ctx['root_nodes'], ctx['child_nodes']
-        tails = self._tails(key, side)
+        tails = self._tails(key, side, b)
         found = {}
 
         def note(code, at, sentence):
@@ -1153,24 +1217,24 @@ class StitchedGraphlet:
                  'evidence boundary ({bp} bp, output.max_branch_events): why it ended there '
                  'is not recorded')
         got = [found[c] for c in sorted(found, key=lambda c: (found[c][2], _RANK[c]))]
-        self._cache[('w8', key, pid)] = got
-        return got
+        return self._keep(ck, got, price, (('ctx', key), ('tails', key, side)))
 
     # ---------------------------------------------------------------- stitched walks
 
     def _rows(self, side, b=None):
-        """Every stitched walk of the arm in key order, as (key, [(part, pid)]), not built."""
-        got = self._cache.get(('rows', side))
+        """Every stitched walk of the arm in key order, as (key, [(part, pid)]), not built.
+        Cached; charged at its cold price (_rows_price())."""
+        ck = ('rows', side)
+        got = self._cache.get(ck)
         if got is not None:
+            self._uses(b, ck)
             return got
+        price = self._rows_price(side)
+        self._computing(b, ck, price)
         out = []
 
         def visit(part, chain):
-            g = part.graphlet
-            a = g.arms[side]
-            if b is not None:
-                b.charge(W_ELEM * len(a.segments))
-            for p in derive.paths(a):
+            for p in derive.paths(part.graphlet.arms[side]):
                 here = chain + [(part, p.id)]
                 kid = self._by_key.get(part.key + ((side, p.id),))
                 if kid is None:
@@ -1178,8 +1242,22 @@ class StitchedGraphlet:
                 else:
                     visit(kid, here)
         visit(self._parts[0], [])
-        self._cache[('rows', side)] = out
-        return out
+        return self._keep(ck, out, price)
+
+    def _rows_price(self, side):
+        """(lwu, bytes) of _rows(side): W_ELEM per segment of each part on the arm, and per
+        walk of each (at most one row each) its row, key, chain list and piece."""
+        work = nbytes = walks = 0
+        for p in self._parts:
+            if p.key and p.key[0][0] != side:
+                continue
+            a = p.graphlet.arms[side]
+            d = len(p.key) + 1
+            n = _ops._n_walks(a)
+            walks += n
+            work += W_ELEM * len(a.segments)
+            nbytes += n * (3 * TUPLE + 16 + 8 * d + list_bytes(d))
+        return work, nbytes + list_bytes(walks)
 
     def _certify(self, side, chain, prospective, b=None):
         """(certified_to_bp, complete, causes in stitched coordinates, junction indexes) of a
@@ -1260,16 +1338,29 @@ class StitchedGraphlet:
         p = derive.paths(a)[chain[-1][1]]
         return [self._label_of[l.ref] for l in _ops._labels_full(last, a, p) if l.ref in refs]
 
+    def _walk_length(self, side, chain):
+        part, pid = chain[-1]
+        return part.offset_bp + derive.paths(part.graphlet.arms[side])[pid].length_bp
+
+    @staticmethod
+    def _walk_price(n, chain):
+        """(lwu, bytes) of building a StitchedWalk of |n| bases over |chain|: its row, its
+        pieces and its spelling (three copies of the text at most), as walks() and walk()
+        charge each walk they return."""
+        return (W_ROW + W_STEP * n // 64 + (n >> 8) + 4 * len(chain),
+                record_bytes(StitchedWalk) + 3 * (STR + n) + 400)
+
     def _walk_object(self, side, row):
         chain = row['chain']
         part, pid = chain[-1]
         g = part.graphlet
         a = g.arms[side]
-        ranked = self._cache.get(('ranked', part.key, side))
-        if ranked is None:
-            ranked = self._cache[('ranked', part.key, side)] = {
-                x[0].id: x for x in _ops._ranked_walks(g, a, 'id', None, True, 0)}
-        w = _ops._walk_objects(g, a, [ranked[pid]], with_claims=False)[0]
+        # the walk's keys as the part's walks(by='id') ranks them, for this walk alone
+        p = derive.paths(a)[pid]
+        full, alive_ids, _, min_loss = _ops._walk_keys_of(g, a, p)
+        if full is None:
+            full = _ops._labels_full(g, a, p)
+        w = _ops._walk_objects(g, a, [(p, full, alive_ids, min_loss)], with_claims=False)[0]
         try:
             seq = self._spell_chain(side, chain, 'natural')
         except ValueError:
@@ -1328,8 +1419,8 @@ class StitchedGraphlet:
                 k0, = _K.resume_pos(self.digest, 'walks', args, resume, 1)
                 rows = []
                 for key, chain in self._rows(side, b):
-                    part, pid = chain[-1]
-                    n = part.offset_bp + derive.paths(part.graphlet.arms[side])[pid].length_bp
+                    part = chain[-1][0]
+                    n = self._walk_length(side, chain)
                     if n < min_bp:
                         continue
                     full, alive_ids, consistent, min_loss = self._rank_keys(side, chain, by)
@@ -1352,8 +1443,7 @@ class StitchedGraphlet:
                     rows = rows[:top]
                 for key, chain, n, _, _, _ in rows[k0:]:
                     if b is not None:
-                        b.charge(W_ROW + W_STEP * n // 64 + (n >> 8) + 4 * len(chain),
-                                 record_bytes(StitchedWalk) + 3 * (STR + n) + 400)
+                        b.charge(*self._walk_price(n, chain))
                     out.append(self._walk_object(side, self._walk_row(side, key, chain,
                                                                       b=b)))
                 return out
@@ -1367,19 +1457,30 @@ class StitchedGraphlet:
                                 rows=len(out), position=k0 + len(out))
             raise
 
-    def _row(self, side, key, prospective=False, b=None):
-        key = self._walk_key(key)
+    def _chain(self, side, key, b=None):
+        """The chain [(part, path id)] of stitched walk |key| (a walk key) on arm |side|."""
         for k, chain in self._rows(side, b):
             if k == key:
-                return self._walk_row(side, k, chain, prospective, b)
+                return chain
         raise IndexError('no stitched walk %s on the %s arm (a continued walk is replaced by '
                          'its child\'s walks)' % (walk_name(key), side))
 
+    def _row(self, side, key, prospective=False, b=None):
+        key = self._walk_key(key)
+        return self._walk_row(side, key, self._chain(side, key, b), prospective, b)
+
     def walk(self, arm, walk, *, budget=None):
-        """One StitchedWalk by key."""
+        """One StitchedWalk by key. budget=: the arm's rows it is looked up in, then the walk
+        as walks() charges each walk it returns (its row and spelling, its walk causes)."""
         side = self.arm_of(arm)
-        return _K.run_scoped(budget, 'walks', lambda b: self._walk_object(
-            side, self._row(side, walk, False, b)))
+
+        def run(b):
+            key = self._walk_key(walk)
+            chain = self._chain(side, key, b)
+            if b is not None:
+                b.charge(*self._walk_price(self._walk_length(side, chain), chain))
+            return self._walk_object(side, self._walk_row(side, key, chain, False, b))
+        return _K.run_scoped(budget, 'walks', run)
 
     # ---------------------------------------------------------------- spelling
 
@@ -1542,22 +1643,32 @@ class StitchedGraphlet:
 
     # ---------------------------------------------------------------- completeness
 
-    def completeness(self):
+    def completeness(self, *, budget=None):
         """Per arm: the root's complete_to_bp and scope, unchanged (stitching never makes
         "every walk to depth D" true for a larger D), and one extension per junction on the
         arm, by (arm, walk key): {walk, at_bp, extended_to_bp (at_bp + the child's
         complete_to_bp), certified_to_bp (how far the certificate reaches through the
         junction: no junction is exact in phase 1a-S, so at most at_bp, the continued walk's
-        own certified depth), verdict, causes (the junction's cause codes)}."""
-        return self._completeness(False)
+        own certified depth), verdict, causes (the junction's cause codes), walk_causes (the
+        walk-scope cause codes on the walks below it)}. budget=: the arm's rows, per junction
+        its extension and continued walk, and the walk rule (W8) on every walk below it, the
+        derivations at their cold price as summary() charges them; a stop raises with no
+        partial."""
+        return _K.run_scoped(budget, 'completeness', lambda b: self._completeness(False, b))
 
     def _causes_below(self, j, b=None):
         """The walk-scope cause codes (exact_gated left out) on the stitched walks through
         junction |j|, in Appendix B.2's order: W8 is judged per walk, so a junction whose own
-        rules hold can still stand above a walk the reference walks otherwise."""
+        rules hold can still stand above a walk the reference walks otherwise. |b|: the scan
+        of the arm's rows, each walk below (its row) and its derivations."""
         codes = set()
-        for key, chain in self._rows(j.arm, b):
+        rows = self._rows(j.arm, b)
+        if b is not None:
+            b.charge(W_ELEM * len(rows))
+        for key, chain in rows:
             if key[:len(j.walk)] == j.walk and len(key) > len(j.walk):
+                if b is not None:
+                    b.charge(W_ROW + W_ELEM * len(chain))
                 codes.update(c[0] for c in self._walk_row(j.arm, key, chain, False, b)['causes']
                              if c[0] != 'exact_gated')
         return sorted(codes, key=_RANK.get)
@@ -1566,7 +1677,7 @@ class StitchedGraphlet:
         """[(part, path id)] of walk key |key| on arm |side|, root first."""
         return [self._part_of_walk(side, key[:i + 1]) for i in range(len(key))]
 
-    def _completeness(self, prospective):
+    def _completeness(self, prospective, b=None):
         out = {}
         for side in self.arms():
             a = self.root.arms[side]
@@ -1576,15 +1687,18 @@ class StitchedGraphlet:
                     continue
                 cg = self._by_key[j.part].graphlet
                 ext = j.at_bp + cg.arms[side].complete_to_bp
-                cert = min(j.at_bp, self._certify(side, self._chain_of(side, j.walk),
-                                                  prospective)[0])
+                chain = self._chain_of(side, j.walk)
+                if b is not None:
+                    b.charge(W_ROW + W_ELEM * len(chain),
+                             dict_bytes(7) + 2 * list_bytes(len(j.causes)))
+                cert = min(j.at_bp, self._certify(side, chain, prospective, b)[0])
                 if prospective and self._gated(j) and cert == j.at_bp:
                     # every walk below the junction certified to the extension, or as far
                     # as the first one that is not complete
                     cert = ext
-                    for key, chain in self._rows(side):
+                    for key, chain in self._rows(side, b):
                         if key[:len(j.walk)] == j.walk:
-                            row = self._walk_row(side, key, chain, True)
+                            row = self._walk_row(side, key, chain, True, b)
                             if not row['complete']:
                                 cert = min(cert, row['certified_to_bp'])
                 exts.append({'walk': j.walk, 'at_bp': j.at_bp, 'extended_to_bp': ext,
@@ -1593,14 +1707,14 @@ class StitchedGraphlet:
                              if prospective else j.verdict,
                              'causes': [c[0] for c in j.causes
                                         if not (prospective and c[0] == 'exact_gated')],
-                             'walk_causes': self._causes_below(j)})
+                             'walk_causes': self._causes_below(j, b)})
             out[side] = {'complete_to_bp': a.complete_to_bp, 'scope': a.scope,
                          'extensions': exts}
         return out
 
     # ---------------------------------------------------------------- evidence
 
-    def evidence(self, arm=None, walks=None):
+    def evidence(self, arm=None, walks=None, *, budget=None):
         """The evidence of an answer (§3.5): {parts: each part's own evidence_block keyed by
         part name ('root', 'right:3', ...), junctions: those the answer reads with their
         verdicts and causes, walk_causes: the walk-scope causes on the walks it reads,
@@ -1610,10 +1724,14 @@ class StitchedGraphlet:
         the parts and junctions those walks (keys, on |arm|) read -- a root walk no child
         continues reads the root alone and states its evidence. exact holds only when every
         part read is exact, no junction is read (no junction is exact in phase 1a-S) and no
-        walk read has a walk-scope cause."""
-        return self._evidence(arm, walks, False)
+        walk read has a walk-scope cause. budget=: the rows of the walks read, the walk rule
+        (W8) on each, the derivations at their cold price as summary() charges them, each
+        part's evidence block and each junction and cause stated; a stop raises with no
+        partial."""
+        return _K.run_scoped(budget, 'evidence', lambda b: self._evidence(arm, walks, False, b),
+                             ('select_walks', 'narrow_arm'))
 
-    def _evidence(self, arm, walks, prospective):
+    def _evidence(self, arm, walks, prospective, b=None):
         """evidence(); |prospective|: the private test hook of §3.5 (exact_gated read as
         exact; where a junction is read, exact needs the identity verified)."""
         sides = [self.arm_of(arm)] if arm is not None else self.arms()
@@ -1622,21 +1740,32 @@ class StitchedGraphlet:
         read_parts, read_j, wcauses = set(), set(), []
         for side in sides:
             if walks is None:
-                chosen = self._rows(side)
+                chosen = self._rows(side, b)
             else:
-                chosen = [(r['key'], r['chain']) for r in
-                          (self._row(side, w, prospective) for w in self._walk_keys(walks))]
+                chosen = [(k, self._chain(side, k, b)) for k in self._walk_keys(walks)]
             for key, chain in chosen:
                 for part, _ in chain:
                     read_parts.add(part.key)
-                row = self._walk_row(side, key, chain, prospective)
+                if b is not None:
+                    b.charge(W_ROW + W_ELEM * len(chain))
+                row = self._walk_row(side, key, chain, prospective, b)
                 read_j.update(row['junctions'])
+                if b is not None and row['causes']:
+                    b.charge(W_ELEM * len(row['causes']), len(row['causes']) * dict_bytes(4))
                 for c in row['causes']:
                     if c[0] != 'exact_gated':
                         wcauses.append({'walk': key, 'code': c[0], 'at_bp': c[2],
                                         'sentence': c[1]})
         parts = [p for p in self._parts if p.key in read_parts]
         verified = bool(self.identity.get('verified')) or not read_j
+        if b is not None:
+            # each part's evidence block and the limitations it reads; each junction
+            # stated with its causes
+            nlim = sum(len(p.graphlet.limitations) for p in parts)
+            jbytes = sum(dict_bytes(5) + 2 * list_bytes(len(self._junctions[i].causes))
+                         for i in read_j)
+            b.charge(W_ROW * (len(parts) + len(read_j)) + W_ELEM * nlim,
+                     len(parts) * _EV_BLOCK + nlim * (STR + 16) + jbytes)
         ev = _K.combined_evidence([(part_name(p.key), p.graphlet, True) for p in parts],
                                   sides[0] if len(sides) == 1 else None)
         js = [self._junctions[i] for i in sorted(read_j)]
@@ -1665,7 +1794,8 @@ class StitchedGraphlet:
         """The private test hook of §3.5 (T4, T11), never part of a public answer: the
         result with exact_gated read as exact. With |walk|: that stitched walk's row
         {key, length_bp, certified_to_bp, complete, verdict, causes, junctions, pieces};
-        without: {completeness: the arm's, evidence: the arm's}."""
+        without: {completeness: the arm's, evidence: the arm's}. Uncharged: it takes no
+        budget and ignores the ambient one (a test hook, not an operation)."""
         side = self.arm_of(arm)
         if walk is not None:
             return self._row(side, walk, True)
@@ -1691,9 +1821,9 @@ class StitchedGraphlet:
             for side in self.arms():
                 a = self.root.arms[side]
                 rows = self._rows(side, b)
-                lengths = [chain[-1][0].offset_bp + derive.paths(
-                    chain[-1][0].graphlet.arms[side])[chain[-1][1]].length_bp
-                    for _, chain in rows]
+                if b is not None:
+                    b.charge(W_ELEM * len(rows))
+                lengths = [self._walk_length(side, chain) for _, chain in rows]
                 out['arms'][side] = {'complete_to_bp': a.complete_to_bp, 'scope': a.scope,
                                      'walks': len(rows), 'max_bp': max(lengths, default=0)}
             for j in self._junctions:
@@ -1701,7 +1831,7 @@ class StitchedGraphlet:
                                          'at_bp': j.at_bp, 'verdict': j.verdict,
                                          'causes': [c[0] for c in j.causes],
                                          'walk_causes': self._causes_below(j, b)})
-            ev = self.evidence()
+            ev = self._evidence(None, None, False, b)
             out['identity'] = {'verified': self.identity.get('verified')}
             out['outcome'] = ev['outcome']
             out['exact'] = ev['exact']
@@ -1745,11 +1875,12 @@ class StitchedGraphlet:
     def memory_bytes(self):
         """What this graphlet holds: the parts' models and everything it built from them --
         its parts and labels, the junctions and their cores, and every cache of the queries
-        (rule-check indexes, walk causes, rows, ranked walks, tails) -- each object once."""
+        (rule-check indexes, walk causes, rows, tails, root nodes) with its price -- each
+        object once."""
         return _ops._deep_bytes([p.graphlet for p in self._parts]
                                 + [self._parts, self._by_key, self._labels, self._label_of,
                                    self._junctions, self._jindex, self._jcore, self._cache,
-                                   self.identity])
+                                   self._price, self.identity])
 
     # ---------------------------------------------------------------- not offered
 
