@@ -115,6 +115,27 @@ __all__ = ['LocalLimits', 'LocalBudget', 'LocalStop', 'LocalBudgetExceeded', 'Pa
 #     cut's bytes count its label set and its {label: j} at their bound (in constrain mode
 #     the root's entry and the first piece's labels);
 #   * to_fasta(leaves=<one-shot iterator>): the copy of the walks it gives.
+#   * union_pairs() (union.py, docs/DESIGN-graphlet-merge.md Appendix F.1): the trie is one
+#     pass over each part's first-parent tree, charged per part and arm before the pass:
+#     4 W_ELEM per part segment (its element, the compare of its bases, at most two trie
+#     nodes, an edge and a cover entry) and 1 lwu per 16 of its bases, 600 bytes per part
+#     segment; the parts' own parses are the caller's (a union takes parsed models);
+#   * PairUnion's queries charge the parts' cold prices plus the trie work: the union walks
+#     of an arm (walks(), statements(), summary(), the exports) at their cold price on every
+#     call, per walk W_ROW and per pair W_ELEM per union segment of the walk's path plus 1 lwu
+#     per 16 bases of its depth (its span and the route through the pair's merges), with
+#     labels 4 W_ELEM more per pair and segment (the alive sets read along the chain), 300 +
+#     200 per pair bytes; segments() per union segment W_ROW and W_ELEM per entry label,
+#     event and presence run of the part segments it covers (label_intervals(), linear),
+#     200 + 120 per pair bytes and a tuple of three ints per element; carriers() per pair
+#     W_ROW, W_STEP per 16 bases of the walk and W_ELEM per union segment, 600 + 120 per label
+#     of the pair bytes; spell() W_ROW, W_STEP per union segment and 1 lwu per 256 bases,
+#     three copies of the text; a listed walk W_ROW (and its bases at BASE_SHIFT when
+#     spelled), 400 bytes and its text;
+#   * label_intervals() (ops.py): per segment W_ELEM, W_ELEM per entry label and label
+#     change (constrain; the segment's ops, derived once) or per P run and label of a run
+#     (annotate), the sort of its intervals, and their list, tuples and dict; the price
+#     list is derived once per arm ('interval_prices') and charged on every call.
 # The work model changes no unbudgeted answer.
 WORK_MODEL = 2
 MEMORY_BOUND = 'model'

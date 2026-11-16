@@ -726,13 +726,13 @@ class PairUnion:
             elif e is not None:
                 if e.kind == 'absent':
                     detail = _absent_detail(e)
-                    check = 'sent' if e.sent is not None else (
-                        'stated' if e.sequence is not None else 'unchecked')
-                    absent.append(PairAbsent(tag, key, e.by, e.cls, detail, seqs[id(c)], check))
+                    absent.append(PairAbsent(tag, key, e.by, e.cls, detail, seqs[id(c)],
+                                             _seed_check(e)))
                 else:
                     absent.append(PairAbsent(tag, key, e.by, 'failed',
                                              {'error': e.error}, seqs[id(c)], None))
-            for f in kept['failures'].get(id(c), ()):
+            for f in sorted(kept['failures'].get(id(c), ()),
+                            key=lambda f: f.error.encode('utf-8')):
                 if f is not e:
                     self._failures.append({'tag': tag, 'error': f.error,
                                            'kept': 'answer' if e is not None and e.kind != 'failed'
@@ -763,8 +763,9 @@ class PairUnion:
         self._number_segments()
         self.digest = C.combined_digest([
             [[list(p.key), p.tag, p.pair_stated_by, p.retrieval[1], p.digest] for p in self.parts],
-            [[list(a.key), a.tag, a.pair_stated_by, a.category, C.canonical_json(a.detail)]
-             for a in self.absent],
+            [[list(a.key), a.tag, a.pair_stated_by, a.category, C.canonical_json(a.detail),
+              a.seed_check] for a in self.absent],
+            [[f['tag'], f['error'], f['kept']] for f in self._failures],
             self._seed_seq, sorted(self._expected_raw) if exp is not None else None])
         self._walk_cache = {}
 
@@ -1554,7 +1555,9 @@ def _dedupe(elems, cls_of, tags):
                               C.first_difference(ra, rb))
         elif prev.kind == 'absent' and e.kind == 'absent' \
                 and _absent_identity(prev) == _absent_identity(e):
-            if e.by == 'envelope' and prev.by != 'envelope':
+            # a no-op: the envelope-stated form wins, then the stronger seed check, so the
+            # form kept does not depend on the order given
+            if _absent_rank(e) < _absent_rank(prev):
                 seen[id(c)] = e
             continue
         if not prev.desc.get('index_fp') and not e.desc.get('index_fp') \
@@ -1569,6 +1572,15 @@ def _dedupe(elems, cls_of, tags):
             by_class[cid] = min(fs, key=lambda f: f.error.encode('utf-8'))
     order = [e for e in elems if by_class.get(id(cls_of[id(e.desc)])) is e]
     return {'by_class': by_class, 'failures': failures, 'order': order}
+
+
+def _seed_check(e):
+    return 'sent' if e.sent is not None else ('stated' if e.sequence is not None
+                                              else 'unchecked')
+
+
+def _absent_rank(e):
+    return (e.by != 'envelope', ('sent', 'stated', 'unchecked').index(_seed_check(e)))
 
 
 def _prefer(e, prev):

@@ -657,6 +657,31 @@ class TestInputs(unittest.TestCase):
         u = union_pairs([a, b], seed=seq)
         self.assertEqual(len(u.absent), 1)
 
+    def test_identical_absent_records_keep_the_stronger_check_in_either_order(self):
+        """Of two forms of one absent record the stronger seed check is kept, whatever the
+        order, and the check enters the digest (found by the r237 round trip: a stated and
+        an unchecked union had one digest and different sentences)."""
+        seq = T.graphlet('merge').seed.sequence
+        bare = {'pair': 'g2', 'result': absent_result('not_in_graph')}
+        told = dict(bare, sequence=seq.lower())
+        got = []
+        for order in ([bare, told], [told, bare]):
+            u = union_pairs(order, seed=seq)
+            got.append((u.digest, u.absent[0].seed_check, u.coverage().sentence))
+        self.assertEqual(got[0], got[1])
+        self.assertEqual(got[0][1], 'stated')
+        self.assertNotEqual(union_pairs([bare], seed=seq).digest, got[0][0])
+
+    def test_failures_are_listed_in_one_order(self):
+        g = with_env(T.graphlet('merge'), graph='g2')
+        fa, fb = {'pair': 'g2', 'error': 'timeout'}, {'pair': 'g2', 'error': 'HTTP 503'}
+        got = [(u.digest, u.provenance()) for u in (union_pairs([fa, g, fb]),
+                                                     union_pairs([fb, fa, g]))]
+        self.assertEqual(got[0], got[1])
+        self.assertEqual([e['error'] for e in got[0][1] if e['kind'] == 'earlier_failure'],
+                         ['HTTP 503', 'timeout'])
+        self.assertNotEqual(union_pairs([g]).digest, got[0][0])
+
     def test_seed_check_ignores_a_matching_seed_id(self):
         seq = T.graphlet('merge').seed.sequence
         r = absent_result('not_in_graph')
