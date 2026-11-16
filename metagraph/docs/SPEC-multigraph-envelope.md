@@ -205,9 +205,11 @@ The answer keeps its upstream shape (a list of `{seq_description, results, ...}`
   `partial_refusal` a request refused by the budget is so refused whatever else its work raised (another pair's
   error, a load refused `index_changed`). With it a refused unit is no error: another pair's error is answered
   as without a budget (the first failing pair in pair order), and only the request's answer passing the bound
-  wins over it: a request whose answer passes the bound is refused 400 `search_answer_too_large` (`account`
-  `"answer"`) also when another pair failed. The same request is refused again (the code is final: change the
-  request), and a 400 is not cached; a partly refused 200 is cached as any answer. `in_ram` changes nothing: the same charges, the same
+  wins over it: a request whose answer passes the bound while its pairs work (the units' objects; its text is
+  priced only once every pair has answered, so a failed pair leaves it unpriced) is refused 400
+  `search_answer_too_large` (`account` `"answer"`) also when another pair failed. The same request is refused
+  again (the code is final: change the request), and a 400 is not cached; a partly refused 200 is cached as any
+  answer. `in_ram` changes nothing: the same charges, the same
   refusals. Below the bound every answer is the one without a budget, byte for byte, in both modes. Since lane
   T7-P1 the values are bounded per unit, not per pair: a request refused before only because a pair's records
   together passed the bound, each record within it, is answered.
