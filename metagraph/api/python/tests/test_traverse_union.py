@@ -879,5 +879,208 @@ class TestBudgets(unittest.TestCase):
                     v.walks('right', resume=e.partial.resume)
 
 
+R237 = os.path.join(UNION, 'r237')
+# the body sha256 of each part as the service's record states it (the README of r237/)
+R237_BODIES = {'bact_other': 'cda902d0df71afab3d9fe1bcf33a04630468c22a1748777941686867fcc31eea',
+               'bact_pseudomonadota':
+                   '6d48f657aa3af50bd79c3ed39126d42c4c8c1e1bc431f8f9d6d5155cc732d522'}
+
+
+class TestLoadGzip(unittest.TestCase):
+    """load() reads a gzip file (the service's .mgt.gz export) as the text it holds,
+    inflated as a stream within the local limits; a corrupt or truncated one is refused."""
+
+    def setUp(self):
+        import tempfile
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+
+    def write(self, name, data):
+        path = os.path.join(self.tmp.name, name)
+        with open(path, 'wb') as f:
+            f.write(data)
+        return path
+
+    def test_gzip_equals_the_text(self):
+        import gzip
+        from metagraph.traverse import load, parse
+        for name in ('merge', 'annotate'):
+            text = T.doc_text(name)
+            plain = self.write(name + '.mgt', text.encode('utf-8'))
+            gz = self.write(name + '.mgt.gz', gzip.compress(text.encode('utf-8')))
+            want = load(plain).dump(envelope=True)
+            self.assertEqual(load(gz).dump(envelope=True), want)
+            self.assertEqual(load(gz, budget=LocalBudget(work_units=10 ** 9)).dump(envelope=True),
+                             want)
+        for part in R237_BODIES:
+            path = os.path.join(R237, part + '.mgt.gz')
+            with open(path, 'rb') as f:
+                text = gzip.decompress(f.read()).decode('utf-8')
+            self.assertEqual(load(path).dump(envelope=True), parse(text).dump(envelope=True))
+
+    def test_save_writes_plain_text(self):
+        from metagraph.traverse import load, save
+        g = load(os.path.join(R237, 'bact_other.mgt.gz'))
+        out = os.path.join(self.tmp.name, 'out.mgt')
+        save(g, out)
+        with open(out, 'rb') as f:
+            self.assertEqual(f.read(2), b'H ')
+
+    def test_a_high_ratio_gzip_stops_at_the_cap(self):
+        import gzip
+        from metagraph.traverse import load
+        from metagraph.traverse import parser as P
+        text = T.doc_text('merge')
+        # 64 MiB of one byte in a comment-free document: about 64 KiB of gzip
+        bomb = self.write('bomb.mgt.gz', gzip.compress(text.encode('utf-8') + b'A' * (64 << 20)))
+        self.assertLess(os.path.getsize(bomb), 1 << 20)
+        old = P.GZIP_TEXT_MAX
+        P.GZIP_TEXT_MAX = 1 << 20
+        try:
+            with self.assertRaises(GraphletFormatError) as cm:
+                load(bomb)
+        finally:
+            P.GZIP_TEXT_MAX = old
+        self.assertEqual(str(cm.exception),
+                         'the gzip file bomb.mgt.gz inflates to more than 1048576 bytes, the most '
+                         'a load() without budget= inflates (GZIP_TEXT_MAX): refused, not '
+                         'inflated further; pass budget= to bound it by its memory account '
+                         'instead')
+        # with budget=, the memory account stops it as it stops a plain text that size
+        plain = self.write('big.mgt', text.encode('utf-8') + b'A' * (64 << 20))
+        stops = []
+        for path in (bomb, plain):
+            with self.assertRaises(LocalBudgetExceeded) as cm:
+                load(path, budget=LocalBudget(memory_mb=16))
+            stops.append((cm.exception.stop.resource, cm.exception.stop.op,
+                          cm.exception.stop.limit))
+        self.assertEqual(stops[0], stops[1])
+        self.assertEqual(stops[0][0], 'memory')
+
+    def test_corrupt_or_truncated_gzip_refused(self):
+        import gzip
+        from metagraph.traverse import load
+        data = gzip.compress(T.doc_text('merge').encode('utf-8'))
+        bad_crc = bytearray(data)
+        bad_crc[-6] ^= 0xff
+        for name, blob in (('cut.mgt.gz', data[:-20]), ('crc.mgt.gz', bytes(bad_crc)),
+                           ('tail.mgt.gz', data + b'junk')):
+            with self.subTest(name=name):
+                with self.assertRaises(GraphletFormatError) as cm:
+                    load(self.write(name, blob))
+                self.assertTrue(str(cm.exception).startswith(
+                    'the gzip file %s is corrupt or truncated (' % name), str(cm.exception))
+        # a gzip of text that is not UTF-8: the parser's refusal
+        with self.assertRaises(GraphletFormatError) as cm:
+            load(self.write('latin.mgt.gz', gzip.compress(b'H \xe9\n')))
+        self.assertIn('not UTF-8', str(cm.exception))
+
+
+def r237_union(**kw):
+    """The r237 export (documents/union/r237/): the two parts as delivered, the nine absent
+    records, seed= from seed.fa and the 11 pairs expected."""
+    from metagraph.traverse import load
+    parts = [load(os.path.join(R237, p + '.mgt.gz')) for p in sorted(R237_BODIES)]
+    with open(os.path.join(R237, 'absent.json'), encoding='utf-8') as f:
+        absent = json.load(f)
+    with open(os.path.join(R237, 'seed.fa'), encoding='utf-8') as f:
+        seed = ''.join(line.strip() for line in f if not line.startswith('>'))
+    expected = [{k: g.envelope[k] for k in ('graph', 'graph_path', 'annotation_path')}
+                for g in parts] + [dict(a['pair']) for a in absent]
+    return parts, union_pairs(parts + absent, seed=seed, expected_pairs=expected, **kw)
+
+
+class TestR237RoundTrip(unittest.TestCase):
+    """OQ21: the service's r237 export of one 16S seed over the 11 graphs (2 answered, 9
+    not_in_graph) loads as delivered and unites as §2.3 and §2.6 expect."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.parts, cls.u = r237_union()
+
+    def test_parts_load_as_delivered(self):
+        import hashlib
+        for g in self.parts:
+            name = g.envelope['graph']
+            self.assertEqual(hashlib.sha256(g.dump(envelope=False).encode('utf-8')).hexdigest(),
+                             R237_BODIES[name])
+            self.assertEqual((g.mode, g.k, sorted(g.arms)), ('constrain', 31, ['left', 'right']))
+            self.assertEqual(g.seed.sequence, self.u.seed.sequence)
+
+    def test_union_states_the_pairs(self):
+        u = self.u
+        absent = ['inv_insecta', 'inv_other', 'plant', 'vm_laurasiatheria', 'vm_other',
+                  'vo_actinopterygii', 'vo_amphibia_lobefins', 'vo_other', 'vo_sauropsida']
+        present = {'inv_insecta': 23, 'plant': 15, 'vm_laurasiatheria': 31, 'vo_sauropsida': 13}
+        self.assertEqual(([p.tag for p in u.parts], [a.tag for a in u.absent], u._not_included),
+                         (['bact_other', 'bact_pseudomonadota'], absent, ()))
+        self.assertEqual(str(u).split('\n')[0], 'union of one seed (200 bp) over 11 expected '
+                                                'pairs: 2 parts, 9 absent records')
+        seeds = ', '.join('%s (%d of 170 k-mers)' % (t, present.get(t, 0)) for t in absent)
+        self.assertEqual(
+            U._core_sentence(u.coverage('left')),
+            'left arm, to 5000 bp (constrain, kmer, k 31, in every pair): incomplete in '
+            'bact_other (certified to 342 bp: time_budget), bact_pseudomonadota (certified to '
+            '55 bp: resource_limit); seed not in graph: %s. Pairs stated by the caller: %s. '
+            'Seed of the absent records: not checked for %s.'
+            % (seeds, ', '.join(absent), ', '.join(absent)))
+        self.assertEqual(u.statements('left').provenance,
+                         'walks: left 11 (2 held by two or more pairs; 9 stub walks not listed)')
+        self.assertEqual(u.statements('right').provenance,
+                         'walks: right 9 (3 held by two or more pairs; 6 stub walks not listed)')
+        self.assertTrue(u.statements('left').labels.endswith(
+            'header names of every pair rest on an unchecked record mapping (unknown)'))
+        for side in ('left', 'right'):
+            c = u.coverage(side, at_bp=50)
+            self.assertEqual(c.per_pair['bact_other'],
+                             {'category': 'complete_qualified',
+                              'certified_to_bp': {'left': 342, 'right': 341}[side],
+                              'note': 'a merge united histories: complete for the '
+                                      'united-history rule, not per path'})
+            self.assertEqual(c.per_pair['bact_pseudomonadota'],
+                             {'category': 'complete_qualified', 'certified_to_bp': 55,
+                              'note': 'complete for 1000 of 12313 seed labels; a merge united '
+                                      'histories: complete for the united-history rule, not '
+                                      'per path'})
+            self.assertEqual(c.by_category['seed_not_in_graph'], absent)
+            self.assertIsNone(c.every_pair_certified_to_bp)
+
+    def test_bact_other_extends_the_walks_both_hold(self):
+        """The walks both pairs hold are bact_pseudomonadota's whole 55 bp walks (its
+        certified depth), which bact_other spells and goes on beyond."""
+        for side, ids in (('left', [3, 5]), ('right', [3, 5, 9])):
+            both = self.u.walks(side, pairs=['bact_other', 'bact_pseudomonadota'])
+            self.assertEqual([w.id for w in both], ids)
+            for w in both:
+                self.assertEqual((w.length_bp, w.whole_in), (55, ('bact_pseudomonadota',)))
+                self.assertEqual({s.pair: (s.how, s.to_bp) for s in w.spans},
+                                 {'bact_other': ('extends', 55),
+                                  'bact_pseudomonadota': ('whole', 55)})
+
+    def test_the_union_of_each_part_is_that_part(self):
+        for g in self.parts:
+            u = union_pairs([g])
+            for side in g.arms:
+                walks = {g.spell(side, w.path_id): w for w in g.walks(side, by='id')}
+                mine = u.walks(side, by='id')
+                self.assertEqual(sorted(walks), sorted(u.spell(side, w.id) for w in mine))
+                for w in mine:
+                    (sp,) = u.carriers(side, w.id)
+                    pw = walks[u.spell(side, w.id)]
+                    self.assertEqual((sp.how, sp.walk, sp.to_bp),
+                                     ('whole', pw.path_id, pw.length_bp))
+                    self.assertEqual({x.label.ref for x in sp.labels if x.from_bp == 0},
+                                     {l.ref for l in pw.labels_full})
+
+    def test_exports_read_the_union(self):
+        fasta = self.u.to_fasta()
+        heads = [line for line in fasta.split('\n') if line.startswith('>')]
+        self.assertEqual(len(heads), 20)
+        self.assertTrue(all('absent=inv_insecta:seed_not_in_graph,' in h and
+                            h.endswith(' mapping=unknown scope=within_one_graph') for h in heads))
+        self.assertTrue(self.u.to_gfa().startswith('H\tVN:Z:1.0\n# union_pairs: seed 200 bp; '
+                                                   'parts bact_other bact_pseudomonadota; '))
+
+
 if __name__ == '__main__':
     unittest.main()

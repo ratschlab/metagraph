@@ -13,11 +13,13 @@ B/T maps in canonical order. dump(parse(x)) == x for every canonical document;
 is_canonical(x) tests exactly that.
 """
 
+import gzip
 import hashlib
 import json
 import os
 import re
 import secrets
+import zlib
 from array import array
 
 from . import budget as _B
@@ -53,7 +55,7 @@ _LINE_BLOCK = 64
 
 __all__ = ['parse', 'dump', 'is_canonical', 'load', 'save', 'from_response',
            'standalone_text', 'seed_envelope', 'RESERVED_ENVELOPE_NAMES',
-           'GraphletFormatError', 'FORMAT_VERSION', 'utf8_bytes']
+           'GraphletFormatError', 'FORMAT_VERSION', 'utf8_bytes', 'GZIP_TEXT_MAX']
 
 FORMAT_VERSION = 1
 
@@ -1467,14 +1469,31 @@ def _write_all(fd, data, sync=False):
             os.fsync(f.fileno())
 
 
+# load() of a gzip file (the service's .mgt.gz export) without budget=: the most text it
+# inflates. A stream that inflates further is refused, never inflated further (a gzip bomb
+# does not get through); with budget= the budget's memory account bounds the text instead.
+GZIP_TEXT_MAX = 1 << 31
+_GZIP_MAGIC = b'\x1f\x8b'
+_GZIP_CHUNK = 1 << 16
+
+
 def load(path, *, budget=None):
-    """A saved .mgt file -> its Graphlet (or the GraphletView it saved). budget=
-    (local limits): the file's text, the parse and the view are charged; a stop raises
-    LocalBudgetExceeded and the file is left as it is."""
+    """A saved .mgt file -> its Graphlet (or the GraphletView it saved). A gzip file (its
+    first bytes 1f 8b: the service's .mgt.gz export) is read as the text it holds,
+    decompressed as a stream: without budget= at most GZIP_TEXT_MAX bytes of text, with
+    budget= every decompressed chunk charged as a plain file's text is, so the stop is the
+    one of a text that size; a corrupt or truncated gzip file raises GraphletFormatError.
+    save() writes plain text. budget= (local limits): the file's text, the parse and the
+    view are charged; a stop raises LocalBudgetExceeded and the file is left as it is."""
     b = _B.resolve(budget)
+    with open(path, 'rb') as f:
+        gz = f.read(2) == _GZIP_MAGIC
     if b is None:
-        with open(path, 'r', encoding='utf-8', newline='') as f:
-            text = f.read()
+        if gz:
+            text = _inflate(path, None)
+        else:
+            with open(path, 'r', encoding='utf-8', newline='') as f:
+                text = f.read()
         g = parse(text)
         if g.view is not None:
             from . import ops
@@ -1482,15 +1501,47 @@ def load(path, *, budget=None):
         return g
     with b.scope('load', ('export_mgt',)):
         n = os.path.getsize(path)
-        b.charge(n >> 10, STR + 4 * n)
-        with open(path, 'r', encoding='utf-8', newline='') as f:
-            text = f.read()
+        if gz:
+            b.charge(n >> 10, STR)
+            text = _inflate(path, b)
+        else:
+            b.charge(n >> 10, STR + 4 * n)
+            with open(path, 'r', encoding='utf-8', newline='') as f:
+                text = f.read()
         g = parse(text, budget=b)
         del text
         if g.view is not None:
             from . import ops
             return ops.view_from_saved(g, budget=b)
         return g
+
+
+def _inflate(path, b):
+    """The bytes a gzip file holds, decompressed _GZIP_CHUNK bytes at a time: each chunk
+    charged to |b| before it is kept (1 lwu per KiB, 4 bytes per byte: a plain file's text
+    price), or held to GZIP_TEXT_MAX without a budget. A corrupt or truncated stream raises
+    GraphletFormatError. parse() decodes the bytes (not UTF-8: GraphletFormatError)."""
+    out = bytearray()
+    try:
+        with gzip.open(path, 'rb') as f:
+            while True:
+                piece = f.read(_GZIP_CHUNK)
+                if not piece:
+                    break
+                if b is not None:
+                    b.charge(len(piece) >> 10, 4 * len(piece))
+                elif len(out) + len(piece) > GZIP_TEXT_MAX:
+                    raise GraphletFormatError(
+                        0, 'the gzip file %s inflates to more than %d bytes, the most a load() '
+                           'without budget= inflates (GZIP_TEXT_MAX): refused, not inflated '
+                           'further; pass budget= to bound it by its memory account instead'
+                           % (os.path.basename(path), GZIP_TEXT_MAX))
+                out += piece
+    except (OSError, EOFError, zlib.error) as e:
+        # gzip.BadGzipFile is an OSError; a truncated stream an EOFError
+        raise GraphletFormatError(0, 'the gzip file %s is corrupt or truncated (%s: %s)'
+                                  % (os.path.basename(path), type(e).__name__, e)) from None
+    return out
 
 
 def body_text(g):

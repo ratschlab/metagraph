@@ -50,6 +50,14 @@ from base import PROTEIN_MODE, TestingBase, METAGRAPH
 from test_pattern import gate_block
 from test_traverse_forms import CHARGED
 
+# the graphlet library (api/python, stdlib-only), imported as test_traverse.py imports it
+try:
+    import metagraph.traverse as graphlet_lib
+except ImportError:
+    sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                                    'api', 'python'))
+    import metagraph.traverse as graphlet_lib
+
 MINI_DIR = os.environ.get('METAGRAPH_MINI_REFSEQ', os.path.join(os.getcwd(), 'mini_refseq'))
 FASTA = os.path.join(MINI_DIR, 'fasta')
 # $METAGRAPH_REQUIRE_GUARDS=1: a missing mini index fails the class instead of skipping it
@@ -3136,6 +3144,106 @@ class TestMultiGraphServer(TestingBase):
             self.assertEqual(400, ret.status_code)
             self.assertIn(words, ret.json()['error'])
             self.assertEqual(code, ret.json()['code'])
+
+    def test_traverse_union_reads_a_pair_without_the_seed(self):
+        """The library's cross-pair union on a real fan-out (docs/DESIGN-graphlet-merge.md
+        sections 2.3 and 2.6, Appendix E.1): traverse_pairs() sends one seed of ecoli's record to
+        ecoli and kleb, kleb answers not_in_graph, and union_pairs() reads both answers as
+        returned: one part, whose union is that part, and kleb an absent record of category
+        seed_not_in_graph whose seed this client sent; both pairs stated by the envelope. A
+        fan-out whose every pair lacks the seed is the arm-less union, built from seed= alone."""
+        others = self.kmers('kleb') | self.kmers('pseudo')
+        record = self.records['ecoli'][0]
+        n = 80 - K + 1
+        # an 80 bp seed of ecoli's record none of whose k-mers kleb or pseudo holds
+        start = next(i for i in range(30000, len(record) - 80, 500)
+                     if not any(record[i + j:i + j + K] in others for j in range(n)))
+        seed = record[start:start + 80]
+        client = graphlet_lib.TraverseClient('127.0.0.1', self.server.port)
+        strategy = {'direction': 'both', 'bounds': {'max_extension_bp': 200}}
+        r = client.traverse_pairs(seed, strategy, pairs=['ecoli', 'kleb'], timing=False)
+        self.assertEqual((seed, ({'graph': 'ecoli'}, {'graph': 'kleb'})),
+                         (r.seed, r.expected_pairs))
+        self.assertEqual(2, len(r.results))
+        self.assertIsNotNone(r.results[0].graphlets[0])
+        self.assertEqual([None], r.results[1].graphlets)
+        u = graphlet_lib.union_pairs(r.results, seed=r.seed, expected_pairs=r.expected_pairs,
+                                     seqs_order=r.seqs_order)
+        (part,), (absent,) = u.parts, u.absent
+        self.assertEqual((('ecoli', 'envelope'), ('kleb', 'envelope')),
+                         ((part.tag, part.pair_stated_by), (absent.tag, absent.pair_stated_by)))
+        self.assertEqual((('ecoli', 'kleb'), ()), (u.expected, u._not_included))
+        self.assertEqual((self.pairs['ecoli'][0], self.pairs['kleb'][0]),
+                         (part.key[3], absent.key[3]))
+        self.assertEqual(('seed_not_in_graph', 'sent'), (absent.category, absent.seed_check))
+        self.assertEqual({'kmers': n, 'kmers_present': 0}, absent.detail['not_in_graph'])
+        # each pair's record-mapping certificate as GET /capabilities states it
+        listed = {p['graph']: p.get('seqs_order', 'unknown')
+                  for p in client.server_capabilities()['graph_summary']['pairs']}
+        word = {None: 'none', 'unknown': 'unknown'}
+        self.assertEqual((word.get(listed['ecoli'], listed['ecoli']),
+                          word.get(listed['kleb'], listed['kleb'])),
+                         (part.seqs_order, absent.seqs_order))
+        g = part.graphlet
+        self.assertEqual(seed, g.seed.sequence)
+        self.assertEqual(seed, u.seed.sequence)
+        for side, arm in g.arms.items():
+            with self.subTest(arm=side):
+                # the union of one part is that part (P2): its walks, spelled alike, whole in it
+                walks = {g.spell(side, w.path_id): w for w in g.walks(side, by='id')}
+                mine = [w for w in u.walks(side, by='id')]
+                self.assertEqual(sorted(walks), sorted(u.spell(side, w.id) for w in mine))
+                for w in mine:
+                    (span,) = u.carriers(side, w.id)
+                    pw = walks[u.spell(side, w.id)]
+                    self.assertEqual(('ecoli', 'whole', pw.path_id, pw.length_bp),
+                                     (span.pair, span.how, span.walk, span.to_bp))
+                    self.assertEqual(('ecoli',), w.whole_in)
+                # coverage (section 2.6): the part's arm certificate, kleb absent, never more
+                # complete than the part
+                cov = u.coverage(side)
+                self.assertEqual(200, cov.at_bp)
+                self.assertEqual(arm.complete_to_bp, cov.per_pair['ecoli']['certified_to_bp'])
+                self.assertEqual('complete' if arm.complete_to_bp >= 200 else 'incomplete',
+                                 cov.per_pair['ecoli']['category'])
+                self.assertEqual({'category': 'seed_not_in_graph', 'certified_to_bp': None,
+                                  'note': f'0 of {n} k-mers', 'seed_check': 'sent'},
+                                 cov.per_pair['kleb'])
+                self.assertEqual(['kleb'], cov.by_category['seed_not_in_graph'])
+                self.assertEqual(arm.complete_to_bp if arm.complete_to_bp >= 200 else None,
+                                 cov.every_pair_certified_to_bp)
+                self.assertIn(f'seed not in graph: kleb (0 of {n} k-mers)', cov.sentence)
+                self.assertIn('Seed of the absent records: sent by this client for kleb.',
+                              cov.sentence)
+                self.assertEqual(5, len(u.statements(side).sentences()))
+        # the exports and the evidence read the real answers
+        fasta = u.to_fasta()
+        self.assertEqual(sum(len(g.walks(s)) for s in g.arms), fasta.count('>'))
+        self.assertTrue(all('absent=kleb:seed_not_in_graph' in line
+                            for line in fasta.split('\n') if line.startswith('>')), fasta[:2000])
+        self.assertIn('scope=within_one_graph', fasta)
+        self.assertTrue(u.to_gfa().startswith('H\t'))
+        self.assertEqual([{'pair': 'kleb', 'category': 'seed_not_in_graph', 'seed_check': 'sent'}],
+                         u.evidence(u.arms()[0])['absent'])
+        self.assertEqual(['part', 'absent', 'expected_pairs'],
+                         [e['kind'] for e in u.provenance()])
+        # the same answers in any order: one union
+        again = graphlet_lib.union_pairs(r.results[::-1], seed=r.seed,
+                                         expected_pairs=r.expected_pairs, seqs_order=r.seqs_order)
+        self.assertEqual(u.digest, again.digest)
+        # every pair lacks the seed: the arm-less union of absent records, built from seed=;
+        # without seed= it is refused no_seed
+        lacking = client.traverse_pairs(seed, strategy, pairs=['kleb', 'pseudo'], timing=False)
+        none = graphlet_lib.union_pairs(lacking.results, seed=lacking.seed,
+                                        expected_pairs=lacking.expected_pairs)
+        self.assertEqual(((), ('kleb', 'pseudo'), []), (none.parts, none.pairs, none.arms()))
+        cov = none.coverage()
+        self.assertEqual({'seed_not_in_graph': ['kleb', 'pseudo']}, cov.by_category)
+        self.assertIsNone(cov.every_pair_certified_to_bp)
+        self.assertEqual(seed, none.seed.sequence)
+        with self.assertRaises(graphlet_lib.CombineRefused) as refused:
+            graphlet_lib.union_pairs(lacking.results, expected_pairs=lacking.expected_pairs)
+        self.assertEqual('no_seed', refused.exception.code)
 
     # -------------------------------------------------------------------- POST /resolve
 
