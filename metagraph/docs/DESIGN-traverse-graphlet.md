@@ -536,6 +536,17 @@ PairUnion.labels(pair=None) / .label(selector) / .shared_names()   # labels each
 PairUnion.to_fasta(..., at_bp=None) / .to_gfa(...) / .summary(max_bytes=4096) / .provenance() / .memory_bytes()
 PairUnion.evidence(arm=None)                        # each part's evidence block and the five statements, of one
                                                     # arm or (arm=None) of every arm
+stitch(parent, child=None, *, arm=None, walk=None, allow_unverified_index=False, budget=None) -> StitchedGraphlet
+    # experimental (DESIGN-graphlet-merge.md §3): a continuation joined to the walk it continues, on one pair; parent a
+    # Graphlet with its envelope or a StitchedGraphlet, child rooted at the walk's continuation; refusals
+    # CombineRefused(code) in the order of DESIGN-graphlet-merge.md Appendix B.1; the parts stay unchanged
+StitchedGraphlet.parts / .junctions / .root / .labels / .identity / .digest / .arms() / .stitch(child, ...)
+StitchedGraphlet.walks(arm, *, top=None, by='support'|'length'|'loss'|'id', labels=None, route_consistent=True, min_bp=0)
+    -> list[StitchedWalk(key, arm, length_bp, sequence, ..., complete, verdict, certified_to_bp, junctions, pieces,
+       causes)]                                     # verdict 'qualified' where a junction joins the walk, else None
+StitchedGraphlet.walk(arm, walk) / .spell(arm, walk, orientation, with_seed) / .continuation(arm, walk)
+    / .next_request(arm, walks, ...) / .to_fasta(...) / .completeness() / .evidence(arm=None, walks=None)
+    / .summary(max_bytes=2048) / .provenance() / .memory_bytes() / .label(selector)
 TraverseClient(host, port, api_path=None, *, session=None, timeout=900, release=None)
     .capabilities(graph=None, graph_path=None) -> dict;  .server_capabilities() -> dict
     .resolve(sequence, *, labels=None, discover=None, select=None, **opts) -> dict
@@ -679,12 +690,11 @@ A continuation is a new traversal (§14): its result is certified on its own, wi
   seeded).
 - The request carries the record-coordinates setting forward (§18.3).
 
-A continuation stays a graphlet of its own. Combining graphlets (one seed's answers across pairs, which `union.py`
-builds; a continuation stitched to its parent) is designed in `DESIGN-graphlet-merge.md`.
-
-A continuation can be stitched to the walk it continues (`stitch()`, in `_stitch.py`, experimental): the result keeps both
-retrievals and states, at each junction and walk, why its walks may differ from one uninterrupted walk.
-DESIGN-graphlet-merge.md §3 is the design.
+A continuation stays a graphlet of its own. Two combinations keep their retrievals unchanged and state how they relate
+(`DESIGN-graphlet-merge.md`): `union_pairs()` (`union.py`, §2 of that note) combines one seed's answers across pairs by
+sequence, and `stitch()` (`_stitch.py`, §3, experimental) joins a continuation to the walk it continues. A stitched
+graphlet keeps both retrievals and states, at each junction and walk, why its walks may differ from one uninterrupted
+walk; every verdict is `qualified` until `exact` passes the randomized comparison against uninterrupted traversals.
 
 ## 5.4 Local limits
 
