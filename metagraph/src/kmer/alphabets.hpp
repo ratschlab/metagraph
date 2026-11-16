@@ -133,6 +133,22 @@ constexpr uint8_t kBitsPerCharDNA5 = std::bit_width(kSigmaDNA5 - 1u);
 static_assert(kSigmaDNA5 <= 1llu << kBitsPerCharDNA5);
 static_assert(kSigmaDNA5 > 1llu << (kBitsPerCharDNA5 - 1));
 
+// The alphabet size of this build, with the sentinel '$' of BOSS
+#if _PROTEIN_GRAPH
+constexpr uint8_t kBOSSSigma = kBOSSSigmaProtein;
+#elif _DNA_CASE_SENSITIVE_GRAPH
+constexpr uint8_t kBOSSSigma = kBOSSSigmaDNACaseSent;
+#elif _DNA5_GRAPH
+constexpr uint8_t kBOSSSigma = kBOSSSigmaDNA5;
+#elif _DNA_GRAPH
+constexpr uint8_t kBOSSSigma = kBOSSSigmaDNA;
+#else
+static_assert(false,
+    "Define an alphabet: either "
+    "_DNA_GRAPH, _DNA5_GRAPH, _PROTEIN_GRAPH, or _DNA_CASE_SENSITIVE_GRAPH."
+);
+#endif
+
 } // namespace alphabets
 } // namespace kmer
 } // namespace mtg

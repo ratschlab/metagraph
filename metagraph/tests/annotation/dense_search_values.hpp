@@ -14,9 +14,9 @@
 namespace mtg {
 namespace test {
 
-// The rows of AnnotatedDBG's per-position queries (get_top_label_signatures, get_kmer_counts,
-// get_kmer_coordinates) with each row's values as the vector of the query's k-mers they stand
-// for (PresenceRuns::to_dense and the others), to compare with expected vectors
+// The results of get_top_label_signatures, get_kmer_counts and get_kmer_coordinates
+// with each label's values expanded to one value per k-mer of the query (to_dense()),
+// to compare with expected vectors
 
 inline std::vector<std::tuple<std::string, size_t, sdsl::bit_vector>>
 dense(const std::vector<std::tuple<std::string, size_t, graph::PresenceRuns>> &rows) {

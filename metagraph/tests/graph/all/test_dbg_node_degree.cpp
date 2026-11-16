@@ -232,7 +232,9 @@ TYPED_TEST(DeBruijnGraphTest, indegree_identity_incoming_indegree) {
 
         graph->call_nodes([&](auto node) {
             std::vector<DeBruijnGraph::node_index> incoming_nodes;
-            graph->adjacent_incoming_nodes(node, [&](auto i) { incoming_nodes.push_back(i); });
+            for (auto i : graph->adjacent_incoming_nodes(node)) {
+                incoming_nodes.push_back(i);
+            }
             EXPECT_EQ(graph->indegree(node), incoming_nodes.size())
                 << "adjacent_incoming_nodes and indegree are inconsistent for node: " << node;
         });
@@ -280,7 +282,9 @@ TYPED_TEST(DeBruijnGraphTest, indegree_identity_traverse_back_incoming) {
                     num_incoming_edges++;
             }
             std::vector<DeBruijnGraph::node_index> incoming_nodes;
-            graph->adjacent_incoming_nodes(node, [&](auto i) { incoming_nodes.push_back(i); });
+            for (auto i : graph->adjacent_incoming_nodes(node)) {
+                incoming_nodes.push_back(i);
+            }
             EXPECT_EQ(num_incoming_edges, incoming_nodes.size())
                 << "adjacent_incoming_nodes and traverse_back are inconsistent for node: " << node;
         });

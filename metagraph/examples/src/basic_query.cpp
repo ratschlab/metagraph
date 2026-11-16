@@ -111,9 +111,8 @@ int main(int argc, char* argv[]) {
             std::cout << "  Length: " << sequence.length() << " bp" << std::endl;
             
             // Map the sequence to the graph
-            std::vector<DeBruijnGraph::node_index> mapping;
-            anno_graph->get_graph().map_to_nodes_sequentially(sequence,
-                [&](DeBruijnGraph::node_index node) { mapping.push_back(node); });
+            std::vector<DeBruijnGraph::node_index> mapping
+                = map_to_nodes_sequentially(anno_graph->get_graph(), sequence);
             
             // Count how many k-mers matched
             size_t total_kmers = mapping.size();

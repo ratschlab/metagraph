@@ -120,21 +120,22 @@ inline void call_outgoing(const BOSS &boss,
     }
 }
 
-void DBGSuccinct::call_outgoing_kmers(node_index node,
-                                      const OutgoingEdgeCallback &callback) const {
+DeBruijnGraph::Edges DBGSuccinct::outgoing_kmers(node_index node) const {
     assert(in_graph(node));
+    Edges edges;
 
     call_outgoing(*boss_graph_, node, [&](auto i) {
         auto next = i;
         if (in_graph(next))
-            callback(next, boss_graph_->decode(boss_graph_->get_W(i)
+            edges.emplace_back(next, boss_graph_->decode(boss_graph_->get_W(i)
                                 % boss_graph_->alph_size));
     });
+    return edges;
 }
 
-void DBGSuccinct::call_incoming_kmers(node_index node,
-                                      const IncomingEdgeCallback &callback) const {
+DeBruijnGraph::Edges DBGSuccinct::incoming_kmers(node_index node) const {
     assert(in_graph(node));
+    Edges edges;
 
     auto edge = node;
 
@@ -146,7 +147,7 @@ void DBGSuccinct::call_incoming_kmers(node_index node,
 
             auto prev = incoming_boss_edge;
             if (in_graph(prev)) {
-                callback(prev,
+                edges.emplace_back(prev,
                     boss_graph_->decode(
                         boss_graph_->get_minus_k_value(incoming_boss_edge, get_k() - 2).first
                     )
@@ -154,22 +155,24 @@ void DBGSuccinct::call_incoming_kmers(node_index node,
             }
         }
     );
+    return edges;
 }
 
-void DBGSuccinct::adjacent_outgoing_nodes(node_index node,
-                                          const std::function<void(node_index)> &callback) const {
+DeBruijnGraph::Nodes DBGSuccinct::adjacent_outgoing_nodes(node_index node) const {
     assert(in_graph(node));
+    Nodes nodes;
 
     call_outgoing(*boss_graph_, node, [&](auto i) {
         auto next = i;
         if (in_graph(next))
-            callback(next);
+            nodes.push_back(next);
     });
+    return nodes;
 }
 
-void DBGSuccinct::adjacent_incoming_nodes(node_index node,
-                                          const std::function<void(node_index)> &callback) const {
+DeBruijnGraph::Nodes DBGSuccinct::adjacent_incoming_nodes(node_index node) const {
     assert(in_graph(node));
+    Nodes nodes;
 
     auto edge = node;
 
@@ -181,9 +184,10 @@ void DBGSuccinct::adjacent_incoming_nodes(node_index node,
 
             auto prev = incoming_boss_edge;
             if (in_graph(prev))
-                callback(prev);
+                nodes.push_back(prev);
         }
     );
+    return nodes;
 }
 
 void DBGSuccinct::call_nodes(const std::function<void(node_index)> &callback,
@@ -272,17 +276,6 @@ std::string DBGSuccinct::get_node_sequence(node_index node) const {
             + boss_graph_->decode(boss_graph_->get_W(boss_edge) % boss_graph_->alph_size);
 }
 
-// Traverse graph mapping sequence to the graph nodes
-// and run callback for each node until the termination condition is satisfied.
-// Guarantees that nodes are called in the same order as the input sequence.
-// In canonical mode, non-canonical k-mers are not mapped to canonical ones
-void DBGSuccinct::map_to_nodes_sequentially(std::string_view sequence,
-                                            const std::function<void(node_index)> &callback,
-                                            const std::function<bool()> &terminate) const {
-    // a BOSS lookup dwarfs the virtual call: map nothing past terminate()
-    call_streamed_nodes(sequence, true, callback, terminate, 1);
-}
-
 namespace {
 
 class DBGSuccinctNodeStream final : public NodeStream {
@@ -306,16 +299,56 @@ class DBGSuccinctNodeStream final : public NodeStream {
 
 } // namespace
 
+// Streams the BOSS edges, except for canonical k-mers (canonical mode,
+// not |sequential|), which need both strands and are mapped at once
 std::unique_ptr<NodeStream>
 DBGSuccinct::node_stream(std::string_view sequence, bool sequential) const {
-    if (mode_ == CANONICAL && !sequential)
-        return DeBruijnGraph::node_stream(sequence, sequential);
-
     std::function<bool()> skip;
     if (bloom_filter_ && sequence.size() >= get_k())
         skip = get_missing_kmer_skipper(bloom_filter_.get(), sequence);
 
-    return std::make_unique<DBGSuccinctNodeStream>(*this, sequence, std::move(skip));
+    if (mode_ != CANONICAL || sequential)
+        return std::make_unique<DBGSuccinctNodeStream>(*this, sequence, std::move(skip));
+
+    std::vector<node_index> nodes;
+    if (sequence.size() < get_k())
+        return std::make_unique<BufferedNodeStream>(std::move(nodes));
+
+    std::string sequence_rev_compl(sequence.begin(), sequence.end());
+    reverse_complement(sequence_rev_compl.begin(), sequence_rev_compl.end());
+
+    nodes.resize(sequence.size() - get_k() + 1);
+
+    auto jt = nodes.begin();
+    boss_graph_->map_to_edges(sequence,
+        [&](auto index) { *jt = index; ++jt; },
+        []() { return false; },
+        skip
+    );
+
+    assert(jt == nodes.end());
+
+    auto it = nodes.rbegin();
+    boss_graph_->map_to_edges(sequence_rev_compl,
+        [&](auto rc_index) {
+            assert(it < nodes.rend());
+            // the definition of a canonical k-mer is redefined:
+            //      use k-mer with smaller index in the BOSS table.
+            *it = std::min(*it, rc_index);
+            ++it;
+        },
+        []() { return false; },
+        [&]() {
+            assert(it < nodes.rend());
+            // if a k-mer is missing, skip its reverse compliment, as it's missing too.
+            return !*it;
+        }
+    );
+
+    for (node_index &node : nodes) {
+        node = validate_edge(node);
+    }
+    return std::make_unique<BufferedNodeStream>(std::move(nodes));
 }
 
 void DBGSuccinct
@@ -598,58 +631,6 @@ void DBGSuccinct::traverse(node_index start,
             return;
 
         callback(start);
-    }
-}
-
-// Map sequence k-mers to the canonical graph nodes
-// and run callback for each node until the termination condition is satisfied
-void DBGSuccinct::map_to_nodes(std::string_view sequence,
-                               const std::function<void(node_index)> &callback,
-                               const std::function<bool()> &terminate) const {
-    if (mode_ != CANONICAL) {
-        call_streamed_nodes(sequence, false, callback, terminate, 1);
-        return;
-    }
-
-    if (sequence.size() < get_k())
-        return;
-
-    auto is_missing = get_missing_kmer_skipper(bloom_filter_.get(), sequence);
-
-    std::string sequence_rev_compl(sequence.begin(), sequence.end());
-    reverse_complement(sequence_rev_compl.begin(), sequence_rev_compl.end());
-
-    std::vector<BOSS::edge_index> boss_edges;
-    boss_edges.resize(sequence.size() - get_k() + 1);
-
-    auto jt = boss_edges.begin();
-    boss_graph_->map_to_edges(sequence,
-        [&](auto index) { *jt = index; ++jt; },
-        []() { return false; },
-        is_missing
-    );
-
-    assert(jt == boss_edges.end());
-
-    auto it = boss_edges.rbegin();
-    boss_graph_->map_to_edges(sequence_rev_compl,
-        [&](auto rc_index) {
-            assert(it < boss_edges.rend());
-            *it = std::min(*it, rc_index);
-            ++it;
-        },
-        []() { return false; },
-        [&]() {
-            assert(it < boss_edges.rend());
-            // if a k-mer is missing, skip its reverse compliment, as it's missing too.
-            return !*it;
-        }
-    );
-
-    for (size_t i = 0; i < boss_edges.size() && !terminate(); ++i) {
-        // the definition of a canonical k-mer is redefined:
-        //      use k-mer with smaller index in the BOSS table.
-        callback(validate_edge(boss_edges[i]));
     }
 }
 

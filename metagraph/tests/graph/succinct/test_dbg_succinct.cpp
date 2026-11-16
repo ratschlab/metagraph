@@ -151,10 +151,9 @@ TEST(DBGSuccinct, call_outgoing_kmers_source) {
 
     std::multiset<std::pair<DBGSuccinct::node_index, char>> obs;
 
-    graph->call_outgoing_kmers(
-        1,
-        [&](auto node, char c) { obs.emplace(node, c); }
-    );
+    for (auto [node, c] : graph->outgoing_kmers(1)) {
+        obs.emplace(node, c);
+    }
 
     EXPECT_EQ(ref, obs);
 }

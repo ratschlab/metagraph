@@ -521,17 +521,10 @@ bool check_graph(const std::string &alphabet, DeBruijnGraph::Mode mode, bool che
         return true;
 
     for (const auto &seq : sequences) {
-        bool stop = false;
-        graph->map_to_nodes(
-            seq,
-            [&](const auto &i) {
-                stop = !i || graph->kmer_to_node(graph->get_node_sequence(i)) != i;
-            },
-            [&]() { return stop; }
-        );
-
-        if (stop)
-            return false;
+        for (auto i : graph->node_range(seq)) {
+            if (!i || graph->kmer_to_node(graph->get_node_sequence(i)) != i)
+                return false;
+        }
     }
 
     return true;

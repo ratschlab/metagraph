@@ -2387,11 +2387,10 @@ RefEnd reference_walk(const LabelOracle &oracle, const std::string &label, Arm a
     uint64_t at = 0;
     while (true) {
         std::vector<std::pair<node_index, char>> succs;
-        auto cb = [&](node_index n, char c) { if (c != '$') succs.emplace_back(n, c); };
-        if (arm == Arm::RIGHT) {
-            graph.call_outgoing_kmers(node, cb);
-        } else {
-            graph.call_incoming_kmers(node, cb);
+        for (auto [n, c] : arm == Arm::RIGHT ? graph.outgoing_kmers(node)
+                                             : graph.incoming_kmers(node)) {
+            if (c != '$')
+                succs.emplace_back(n, c);
         }
         std::sort(succs.begin(), succs.end(), [](const auto &a, const auto &b) { return a.second < b.second; });
         if (succs.empty())

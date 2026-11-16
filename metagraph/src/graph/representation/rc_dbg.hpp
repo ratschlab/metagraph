@@ -1,6 +1,8 @@
 #ifndef __RC_DBG_HPP__
 #define __RC_DBG_HPP__
 
+#include <algorithm>
+
 #include "graph/representation/base/dbg_wrapper.hpp"
 #include "common/seq_tools/reverse_complement.hpp"
 #include "graph/graph_extensions/node_first_cache.hpp"
@@ -31,40 +33,15 @@ class RCDBG : public DBGWrapper<DeBruijnGraph> {
         return graph_->traverse(node, complement(prev_char));
     }
 
-    virtual void
-    map_to_nodes_sequentially(std::string_view sequence,
-                              const std::function<void(node_index)> &callback,
-                              const std::function<bool()> &terminate
-                                  = [](){ return false; }) const override final {
-        if (terminate())
-            return;
-
+    virtual std::unique_ptr<NodeStream>
+    node_stream(std::string_view sequence, bool sequential) const override final {
         std::string rc(sequence);
         ::reverse_complement(rc.begin(), rc.end());
-        std::vector<node_index> nodes = graph::map_to_nodes_sequentially(*graph_, rc);
-
-        for (auto it = nodes.rbegin(); it != nodes.rend() && !terminate(); ++it) {
-            callback(*it);
-        }
-    }
-
-    virtual void map_to_nodes(std::string_view sequence,
-                              const std::function<void(node_index)> &callback,
-                              const std::function<bool()> &terminate
-                                  = [](){ return false; }) const override final {
-        if (terminate() || sequence.size() < get_k())
-            return;
-
-        std::string rc(sequence);
-        ::reverse_complement(rc.begin(), rc.end());
-
-        std::vector<node_index> nodes;
-        nodes.reserve(sequence.size() - get_k() + 1);
-        graph_->map_to_nodes(rc, [&](node_index node) { nodes.push_back(node); });
-
-        for (auto it = nodes.rbegin(); it != nodes.rend() && !terminate(); ++it) {
-            callback(*it);
-        }
+        std::vector<node_index> nodes = sequential
+                ? graph::map_to_nodes_sequentially(*graph_, rc)
+                : graph::map_to_nodes(*graph_, rc);
+        std::reverse(nodes.begin(), nodes.end());
+        return std::make_unique<BufferedNodeStream>(std::move(nodes));
     }
 
     virtual size_t outdegree(node_index node) const override final {
@@ -83,35 +60,28 @@ class RCDBG : public DBGWrapper<DeBruijnGraph> {
         return graph_->has_single_outgoing(node);
     }
 
-    virtual void call_outgoing_kmers(node_index kmer,
-                                     const OutgoingEdgeCallback &callback) const override final {
-        auto incoming_kmer_callback = [&](node_index prev, char c) {
-            callback(prev, complement(c));
-        };
-
-        if (const auto cache = get_extension<NodeFirstCache>()) {
-            cache->call_incoming_kmers(kmer, incoming_kmer_callback);
-        } else {
-            graph_->call_incoming_kmers(kmer, incoming_kmer_callback);
+    virtual Edges outgoing_kmers(node_index kmer) const override final {
+        const auto cache = get_extension<NodeFirstCache>();
+        Edges edges = cache ? cache->incoming_kmers(kmer) : graph_->incoming_kmers(kmer);
+        for (auto &[prev, c] : edges) {
+            c = complement(c);
         }
+        return edges;
     }
 
-    virtual void call_incoming_kmers(node_index kmer,
-                                     const IncomingEdgeCallback &callback) const override final {
-        graph_->call_outgoing_kmers(kmer, [&](node_index next, char c) {
-            callback(next, complement(c));
-        });
+    virtual Edges incoming_kmers(node_index kmer) const override final {
+        Edges edges = graph_->outgoing_kmers(kmer);
+        for (auto &[next, c] : edges) {
+            c = complement(c);
+        }
+        return edges;
     }
 
-    virtual void
-    adjacent_outgoing_nodes(node_index node,
-                            const std::function<void(node_index)> &callback) const override final {
-        graph_->adjacent_incoming_nodes(node, callback);
+    virtual Nodes adjacent_outgoing_nodes(node_index node) const override final {
+        return graph_->adjacent_incoming_nodes(node);
     }
-    virtual void
-    adjacent_incoming_nodes(node_index node,
-                            const std::function<void(node_index)> &callback) const override final {
-        graph_->adjacent_outgoing_nodes(node, callback);
+    virtual Nodes adjacent_incoming_nodes(node_index node) const override final {
+        return graph_->adjacent_outgoing_nodes(node);
     }
 
     virtual std::string get_node_sequence(node_index node) const override final {

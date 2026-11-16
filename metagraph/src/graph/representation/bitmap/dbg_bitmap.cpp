@@ -35,30 +35,13 @@ DBGBitmap::DBGBitmap(DBGBitmapConstructor *builder) : DBGBitmap(2) {
 }
 
 
-void DBGBitmap::map_to_nodes(std::string_view sequence,
-                             const std::function<void(node_index)> &callback,
-                             const std::function<bool()> &terminate) const {
-    for (const auto &[kmer, valid] : sequence_to_kmers(sequence, mode_ == CANONICAL)) {
-        if (terminate())
-            return;
-
-        callback(valid ? to_node(kmer) : npos);
-    }
-}
-
-// Traverse graph mapping sequence to the graph nodes
-// and run callback for each node until the termination condition is satisfied.
-// Guarantees that nodes are called in the same order as the input sequence.
-// In canonical mode, non-canonical k-mers are NOT mapped to canonical ones
-void DBGBitmap::map_to_nodes_sequentially(std::string_view sequence,
-                                          const std::function<void(node_index)> &callback,
-                                          const std::function<bool()> &terminate) const {
-    for (const auto &[kmer, valid] : sequence_to_kmers(sequence)) {
-        if (terminate())
-            return;
-
-        callback(valid ? to_node(kmer) : npos);
-    }
+std::unique_ptr<NodeStream>
+DBGBitmap::node_stream(std::string_view sequence, bool sequential) const {
+    auto kmers = sequence_to_kmers(sequence, !sequential && mode_ == CANONICAL);
+    size_t size = kmers.size();
+    return make_node_stream(size, [this, kmers = std::move(kmers)](size_t i) {
+        return kmers[i].second ? to_node(kmers[i].first) : npos;
+    });
 }
 
 DBGBitmap::node_index
@@ -79,9 +62,9 @@ DBGBitmap::traverse_back(node_index node, char prev_char) const {
     return to_node(kmer);
 }
 
-void DBGBitmap::call_outgoing_kmers(node_index node,
-                                    const OutgoingEdgeCallback &callback) const {
+DeBruijnGraph::Edges DBGBitmap::outgoing_kmers(node_index node) const {
     assert(in_graph(node));
+    Edges edges;
 
     const auto &kmer = node_to_kmer(node);
 
@@ -91,8 +74,9 @@ void DBGBitmap::call_outgoing_kmers(node_index node,
 
         auto next_index = to_node(next_kmer);
         if (next_index != npos)
-            callback(next_index, c);
+            edges.emplace_back(next_index, c);
     }
+    return edges;
 }
 
 size_t DBGBitmap::outdegree(node_index node) const {
@@ -166,9 +150,9 @@ bool DBGBitmap::has_multiple_outgoing(node_index node) const {
     return false;
 }
 
-void DBGBitmap::call_incoming_kmers(node_index node,
-                                    const OutgoingEdgeCallback &callback) const {
+DeBruijnGraph::Edges DBGBitmap::incoming_kmers(node_index node) const {
     assert(in_graph(node));
+    Edges edges;
 
     const auto &kmer = node_to_kmer(node);
 
@@ -178,8 +162,9 @@ void DBGBitmap::call_incoming_kmers(node_index node,
 
         auto next_index = to_node(prev_kmer);
         if (next_index != npos)
-            callback(next_index, c);
+            edges.emplace_back(next_index, c);
     }
+    return edges;
 }
 
 size_t DBGBitmap::indegree(node_index node) const {

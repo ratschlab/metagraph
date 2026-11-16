@@ -2229,7 +2229,7 @@ TEST(PatternSearch, RandomGraphsAgainstOracles) {
  * no code with the engine's DFS:
  *  - the graph-walk oracle extends strings over the served graph's k-mers (graph_kmers, a
  *    map from each k-mer to its node id): every walk of L - k + 1 k-mers spelling an
- *    instance of an oriented pattern, never through call_outgoing_kmers; it also counts the
+ *    instance of an oriented pattern, never through outgoing_kmers; it also counts the
  *    partial walks of k + 1 .. L bases the DFS must enter (candidates_examined);
  *  - the record-scan oracle lists the windows of L bases of the records' islands (and of
  *    their reverse complements unless BASIC) that instantiate an oriented pattern and whose

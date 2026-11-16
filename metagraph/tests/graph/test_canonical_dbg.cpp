@@ -113,21 +113,22 @@ TYPED_TEST(CanonicalDBGTest, Traversals1) {
 
         auto it = DeBruijnGraph::npos;
         auto jt = DeBruijnGraph::npos;
-        graph->map_to_nodes_sequentially(std::string(k, 'A'), [&](auto i) { it = i; });
-        graph->map_to_nodes_sequentially(std::string(k, 'T'), [&](auto i) {
+        for (auto i : map_to_nodes_sequentially(*graph, std::string(k, 'A'))) {
+            it = i;
+        }
+        for (auto i : map_to_nodes_sequentially(*graph, std::string(k, 'T'))) {
             jt = i;
             EXPECT_EQ(get_rev_comp(*graph, it), jt);
-        });
+        }
 
         auto it2 = DeBruijnGraph::npos;
         auto jt2 = DeBruijnGraph::npos;
-        graph->map_to_nodes_sequentially(std::string(k - 1, 'A') + "C", [&](auto i) {
+        for (auto i : map_to_nodes_sequentially(*graph, std::string(k - 1, 'A') + "C")) {
             it2 = i;
-        });
-        graph->map_to_nodes_sequentially(
-            std::string(1, 'G') + std::string(k - 1, 'T'),
-            [&](auto i) { jt2 = i; }
-        );
+        }
+        for (auto i : map_to_nodes_sequentially(*graph, std::string(1, 'G') + std::string(k - 1, 'T'))) {
+            jt2 = i;
+        }
 
         EXPECT_EQ(it, graph->traverse(it, 'A'));
         EXPECT_EQ(it2, graph->traverse(it, 'C'));
@@ -140,15 +141,17 @@ TYPED_TEST(CanonicalDBGTest, Traversals1) {
         EXPECT_EQ(DeBruijnGraph::npos, graph->traverse(it, 'G'));
         EXPECT_EQ(DeBruijnGraph::npos, graph->traverse_back(it2, 'G'));
 
-        graph->map_to_nodes_sequentially(std::string(k, 'G'), [&](auto i) { it = i; });
+        for (auto i : map_to_nodes_sequentially(*graph, std::string(k, 'G'))) {
+            it = i;
+        }
         ASSERT_NE(DeBruijnGraph::npos, it);
-        graph->map_to_nodes_sequentially(std::string(k, 'C'), [&](auto i) {
+        for (auto i : map_to_nodes_sequentially(*graph, std::string(k, 'C'))) {
             jt = i;
             ASSERT_EQ(jt, get_rev_comp(*graph, it));
-        });
-        graph->map_to_nodes_sequentially(std::string(k - 1, 'G') + "T", [&](auto i) {
+        }
+        for (auto i : map_to_nodes_sequentially(*graph, std::string(k - 1, 'G') + "T")) {
             it2 = i;
-        });
+        }
         ASSERT_NE(DeBruijnGraph::npos, it2);
         EXPECT_EQ(DeBruijnGraph::npos, graph->traverse(it, 'A'));
         EXPECT_EQ(it, graph->traverse(it, 'G'));
@@ -171,7 +174,9 @@ TYPED_TEST(CanonicalDBGTest, Traversals2) {
 
         auto it = DeBruijnGraph::npos;
 
-        graph->map_to_nodes_sequentially(std::string(k, 'A'), [&](auto i) { it = i; });
+        for (auto i : map_to_nodes_sequentially(*graph, std::string(k, 'A'))) {
+            it = i;
+        }
         ASSERT_NE(DeBruijnGraph::npos, it);
 
         EXPECT_EQ(it, graph->traverse(it, 'A'));
@@ -185,7 +190,9 @@ TYPED_TEST(CanonicalDBGTest, Traversals2) {
         EXPECT_EQ(DeBruijnGraph::npos, graph->traverse_back(it, 'G'));
 
         // reverse complement
-        graph->map_to_nodes_sequentially(std::string(k, 'G'), [&](auto i) { it = i; });
+        for (auto i : map_to_nodes_sequentially(*graph, std::string(k, 'G'))) {
+            it = i;
+        }
         ASSERT_NE(DeBruijnGraph::npos, it);
 
         EXPECT_EQ(it, graph->traverse(it, 'G'));
@@ -1261,31 +1268,31 @@ TYPED_TEST(CanonicalDBGTest, TraversalDummySink) {
 
     size_t num_found = 0;
 
-    graph->call_outgoing_kmers(node, [&](auto, char c) {
+    for (auto [neighbour, c] : graph->outgoing_kmers(node)) {
         ASSERT_EQ(boss::BOSS::kSentinel, c);
         ++num_found;
-    });
+    }
     ASSERT_EQ(1u, num_found);
 
     num_found = 0;
-    graph->adjacent_outgoing_nodes(node, [&](auto next) {
+    for (auto next : graph->adjacent_outgoing_nodes(node)) {
         ASSERT_EQ(boss::BOSS::kSentinel, graph->get_node_sequence(next).back());
         ++num_found;
-    });
+    }
     ASSERT_EQ(1u, num_found);
 
     num_found = 0;
-    canonical.call_outgoing_kmers(node, [&](auto, char c) {
+    for (auto [neighbour, c] : canonical.outgoing_kmers(node)) {
         EXPECT_EQ(boss::BOSS::kSentinel, c);
         ++num_found;
-    });
+    }
     EXPECT_EQ(1u, num_found);
 
     num_found = 0;
-    canonical.adjacent_outgoing_nodes(node, [&](auto next) {
+    for (auto next : canonical.adjacent_outgoing_nodes(node)) {
         EXPECT_EQ(boss::BOSS::kSentinel, canonical.get_node_sequence(next).back());
         ++num_found;
-    });
+    }
     EXPECT_EQ(1u, num_found);
 }
 
@@ -1314,32 +1321,32 @@ TYPED_TEST(CanonicalDBGTest, TraversalDummySource) {
 
     size_t num_found = 0;
 
-    graph->call_incoming_kmers(node, [&](auto, char c) {
+    for (auto [neighbour, c] : graph->incoming_kmers(node)) {
         ASSERT_EQ(boss::BOSS::kSentinel, c);
         ++num_found;
-    });
+    }
     ASSERT_EQ(1u, num_found);
 
     num_found = 0;
-    graph->adjacent_incoming_nodes(node, [&](auto prev) {
+    for (auto prev : graph->adjacent_incoming_nodes(node)) {
         ASSERT_EQ(boss::BOSS::kSentinel, graph->get_node_sequence(prev).front());
         ++num_found;
-    });
+    }
     ASSERT_EQ(1u, num_found);
 
     num_found = 0;
-    canonical.call_incoming_kmers(node, [&](auto, char c) {
+    for (auto [neighbour, c] : canonical.incoming_kmers(node)) {
         EXPECT_EQ(boss::BOSS::kSentinel, c);
         ++num_found;
-    });
+    }
 
     EXPECT_EQ(1u, num_found);
 
     num_found = 0;
-    canonical.adjacent_incoming_nodes(node, [&](auto prev) {
+    for (auto prev : canonical.adjacent_incoming_nodes(node)) {
         EXPECT_EQ(boss::BOSS::kSentinel, canonical.get_node_sequence(prev).front());
         ++num_found;
-    });
+    }
     EXPECT_EQ(1u, num_found);
 }
 
@@ -1376,16 +1383,16 @@ TYPED_TEST(CanonicalDBGTest, TraversalDummy) {
     ASSERT_EQ(std::string(1, '$') + query, canonical.get_node_sequence(edge_2));
 
     size_t num_real_edges = 0;
-    graph->call_outgoing_kmers(edge_2, [&](auto, char c) {
+    for (auto [neighbour, c] : graph->outgoing_kmers(edge_2)) {
         EXPECT_EQ('C', c);
         ++num_real_edges;
-    });
+    }
     EXPECT_EQ(1u, num_real_edges);
 
     std::vector<char> out_edges;
-    canonical.call_outgoing_kmers(edge_2, [&](auto, char c) {
+    for (auto [neighbour, c] : canonical.outgoing_kmers(edge_2)) {
         out_edges.emplace_back(c);
-    });
+    }
 
     ASSERT_EQ(2u, out_edges.size());
     if (out_edges[0] > out_edges[1])
@@ -1430,20 +1437,20 @@ TYPED_TEST(CanonicalDBGTest, TraverseNoDummyToDummyForward) {
 
     ASSERT_EQ(std::string(1, '$') + query, canonical.get_node_sequence(edge_2));
     bool found_edge = false;
-    graph->call_outgoing_kmers(edge_2, [&](auto, char c) {
+    for (auto [neighbour, c] : graph->outgoing_kmers(edge_2)) {
         found_edge = true;
         EXPECT_EQ('A', c);
-    });
+    }
     EXPECT_TRUE(found_edge);
 
-    canonical.call_outgoing_kmers(edge_2, [&](auto next, char c) {
+    for (auto [next, c] : canonical.outgoing_kmers(edge_2)) {
         EXPECT_NE(boss::BOSS::kSentinel, c);
-    });
+    }
 
-    canonical.adjacent_outgoing_nodes(edge_2, [&](auto next) {
+    for (auto next : canonical.adjacent_outgoing_nodes(edge_2)) {
         char c = canonical.get_node_sequence(next).back();
         EXPECT_NE(boss::BOSS::kSentinel, c);
-    });
+    }
 }
 
 TYPED_TEST(CanonicalDBGTest, TraverseNoDummyToDummyBackward) {
@@ -1482,18 +1489,18 @@ TYPED_TEST(CanonicalDBGTest, TraverseNoDummyToDummyBackward) {
 
     auto node = canonical.reverse_complement(edge_2);
     bool found = false;
-    canonical.call_outgoing_kmers(node, [&](auto, char c) {
+    for (auto [neighbour, c] : canonical.outgoing_kmers(node)) {
         found = true;
         EXPECT_EQ('A', c);
-    });
+    }
     ASSERT_TRUE(found);
 
     found = false;
-    canonical.adjacent_outgoing_nodes(node, [&](auto next) {
+    for (auto next : canonical.adjacent_outgoing_nodes(node)) {
         found = true;
         char c = canonical.get_node_sequence(next).back();
         EXPECT_EQ('A', c);
-    });
+    }
     EXPECT_TRUE(found);
 }
 
@@ -1532,17 +1539,21 @@ TYPED_TEST(CanonicalDBGTest, TraverseNoDualDummy) {
         ASSERT_EQ('A', boss.decode(boss.get_W(edge_2)));
 
         bool found_dummy = false;
-        ASSERT_NO_THROW(canonical.call_outgoing_kmers(edge_2, [&](auto, char c) {
+        DeBruijnGraph::Edges edges;
+        ASSERT_NO_THROW(edges = canonical.outgoing_kmers(edge_2));
+        for (auto [node, c] : edges) {
             EXPECT_FALSE(found_dummy);
             found_dummy |= (boss::BOSS::kSentinel == c);
-        }));
+        }
         EXPECT_TRUE(found_dummy);
 
         found_dummy = false;
-        ASSERT_NO_THROW(canonical.adjacent_outgoing_nodes(edge_2, [&](auto next) {
+        DeBruijnGraph::Nodes nodes;
+        ASSERT_NO_THROW(nodes = canonical.adjacent_outgoing_nodes(edge_2));
+        for (auto next : nodes) {
             EXPECT_FALSE(found_dummy);
             found_dummy |= (canonical.get_node_sequence(next).back() == boss::BOSS::kSentinel);
-        }));
+        }
         EXPECT_TRUE(found_dummy);
     }
     {
@@ -1554,17 +1565,21 @@ TYPED_TEST(CanonicalDBGTest, TraverseNoDualDummy) {
         ASSERT_EQ('T', boss.decode(boss.get_W(edge_2)));
 
         bool found_dummy = false;
-        ASSERT_NO_THROW(canonical.call_incoming_kmers(edge_2, [&](auto, char c) {
+        DeBruijnGraph::Edges edges;
+        ASSERT_NO_THROW(edges = canonical.incoming_kmers(edge_2));
+        for (auto [node, c] : edges) {
             EXPECT_FALSE(found_dummy);
             found_dummy |= (boss::BOSS::kSentinel == c);
-        }));
+        }
         EXPECT_TRUE(found_dummy);
 
         found_dummy = false;
-        ASSERT_NO_THROW(canonical.adjacent_incoming_nodes(edge_2, [&](auto next) {
+        DeBruijnGraph::Nodes nodes;
+        ASSERT_NO_THROW(nodes = canonical.adjacent_incoming_nodes(edge_2));
+        for (auto next : nodes) {
             EXPECT_FALSE(found_dummy);
             found_dummy |= (canonical.get_node_sequence(next).front() == boss::BOSS::kSentinel);
-        }));
+        }
         EXPECT_TRUE(found_dummy);
     }
 }
@@ -1598,33 +1613,33 @@ TYPED_TEST(CanonicalDBGTest, TraverseNoDuplicateDummySink) {
         std::string query = "TCCTGCGCTTCGTACATATTCCCGCCGCACT";
         DeBruijnGraph::node_index start_node = map_to_nodes_sequentially(canonical, query)[0];
         DeBruijnGraph::node_index last_node = 0;
-        canonical.call_outgoing_kmers(start_node, [&](auto node, char c) {
+        for (auto [node, c] : canonical.outgoing_kmers(start_node)) {
             ASSERT_EQ(boss::BOSS::kSentinel, c);
             EXPECT_NE(last_node, node);
             last_node = node;
-        });
+        }
 
         last_node = 0;
-        canonical.adjacent_outgoing_nodes(start_node, [&](auto node) {
+        for (auto node : canonical.adjacent_outgoing_nodes(start_node)) {
             EXPECT_NE(last_node, node);
             last_node = node;
-        });
+        }
     }
     {
         std::string query = "AGTGCGGCGGGAATATGTACGAAGCGCAGGC";
         DeBruijnGraph::node_index start_node = map_to_nodes_sequentially(canonical, query)[0];
         DeBruijnGraph::node_index last_node = 0;
-        canonical.call_incoming_kmers(start_node, [&](auto node, char c) {
+        for (auto [node, c] : canonical.incoming_kmers(start_node)) {
             ASSERT_EQ(boss::BOSS::kSentinel, c);
             EXPECT_NE(last_node, node);
             last_node = node;
-        });
+        }
 
         last_node = 0;
-        canonical.adjacent_incoming_nodes(start_node, [&](auto node) {
+        for (auto node : canonical.adjacent_incoming_nodes(start_node)) {
             EXPECT_NE(last_node, node);
             last_node = node;
-        });
+        }
     }
 }
 

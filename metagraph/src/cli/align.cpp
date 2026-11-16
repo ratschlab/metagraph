@@ -201,12 +201,10 @@ std::string sequence_to_gfa_path(const std::string &seq,
     // We need to print the id of the last unitig even in the case that
     // this unitig is not completely covered by the query sequence.
     while (config->output_compacted && !is_unitig_end_node.count(last_node_to_print)) {
-        uint64_t unique_next_node;
-        graph.adjacent_outgoing_nodes(
-            last_node_to_print,
-            [&](uint64_t node) { unique_next_node = node; }
-        );
-        last_node_to_print = unique_next_node;
+        // a node inside a unitig has exactly one outgoing node
+        const auto next_nodes = graph.adjacent_outgoing_nodes(last_node_to_print);
+        assert(next_nodes.size() == 1);
+        last_node_to_print = next_nodes[0];
     }
     nodes_on_path += fmt::format("{}+,", last_node_to_print);
 

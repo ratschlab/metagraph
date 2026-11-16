@@ -47,44 +47,30 @@ class CanonicalDBG : public DBGWrapper<DeBruijnGraph> {
     /**
      * Methods from DeBruijnGraph
      */
-    // Traverse graph mapping sequence to the graph nodes
-    // and run callback for each node until the termination condition is satisfied
-    virtual void map_to_nodes(std::string_view sequence,
-                              const std::function<void(node_index)> &callback,
-                              const std::function<bool()> &terminate = [](){ return false; }) const override final;
+    // Map the k-mers of |sequence| to nodes, in the order of the sequence.
+    // A k-mer of the base graph maps to its node there. Otherwise, a k-mer
+    // whose reverse complement is in the base graph maps to the reverse
+    // complement node, or, if not |sequential|, to that base graph node
+    virtual std::unique_ptr<NodeStream> node_stream(std::string_view sequence,
+                                                    bool sequential) const override final;
 
-    // Traverse graph mapping sequence to the graph nodes
-    // and run callback for each node until the termination condition is satisfied.
-    // Guarantees that nodes are called in the same order as the input sequence
-    virtual void map_to_nodes_sequentially(std::string_view sequence,
-                                           const std::function<void(node_index)> &callback,
-                                           const std::function<bool()> &terminate = [](){ return false; }) const override final;
+    // The target nodes of all edges outgoing from |node|
+    virtual Nodes adjacent_outgoing_nodes(node_index node) const override final;
 
-    // Given a node index, call the target nodes of all edges outgoing from it.
-    virtual void adjacent_outgoing_nodes(node_index node,
-                                         const std::function<void(node_index)> &callback) const override final;
+    // The source nodes of all edges incoming to |node|
+    virtual Nodes adjacent_incoming_nodes(node_index node) const override final;
 
-    // Given a node index, call the source nodes of all edges incoming to it.
-    virtual void adjacent_incoming_nodes(node_index node,
-                                         const std::function<void(node_index)> &callback) const override final;
-
-    virtual void call_outgoing_kmers(node_index kmer,
-                                     const OutgoingEdgeCallback &callback) const override final {
-        call_outgoing_kmers(kmer, get_node_sequence(kmer), callback);
+    virtual Edges outgoing_kmers(node_index kmer) const override final {
+        return outgoing_kmers(kmer, get_node_sequence(kmer));
     }
 
-    virtual void call_incoming_kmers(node_index kmer,
-                                     const IncomingEdgeCallback &callback) const override final {
-        call_incoming_kmers(kmer, get_node_sequence(kmer), callback);
+    virtual Edges incoming_kmers(node_index kmer) const override final {
+        return incoming_kmers(kmer, get_node_sequence(kmer));
     }
 
-    void call_outgoing_kmers(node_index kmer,
-                             const std::string &spelling_hint,
-                             const OutgoingEdgeCallback &callback) const;
-
-    void call_incoming_kmers(node_index kmer,
-                             const std::string &spelling_hint,
-                             const IncomingEdgeCallback &callback) const;
+    // |spelling_hint| is the sequence of |kmer|
+    Edges outgoing_kmers(node_index kmer, const std::string &spelling_hint) const;
+    Edges incoming_kmers(node_index kmer, const std::string &spelling_hint) const;
 
     virtual void call_sequences(const CallPath &callback,
                                 size_t num_threads = 1,
@@ -137,6 +123,20 @@ class CanonicalDBG : public DBGWrapper<DeBruijnGraph> {
     // a thread-safe 0-size NodeFirstCache to use as a fallback if another NodeFirstCache
     // extension is not available
     mutable std::unique_ptr<NodeFirstCache> fallback_cache_;
+
+    // Callback forms of the neighbour methods. The callback can throw to stop early
+    template <class Callback>
+    void call_outgoing_kmers(node_index node,
+                             const std::string &spelling_hint,
+                             const Callback &callback) const;
+    template <class Callback>
+    void call_incoming_kmers(node_index node,
+                             const std::string &spelling_hint,
+                             const Callback &callback) const;
+    template <class Callback>
+    void call_outgoing_nodes(node_index node, const Callback &callback) const;
+    template <class Callback>
+    void call_incoming_nodes(node_index node, const Callback &callback) const;
 
     // Find incoming nodes that are on the reverse complement strand of node
     void adjacent_incoming_rc_strand(node_index node,

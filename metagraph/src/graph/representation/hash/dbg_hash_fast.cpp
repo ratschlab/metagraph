@@ -59,32 +59,21 @@ class DBGHashFastImpl : public DBGHashFast::DBGHashFastInterface {
     void add_sequence(std::string_view sequence,
                       const std::function<void(node_index)> &on_insertion) override final;
 
-    // Traverse graph mapping sequence to the graph nodes
-    // and run callback for each node until the termination condition is satisfied
-    void map_to_nodes(std::string_view sequence,
-                      const std::function<void(node_index)> &callback,
-                      const std::function<bool()> &terminate) const override final;
-
-    // Traverse graph mapping sequence to the graph nodes
-    // and run callback for each node until the termination condition is satisfied.
-    // Guarantees that nodes are called in the same order as the input sequence.
-    // In canonical mode, non-canonical k-mers are NOT mapped to canonical ones
-    void map_to_nodes_sequentially(std::string_view sequence,
-                                   const std::function<void(node_index)> &callback,
-                                   const std::function<bool()> &terminate) const override final;
-
     std::unique_ptr<NodeStream> node_stream(std::string_view sequence,
                                             bool sequential) const override final {
-        return std::make_unique<HashNodeStream>(
-            *this, sequence_to_kmers(sequence, !sequential && mode_ == CANONICAL)
-        );
+        auto kmers = sequence_to_kmers(sequence, !sequential && mode_ == CANONICAL);
+        size_t size = kmers.size();
+        return make_node_stream(size, [this, kmers = std::move(kmers)](size_t i) {
+            const auto &[kmer, valid] = kmers[i];
+            node_index node = valid ? get_node_index(kmer) : npos;
+            assert(!node || kmer == get_kmer(node));
+            return node;
+        });
     }
 
-    void call_outgoing_kmers(node_index node,
-                             const OutgoingEdgeCallback &callback) const override final;
+    Edges outgoing_kmers(node_index node) const override final;
 
-    void call_incoming_kmers(node_index node,
-                             const IncomingEdgeCallback &callback) const override final;
+    Edges incoming_kmers(node_index node) const override final;
 
     void call_nodes(const std::function<void(node_index)> &callback,
                     const std::function<bool()> &stop_early,
@@ -188,27 +177,6 @@ class DBGHashFastImpl : public DBGHashFast::DBGHashFastInterface {
     node_index bucket_to_node(size_t bucket) const { return bucket * kAlphabetSize + 1; }
 
     node_index get_node_index(const Kmer &kmer) const;
-
-    class HashNodeStream final : public NodeStream {
-      public:
-        HashNodeStream(const DBGHashFastImpl &graph, Vector<std::pair<Kmer, bool>>&& kmers)
-              : graph_(graph), kmers_(std::move(kmers)) {}
-
-        size_t next(std::span<node_index> out) override {
-            size_t n = std::min(out.size(), kmers_.size() - i_);
-            for (size_t j = 0; j < n; ++j, ++i_) {
-                const auto &[kmer, valid] = kmers_[i_];
-                out[j] = valid ? graph_.get_node_index(kmer) : npos;
-                assert(!out[j] || kmer == graph_.get_kmer(out[j]));
-            }
-            return n;
-        }
-
-      private:
-        const DBGHashFastImpl &graph_;
-        Vector<std::pair<Kmer, bool>> kmers_;
-        size_t i_ = 0;
-    };
 
     const Kmer get_kmer(node_index node) const {
         assert(in_graph(node));
@@ -314,21 +282,6 @@ void DBGHashFastImpl<KMER>::add_sequence(std::string_view sequence,
     }
 }
 
-template <typename KMER>
-void DBGHashFastImpl<KMER>::map_to_nodes_sequentially(
-                                std::string_view sequence,
-                                const std::function<void(node_index)> &callback,
-                                const std::function<bool()> &terminate) const {
-    this->call_streamed_nodes(sequence, true, callback, terminate);
-}
-
-template <typename KMER>
-void DBGHashFastImpl<KMER>::map_to_nodes(std::string_view sequence,
-                                         const std::function<void(node_index)> &callback,
-                                         const std::function<bool()> &terminate) const {
-    this->call_streamed_nodes(sequence, false, callback, terminate);
-}
-
 
 template <typename KMER>
 typename DBGHashFastImpl<KMER>::KmerConstIterator
@@ -351,13 +304,13 @@ DBGHashFastImpl<KMER>::next_kmer(node_index node) const {
 }
 
 template <typename KMER>
-void DBGHashFastImpl<KMER>::call_outgoing_kmers(node_index node,
-                                                const OutgoingEdgeCallback &callback) const {
+DeBruijnGraph::Edges DBGHashFastImpl<KMER>::outgoing_kmers(node_index node) const {
     assert(in_graph(node));
+    Edges edges;
 
     KmerConstIterator next_kmer_it = next_kmer(node);
     if (next_kmer_it == kmers_.end())
-        return;
+        return edges;
 
     size_t bucket = next_kmer_it - kmers_.begin();
     Flags flags = bits_[bucket];
@@ -366,15 +319,16 @@ void DBGHashFastImpl<KMER>::call_outgoing_kmers(node_index node,
         if (flags & static_cast<Flags>(1)) {
             assert(in_graph(bucket_to_node(bucket) + c));
 
-            callback(bucket_to_node(bucket) + c, seq_encoder_.decode(c));
+            edges.emplace_back(bucket_to_node(bucket) + c, seq_encoder_.decode(c));
         }
     }
+    return edges;
 }
 
 template <typename KMER>
-void DBGHashFastImpl<KMER>::call_incoming_kmers(node_index node,
-                                                const IncomingEdgeCallback &callback) const {
+DeBruijnGraph::Edges DBGHashFastImpl<KMER>::incoming_kmers(node_index node) const {
     assert(in_graph(node));
+    Edges edges;
 
     const KMER &kmer = get_kmer(node);
 
@@ -384,8 +338,9 @@ void DBGHashFastImpl<KMER>::call_incoming_kmers(node_index node,
 
         auto prev_kmer_index = get_node_index(prev_kmer);
         if (prev_kmer_index != npos)
-            callback(prev_kmer_index, seq_encoder_.decode(c));
+            edges.emplace_back(prev_kmer_index, seq_encoder_.decode(c));
     }
+    return edges;
 }
 
 template <typename KMER>
@@ -403,9 +358,7 @@ template <typename KMER>
 size_t DBGHashFastImpl<KMER>::indegree(node_index node) const {
     assert(in_graph(node));
 
-    size_t indegree = 0;
-    call_incoming_kmers(node, [&](auto, auto) { indegree++; });
-    return indegree;
+    return incoming_kmers(node).size();
 }
 
 template <typename KMER>

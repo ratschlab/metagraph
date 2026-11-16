@@ -1,7 +1,10 @@
 #include <algorithm>
 #include <atomic>
 #include <limits>
+#include <map>
 #include <random>
+#include <set>
+#include <span>
 #include <string>
 #include <thread>
 #include <tuple>
@@ -340,6 +343,281 @@ TEST(SearchBudget, QueriesWithAnAccountAnswerAsWithout) {
             }
         }
     }
+}
+
+// The fixture's matrix without row-diff, recording the rows its batched read is asked for
+class CountingRows : public annot::matrix::TupleCSCMatrix<annot::matrix::ColumnMajor> {
+  public:
+    using TupleCSCMatrix::TupleCSCMatrix;
+
+    std::vector<RowTuples> get_row_tuples(std::span<const Row> rows,
+                                          size_t num_threads = 1) const override {
+        requested.insert(requested.end(), rows.begin(), rows.end());
+        return TupleCSCMatrix::get_row_tuples(rows, num_threads);
+    }
+
+    mutable std::vector<Row> requested;
+};
+
+// Train 7 P1's R8 (a), lane T7-M5. A query by record folds its rows into the records it
+// meets; past the fold's budget (kFoldValuesBudget: 16 MiB of runs in a release build, none
+// in a debug one), with more records still in the race than the cut returns, the fold keeps
+// only the counts and reads the rows again after the cut for the returned records (master's
+// #765). The runs that read builds are values of the returned records: they are charged to
+// the pair's account (as the task's scratch) before they grow, the values built from them as
+// they grow. Here 1,200 records share a stretch of 1,000 k-mers, which the query holds each at
+// a position of its own: 1.2 M runs before the cut. With an account the answer is the one
+// without; the account's scratch holds at least the runs read again (16 B each: position,
+// length, value); a bound below what the query needs, and one below those runs alone, refuse
+// it with SearchAnswerTooLarge.
+TEST(SearchBudget, AQueryByRecordReadAgainAfterTheCutIsCharged) {
+    std::mt19937 rng(765);
+    const size_t k = 11;
+    const size_t num_shared = 1000;
+    const std::string shared = random_sequence(rng, num_shared + k - 1);
+    std::vector<CoordinateRecord> records;
+    for (size_t i = 0; i < 1200; ++i) {
+        records.push_back({ random_sequence(rng, 10) + shared + random_sequence(rng, 10),
+                            "F" + std::to_string(i % 2), "r" + std::to_string(i) });
+    }
+    std::string query;
+    for (size_t i = 0; i < num_shared; ++i) {
+        query += shared.substr(i, k) + "N";
+    }
+    auto index = coordinate_test_graph<CountingRows>(k, records, false, false, false, true);
+    const auto &matrix = dynamic_cast<const CountingRows &>(index->get_annotator().get_matrix());
+    const size_t top = 10;
+    auto check = [&](const std::string &mode, const auto &query_with) {
+        SCOPED_TRACE(mode);
+        matrix.requested.clear();
+        const auto plain = query_with(nullptr);
+        ASSERT_EQ(top, plain.size());
+        // every row of the query was read twice: the fold kept only the counts
+        std::map<annot::matrix::BinaryMatrix::Row, size_t> requests;
+        for (auto row : matrix.requested) {
+            ++requests[row];
+        }
+        std::map<annot::matrix::BinaryMatrix::Row, size_t> twice;
+        for (auto node : index->get_graph().node_range(query)) {
+            if (node)
+                twice[graph::AnnotatedDBG::graph_to_anno_index(node)] = 2;
+        }
+        ASSERT_LT(num_shared * 9 / 10, twice.size());
+        EXPECT_EQ(twice, requests);
+        SearchBudget budget(kLarge);
+        SearchAccount account(&budget, "values");
+        EXPECT_EQ(plain, query_with(&account));
+        const uint64_t runs_read_again = top * num_shared * 16;
+        EXPECT_LE(runs_read_again, account.scratch());
+        EXPECT_LT(account.scratch(), account.held());
+        for (uint64_t bound : { account.held() - 1, runs_read_again / 2 }) {
+            SearchBudget short_one(bound);
+            SearchAccount refused(&short_one, "values");
+            EXPECT_THROW(query_with(&refused), SearchAnswerTooLarge) << bound;
+            EXPECT_TRUE(short_one.passed());
+            EXPECT_GE(bound, refused.held());
+        }
+    };
+    check("signatures", [&](SearchAccount *a) -> Signatures {
+        return index->get_top_label_signatures(query, top, 0, 0, nullptr, a);
+    });
+    check("counts", [&](SearchAccount *a) -> Counts {
+        return index->get_kmer_counts(query, top, 0, 0, nullptr, a);
+    });
+    check("coordinates", [&](SearchAccount *a) -> Coordinates {
+        return index->get_kmer_coordinates(query, top, 0, 0, nullptr, a);
+    });
+}
+
+// The fold of a query by record past its budget (a release build's 16 MiB of runs) frees the
+// values of the records that can no longer be returned and keeps those of a record at the
+// edge: its count and every row left reach the cutoff exactly, and it then ties at the cut and
+// wins by its header's bytes. It holds no values for the records first met too late to be
+// returned. The answers are those of a fold that frees nothing; the counts at the cut are
+// distinct. Without a budget, the fold keeps only the counts and reads the rows again.
+// (Reviews M2 and A-m2, lane T7-M5: a release build reaches every branch of the fold's pruning
+// and its edge; freeing at the cutoff, or cutting at the top count instead of the N-th, fails.)
+TEST(SearchBudget, TheFoldFreesOnlyTheValuesOfRecordsThatCannotBeReturned) {
+    std::mt19937 rng(764);
+    const size_t k = 15;
+    const size_t num_low = 1100, num_late = 10, num_shared = 1000, num_late_kmers = 100;
+    const size_t top = 3;
+    // The shared k-mers make a run each for the low records and for a, b and t: the runs
+    // pass the budget at the shared k-mer |at_check|, the fold's one check.
+    const size_t at_check = FoldBudget::kRelease / ((num_low + 3) * 16) + 1;
+    ASSERT_LT(at_check, num_shared);
+    const size_t remaining = num_shared - at_check + num_late_kmers;
+    // Repeated k-mers, each counted at its first position for a, b, t and e. t matches the
+    // shared k-mers up to the check and nothing after: its count there, the third, is the
+    // cutoff. e matches only its repeated k-mer before the check and every row after it.
+    const size_t w_a = 500, w_b = 300, w_t = 200;
+    const size_t cutoff = w_t + at_check;
+    const size_t w_e = cutoff - remaining;
+    ASSERT_LT(num_shared + num_late_kmers, cutoff) << "the low records are freed";
+    ASSERT_LT(cutoff, w_b + num_shared) << "b stays above t";
+    const std::string x_a = random_sequence(rng, k), x_b = random_sequence(rng, k),
+                      x_t = random_sequence(rng, k), x_e = random_sequence(rng, k);
+    const std::string shared = random_sequence(rng, num_shared + k - 1);
+    const std::string late = random_sequence(rng, num_late_kmers + k - 1);
+    std::vector<CoordinateRecord> records;
+    auto add = [&](const std::string &sequence, const std::string &header) {
+        records.push_back({ random_sequence(rng, 10) + sequence + random_sequence(rng, 10),
+                            "F" + std::to_string(records.size() % 2), header });
+    };
+    // a base other than |c|: t's and e's pieces of |shared| end and start with it, so that
+    // the k-mer across the end or the start is no shared k-mer of the query
+    auto other = [](char c) { return std::string(1, c == 'A' ? 'C' : 'A'); };
+    add(x_a + random_sequence(rng, 10) + shared, "a");
+    add(x_b + random_sequence(rng, 10) + shared, "b");
+    add(x_t + random_sequence(rng, 10) + shared.substr(0, at_check + k - 1)
+            + other(shared[at_check + k - 1]), "t");
+    add(x_e + random_sequence(rng, 10) + other(shared[at_check - 1]) + shared.substr(at_check)
+            + random_sequence(rng, 10) + late, "e");
+    for (size_t i = 0; i < num_low; ++i) {
+        add(shared, "l" + std::to_string(i));
+    }
+    for (size_t i = 0; i < num_late; ++i) {
+        add(late, "z" + std::to_string(i));
+    }
+    // the repeated k-mers (one row each, counted at its first position, values held for the
+    // returned records only), then the shared and the late k-mers one by one: a run each
+    std::string query;
+    for (const auto &[kmer, weight] : std::vector<std::pair<std::string, size_t>> {
+                { x_a, w_a }, { x_b, w_b }, { x_t, w_t }, { x_e, w_e } }) {
+        for (size_t i = 0; i < weight; ++i) {
+            query += kmer + "N";
+        }
+    }
+    for (size_t i = 0; i < num_shared; ++i) {
+        query += shared.substr(i, k) + "N";
+    }
+    for (size_t i = 0; i < num_late_kmers; ++i) {
+        query += late.substr(i, k) + "N";
+    }
+    auto index = coordinate_test_graph(k, records, false, false, false, true);
+    // a, b, then e and t tied (e first by its header's bytes): e at the edge is returned
+    const std::vector<std::pair<std::string, size_t>> expected {
+        { "a", w_a + num_shared }, { "b", w_b + num_shared }, { "e", cutoff } };
+    auto check = [&](const std::string &mode, const auto &query_by) {
+        SCOPED_TRACE(mode);
+        graph::reset_record_fold_counts();
+        const auto unbounded = [&]() {
+            const FoldBudget fold_budget(std::numeric_limits<size_t>::max());
+            return query_by();
+        }();
+        EXPECT_EQ(0u, graph::record_fold_counts().freed);
+        EXPECT_EQ(0u, graph::record_fold_counts().met_late);
+        EXPECT_EQ(0u, graph::record_fold_counts().counts_only);
+        ASSERT_EQ(top, unbounded.size());
+        for (size_t r = 0; r < top; ++r) {
+            EXPECT_EQ(expected[r].first, std::get<0>(unbounded[r]));
+            EXPECT_EQ(expected[r].second, std::get<1>(unbounded[r]));
+        }
+        {
+            const FoldBudget fold_budget(FoldBudget::kRelease);
+            EXPECT_EQ(unbounded, query_by());
+            EXPECT_EQ(num_low, graph::record_fold_counts().freed);
+            EXPECT_EQ(num_late, graph::record_fold_counts().met_late);
+            EXPECT_EQ(0u, graph::record_fold_counts().counts_only);
+        }
+        graph::reset_record_fold_counts();
+        {
+            const FoldBudget fold_budget(0);
+            EXPECT_EQ(unbounded, query_by());
+            EXPECT_EQ(1u, graph::record_fold_counts().counts_only);
+        }
+    };
+    check("signatures", [&]() -> Signatures {
+        return index->get_top_label_signatures(query, top, 0, 0);
+    });
+    check("counts", [&]() -> Counts {
+        return index->get_kmer_counts(query, top, 0, 0);
+    });
+    check("coordinates", [&]() -> Coordinates {
+        return index->get_kmer_coordinates(query, top, 0, 0);
+    });
+}
+
+// A query by record for coordinates at a homopolymer charges the coordinates of the returned
+// records at its one repeated row to the values account's scratch: each record's buffer, grown
+// by doubling from one, 16 B per coordinate (not per coordinate and position). (Review m1, lane
+// T7-M5.)
+TEST(SearchBudget, AQueryByRecordChargesTheValuesOfItsRepeatedRows) {
+    std::mt19937 rng(16);
+    const size_t k = 9;
+    std::vector<CoordinateRecord> records;
+    for (size_t i = 0; i < 6; ++i) {
+        records.push_back({ random_sequence(rng, 12) + std::string(k + 20 * i + 3, 'A')
+                                + random_sequence(rng, 12),
+                            "F" + std::to_string(i % 2), "r" + std::to_string(i) });
+    }
+    const std::string query(k + 500, 'A');
+    auto index = coordinate_test_graph(k, records, false, false, false, true);
+    const size_t top = 4;
+    SearchBudget budget(kLarge);
+    SearchAccount account(&budget, "values");
+    const Coordinates result = index->get_kmer_coordinates(query, top, 0, 0, nullptr, &account);
+    ASSERT_EQ(top, result.size());
+    uint64_t scratch = 0;
+    uint64_t spread = 0;
+    for (const auto &[label, count, positions, length] : result) {
+        SCOPED_TRACE(label);
+        EXPECT_EQ(501u, count);
+        // the record's coordinates at the row of A^k, the same at every position
+        const auto dense = positions.to_dense();
+        const size_t num_coords = dense[0].size();
+        ASSERT_LT(2u, num_coords);
+        EXPECT_EQ(num_coords, dense[500].size());
+        size_t capacity = 1;
+        while (capacity < num_coords) {
+            capacity *= 2;
+        }
+        scratch += annot::matrix::buffer_bytes(capacity, 16);
+        spread += num_coords * 501 * 16;
+    }
+    EXPECT_EQ(scratch, account.scratch());
+    EXPECT_LT(account.scratch() * 100, spread);
+}
+
+// A query by record for coordinates charges each returned record's coordinates at the positions
+// the fold holds to the values account's scratch, as the (position, coordinate) pairs it sorts:
+// one record at a time, 16 B a pair (lane T7-M5's fix round: the coordinate path's |held|)
+TEST(SearchBudget, AQueryByRecordChargesTheCoordinatesItSorts) {
+    std::mt19937 rng(17);
+    const size_t k = 11;
+    std::vector<CoordinateRecord> records;
+    for (size_t i = 0; i < 8; ++i) {
+        records.push_back({ random_sequence(rng, 40 + 30 * i), "F" + std::to_string(i % 2),
+                            "r" + std::to_string(i) });
+    }
+    const std::string query = records[7].sequence + records[2].sequence
+                              + records[5].sequence.substr(0, 60);
+    auto index = coordinate_test_graph(k, records, false, false, false, true);
+    // no k-mer repeated in the query: the fold holds the coordinates of every position
+    std::set<graph::AnnotatedDBG::row_index> rows;
+    size_t present = 0;
+    for (auto node : index->get_graph().node_range(query)) {
+        if (node) {
+            rows.insert(graph::AnnotatedDBG::graph_to_anno_index(node));
+            ++present;
+        }
+    }
+    ASSERT_EQ(present, rows.size());
+    const size_t top = 3;
+    SearchBudget budget(kLarge);
+    SearchAccount account(&budget, "values");
+    const Coordinates result = index->get_kmer_coordinates(query, top, 0, 0, nullptr, &account);
+    ASSERT_EQ(top, result.size());
+    uint64_t scratch = 0;
+    for (const auto &[label, count, positions, length] : result) {
+        size_t num_coords = 0;
+        for (const auto &coords : positions.to_dense()) {
+            num_coords += coords.size();
+        }
+        scratch = std::max(scratch, annot::matrix::buffer_bytes(num_coords, 16));
+    }
+    EXPECT_LT(0u, scratch);
+    EXPECT_EQ(scratch, account.scratch());
 }
 
 // REVIEW 9726cb420 [P2], lane T6-W2: the scratch one task of an account's work holds while it

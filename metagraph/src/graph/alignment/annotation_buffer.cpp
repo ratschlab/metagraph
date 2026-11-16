@@ -215,9 +215,9 @@ void AnnotationBuffer::resolve_source_dummy_labels(const DBGSuccinct &dbg_succ,
         for (size_t step = 0; step < num_dummy && frontier.size(); ++step) {
             std::vector<node_index> next;
             for (node_index n : frontier) {
-                dbg_succ.adjacent_outgoing_nodes(n, [&](node_index out) {
+                for (node_index out : dbg_succ.adjacent_outgoing_nodes(n)) {
                     next.push_back(out);
-                });
+                }
             }
             frontier = next.size() <= kMaxSourceDummyFanout
                 ? std::move(next)

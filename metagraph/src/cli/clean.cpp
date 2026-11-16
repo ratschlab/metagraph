@@ -2,9 +2,11 @@
 
 #include <ips4o.hpp>
 
+#include "annotation/annotation_remap.hpp"
 #include "common/logger.hpp"
 #include "common/algorithms.hpp"
 #include "common/unix_tools.hpp"
+#include "common/utils/file_utils.hpp"
 #include "common/utils/template_utils.hpp"
 #include "common/threads/threading.hpp"
 #include "common/vectors/vector_algorithm.hpp"
@@ -27,13 +29,7 @@ using mtg::seq_io::ExtendedFastaWriter;
 
 int clean_graph(Config *config) {
     assert(config);
-
-    const auto &files = config->fnames;
-
-    assert(files.size() == 1);
-    assert(config->outfbase.size());
-
-    config->min_count = std::max(1u, config->min_count);
+    assert(config->fnames.size() == 1);
 
     if (!config->to_fasta) {
         logger->error("Clean graph can be serialized only in form "
@@ -41,10 +37,29 @@ int clean_graph(Config *config) {
         exit(1);
     }
 
-    Timer timer;
     logger->trace("Loading graph...");
 
-    auto graph = load_critical_dbg(files.at(0));
+    return clean_graph(config, load_critical_dbg(config->fnames.at(0)));
+}
+
+int clean_graph(Config *config, std::shared_ptr<graph::DeBruijnGraph> graph,
+                std::pair<sdsl::bit_vector, sdsl::bit_vector> *succ_pred) {
+    assert(config);
+
+    const auto &files = config->fnames;
+
+    assert(files.size() == 1);
+    assert(config->outfbase.size());
+    assert(config->to_fasta);
+
+    config->min_count = std::max(1u, config->min_count);
+
+    Timer timer;
+
+    if (config->row_map && graph->get_mode() == graph::DeBruijnGraph::CANONICAL) {
+        logger->error("--row-map supports only graphs in basic or primary mode");
+        exit(1);
+    }
     // try loading k-mer counts
     auto node_weights = graph->load_extension<graph::NodeWeights>(files.at(0));
 
@@ -125,6 +140,14 @@ int clean_graph(Config *config) {
 
     timer.reset();
 
+    // The degrees in the source graph are those in the SSHash graph only if all
+    // k-mers of a basic graph are written: no subgraph, no k-mer counts to filter
+    // by, no pruned tips.
+    auto *dbg_succ = dynamic_cast<const graph::DBGSuccinct*>(graph.get());
+    if (!dbg_succ || node_weights || config->min_tip_size > 1
+            || graph->get_mode() != graph::DeBruijnGraph::BASIC)
+        succ_pred = nullptr;
+
     auto call_clean_contigs = [&](auto callback, size_t num_threads) {
         if (config->min_unitig_median_kmer_abundance != 1) {
             assert(node_weights);
@@ -161,6 +184,83 @@ int clean_graph(Config *config) {
         uint64_t num_kmers = 0;
         std::string fasta_fname;
 
+        // An SSHash graph built from the written file numbers its k-mers in file
+        // order, so the row of every k-mer in that graph is known here.
+        std::unique_ptr<annot::RowMapWriter> row_map;
+        std::filesystem::path row_map_tmp_dir;
+        if (config->row_map) {
+            row_map_tmp_dir = utils::create_temp_dir(
+                    config->tmp_dir.empty() ? std::filesystem::path(outfbase).remove_filename()
+                                            : config->tmp_dir,
+                    "rowmap");
+            // in primary mode, an SSHash graph has a second node for every reverse complement
+            row_map = std::make_unique<annot::RowMapWriter>(graph->max_index(),
+                                                            2 * graph->max_index(),
+                                                            row_map_tmp_dir);
+        }
+        const graph::boss::BOSS *boss = nullptr;
+        const bit_vector *boss_mask = nullptr;
+        if (succ_pred) {
+            boss = &dbg_succ->get_boss();
+            boss_mask = dbg_succ->get_mask();
+            // resized to the number of written k-mers after the extraction
+            succ_pred->first = sdsl::bit_vector(graph->max_index() + 1, false);
+            succ_pred->second = sdsl::bit_vector(graph->max_index() + 1, false);
+        }
+        // `first` is the number of k-mers written before this contig
+        auto add_rows = [&](const auto &path, uint64_t first) {
+            if (row_map) {
+                uint64_t target = first;
+                for (auto node : path) {
+                    row_map->add(node - 1, ++target);
+                }
+            }
+            if (succ_pred) {
+                // K-mer j of this contig is SSHash node first + 1 + j. Edge path[j + 1]
+                // leaves the BOSS node that edge path[j] enters, so the degrees of
+                // that node are read here without fwd or bwd.
+                for (size_t j = 0; j + 1 < path.size(); ++j) {
+                    if (boss->is_single_outgoing(path[j + 1]))
+                        set_bit(succ_pred->first.data(), first + 1 + j, true);
+
+                    auto w = boss->get_W(path[j]);
+                    bool single_incoming;
+                    if (w < boss->alph_size) {
+                        // path[j] is the first edge incoming to that node
+                        single_incoming = boss->is_single_incoming(path[j], w);
+                    } else if (!boss_mask) {
+                        single_incoming = false;
+                    } else {
+                        // single if the only other incoming edge is a masked dummy
+                        auto d = w - boss->alph_size;
+                        auto x = boss->pred_W(path[j], d);
+                        single_incoming = !(*boss_mask)[x]
+                                    && boss->num_incoming_to_target(x, d) == 2;
+                    }
+                    if (single_incoming)
+                        set_bit(succ_pred->second.data(), first + 2 + j, true);
+                }
+            }
+        };
+        // the end of the last written contig, for the edge between two contigs
+        std::string prev_suffix;
+        bool prev_single_outgoing = false;
+        // call under the lock, before num_kmers is advanced
+        auto link_contigs = [&](const std::string &contig, bool single_incoming,
+                                bool single_outgoing) {
+            if (!succ_pred)
+                return;
+            const size_t overlap = graph->get_k() - 1;
+            if (num_kmers && prev_suffix == std::string_view(contig).substr(0, overlap)) {
+                if (prev_single_outgoing)
+                    set_bit(succ_pred->first.data(), num_kmers, true);
+                if (single_incoming)
+                    set_bit(succ_pred->second.data(), num_kmers + 1, true);
+            }
+            prev_suffix = contig.substr(contig.size() - overlap);
+            prev_single_outgoing = single_outgoing;
+        };
+
         if (node_weights) {
             if (!node_weights->is_compatible(*graph)) {
                 logger->error("k-mer counts are not compatible with the subgraph");
@@ -182,10 +282,15 @@ int clean_graph(Config *config) {
                 // smooth k-mer counts in the unitig
                 utils::smooth_vector(config->smoothing_window, &kmer_counts);
 
-                std::lock_guard<std::mutex> lock(seq_mutex);
-                writer.write(contig, kmer_counts);
-                num_bp += contig.size();
-                num_kmers += contig.size() - graph->get_k() + 1;
+                uint64_t first;
+                {
+                    std::lock_guard<std::mutex> lock(seq_mutex);
+                    writer.write(contig, kmer_counts);
+                    num_bp += contig.size();
+                    first = num_kmers;
+                    num_kmers += contig.size() - graph->get_k() + 1;
+                }
+                add_rows(path, first);
             }, get_num_threads());
 
             fasta_fname = writer.get_fasta_fname();
@@ -195,17 +300,51 @@ int clean_graph(Config *config) {
                                config->enumerate_out_sequences,
                                get_num_threads() > 1);
 
-            call_contigs([&](const std::string &contig, const auto &) {
-                std::lock_guard<std::mutex> lock(seq_mutex);
-                writer.write(contig);
-                num_bp += contig.size();
-                num_kmers += contig.size() - graph->get_k() + 1;
+            call_contigs([&](const std::string &contig, const auto &path) {
+                uint64_t first;
+                const bool single_incoming = succ_pred && graph->has_single_incoming(path.front());
+                const bool single_outgoing = succ_pred && graph->has_single_outgoing(path.back());
+                {
+                    std::lock_guard<std::mutex> lock(seq_mutex);
+                    writer.write(contig);
+                    link_contigs(contig, single_incoming, single_outgoing);
+                    num_bp += contig.size();
+                    first = num_kmers;
+                    num_kmers += contig.size() - graph->get_k() + 1;
+                }
+                add_rows(path, first);
             }, get_num_threads());
 
             fasta_fname = writer.get_fname();
         }
         logger->trace("Extracted {} bp of sequences with {} k-mers and wrote to {}",
                       num_bp, num_kmers, fasta_fname);
+
+        if (succ_pred) {
+            succ_pred->first.resize(num_kmers + 1);
+            succ_pred->second.resize(num_kmers + 1);
+        }
+
+        if (row_map) {
+            const std::string row_map_fname = outfbase + ".rowmap";
+            try {
+                row_map->write(row_map_fname,
+                               graph->get_mode() == graph::DeBruijnGraph::PRIMARY
+                                    ? 2 * num_kmers : num_kmers,
+                               get_num_threads());
+            } catch (const std::exception &e) {
+                logger->error("{}", e.what());
+                row_map.reset();
+                utils::remove_temp_dir(row_map_tmp_dir);
+                std::error_code ec;
+                std::filesystem::remove(row_map_fname, ec);
+                exit(1);
+            }
+            row_map.reset();
+            utils::remove_temp_dir(row_map_tmp_dir);
+            logger->trace("Row map for an SSHash graph built from {} saved to {}",
+                          fasta_fname, row_map_fname);
+        }
     };
 
     assert(config->count_slice_quantiles.size() >= 2);

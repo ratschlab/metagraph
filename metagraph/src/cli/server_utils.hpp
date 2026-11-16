@@ -2,8 +2,10 @@
 #define __METAGRAPH_SERVER_UTILS_HPP__
 
 #include <functional>
+#include <initializer_list>
 #include <optional>
 #include <stdexcept>
+#include <string_view>
 
 #include <json/json.h>
 #include <server_http.hpp>
@@ -114,6 +116,11 @@ void process_serialized_request(std::shared_ptr<HttpServer::Response> &response,
 
 
 Json::Value parse_json_string(const std::string &msg);
+
+// Refuse a request that is not an object or has a field outside |known|, so that a
+// misspelled field is never ignored
+void check_request_fields(const Json::Value &request,
+                          std::initializer_list<std::string_view> known);
 
 } // namespace cli
 } // namespace mtg

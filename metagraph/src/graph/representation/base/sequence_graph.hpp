@@ -1,8 +1,10 @@
 #ifndef __SEQUENCE_GRAPH_HPP__
 #define __SEQUENCE_GRAPH_HPP__
 
+#include "common/vector.hpp"
 #include "common/vectors/bit_vector.hpp"
 #include "graph/representation/base/node_stream.hpp"
+#include "kmer/alphabets.hpp"
 
 #include <vector>
 #include <string>
@@ -40,39 +42,26 @@ class SequenceGraph {
     virtual void add_sequence(std::string_view sequence,
                               const std::function<void(node_index)> &on_insertion = [](uint64_t) {}) = 0;
 
-    // Traverse graph mapping sequence to the graph nodes
-    // and run callback for each node until the termination condition is satisfied
-    // TODO: move to AnnotatedSequenceGraph?
-    virtual void map_to_nodes(std::string_view sequence,
-                              const std::function<void(node_index)> &callback,
-                              const std::function<bool()> &terminate = [](){ return false; }) const = 0;
-
-    // Traverse graph mapping sequence to the graph nodes
-    // and run callback for each node until the termination condition is satisfied.
-    // Guarantees that nodes are called in the same order as the input sequence.
-    // In canonical mode, non-canonical k-mers are not mapped to canonical ones
-    virtual void map_to_nodes_sequentially(std::string_view sequence,
-                                           const std::function<void(node_index)> &callback,
-                                           const std::function<bool()> &terminate = [](){ return false; }) const = 0;
-
-    // Map the k-mers of |sequence| to nodes lazily, one node per k-mer position.
-    // With |sequential|, nodes are those of map_to_nodes_sequentially, otherwise
-    // those of map_to_nodes. |sequence| must outlive the returned range.
+    // Map the k-mers of |sequence| to nodes, one node per k-mer position.
+    // With |sequential|, nodes are called in the order of the input sequence
+    // and, in canonical mode, non-canonical k-mers are not mapped to canonical
+    // ones. |sequence| must outlive the returned range.
     NodeRange node_range(std::string_view sequence, bool sequential = false) const {
         return NodeRange(node_stream(sequence, sequential));
     }
 
-    // Backend of node_range. The default runs the callback interface and
-    // buffers all nodes; graphs with a streaming mapping override it.
+    // Backend of node_range
     virtual std::unique_ptr<NodeStream> node_stream(std::string_view sequence,
-                                                    bool sequential) const;
+                                                    bool sequential) const = 0;
 
-    // Given a node index, call the target nodes of all edges outgoing from it.
-    virtual void adjacent_outgoing_nodes(node_index node,
-                                         const std::function<void(node_index)> &callback) const = 0;
-    // Given a node index, call the source nodes of all edges incoming to it.
-    virtual void adjacent_incoming_nodes(node_index node,
-                                         const std::function<void(node_index)> &callback) const = 0;
+    // A node has at most one neighbour per character, so these never allocate
+    static constexpr size_t kMaxNeighbours = kmer::alphabets::kBOSSSigma;
+    typedef SmallVector<node_index, kMaxNeighbours> Nodes;
+
+    // The target nodes of all edges outgoing from |node|
+    virtual Nodes adjacent_outgoing_nodes(node_index node) const = 0;
+    // The source nodes of all edges incoming to |node|
+    virtual Nodes adjacent_incoming_nodes(node_index node) const = 0;
 
     virtual void call_nodes(const std::function<void(node_index)> &callback,
                             const std::function<bool()> &terminate = [](){ return false; },
@@ -232,22 +221,18 @@ class DeBruijnGraph : public SequenceGraph {
 
     virtual node_index kmer_to_node(std::string_view kmer) const;
 
-    using OutgoingEdgeCallback = std::function<void(node_index /* target_kmer */,
-                                                    char /* last_target_char */)>;
-    virtual void call_outgoing_kmers(node_index kmer,
-                                     const OutgoingEdgeCallback &callback) const = 0;
+    // A neighbour of a node and the character on the edge to it
+    typedef SmallVector<std::pair<node_index, char>, kMaxNeighbours> Edges;
 
-    using IncomingEdgeCallback = std::function<void(node_index /* source_kmer */,
-                                                    char /* first_source_char */)>;
-    virtual void call_incoming_kmers(node_index kmer,
-                                     const IncomingEdgeCallback &callback) const = 0;
+    // The target nodes of all edges outgoing from |kmer|, each with the last
+    // character of the target k-mer
+    virtual Edges outgoing_kmers(node_index kmer) const = 0;
+    // The source nodes of all edges incoming to |kmer|, each with the first
+    // character of the source k-mer
+    virtual Edges incoming_kmers(node_index kmer) const = 0;
 
-    // Given a node index, call the target nodes of all edges outgoing from it.
-    virtual void adjacent_outgoing_nodes(node_index node,
-                                         const std::function<void(node_index)> &callback) const override;
-    // Given a node index, call the source nodes of all edges incoming to it.
-    virtual void adjacent_incoming_nodes(node_index node,
-                                         const std::function<void(node_index)> &callback) const override;
+    virtual Nodes adjacent_outgoing_nodes(node_index node) const override;
+    virtual Nodes adjacent_incoming_nodes(node_index node) const override;
 
     // Check whether graph contains fraction of nodes from the sequence
     virtual bool find(std::string_view sequence, double discovery_fraction = 1) const;
@@ -263,14 +248,6 @@ class DeBruijnGraph : public SequenceGraph {
 
     // Call all nodes that have no incoming edges
     virtual void call_source_nodes(const std::function<void(node_index)> &callback) const;
-
-  protected:
-    // Callback interface on top of node_stream, for graphs that override it.
-    // Maps at most |max_chunk_size| - 1 nodes past the one terminate() stops at.
-    void call_streamed_nodes(std::string_view sequence, bool sequential,
-                             const std::function<void(node_index)> &callback,
-                             const std::function<bool()> &terminate,
-                             size_t max_chunk_size = NodeRange::kChunkSize) const;
 };
 
 

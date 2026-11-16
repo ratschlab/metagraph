@@ -401,9 +401,10 @@ check_path_results(const Index &idx, const Json::Value &e, const std::string &p)
             } else if (idx.mode == DeBruijnGraph::CANONICAL) {
                 // the canonical k-mer's row, shared with the reverse complement
                 DeBruijnGraph::node_index canonical = DeBruijnGraph::npos;
-                graph.map_to_nodes(s.substr(j, k), [&](DeBruijnGraph::node_index x) {
+                // a node range must not outlive its sequence: the free function maps the temporary
+                for (DeBruijnGraph::node_index x : mtg::graph::map_to_nodes(graph, s.substr(j, k))) {
                     canonical = x;
-                });
+                }
                 EXPECT_EQ(canonical - 1, rows[j].asUInt64());
             }
             EXPECT_LT(rows[j].asUInt64(), idx.anno->get_annotator().num_objects());
@@ -2180,7 +2181,9 @@ TEST(PatternPaths, TheRetrievalCounters) {
         p.sequence = s;
         for (size_t j = 0; j + kK <= s.size(); ++j) {
             DeBruijnGraph::node_index node = DeBruijnGraph::npos;
-            graph.map_to_nodes(s.substr(j, kK), [&](DeBruijnGraph::node_index x) { node = x; });
+            for (DeBruijnGraph::node_index x : mtg::graph::map_to_nodes(graph, s.substr(j, kK))) {
+                node = x;
+            }
             EXPECT_NE(DeBruijnGraph::npos, node) << s.substr(j, kK);
             p.keys.push_back(AnnotatedDBG::anno_to_graph_index(
                     AnnotatedDBG::graph_to_anno_index(node)));

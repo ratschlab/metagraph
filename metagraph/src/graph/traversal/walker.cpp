@@ -2782,25 +2782,26 @@ void Walker::init_arm(ArmState &arm) {
 
 std::vector<Succ> Walker::enumerate(ArmState &arm, node_index node, const std::string &kmer) {
     std::vector<Succ> out;
-    auto cb = [&](node_index n, char c) {
-        if (c != kSentinel && n != npos)
-            out.push_back({ n, c });
-    };
     try {
+        DeBruijnGraph::Edges edges;
         if (arm.arm == Arm::RIGHT) {
             if (canonical_) {
-                canonical_->call_outgoing_kmers(node, kmer, cb);
+                edges = canonical_->outgoing_kmers(node, kmer);
             } else {
-                graph_.call_outgoing_kmers(node, cb);
+                edges = graph_.outgoing_kmers(node);
             }
         } else {
             if (canonical_) {
-                canonical_->call_incoming_kmers(node, kmer, cb);
+                edges = canonical_->incoming_kmers(node, kmer);
             } else if (nfc_) {
-                nfc_->call_incoming_kmers(node, cb);
+                edges = nfc_->incoming_kmers(node);
             } else {
-                graph_.call_incoming_kmers(node, cb);
+                edges = graph_.incoming_kmers(node);
             }
+        }
+        for (auto [n, c] : edges) {
+            if (c != kSentinel && n != npos)
+                out.push_back({ n, c });
         }
     } catch (const std::runtime_error &e) {
         // CanonicalDBG throws an empty runtime_error on an inconsistent primary graph

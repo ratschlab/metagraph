@@ -12,11 +12,30 @@
 namespace mtg::test {
 struct CoordinateRecord { std::string sequence, column, header; };
 
+// The budget of the folds of the queries by record (graph::set_record_fold_values_budget)
+// while it lives: a release build's 16 MiB, or 0 as in a debug build (lane T7-M5, review M2)
+class FoldBudget {
+  public:
+    static constexpr size_t kRelease = size_t(16) << 20;
+    explicit FoldBudget(size_t bytes) : before_(graph::record_fold_values_budget()) {
+        graph::set_record_fold_values_budget(bytes);
+    }
+    ~FoldBudget() { graph::set_record_fold_values_budget(before_); }
+    FoldBudget(const FoldBudget &) = delete;
+    FoldBudget& operator=(const FoldBudget &) = delete;
+
+  private:
+    size_t before_;
+};
+
 // Small real coordinate-matrix fixture, with adjacent records in each column.
 // |verified_order|: its record mapping states its column labels and was checked against the
 // annotation, as a load of a .seqs written since H4 (CoordToHeader::column_order_verified).
 // |record_mapping| false: no record mapping (a coordinate index without a .seqs, whose labels
 // are its columns and whose coordinates are the column's, its records concatenated)
+// Without |row_diff| and |brwt|, the matrix is a |ColumnMatrix|: TupleCSCMatrix<ColumnMajor>
+// or a class derived from it.
+template <class ColumnMatrix = annot::matrix::TupleCSCMatrix<annot::matrix::ColumnMajor>>
 inline std::unique_ptr<graph::AnnotatedDBG>
 coordinate_test_graph(size_t k, const std::vector<CoordinateRecord> &records,
                       bool row_diff = false, bool brwt = false, bool verified_order = false,
@@ -38,11 +57,11 @@ coordinate_test_graph(size_t k, const std::vector<CoordinateRecord> &records,
     for (const auto &record : records) {
         auto col = encoder.encode(record.column);
         size_t pos = 0;
-        graph->map_to_nodes_sequentially(record.sequence, [&](auto node) {
+        for (auto node : map_to_nodes_sequentially(*graph, record.sequence)) {
             if (node)
                 coords[col][node - 1].push_back(offsets[col] + pos);
             ++pos;
-        });
+        }
         offsets[col] += pos;
         headers[col].push_back(record.header);
         counts[col].push_back(pos);
@@ -56,7 +75,9 @@ coordinate_test_graph(size_t k, const std::vector<CoordinateRecord> &records,
             if (!graph->has_single_outgoing(node))
                 return;
             uint64_t next = 0;
-            graph->adjacent_outgoing_nodes(node, [&](auto n) { next = n; });
+            for (auto n : graph->adjacent_outgoing_nodes(node)) {
+                next = n;
+            }
             if (next <= node)
                 return; // strictly increasing paths cannot form anchor-free cycles
             anchors[node - 1] = 0;
@@ -128,8 +149,9 @@ coordinate_test_graph(size_t k, const std::vector<CoordinateRecord> &records,
             BRWTBottomUpBuilder::build(std::move(bits), reversed),
             std::move(delimiters), std::move(values)));
     } else {
-        annotation = wrap(std::make_unique<TupleCSCMatrix<ColumnMajor>>(
-            ColumnMajor(std::move(bits)), std::move(delimiters), std::move(values)));
+        std::unique_ptr<TupleCSCMatrix<ColumnMajor>> matrix = std::make_unique<ColumnMatrix>(
+            ColumnMajor(std::move(bits)), std::move(delimiters), std::move(values));
+        annotation = wrap(std::move(matrix));
     }
     if (expected) {
         std::vector<BinaryMatrix::Row> ids;

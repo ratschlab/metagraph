@@ -29,9 +29,9 @@ size_t MaskedDeBruijnGraph::outdegree(node_index node) const {
     assert(in_graph(node));
 
     size_t outdegree = 0;
-    graph_->adjacent_outgoing_nodes(node, [&](auto index) {
+    for (auto index : graph_->adjacent_outgoing_nodes(node)) {
         outdegree += in_graph(index);
-    });
+    }
     return outdegree;
 }
 
@@ -39,50 +39,54 @@ size_t MaskedDeBruijnGraph::indegree(node_index node) const {
     assert(in_graph(node));
 
     size_t indegree = 0;
-    graph_->adjacent_incoming_nodes(node, [&](auto index) {
+    for (auto index : graph_->adjacent_incoming_nodes(node)) {
         indegree += in_graph(index);
-    });
+    }
     return indegree;
 }
 
-void MaskedDeBruijnGraph
-::adjacent_outgoing_nodes(node_index node, const std::function<void(node_index)> &callback) const {
+DeBruijnGraph::Nodes MaskedDeBruijnGraph::adjacent_outgoing_nodes(node_index node) const {
     assert(in_graph(node));
+    Nodes nodes;
 
-    graph_->adjacent_outgoing_nodes(node, [&](auto node) {
+    for (auto node : graph_->adjacent_outgoing_nodes(node)) {
         if (in_graph(node))
-            callback(node);
-    });
+            nodes.push_back(node);
+    }
+    return nodes;
 }
 
-void MaskedDeBruijnGraph
-::adjacent_incoming_nodes(node_index node, const std::function<void(node_index)> &callback) const {
+DeBruijnGraph::Nodes MaskedDeBruijnGraph::adjacent_incoming_nodes(node_index node) const {
     assert(in_graph(node));
+    Nodes nodes;
 
-    graph_->adjacent_incoming_nodes(node, [&](auto node) {
+    for (auto node : graph_->adjacent_incoming_nodes(node)) {
         if (in_graph(node))
-            callback(node);
-    });
+            nodes.push_back(node);
+    }
+    return nodes;
 }
 
-void MaskedDeBruijnGraph
-::call_outgoing_kmers(node_index kmer, const OutgoingEdgeCallback &callback) const {
+DeBruijnGraph::Edges MaskedDeBruijnGraph::outgoing_kmers(node_index kmer) const {
     assert(in_graph(kmer));
+    Edges edges;
 
-    graph_->call_outgoing_kmers(kmer, [&](const auto &index, auto c) {
+    for (auto [index, c] : graph_->outgoing_kmers(kmer)) {
         if (in_graph(index))
-            callback(index, c);
-    });
+            edges.emplace_back(index, c);
+    }
+    return edges;
 }
 
-void MaskedDeBruijnGraph
-::call_incoming_kmers(node_index kmer, const IncomingEdgeCallback &callback) const {
+DeBruijnGraph::Edges MaskedDeBruijnGraph::incoming_kmers(node_index kmer) const {
     assert(in_graph(kmer));
+    Edges edges;
 
-    graph_->call_incoming_kmers(kmer, [&](const auto &index, auto c) {
+    for (auto [index, c] : graph_->incoming_kmers(kmer)) {
         if (in_graph(index))
-            callback(index, c);
-    });
+            edges.emplace_back(index, c);
+    }
+    return edges;
 }
 
 bit_vector_stat get_boss_mask(const DBGSuccinct &dbg_succ,
@@ -225,34 +229,12 @@ void MaskedDeBruijnGraph
     }
 }
 
-// Traverse graph mapping sequence to the graph nodes
-// and run callback for each node until the termination condition is satisfied
-void MaskedDeBruijnGraph::map_to_nodes(std::string_view sequence,
-                                       const std::function<void(node_index)> &callback,
-                                       const std::function<bool()> &terminate) const {
-    graph_->map_to_nodes(
-        sequence,
-        [&](const node_index &index) {
-            callback(index && in_graph(index) ? index : npos);
-        },
-        terminate
-    );
-}
-
-// Traverse graph mapping sequence to the graph nodes
-// and run callback for each node until the termination condition is satisfied.
-// Guarantees that nodes are called in the same order as the input sequence
-void MaskedDeBruijnGraph
-::map_to_nodes_sequentially(std::string_view sequence,
-                            const std::function<void(node_index)> &callback,
-                            const std::function<bool()> &terminate) const {
-    graph_->map_to_nodes_sequentially(
-        sequence,
-        [&](const node_index &index) {
-            callback(index && in_graph(index) ? index : npos);
-        },
-        terminate
-    );
+std::unique_ptr<NodeStream>
+MaskedDeBruijnGraph::node_stream(std::string_view sequence, bool sequential) const {
+    return map_node_stream(graph_->node_stream(sequence, sequential),
+                           [this](node_index node) {
+        return node && in_graph(node) ? node : npos;
+    });
 }
 
 // Get string corresponding to |node_index|.

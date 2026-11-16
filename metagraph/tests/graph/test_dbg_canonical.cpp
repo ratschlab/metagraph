@@ -167,64 +167,50 @@ TYPED_TEST(DeBruijnGraphCanonicalTest, Traversals1) {
         }, DeBruijnGraph::CANONICAL);
 
         auto it = DeBruijnGraph::npos;
-        graph->map_to_nodes_sequentially(std::string(k, 'A'), [&](auto i) { it = i; });
-        graph->map_to_nodes_sequentially(
-            std::string(k, 'T'),
-            [&](auto i) {
-                EXPECT_NE(i, it);
-            }
-        );
-        graph->map_to_nodes(
-            std::string(k, 'T'),
-            [&](auto i) {
-                EXPECT_EQ(i, it);
-            }
-        );
+        for (auto i : map_to_nodes_sequentially(*graph, std::string(k, 'A'))) {
+            it = i;
+        }
+        for (auto i : map_to_nodes_sequentially(*graph, std::string(k, 'T'))) {
+            EXPECT_NE(i, it);
+        }
+        for (auto i : map_to_nodes(*graph, std::string(k, 'T'))) {
+            EXPECT_EQ(i, it);
+        }
 
         auto it2 = DeBruijnGraph::npos;
-        graph->map_to_nodes_sequentially(
-            std::string(k - 1, 'A') + "C",
-            [&](auto i) { it2 = i; }
-        );
+        for (auto i : map_to_nodes_sequentially(*graph, std::string(k - 1, 'A') + "C")) {
+            it2 = i;
+        }
         EXPECT_EQ(it, graph->traverse(it, 'A'));
         EXPECT_EQ(it2, graph->traverse(it, 'C'));
         EXPECT_EQ(it, graph->traverse_back(it2, 'A'));
         EXPECT_EQ(DeBruijnGraph::npos, graph->traverse(it, 'G'));
         EXPECT_EQ(DeBruijnGraph::npos, graph->traverse_back(it2, 'G'));
 
-        graph->map_to_nodes(std::string(k, 'G'), [&](auto i) { it = i; });
+        for (auto i : map_to_nodes(*graph, std::string(k, 'G'))) {
+            it = i;
+        }
         ASSERT_NE(DeBruijnGraph::npos, it);
-        graph->map_to_nodes_sequentially(
-            std::string(k, 'C'),
-            [&](auto i) {
-                EXPECT_EQ(i, it);
-            }
-        );
-        graph->map_to_nodes(
-            std::string(k, 'C'),
-            [&](auto i) {
-                EXPECT_EQ(i, it);
-            }
-        );
-        graph->map_to_nodes_sequentially(std::string(k, 'G'), [&](auto i) { it = i; });
+        for (auto i : map_to_nodes_sequentially(*graph, std::string(k, 'C'))) {
+            EXPECT_EQ(i, it);
+        }
+        for (auto i : map_to_nodes(*graph, std::string(k, 'C'))) {
+            EXPECT_EQ(i, it);
+        }
+        for (auto i : map_to_nodes_sequentially(*graph, std::string(k, 'G'))) {
+            it = i;
+        }
         ASSERT_NE(DeBruijnGraph::npos, it);
-        graph->map_to_nodes_sequentially(
-            std::string(k, 'C'),
-            [&](auto i) {
-                EXPECT_NE(i, it);
-            }
-        );
-        graph->map_to_nodes(
-            std::string(k, 'C'),
-            [&](auto i) {
-                EXPECT_NE(i, it);
-            }
-        );
+        for (auto i : map_to_nodes_sequentially(*graph, std::string(k, 'C'))) {
+            EXPECT_NE(i, it);
+        }
+        for (auto i : map_to_nodes(*graph, std::string(k, 'C'))) {
+            EXPECT_NE(i, it);
+        }
 
-        graph->map_to_nodes_sequentially(
-            std::string(k - 1, 'G') + "T",
-            [&](auto i) { it2 = i; }
-        );
+        for (auto i : map_to_nodes_sequentially(*graph, std::string(k - 1, 'G') + "T")) {
+            it2 = i;
+        }
         ASSERT_NE(DeBruijnGraph::npos, it2);
         EXPECT_EQ(DeBruijnGraph::npos, graph->traverse(it, 'A'));
         EXPECT_EQ(it, graph->traverse(it, 'G'));
@@ -246,10 +232,14 @@ TYPED_TEST(DeBruijnGraphCanonicalTest, Traversals2) {
 
         auto it = DeBruijnGraph::npos;
 
-        graph->map_to_nodes_sequentially(std::string(k, 'A'), [&](auto i) { it = i; });
+        for (auto i : map_to_nodes_sequentially(*graph, std::string(k, 'A'))) {
+            it = i;
+        }
         ASSERT_NE(DeBruijnGraph::npos, it);
 
-        graph->map_to_nodes_sequentially(std::string(k, 'A'), [&](auto i) { it = i; });
+        for (auto i : map_to_nodes_sequentially(*graph, std::string(k, 'A'))) {
+            it = i;
+        }
         ASSERT_NE(DeBruijnGraph::npos, it);
 
         EXPECT_EQ(it, graph->traverse(it, 'A'));
@@ -263,7 +253,9 @@ TYPED_TEST(DeBruijnGraphCanonicalTest, Traversals2) {
         EXPECT_EQ(DeBruijnGraph::npos, graph->traverse_back(it, 'G'));
 
         // reverse complement
-        graph->map_to_nodes_sequentially(std::string(k, 'G'), [&](auto i) { it = i; });
+        for (auto i : map_to_nodes_sequentially(*graph, std::string(k, 'G'))) {
+            it = i;
+        }
         ASSERT_NE(DeBruijnGraph::npos, it);
 
         EXPECT_EQ(it, graph->traverse(it, 'G'));
@@ -284,86 +276,67 @@ TYPED_TEST(DeBruijnGraphCanonicalTest, Traversals3) {
         }, DeBruijnGraph::CANONICAL);
 
         auto it = DeBruijnGraph::npos;
-        graph->map_to_nodes(std::string(k, 'A'), [&](auto i) { it = i; });
-        graph->map_to_nodes_sequentially(
-            std::string(k, 'T'),
-            [&](auto i) {
-                EXPECT_NE(i, it);
-            }
-        );
-        graph->map_to_nodes(
-            std::string(k, 'T'),
-            [&](auto i) {
-                EXPECT_EQ(i, it);
-            }
-        );
+        for (auto i : map_to_nodes(*graph, std::string(k, 'A'))) {
+            it = i;
+        }
+        for (auto i : map_to_nodes_sequentially(*graph, std::string(k, 'T'))) {
+            EXPECT_NE(i, it);
+        }
+        for (auto i : map_to_nodes(*graph, std::string(k, 'T'))) {
+            EXPECT_EQ(i, it);
+        }
 
         DeBruijnGraph::node_index it2;
-        graph->map_to_nodes(
-            std::string(k - 1, 'A') + "C",
-            [&](auto i) { it2 = i; }
-        );
+        for (auto i : map_to_nodes(*graph, std::string(k - 1, 'A') + "C")) {
+            it2 = i;
+        }
         EXPECT_EQ(it, graph->traverse(it, 'A'));
         EXPECT_EQ(it2, graph->traverse(it, 'C'));
         EXPECT_EQ(it, graph->traverse_back(it2, 'A'));
         EXPECT_EQ(DeBruijnGraph::npos, graph->traverse(it, 'G'));
         EXPECT_EQ(DeBruijnGraph::npos, graph->traverse_back(it2, 'G'));
 
-        graph->map_to_nodes(std::string(k, 'G'), [&](auto i) { it = i; });
+        for (auto i : map_to_nodes(*graph, std::string(k, 'G'))) {
+            it = i;
+        }
         ASSERT_NE(DeBruijnGraph::npos, it);
-        graph->map_to_nodes_sequentially(
-            std::string(k, 'C'),
-            [&](auto i) {
-                EXPECT_EQ(i, it);
-            }
-        );
-        graph->map_to_nodes(
-            std::string(k, 'C'),
-            [&](auto i) {
-                EXPECT_EQ(i, it);
-            }
-        );
-        graph->map_to_nodes(std::string(k, 'G'), [&](auto i) { it = i; });
+        for (auto i : map_to_nodes_sequentially(*graph, std::string(k, 'C'))) {
+            EXPECT_EQ(i, it);
+        }
+        for (auto i : map_to_nodes(*graph, std::string(k, 'C'))) {
+            EXPECT_EQ(i, it);
+        }
+        for (auto i : map_to_nodes(*graph, std::string(k, 'G'))) {
+            it = i;
+        }
         ASSERT_NE(DeBruijnGraph::npos, it);
-        graph->map_to_nodes_sequentially(
-            std::string(k, 'C'),
-            [&](auto i) {
-                EXPECT_EQ(i, it);
-            }
-        );
-        graph->map_to_nodes(
-            std::string(k, 'C'),
-            [&](auto i) {
-                EXPECT_EQ(i, it);
-            }
-        );
-        graph->map_to_nodes_sequentially(std::string(k, 'G'), [&](auto i) { it = i; });
+        for (auto i : map_to_nodes_sequentially(*graph, std::string(k, 'C'))) {
+            EXPECT_EQ(i, it);
+        }
+        for (auto i : map_to_nodes(*graph, std::string(k, 'C'))) {
+            EXPECT_EQ(i, it);
+        }
+        for (auto i : map_to_nodes_sequentially(*graph, std::string(k, 'G'))) {
+            it = i;
+        }
         ASSERT_NE(DeBruijnGraph::npos, it);
-        graph->map_to_nodes_sequentially(
-            std::string(k, 'C'),
-            [&](auto i) {
-                EXPECT_NE(i, it);
-            }
-        );
-        graph->map_to_nodes(
-            std::string(k, 'C'),
-            [&](auto i) {
-                EXPECT_NE(i, it);
-            }
-        );
+        for (auto i : map_to_nodes_sequentially(*graph, std::string(k, 'C'))) {
+            EXPECT_NE(i, it);
+        }
+        for (auto i : map_to_nodes(*graph, std::string(k, 'C'))) {
+            EXPECT_NE(i, it);
+        }
 
-        graph->map_to_nodes(
-            std::string(k - 1, 'G') + "T",
-            [&](auto i) { it2 = i; }
-        );
+        for (auto i : map_to_nodes(*graph, std::string(k - 1, 'G') + "T")) {
+            it2 = i;
+        }
         ASSERT_NE(DeBruijnGraph::npos, it2);
         EXPECT_EQ(DeBruijnGraph::npos, graph->traverse(it2, 'T'));
         EXPECT_NE(DeBruijnGraph::npos, graph->traverse(it2, 'C'));
 
-        graph->map_to_nodes_sequentially(
-            std::string(k - 1, 'G') + "T",
-            [&](auto i) { it2 = i; }
-        );
+        for (auto i : map_to_nodes_sequentially(*graph, std::string(k - 1, 'G') + "T")) {
+            it2 = i;
+        }
         ASSERT_NE(DeBruijnGraph::npos, it2);
         EXPECT_EQ(DeBruijnGraph::npos, graph->traverse(it2, 'A'));
         EXPECT_EQ(it, graph->traverse(it, 'G'));
@@ -384,9 +357,13 @@ TYPED_TEST(DeBruijnGraphCanonicalTest, Traversals4) {
 
         auto it = DeBruijnGraph::npos;
 
-        graph->map_to_nodes(std::string(k, 'A'), [&](auto i) { it = i; });
+        for (auto i : map_to_nodes(*graph, std::string(k, 'A'))) {
+            it = i;
+        }
         ASSERT_NE(DeBruijnGraph::npos, it);
-        graph->map_to_nodes_sequentially(std::string(k, 'A'), [&](auto i) { it = i; });
+        for (auto i : map_to_nodes_sequentially(*graph, std::string(k, 'A'))) {
+            it = i;
+        }
         ASSERT_NE(DeBruijnGraph::npos, it);
 
         EXPECT_EQ(it, graph->traverse(it, 'A'));
@@ -398,14 +375,18 @@ TYPED_TEST(DeBruijnGraphCanonicalTest, Traversals4) {
 
 
         // reverse complement
-        graph->map_to_nodes_sequentially(std::string(k, 'G'), [&](auto i) { it = i; });
+        for (auto i : map_to_nodes_sequentially(*graph, std::string(k, 'G'))) {
+            it = i;
+        }
         ASSERT_NE(DeBruijnGraph::npos, it);
         EXPECT_EQ(it, graph->traverse(it, 'G'));
         ASSERT_NE(DeBruijnGraph::npos, graph->traverse(it, 'T'));
         EXPECT_EQ(it, graph->traverse_back(graph->traverse(it, 'T'), 'G'));
 
 
-        graph->map_to_nodes(std::string(k, 'G'), [&](auto i) { it = i; });
+        for (auto i : map_to_nodes(*graph, std::string(k, 'G'))) {
+            it = i;
+        }
         ASSERT_NE(DeBruijnGraph::npos, it);
 
         EXPECT_EQ(DeBruijnGraph::npos, graph->traverse(it, 'G'));
@@ -435,22 +416,19 @@ TYPED_TEST(DeBruijnGraphCanonicalTest, map_to_nodes_canonical) {
         reverse_complement(rev_seq.begin(), rev_seq.end());
 
         std::vector<DeBruijnGraph::node_index> indices_forward;
-        graph->map_to_nodes(
-            sequence_to_map,
-            [&](auto i) { indices_forward.push_back(i); }
-        );
+        for (auto i : map_to_nodes(*graph, sequence_to_map)) {
+            indices_forward.push_back(i);
+        }
         std::vector<DeBruijnGraph::node_index> indices_reverse;
-        graph->map_to_nodes(
-            rev_seq,
-            [&](auto i) { indices_reverse.push_back(i); }
-        );
+        for (auto i : map_to_nodes(*graph, rev_seq)) {
+            indices_reverse.push_back(i);
+        }
         std::reverse(indices_reverse.begin(), indices_reverse.end());
 
         std::vector<DeBruijnGraph::node_index> indices_canonical;
-        graph_can->map_to_nodes(
-            sequence_to_map,
-            [&](auto i) { indices_canonical.push_back(i); }
-        );
+        for (auto i : map_to_nodes(*graph_can, sequence_to_map)) {
+            indices_canonical.push_back(i);
+        }
 
         ASSERT_EQ(indices_forward.size(), indices_reverse.size());
         ASSERT_EQ(indices_forward.size(), indices_canonical.size());

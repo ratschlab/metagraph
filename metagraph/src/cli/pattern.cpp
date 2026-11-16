@@ -1841,7 +1841,9 @@ Json::Value process_pattern_request(
         DeBruijnGraph::node_index key = c.base_node;
         if (support.mode == GraphMode::CANONICAL) {
             key = DeBruijnGraph::npos;
-            graph.map_to_nodes(kmer, [&](DeBruijnGraph::node_index n) { key = n; });
+            for (DeBruijnGraph::node_index n : graph.node_range(kmer)) {
+                key = n;
+            }
         }
         r["instance"] = kmer.substr(c.offset, length);
         if (collected) {
@@ -1904,11 +1906,11 @@ Json::Value process_pattern_request(
         std::vector<DeBruijnGraph::node_index> keys(n, DeBruijnGraph::npos);
         if (support.mode == GraphMode::CANONICAL) {
             size_t j = 0;
-            graph.map_to_nodes(c.sequence, [&](DeBruijnGraph::node_index x) {
+            for (DeBruijnGraph::node_index x : graph.node_range(c.sequence)) {
                 if (j < n)
                     keys[j] = x;
                 ++j;
-            });
+            }
         } else {
             for (size_t j = 0; j < n; ++j) {
                 keys[j] = search.base_node(c.path[j]);

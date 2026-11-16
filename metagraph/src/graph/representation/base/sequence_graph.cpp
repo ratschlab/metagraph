@@ -1,7 +1,6 @@
 #include "sequence_graph.hpp"
 
 #include <algorithm>
-#include <array>
 #include <cassert>
 #include <progress_bar.hpp>
 #include <sdsl/int_vector.hpp>
@@ -58,9 +57,8 @@ void SequenceGraph::serialize_extensions(const std::string &filename) const {
 node_index DeBruijnGraph::kmer_to_node(std::string_view kmer) const {
     assert(kmer.size() == get_k());
 
-    node_index node = npos;
-    map_to_nodes_sequentially(kmer, [&node](node_index i) { node = i; });
-    return node;
+    // a k-mer maps to exactly one node
+    return *node_range(kmer, true).begin();
 }
 
 // Check whether graph contains fraction of nodes from the sequence
@@ -72,36 +70,40 @@ bool DeBruijnGraph::find(std::string_view sequence,
     const size_t num_kmers = sequence.length() - get_k() + 1;
     const size_t max_kmers_missing = num_kmers * (1 - discovery_fraction);
     const size_t min_kmers_discovered = num_kmers - max_kmers_missing;
+    if (!min_kmers_discovered)
+        return true;
+
     size_t num_kmers_discovered = 0;
     size_t num_kmers_missing = 0;
 
-    map_to_nodes(sequence,
-        [&](node_index node) {
-            if (node) {
-                num_kmers_discovered++;
-            } else {
-                num_kmers_missing++;
-            }
-        },
-        [&]() { return num_kmers_missing > max_kmers_missing
-                        || num_kmers_discovered >= min_kmers_discovered; }
-    );
+    for (node_index node : node_range(sequence)) {
+        if (node) {
+            if (++num_kmers_discovered >= min_kmers_discovered)
+                return true;
+        } else if (++num_kmers_missing > max_kmers_missing) {
+            return false;
+        }
+    }
 
     return num_kmers_missing <= max_kmers_missing;
 }
 
-void DeBruijnGraph
-::adjacent_outgoing_nodes(node_index node,
-                          const std::function<void(node_index)> &callback) const {
+DeBruijnGraph::Nodes DeBruijnGraph::adjacent_outgoing_nodes(node_index node) const {
     assert(in_graph(node));
-    call_outgoing_kmers(node, [&](auto child, char) { callback(child); });
+    Nodes nodes;
+    for (auto [child, c] : outgoing_kmers(node)) {
+        nodes.push_back(child);
+    }
+    return nodes;
 }
 
-void DeBruijnGraph
-::adjacent_incoming_nodes(node_index node,
-                          const std::function<void(node_index)> &callback) const {
+DeBruijnGraph::Nodes DeBruijnGraph::adjacent_incoming_nodes(node_index node) const {
     assert(in_graph(node));
-    call_incoming_kmers(node, [&](auto parent, char) { callback(parent); });
+    Nodes nodes;
+    for (auto [parent, c] : incoming_kmers(node)) {
+        nodes.push_back(parent);
+    }
+    return nodes;
 }
 
 bool DeBruijnGraph::operator==(const DeBruijnGraph &other) const {
@@ -187,9 +189,9 @@ void call_sequences_from(const DeBruijnGraph &graph,
             ++progress_bar;
 
             targets.clear();
-            graph.call_outgoing_kmers(node,
-                [&](node_index next, char c) { targets.emplace_back(next, c); }
-            );
+            for (auto [next, c] : graph.outgoing_kmers(node)) {
+                targets.emplace_back(next, c);
+            }
 
             if (targets.empty())
                 break;
@@ -307,19 +309,17 @@ void call_sequences_from(const DeBruijnGraph &graph,
 
                     // schedule traversal branched off from each terminal dual k-mer
                     if (i == 0) {
-                        graph.adjacent_outgoing_nodes(dual_path[i],
-                            [&](auto next) {
-                                if (!(*discovered)[next]) {
-                                    (*discovered)[next] = true;
-                                    queue.push_back(next);
-                                }
+                        for (auto next : graph.adjacent_outgoing_nodes(dual_path[i])) {
+                            if (!(*discovered)[next]) {
+                                (*discovered)[next] = true;
+                                queue.push_back(next);
                             }
-                        );
+                        }
                     } else if (!dual_path[i - 1]) {
                         size_t num_outgoing = 0;
-                        graph.adjacent_outgoing_nodes(dual_path[i],
-                            [&](node_index next) { num_outgoing++; node = next; }
-                        );
+                        for (node_index next : graph.adjacent_outgoing_nodes(dual_path[i])) {
+                            num_outgoing++; node = next;
+                        }
                         // schedule only if it has a single outgoing k-mer,
                         // otherwise it's a fork which will be covered in the forward pass.
                         if (num_outgoing == 1) {
@@ -406,10 +406,10 @@ void call_sequences(const DeBruijnGraph &graph,
     call_zeros(visited, [&](auto node) {
         // TODO: these two calls to outgoing nodes could be combined into one
         if (graph.has_multiple_outgoing(node)) {
-            graph.adjacent_outgoing_nodes(node, [&](auto next) {
+            for (auto next : graph.adjacent_outgoing_nodes(node)) {
                 if (!visited[next])
                     call_paths_from(next);
-            });
+            }
         }
     });
 
@@ -464,19 +464,16 @@ void DeBruijnGraph
 
                 auto next_node = npos;
                 char next_c = '\0';
-                call_outgoing_kmers(
-                    node,
-                    [&, &sequence=sequence](const auto &next, char c) {
-                        if (visited[next])
-                            return;
+                for (auto [next, c] : outgoing_kmers(node)) {
+                    if (visited[next])
+                        continue;
 
-                        if (next_node == npos) {
-                            std::tie(next_node, next_c) =  std::tie(next, c);
-                        } else {
-                            nodes.emplace(next, sequence + c);
-                        }
+                    if (next_node == npos) {
+                        std::tie(next_node, next_c) = std::tie(next, c);
+                    } else {
+                        nodes.emplace(next, sequence + c);
                     }
-                );
+                }
 
                 if (next_node == npos)
                     break;
@@ -527,72 +524,36 @@ size_t incoming_edge_rank(const SequenceGraph &graph,
     size_t edge_rank = 0;
     bool done = false;
 
-    graph.adjacent_incoming_nodes(target, [&](auto node) {
+    for (auto node : graph.adjacent_incoming_nodes(target)) {
         if (node == source)
             done = true;
 
         if (!done)
             edge_rank++;
-    });
+    }
 
     assert(done && "the edge must exist in graph");
 
     return edge_rank;
 }
 
-std::unique_ptr<NodeStream>
-SequenceGraph::node_stream(std::string_view sequence, bool sequential) const {
-    return std::make_unique<BufferedNodeStream>(
-        sequential ? graph::map_to_nodes_sequentially(*this, sequence)
-                   : graph::map_to_nodes(*this, sequence)
-    );
-}
-
-void DeBruijnGraph::call_streamed_nodes(std::string_view sequence, bool sequential,
-                                        const std::function<void(node_index)> &callback,
-                                        const std::function<bool()> &terminate,
-                                        size_t max_chunk_size) const {
-    assert(max_chunk_size && max_chunk_size <= NodeRange::kChunkSize);
-    if (terminate())
-        return;
-
-    // Pull chunks of doubling size: a virtual call per node is slow for fast
-    // graphs, while terminate() may stop early, and then at most as many nodes
-    // are mapped in vain as were already passed to the callback
-    auto stream = node_stream(sequence, sequential);
-    std::array<node_index, NodeRange::kChunkSize> buffer;
-    for (size_t size = 1; ; size = std::min(2 * size, max_chunk_size)) {
-        size_t n = stream->next({ buffer.data(), size });
-        for (size_t i = 0; i < n; ++i) {
-            callback(buffer[i]);
-            if (terminate())
-                return;
-        }
-        if (n < size)
-            return;
+static std::vector<node_index> collect_nodes(NodeRange&& nodes, size_t max_num_nodes) {
+    std::vector<node_index> result;
+    result.reserve(max_num_nodes);
+    for (node_index node : nodes) {
+        result.push_back(node);
     }
+    return result;
 }
 
 std::vector<SequenceGraph::node_index>
 map_to_nodes_sequentially(const SequenceGraph &graph, std::string_view sequence) {
-    std::vector<SequenceGraph::node_index> nodes;
-    nodes.reserve(sequence.size());
-
-    graph.map_to_nodes_sequentially(sequence,
-        [&nodes](auto node) { nodes.push_back(node); }
-    );
-
-    return nodes;
+    return collect_nodes(graph.node_range(sequence, true), sequence.size());
 }
 
 std::vector<SequenceGraph::node_index>
 map_to_nodes(const SequenceGraph &graph, std::string_view sequence) {
-    std::vector<node_index> nodes;
-    nodes.reserve(sequence.size());
-
-    graph.map_to_nodes(sequence, [&](node_index i) { nodes.push_back(i); });
-
-    return nodes;
+    return collect_nodes(graph.node_range(sequence), sequence.size());
 }
 
 void reverse_complement_seq_path(const SequenceGraph &graph,
