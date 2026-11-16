@@ -809,7 +809,12 @@ class TestRefusals(unittest.TestCase):
         with self.assertRaises(BadSelector) as cm:
             u.label({'id': 0})
         self.assertEqual(str(cm.exception), U.TEXTS['label_id'])
-        size = len(U.C.canonical_json({'statements': u.summary(max_bytes=10 ** 6)['statements']}))
+        full = u.summary(max_bytes=10 ** 6)
+        no_arms = ['arms left out (max_bytes)']
+        size = min(len(U.C.canonical_json(o)) for o in (
+            {'statements': full['statements'], 'pairs': full['pairs'], 'notes': no_arms},
+            {'statements': full['statements'], 'notes': ['pairs left out (max_bytes)'] +
+             no_arms}))
         refused(self, 'summary_too_small', lambda: u.summary(max_bytes=100),
                 U.TEXTS['summary_too_small'] % (size, 100, size))
         refused(self, 'not_offered', u.dump, U.TEXTS['not_offered_dump'])
@@ -819,6 +824,53 @@ class TestRefusals(unittest.TestCase):
                 U.TEXTS['not_offered_inferred'])
         refused(self, 'not_offered', lambda: u.walks('right', max_transitions=2))
         refused(self, 'not_offered', lambda: u.spell('right', 'i:1.2'))
+
+
+class TestSummaryBound(unittest.TestCase):
+    """summary(max_bytes=) answers at most max_bytes of canonical JSON, its notes included,
+    or refuses summary_too_small (GPT review M6; the service turns a larger answer into
+    result_too_large)."""
+
+    def sweep(self, u, caps):
+        got = {}
+        for mb in caps:
+            try:
+                out = u.summary(max_bytes=mb)
+            except CombineRefused as e:
+                self.assertEqual(e.code, 'summary_too_small', mb)
+                got[mb] = None
+                continue
+            n = len(U.C.canonical_json(out).encode('utf-8'))
+            self.assertLessEqual(n, mb, (mb, out.get('notes')))
+            self.assertIn('statements', out)
+            got[mb] = n
+        return got
+
+    def test_every_ceiling_on_the_locus(self):
+        u = locus()
+        got = self.sweep(u, range(1, 2400))
+        least = min(mb for mb, n in got.items() if n is not None)
+        self.assertTrue(all(got[mb] is None for mb in range(1, least)))
+        self.assertEqual(got[least], least)
+        refused(self, 'summary_too_small', lambda: u.summary(max_bytes=least - 1),
+                U.TEXTS['summary_too_small'] % (least, least - 1, least))
+        # the exact boundary of the whole answer: at its size it is whole, one byte less
+        # leaves something out and says so
+        full = u.summary(max_bytes=10 ** 6)
+        self.assertNotIn('notes', full)
+        n = len(U.C.canonical_json(full))
+        self.assertEqual(u.summary(max_bytes=n), full)
+        less = u.summary(max_bytes=n - 1)
+        self.assertLessEqual(len(U.C.canonical_json(less)), n - 1)
+        self.assertEqual(less['notes'], ['top walks cut (max_bytes)'])
+
+    def test_the_services_sweep_on_r237(self):
+        # the service's repro: r237 (2 parts, 9 absent, 11 expected), 2404..6000 bp in steps
+        # of 7; at 68e29b5e0 199 of the 514 answered over the limit, by up to 56 bytes
+        _, u = r237_union()
+        got = self.sweep(u, range(2404, 6001, 7))
+        self.assertEqual(len(got), 514)
+        self.assertGreater(sum(1 for n in got.values() if n is not None), 400)
 
 
 def _common(a, b):

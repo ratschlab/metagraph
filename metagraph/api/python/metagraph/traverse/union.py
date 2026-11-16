@@ -113,8 +113,9 @@ TEXTS = {
                       'to be one record; select by {pair, name} or {pair, ref}',
     'label_id': 'label ids are local to each part of a pair union: select by {pair, ref} or '
                 '{pair, name}',
-    'summary_too_small': 'the statements alone take %d bytes, more than max_bytes=%d: they '
-                         'are never cut; pass max_bytes >= %d',
+    'summary_too_small': 'the statements alone take %d bytes with the notes of what is left '
+                         'out, more than max_bytes=%d: they are never cut; pass max_bytes '
+                         '>= %d',
     'not_offered_dump': 'a pair union is not an MGT document: each part dumps on its own '
                         '(parts[i].graphlet.dump())',
     'not_offered_json': 'to_json() is detail "full" of one server result, and a pair union '
@@ -1701,50 +1702,57 @@ class PairUnion:
             st = self._statements(s, None, 'supported', b)
             sts.append({'arm': s, 'coverage': _core_sentence(st.coverage),
                         'provenance': st.provenance})
-        out = {'statements': {'per_arm': sts, 'turn_offs': TURN_OFFS,
-                              'labels': self._labels_sentence(b), 'scope': SCOPE}}
-        size = len(C.canonical_json(out))
-        if size > max_bytes:
-            raise _refuse('summary_too_small', None, size, max_bytes, size)
-        out['notes'] = []
+        base = {'statements': {'per_arm': sts, 'turn_offs': TURN_OFFS,
+                               'labels': self._labels_sentence(b), 'scope': SCOPE}}
 
-        def fits(o):
-            return len(C.canonical_json(o)) <= max_bytes
+        # every fit test is of the answer as it would be returned, its notes included: a
+        # section is added only where the answer still fits with the notes of what may be
+        # left out after it (GPT review M6)
+        def size(o, notes):
+            if notes:
+                o = dict(o, notes=list(notes))
+            return len(C.canonical_json(o))
 
-        cand = dict(out)
-        cand['pairs'] = {p.tag: _summary_part(p, self._below_codes(p.tag)) for p in self.parts}
-        cand['pairs'].update({a.tag: {'absent': a.category, 'seed_check': a.seed_check}
-                              for a in self.absent})
-        cand['pairs'].update({t: {'not_included': True} for t in self._not_included})
-        if fits(cand):
-            out = cand
-        else:
-            out['notes'].append('pairs left out (max_bytes)')
+        pairs = {p.tag: _summary_part(p, self._below_codes(p.tag)) for p in self.parts}
+        pairs.update({a.tag: {'absent': a.category, 'seed_check': a.seed_check}
+                      for a in self.absent})
+        pairs.update({t: {'not_included': True} for t in self._not_included})
         arms = {}
+        ranked = []
         for s in self.arms():
-            ws = self._figures(s, b)
-            walks = [w for w in ws if w.kind == 'walk']
-            arms[s] = {'walks': len(walks), 'stub_walks': len(ws) - len(walks),
+            figs = self._figures(s, b)
+            walks = [w for w in figs if w.kind == 'walk']
+            arms[s] = {'walks': len(walks), 'stub_walks': len(figs) - len(walks),
                        'segments': len(self._arms[s].order), 'top': []}
-        cand = dict(out, arms=arms)
-        if fits(cand):
-            out = cand
-            for s in self.arms():
-                figs = self._figures(s, b)
-                ranked = sorted((i for i, w in enumerate(figs) if w.kind == 'walk'),
-                                key=lambda i: (-len(figs[i].held_in), -len(figs[i].whole_in),
-                                               -figs[i].length_bp, i))
-                for i in ranked[:10]:
-                    arms[s]['top'].append({'id': i, 'length_bp': figs[i].length_bp,
-                                           'held_in': list(figs[i].held_in)})
-                    if not fits(out):
-                        arms[s]['top'].pop()
-                        out['notes'].append('top walks cut (max_bytes)')
-                        break
+            order = sorted((i for i, w in enumerate(figs) if w.kind == 'walk'),
+                           key=lambda i: (-len(figs[i].held_in), -len(figs[i].whole_in),
+                                          -figs[i].length_bp, i))
+            ranked += [(s, {'id': i, 'length_bp': figs[i].length_bp,
+                            'held_in': list(figs[i].held_in)}) for i in order[:10]]
+        no_pairs, no_arms = 'pairs left out (max_bytes)', 'arms left out (max_bytes)'
+        cut = ['top walks cut (max_bytes)'] if ranked else []
+        with_pairs = dict(base, pairs=pairs)
+        if size(with_pairs, [no_arms]) <= max_bytes:
+            out, notes = with_pairs, []
+        elif size(base, [no_pairs, no_arms]) <= max_bytes:
+            out, notes = dict(base), [no_pairs]
         else:
-            out['notes'].append('arms left out (max_bytes)')
-        if not out['notes']:
-            del out['notes']
+            # the smallest answer: the statements and the notes of what is left out
+            least = min(size(with_pairs, [no_arms]), size(base, [no_pairs, no_arms]))
+            raise _refuse('summary_too_small', None, least, max_bytes, least)
+        cand = dict(out, arms=arms)
+        if size(cand, notes + cut) <= max_bytes:
+            out = cand
+            for k, (s, row) in enumerate(ranked):
+                arms[s]['top'].append(row)
+                if size(out, notes + (cut if k + 1 < len(ranked) else [])) > max_bytes:
+                    arms[s]['top'].pop()
+                    notes += cut
+                    break
+        else:
+            notes.append(no_arms)
+        if notes:
+            out['notes'] = notes
         return out
 
     def evidence(self, arm=None):
