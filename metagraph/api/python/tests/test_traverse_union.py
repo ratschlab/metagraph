@@ -92,13 +92,32 @@ def admitted_paths(gfa):
     return paths
 
 
+def limits_with_bases():
+    """limits.mgt (no bases) with bases filled in: a zero-length merge leaf that max_steps
+    stopped, entered from two parents."""
+    g = copy.deepcopy(T.graphlet('limits'))
+    for seg, w in zip(g.arms['right'].segments, ['ACG', 'CAAA', 'GAAA', '']):
+        assert len(w) == seg.length_bp
+        seg.walk = w
+    return g
+
+
+def one_part_graphlets():
+    """(name, graphlet, union input) of each committed fixture with bases, limits.mgt's
+    with bases filled in (it names no graph, so it is passed with a pair name)."""
+    out = [(name, T.graphlet(name)) for name in WITH_BASES]
+    out = [(name, g, g) for name, g in out]
+    g = limits_with_bases()
+    return out + [('limits+bases', g, {'pair': 'L', 'graphlet': g})]
+
+
 class TestOnePart(unittest.TestCase):
     """P2: the union of one part is that part."""
 
     def test_walks_are_the_parts_walks(self):
-        for name in WITH_BASES:
-            g = T.graphlet(name)
-            u = union_pairs([g])
+        stubs_to_a_leaf = 0
+        for name, g, given in one_part_graphlets():
+            u = union_pairs([given])
             for side in g.arms:
                 parts = {g.spell(side, w.path_id): w for w in g.walks(side, by='id')}
                 kinds = [w.kind for w in u.walks(side, by='id', stubs=True)]
@@ -121,8 +140,26 @@ class TestOnePart(unittest.TestCase):
                         self.assertEqual(sp.how, 'merges')
                         self.assertEqual(sp.route.how, 'held')
                         self.assertEqual(sp.route.to_bp, w.length_bp)
-                        self.assertTrue(sp.route.goes_on)
                         self.assertEqual(w.held_in, (u.parts[0].tag,))
+                        segs = g.arms[side].segments
+                        at_leaf = [pw for pw in g.walks(side, by='id')
+                                   if pw.leaf in segs[sp.stub_end].children
+                                   and not segs[pw.leaf].length_bp]
+                        if sp.route.goes_on:
+                            self.assertEqual(at_leaf, [], (name, side, w.id))
+                            continue
+                        # a stub into a zero-length merge leaf: the route ends at the part
+                        # leaf and takes the part walk's own end and certificate there
+                        stubs_to_a_leaf += 1
+                        pw = at_leaf[0]
+                        self.assertEqual(sp.route.end_reasons,
+                                         {'path_reason': pw.path_reason,
+                                          'labels': pw.end_reasons}, (name, side, w.id))
+                        self.assertEqual((sp.route.complete, sp.route.certified_to_bp),
+                                         (pw.complete, pw.length_bp - pw.beyond_certified_bp))
+                        self.assertEqual((sp.complete, sp.certified_to_bp),
+                                         (pw.complete, pw.length_bp - pw.beyond_certified_bp))
+        self.assertGreater(stubs_to_a_leaf, 0)
 
     def test_coverage_is_the_arm_certificate(self):
         for name in WITH_BASES:
@@ -142,9 +179,8 @@ class TestOnePart(unittest.TestCase):
         self.assertEqual(str(cm.exception), U.TEXTS['no_bases'] % 'g')
 
     def test_spell_equals_the_parts_spelling(self):
-        for name in WITH_BASES:
-            g = T.graphlet(name)
-            u = union_pairs([g])
+        for name, g, given in one_part_graphlets():
+            u = union_pairs([given])
             for side in g.arms:
                 for w in u.walks(side, by='id'):
                     sp = u.carriers(side, w.id)[0]
@@ -152,6 +188,32 @@ class TestOnePart(unittest.TestCase):
                         for s in (False, True):
                             self.assertEqual(u.spell(side, w.id, o, s),
                                              g.spell(side, sp.walk, o, s))
+
+
+class TestRoutes(unittest.TestCase):
+    """§2.4 'Routes through merges': a route that ends at a part leaf takes the part walk's
+    own complete and certificate there."""
+
+    def test_a_route_held_to_a_leaf_a_resource_stopped(self):
+        m = copy.deepcopy(T.graphlet('merge'))
+        (leaf,) = [s for s in m.arms['right'].segments if s.leaf is not None]
+        leaf.leaf.path_reason = 'M'                     # time_budget: a resource stop
+        (own,) = m.walks('right')
+        self.assertEqual((own.length_bp, own.path_reason, own.complete),
+                         (100, 'time_budget', False))
+        u = union_pairs([{'pair': 'gM', 'graphlet': m},
+                         {'pair': 'gT', 'graphlet': T.graphlet('merge_ties')}])
+        seen = 0
+        for w in u.walks('right', by='id', stubs=True):
+            s = {x.pair: x for x in u.carriers('right', w.id)}['gM']
+            if s.how != 'merges' or s.route.goes_on:
+                continue
+            # the route is held to gM's leaf: gM's own walk there is incomplete
+            seen += 1
+            self.assertEqual((s.route.how, s.route.to_bp, s.route.end_reasons['path_reason'],
+                              s.route.complete, s.complete),
+                             ('held', 100, 'time_budget', False, False))
+        self.assertEqual(seen, 1)
 
 
 class TestTrie(unittest.TestCase):

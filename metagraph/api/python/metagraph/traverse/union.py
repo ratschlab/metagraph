@@ -2144,6 +2144,7 @@ def _route(un, t, pi, part, a, stub, m, j, d, path, length, into, with_labels, a
     n = 0                       # bases of |rest| matched
     none = {'path_reason': None, 'labels': {}}
     reasons, code = none, None
+    held_leaf = None
     while True:
         s = segs[cur]
         route.append((cur, cur_j))
@@ -2156,6 +2157,14 @@ def _route(un, t, pi, part, a, stub, m, j, d, path, length, into, with_labels, a
             how = 'held'
             goes_on = i < len(w) or any(segs[c].length_bp or segs[c].children
                                         for c in s.children)
+            if not goes_on:
+                # the route ends at a part leaf (this segment's, or a zero-length leaf
+                # child's: a merge node there): it takes that leaf's reasons and certificate
+                leaf = cur if s.leaf is not None else next(
+                    (c for c in s.children if segs[c].leaf is not None), None)
+                if leaf is not None:
+                    reasons, code = _leaf_reasons(g, a, leaf)
+                    held_leaf = leaf
             break
         if i < len(w):
             how, goes_on = 'diverges', True
@@ -2183,6 +2192,8 @@ def _route(un, t, pi, part, a, stub, m, j, d, path, length, into, with_labels, a
     # certification
     if how == 'ends':
         complete, cert = _leaf_cert(a, cur, code)
+    elif held_leaf is not None:
+        complete, cert = _leaf_cert(a, held_leaf, code)
     else:
         cert = min(pos, a.complete_to_bp)
         complete = how == 'held' and pos <= a.complete_to_bp
