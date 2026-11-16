@@ -665,7 +665,9 @@ class PairUnion:
                 _check_seed(useed, ref_tag, C.case_mapped(seed, alphabet), 'seed', None,
                             alphabet)
         else:
-            useed, ref_tag = seed, None
+            # no part: the alphabet is not known, so the case mapping of every DNA and
+            # protein build (upper case) applies
+            useed, ref_tag = seed.upper(), None
         for e in elems:
             tag = tags[id(cls_of[id(e.desc)])]
             if e.kind == 'part':
@@ -679,8 +681,8 @@ class PairUnion:
                                   len(useed), 0)
                 for sq in (e.sent, e.sequence):
                     if sq is not None:
-                        _check_seed(useed, ref_tag, C.case_mapped(sq, alphabet), 'absent', tag,
-                                    alphabet)
+                        sq = C.case_mapped(sq, alphabet) if alphabet else sq.upper()
+                        _check_seed(useed, ref_tag, sq, 'absent', tag, alphabet)
         # duplicate_pair (and the no-ops)
         kept = _dedupe(elems, cls_of, tags)
         # not_expected
