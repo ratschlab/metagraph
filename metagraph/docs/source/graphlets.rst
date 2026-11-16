@@ -1623,7 +1623,8 @@ queries that read one retrieval's records (``dump()``, ``to_json()``, ``compare(
 ``subgraph()``, ``to_gfa()``, ``label_walks()``, ``routes()``, ``label_summary()``,
 ``splits()``) are not, and are refused with ``not_offered``. ``provenance()`` lists each
 part's replay request: replaying a stitched graphlet replays its parts and stitches them
-again.
+again. A stitched graphlet can be one pair's part of a union (`A stitched graphlet as a
+part`_).
 
 Comparing retrievals
 ^^^^^^^^^^^^^^^^^^^^
@@ -1838,6 +1839,8 @@ takes everything one seed's request returned across pairs, in any order:
 * a ``Graphlet`` whose envelope names its pair (``graph``, ``graph_path``,
   ``annotation_path``, ``index_fp``, ...), or ``{'pair': ..., 'graphlet': g}`` for a body
   without one (a graph name or a pair object, stated by the caller);
+* a ``StitchedGraphlet`` (experimental, `A stitched graphlet as a part`_), in either form:
+  one pair's answer, its root and the continuations stitched to it;
 * a ``TraverseResponse`` of one seed (``{'response': r, 'index': i}`` picks one seed of
   several), with or without a graphlet: a result without one is an *absent record*;
 * ``{'pair': ..., 'result': r}`` (with ``'error'`` and ``'sequence'`` beside it if known)
@@ -1875,6 +1878,38 @@ result in the order given. A part without its envelope raises ``MissingEnvelope`
 ``dump()``, ``to_json()``, ``compare()``, ``save()``, ``support_by_depth()`` and
 ``next_request()`` are refused ``not_offered``: a union is not an MGT document, and each
 part keeps them.
+
+A stitched graphlet as a part
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+A ``StitchedGraphlet`` (`Stitching a continuation`_) is one pair's answer: its pair, seed,
+envelope, request and certificate are its root's, and its digest is its retrieval identity.
+Its root goes into the union as a plain part would, and each child's tree goes in where the
+walk it continues ends, so the union walks of that pair are its stitched walks, named by
+their keys (``PairSpan.walk`` is ``(3, 0)`` past a junction, the path id ``3`` before one).
+Where no junction is read, the part answers as its root alone: ``stitch(g)``, with no
+junction, answers every union query as ``g`` (only its digest differs). Past a junction, as
+the stitched graphlet itself states:
+
+* each span names the junctions it reads (``PairSpan.junctions``: ``SpanJunction`` with
+  ``at_bp``, ``verdict``, the child's part key and the junction's cause codes), is never
+  complete, and is certified at most to the first junction (the stitched walk's
+  ``certified_to_bp``); a route through a merge that reaches a continued walk goes on in the
+  child, and reads its junction;
+* absence is ``graph`` only at a dead end, otherwise ``uncertified``: the child's own seed
+  re-entry and edge history may stop it where an uninterrupted walk goes on;
+* labels are the child's own from the junction on (``from_bp`` at least the junction's): the
+  union does not join labels across a junction, so it states less than
+  ``StitchedWalk.labels_full``, which keeps a label whole on every piece and continued;
+* the pair's coverage category is its root's, with a note naming the junctions, and
+  ``evidence()`` gives the stitched graphlet's own block (its junctions and causes) for an
+  arm with a junction; ``exact`` is false there;
+* each segment's support names the sub-part that spells it (``SegmentSupport.part``, its
+  ``Part.key``), and FASTA and GFA state the junctions (below).
+
+A stitched graphlet and a plain graphlet of one pair are two retrievals of it
+(``duplicate_pair``, ``stitch(g)`` and ``g`` included); every part of a stitched graphlet
+must carry bases. A union is never stitched: ``stitch()`` refuses it.
 
 Walks, spans and absence
 ^^^^^^^^^^^^^^^^^^^^^^^^
@@ -2018,10 +2053,13 @@ FASTA and GFA
 
 ``to_fasta()`` writes one record per union walk, its header the walk's provenance as
 ``key=value`` tokens (``held=``, ``whole=``, ``extends=``, ``merges=``, ``ends=``,
-``diverges=`` with each span's absence, ``certified=``, ``labels=``, ``modes=``,
+``diverges=`` with each span's absence, ``certified=``, ``junctions=`` for a stitched
+part's junctions the walk reads as ``<pair>@<bp>:qualified``, ``labels=``, ``modes=``,
 ``absent=``, ``not_included=``, ``mapping=``, and always ``scope=within_one_graph``); pair
 names escape the reserved characters as ``%XX``. ``to_gfa()`` writes the statements as
-comment lines, then one tree per arm on the seed strand: union segments linked to their
+comment lines (a stitched part's junctions among them: ``# stitched (experimental): A
+joins right walk 0 at 20 bp (qualified); nothing past a junction is complete or exact``),
+then one tree per arm on the seed strand: union segments linked to their
 children only, the seed once per arm (``seed_l``, ``seed_r``), a stub's merge a tag
 (``mg``, ``mt``) and not a link. Every path the file admits is therefore spelled whole by
 one pair; no path joins one pair's flank to another's.
@@ -2063,6 +2101,9 @@ one seed across pairs (``union_pairs``)                  offered (`Combining one
 a continuation stitched to the walk it continues         offered, experimental (`Stitching a
                                                          continuation`_): every verdict
                                                          ``qualified``
+a stitched graphlet as a union part                      offered, experimental (`A stitched
+                                                         graphlet as a part`_): nothing past a
+                                                         junction complete or exact
 two retrievals of one pair                               designed, built later: until then
                                                          ``union_pairs()`` refuses them
                                                          (``duplicate_pair``) and ``compare()``

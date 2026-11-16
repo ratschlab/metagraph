@@ -1,8 +1,8 @@
 # Design: combining graphlets — the cross-pair union and stitching a continuation
 
 **Owner-review edition, 2026-11-15, revised after the full Fable and GPT reviews.** Implemented since in train 7:
-phase 1a-U (`union.py`, the source-supported mode) and phase 1a-S (`_stitch.py`, experimental, every verdict
-`qualified`); the rest is design. Nothing is final. The owner asked to "write this design down first and I will review it end to end", and said of his
+phase 1a-U (`union.py`, the source-supported mode), phase 1a-S (`_stitch.py`, experimental, every verdict
+`qualified`) and a `StitchedGraphlet` as a union part (§2.3); the rest is design. Nothing is final. The owner asked to "write this design down first and I will review it end to end", and said of his
 answers so far: "do not take my answers as the final answers yet". Every decision that rests on one of them is marked
 provisional, and §8 lists them all.
 
@@ -303,10 +303,30 @@ The codes, in that order: `bad_expected`, `bad_seqs_order`, `not_combinable`, `v
 
 - **A reverse-complement part is refused**, not flipped. On primary graphs a seed and its reverse complement are one
   seed; flipping a part's walks (each arm becomes the other, reverse complemented) is phase 2.
-- **A `StitchedGraphlet`** (once stitching ships) is one pair's answer: its root and continuations on that pair. Its
-  walks are its stitched walks, and a span's `certified_to_bp` is the stitched one, with the junction verdicts named.
-  The relation goes this way only: a union of stitched parts, never a stitch of a union, since a continuation runs
-  on one pair.
+- **A `StitchedGraphlet`** (built in train 7, experimental) is one pair's answer: its root and continuations on that
+  pair. Its walks are its stitched walks, and a span's `certified_to_bp` is the stitched one, with the junction
+  verdicts named. The relation goes this way only: a union of stitched parts, never a stitch of a union, since a
+  continuation runs on one pair. As built (the coordinator's decisions of 2026-11-16):
+  - *Insertion.* The root goes into the trie as a plain part (its stubs, merges and routes unchanged), and each
+    child's first-parent tree goes in at the trie node where the walk it continues ends (depth `at_bp`, positions
+    shifted by the child's `offset_bp`); the continued leaf ends no union walk. So a union with `stitch(g)` answers
+    every query byte for byte as with `g`, except the part's digest and retrieval identity (its `digest`), and the
+    union's digest. Inserting walk by walk would drop the root's stubs and merges.
+  - *Past a junction.* Every span read in a child (a span whose deepest spelling of the walk is a child's, or a route
+    that crosses into one) names the junctions it reads (`PairSpan.junctions`, C.1), has `complete` false, and is
+    certified to `min(certified_to_bp, the first junction's certified depth)`, which is the stitched walk's
+    `certified_to_bp` for a walk the part holds whole. Its absence is `graph` at a dead end and `uncertified`
+    otherwise, never `walk_rule` or `under_strategy`: the child's own seed re-entry or edge history may stop it where
+    an uninterrupted walk goes on.
+  - *Labels.* Not joined across a junction (D.1, phase 1b): a child's span labels start at the junction, and at a
+    depth no child base reaches they are the parent's along the continued walk. The union therefore states less than
+    `StitchedWalk.labels_full`.
+  - *Statements.* The pair's coverage category is its root's, with a note naming its junctions on the arm; its
+    evidence block is `StitchedGraphlet.evidence(arm)` on an arm with a junction (exact false), its root's otherwise;
+    `summary()` lists its junctions, `provenance()` each child's entry (`stitched`), FASTA the `junctions=` token
+    (A.5) and GFA a comment line per stitched pair.
+  - *Identity.* A stitched part beside a plain graphlet of its pair is `duplicate_pair` (`stitch(g)` and `g`
+    included); the same stitched graphlet twice is a no-op; every part of it must carry bases (`no_bases`).
 
 ### 2.4 The union trie: spellings, segments, walks
 
@@ -1344,6 +1364,7 @@ The sorting is total: every element becomes a part, an absent record, or a refus
 | element | becomes |
 |---|---|
 | a `Graphlet` | a part, its pair from the envelope's tags (`pair_stated_by: envelope`); a view is refused `view_unsupported`, a body without its envelope MissingEnvelope |
+| a `StitchedGraphlet` (alone or as `{'pair', 'graphlet'}`) | a part, as its root would be: its pair, envelope, seed and certificate are the root's; every part of it carries bases (else `no_bases`); its digest is its body and retrieval identity (§2.3) |
 | a `TraverseResponse` | with exactly one seed result (else `not_one_seed`): its graphlet is a part; a result without a graphlet is read as `{result}` below, its pair from the response's envelope (`pair_stated_by: envelope`) |
 | `{'response': TraverseResponse, 'index': int}` | seed result `index` of a response with any number of seeds, read as the response alone would read a one-seed response: its pair still from the envelope (`pair_stated_by: envelope`), and `seed_check: 'sent'` where the client kept the seeds it sent; an index out of range is `not_one_seed` |
 | `{'response': TraverseResponse, 'sequence': str}` | as the response alone, with the caller's statement of the seed (R3) |
@@ -1358,7 +1379,7 @@ The sorting is total: every element becomes a part, an absent record, or a refus
 |---|---|
 | `bad_expected` | `expected_pairs= takes a list of the pairs the request was sent to, as graph names or {graph, graph_path, annotation_path} objects; %s is not one` (a string: `expected_pairs= is a string: pass a list of graph names`) |
 | `bad_seqs_order` | `seqs_order= maps pairs (graph names or pair objects) to "verified", "count_only" or None, as GET /capabilities states them; %s is not one` |
-| `not_combinable` (TypeError) | `union_pairs() takes results: a Graphlet, a TraverseResponse, {response, sequence}, or {pair, graphlet}, {pair, result} or {pair, error}; not %s` (once stitching ships, a StitchedGraphlet too) |
+| `not_combinable` (TypeError) | `union_pairs() takes results: a Graphlet, a StitchedGraphlet, a TraverseResponse, {response, sequence}, or {pair, graphlet}, {pair, result} or {pair, error}; not %s` |
 | `view_unsupported` | `union_pairs() reads whole retrievals, not views: pass view.backing, and select labels on the union (labels=)` |
 | `not_one_seed` | `result %s holds %d seed results: pass {response, index} for this union's seed, or it as {pair, graphlet} or {pair, result}`; zero: `result %s holds no seed result`; out of range: `result %s has no seed result %d (it holds %d)` |
 | `result_has_graphlet` | `result %s carries a graphlet: pass it as a Graphlet (Graphlet.from_response(result, response)) or as {pair, graphlet}` |
@@ -1447,6 +1468,8 @@ its result as canonical JSON without `seed_id`); a failed record's, (the pair ke
 - A `merges` token is `<tag>@<to_bp>><trie node>` (`s31`, or `s30$` for a merge segment without bases), followed by
   `~<route to_bp>[:<end reason>]/<absence>` when the route stops short.
 - `certified=` each pair's `certified_to_bp`, as `<tag>:<bp>`.
+- `junctions=` the junctions of a stitched part that the walk's span reads, as `<tag>@<at_bp>:<verdict>`
+  (`junctions=A@20:qualified`; every verdict `qualified` in this phase, §2.3).
 - `labels=` label entries per pair as `<alive>/<carrying the whole walk>`, `+` marking a lower bound (cut lists). The
   full lists with their `from_bp` are `carriers()`'s; `to_fasta()` writes the counts only.
 - `modes=` whenever a part is not in annotate mode (`modes=g1:constrain,g7:annotate` when they differ).
@@ -1552,6 +1575,7 @@ class LabelInterval: label: PairLabel; from_bp: int; to_bp: int     # where a la
 class SegmentSupport:  pair: str; n_walks: int; n_stubs: int        # the walks and stubs passing, by count
                        pieces: tuple[tuple[int, int, int], ...]     # (part segment id, from_bp, to_bp)
                        labels: tuple[LabelInterval, ...]; labels_cut: bool   # from alive sets and runs, in order
+                       part: tuple = ()                             # a stitched part's sub-part (Part.key)
 @dataclass(slots=True)
 class UnionSegment:    id: int; arm: str; from_bp: int; to_bp: int; parent: int | None; children: tuple[int, ...]
                        support: tuple[SegmentSupport, ...]          # one per pair spelling it, canonical order
@@ -1562,7 +1586,8 @@ class Route:       to_bp: int; how: str                             # 'held' | '
                    labels: tuple[SpanLabel, ...]; complete: bool; certified_to_bp: int
 @dataclass(slots=True)
 class PairSpan:    pair: str; mode: str; how: str; to_bp: int       # whole | extends | ends | merges | diverges | none
-                   walk: int | None                                 # the part's path id (whole, extends, ends)
+                   walk: int | tuple | None                         # the part's path id (whole, extends, ends);
+                                                                    # past a junction the stitched walk's key
                    stub_end: int | None; into: str | None           # merges: the part segment; trie node 's31' | 's30$'
                    route: Route | None                              # merges only, computed on demand
                    continues: tuple[PairLabel, ...]                 # merges: kept entries entering through it
@@ -1570,6 +1595,10 @@ class PairSpan:    pair: str; mode: str; how: str; to_bp: int       # whole | ex
                    complete: bool; certified_to_bp: int             # §2.4: defined for every how
                    absence: str | None                              # graph | walk_rule | under_strategy | uncertified;
                                                                     # None for whole, extends, merges
+                   k: int; regime: str
+                   junctions: tuple[SpanJunction, ...] = ()         # a stitched part's junctions the span reads
+@dataclass(frozen=True)
+class SpanJunction: at_bp: int; verdict: str; part: tuple; causes: tuple[str, ...]   # Part.key; cause codes
 class Carriers(list):                                               # carriers(): a list of PairSpan
     def __str__(self) -> str: ...                                   # one line per pair, as in §2.2
 @dataclass(slots=True)

@@ -459,7 +459,7 @@ the subpackage from a non-editable install). `metagraph/__init__.py` does not im
 | `mcp_tools.py` | framework-agnostic tool functions returning dicts ≤ `max_bytes` (the MCP server, wherever it lives, registers them; §6) |
 | `frames.py` | `frames(g)` → dict of DataFrames, lazy `import pandas` |
 | `composite.py` | what every combination of graphlets shares (DESIGN-graphlet-merge.md): `CombineRefused(code, message)`, the preconditions (envelope, bases, alphabet, one oriented seed), the index identity rules (`ops.index_rule`, `ops.seed_rule`), retrieval identity, the weakest-of evidence, digests, the budget plumbing, the streaming speller over pieces of parts |
-| `union.py` | `union_pairs(results)` → `PairUnion`, the cross-pair union of one seed (DESIGN-graphlet-merge.md §2): the inputs, pair tags and record-mapping warnings, the trie of every part's spellings per arm, spans and their absence, coverage per pair, the five statements, `PairPart`, `PairAbsent`, `UnionWalk`, `PairSpan`, `Route`, `UnionSegment`, `SegmentSupport`, `LabelInterval`, `PairLabel`, `SpanLabel`, `Carriers`, `Coverage`, `Statements` |
+| `union.py` | `union_pairs(results)` → `PairUnion`, the cross-pair union of one seed (DESIGN-graphlet-merge.md §2): the inputs, pair tags and record-mapping warnings, the trie of every part's spellings per arm, spans and their absence, coverage per pair, the five statements, `PairPart`, `PairAbsent`, `UnionWalk`, `PairSpan`, `SpanJunction`, `Route`, `UnionSegment`, `SegmentSupport`, `LabelInterval`, `PairLabel`, `SpanLabel`, `Carriers`, `Coverage`, `Statements`; a `StitchedGraphlet` as one pair's part (§2.3), each child's tree grafted where the walk it continues ends |
 | `_stitch.py` | (experimental, phase 1a-S of DESIGN-graphlet-merge.md §3; private, its names exported from `metagraph.traverse`) `stitch(parent, child=None, *, arm, walk, allow_unverified_index, budget)` → `StitchedGraphlet`, with `Part`, `Junction`, `StitchedWalk`: a continuation joined to the walk it continues, every junction and walk stating its causes; every verdict `qualified` |
 
 Public API (one line each):
@@ -521,7 +521,8 @@ load(path) -> Graphlet                        # a .mgt file, or its gzip (the se
                                               # times the file's size, peak about twice the text; with budget= charged
                                               # chunk by chunk; a corrupt gzip -> GraphletFormatError
 union_pairs(results, *, seed=None, expected_pairs=None, seqs_order=None, budget=None) -> PairUnion
-    # one seed's answers on several pairs (DESIGN-graphlet-merge.md §2), any order: Graphlet, one-seed TraverseResponse,
+    # one seed's answers on several pairs (DESIGN-graphlet-merge.md §2), any order: Graphlet, StitchedGraphlet
+    # (experimental: its spans past a junction name it, PairSpan.junctions), one-seed TraverseResponse,
     # {response, index}, {response, sequence}, {pair, graphlet}, {pair, result[, error][, sequence]}, {pair, error};
     # refusals CombineRefused(code) in the order of DESIGN-graphlet-merge.md Appendix A.2; the parts stay unchanged
 PairUnion.parts / .absent / .pairs / .expected / .digest / .seed / .arms()
@@ -530,7 +531,8 @@ PairUnion.statements(arm=None, at_bp=None) -> Statements          # the five, ne
 PairUnion.walks(arm, *, by='pairs'|'length'|'id', top=None, pairs=None, labels=None, min_bp=0, spell=False,
                 stubs=False) -> list[UnionWalk(id, arm, kind, length_bp, sequence, segments, spans, whole_in, held_in)]
 PairUnion.carriers(arm, walk, *, at_bp=None) -> Carriers[PairSpan]  # per pair: how (whole|extends|ends|merges|
-                                              # diverges|none), to_bp, route, absence, span labels with from_bp
+                                              # diverges|none), to_bp, route, absence, span labels with from_bp,
+                                              # junctions (SpanJunction: a stitched part's, read by the span)
 PairUnion.segments(arm) -> list[UnionSegment];  .spell(arm, walk, orientation, with_seed) -> str
 PairUnion.labels(pair=None) / .label(selector) / .shared_names()   # labels each pair's own: PairLabel(pair, ref, name, kind)
 PairUnion.to_fasta(..., at_bp=None) / .to_gfa(...) / .summary(max_bytes=4096) / .provenance() / .memory_bytes()
@@ -694,7 +696,9 @@ A continuation stays a graphlet of its own. Two combinations keep their retrieva
 (`DESIGN-graphlet-merge.md`): `union_pairs()` (`union.py`, §2 of that note) combines one seed's answers across pairs by
 sequence, and `stitch()` (`_stitch.py`, §3, experimental) joins a continuation to the walk it continues. A stitched
 graphlet keeps both retrievals and states, at each junction and walk, why its walks may differ from one uninterrupted
-walk; every verdict is `qualified` until `exact` passes the randomized comparison against uninterrupted traversals.
+walk; every verdict is `qualified` until `exact` passes the randomized comparison against uninterrupted traversals. A
+stitched graphlet can be one of a union's parts (§2.3 of that note): where no junction is read it answers as its root,
+and past a junction no union answer reads complete or exact.
 
 ## 5.4 Local limits
 
