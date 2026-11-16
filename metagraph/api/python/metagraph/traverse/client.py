@@ -940,7 +940,8 @@ class TraverseClient:
         graph_path, annotation_path} objects; by default every pair GET /capabilities
         lists (graph_summary.pairs), or the client's own pair on a single-graph server.
         Every answer is kept as returned (a TraverseResponse of one seed, which keeps the
-        seed it sent); a refused or failed request becomes {pair, error}. attempt_id and
+        seed it sent); a refused request (TraverseError) or a transport failure (OSError)
+        becomes {pair, error}, and any other exception is raised. attempt_id and
         expect_server_instance are not accepted: attempt ids share one server-wide namespace
         with request ids, so one id sent to several pairs is refused from the second request
         on (a ledger-managed fan-out is a later extension).
@@ -1017,7 +1018,10 @@ class TraverseClient:
                                              graph=t[0], graph_path=t[1],
                                              annotation_path=t[2], coordinates=coordinates,
                                              not_after_ms=not_after_ms))
-            except Exception as e:      # a refused request or a transport failure
+            except (TraverseError, OSError) as e:
+                # a refused request (TraverseError) or a transport failure (an OSError: a
+                # connection refused, a timeout, a cut response); anything else -- a bad
+                # argument, a library bug -- is raised, not reported as every pair failing
                 pair = {k: v for k, v in zip(('graph', 'graph_path', 'annotation_path'), t)
                         if v} or (expected[0] if expected else {})
                 results.append({'pair': pair, 'error': e})

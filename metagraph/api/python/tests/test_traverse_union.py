@@ -1453,6 +1453,73 @@ class TestScale(unittest.TestCase):
                                 % (what, n, t, t0, self.SIZES[0]))
 
 
+class _FanOutClient:
+    """A TraverseClient whose server is a dict: GET /capabilities, the index's own
+    capabilities, and per graph what traverse() answers or raises."""
+
+    @staticmethod
+    def make(caps, answers, ns=None, own=(None, None, None)):
+        from metagraph.traverse import TraverseClient
+
+        class Client(TraverseClient):
+            sent = []
+
+            def server_capabilities(self):
+                return caps
+
+            def capabilities(self, *a, **kw):
+                return {'index_ns': ns}
+
+            def selection(self, *a, **kw):
+                return own
+
+            def traverse(self, seeds, strategy=None, **kw):
+                self.sent.append((seeds, kw['graph']))
+                got = answers[kw['graph']]
+                if isinstance(got, BaseException):
+                    raise got
+                return got
+        return Client('localhost', 1)
+
+
+class TestTraversePairs(unittest.TestCase):
+    """TraverseClient.traverse_pairs() (§5.2) against a fake server: the pairs from GET
+    /capabilities, what becomes {pair, error} and what is raised (review minor 6)."""
+
+    CAPS = {'graph_summary': {'pairs': [{'graph': 'g1', 'seqs_order': 'verified'},
+                                        {'graph': 'g2'}, {'graph': 'g3'}]}}
+
+    def test_every_listed_pair_and_its_failures(self):
+        from metagraph.traverse import TraverseError
+        refusal = TraverseError(409, 'the attempt is busy')
+        cut = ConnectionResetError('connection reset by peer')
+        c = _FanOutClient.make(self.CAPS, {'g1': 'answer-g1', 'g2': refusal, 'g3': cut})
+        r = c.traverse_pairs('ACGT')
+        self.assertEqual(r.results, ['answer-g1', {'pair': {'graph': 'g2'}, 'error': refusal},
+                                     {'pair': {'graph': 'g3'}, 'error': cut}])
+        self.assertEqual((r.seed, r.expected_pairs, r.seqs_order),
+                         ('ACGT', ({'graph': 'g1'}, {'graph': 'g2'}, {'graph': 'g3'}),
+                          {('g1', None, None): 'verified'}))
+        self.assertEqual([g for _, g in c.sent], ['g1', 'g2', 'g3'])
+
+    def test_a_bad_argument_or_a_bug_is_raised(self):
+        for exc in (ValueError('strategy.mode is not a mode'), KeyError('oops'),
+                    TypeError('a library bug')):
+            c = _FanOutClient.make(self.CAPS, {'g1': 'answer-g1', 'g2': exc, 'g3': 'x'})
+            with self.assertRaises(type(exc)):
+                c.traverse_pairs('ACGT')
+
+    def test_a_single_graph_server(self):
+        caps = {'graph_summary': {}, 'pair_summary': {'seqs_order': 'count_only'}}
+        c = _FanOutClient.make(caps, {None: 'answer'}, ns='refseq_ns')
+        r = c.traverse_pairs('ACGT')
+        self.assertEqual((r.results, r.expected_pairs, r.seqs_order),
+                         (['answer'], ({'index_ns': 'refseq_ns'},), {'refseq_ns': 'count_only'}))
+        c = _FanOutClient.make(caps, {None: OSError('timed out')}, ns='refseq_ns')
+        r = c.traverse_pairs('ACGT')
+        self.assertEqual(r.results[0]['pair'], {'index_ns': 'refseq_ns'})
+
+
 class TestLoadGzip(unittest.TestCase):
     """load() reads a gzip file (the service's .mgt.gz export) as the text it holds,
     inflated as a stream within the local limits; a corrupt or truncated one is refused."""
