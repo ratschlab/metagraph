@@ -538,6 +538,81 @@ TEST(SearchBudget, TheFoldFreesOnlyTheValuesOfRecordsThatCannotBeReturned) {
     });
 }
 
+// A record first met when the weight of the rows left equals the cutoff of the fold's last
+// check keeps its values: it matches every row from there on, ties the N-th record at the cut
+// and wins by its header's bytes. (Review M5-n1, lane T7-M5: the met-late edge; holding no
+// values for a record met at the cutoff, `>` for `>=`, fails here.) A small budget makes the
+// check come early, with more rows left than the cutoff.
+TEST(SearchBudget, ARecordFirstMetAtTheCutoffKeepsItsValues) {
+    std::mt19937 rng(1235);
+    const size_t k = 15;
+    const size_t budget = 16 << 10;
+    const size_t top = 2;
+    // The shared k-mers make a run each for a and t: the runs pass the budget at the shared
+    // k-mer |at_check|. t's count there, the second, is the cutoff; t matches nothing after.
+    const size_t at_check = budget / (2 * 16) + 1;
+    const size_t w_a = 300, w_t = 100;
+    const size_t cutoff = w_t + at_check;
+    // m is first met at the shared k-mer |first_m|, where the rows left (from it on) are
+    // the cutoff, and matches all of them; a matches the shared k-mers before it
+    const size_t first_m = at_check + 174;
+    const size_t num_shared = first_m + cutoff;
+    // no second check: the runs stay within twice those at the check
+    ASSERT_LE(num_shared + at_check, 4 * at_check);
+    const std::string x_a = random_sequence(rng, k), x_t = random_sequence(rng, k);
+    const std::string shared = random_sequence(rng, num_shared + k - 1);
+    auto other = [](char c) { return std::string(1, c == 'A' ? 'C' : 'A'); };
+    std::vector<CoordinateRecord> records {
+        { random_sequence(rng, 10) + x_a + random_sequence(rng, 10)
+              + shared.substr(0, first_m + k - 1) + other(shared[first_m + k - 1]), "F0", "a" },
+        { random_sequence(rng, 10) + x_t + random_sequence(rng, 10)
+              + shared.substr(0, at_check + k - 1) + other(shared[at_check + k - 1]), "F1", "t" },
+        { random_sequence(rng, 10) + other(shared[first_m - 1]) + shared.substr(first_m)
+              + random_sequence(rng, 10), "F0", "m" },
+    };
+    std::string query;
+    for (const auto &[kmer, weight] : std::vector<std::pair<std::string, size_t>> {
+                { x_a, w_a }, { x_t, w_t } }) {
+        for (size_t i = 0; i < weight; ++i) {
+            query += kmer + "N";
+        }
+    }
+    for (size_t i = 0; i < num_shared; ++i) {
+        query += shared.substr(i, k) + "N";
+    }
+    auto index = coordinate_test_graph(k, records, false, false, false, true);
+    // a, then m and t tied at the cutoff (m first by its header's bytes)
+    const std::vector<std::pair<std::string, size_t>> expected {
+        { "a", w_a + first_m }, { "m", cutoff } };
+    auto check = [&](const std::string &mode, const auto &query_by) {
+        SCOPED_TRACE(mode);
+        const auto unbounded = [&]() {
+            const FoldBudget fold_budget(std::numeric_limits<size_t>::max());
+            return query_by();
+        }();
+        ASSERT_EQ(top, unbounded.size());
+        for (size_t r = 0; r < top; ++r) {
+            EXPECT_EQ(expected[r].first, std::get<0>(unbounded[r]));
+            EXPECT_EQ(expected[r].second, std::get<1>(unbounded[r]));
+        }
+        graph::reset_record_fold_counts();
+        const FoldBudget fold_budget(budget);
+        EXPECT_EQ(unbounded, query_by());
+        EXPECT_EQ(0u, graph::record_fold_counts().freed);
+        EXPECT_EQ(0u, graph::record_fold_counts().met_late);
+        EXPECT_EQ(0u, graph::record_fold_counts().counts_only);
+    };
+    check("signatures", [&]() -> Signatures {
+        return index->get_top_label_signatures(query, top, 0, 0);
+    });
+    check("counts", [&]() -> Counts {
+        return index->get_kmer_counts(query, top, 0, 0);
+    });
+    check("coordinates", [&]() -> Coordinates {
+        return index->get_kmer_coordinates(query, top, 0, 0);
+    });
+}
+
 // A query by record for coordinates at a homopolymer charges the coordinates of the returned
 // records at its one repeated row to the values account's scratch: each record's buffer, grown
 // by doubling from one, 16 B per coordinate (not per coordinate and position). (Review m1, lane
