@@ -8,7 +8,10 @@ routes, support profiles, comparisons, FASTA/GFA, continuations and the next req
 A retrieval made with strategy.output.coordinates (feature level 6) also says where each
 run's bases lie in the indexed records (Graphlet.coordinates, coords.py).
 Nothing here reads the graph; deepening is a new backend traversal that the library
-prepares (next_request) and the client runs.
+prepares (next_request) and the client runs. Two combinations keep their retrievals
+unchanged (docs/DESIGN-graphlet-merge.md): union_pairs() combines one seed's graphlets
+across pairs by sequence (union.py), and stitch() joins a continuation to the walk it
+continues (_stitch.py; experimental: every junction verdict is qualified).
 
 Stdlib only. pandas is imported lazily by frames.frames() alone, so
 `import metagraph.traverse` works without it. The package's names are loaded on first use
