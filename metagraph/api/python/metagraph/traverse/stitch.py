@@ -37,9 +37,9 @@ from . import composite as _K
 from . import derive
 from . import export as _export
 from . import ops as _ops
-from ._codec import REASON, RESOURCE_CODES
-from .budget import (DICT_KEY, INT, LIST_ITEM, SET_ITEM, STR, TUPLE, W_ELEM, W_ROW, W_STEP,
-                     LocalBudgetExceeded, Partial, list_bytes, record_bytes, set_bytes)
+from ._codec import REASON
+from .budget import (STR, W_ELEM, W_ROW, W_STEP, LocalBudgetExceeded, Partial, record_bytes,
+                     set_bytes)
 from .client import answered_pair
 from .composite import CombineRefused, NotCombinable
 from .model import (ARM_SIDES, AmbiguousLabel, BadSelector, Continuation, Graphlet, Label,
@@ -402,7 +402,7 @@ class StitchedGraphlet:
         """The checks of §3.1 in order, then the new graphlet (or self: a no-op)."""
         croot = child.root if isinstance(child, StitchedGraphlet) else child
         proot = self.root
-        identity = self._check_index(croot, allow)
+        identity = self._check_index(croot, child.labels, allow)
         if not identity['verified']:
             self._check_pair(proot, croot)
         for name in ('k', 'regime'):
@@ -468,7 +468,7 @@ class StitchedGraphlet:
             b.charge(W_ROW * len(parts), len(parts) * (record_bytes(Part) + 200))
         return StitchedGraphlet(parts, identity, self._allow or allow)
 
-    def _check_index(self, croot, allow):
+    def _check_index(self, croot, labels, allow):
         """different_index, then index_unverifiable -> the identity statement."""
         names = self._label_of
         clause = None
@@ -476,7 +476,7 @@ class StitchedGraphlet:
         if key in ('meta_fp', 'fp', 'ns', 'release'):
             clause = _K.different_index_clause(key, values)
         else:
-            for l in croot.labels:
+            for l in labels:
                 if l.ref in names and names[l.ref].name != l.name:
                     clause = _K.INDEX_CLAUSES['names'] % (l.ref, names[l.ref].name, l.name)
                     break
@@ -824,14 +824,19 @@ class StitchedGraphlet:
             chain_edges = (frozenset(edges),)
             count = 0
         count += _split_counts(a)[leaf]
-        root = self.root
         cg = self._by_key[key].graphlet
         got = {'edges': chain_edges, 'count': count,
-               'root_nodes': self._cache.setdefault(
-                   'root_nodes', _kmers(root.seed.sequence, root.k, root.regime)),
+               'root_nodes': self._root_nodes(),
                'child_nodes': _kmers(cg.seed.sequence, cg.k, cg.regime),
                'max_splits': _knob(_strategy(pg), 'branching', 'max_splits_per_path')}
         self._cache[('ctx', key)] = got
+        return got
+
+    def _root_nodes(self):
+        got = self._cache.get('root_nodes')
+        if got is None:
+            root = self.root
+            got = self._cache['root_nodes'] = _kmers(root.seed.sequence, root.k, root.regime)
         return got
 
     def _tails(self, key, side):
@@ -1070,8 +1075,11 @@ class StitchedGraphlet:
         part, pid = chain[-1]
         g = part.graphlet
         a = g.arms[side]
-        w = _ops._walk_objects(g, a, [x for x in _ops._ranked_walks(g, a, 'id', None, True, 0)
-                                      if x[0].id == pid], with_claims=False)[0]
+        ranked = self._cache.get(('ranked', part.key, side))
+        if ranked is None:
+            ranked = self._cache[('ranked', part.key, side)] = {
+                x[0].id: x for x in _ops._ranked_walks(g, a, 'id', None, True, 0)}
+        w = _ops._walk_objects(g, a, [ranked[pid]], with_claims=False)[0]
         try:
             seq = self._spell_chain(side, chain, 'natural')
         except ValueError:
@@ -1092,7 +1100,9 @@ class StitchedGraphlet:
         a = g.arms[side]
         p = derive.paths(a)[pid]
         full, alive_ids, consistent, min_loss = _ops._walk_keys_of(g, a, p)
-        if full is None:
+        if len(chain) > 1:
+            full = self._labels_full(side, chain)       # as StitchedWalk.labels_full
+        elif full is None:
             full = _ops._labels_full(g, a, p)
         return full, alive_ids, consistent, min_loss
 
