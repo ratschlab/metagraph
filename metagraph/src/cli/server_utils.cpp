@@ -1193,6 +1193,12 @@ std::optional<bool> in_ram_field(const Json::Value &request) {
     return request["in_ram"].asBool();
 }
 
+void check_request_object(const Json::Value &request) {
+    // the parsers' own check (parse_resolve_request, parse_traverse_request: StrictObject at
+    // "request"), so that the words are theirs byte for byte; nothing of an object is read
+    [[maybe_unused]] const StrictObject<RefuseRequest> object(request, "request");
+}
+
 GraphSelection traverse_graph_selection(const Json::Value &request, bool multi_graph) {
     GraphSelection selection;
     if (!request.isObject())

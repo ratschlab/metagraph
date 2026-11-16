@@ -464,6 +464,15 @@ const char* to_string(InRamPlan plan);
 // std::invalid_argument ("request.in_ram: expected a boolean") for any other value
 std::optional<bool> in_ram_field(const Json::Value &request);
 
+// The body of POST /resolve or /traverse, checked as soon as it is parsed: a JSON value that
+// is no object (an array, a string, a number, a boolean, null) is refused here, before the
+// selection or any field is read, by the check and in the words of the route's parser
+// (InvalidRequest "request: expected an object", 400 without a code), on a single-graph and a
+// multi-graph server alike. A multi-graph server read such a body as a request without
+// selectors before (T7-F1): /traverse refused it with the selection's text, /resolve with
+// jsoncpp's. An object passes, whatever its members (they are the parser's)
+void check_request_object(const Json::Value &request);
+
 /**
  * The graph a POST /resolve or /traverse request selects (the request's fields; the pair is
  * then chosen by the graph list's rules, select_traverse_pair): |name| and |graph_path|

@@ -176,6 +176,30 @@ TEST(MultiGraphSelection, ParsersDeclareGraphsAndInRam) {
               refusal_of([] { in_ram_field(parse(R"({"in_ram": "true"})")); }));
 }
 
+// A body of /resolve or /traverse that is no object is refused before the selection reads it
+// (T7-F1), in the words of the routes' parsers byte for byte (/traverse/cancel's included), as
+// an InvalidRequest (a 400 without a code); an object passes whatever its members
+TEST(MultiGraphSelection, ABodyThatIsNoObjectIsRefusedInTheParsersWords) {
+    const std::string words = "request: expected an object";
+    for (const std::string &body : { std::string("[]"),
+                                     std::string(R"([{"sequence": "ACGTACGTACGT"}])"),
+                                     std::string(R"("x")"), std::string("7"),
+                                     std::string("1.5"), std::string("true"),
+                                     std::string("null") }) {
+        const Json::Value json = parse(body);
+        EXPECT_THROW(check_request_object(json), InvalidRequest) << body;
+        EXPECT_EQ(words, refusal_of([&] { check_request_object(json); })) << body;
+        EXPECT_EQ(words, refusal_of([&] { parse_resolve_request(json); })) << body;
+        EXPECT_EQ(words, refusal_of([&] { parse_traverse_request(json); })) << body;
+        EXPECT_EQ(words, refusal_of([&] { parse_cancel_request(json); })) << body;
+    }
+    for (const std::string &body : { std::string("{}"),
+                                     std::string(R"({"pairs": 5, "unknown": [1]})"),
+                                     std::string(R"({"sequence": "ACGTACGTACGT"})") }) {
+        EXPECT_NO_THROW(check_request_object(parse(body))) << body;
+    }
+}
+
 // POST /pattern on a multi-graph server: /search's selection (deduplicated, sorted; every name
 // of a small server without the field), every name known
 TEST(MultiGraphSelection, PatternGraphNames) {

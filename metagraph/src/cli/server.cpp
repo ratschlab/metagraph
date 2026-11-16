@@ -2427,6 +2427,9 @@ int run_server(Config *config) {
                 slot = take_slot(resolve_slots);
 
             Json::Value json = parse_traversal_body(content, config->max_request_json_values);
+            // a body that is no object is refused before anything reads it, in the parser's
+            // words on either server (a multi-graph server's selection read it as an object)
+            check_request_object(json);
             const bool multi = !config->fnames.empty();
             if (multi) {
                 try {
@@ -2655,6 +2658,9 @@ int run_server(Config *config) {
                 slot = take_slot(traverse_slots);
 
             Json::Value json = parse_traversal_body(content, config->max_request_json_values);
+            // a body that is no object is refused before anything reads it, in the parser's
+            // words on either server (a multi-graph server's selection read it as an object)
+            check_request_object(json);
             // a malformed id or not_after_ms is refused before anything is registered (400, no
             // usage)
             attempt->set_ids(attempt_ids(json));
