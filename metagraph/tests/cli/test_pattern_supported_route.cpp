@@ -2448,6 +2448,113 @@ TEST(PatternSupportedRoute, BudgetAndClockSweeps) {
 }
 
 
+// The extension's depth-first stack under "supported_paths" (SPEC §30): a stop at a level whose
+// frame fit, in the second "+" anchor after the first one's supported path. Between a level's
+// admission and the next candidate the search admits nothing (the candidate's row and frame come
+// after it is entered), so the accounts just below the smallest one that reaches candidate c + 1
+// stop at the level of candidate c: a level's price below it (less a quarter, the row cache's
+// allotment) every such account does, the frame of c held. The second anchor's frames are larger
+// than the first's (ten labels carry its walk, one the first's), so its search stops at levels
+// the first one's walk passed with room to spare. The stop is the search's own memory stop:
+// stop {extension, max_memory}, no row refused, the supported paths at_least 1 ("+" at_least 1,
+// "-" at_least 0: its anchor not extended), all_or_count withheld annotation_budget (as the
+// tracker's own stops; a kept walk's under "paths" is output_budget), partial cut max_memory
+// listing the supported path completed before it. With a predicate (the selection's release of
+// the engine's stop) alike
+TEST(PatternSupportedRoute, AStopAtALevelOfTheStackIsTheSearchsMemoryStop) {
+    const size_t k = 5;
+    const size_t L = 22;
+    // "+" anchors ACAAA (one label) and GCAAA (ten), in answer order, then the "-" one, TTTTT,
+    // whose walk ends at once (TTTTG only)
+    std::vector<Record> records { { "a", "r0", "AC" + std::string(25, 'A') },
+                                  { "b", "r1", "TTTTTG" } };
+    for (int i = 0; i < 10; ++i) {
+        records.push_back({ "c" + std::to_string(i), "s" + std::to_string(i),
+                            "GC" + std::string(25, 'A') });
+    }
+    const Index idx = build_rd(k, records);
+    auto candidates = [](const Json::Value &e) {
+        return e["counts"]["supported_paths"]["candidates_examined"].asUInt64();
+    };
+    for (const std::string predicate : { "", "{\"any\": [\"a\"]}" }) {
+        for (const std::string mode : { "all_or_count", "partial" }) {
+            SCOPED_TRACE(mode + " " + predicate);
+            Ask r;
+            r.patterns = { "NC" + std::string(L - 2, 'A') };
+            r.kind = "iupac";
+            r.mode = mode;
+            r.predicate = predicate;
+            Ask listing = r;
+            listing.mode = "partial";
+            const Json::Value full = answer_of(idx, listing)["patterns"][0];
+            ASSERT_FALSE(full.isMember("error")) << compact(full["error"]);
+            ASSERT_TRUE(full["stop"].isNull()) << compact(full["stop"]);
+            const Json::Value &by_strand = full["counts"]["supported_paths"]["by_strand"];
+            ASSERT_EQ(2u, by_strand["+"]["value"].asUInt64()) << compact(by_strand);
+            ASSERT_EQ(0u, by_strand["-"]["value"].asUInt64()) << compact(by_strand);
+            ASSERT_LE(1u, full["results"].size());
+            auto at = [&](uint64_t bytes) {
+                Ask q = r;
+                q.max_memory_bytes = bytes;
+                return answer_of(idx, q)["patterns"][0];
+            };
+            // the smallest account whose answer is |reached| (monotone in the account)
+            auto smallest = [&](const std::function<bool(const Json::Value &)> &reached) {
+                uint64_t lo = 0, hi = uint64_t(1) << 20;
+                while (hi - lo > 1) {
+                    const uint64_t mid = lo + (hi - lo) / 2;
+                    (reached(at(mid)) ? hi : lo) = mid;
+                }
+                return hi;
+            };
+            auto supported = [](uint64_t n) {
+                return [n](const Json::Value &e) {
+                    return e["counts"]["supported_paths"]["value"].asUInt64() >= n;
+                };
+            };
+            // the first candidate a stop falls on once the first anchor's walk is supported, and
+            // the next one, whose accounts are not cut short by the first anchor's search; before
+            // the candidate that completes the second walk (that one has no level)
+            const uint64_t c = candidates(at(smallest(supported(1)))) + 1;
+            const uint64_t last = candidates(at(smallest(supported(2)) - 1));
+            ASSERT_LT(c, last);
+            const uint64_t bytes = smallest([&](const Json::Value &e) {
+                return candidates(e) > c;
+            }) - 100;
+            const Json::Value e = at(bytes);
+            const std::string what = "account " + std::to_string(bytes) + " candidate "
+                    + std::to_string(c);
+            ASSERT_EQ(c, candidates(e)) << what;
+            EXPECT_EQ("extension", e["stop"]["phase"].asString()) << what;
+            EXPECT_EQ("max_memory", e["stop"]["reason"].asString()) << what;
+            EXPECT_EQ(0u, e["rows_refused"].size()) << what;
+            EXPECT_EQ("full", e["determinism"].asString()) << what;
+            EXPECT_LE(e["work"]["memory_bytes"].asUInt64(), bytes) << what;
+            const Json::Value &sp = e["counts"]["supported_paths"];
+            EXPECT_EQ("stopped", sp["search"].asString()) << what;
+            EXPECT_EQ("at_least", sp["relation"].asString()) << what;
+            EXPECT_EQ(1u, sp["value"].asUInt64()) << what;
+            EXPECT_EQ("at_least", sp["by_strand"]["+"]["relation"].asString()) << what;
+            EXPECT_EQ(1u, sp["by_strand"]["+"]["value"].asUInt64()) << what;
+            EXPECT_EQ("at_least", sp["by_strand"]["-"]["relation"].asString()) << what;
+            EXPECT_EQ(0u, sp["by_strand"]["-"]["value"].asUInt64()) << what;
+            if (mode == "all_or_count") {
+                EXPECT_EQ("annotation_budget", e["withheld"]["reason"].asString()) << what;
+                EXPECT_EQ(0u, e["returned"].asUInt64()) << what;
+                EXPECT_EQ(0u, e["results"].size()) << what;
+            } else {
+                // the supported path completed before the stop: the first in answer order
+                EXPECT_EQ("max_memory", e["cut"]["reason"].asString()) << what;
+                EXPECT_FALSE(e["retrieval_complete"].asBool()) << what;
+                ASSERT_EQ(1u, e["results"].size()) << what << compact(e);
+                EXPECT_EQ(compact(full["results"][0]["sequence"]),
+                          compact(e["results"][0]["sequence"])) << what;
+                EXPECT_EQ("+", e["results"][0]["strand"].asString()) << what;
+            }
+        }
+    }
+}
+
 // ------------------------------------------------------------------ the motif (§25)
 
 // predicate_scope "motif": each pattern of at most k bases also answered as a whole, on the

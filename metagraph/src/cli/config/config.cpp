@@ -2078,7 +2078,7 @@ if (advanced) {
             fprintf(stderr, "\t   --pattern-max-patterns [INT] \tpatterns per request (a longer list is refused) [16]\n");
             fprintf(stderr, "\t   --pattern-max-labels-per-anchor [INT] \tdefault and maximum of max_labels_per_anchor: labels kept per row with output.labels all (more: a truncated anchor) [64]\n");
             fprintf(stderr, "\t   --pattern-max-annotation-work [INT] \tdefault and maximum of max_annotation_work per request (annotation work units) [100000000]\n");
-            fprintf(stderr, "\t   --pattern-max-memory-mb [INT] \tdefault and maximum of max_memory_mb: the memory account of a request reading labels [256]\n");
+            fprintf(stderr, "\t   --pattern-max-memory-mb [INT] \tdefault and maximum of max_memory_mb: the memory account of a request: the labels read, a predicate's selection, and for a pattern longer than k with long_search paths or supported_paths its search (the extension's depth-first stack in every mode) and the paths it keeps [256]\n");
             fprintf(stderr, "\t   --pattern-max-labels [INT] \tmaximum of max_labels: labels listed per pattern in mode partial [1000]\n");
             fprintf(stderr, "\t   --pattern-default-max-labels [INT] \tmax_labels of a request that names none, at most --pattern-max-labels (follows a lower cap when not given) [1000]\n");
             fprintf(stderr, "\t   --pattern-max-occurrences [INT] \tdefault and maximum of max_occurrences_per_label in mode partial [16]\n");
@@ -2172,7 +2172,7 @@ if (advanced) {
             fprintf(stderr, "\t   --pattern-max-patterns [INT] \tpatterns per request (a longer list is refused) [16]\n");
             fprintf(stderr, "\t   --pattern-max-labels-per-anchor [INT] \tdefault and maximum of max_labels_per_anchor: labels kept per row with output.labels all (more: a truncated anchor) [64]\n");
             fprintf(stderr, "\t   --pattern-max-annotation-work [INT] \tdefault and maximum of max_annotation_work per request (annotation work units) [100000000]\n");
-            fprintf(stderr, "\t   --pattern-max-memory-mb [INT] \tdefault and maximum of max_memory_mb: the memory account of a request reading labels [256]\n");
+            fprintf(stderr, "\t   --pattern-max-memory-mb [INT] \tdefault and maximum of max_memory_mb: the memory account of a request: the labels read, a predicate's selection, and for a pattern longer than k with long_search paths or supported_paths its search (the extension's depth-first stack in every mode) and the paths it keeps [256]\n");
             fprintf(stderr, "\t   --pattern-max-labels [INT] \tmaximum of max_labels: labels listed per pattern in mode partial [1000]\n");
             fprintf(stderr, "\t   --pattern-default-max-labels [INT] \tmax_labels of a request that names none, at most --pattern-max-labels (follows a lower cap when not given) [1000]\n");
             fprintf(stderr, "\t   --pattern-max-occurrences [INT] \tdefault and maximum of max_occurrences_per_label in mode partial [16]\n");

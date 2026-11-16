@@ -1328,6 +1328,24 @@ TEST(PatternPaths, TheMemoryAccountBoundsLabelFreePaths) {
     EXPECT_EQ(0u, u["returned"].asUInt64());
     EXPECT_EQ("exact", u["counts"]["paths"]["relation"].asString());
     EXPECT_EQ(paths, u["counts"]["paths"]["value"].asUInt64());
+
+    // an account that holds the first pattern's answer whole (its last object built beside its
+    // last walk) and less than a level of the stack beside its objects: the second pattern's
+    // extension stops at its anchor's level, before any walk (paths at_least 0)
+    ASSERT_LT(walk, pattern::kExtensionLevelBytes);
+    hooks.max_memory_bytes = paths * object + walk;
+    ASSERT_EQ(paths, admitted(hooks.max_memory_bytes, paths));
+    out = run(idx, body(spec + ", " + spec, "\"mode\": \"partial\"", "none"), hooks);
+    EXPECT_EQ(untimed(full["patterns"][0]), untimed(out["patterns"][0]));
+    const Json::Value &v = out["patterns"][1];
+    EXPECT_EQ("extension", v["stop"]["phase"].asString());
+    EXPECT_EQ("max_memory", v["stop"]["reason"].asString());
+    EXPECT_EQ("stopped", v["counts"]["paths"]["extension"].asString());
+    EXPECT_EQ("at_least", v["counts"]["paths"]["relation"].asString());
+    EXPECT_EQ(0u, v["counts"]["paths"]["value"].asUInt64());
+    EXPECT_EQ("max_memory", v["cut"]["reason"].asString());
+    EXPECT_EQ(0u, v["returned"].asUInt64());
+    EXPECT_EQ("full", v["determinism"].asString());
 }
 
 // The extension's depth-first stack is in the request's memory account in every mode (the
@@ -1409,6 +1427,78 @@ TEST(PatternPaths, TheMemoryAccountHoldsTheExtensionStack) {
     EXPECT_EQ("exact", e["counts"]["paths"]["relation"].asString());
     EXPECT_EQ(1u, e["counts"]["paths"]["value"].asUInt64());
     EXPECT_EQ(levels * pattern::kExtensionLevelBytes, e["work"]["memory_bytes"].asUInt64());
+
+    // the stop is the pattern's (§7.6: max_memory is not sticky): the stack it left is released,
+    // and the next pattern's walk, which 1 MiB holds, is counted
+    const std::string next = "{\"dna\": \"" + std::string(50, 'A') + "\"}";
+    for (const std::string mode : { "count", "partial" }) {
+        out = run(idx, body(spec + ", " + next, "\"mode\": \"" + mode
+                                                   + "\", \"max_memory_mb\": 1", "none"));
+        stopped(out["patterns"][0], "first " + mode);
+        const Json::Value &n = out["patterns"][1];
+        EXPECT_TRUE(n["stop"].isNull()) << mode << n["stop"];
+        EXPECT_EQ("exact", n["counts"]["paths"]["relation"].asString()) << mode;
+        EXPECT_EQ(1u, n["counts"]["paths"]["value"].asUInt64()) << mode;
+        EXPECT_EQ("completed", n["counts"]["paths"]["extension"].asString()) << mode;
+    }
+}
+
+// Under "paths" a stop at a level of the depth-first stack comes before the pattern's first
+// complete walk (SPEC §30): every walk completes at the full depth L - k, beside the whole
+// stack, and only the kept walks are admitted while the extension runs. A sweep of the account
+// over a branching pattern: the extension stops having found no walk exactly when the account
+// cannot hold the stack (paths at_least 0), and after a walk only where one more walk does not
+// fit beside the stack and those kept before it, within their half (a kept walk's stop, the walk
+// counted); mode count, which keeps no walk, stops only below the stack
+TEST(PatternPaths, UnderPathsAStackStopPrecedesTheFirstWalk) {
+    std::mt19937 rng(17);
+    std::vector<Record> records;
+    for (int i = 0; i < 6; ++i) {
+        std::string seq;
+        for (int j = 0; j < 120; ++j) {
+            seq += "ACGT"[rng() % 4];
+        }
+        records.push_back({ i % 2 ? "odd" : "even", "r" + std::to_string(i), seq });
+    }
+    Index idx = build<annot::RowDiffColumnAnnotator>(5, records, true);
+    const std::string spec = "{\"iupac\": \"ACNNNNNT\"}";
+    const uint64_t walk = pattern::retained_path_bytes(5, 8);
+    const uint64_t stack = (8 - 5) * pattern::kExtensionLevelBytes;
+    const Json::Value full = run(idx, body(spec, "\"mode\": \"partial\"", "none"));
+    const uint64_t paths = full["patterns"][0]["counts"]["paths"]["value"].asUInt64();
+    ASSERT_GT(paths, 3u);
+    ASSERT_GT(full["patterns"][0]["counts"]["anchors"]["value"].asUInt64(), 1u);
+    uint64_t level = 0, kept = 0;
+    for (const std::string mode : { "count", "partial" }) {
+        for (uint64_t max = 1; max < stack + 6 * walk; max += 11) {
+            const std::string at = mode + " " + std::to_string(max);
+            RetrievalHooks hooks;
+            hooks.max_memory_bytes = max;
+            const Json::Value e = run(idx, body(spec, "\"mode\": \"" + mode + "\"", "none"),
+                                      hooks)["patterns"][0];
+            if (e["stop"]["phase"] != "extension" || e["stop"]["reason"] != "max_memory") {
+                EXPECT_EQ("completed", e["counts"]["paths"]["extension"].asString()) << at;
+                EXPECT_LE(stack, max) << at;
+                continue;
+            }
+            const Json::Value &c = e["counts"]["paths"];
+            EXPECT_EQ("at_least", c["relation"].asString()) << at;
+            const uint64_t found = c["value"].asUInt64();
+            if (max < stack) {
+                EXPECT_EQ(0u, found) << at;
+                ++level;
+                continue;
+            }
+            EXPECT_EQ("partial", mode) << at;
+            ASSERT_LE(1u, found) << at;
+            EXPECT_TRUE(found * walk > max / 2 || stack + found * walk > max) << at;
+            EXPECT_LE((found - 1) * walk, max / 2) << at;
+            EXPECT_LE(stack + (found - 1) * walk, max) << at;
+            ++kept;
+        }
+    }
+    EXPECT_LT(0u, level);
+    EXPECT_LT(0u, kept);
 }
 
 // The route's memory cut of a label-free path list comes before a time stop the engine's

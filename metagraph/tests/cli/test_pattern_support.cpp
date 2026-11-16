@@ -530,6 +530,9 @@ struct Ask {
     std::function<Clock::time_point()> clock;
     double time_budget_ms = std::numeric_limits<double>::infinity();
     std::function<bool(uint64_t)> deny;
+    // the engine's depth-first stack in the same account (Budget::set_memory, as the route
+    // passes it; SPEC §30)
+    bool stack_in_account = false;
 };
 
 struct Outcome {
@@ -546,6 +549,8 @@ struct Outcome {
     uint64_t held_after = 0;
     uint64_t accepted = 0;
     bool output_cut = false;
+    // with Ask::stack_in_account: the engine's admission of a level was refused
+    bool level_refused = false;
     // the request's annotation units before each annotation read began
     std::vector<uint64_t> units_before_reads;
 };
@@ -593,6 +598,23 @@ Outcome run_support(const Index &idx, const std::string &text, bool peptide, con
     PathTracker tracker(env, options);
     const PathTracker::Retained fresh = tracker.retained();
     SupportedPathSink sink(tracker);
+    // the engine's admissions (with a sink it keeps no walk: only its stack's levels), each
+    // refusal recorded
+    struct Stack final : public MemoryAccount {
+        retrieval::Account &account;
+        bool refused = false;
+        explicit Stack(retrieval::Account &account) : account(account) {}
+        bool admit(uint64_t bytes) override {
+            if (account.admit(bytes))
+                return true;
+            refused = true;
+            return false;
+        }
+        void release(uint64_t bytes) override { account.release(bytes); }
+        uint64_t left() const override { return account.left(); }
+    } stack(account);
+    if (ask.stack_in_account)
+        budget.set_memory(&stack);
     PatternSearch search(graph);
     Request rq;
     rq.mode = ask.mode;
@@ -608,6 +630,7 @@ Outcome run_support(const Index &idx, const std::string &text, bool peptide, con
     tracker.begin_pattern(p.length());
     sink.begin_pattern(ask.mode, ask.max_paths);
     out.result = search.count(p, rq, budget);
+    out.level_refused = stack.refused;
     // every frame popped: frame 0's chain block, kept for the next anchor, is the only one left
     EXPECT_GE(1u, tracker.retained().chain_blocks) << describe(tracker.retained());
     out.x = supported_release(out.result, rq, sink, &out.named);
@@ -2299,6 +2322,82 @@ TEST(PatternRetrieval, CountObjectHasNoInterval) {
                                                 Unit::PLACED_OCCURRENCES)["relation"].asString());
     EXPECT_TRUE(retrieval::count_json(Relation::UNKNOWN, 3, Unit::PATHS)["value"].isNull());
     EXPECT_DEBUG_DEATH(retrieval::count_json(Relation::BOUNDS, 3, Unit::GRAPH_CONTEXTS), "BOUNDS");
+}
+
+// The engine's depth-first stack in the account the tracker charges (the route's one account,
+// SPEC §30): an account swept across the search stops it at a row, a frame or a level, a level's
+// told by the engine's refused admission (the tracker's frame of that node held). A level's stop
+// is the search's own memory stop: {EXTENSION, MAX_MEMORY}, no stop of the tracker or the sink,
+// no row refused; the release names it as the tracker's stops (Withheld::EXTERNAL, the answer's
+// annotation_budget), not as the kept walks' (OUTPUT_BUDGET); PARTIAL cuts at MAX_MEMORY and
+// lists the supported paths completed before it, a prefix of the answer. Some such stops fall
+// after a supported path, in the second "+" anchor (its walk carried by ten labels, the first
+// one's by one: larger frames), the "-" anchor not extended (at_least 0)
+TEST(PatternSupport, AStopAtALevelOfTheStackIsTheSearchsOwn) {
+    std::vector<Record> records { { "a", "r0", "AC" + std::string(25, 'A') },
+                                  { "b", "r1", "TTTTTG" } };
+    for (int i = 0; i < 10; ++i) {
+        records.push_back({ "c" + std::to_string(i), "s" + std::to_string(i),
+                            "GC" + std::string(25, 'A') });
+    }
+    const Index idx = build_rd(5, records);
+    const std::string text = "NC" + std::string(20, 'A');
+    for (Mode mode : { Mode::ALL_OR_COUNT, Mode::PARTIAL }) {
+        SCOPED_TRACE(static_cast<int>(mode));
+        Ask ask;
+        ask.mode = mode;
+        ask.labels = false;
+        ask.stack_in_account = true;
+        const Outcome full = run_support(idx, text, false, ask);
+        ASSERT_FALSE(full.result.stop);
+        ASSERT_EQ(Relation::EXACT, full.result.anchors->supported.relation);
+        ASSERT_EQ(2u, full.result.anchors->supported.value);
+        ASSERT_EQ(2u, full.paths.size());
+        uint64_t levels = 0, after = 0;
+        for (uint64_t max = 1024; max < (uint64_t(1) << 16); max += 29) {
+            ask.max_memory = max;
+            const Outcome out = run_support(idx, text, false, ask);
+            if (!out.result.stop)
+                break;
+            if (!out.level_refused)
+                continue;
+            ++levels;
+            const std::string what = "account " + std::to_string(max);
+            EXPECT_EQ(StopPhase::EXTENSION, out.result.stop->phase) << what;
+            EXPECT_EQ(StopReason::MAX_MEMORY, out.result.stop->reason) << what;
+            EXPECT_EQ("", out.stop) << what;
+            EXPECT_EQ(0u, out.rows_refused.size()) << what;
+            const AnchorCounts &a = *out.result.anchors;
+            EXPECT_EQ(Extension::STOPPED, a.extension) << what;
+            EXPECT_EQ(Relation::AT_LEAST, a.supported.relation) << what;
+            ASSERT_TRUE(out.x) << what;
+            if (mode == Mode::ALL_OR_COUNT) {
+                ASSERT_TRUE(out.x->withheld) << what;
+                EXPECT_EQ(Withheld::EXTERNAL, *out.x->withheld) << what;
+            } else {
+                ASSERT_TRUE(out.x->cut) << what;
+                EXPECT_EQ(StopReason::MAX_MEMORY, *out.x->cut) << what;
+                EXPECT_FALSE(out.x->complete) << what;
+                if (!out.output_cut) {
+                    ASSERT_EQ(a.supported.value, out.paths.size()) << what;
+                }
+                for (size_t i = 0; i < out.paths.size(); ++i) {
+                    EXPECT_EQ(full.paths[i].sequence, out.paths[i].sequence) << what;
+                }
+            }
+            if (a.supported.value) {
+                ++after;
+                EXPECT_EQ(Relation::AT_LEAST,
+                          a.supported_by_orientation.at(Orientation::FORWARD).relation) << what;
+                EXPECT_EQ(1u, a.supported_by_orientation.at(Orientation::FORWARD).value) << what;
+                const Count &minus = a.supported_by_orientation.at(Orientation::REVERSE);
+                EXPECT_EQ(Relation::AT_LEAST, minus.relation) << what;
+                EXPECT_EQ(0u, minus.value) << what;
+            }
+        }
+        EXPECT_LT(0u, levels);
+        EXPECT_LT(0u, after);
+    }
 }
 
 #endif // ! _PROTEIN_GRAPH

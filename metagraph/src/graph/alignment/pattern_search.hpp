@@ -990,9 +990,14 @@ inline uint64_t retained_path_bytes(size_t k, size_t length) {
  * doubling, so they hold at most twice what their levels fill (for the moment of a growth's
  * copy the old buffer stands beside the new one: 1.5 times the charge, the model's slack).
  * Their capacity is not shrunk when the DFS backs out of a level (it is freed when the search
- * returns) while the level is released at once: the account's peak covers the deepest stack,
- * and the extension keeps a walk only at the full depth L - k, where the stack's charge is at
- * its largest. The DFS frontier of discovery (O(k) per base search) is not charged.
+ * returns) while the level is released at once. Without anything else admitted during the
+ * search (long_search "paths": the extension keeps a walk only at the full depth L - k, where
+ * the stack's charge is at its largest) the account's peak covers that capacity. Where
+ * something else is admitted at a shallower depth after a deeper branch was left (a support
+ * tracker's frames and rows under "supported_paths"; the segment search's memoised states),
+ * real memory can exceed the account by at most the deepest stack charge of the current
+ * anchor (arm), less what the stack holds then. The DFS frontier of discovery (O(k) per base
+ * search) is not charged.
  */
 #if _PROTEIN_GRAPH
 constexpr uint64_t kExtensionLevelBytes = 754;
