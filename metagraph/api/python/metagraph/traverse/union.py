@@ -870,10 +870,13 @@ class PairUnion:
             if any(side in _root(p.graphlet).arms for p in self.parts):
                 self._arms[side] = _Trie(self, side, b)
         self._number_segments()
+        # each pair's record-mapping status (seqs_order) is in it: the warnings, carriers()
+        # and evidence() read it, so a resume token does not cross a change of it
         self.digest = C.combined_digest([
-            [[list(p.key), p.tag, p.pair_stated_by, p.retrieval[1], p.digest] for p in self.parts],
+            [[list(p.key), p.tag, p.pair_stated_by, p.retrieval[1], p.digest, p.seqs_order]
+             for p in self.parts],
             [[list(a.key), a.tag, a.pair_stated_by, a.category, C.canonical_json(a.detail),
-              a.seed_check] for a in self.absent],
+              a.seed_check, a.seqs_order] for a in self.absent],
             [[f['tag'], f['error'], f['kept']] for f in self._failures],
             self._seed_seq, sorted(self._expected_raw) if exp is not None else None])
         self._fig_cache = {}

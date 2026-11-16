@@ -904,6 +904,30 @@ class TestInputs(unittest.TestCase):
                 ('g', '/x/a.dbg'): 'verified', ('g', '/y/b.dbg'): 'count_only'}))
         self.assertIn('two values for pair g', text)
 
+    def test_the_mapping_status_is_in_the_digest(self):
+        # GPT review m2: seqs_order changes the warnings and evidence, so it changes the
+        # digest, and a resume token does not cross it
+        parts = [{'pair': 'g', 'graphlet': T.graphlet('same_name')}]
+        absent = [{'pair': 'h', 'result': absent_result('not_in_graph')}]
+        us = {v: union_pairs(parts + absent, seqs_order=None if v is None else {'g': v})
+              for v in (None, 'verified', 'count_only')}
+        self.assertEqual(len({u.digest for u in us.values()}), 3)
+        self.assertEqual(us['verified'].digest,
+                         union_pairs(parts + absent, seqs_order={'g': 'verified'}).digest)
+        self.assertNotEqual(union_pairs(parts + absent, seqs_order={'h': 'verified'}).digest,
+                            us[None].digest)
+        wid = us['verified'].walks('right')[0].id
+        with self.assertRaises(LocalBudgetExceeded) as cm:
+            us['verified'].carriers('right', wid, budget=LocalBudget(work_units=1))
+        token = cm.exception.partial.resume
+        for v in (None, 'count_only'):
+            with self.assertRaises(ValueError):
+                us[v].carriers('right', wid, resume=token)
+        again = union_pairs(parts + absent, seqs_order={'g': 'verified'})
+        self.assertEqual([str(s) for s in cm.exception.partial.rows] +
+                         [str(s) for s in again.carriers('right', wid, resume=token)],
+                         [str(s) for s in again.carriers('right', wid)])
+
     def test_seed_check_ignores_a_matching_seed_id(self):
         seq = T.graphlet('merge').seed.sequence
         r = absent_result('not_in_graph')
