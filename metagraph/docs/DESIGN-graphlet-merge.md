@@ -345,7 +345,8 @@ The codes, in that order: `bad_expected`, `bad_seqs_order`, `not_combinable`, `v
     `seed_id`) are one retrieval; the form kept ranks on the canonical JSON of every sub-part's envelope and seed
     summary (A.4), so the answers do not depend on the order given (§2.10).
   - *Identity.* A stitched part beside a plain graphlet of its pair is `duplicate_pair` (`stitch(g)` and `g`
-    included); the same stitched graphlet twice is a no-op; every part of it must carry bases (`no_bases`).
+    included); the same stitched graphlet twice is a no-op; every part of it must carry bases (`no_bases`, the
+    text naming the pair and its first part without them: `part A (its stitched part right:0) carries no bases`).
 
 ### 2.4 The union trie: spellings, segments, walks
 

@@ -45,7 +45,7 @@ from .attempts import TraverseResponse
 from .budget import (BASE_SHIFT, DICT, DICT_KEY, INT, LIST_ITEM, SET, SET_ITEM, STR, TUPLE,
                      W_ELEM, W_ROW, W_STEP, LocalBudgetExceeded, Partial)
 from ._stitch import _RANK as _CAUSE_RANK
-from ._stitch import StitchedGraphlet
+from ._stitch import StitchedGraphlet, part_name
 from .client import answered_pair
 from .model import ARM_SIDES, BadSelector, Graphlet, UnknownLabel
 
@@ -746,7 +746,12 @@ class PairUnion:
         # no_bases, different_alphabet
         parts = [e for e in elems if e.kind == 'part']
         for e in parts:
-            if not all(C.has_bases(g) for g in _sub_graphlets(e.graphlet)):
+            if isinstance(e.graphlet, StitchedGraphlet):
+                bare = next((q for q in e.graphlet.parts if not C.has_bases(q.graphlet)), None)
+                if bare is not None:
+                    raise _refuse('no_bases', None, '%s (its stitched part %s)' % (
+                        tags[id(cls_of[id(e.desc)])], part_name(bare.key)))
+            elif not C.has_bases(e.graphlet):
                 raise _refuse('no_bases', None, tags[id(cls_of[id(e.desc)])])
         if parts:
             ref = parts[0]

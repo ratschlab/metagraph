@@ -356,6 +356,16 @@ class TestStitchedPart(unittest.TestCase):
             with self.assertRaises(CombineRefused) as cm:
                 union_pairs(pairs(stitched(name), None))
             self.assertEqual(cm.exception.code, 'no_bases')
+            # the text names the stitched part without bases, not only the pair
+            self.assertIn('part A (its stitched part root) carries no bases', str(cm.exception))
+        # a child without bases under a root with them (its bases dropped after stitching)
+        child = copy.deepcopy(role('keep_forbid', 'child'))
+        bare = stitch(role('keep_forbid', 'parent'), child)
+        child.arms['right'].segments[0].walk = None
+        with self.assertRaises(CombineRefused) as cm:
+            union_pairs(pairs(bare, None))
+        self.assertIn('part A (its stitched part right:%d) carries no bases'
+                      % bare.junctions[0].walk[0], str(cm.exception))
         with self.assertRaises(CombineRefused) as cm:
             union_pairs([42])
         self.assertEqual(cm.exception.code, 'not_combinable')
