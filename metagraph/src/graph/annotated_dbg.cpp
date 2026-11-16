@@ -893,7 +893,8 @@ std::atomic<uint64_t> folds_counts_only = 0;
  * task (SearchAccount::charge_scratch: the most one task holds at once, times the tasks that
  * run at once), and released when it is freed. The values themselves charge as they grow
  * (PresenceRuns, CountRuns, PositionCoords). What the fold holds before the cut is not
- * charged here (kFoldValuesBudget). Lane T7-M5: train 7 P1's R8 (a).
+ * charged here (its budget: the fold's budget_, set_record_fold_values_budget, by default
+ * kFoldValuesBudget). Lane T7-M5: train 7 P1's R8 (a).
  */
 class CutScratch {
   public:
@@ -1033,20 +1034,36 @@ void call_selected_coords(const MultiIntMatrix &matrix, const annot::CoordToHead
 // with |count|, their number. A value is held once per row, and found again for each
 // position of the row as the positions are visited in order (call_in_order): it is not
 // spread over the positions first, so nothing grows with a row's positions times its
-// values, and nothing is sorted (review M1/m3 of lane T7-M5, Q-M16). The values held are
-// charged to |scratch| as they grow (the query's positions of the repeated rows are not:
-// they are the query's, as the rows are).
+// values, and nothing is sorted (review M1/m3 of lane T7-M5, Q-M16). A record visits the
+// positions of the rows it has values at only (review A-m1). The values held, and the
+// rows a record visits, are charged to |scratch| as they grow. The positions of the
+// repeated rows (4 B a position and 4 B a row, made only when records are returned) are
+// not: they are the query's, as its rows and positions are.
 class RepeatedValues {
   public:
     RepeatedValues(const MultiIntMatrix &matrix, const annot::CoordToHeader &mapping,
                    const QueryRows &q, std::span<const size_t> positions,
                    const HeaderCounts &counts, bool count, CutScratch *scratch)
           : hits_(counts.size()), scratch_(scratch) {
+        if (counts.empty())
+            return;
+        // the positions of each repeated row, ascending: those of row j are
+        // positions_[offsets_[j], offsets_[j + 1])
+        offsets_.assign(q.repeated.size() + 1, 0);
+        for (size_t d = 0; d < q.distinct.size(); ++d) {
+            if (q.weight[d] > 1)
+                offsets_[q.repeated_of[d] + 1] = q.weight[d];
+        }
+        std::partial_sum(offsets_.begin(), offsets_.end(), offsets_.begin());
+        positions_.resize(offsets_.back());
         for (size_t i = 0; i < q.row_of.size(); ++i) {
             const uint32_t d = q.row_of[i];
             if (q.weight[d] > 1)
-                repeated_at_.emplace_back(positions[i], q.repeated_of[d]);
+                positions_[offsets_[q.repeated_of[d]]++] = positions[i];
         }
+        // each offset was moved to the end of its row: the start of the next one
+        std::copy_backward(offsets_.begin(), offsets_.end() - 1, offsets_.end());
+        offsets_[0] = 0;
         call_selected_coords(matrix, mapping, q.repeated, counts,
                              [&](size_t j, uint32_t r, uint64_t coord) {
             auto &hits = hits_[r];
@@ -1061,33 +1078,76 @@ class RepeatedValues {
 
     // Call |callback|(position, value) for the values of counts[r], in ascending order of
     // position and, at a position, of value (a row's coordinates are in ascending order).
-    // Once: the values are freed after.
+    // Once: the values are freed after. The positions of a record's one row are walked
+    // directly, those of several rows merged by position (a heap of the rows).
     template <class Callback>
     void call_in_order(size_t r, const Callback &callback) {
         auto &hits = hits_[r];
         // by row, as call_selected_coords adds them, and at a row in ascending order
         assert(std::is_sorted(hits.begin(), hits.end()));
-        auto row_begin = hits.begin();
-        uint32_t row = std::numeric_limits<uint32_t>::max();
-        for (const auto &[pos, j] : repeated_at_) {
-            if (j != row) {
-                row = j;
-                row_begin = std::lower_bound(hits.begin(), hits.end(), j,
-                                             [](const auto &hit, uint32_t next_row) {
-                    return hit.first < next_row;
-                });
+        if (hits.empty()) {
+            // nothing to visit
+        } else if (hits.front().first == hits.back().first) {
+            // one row: its positions in order
+            const uint32_t j = hits.front().first;
+            for (uint32_t i = offsets_[j]; i < offsets_[j + 1]; ++i) {
+                for (const auto &hit : hits) {
+                    callback(positions_[i], hit.second);
+                }
             }
-            for (auto it = row_begin; it != hits.end() && it->first == j; ++it) {
-                callback(pos, it->second);
-            }
+        } else {
+            merge_rows(hits, callback);
         }
         scratch_->free(hits);
     }
 
   private:
-    // (query position, index of the repeated row) of each position of a repeated row,
-    // ascending
-    std::vector<std::pair<uint32_t, uint32_t>> repeated_at_;
+    // Call |callback| for the values in |hits| of several rows, merged by position: a heap
+    // of the rows by their next position (no position is in two rows), charged to the
+    // scratch as it grows
+    template <class Callback>
+    void merge_rows(const std::vector<std::pair<uint32_t, uint64_t>> &hits,
+                    const Callback &callback) {
+        // the next of a row's positions, and its values in |hits|
+        struct Row {
+            uint32_t next;
+            uint32_t end;
+            size_t hits_begin;
+            size_t hits_end;
+        };
+        std::vector<Row> rows;
+        for (size_t h = 0; h < hits.size(); ) {
+            const uint32_t j = hits[h].first;
+            size_t e = h + 1;
+            while (e < hits.size() && hits[e].first == j) {
+                ++e;
+            }
+            scratch_->make_room(rows);
+            rows.push_back({ offsets_[j], offsets_[j + 1], h, e });
+            h = e;
+        }
+        auto later = [&](const Row &a, const Row &b) {
+            return positions_[a.next] > positions_[b.next];
+        };
+        std::make_heap(rows.begin(), rows.end(), later);
+        for (size_t left = rows.size(); left; ) {
+            std::pop_heap(rows.begin(), rows.begin() + left, later);
+            Row &row = rows[left - 1];
+            for (size_t h = row.hits_begin; h < row.hits_end; ++h) {
+                callback(positions_[row.next], hits[h].second);
+            }
+            if (++row.next < row.end) {
+                std::push_heap(rows.begin(), rows.begin() + left, later);
+            } else {
+                --left;
+            }
+        }
+        scratch_->free(rows);
+    }
+
+    // the query positions of the repeated rows, by row, and the start of each row's in it
+    std::vector<uint32_t> positions_;
+    std::vector<uint32_t> offsets_;
     // (index of the repeated row, value) of each record, by row
     std::vector<std::vector<std::pair<uint32_t, uint64_t>>> hits_;
     CutScratch *scratch_;
