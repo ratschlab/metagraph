@@ -27,8 +27,6 @@
 #include "cli/load/load_annotated_graph.hpp"
 #include "cli/server_checks.hpp"
 #include "cli/server_fanout.hpp"
-// held_result_bytes (T7-D2's; moves to json_helpers.hpp in a later commit of T7-D3)
-#include "cli/pattern.hpp"
 #include "cli/traverse_attempts.hpp"
 #include "annotation/binary_matrix/base/decode_budget.hpp"
 #include "annotation/coord_to_header.hpp"
