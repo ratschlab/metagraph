@@ -1023,8 +1023,10 @@ void call_selected_coords(const MultiIntMatrix &matrix, const annot::CoordToHead
 
 // The values of the records of |counts| at the positions of the repeated rows, whose
 // values the fold does not hold. The value is each coordinate of the record there or,
-// with |count|, their number. A value is held once per row and spread over the
-// positions of the row one record at a time. The values held, and those spread, are
+// with |count|, their number. A value is held once per row, and found again for each
+// position of the row as the positions are visited in order (call_in_order): it is not
+// spread over the positions first, so nothing grows with a row's positions times its
+// values, and nothing is sorted (review M1/m3 of lane T7-M5, Q-M16). The values held are
 // charged to |scratch| as they grow (the query's positions of the repeated rows are not:
 // they are the query's, as the rows are).
 class RepeatedValues {
@@ -1032,11 +1034,11 @@ class RepeatedValues {
     RepeatedValues(const MultiIntMatrix &matrix, const annot::CoordToHeader &mapping,
                    const QueryRows &q, std::span<const size_t> positions,
                    const HeaderCounts &counts, bool count, CutScratch *scratch)
-          : positions_(q.repeated.size()), hits_(counts.size()), scratch_(scratch) {
+          : hits_(counts.size()), scratch_(scratch) {
         for (size_t i = 0; i < q.row_of.size(); ++i) {
             const uint32_t d = q.row_of[i];
             if (q.weight[d] > 1)
-                positions_[q.repeated_of[d]].push_back(positions[i]);
+                repeated_at_.emplace_back(positions[i], q.repeated_of[d]);
         }
         call_selected_coords(matrix, mapping, q.repeated, counts,
                              [&](size_t j, uint32_t r, uint64_t coord) {
@@ -1050,28 +1052,35 @@ class RepeatedValues {
         });
     }
 
-    // The (position, value) pairs of counts[r], to take once, with
-    // room for |num_more| pairs (charged to the scratch, which the caller releases)
-    std::vector<std::pair<uint32_t, uint64_t>> take(size_t r, size_t num_more = 0) {
-        auto hits = std::move(hits_[r]);
-        size_t num_values = num_more;
-        for (const auto &[j, value] : hits) {
-            num_values += positions_[j].size();
-        }
-        std::vector<std::pair<uint32_t, uint64_t>> values;
-        scratch_->reserve(values, num_values);
-        for (const auto &[j, value] : hits) {
-            for (uint32_t pos : positions_[j]) {
-                values.emplace_back(pos, value);
+    // Call |callback|(position, value) for the values of counts[r], in ascending order of
+    // position and, at a position, of value (a row's coordinates are in ascending order).
+    // Once: the values are freed after.
+    template <class Callback>
+    void call_in_order(size_t r, const Callback &callback) {
+        auto &hits = hits_[r];
+        // by row, as call_selected_coords adds them, and at a row in ascending order
+        assert(std::is_sorted(hits.begin(), hits.end()));
+        auto row_begin = hits.begin();
+        uint32_t row = std::numeric_limits<uint32_t>::max();
+        for (const auto &[pos, j] : repeated_at_) {
+            if (j != row) {
+                row = j;
+                row_begin = std::lower_bound(hits.begin(), hits.end(), j,
+                                             [](const auto &hit, uint32_t next_row) {
+                    return hit.first < next_row;
+                });
+            }
+            for (auto it = row_begin; it != hits.end() && it->first == j; ++it) {
+                callback(pos, it->second);
             }
         }
         scratch_->free(hits);
-        return values;
     }
 
   private:
-    // the query positions of each repeated row, ascending
-    std::vector<std::vector<uint32_t>> positions_;
+    // (query position, index of the repeated row) of each position of a repeated row,
+    // ascending
+    std::vector<std::pair<uint32_t, uint32_t>> repeated_at_;
     // (index of the repeated row, value) of each record, by row
     std::vector<std::vector<std::pair<uint32_t, uint64_t>>> hits_;
     CutScratch *scratch_;
@@ -1601,33 +1610,29 @@ AnnotatedDBG::get_header_results(std::string_view sequence, size_t num_top_label
         result.reserve(top.size());
         for (size_t r = 0; r < top.size(); ++r) {
             Values values(num_kmers, values_account);
-            // merge the runs of the fold and the values it does not hold, both in
-            // ascending order of position
-            auto unheld = unheld_values.take(r);
-            if (!std::is_sorted(unheld.begin(), unheld.end()))
-                std::sort(unheld.begin(), unheld.end());
-            auto next = unheld.begin();
-            const auto end = unheld.end();
-            auto add_unheld_before = [&](size_t pos) {
-                for ( ; next != end && next->first < pos; ++next) {
+            // merge the runs of the fold and the values it does not hold (at the positions
+            // of the repeated rows, which no run holds), both in ascending order of position
+            auto runs = fold.take_runs(top[r].header);
+            auto next = runs.begin();
+            auto add_runs_before = [&](size_t pos) {
+                for ( ; next != runs.end() && next->pos < pos; ++next) {
                     if constexpr (std::is_same_v<Values, PresenceRuns>) {
-                        values.add(next->first);
+                        values.add_run(next->pos, next->pos + next->len);
                     } else {
-                        values.add(next->first, next->second);
+                        values.add_run(next->pos, next->pos + next->len, next->value);
                     }
                 }
             };
-            auto runs = fold.take_runs(top[r].header);
-            for (const RecordFold::Run &run : runs) {
-                add_unheld_before(run.pos);
+            unheld_values.call_in_order(r, [&](uint32_t pos, uint64_t value) {
+                add_runs_before(pos);
                 if constexpr (std::is_same_v<Values, PresenceRuns>) {
-                    values.add_run(run.pos, run.pos + run.len);
+                    values.add(pos);
+                    (void)value;
                 } else {
-                    values.add_run(run.pos, run.pos + run.len, run.value);
+                    values.add(pos, value);
                 }
-            }
-            add_unheld_before(num_kmers);
-            scratch.free(unheld);
+            });
+            add_runs_before(num_kmers);
             if (fold.runs_scratch())
                 scratch.free(runs);
             values.shrink();
@@ -1942,30 +1947,42 @@ AnnotatedDBG::get_kmer_coordinates(std::string_view sequence,
         std::vector<std::tuple<std::string, size_t, PositionCoords, size_t>> result;
         result.reserve(top.size());
         for (size_t r = 0; r < top.size(); ++r) {
-            std::vector<std::pair<uint32_t, uint64_t>> coords_at; // (position, coordinate)
             const auto &[col, header] = top[r].header;
+            // (position, coordinate) of the fold's runs, sorted: a record at several
+            // coordinates of a position has a run for each, and the runs come in any order
+            std::vector<std::pair<uint32_t, uint64_t>> held;
             {
                 auto runs = fold.take_runs(top[r].header);
                 size_t num_held = 0;
                 for (const RecordFold::Run &run : runs) {
                     num_held += run.len;
                 }
-                coords_at = unheld_coords.take(r, num_held);
+                scratch.reserve(held, num_held);
                 for (const RecordFold::Run &run : runs) {
                     for (uint32_t i = 0; i < run.len; ++i) {
-                        coords_at.emplace_back(run.pos + i, run.value + i);
+                        held.emplace_back(run.pos + i, run.value + i);
                     }
                 }
                 if (fold.runs_scratch())
                     scratch.free(runs);
             }
-            // each position's coordinates in ascending order, as the row holds a record's
-            std::sort(coords_at.begin(), coords_at.end());
+            std::sort(held.begin(), held.end());
+            // merged with the coordinates at the repeated rows, whose positions no run
+            // holds: each position's coordinates in ascending order, as the row holds a
+            // record's
             PositionCoords coords(num_kmers, values);
-            for (const auto &[position, coord] : coords_at) {
-                coords.add(position, coord);
-            }
-            scratch.free(coords_at);
+            auto next = held.begin();
+            auto add_held_before = [&](size_t pos) {
+                for ( ; next != held.end() && next->first < pos; ++next) {
+                    coords.add(next->first, next->second);
+                }
+            };
+            unheld_coords.call_in_order(r, [&](uint32_t pos, uint64_t coord) {
+                add_held_before(pos);
+                coords.add(pos, coord);
+            });
+            add_held_before(num_kmers);
+            scratch.free(held);
             coords.shrink();
             result.emplace_back(std::move(top[r].label), top[r].count, std::move(coords),
                                 coord_to_header_->num_kmers_in_sequence(col, header));

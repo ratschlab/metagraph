@@ -428,6 +428,47 @@ TEST(SearchBudget, AQueryByRecordReadAgainAfterTheCutIsCharged) {
     });
 }
 
+// A query by record for coordinates at a homopolymer charges the coordinates of the returned
+// records at its one repeated row to the values account's scratch: each record's buffer, grown
+// by doubling from one, 16 B per coordinate (not per coordinate and position). (Review m1, lane
+// T7-M5.)
+TEST(SearchBudget, AQueryByRecordChargesTheValuesOfItsRepeatedRows) {
+    std::mt19937 rng(16);
+    const size_t k = 9;
+    std::vector<CoordinateRecord> records;
+    for (size_t i = 0; i < 6; ++i) {
+        records.push_back({ random_sequence(rng, 12) + std::string(k + 20 * i + 3, 'A')
+                                + random_sequence(rng, 12),
+                            "F" + std::to_string(i % 2), "r" + std::to_string(i) });
+    }
+    const std::string query(k + 500, 'A');
+    auto index = coordinate_test_graph(k, records, false, false, false, true);
+    const size_t top = 4;
+    SearchBudget budget(kLarge);
+    SearchAccount account(&budget, "values");
+    const Coordinates result = index->get_kmer_coordinates(query, top, 0, 0, nullptr, &account);
+    ASSERT_EQ(top, result.size());
+    uint64_t scratch = 0;
+    uint64_t spread = 0;
+    for (const auto &[label, count, positions, length] : result) {
+        SCOPED_TRACE(label);
+        EXPECT_EQ(501u, count);
+        // the record's coordinates at the row of A^k, the same at every position
+        const auto dense = positions.to_dense();
+        const size_t num_coords = dense[0].size();
+        ASSERT_LT(2u, num_coords);
+        EXPECT_EQ(num_coords, dense[500].size());
+        size_t capacity = 1;
+        while (capacity < num_coords) {
+            capacity *= 2;
+        }
+        scratch += annot::matrix::buffer_bytes(capacity, 16);
+        spread += num_coords * 501 * 16;
+    }
+    EXPECT_EQ(scratch, account.scratch());
+    EXPECT_LT(account.scratch() * 100, spread);
+}
+
 // REVIEW 9726cb420 [P2], lane T6-W2: the scratch one task of an account's work holds while it
 // runs (a record's store of its rows) is charged as the most one task took, times the tasks
 // that run at once, raised before the scratch is allocated: a freed scratch is not charged again
