@@ -23,19 +23,19 @@ in walking order (outward), so spellings compare across k, regime and radius.
 
 import collections
 import hashlib
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any, Optional
 
 from . import budget as _B
 from . import composite as C
 from . import derive
 from . import ops as _ops
-from ._codec import REASON, RESOURCE_CODES, GraphletFormatError
+from ._codec import REASON, GraphletFormatError
 from .attempts import TraverseResponse
 from .budget import (BASE_SHIFT, DICT, DICT_KEY, INT, LIST_ITEM, SET, SET_ITEM, STR, TUPLE,
                      W_ELEM, W_ROW, W_STEP, LocalBudgetExceeded, Partial)
 from .client import answered_pair
-from .model import (ARM_SIDES, AmbiguousLabel, BadSelector, Graphlet, UnknownLabel)
+from .model import ARM_SIDES, BadSelector, Graphlet, UnknownLabel
 
 __all__ = [
     'union_pairs', 'PairUnion', 'PairPart', 'PairAbsent', 'PairLabel', 'SpanLabel',
@@ -81,6 +81,9 @@ TEXTS = {
                       'one oriented seed, spelled base for base the same',
     'different_seed_length': '%s is %d bp and %s %d bp (equal for the first %d bases): a '
                              'union by sequence needs one oriented seed',
+    # an absent record states the seed's length, not its bases
+    'different_seed_length_absent': '%s is %d bp and %s %d bp: a union by sequence needs one '
+                                    'oriented seed',
     'different_seed_revcomp': '%s is the reverse complement of %s: a union by sequence needs '
                               'one orientation; fetch %s with the seed as %s spells it',
     'duplicate_pair': 'results %s and %s were answered on one pair (%s): a union holds one '
@@ -715,9 +718,9 @@ class PairUnion:
             elif e.kind == 'absent':
                 n = _seed_meta(e.result).get('length_bp')
                 if isinstance(n, int) and not isinstance(n, bool) and n != len(useed):
-                    raise _refuse('different_seed', 'different_seed_length',
+                    raise _refuse('different_seed', 'different_seed_length_absent',
                                   _seed_subject('absent', tag), n, _seed_object(ref_tag),
-                                  len(useed), 0)
+                                  len(useed))
                 for sq in (e.sent, e.sequence):
                     if sq is not None:
                         sq = C.case_mapped(sq, alphabet) if alphabet else sq.upper()
@@ -2031,9 +2034,20 @@ class _Trie:
         pol = derive.path_of_leaf(a)
         nodes = self.seg_nodes[pi]
         stack = [(r, 0) for r in reversed(roots)]
+        first = {}                      # (trie node, first base) -> the segment starting so
         while stack:
             sid, start = stack.pop()
             s = segs[sid]
+            if s.length_bp:
+                # a prefix names one path per graph: two segments of one part that start at
+                # one node with one base would share the trie's edge, one overwriting the
+                # other's cover
+                other = first.setdefault((start, s.walk[0]), sid)
+                if other != sid:
+                    raise GraphletFormatError(
+                        0, 'part %s: segments %d and %d of the %s arm both start with %r at %d '
+                        'bp (sibling segments start with distinct bases)'
+                        % (part.tag, other, sid, self.side, s.walk[0], s.from_bp))
             end = self._insert_seg(pi, s, start)
             nodes[sid] = (start, end)
             if s.length_bp == 0:
@@ -2215,10 +2229,12 @@ def _leaf_reasons(g, a, seg):
             'labels': labels}, code
 
 
-def _leaf_cert(a, seg, code):
-    n = a.segments[seg].end_bp
-    complete = (code is None or code not in RESOURCE_CODES) and n <= a.complete_to_bp
-    return complete, min(n, a.complete_to_bp)
+def _leaf_cert(a, seg):
+    """(complete, certified_to_bp) of the part walk ending at leaf |seg|: ops._walk_end()'s
+    own (no resource stop at the leaf, within complete_to_bp)."""
+    p = derive.paths(a)[derive.path_of_leaf(a)[seg]]
+    _, complete, beyond = _ops._walk_end(a, p)
+    return complete, p.length_bp - beyond
 
 
 def _events_at(t, pi, a, stop, last):
@@ -2302,7 +2318,7 @@ def _span(un, t, pi, part, node, length, with_labels, at_bp=None, b=None):
     if how == 'whole':
         _, leaf, pid = item
         reasons, code = _leaf_reasons(g, a, leaf)
-        complete, cert = _leaf_cert(a, leaf, code)
+        complete, cert = _leaf_cert(a, leaf)
         labels, cut = _labels_to(un, part, a, leaf, length, with_labels, at_bp, b)
         return PairSpan(part.tag, mode, 'whole', length, pid, None, None, None, (), reasons,
                         labels, cut, complete, cert, None, g.k, g.regime)
@@ -2319,7 +2335,7 @@ def _span(un, t, pi, part, node, length, with_labels, at_bp=None, b=None):
     if how == 'ends':
         _, leaf, pid = item
         reasons, code = _leaf_reasons(g, a, leaf)
-        complete, cert = _leaf_cert(a, leaf, code)
+        complete, cert = _leaf_cert(a, leaf)
         absence = _absence(g, a, _events_at(t, pi, a, stop, last), d, c, code)
         labels, cut = _labels_to(un, part, a, leaf, d, with_labels, at_bp, b)
         return PairSpan(part.tag, mode, 'ends', d, pid, None, None, None, (), reasons, labels,
@@ -2425,9 +2441,9 @@ def _route(un, t, pi, part, a, stub, m, j, d, below, into, with_labels, at_bp, b
     pos = d + n
     # certification
     if how == 'ends':
-        complete, cert = _leaf_cert(a, cur, code)
+        complete, cert = _leaf_cert(a, cur)
     elif held_leaf is not None:
-        complete, cert = _leaf_cert(a, held_leaf, code)
+        complete, cert = _leaf_cert(a, held_leaf)
     else:
         cert = min(pos, a.complete_to_bp)
         complete = how == 'held' and pos <= a.complete_to_bp

@@ -213,6 +213,15 @@ class TestOnePart(unittest.TestCase):
                 self.assertEqual(c.per_pair[u.parts[0].tag]['certified_to_bp'],
                                  arm.complete_to_bp)
 
+    def test_siblings_with_one_first_base_refused(self):
+        g = copy.deepcopy(T.graphlet('merge'))
+        segs = g.arms['right'].segments
+        segs[2].walk = segs[1].walk[0] + segs[2].walk[1:]   # 1 and 2 both start with 'A'
+        with self.assertRaises(GraphletFormatError) as cm:
+            union_pairs([{'pair': 'g', 'graphlet': g}])
+        self.assertIn("segments 1 and 2 of the right arm both start with 'A' at 20 bp",
+                      str(cm.exception))
+
     def test_no_bases_refused(self):
         with self.assertRaises(CombineRefused) as cm:
             union_pairs([{'pair': 'g', 'graphlet': T.graphlet('caps')}])
@@ -425,6 +434,21 @@ class TestExports(unittest.TestCase):
         name = stub_line.split('\t')[1]
         self.assertFalse(any(x.startswith('L\t%s\t' % name) for x in gfa.split('\n')))
 
+    def test_tokens_write_trie_nodes_and_reasons_as_they_are(self):
+        # A.5: a merges token names the trie node as 's<id>' or 's<id>$', and mt:Z the same
+        g = limits_with_bases()
+        u = union_pairs([{'pair': 'L', 'graphlet': g}])
+        fa, gfa = u.to_fasta(stubs=True), u.to_gfa()
+        self.assertIn('merges=L@7>s1$', fa)
+        self.assertIn('\tmt:Z:s1$', gfa)
+        self.assertNotIn('%24', fa + gfa)
+        # constrain mode ends= joins its label reasons with a bare '|'
+        s = X._span_token(U.PairSpan('A', 'constrain', 'ends', 76, 0, None, None, None, (),
+                                     {'path_reason': None,
+                                      'labels': {'dead_end': 1, 'max_steps': 2}},
+                                     (), False, False, 76, 'graph'))
+        self.assertEqual(s, 'A@76:dead_end|max_steps/graph')
+
     def test_gfa_seed_once_per_arm_and_stub_tags(self):
         u = locus()
         gfa = u.to_gfa()
@@ -607,8 +631,9 @@ class TestRefusals(unittest.TestCase):
         union_pairs([pa], seed=seq.lower())            # case mapped
         refused(self, 'different_seed', lambda: union_pairs(
             [pa, {'pair': 'g2', 'result': absent_result('not_in_graph', seed_len=31)}]),
-            U.TEXTS['different_seed_length'] % ('the seed of the absent record of pair g2',
-                                                31, "part a's", 30, 0))
+            U.TEXTS['different_seed_length_absent'] % (
+                'the seed of the absent record of pair g2', 31, "part a's", 30))
+        self.assertNotIn('equal for the first', U.TEXTS['different_seed_length_absent'])
         refused(self, 'different_seed', lambda: union_pairs(
             [pa, {'pair': 'g2', 'result': absent_result('not_in_graph'), 'sequence': bad}]),
             U.TEXTS['different_seed'] % ('the seed of the absent record of pair g2',

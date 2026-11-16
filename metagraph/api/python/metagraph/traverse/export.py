@@ -1000,7 +1000,9 @@ def _comment(text):
 
 def _end_reason(r):
     """The end reason a span token names: the path reason, else the label end reasons
-    ('|' between them, in byte order), else none."""
+    ('|' between them, in byte order), else none. Reason names are enum names
+    ([a-z_]+), so they are written as they are: '|' joins them unescaped, and a decoder
+    splits on it."""
     if not r:
         return None
     if r.get('path_reason'):
@@ -1010,16 +1012,19 @@ def _end_reason(r):
 
 
 def _span_token(s, sep='@'):
+    """A span token of Appendix A.5: the tag escaped; the trie node ('s31', 's30$',
+    'seed') and the end reasons written as they are (their grammar holds no other
+    character)."""
     e = union_escape
     if s.how == 'merges':
-        tok = '%s%s%d>%s' % (e(s.pair), sep, s.to_bp, e(s.into))
+        tok = '%s%s%d>%s' % (e(s.pair), sep, s.to_bp, s.into)
         r = s.route
         if r is not None and r.how != 'held':
             why = _end_reason(r.end_reasons) if r.how == 'ends' else None
-            tok += '~%d%s/%s' % (r.to_bp, ':' + e(why) if why else '', r.absence)
+            tok += '~%d%s/%s' % (r.to_bp, ':' + why if why else '', r.absence)
         return tok
     why = _end_reason(s.end_reasons) if s.how == 'ends' else None
-    return '%s%s%d%s/%s' % (e(s.pair), sep, s.to_bp, ':' + e(why) if why else '', s.absence)
+    return '%s%s%d%s/%s' % (e(s.pair), sep, s.to_bp, ':' + why if why else '', s.absence)
 
 
 def _held_labels(s):
@@ -1191,7 +1196,7 @@ def union_gfa(u, with_seed, labels, at_bp, bud):
             st = stub_tags.get(idx)
             if st:
                 tags.append('mg:Z:%s' % ','.join(e(x) for x, _ in st))
-                tags.append('mt:Z:%s' % ','.join(e(x) for _, x in st))
+                tags.append('mt:Z:%s' % ','.join(x for _, x in st))
             segs_out.append('S\t%s\t%s\t%s' % (name, text, '\t'.join(tags)))
             par = 's%d' % t.useg[us.parent].id if us.parent is not None else (
                 sname if with_seed else None)
