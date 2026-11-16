@@ -47,7 +47,7 @@ import unittest
 import requests
 
 from base import PROTEIN_MODE, TestingBase, METAGRAPH
-from test_pattern import gate_block
+from test_pattern import gate_block, jsoncpp_compact, members_once
 from test_traverse_forms import CHARGED
 
 MINI_DIR = os.environ.get('METAGRAPH_MINI_REFSEQ', os.path.join(os.getcwd(), 'mini_refseq'))
@@ -1009,6 +1009,46 @@ class TestMultiGraphServer(TestingBase):
         every = self.post('pattern', request)
         self.assertEqual(['ecoli', 'enterics', 'kleb', 'pseudo'], every['graphs'])
         self.assertEqual(5, len(every['answers']))
+
+    def test_pattern_envelope_bytes_are_the_trees_text(self):
+        """SPEC-pattern-search.md §31: a multi-graph server writes /pattern's envelope from each
+        answered pair's held texts. Its body, with gzip off and on, is the text jsoncpp writes
+        for the tree it parses to (members in byte order, none twice, its escapes and number
+        forms), and each answered pair's entry is the pair's single-graph answer but for the
+        clock and the pair's tags: every pair answered (ids that need escapes), a refused pair
+        beside an answered one, and an envelope whose every pair is refused (written as it is,
+        without texts)."""
+        ecoli = self.records['ecoli'][0]
+        odd = 'q"\\\u00e9\u0001\U0001F600/<'
+        request = {'patterns': [{'dna': ecoli[123456:123476], 'id': odd},
+                                {'dna': ecoli[200000:200040], 'id': ''}],
+                   'mode': 'partial', 'long_search': 'paths'}
+        labelled = dict(request, output={'labels': 'all'})
+        for payload, outcomes in (
+                (dict(request, graphs=['ecoli', 'kleb', 'pseudo']), ['answered'] * 3),
+                # the column annotations under output.labels "all": annotation_unbudgeted
+                (dict(labelled, graphs=['enterics']), ['answered', 'refused']),
+                (dict(labelled, graphs=['kleb', 'pseudo']), ['refused', 'refused'])):
+            for encoding in ('identity', 'gzip'):
+                with self.subTest(graphs=payload['graphs'], encoding=encoding):
+                    ret = requests.post(self.server.url('pattern'), data=json.dumps(payload),
+                                        headers={'Accept-Encoding': encoding}, timeout=300)
+                    self.assertEqual(200, ret.status_code, ret.text[:2000])
+                    text = ret.content
+                    out = json.loads(text, object_pairs_hook=members_once)
+                    self.assertEqual(jsoncpp_compact(out).encode('ascii'), text)
+                    self.assertEqual(outcomes, [a['outcome'] for a in out['answers']])
+                    if encoding != 'identity':
+                        continue
+                    single = {k: v for k, v in payload.items() if k != 'graphs'}
+                    for answer in out['answers']:
+                        if answer['outcome'] == 'answered':
+                            # the chunk of the pair (a name over two graphs names two chunks)
+                            chunk = next(c for c, (graph, _) in self.pairs.items()
+                                         if graph == answer['graph_path'])
+                            tagless = {k: v for k, v in answer.items() if k not in TAGS}
+                            self.assertEqual(untimed(self.cli_pattern(chunk, single)),
+                                             untimed(tagless))
 
     def test_pattern_refusals(self):
         p = {'patterns': [{'dna': 'ACGTTGCAACGTTGCAAG'}], 'mode': 'count'}
