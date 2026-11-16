@@ -1,0 +1,122 @@
+{
+ "fixture_index": {
+  "cli": "splits",
+  "k": 11,
+  "doc": "the full Fable review's split-count case (G.5): k 11, forbid, merge, max_label_branches 0, max_splits_per_path 2, radius 45; the walk's leaf holds two splits through a merge parent, one on its displayed chain; the child splits again, which the reference refuses (split_limit_restarted)",
+  "arm": "right",
+  "walk": 1
+ },
+ "parent": {
+  "seeds": [
+   {
+    "seed_id": "splits45",
+    "sequence": "CTACTCTCACACTCTACCCCGGGGATTGCA"
+   }
+  ],
+  "strategy": {
+   "direction": "right",
+   "labels": {
+    "seed_label_kind": "column"
+   },
+   "branching": {
+    "max_label_branches": 0,
+    "max_splits_per_path": 2
+   },
+   "bounds": {
+    "max_extension_bp": 45
+   },
+   "output": {
+    "timing": false
+   }
+  }
+ },
+ "child": {
+  "seeds": [
+   {
+    "sequence": "CCGTTAAAGCTAAA",
+    "labels": [
+     "a.fa",
+     "c.fa",
+     "d.fa"
+    ]
+   }
+  ],
+  "strategy": {
+   "annotation": {
+    "batch_kmers": 64
+   },
+   "bounds": {
+    "max_extension_bp": 40,
+    "max_live_paths": 1000,
+    "max_output_bp": 2000000,
+    "max_paths": 10000,
+    "max_steps": 1000000,
+    "min_live_labels": 1,
+    "time_budget_ms": 30000.0
+   },
+   "branching": {
+    "bubble_window_bp": 0,
+    "hairpins": "skip",
+    "max_label_branches": 0,
+    "max_splits_per_path": 2,
+    "min_successor_fraction": 0.0,
+    "min_successor_labels": 1,
+    "on_reconverge": "merge",
+    "tip_window_bp": 0
+   },
+   "direction": "right",
+   "exhaustive": false,
+   "frontier": {
+    "on_overflow": "stop",
+    "order": "breadth_first"
+   },
+   "labels": {
+    "change_cost": {
+     "model": "forbid"
+    },
+    "extra": [],
+    "loss_budget": 0.0,
+    "max_labels_per_node": 64,
+    "max_seed_labels": 1000,
+    "max_switch_sources": 64,
+    "mode": "constrain",
+    "seed_label_kind": "column",
+    "switch_on": "loss"
+   },
+   "output": {
+    "continuation_bp": 1000,
+    "detail": "graphlet",
+    "max_branch_events": 100,
+    "profile_bin_bp": 100,
+    "sequences": true,
+    "timing": false
+   },
+   "schema_version": 1,
+   "support": "kmer"
+  }
+ },
+ "reference": {
+  "seeds": [
+   {
+    "seed_id": "splits45",
+    "sequence": "CTACTCTCACACTCTACCCCGGGGATTGCA"
+   }
+  ],
+  "strategy": {
+   "direction": "right",
+   "labels": {
+    "seed_label_kind": "column"
+   },
+   "branching": {
+    "max_label_branches": 0,
+    "max_splits_per_path": 2
+   },
+   "bounds": {
+    "max_extension_bp": 85
+   },
+   "output": {
+    "timing": false
+   }
+  }
+ }
+}

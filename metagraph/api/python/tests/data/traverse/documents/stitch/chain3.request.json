@@ -1,0 +1,182 @@
+{
+ "fixture_index": {
+  "cli": "whitelist",
+  "k": 15,
+  "doc": "a chain of three parts on one walk: b.fa alone (no split), the parent to 15, the child to 30, the grandchild to the end of b1 at 45",
+  "arm": "right",
+  "walk": 0,
+  "grandchild": 0
+ },
+ "parent": {
+  "seeds": [
+   {
+    "seed_id": "chain3",
+    "sequence": "TTGCCGTGAGGCTTGCTGGGCAGAGTGATG",
+    "labels": [
+     "b.fa"
+    ]
+   }
+  ],
+  "strategy": {
+   "direction": "right",
+   "labels": {
+    "seed_label_kind": "column"
+   },
+   "bounds": {
+    "max_extension_bp": 15
+   },
+   "output": {
+    "timing": false
+   }
+  }
+ },
+ "child": {
+  "seeds": [
+   {
+    "sequence": "GTTGTTCGTACCACG",
+    "labels": [
+     "b.fa"
+    ]
+   }
+  ],
+  "strategy": {
+   "annotation": {
+    "batch_kmers": 64
+   },
+   "bounds": {
+    "max_extension_bp": 15,
+    "max_live_paths": 1000,
+    "max_output_bp": 2000000,
+    "max_paths": 10000,
+    "max_steps": 1000000,
+    "min_live_labels": 1,
+    "time_budget_ms": 30000.0
+   },
+   "branching": {
+    "bubble_window_bp": 0,
+    "hairpins": "skip",
+    "max_label_branches": 0,
+    "max_splits_per_path": 64,
+    "min_successor_fraction": 0.0,
+    "min_successor_labels": 1,
+    "on_reconverge": "merge",
+    "tip_window_bp": 0
+   },
+   "direction": "right",
+   "exhaustive": false,
+   "frontier": {
+    "on_overflow": "stop",
+    "order": "breadth_first"
+   },
+   "labels": {
+    "change_cost": {
+     "model": "forbid"
+    },
+    "extra": [],
+    "loss_budget": 0.0,
+    "max_labels_per_node": 64,
+    "max_seed_labels": 1000,
+    "max_switch_sources": 64,
+    "mode": "constrain",
+    "seed_label_kind": "column",
+    "switch_on": "loss"
+   },
+   "output": {
+    "continuation_bp": 1000,
+    "detail": "graphlet",
+    "max_branch_events": 100,
+    "profile_bin_bp": 100,
+    "sequences": true,
+    "timing": false
+   },
+   "schema_version": 1,
+   "support": "kmer"
+  }
+ },
+ "reference": {
+  "seeds": [
+   {
+    "seed_id": "chain3",
+    "sequence": "TTGCCGTGAGGCTTGCTGGGCAGAGTGATG",
+    "labels": [
+     "b.fa"
+    ]
+   }
+  ],
+  "strategy": {
+   "direction": "right",
+   "labels": {
+    "seed_label_kind": "column"
+   },
+   "bounds": {
+    "max_extension_bp": 60
+   },
+   "output": {
+    "timing": false
+   }
+  }
+ },
+ "grandchild": {
+  "seeds": [
+   {
+    "sequence": "TTACCACTAACAATA",
+    "labels": [
+     "b.fa"
+    ]
+   }
+  ],
+  "strategy": {
+   "annotation": {
+    "batch_kmers": 64
+   },
+   "bounds": {
+    "max_extension_bp": 30,
+    "max_live_paths": 1000,
+    "max_output_bp": 2000000,
+    "max_paths": 10000,
+    "max_steps": 1000000,
+    "min_live_labels": 1,
+    "time_budget_ms": 30000.0
+   },
+   "branching": {
+    "bubble_window_bp": 0,
+    "hairpins": "skip",
+    "max_label_branches": 0,
+    "max_splits_per_path": 64,
+    "min_successor_fraction": 0.0,
+    "min_successor_labels": 1,
+    "on_reconverge": "merge",
+    "tip_window_bp": 0
+   },
+   "direction": "right",
+   "exhaustive": false,
+   "frontier": {
+    "on_overflow": "stop",
+    "order": "breadth_first"
+   },
+   "labels": {
+    "change_cost": {
+     "model": "forbid"
+    },
+    "extra": [],
+    "loss_budget": 0.0,
+    "max_labels_per_node": 64,
+    "max_seed_labels": 1000,
+    "max_switch_sources": 64,
+    "mode": "constrain",
+    "seed_label_kind": "column",
+    "switch_on": "loss"
+   },
+   "output": {
+    "continuation_bp": 1000,
+    "detail": "graphlet",
+    "max_branch_events": 100,
+    "profile_bin_bp": 100,
+    "sequences": true,
+    "timing": false
+   },
+   "schema_version": 1,
+   "support": "kmer"
+  }
+ }
+}

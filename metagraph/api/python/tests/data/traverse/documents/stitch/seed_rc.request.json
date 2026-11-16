@@ -1,0 +1,114 @@
+{
+ "fixture_index": {
+  "cli": "seed_rc",
+  "k": 15,
+  "doc": "canonical graph, unlimited branches, keep, radius 20: the child continues a walk inside Y and steps into rc(S), the root seed's nodes on the other strand, which the reference blocks as rejoined_seed (rule_violation)",
+  "arm": "right",
+  "walk": 0
+ },
+ "parent": {
+  "seeds": [
+   {
+    "seed_id": "seed_rc",
+    "sequence": "GCAGCCCACATCCATCGGCTTGGCCTGGCG"
+   }
+  ],
+  "strategy": {
+   "direction": "right",
+   "branching": {
+    "max_label_branches": "unlimited",
+    "on_reconverge": "keep"
+   },
+   "bounds": {
+    "max_extension_bp": 20
+   },
+   "output": {
+    "timing": false
+   }
+  }
+ },
+ "child": {
+  "seeds": [
+   {
+    "sequence": "GGTCTTAGGCTAGAATCCTA",
+    "labels": [
+     "r1"
+    ]
+   }
+  ],
+  "strategy": {
+   "annotation": {
+    "batch_kmers": 64
+   },
+   "bounds": {
+    "max_extension_bp": 60,
+    "max_live_paths": 1000,
+    "max_output_bp": 2000000,
+    "max_paths": 10000,
+    "max_steps": 1000000,
+    "min_live_labels": 1,
+    "time_budget_ms": 30000.0
+   },
+   "branching": {
+    "bubble_window_bp": 0,
+    "hairpins": "skip",
+    "max_label_branches": "unlimited",
+    "max_splits_per_path": 64,
+    "min_successor_fraction": 0.0,
+    "min_successor_labels": 1,
+    "on_reconverge": "keep",
+    "tip_window_bp": 0
+   },
+   "direction": "right",
+   "exhaustive": false,
+   "frontier": {
+    "on_overflow": "stop",
+    "order": "breadth_first"
+   },
+   "labels": {
+    "change_cost": {
+     "model": "forbid"
+    },
+    "extra": [],
+    "loss_budget": 0.0,
+    "max_labels_per_node": 64,
+    "max_seed_labels": 1000,
+    "max_switch_sources": 64,
+    "mode": "constrain",
+    "seed_label_kind": "auto",
+    "switch_on": "loss"
+   },
+   "output": {
+    "continuation_bp": 1000,
+    "detail": "graphlet",
+    "max_branch_events": 100,
+    "profile_bin_bp": 100,
+    "sequences": true,
+    "timing": false
+   },
+   "schema_version": 1,
+   "support": "kmer"
+  }
+ },
+ "reference": {
+  "seeds": [
+   {
+    "seed_id": "seed_rc",
+    "sequence": "GCAGCCCACATCCATCGGCTTGGCCTGGCG"
+   }
+  ],
+  "strategy": {
+   "direction": "right",
+   "branching": {
+    "max_label_branches": "unlimited",
+    "on_reconverge": "keep"
+   },
+   "bounds": {
+    "max_extension_bp": 80
+   },
+   "output": {
+    "timing": false
+   }
+  }
+ }
+}

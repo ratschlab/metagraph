@@ -1,0 +1,184 @@
+{
+ "fixture_index": {
+  "cli": "comb",
+  "k": 15,
+  "doc": "a chain of comb continuations (T8's peak): unlimited branches, keep, radius 20; the parent, the child and the grandchild each split at every node into a one-base tip and the backbone (walk 20 of the parent, 19 of the child), which the next part continues",
+  "arm": "right",
+  "walk": 20,
+  "grandchild": 19
+ },
+ "parent": {
+  "seeds": [
+   {
+    "seed_id": "comb_chain",
+    "sequence": "CTCCAGTTTCTTATCCCAAAGCAGCACCAG"
+   }
+  ],
+  "strategy": {
+   "direction": "right",
+   "labels": {
+    "seed_label_kind": "column"
+   },
+   "branching": {
+    "max_label_branches": "unlimited",
+    "on_reconverge": "keep"
+   },
+   "bounds": {
+    "max_extension_bp": 20
+   },
+   "output": {
+    "timing": false
+   }
+  }
+ },
+ "child": {
+  "seeds": [
+   {
+    "sequence": "TGTACCCCCAAGCGTTAGGT",
+    "labels": [
+     "comb.fa"
+    ]
+   }
+  ],
+  "strategy": {
+   "annotation": {
+    "batch_kmers": 64
+   },
+   "bounds": {
+    "max_extension_bp": 20,
+    "max_live_paths": 1000,
+    "max_output_bp": 2000000,
+    "max_paths": 10000,
+    "max_steps": 1000000,
+    "min_live_labels": 1,
+    "time_budget_ms": 30000.0
+   },
+   "branching": {
+    "bubble_window_bp": 0,
+    "hairpins": "skip",
+    "max_label_branches": "unlimited",
+    "max_splits_per_path": 64,
+    "min_successor_fraction": 0.0,
+    "min_successor_labels": 1,
+    "on_reconverge": "keep",
+    "tip_window_bp": 0
+   },
+   "direction": "right",
+   "exhaustive": false,
+   "frontier": {
+    "on_overflow": "stop",
+    "order": "breadth_first"
+   },
+   "labels": {
+    "change_cost": {
+     "model": "forbid"
+    },
+    "extra": [],
+    "loss_budget": 0.0,
+    "max_labels_per_node": 64,
+    "max_seed_labels": 1000,
+    "max_switch_sources": 64,
+    "mode": "constrain",
+    "seed_label_kind": "column",
+    "switch_on": "loss"
+   },
+   "output": {
+    "continuation_bp": 1000,
+    "detail": "graphlet",
+    "max_branch_events": 100,
+    "profile_bin_bp": 100,
+    "sequences": true,
+    "timing": false
+   },
+   "schema_version": 1,
+   "support": "kmer"
+  }
+ },
+ "reference": {
+  "seeds": [
+   {
+    "seed_id": "comb_chain",
+    "sequence": "CTCCAGTTTCTTATCCCAAAGCAGCACCAG"
+   }
+  ],
+  "strategy": {
+   "direction": "right",
+   "labels": {
+    "seed_label_kind": "column"
+   },
+   "branching": {
+    "max_label_branches": "unlimited",
+    "on_reconverge": "keep"
+   },
+   "bounds": {
+    "max_extension_bp": 60
+   },
+   "output": {
+    "timing": false
+   }
+  }
+ },
+ "grandchild": {
+  "seeds": [
+   {
+    "sequence": "AGGGGTATTGACCAAATTGC",
+    "labels": [
+     "comb.fa"
+    ]
+   }
+  ],
+  "strategy": {
+   "annotation": {
+    "batch_kmers": 64
+   },
+   "bounds": {
+    "max_extension_bp": 20,
+    "max_live_paths": 1000,
+    "max_output_bp": 2000000,
+    "max_paths": 10000,
+    "max_steps": 1000000,
+    "min_live_labels": 1,
+    "time_budget_ms": 30000.0
+   },
+   "branching": {
+    "bubble_window_bp": 0,
+    "hairpins": "skip",
+    "max_label_branches": "unlimited",
+    "max_splits_per_path": 64,
+    "min_successor_fraction": 0.0,
+    "min_successor_labels": 1,
+    "on_reconverge": "keep",
+    "tip_window_bp": 0
+   },
+   "direction": "right",
+   "exhaustive": false,
+   "frontier": {
+    "on_overflow": "stop",
+    "order": "breadth_first"
+   },
+   "labels": {
+    "change_cost": {
+     "model": "forbid"
+    },
+    "extra": [],
+    "loss_budget": 0.0,
+    "max_labels_per_node": 64,
+    "max_seed_labels": 1000,
+    "max_switch_sources": 64,
+    "mode": "constrain",
+    "seed_label_kind": "column",
+    "switch_on": "loss"
+   },
+   "output": {
+    "continuation_bp": 1000,
+    "detail": "graphlet",
+    "max_branch_events": 100,
+    "profile_bin_bp": 100,
+    "sequences": true,
+    "timing": false
+   },
+   "schema_version": 1,
+   "support": "kmer"
+  }
+ }
+}

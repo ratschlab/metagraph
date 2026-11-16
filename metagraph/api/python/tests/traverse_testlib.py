@@ -111,6 +111,31 @@ def body(name):
     return parse(doc_text(name))
 
 
+STITCH = os.path.join(DOCS, 'stitch')
+
+
+def stitch_requests(name):
+    """The requests of stitching triple |name| (documents/stitch/<name>.request.json):
+    fixture_index (index, doc, arm, walk) and the parent's, child's, reference's (and a
+    sibling's or grandchild's) requests."""
+    with open(os.path.join(STITCH, name + '.request.json'), encoding='utf-8') as f:
+        return json.load(f)
+
+
+def stitch_graphlet(name, role):
+    """One graphlet of stitching triple |name|: role 'parent', 'child', 'reference',
+    'sibling' or 'grandchild', from its detail graphlet response (envelope attached)."""
+    from metagraph.traverse import from_response
+    with open(os.path.join(STITCH, '%s.%s.json' % (name, role)), encoding='utf-8') as f:
+        resp = json.load(f)
+    return from_response(resp['results'][0], resp)
+
+
+def stitch_names():
+    """The stitching triples, in the fixture script's order (STITCH_FIXTURES)."""
+    return list(fixture_script().STITCH_FIXTURES)
+
+
 def json_diff(a, b, path=''):
     """Human-readable differences between two JSON values (for assertion messages)."""
     out = []

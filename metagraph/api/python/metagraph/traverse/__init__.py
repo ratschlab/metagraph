@@ -58,6 +58,7 @@ _NAMES = {
     'union': ('union_pairs', 'PairUnion', 'PairPart', 'PairAbsent', 'PairLabel', 'SpanLabel',
               'LabelInterval', 'SegmentSupport', 'UnionSegment', 'Route', 'PairSpan',
               'Carriers', 'UnionWalk', 'Coverage', 'Statements'),
+    '_stitch': ('Junction', 'Part', 'StitchedGraphlet', 'StitchedWalk', 'stitch'),
 }
 _HOME = {name: mod for mod, names in _NAMES.items() for name in names}
 # the package's modules, also reachable as attributes before anything imported them
@@ -88,6 +89,7 @@ __all__ = [
     'union_pairs', 'PairUnion', 'PairPart', 'PairAbsent', 'PairLabel', 'SpanLabel',
     'LabelInterval', 'SegmentSupport', 'UnionSegment', 'Route', 'PairSpan', 'Carriers',
     'UnionWalk', 'Coverage', 'Statements', 'PairResults',
+    'stitch', 'StitchedGraphlet', 'Part', 'Junction', 'StitchedWalk',
 ]
 
 

@@ -460,6 +460,7 @@ the subpackage from a non-editable install). `metagraph/__init__.py` does not im
 | `frames.py` | `frames(g)` → dict of DataFrames, lazy `import pandas` |
 | `composite.py` | what every combination of graphlets shares (DESIGN-graphlet-merge.md): `CombineRefused(code, message)`, the preconditions (envelope, bases, alphabet, one oriented seed), the index identity rules (`ops.index_rule`, `ops.seed_rule`), retrieval identity, the weakest-of evidence, digests, the budget plumbing, the streaming speller over pieces of parts |
 | `union.py` | `union_pairs(results)` → `PairUnion`, the cross-pair union of one seed (DESIGN-graphlet-merge.md §2): the inputs, pair tags and record-mapping warnings, the trie of every part's spellings per arm, spans and their absence, coverage per pair, the five statements, `PairPart`, `PairAbsent`, `UnionWalk`, `PairSpan`, `Route`, `UnionSegment`, `SegmentSupport`, `LabelInterval`, `PairLabel`, `SpanLabel`, `Carriers`, `Coverage`, `Statements` |
+| `_stitch.py` | (experimental, phase 1a-S of DESIGN-graphlet-merge.md §3; private, its names exported from `metagraph.traverse`) `stitch(parent, child=None, *, arm, walk, allow_unverified_index, budget)` → `StitchedGraphlet`, with `Part`, `Junction`, `StitchedWalk`: a continuation joined to the walk it continues, every junction and walk stating its causes; every verdict `qualified` |
 
 Public API (one line each):
 
@@ -680,6 +681,10 @@ A continuation is a new traversal (§14): its result is certified on its own, wi
 
 A continuation stays a graphlet of its own. Combining graphlets (one seed's answers across pairs, which `union.py`
 builds; a continuation stitched to its parent) is designed in `DESIGN-graphlet-merge.md`.
+
+A continuation can be stitched to the walk it continues (`stitch()`, in `_stitch.py`, experimental): the result keeps both
+retrievals and states, at each junction and walk, why its walks may differ from one uninterrupted walk.
+DESIGN-graphlet-merge.md §3 is the design.
 
 ## 5.4 Local limits
 

@@ -583,7 +583,7 @@ neither mode gives is a walk of one traversal over several graphs, which no engi
 ### 2.8 Python API
 
 New module `union.py`, exported from `metagraph.traverse`; the parts container, refusals, evidence and budgets are in
-`composite.py`, shared with `stitch.py` (Appendix F.2). Everything is phase 1a-U except what is marked `[1c]` and
+`composite.py`, shared with `_stitch.py` (Appendix F.2). Everything is phase 1a-U except what is marked `[1c]` and
 `[inferred]` (the later inferred phase, §7.1).
 
 ```python
@@ -736,7 +736,8 @@ Stitching joins a continuation (a new traversal seeded with a walk's continuatio
 
 ### 3.1 The contract
 
-New module `stitch.py`, exported from `metagraph.traverse`, on the composite machinery of `composite.py` that the
+New private module `_stitch.py`, its names exported from `metagraph.traverse` (so `metagraph.traverse.stitch` is
+only the function), on the composite machinery of `composite.py` that the
 union builds first (Appendix F.2). Everything is phase 1a-S except what Appendix C.2 marks `[1b]` and `[1c]` (§7.1).
 
 ```python
@@ -863,16 +864,26 @@ limit, no quorum, minimum or beam, `forbid` or unlimited branches) pinned by T4.
 
 **The whitelist.** Once `exact` is switched on (§7.1), a junction is `exact` when all of W1–W7 hold, and a stitched walk
 is `exact` when all its junctions are and W8 holds for it. In phase 1a-S every rule is computed and every failing
-condition is named, but nothing is `exact`: where W1–W8 all hold, the verdict is `qualified` with the one cause
-`exact_gated` (the rules found no difference, and they have not yet passed the randomized comparison).
+condition is named, but nothing is `exact`: where W1–W7 hold at a junction, its verdict is `qualified` with the one
+cause `exact_gated` (W8 is judged per walk below it; the junction rules found no difference, and they have not yet
+passed the randomized comparison), and a walk reads `exact_gated` where its junctions do and W8 holds for it.
+
+**What the rules read.** W2–W5 and the split check of W8 read the two normalized strategies. A field they read that
+either envelope does not state (W5's knobs; in constrain mode also `labels.change_cost`, `labels.extra`,
+`branching.max_label_branches` and `branching.max_splits_per_path`), or that one part states and the other does not, is
+the junction cause `strategy_unknown`, not a pass: a missing `max_splits_per_path` is unknown, not unlimited. It is no
+refusal, since every verdict is `qualified` anyway; nothing below it is `exact`, the prospective result included. W2
+compares the fields both state. W6's `keep` or `merge` is read from each part's `H` record, so a difference there is
+`strategy_differs` even where the envelopes do not state `branching.on_reconverge`.
 
 - **W1.** `support: kmer` on both parts.
 - **W2.** The two normalized strategies are equal except in the allowed fields: `direction`; the radius and the
   resource caps (`bounds.max_extension_bp`, `max_steps`, `max_paths`, `max_output_bp`, `time_budget_ms`,
   `max_memory_mb`, `max_work_units`, and `max_live_paths` where `frontier.on_overflow` is `stop` on both); `output.*`;
   `annotation.*`; `labels.max_labels_per_node` (it caps output lists only, SPEC §5); `labels.loss_budget`,
-  `labels.extra` and `branching.max_label_branches` (judged by W3–W4). The child's `labels.extra` names no label
-  outside the parent's permitted pool (its seed labels and `labels.extra`).
+  `labels.extra` and `branching.max_label_branches` (judged by W3–W4); and `clamped`, the server's report of the
+  bounds it clamped, not a knob. The child's `labels.extra` names no label outside the parent's permitted pool (its
+  seed labels and `labels.extra`).
 - **W3.** `labels.change_cost.model` is `forbid` on both parts. Under `forbid` no switch happens, every loss is 0, a
   lineage is one label, and `labels.extra` cannot be entered. Switching (any other model) is `qualified` in phase 1a-S.
   The uniform-shift argument (every continued label at one terminal loss and branch count, with the child's budget
@@ -891,7 +902,9 @@ condition is named, but nothing is `exact`: where W1–W8 all hold, the verdict 
   through any parent, as the walker does (SPEC §6.6, "for merged DAG nodes, any parent").
 - **W7.** Constrain mode: every label alive at the end of w is a seed label of the child (`not_continued` empty), and
   the child's `X` drops none of them. Annotate mode: no condition.
-- **W8 (per stitched walk): the child decided as the reference would.** Both parts carry bases. Five checks, on the
+- **W8 (per stitched walk): the child decided as the reference would.** Every part from the root to the child
+  carries bases (the edge sets of B come from all of them; otherwise `no_bases` at the junction, and W8 is not run
+  below it). Five checks, on the
   walk's route through the child (the DAG ancestors of its leaf in the child, through any parent):
   - *What the reference blocks.* B is the set of steps the reference blocks and the child cannot know of: the
     (k+1)-mers of the DAG ancestors of w's leaf, through any parent (canonicalized in primary and canonical regimes),
@@ -928,7 +941,7 @@ at 115 bp), certified only to 115 bp, and not complete.
 **The causes.** A condition that fails is stated as a named cause, with its scope (the junction or one walk) and the
 modes where it can occur, and the verdict is `qualified`: `trace_restart`, `strategy_differs`, `extra_foreign`,
 `switching`, `branches_unequal`, `label_count_knob`, `sibling_merge_unknown`, `not_continued`, `seed_dropped`,
-`no_bases`, and per walk `rule_violation` (a step in B), `candidate_changed` (a recorded successor in B), `seed_reentry`
+`no_bases`, `strategy_unknown`, and per walk `rule_violation` (a step in B), `candidate_changed` (a recorded successor in B), `seed_reentry`
 (`same_stop`, `earlier_stop`), `decisions_unrecorded` (the walk's end lies at or beyond the child's evidence boundary)
 and `split_limit_restarted`; and, in phase 1a-S, `exact_gated`. Appendix B.2 states what each one means. Until `exact`
 is switched on, every verdict is `qualified`, with `exact_gated` where no other cause applies; after that, a whitelist
@@ -964,7 +977,8 @@ depends on notes `next_request()` returned: a child made another way is judged b
   read `exact` there (§6 T4). In phase 1a-S no answer that depends on a junction reads `exact`, and a `qualified`
   verdict never stands beside `complete: true` or exact evidence that the causes do not justify. An answer that depends
   on no junction, `stitch(g)` without a child or a root walk no child continues, states the root's own evidence, `exact`
-  where the root's is, so `stitch(g)` still answers as `g` (T2). Each part keeps its `K` records, its `Q`
+  where the root's is, so `stitch(g)` still answers as `g` (T2). The verdict is `None` for a walk no junction joins,
+  and its evidence is the root's. Each part keeps its `K` records, its `Q`
   (`resource_stop`), its dropped seed labels (`X`), its cut lists (`label_lists`, `inexact_counts`), its dropped branch
   events (`evidence.complete_to_bp`), its `coordinates` limitation and its delivery (`spooled`), all listed under its
   key. None is summed or dropped. A local-budget stop follows the library's rule (`budget.py`): `LocalBudgetExceeded`,
@@ -1465,7 +1479,7 @@ notes do.
 | `view_unsupported` | `stitch() reads whole retrievals, not views: stitch view.backing instead` |
 | MissingEnvelope | today's `require_envelope('stitch()')` text: `stitch() needs the response envelope (seed_id, the normalized strategy, annotation counters): build the graphlet with Graphlet.from_response() or load a saved .mgt file with its J line; a parsed body alone does not carry it` |
 | `different_index` | `the child was retrieved from another index than its parent (%s): a continuation runs on its parent's index, so a child of another index continues none of its walks; union_pairs() combines one seed's graphlets across pairs`, `%s` one of `index_meta_fp differs`, `index_fp differs`, `index namespace %r vs %r`, `release %r vs %r`, `label %s is %r in one and %r in the other` |
-| `index_unverifiable` | `the child states %s index manifest digest (index_fp) and its parent %s: whether they are the same index cannot be verified (not proven different), so the child is not stitched automatically; pass allow_unverified_index=True to stitch it anyway (the result then states the identity unverified)` (`an`/`no`, `one`/`none`, as `_same_index`, `mcp_tools.py:2578`) |
+| `index_unverifiable` | `the child states %s index manifest digest (index_fp) and its parent %s: whether they are the same index cannot be verified (not proven different), so the child is not stitched automatically; pass allow_unverified_index=True to stitch it anyway (the result then states the identity unverified)` (`an`/`no`, `one`/`none`, as `_same_index`, `mcp_tools.py:2578`); where a side's parts state it unevenly: `the parts state an index manifest digest (index_fp) unevenly (the parent's on %d of %d parts, the child's on %d of %d): whether they are the same index cannot be verified (not proven different), so the child is not stitched automatically; pass allow_unverified_index=True to stitch it anyway (the result then states the identity unverified)`. Both, and `different_index` and `different_pair`, are checked against every part on both sides |
 | `different_pair` | `the child was answered on pair %s, its parent on pair %s: a continuation runs on its parent's pair` (each `{graph, graph_path, annotation_path}` as compact JSON) |
 | `different_graph` | `the child's graph is not its parent's (%s %r vs %r): its walks cannot continue the parent's` (`k`, `regime` or `alphabet`) |
 | `different_mode` | `the child was walked in %s mode with %s support, its parent in %s mode with %s support: its walks answer another question` |
@@ -1474,8 +1488,9 @@ notes do.
 | `no_continuation` | today's `_continuation` text: `walk %d of the %s arm has no continuation (it ended for a semantic reason, not at the radius or a cap)` |
 | `not_a_continuation` | with `walk=`: `the child's seed is not the continuation of walk %s of the %s arm: a stitched child is seeded with that walk's continuation (continuation(), next_request())`; without: `the child's seed is the continuation of no walk of the %s arm: a stitched child is seeded with a walk's continuation (continuation(), next_request())` |
 | `ambiguous_walk` | `the child's seed is the continuation of walks %s of the %s arm: name the one it continues with walk=` |
-| `already_continued` | `walk %s of the %s arm is already continued by another child (part %s, digest %s): one child per walk`; the same body from another request: `walk %s of the %s arm is continued by this body from another request (%s differs): equal bodies are not equal retrievals, and the two would continue differently` |
+| `already_continued` | `walk %s of the %s arm is already continued by another child (part %s, digest %s): one child per walk` (the digest of the subtree there, as `stitch()` of it alone states it); the same bodies, a part's from another request: `walk %s of the %s arm is continued by this body from another request (%s differs): equal bodies are not equal retrievals, and the two would continue differently` (`%s` a field path, `… of part %s` for a part below the child's root). An identical subtree (every part's key, body and retrieval identity) is a no-op |
 | `foreign_seed_labels` | `the child seeds %s, not alive at the end of walk %s of the %s arm: their runs would start new lineages at %d bp, not continue the walk's` |
+| `summary_too_small` | `the summary's statements alone take %d bytes, more than max_bytes=%d: they are never cut; pass max_bytes >= %d` (`summary()` cuts junctions from the end first) |
 | `not_offered` | `dump()`: `a stitched graphlet is not an MGT document: save() writes its parts unchanged in a bundle, and each part dumps on its own (parts[i].graphlet.dump())`; `to_json()`: `to_json() is detail "full" of one server result, and a stitched graphlet has none: export its parts`; `compare()`: `compare() reads one retrieval per side: compare the parts`; any other: `%s() is not offered on a stitched graphlet` |
 
 ### B.2 The junction causes
@@ -1494,10 +1509,11 @@ notes do.
 | `sibling_merge_unknown` | W6, naming the sibling walks | junction | both |
 | `not_continued` | W7, naming the labels | junction | constrain |
 | `seed_dropped` | W7, naming the labels and the `X` reasons | junction | constrain |
-| `no_bases` | W8 cannot be checked: a part has `output.sequences: false` | junction | both |
+| `no_bases` | W8 cannot be checked: a part from the root to the child has `output.sequences: false`; W8 is not run below the junction | junction | both |
+| `strategy_unknown` | W2–W5 or the split check of W8 cannot be judged: an envelope does not state a field they read (W5's knobs; in constrain mode also `labels.change_cost`, `labels.extra`, `branching.max_label_branches`, `branching.max_splits_per_path`), or one part states it and the other does not; naming them (`(both)`, `(the parent)`, `(the child)`) | junction | both |
 | `rule_violation` | W8: the walk takes a step in B (it reuses an ancestor's edge or enters a root-seed node); stated with `at_bp`. The walk is not cut and no end is invented | walk | both |
 | `candidate_changed` | W8: a successor the child admitted at a node of the walk's route, without taking it, is a step in B: a branch event's successor or another child of a split. The child's ambiguity, split or refusal there may not happen in the reference (the external review's counterexample: the child stops at 0 bp, the reference goes on to 145 bp); stated with `at_bp` and the character | walk | both |
-| `exact_gated` | W1–W8 all hold, but `exact` is not switched on (phase 1a-S, OQ19): the rules found no difference and have not yet passed the randomized comparison (Appendix E.2, T11) | junction, walk | both |
+| `exact_gated` | at a junction: W1–W7 hold there, and W8 is judged per walk below it; on a walk: its junctions are `exact_gated` and W8 holds for it. `exact` is not switched on (phase 1a-S, OQ19): the rules found no difference and have not yet passed the randomized comparison (Appendix E.2, T11). `summary()` and `completeness()` state, per junction, the walk-scope causes on the walks below it (`walk_causes`) | junction, walk | both |
 | `decisions_unrecorded` | W8 cannot be checked at or beyond the child's `evidence.complete_to_bp` (branch events cut by `output.max_branch_events`; SPEC §7.0 guarantees a recorded reason only strictly below it), and the walk's end lies there, a 0 bp walk with a boundary of 0 included; stated with that depth | walk | both |
 | `seed_reentry` | W8: a child `rejoined_seed` on a node of the child's seed outside the root seed. Two sub-cases, told apart by the blocked event's character (`E … b`): `same_stop`, where the blocked (k+1)-mer is an ancestor's edge, so the reference stops there too (with `edge_reuse`, by the precedence of SPEC §6.6) and only the reason differs; `earlier_stop`, a new edge into a node of the walk, where the reference goes on. Common: with the whole walk as the child's seed, any repeat of the walk ends the child here (§3.2) | walk | both |
 | `split_limit_restarted` | W8: the parent's split count at w's leaf (the maximum over a merge's parents, as the engine counts) plus the child's count after a split it made on the walk's route exceeds `max_splits_per_path` (the reference would have refused that split); stated with the position of that split | walk | both |
@@ -1633,7 +1649,8 @@ class Junction:  arm: str; walk: tuple; at_bp: int; overlap_bp: int; part: tuple
 @dataclass(slots=True)
 class StitchedWalk:  key: tuple; arm: str; length_bp: int; sequence: Optional[str]; path_reason: Optional[str];
                      end_reasons: dict; labels_full: list[Label]; n_alive: int; complete: bool;
-                     verdict: str                               # 'exact' | 'qualified': its junctions and own causes
+                     verdict: Optional[str]                     # 'exact' | 'qualified': its junctions and own causes;
+                                                                # None for a walk no junction joins (its evidence is the root's)
                      certified_to_bp: int; beyond_certified_bp: int; junctions: tuple[int, ...];
                      pieces: tuple[tuple[tuple, int, int, int], ...]   # (part key, path_id, from_bp, to_bp)
                      causes: tuple                                      # this walk's own causes (§3.4)
@@ -1679,19 +1696,24 @@ class CombineRefused(ValueError):  code: str     # every refusal of §2.3 and §
 - **Canonical tree.** A stitched graphlet is a tree: root, then a child per continued `(arm, walk)`. Parts are ordered
   by key, comparing steps as `(arm: left < right, walk id)`. Every list answer has a canonical order: arms left then
   right, walks by key under `by='id'`, ties of the other rankings by key. `digest` is the sha256 of the canonical
-  tree (the part keys in order with each part's sha256), which is also what the bundle's manifest lists (Appendix D.3).
+  tree (the part keys in order with each part's sha256 and retrieval identity, as the union's digest states retrieval
+  identity), which is also what the bundle's manifest lists (Appendix D.3): equal bodies from other requests, whose
+  junctions can read otherwise, give another digest.
 - **Commutative across junctions.** `stitch(stitch(P, C1), C2)` and `stitch(stitch(P, C2), C1)` have equal digests
   when C1 and C2 continue different walks. Inference does not depend on the order (§3.1).
 - **Associative along chains.** If C2 continues walk v of C1, then `stitch(stitch(P, C1, walk=w), C2, walk=(w, v))`
   and `stitch(P, stitch(C1, C2, walk=v), walk=w)` have equal digests (a StitchedGraphlet child is accepted for this).
+  A refusal is the same in both folds: the identity checks of §3.1 run against every part on both sides, so a proven
+  index difference anywhere in the chain is `different_index` whichever pair is stitched first.
 - **Not commutative between parent and child.** `stitch(C, P)` is usually refused, deterministically, by the first
   failing check of §3.1: a parent with both arms gives `not_one_arm`, a one-arm parent whose walks do not continue
   into P's seed `not_a_continuation`. It is not always refused: on a circular sequence, P's continuation can be C's
   seed and C's continuation P's seed (k 15, radius 25, `continuation_bp` 15, Appendix G.6). Then both orders pass
   the preconditions, give different stitched graphlets, and are judged by W1–W8; W8 qualifies a walk that re-enters
   the root seed.
-- **Idempotent for identical retrievals.** Stitching the same retrieval again at the same walk is a no-op; a
-  different body, or the same body from another request, there is refused `already_continued` (§3.1).
+- **Idempotent for identical retrievals.** Stitching the same retrieval again at the same walk is a no-op (for a
+  StitchedGraphlet child: the same subtree, every part's key, body and retrieval identity); a different body or
+  subtree, or the same bodies from another request, there is refused `already_continued` (§3.1).
 - **Identity element.** `stitch(g)` (no child) answers every offered query as `g` does, with keys `(w,)` for path
   ids `w` (tested on every fixture, §6 T2).
 
@@ -1957,8 +1979,9 @@ graphlets.rst examples run in `run_examples.py` (CI's fixture-checks job).
   walks below w equal the uninterrupted retrieval's subtree of w's prefix, per path, and every junction says `exact`
   once it is switched on (`exact_gated` before). A whitelist entry without its passing fixture is not shipped as
   `exact`. (b) One fixture per cause, each asserting the stated cause and `qualified`: `sibling_merge_unknown` (two
-  radius-ended walks under `merge` that reconverge beyond R); `trace_restart`; `strategy_differs` (a changed quorum
-  knob, a reset branch allowance); `extra_foreign`; `switching`; `not_continued`; both `seed_reentry` sub-cases (a
+  radius-ended walks under `merge` that reconverge beyond R); `trace_restart`; `strategy_differs` with
+  `label_count_knob` (a changed quorum knob); `branches_unequal` (a reset branch allowance: W2 leaves
+  `max_label_branches` to W3–W4); `extra_foreign`; `switching`; `not_continued`; both `seed_reentry` sub-cases (a
   circular record); `split_limit_restarted`, also with unequal split counts on a merge's parents (`splits45`, Appendix
   G.5: k 11, constrain, `forbid`, `merge`, `max_label_branches` 0, `max_splits_per_path` 2, radius 45; one split on w's
   displayed chain, two on the other parent's; the stitched walks are 85 bp, the reference stops at 50 bp with
@@ -2070,7 +2093,7 @@ graphlets.rst examples run in `run_examples.py` (CI's fixture-checks job).
 |---|---|
 | `composite.py` (new; 1a-U) | the parts container, `CombineRefused`, the shared preconditions (envelope, bases, alphabet, the index identity rules), the weakest-of evidence, digests, the budget plumbing, the streaming speller over pieces |
 | `union.py` (new; 1a-U) | `union_pairs`, `PairUnion`, `PairPart`, `PairAbsent`, `PairLabel`, `SpanLabel`, `LabelInterval`, `SegmentSupport`, `UnionSegment`, `PairSpan`, `Carriers`, `UnionWalk`, `Coverage`, `Statements`; the input classification, the tags and retrieval identity, each pair's `seqs_order` and the header-name warnings (OQ20), the trie with terminal markers by one pass over each first-parent tree, the spans and their absence, coverage, the statements. The later inferred phase (OQ18) adds `InferredPath`, `InferredListing`, `Transition` and the inferred paths. The queries delegate to the parts' `ops` (no derivation reimplemented) |
-| `stitch.py` (new; 1a-S) | `stitch`, `StitchedGraphlet`, `Part`, `Junction`, `StitchedWalk`, `StitchedClaim`; the preconditions; the whitelist and causes; the decision check (W8); the queries, which delegate to the parts' `ops` and shift |
+| `_stitch.py` (new; 1a-S) | private, so that `metagraph.traverse.stitch` is only the function: `stitch`, `StitchedGraphlet`, `Part`, `Junction`, `StitchedWalk`, `StitchedClaim`; the preconditions; the whitelist and causes; the decision check (W8); the queries, which delegate to the parts' `ops` and shift |
 | `ops.py` | split `_identity` into the index rule and the seed rule (the index rule shared, no behaviour change; 1a-U); a public per-segment label-interval accessor, built from the entry set and `derive.label_changes()` (constrain) or the `presence` runs (annotate), linear, priced like `_alive_prices` (Appendix F.1; 1a-U); expose the (k+1)-mer edge key of SPEC §6.6 (1a-S) |
 | `client.py`, `attempts.py` | `TraverseClient.traverse_pairs()` and `PairResults` with the seed sent and each pair's `seqs_order` (§5.2), and `TraverseResponse.seeds_sent` (`attempts.py:363`), 1a-U. `TraverseClient.response()` already keeps results without a graphlet with their errors (`client.py:895-911`), which `union_pairs()` reads from a one-seed response |
 | `parser.py` | (1c) `load()` dispatches on `#mgt-bundle`; the atomic writer reused |
@@ -2110,7 +2133,7 @@ lines of tests; stitching 1,200–1,800 lines and about 1,000 lines of tests; ab
   continuation", after "Continuations and the next request": offsets, orientation and the continuation's length, walk
   keys, the whitelist and the causes, the certified depth, one example on a committed triple, marked experimental. "What
   is not combined": the table of §4.
-- `DESIGN-traverse-graphlet.md`: `composite.py`, `union.py` and `stitch.py` rows in the §5 module table, a sentence
+- `DESIGN-traverse-graphlet.md`: `composite.py`, `union.py` and `_stitch.py` rows in the §5 module table, a sentence
   in §5.3 pointing to this note, and the public-API block.
 - No spec change: no wire, record or field changes.
 
