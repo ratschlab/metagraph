@@ -1,0 +1,116 @@
+{
+ "fixture_index": {
+  "cli": "invrep",
+  "k": 15,
+  "doc": "canonical graph, unlimited branches, keep, radius 96, continuation_bp 40: the walk along C continues in a child that takes the step into rc(R), whose edge the parent used on the other strand; the reference stops at 111 with edge_reuse_rc (rule_violation)",
+  "arm": "right",
+  "walk": 1
+ },
+ "parent": {
+  "seeds": [
+   {
+    "seed_id": "invrep",
+    "sequence": "TCATTGGCTATCCTAACCCGACCCTAGGAG"
+   }
+  ],
+  "strategy": {
+   "direction": "right",
+   "branching": {
+    "max_label_branches": "unlimited",
+    "on_reconverge": "keep"
+   },
+   "bounds": {
+    "max_extension_bp": 96
+   },
+   "output": {
+    "continuation_bp": 40,
+    "timing": false
+   }
+  }
+ },
+ "child": {
+  "seeds": [
+   {
+    "sequence": "TATATCTGGACAACATCCCGGCGACTTAGGCGACCCACAG",
+    "labels": [
+     "r1"
+    ]
+   }
+  ],
+  "strategy": {
+   "annotation": {
+    "batch_kmers": 64
+   },
+   "bounds": {
+    "max_extension_bp": 100,
+    "max_live_paths": 1000,
+    "max_output_bp": 2000000,
+    "max_paths": 10000,
+    "max_steps": 1000000,
+    "min_live_labels": 1,
+    "time_budget_ms": 30000.0
+   },
+   "branching": {
+    "bubble_window_bp": 0,
+    "hairpins": "skip",
+    "max_label_branches": "unlimited",
+    "max_splits_per_path": 64,
+    "min_successor_fraction": 0.0,
+    "min_successor_labels": 1,
+    "on_reconverge": "keep",
+    "tip_window_bp": 0
+   },
+   "direction": "right",
+   "exhaustive": false,
+   "frontier": {
+    "on_overflow": "stop",
+    "order": "breadth_first"
+   },
+   "labels": {
+    "change_cost": {
+     "model": "forbid"
+    },
+    "extra": [],
+    "loss_budget": 0.0,
+    "max_labels_per_node": 64,
+    "max_seed_labels": 1000,
+    "max_switch_sources": 64,
+    "mode": "constrain",
+    "seed_label_kind": "auto",
+    "switch_on": "loss"
+   },
+   "output": {
+    "continuation_bp": 40,
+    "detail": "graphlet",
+    "max_branch_events": 100,
+    "profile_bin_bp": 100,
+    "sequences": true,
+    "timing": false
+   },
+   "schema_version": 1,
+   "support": "kmer"
+  }
+ },
+ "reference": {
+  "seeds": [
+   {
+    "seed_id": "invrep",
+    "sequence": "TCATTGGCTATCCTAACCCGACCCTAGGAG"
+   }
+  ],
+  "strategy": {
+   "direction": "right",
+   "branching": {
+    "max_label_branches": "unlimited",
+    "on_reconverge": "keep"
+   },
+   "bounds": {
+    "max_extension_bp": 196
+   },
+   "output": {
+    "continuation_bp": 40,
+    "timing": false
+   }
+  }
+ }
+}

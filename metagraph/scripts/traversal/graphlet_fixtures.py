@@ -248,6 +248,24 @@ INDEXES = {
         'files': {'A.fa': [('record', [('=', 'GGCCCCGCCGCAACTGACATCAAGTTGATTGGTCGTTAATGCGCACC'
                                               'TCTGGCCCCGCCGCAACT')])]},
     },
+    # the Opus code review's inverted repeat (exp9), canonical, k 15: S P R C rc(R) Y, R a
+    # 16-mer. A walk along C reaches rc(R), whose k-mers are R's on the other strand: the
+    # reference blocks the step (edge_reuse_rc) where a child seeded inside C takes it
+    # the seed S again as rc(S) after Y, canonical, k 15: a walk along Y reaches the seed's
+    # nodes on the other strand, which the reference blocks (rejoined_seed) and a child
+    # seeded inside Y does not
+    'seed_rc': {
+        'k': 15, 'seed': 2101, 'mode': 'canonical',
+        'blocks': {'S': 30, 'Y': 40},
+        'files': {'a.fa': [('r1', ['S', 'Y', ('rc', 'S')])]},
+    },
+    'invrep': {
+        'k': 15, 'seed': 2001, 'mode': 'canonical', 'blocks': {},
+        'files': {'a.fa': [('r1', [('=', 'TCATTGGCTATCCTAACCCGACCCTAGGAGCGGTTGGCGTGTATGCCGTGAATTTTCTCATTTCCGCTAG'
+                                         'ACATAATCGTTCTGCCTATATCTGGACAACATCCCGGCGACTTAGGCGACCCACAG'
+                                         'GGCAGAACGATTATGT'
+                                         'AATCGTCCCTTCTAACGTAGTTCGCATAGT')])]},
+    },
 }
 
 
@@ -859,6 +877,138 @@ STITCH_FIXTURES = {
         'arm': 'right', 'walk': 0, 'bp': 40,
         'expect': {'L': 20, 'n': 20, 'child': [20], 'reference': [40, 40]},
     },
+    # ---- (c) the Opus code review's cases (its mutation pass)
+    'no_bases_parent': {
+        'index': 'whitelist',
+        'doc': 'chain3 with output.sequences false on the parent only: the child and the '
+               'grandchild carry bases, but the root does not, so neither junction can run '
+               'the rule check (no_bases on both)',
+        'parent': _stitch_request('no_bases_parent', ['S'], _with(
+            _WHITELIST, bounds={'max_extension_bp': 15}, output={'sequences': False}),
+            ['b.fa']),
+        'arm': 'right', 'walk': 0, 'bp': 15, 'overrides': {'output': {'sequences': True}},
+        'grandchild': {'walk': 0, 'bp': 15},
+        'expect': {'L': 15, 'n': 15, 'child': [15], 'grandchild': [15], 'reference': [45]},
+    },
+    'invrep': {
+        'index': 'invrep',
+        'doc': 'canonical graph, unlimited branches, keep, radius 96, continuation_bp 40: the '
+               'walk along C continues in a child that takes the step into rc(R), whose edge '
+               'the parent used on the other strand; the reference stops at 111 with '
+               'edge_reuse_rc (rule_violation)',
+        'parent': _stitch_request('invrep', [('=', 'TCATTGGCTATCCTAACCCGACCCTAGGAG')], {
+            'direction': 'right',
+            'branching': {'max_label_branches': 'unlimited', 'on_reconverge': 'keep'},
+            'bounds': {'max_extension_bp': 96}, 'output': {'continuation_bp': 40}}),
+        'arm': 'right', 'walk': 1, 'bp': 100,
+        'expect': {'L': 96, 'n': 40, 'child': [46, 86], 'reference': [111, 111]},
+    },
+    'seed_rc': {
+        'index': 'seed_rc',
+        'doc': 'canonical graph, unlimited branches, keep, radius 20: the child continues a '
+               'walk inside Y and steps '
+               'into rc(S), the root seed\'s nodes on the other strand, which the reference '
+               'blocks as rejoined_seed (rule_violation)',
+        'parent': _stitch_request('seed_rc', ['S'], {
+            'direction': 'right',
+            'branching': {'max_label_branches': 'unlimited', 'on_reconverge': 'keep'},
+            'bounds': {'max_extension_bp': 20}}),
+        'arm': 'right', 'walk': None, 'bp': 60,
+        'expect': {'L': 20, 'n': 20, 'child': [50], 'reference': [54, 54]},
+    },
+    'chain_loop': {
+        'index': 'loop',
+        'doc': 'the review\'s chain (exp11): unlimited branches, keep, radius 100, '
+               'continuation_bp 40; the child goes 15 bp into C, the grandchild reaches u, '
+               'where the loop\'s first edge, used by the root part only, is admitted again '
+               '(rule_violation, candidate_changed)',
+        'parent': _stitch_request('chain_loop', ['S'], _with(
+            _LOOP, branching={'max_label_branches': 'unlimited', 'on_reconverge': 'keep'},
+            bounds={'max_extension_bp': 100})),
+        'arm': 'right', 'walk': None, 'bp': 15, 'grandchild': {'walk': 0, 'bp': 100},
+        'expect': {'L': 100, 'n': 40, 'child': [15], 'grandchild': [30, 59],
+                   'reference': [85, 145]},
+    },
+    'splits_chain': {
+        'index': 'splits',
+        'doc': 'splits45 as a chain: the child goes 4 bp without a split, the grandchild '
+               'splits; with the two splits the root carries into the chain that exceeds '
+               'max_splits_per_path 2 (split_limit_restarted below the second junction)',
+        'parent': _stitch_request('splits_chain', ['S'], {
+            'direction': 'right', 'labels': {'seed_label_kind': 'column'},
+            'branching': {'max_label_branches': 0, 'max_splits_per_path': 2},
+            'bounds': {'max_extension_bp': 45}}),
+        'arm': 'right', 'walk': None, 'bp': 4, 'grandchild': {'walk': 0, 'bp': 40},
+        'expect': {'L': 45, 'n': 14, 'child': [4], 'grandchild': [40, 40],
+                   'reference': [18, 50]},
+    },
+    'beam_sibling': {
+        'index': 'whitelist',
+        'doc': 'merge, frontier.on_overflow beam, max_live_paths 1: the beam prunes the X2 '
+               'walk at 1 bp (a continuation), the X1 walk goes on to its dead end at 60, '
+               'beyond the junction, without one (sibling_merge_unknown by its length; '
+               'label_count_knob for the beam)',
+        'parent': _stitch_request('beam_sibling', ['S'], _with(
+            _WHITELIST, branching={'max_label_branches': 'unlimited'},
+            bounds={'max_extension_bp': 100, 'max_live_paths': 1},
+            frontier={'on_overflow': 'beam'}), ['a.fa', 'b.fa']),
+        'arm': 'right', 'walk': 0, 'bp': 40,
+        'expect': {'L': 1, 'n': 15, 'child': [9], 'reference': [1, 60]},
+    },
+    'annotate_loop': {
+        'index': 'loop',
+        'doc': 'annotate mode, keep, radius 90, continuation_bp 15: as loop_interior, the '
+               'child reaches u 25 bp in and admits the loop\'s first edge again; the walk '
+               'along Y has a changed candidate from the split\'s other child '
+               '(candidate_changed), the walk through the loop takes a step in B '
+               '(rule_violation)',
+        'parent': _stitch_request('annotate_loop', ['S'], {
+            'direction': 'right', 'labels': {'mode': 'annotate'},
+            'branching': {'on_reconverge': 'keep'}, 'bounds': {'max_extension_bp': 90},
+            'output': {'continuation_bp': 15}}),
+        'arm': 'right', 'walk': None, 'bp': 910,
+        'expect': {'L': 90, 'n': 15, 'child': [55, 59], 'reference': [85, 145]},
+    },
+    'annotate_merge': {
+        'index': 'fork',
+        'doc': 'annotate mode under keep, its child under merge (the review\'s exp7): '
+               'strategy_differs on branching.on_reconverge',
+        'parent': _stitch_request('annotate_merge', ['E'], {
+            'direction': 'right', 'labels': {'mode': 'annotate'},
+            'branching': {'on_reconverge': 'keep'}, 'bounds': {'max_extension_bp': 20}}),
+        'arm': 'right', 'walk': 0, 'bp': 40,
+        'overrides': {'branching': {'on_reconverge': 'merge'}},
+        'expect': {'L': 20, 'n': 20, 'child': [20], 'reference': [40, 40]},
+    },
+    'comb_chain': {
+        'index': 'comb',
+        'doc': 'a chain of comb continuations (T8\'s peak): unlimited branches, keep, radius '
+               '20; the parent, the child and the grandchild each split at every node into a '
+               'one-base tip and the backbone (walk 20 of the parent, 19 of the child), which '
+               'the next part continues',
+        'parent': _stitch_request('comb_chain', [('B', 0, 30)], {
+            'direction': 'right', 'labels': {'seed_label_kind': 'column'},
+            'branching': {'max_label_branches': 'unlimited', 'on_reconverge': 'keep'},
+            'bounds': {'max_extension_bp': 20}}),
+        'arm': 'right', 'walk': 20, 'bp': 20, 'grandchild': {'walk': 19, 'bp': 20},
+        'expect': {'L': 20, 'n': 20, 'child': list(range(1, 21)) + [20],
+                   'grandchild': list(range(1, 21)) + [20],
+                   'reference': list(range(1, 61)) + [60]},
+    },
+    'hairpin': {
+        'index': 'ambiguous_split',
+        'doc': 'canonical graph, left arm, hairpins follow: the child continues a walk 5 bp '
+               'left of the seed and follows the hairpin at the palindromic step of P onto '
+               'the other strand 20 bp in, where the reference follows it at 25: no cause, '
+               'the prospective walks are the reference\'s',
+        'parent': _stitch_request('hairpin', ['S'], {
+            'direction': 'left', 'labels': {'seed_label_kind': 'column'},
+            'branching': {'hairpins': 'follow', 'max_label_branches': 1,
+                          'on_reconverge': 'keep'},
+            'bounds': {'max_extension_bp': 5}}, ['a.fa']),
+        'arm': 'left', 'walk': None, 'bp': 60,
+        'expect': {'L': 5, 'n': 15, 'child': [51, 51], 'reference': [56, 56]},
+    },
 }
 
 # CLI fixtures of the request budgets (DESIGN-traverse-graphlet.md §14), written to
@@ -1400,8 +1550,9 @@ def build_stitch(metagraph, root, name):
         responses['sibling'], fulls['sibling'] = run(sib_req)
     if 'grandchild' in fx:
         gc = fx['grandchild']
-        gc_req = stitch_child_request(child, child_full, arm, gc['walk'], gc['bp'])
-        requests['fixture_index']['grandchild'] = gc['walk']
+        gc_walk = _pick_walk(child_full, arm, gc['walk'])
+        gc_req = stitch_child_request(child, child_full, arm, gc_walk, gc['bp'])
+        requests['fixture_index']['grandchild'] = gc_walk
         requests['grandchild'] = gc_req
         responses['grandchild'], fulls['grandchild'] = run(gc_req)
         reference_req['strategy']['bounds']['max_extension_bp'] += gc['bp']

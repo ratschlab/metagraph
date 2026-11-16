@@ -1,0 +1,189 @@
+{
+ "algorithm_version": "traverse-0.2",
+ "capabilities": {
+  "alphabet": "$ACGT",
+  "cost_models_available": [
+   "forbid",
+   "constant",
+   "table"
+  ],
+  "detail_levels": [
+   "summary",
+   "tree",
+   "full",
+   "graphlet"
+  ],
+  "direct_access": true,
+  "discovery_trace_scale": "traced",
+  "feature_level": 6,
+  "graphlet_format": 1,
+  "has_coord_to_header": true,
+  "has_coordinates": true,
+  "index_fp": null,
+  "index_meta_fp": "912f4b73896582b5",
+  "index_ns": "fixtures",
+  "k": 11,
+  "label_modes": [
+   "constrain",
+   "annotate"
+  ],
+  "num_labels": 4,
+  "regime": "basic",
+  "release": "",
+  "schema_version": 1,
+  "supports_trace": true
+ },
+ "release": "",
+ "results": [
+  {
+   "annotation": {
+    "access_path": "direct",
+    "direct_reads": 24,
+    "keys_mapped": 8,
+    "rows_requested": 8
+   },
+   "arms": {
+    "right": {
+     "branch_events_total": 0,
+     "complete_to_bp": 4,
+     "completeness_scope": "united_history",
+     "counters": {
+      "edge_reuse_probes": 0,
+      "max_reminimisation_rounds": 0,
+      "output_bp": 4,
+      "pair_evaluations": 0,
+      "refusal_scans": 0,
+      "reminimisation_rounds": 0,
+      "steps": 4,
+      "successor_enumerations": 4,
+      "switch_sources_cut": 0
+     },
+     "counts": {
+      "bases": 4,
+      "label_ends": {
+       "max_extension_bp": 3
+      },
+      "leaves": 1,
+      "leaves_by_reason": {
+       "max_extension_bp": 1
+      },
+      "max_bp": 4,
+      "merges": 0,
+      "runs": 3,
+      "segments": 1,
+      "splits": 0
+     },
+     "evidence": {
+      "complete": true,
+      "complete_to_bp": null
+     },
+     "frontier_remaining": {
+      "exact": true,
+      "live_labels": 0,
+      "live_paths": 0
+     },
+     "labels_per_node": {
+      "cap": 64,
+      "max_seen": 0,
+      "nodes_truncated": 0
+     },
+     "limitations": [
+      {
+       "effect": "completeness holds for the united-history rule, not per path; use \"keep\" for the per-path guarantee",
+       "kind": "scope",
+       "knob": "branching.on_reconverge",
+       "limit": "merge",
+       "observed": 0
+      }
+     ],
+     "status": "complete"
+    }
+   },
+   "graphlet": "H mgt 1 11 basic $ACGT c k m 64 1000 0 walk fixtures * 912f4b73896582b5\nS 3d54a60274c0346d 14 4 3 CCGTTAAAGCTAAA\nL c 0 * 0 a.fa\nL c 2 * 0 c.fa\nL c 3 * 0 d.fa\nO c c c i\nK r scope branching.on_reconverge s:merge i:0 * . completeness holds for the united-history rule, not per path; use \"keep\" for the per-path guarantee\nA r c 4 u 0 0 1 0 0 steps=4,successor_enumerations=4,output_bp=4,pair_evaluations=0,edge_reuse_probes=0,reminimisation_rounds=0,max_reminimisation_rounds=0,refusal_scans=0,switch_sources_cut=0 * 0 * 1 3 1 0 0 4\nB 0 1 3 3 1 4 0 0 0 0 0 0 0 X:3\nG * 0 4 * * * * * * CAAG\nT X .\nC 11 0 0 !\nR 0 0 0 4 X 0 * * 0 0 0\nR 0 1 0 4 X 0 * * 0 0 0\nR 0 2 0 4 X 0 * * 0 0 0\nZ 16\n",
+   "graphlet_bytes": 680,
+   "graphlet_lines": 16,
+   "label_mode": "constrain",
+   "limitations": [],
+   "outcome": {
+    "branch_diagnostics": "complete",
+    "delivery": "inline",
+    "label_evidence": "complete",
+    "walks": "complete"
+   },
+   "seed": {
+    "labels_dropped": 0,
+    "labels_dropped_digest": "",
+    "labels_from_seed": false,
+    "labels_supporting_total": 3,
+    "length_bp": 14,
+    "num_kmers": 4,
+    "num_labels": 3,
+    "num_seed_labels": 3,
+    "seed_id": "",
+    "seed_id_mismatch": false,
+    "validated_seed_id": "3d54a60274c0346d"
+   },
+   "work": {
+    "memory_bytes": 610941
+   }
+  }
+ ],
+ "strategy": {
+  "annotation": {
+   "batch_kmers": 64
+  },
+  "bounds": {
+   "max_extension_bp": 4,
+   "max_live_paths": 1000,
+   "max_output_bp": 2000000,
+   "max_paths": 10000,
+   "max_steps": 1000000,
+   "min_live_labels": 1,
+   "time_budget_ms": 30000.0
+  },
+  "branching": {
+   "bubble_window_bp": 0,
+   "hairpins": "skip",
+   "max_label_branches": 0,
+   "max_splits_per_path": 2,
+   "min_successor_fraction": 0.0,
+   "min_successor_labels": 1,
+   "on_reconverge": "merge",
+   "tip_window_bp": 0
+  },
+  "clamped": [],
+  "direction": "right",
+  "exhaustive": false,
+  "frontier": {
+   "on_overflow": "stop",
+   "order": "breadth_first"
+  },
+  "labels": {
+   "change_cost": {
+    "model": "forbid"
+   },
+   "extra": [],
+   "loss_budget": 0.0,
+   "max_labels_per_node": 64,
+   "max_seed_labels": 1000,
+   "max_switch_sources": 64,
+   "mode": "constrain",
+   "seed_label_kind": "column",
+   "switch_on": "loss"
+  },
+  "output": {
+   "continuation_bp": 1000,
+   "detail": "graphlet",
+   "max_branch_events": 100,
+   "profile_bin_bp": 100,
+   "sequences": true,
+   "timing": false
+  },
+  "schema_version": 1,
+  "support": "kmer"
+ },
+ "walk_rule": "every walk of at most complete_to_bp bases from the seed boundary is present when it uses no (k+1)-mer edge twice on its own path (edges are compared as (k+1)-mers), enters no seed node, and takes every step regardless of strand (a single-strand graph has no hairpins); after a reconvergence the merged walk is also barred from every edge used by any route merged into it (edge histories are united under on_reconverge: merge, so fewer walks are present than per path; on_reconverge: keep gives the per-path set); it is followed while some permitted label supports every node of it under the strategy's label rules",
+ "work": {
+  "memory_bytes": 610941
+ }
+}

@@ -55,7 +55,7 @@ _NAMES = {
     'client': ('ResolveDeadline', 'TraverseClient', 'UnsupportedFeature'),
     'store': ('Entry', 'GraphletStore', 'StoreLimitExceeded', 'UnknownHandle'),
     'composite': ('CombineRefused',),
-    'stitch': ('Junction', 'Part', 'StitchedGraphlet', 'StitchedWalk', 'stitch'),
+    '_stitch': ('Junction', 'Part', 'StitchedGraphlet', 'StitchedWalk', 'stitch'),
 }
 _HOME = {name: mod for mod, names in _NAMES.items() for name in names}
 # the package's modules, also reachable as attributes before anything imported them

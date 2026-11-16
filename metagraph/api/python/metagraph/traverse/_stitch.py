@@ -1,5 +1,6 @@
 """Stitching a continuation to the walk it continues (docs/DESIGN-graphlet-merge.md §3,
-phase 1a-S). EXPERIMENTAL: the API may change until `exact` is switched on.
+phase 1a-S). EXPERIMENTAL: the API may change until `exact` is switched on. A private
+module: its names are exported from metagraph.traverse, where `stitch` is the function.
 
 A continuation (next_request(), deepen(), traverse_continue) is a new traversal seeded with
 a walk's continuation. stitch(parent, child) joins it to that walk, on one pair, as a
@@ -13,7 +14,8 @@ its walks may differ from one uninterrupted walk of the parent's request (§3.4)
 that would call a junction `exact` (W1-W8, the whitelist) are computed, and every failing
 condition is named; but `exact` is not switched on before a seeded randomized comparison
 against uninterrupted traversals passes (OQ19). Until then every verdict is `qualified`,
-with the one cause `exact_gated` where the rules found no difference. Completeness,
+with the one cause `exact_gated` where the rules found no difference (at a junction: W1-W7
+hold there and W8 is judged per walk below it). Completeness,
 evidence and outcomes carry every cause (§3.5): a stitched walk is certified at most to its
 first junction, no walk that reaches into a child is complete, and no answer that depends
 on a junction reads `exact`. An answer that depends on no junction (stitch(g) without a
@@ -38,8 +40,8 @@ from . import derive
 from . import export as _export
 from . import ops as _ops
 from ._codec import REASON
-from .budget import (STR, W_ELEM, W_ROW, W_STEP, LocalBudgetExceeded, Partial, record_bytes,
-                     set_bytes)
+from .budget import (STR, W_ELEM, W_ROW, W_STEP, LocalBudgetExceeded, Partial, list_bytes,
+                     record_bytes, set_bytes)
 from .client import answered_pair
 from .composite import CombineRefused, NotCombinable
 from .model import (ARM_SIDES, AmbiguousLabel, BadSelector, Continuation, Graphlet, Label,
@@ -62,6 +64,12 @@ _T_INDEX_UNVERIFIABLE = (
     'are the same index cannot be verified (not proven different), so the child is not '
     'stitched automatically; pass allow_unverified_index=True to stitch it anyway (the '
     'result then states the identity unverified)')
+_T_INDEX_UNVERIFIABLE_PARTS = (
+    'the parts state an index manifest digest (index_fp) unevenly (the parent\'s on %d of '
+    '%d parts, the child\'s on %d of %d): whether they are the same index cannot be '
+    'verified (not proven different), so the child is not stitched automatically; pass '
+    'allow_unverified_index=True to stitch it anyway (the result then states the identity '
+    'unverified)')
 _T_DIFFERENT_PAIR = ('the child was answered on pair %s, its parent on pair %s: a '
                      'continuation runs on its parent\'s pair')
 _T_DIFFERENT_GRAPH = ('the child\'s graph is not its parent\'s (%s %r vs %r): its walks '
@@ -96,6 +104,8 @@ _T_NOT_OFFERED = {
     'compare': 'compare() reads one retrieval per side: compare the parts',
 }
 _T_NOT_OFFERED_ANY = '%s() is not offered on a stitched graphlet'
+_T_SUMMARY_TOO_SMALL = ('the summary\'s statements alone take %d bytes, more than '
+                        'max_bytes=%d: they are never cut; pass max_bytes >= %d')
 _T_LABEL_ID = ('label ids are local to each part of a stitched graphlet: select by ref or '
                'name')
 
@@ -114,21 +124,25 @@ def _label_list(labels):
 # the order of Appendix B.2's table: a junction's and a walk's causes are listed in it
 CAUSES = ('trace_restart', 'strategy_differs', 'extra_foreign', 'switching',
           'branches_unequal', 'label_count_knob', 'sibling_merge_unknown', 'not_continued',
-          'seed_dropped', 'no_bases', 'rule_violation', 'candidate_changed', 'exact_gated',
-          'decisions_unrecorded', 'seed_reentry', 'split_limit_restarted')
-JUNCTION_CAUSES = CAUSES[:10] + ('exact_gated',)
+          'seed_dropped', 'no_bases', 'strategy_unknown', 'rule_violation', 'candidate_changed',
+          'exact_gated', 'decisions_unrecorded', 'seed_reentry', 'split_limit_restarted')
+JUNCTION_CAUSES = CAUSES[:11] + ('exact_gated',)
 WALK_CAUSES = ('rule_violation', 'candidate_changed', 'decisions_unrecorded', 'seed_reentry',
                'split_limit_restarted', 'exact_gated')
 _RANK = {c: i for i, c in enumerate(CAUSES)}
 
-_GATED = ('exact_gated', 'W1-W8 hold here, but exact is not switched on: the rules found no '
+_GATED = ('exact_gated', 'W1-W7 hold at this junction, and W8 is judged per walk below it (the '
+          'walks\' causes), but exact is not switched on: the junction rules found no '
           'difference from one uninterrupted walk and have not yet passed the randomized '
           'comparison against uninterrupted traversals')
+_NO_BASES = ('no_bases', 'a part from the root to this child carries no bases '
+             '(output.sequences false): the rule check (W8) cannot run below this junction')
 _GATED_WALK = ('exact_gated', 'W1-W8 hold for this walk and its junctions, but exact is not '
                'switched on: the rules found no difference from one uninterrupted walk and '
                'have not yet passed the randomized comparison', None)
 
-# W2: the strategy fields a continuation may change (judged by W3-W5 where they matter)
+# W2: the strategy fields a continuation may change (judged by W3-W5 where they matter);
+# `clamped` is the server's report of the bounds it clamped, not a knob
 _W2_ALLOWED = ('direction', 'clamped', 'output', 'annotation',
                ('bounds', 'max_extension_bp'), ('bounds', 'max_steps'), ('bounds', 'max_paths'),
                ('bounds', 'max_output_bp'), ('bounds', 'time_budget_ms'),
@@ -316,6 +330,49 @@ def _without_allowed(st, other):
     return out
 
 
+# the strategy fields W3-W5 and the split check read; without one of them on either part
+# the junction is strategy_unknown (a missing max_splits_per_path is unknown, not
+# unlimited). The split limit does not apply in annotate mode (SPEC §6.4)
+_W5_KNOBS = (('branching', 'min_successor_labels', lambda v: v > 1),
+             ('branching', 'min_successor_fraction', lambda v: v != 0),
+             ('bounds', 'min_live_labels', lambda v: v > 1),
+             ('frontier', 'on_overflow', lambda v: v != 'stop'))
+_REQUIRED = {'annotate': tuple((b, n) for b, n, _ in _W5_KNOBS),
+             'constrain': tuple((b, n) for b, n, _ in _W5_KNOBS) + (
+                 ('labels', 'change_cost'), ('labels', 'extra'),
+                 ('branching', 'max_label_branches'), ('branching', 'max_splits_per_path'))}
+
+
+def _has(st, path):
+    block = st.get(path[0])
+    return isinstance(block, dict) and path[1] in block
+
+
+def _paths_of(d, prefix=()):
+    """The leaf field paths of a JSON object (a dict's own fields; a list is a leaf)."""
+    out = []
+    for k, v in d.items():
+        if isinstance(v, dict) and v:
+            out.extend(_paths_of(v, prefix + (k,)))
+        else:
+            out.append(prefix + (k,))
+    return out
+
+
+def _common(a, b):
+    """|a| restricted to the fields |b| has too (recursively), for W2's comparison of two
+    strategies of which one may not state every field."""
+    out = {}
+    for k, v in a.items():
+        if k not in b:
+            continue
+        if isinstance(v, dict) and isinstance(b[k], dict):
+            out[k] = _common(v, b[k])
+        else:
+            out[k] = v
+    return out
+
+
 def _is_graphlet(x):
     return isinstance(x, (Graphlet, StitchedGraphlet)) or _K.is_view(x)
 
@@ -341,12 +398,15 @@ def stitch(parent, child=None, *, arm=None, walk=None, allow_unverified_index=Fa
 
     Refusals (CombineRefused with .code, in the order checked; Appendix B.1 has the texts):
     not_combinable (also a TypeError), view_unsupported, MissingEnvelope, different_index,
-    index_unverifiable (a manifest digest on one side only; allow_unverified_index=True
-    stitches it and states the identity unverified), different_pair, different_graph,
-    different_mode, not_one_arm, wrong_arm, no_continuation, not_a_continuation,
-    ambiguous_walk, already_continued (the same retrieval again at that walk is a no-op:
-    the parent is returned), foreign_seed_labels. budget= (local limits): the junction's
-    rule check is charged; a stop raises with no partial."""
+    index_unverifiable (a manifest digest on some parts only; allow_unverified_index=True
+    stitches it and states the identity unverified), different_pair (the identity checks
+    run against every part on both sides), different_graph, different_mode, not_one_arm,
+    wrong_arm, no_continuation, not_a_continuation, ambiguous_walk, already_continued (the
+    same retrieval, or for a stitched child the same subtree, again at that walk is a
+    no-op: the parent is returned), foreign_seed_labels. budget= (local limits): the identity
+    checks, the new graphlet's index and each junction's W1-W7 (computed once per pair of
+    parts) are charged; W8 runs per walk in the queries and is charged there. A stop raises
+    with no partial."""
     if not isinstance(allow_unverified_index, bool):
         raise ValueError('allow_unverified_index is True or False, not %r'
                          % (allow_unverified_index,))
@@ -359,7 +419,7 @@ def stitch(parent, child=None, *, arm=None, walk=None, allow_unverified_index=Fa
         if isinstance(x, Graphlet):
             _K.require_envelope(x, 'stitch()')
     base = parent if isinstance(parent, StitchedGraphlet) else \
-        StitchedGraphlet._root_of(parent, allow_unverified_index)
+        StitchedGraphlet._root_of(parent)
     if child is None:
         return base
     return _K.run_scoped(budget, 'stitch',
@@ -374,38 +434,54 @@ class StitchedGraphlet:
     Its parts are held unchanged; every answer is computed from them, positions outward
     from the root seed's boundary, walks keyed by tuples of walk ids along the chain."""
 
-    def __init__(self, parts, identity, allow_unverified_index):
-        # parts: [Part] in canonical order (root first, then by key)
+    def __init__(self, parts, identity, inherited=(), b=None):
+        # parts: [Part] in canonical order (root first, then by key); |inherited|: the
+        # junction cores of the graphlets this one is built from
         self._parts = tuple(parts)
         self._by_key = {p.key: p for p in self._parts}
         self.identity = identity
-        self._allow = allow_unverified_index
         self._cache = {}
+        self._jcore = {}
         root = self._parts[0].graphlet
         self.k, self.regime, self.alphabet = root.k, root.regime, root.alphabet
         self.mode, self.support = root.mode, root.support
         self.seed = root.seed
         self._labels, self._label_of = self._union_labels()
-        self._junctions = tuple(self._make_junction(p) for p in self._parts[1:])
-        self._junctions = tuple(sorted(self._junctions, key=lambda j: (j.arm, j.walk)))
+        self._junctions = tuple(sorted((self._make_junction(p, inherited, b)
+                                        for p in self._parts[1:]),
+                                       key=lambda j: (j.arm, j.walk)))
         self._jindex = {j.part: i for i, j in enumerate(self._junctions)}
-        self.digest = _K.combined_digest([[[list(s) for s in p.key], p.digest]
-                                          for p in self._parts])
+        self.digest = self._digest_of([(p.key, p) for p in self._parts])
+
+    def _rid(self, g):
+        got = self._jcore.get(('rid', id(g)))
+        if got is None:
+            got = self._jcore[('rid', id(g))] = _K.retrieval_identity(g)
+        return got
+
+    def _digest_of(self, keyed):
+        """The digest of a tree of parts, [(key relative to its root, Part)] in canonical
+        order: the sha-256 of each part's key, body digest and retrieval identity (§3.7, as
+        the union's digest states retrieval identity), so two stitched graphlets of equal
+        bodies from other requests, whose junctions can read otherwise, differ."""
+        return _K.combined_digest([[[list(s) for s in k], p.digest, self._rid(p.graphlet)]
+                                   for k, p in keyed])
 
     # ---------------------------------------------------------------- construction
 
     @classmethod
-    def _root_of(cls, g, allow_unverified_index=False):
-        identity = _identity_alone(g)
-        return cls([Part((), g, 0, _K.part_digest(g))], identity, allow_unverified_index)
+    def _root_of(cls, g):
+        return cls([Part((), g, 0, _K.part_digest(g))], _identity_of([g], [], False))
 
     def _stitched(self, child, arm, walk, allow, b):
         """The checks of §3.1 in order, then the new graphlet (or self: a no-op)."""
         croot = child.root if isinstance(child, StitchedGraphlet) else child
         proot = self.root
-        identity = self._check_index(croot, child.labels, allow)
+        cparts = child.parts if isinstance(child, StitchedGraphlet) else \
+            (Part((), child, 0, _K.part_digest(child)),)
+        identity = self._check_index(cparts, child.labels, allow, b)
         if not identity['verified']:
-            self._check_pair(proot, croot)
+            self._check_pairs(cparts)
         for name in ('k', 'regime'):
             if getattr(proot, name) != getattr(croot, name):
                 raise CombineRefused('different_graph', _T_DIFFERENT_GRAPH % (
@@ -425,25 +501,10 @@ class StitchedGraphlet:
         cseq = _K.case_mapped(croot.seed.sequence, croot.alphabet)
         part, pid, key = self._continued_walk(side, walk, cseq, b)
         pg = part.graphlet
-        step = (side, pid)
-        ckey = part.key + (step,)
-        have = self._by_key.get(ckey)
-        if have is not None:
-            if isinstance(child, StitchedGraphlet):
-                same = [p.digest for p in self.parts if p.key[:len(ckey)] == ckey] == \
-                    [p.digest for p in child.parts]
-            else:
-                same = have.digest == _K.part_digest(croot)
-            if same:
-                ra, rb = (_K.retrieval_identity(have.graphlet),
-                          _K.retrieval_identity(croot))
-                diff = _K.first_difference(ra, rb)
-                if diff is None:
-                    return self
-                raise CombineRefused('already_continued', _T_ALREADY_REQUEST % (
-                    walk_name(key), side, diff))
-            raise CombineRefused('already_continued', _T_ALREADY % (
-                walk_name(key), side, part_name(ckey), have.digest))
+        ckey = part.key + ((side, pid),)
+        if ckey in self._by_key:
+            self._same_child(ckey, cparts, key, side)
+            return self
         leaf = derive.paths(pg.arms[side])[pid].leaf
         L = pg.arms[side].segments[leaf].end_bp
         if croot.mode == 'constrain':
@@ -454,69 +515,86 @@ class StitchedGraphlet:
                 raise CombineRefused('foreign_seed_labels', _T_FOREIGN % (
                     _label_list(foreign), walk_name(key), side, part.offset_bp + L))
         offset = part.offset_bp + L
-        if isinstance(child, StitchedGraphlet):
-            new = [Part(ckey + p.key, p.graphlet, offset + p.offset_bp, p.digest)
-                   for p in child.parts]
-        else:
-            new = [Part(ckey, child, offset, _K.part_digest(child))]
-        parts = sorted(self._parts + tuple(new), key=lambda p: p.key)
-        identity = _weaker_identity(self.identity, identity)
-        if isinstance(child, StitchedGraphlet):
-            identity = _weaker_identity(identity, child.identity)
+        new = tuple(Part(ckey + p.key, p.graphlet, offset + p.offset_bp, p.digest)
+                    for p in cparts)
+        parts = sorted(self._parts + new, key=lambda p: p.key)
         if b is not None:
-            # the junction's rule check (W8) is computed on demand; the new graphlet's own
-            # index (parts, keys, junctions) is charged here
+            # the new graphlet's own index (parts, keys, junctions); a junction's core is
+            # charged when it is computed (once per pair of parts), W8 in the queries
             b.charge(W_ROW * len(parts), len(parts) * (record_bytes(Part) + 200))
-        return StitchedGraphlet(parts, identity, self._allow or allow)
+        inherited = (self._jcore,) + ((child._jcore,) if isinstance(child, StitchedGraphlet)
+                                      else ())
+        return StitchedGraphlet(parts, identity, inherited, b)
 
-    def _check_index(self, croot, labels, allow):
-        """different_index, then index_unverifiable -> the identity statement."""
+    def _same_child(self, ckey, cparts, key, side):
+        """At a continued walk: returns when the child is the subtree already there (every
+        part's key, body and retrieval identity equal: a no-op), else already_continued."""
+        have = [(p.key[len(ckey):], p) for p in self._parts if p.key[:len(ckey)] == ckey]
+        new = [(p.key, p) for p in cparts]
+        if [(k, p.digest) for k, p in have] == [(k, p.digest) for k, p in new]:
+            for (k, a), (_, c) in zip(have, new):
+                diff = _K.first_difference(self._rid(a.graphlet), self._rid(c.graphlet))
+                if diff is not None:
+                    raise CombineRefused('already_continued', _T_ALREADY_REQUEST % (
+                        walk_name(key), side, diff if not k else '%s of part %s' % (
+                            diff, part_name(ckey + k))))
+            return
+        raise CombineRefused('already_continued', _T_ALREADY % (
+            walk_name(key), side, part_name(ckey), self._digest_of(have)))
+
+    def _check_index(self, cparts, labels, allow, b=None):
+        """different_index over every part on both sides (each distinct index identity of
+        one side against each of the other), the names rule over the union's labels, then
+        index_unverifiable (allow_unverified_index waives only that) -> the identity
+        statement of the stitched graphlet."""
+        mine = [p.graphlet for p in self._parts]
+        theirs = [p.graphlet for p in cparts]
+        done = set()
+        for a in mine:
+            for c in theirs:
+                pair = (_index_key(a), _index_key(c))
+                if pair in done:
+                    continue
+                done.add(pair)
+                if b is not None:
+                    b.charge(W_ROW)
+                key, values = _K.index_check(a, c)
+                if key in ('meta_fp', 'fp', 'ns', 'release'):
+                    raise CombineRefused('different_index', _T_DIFFERENT_INDEX
+                                         % _K.different_index_clause(key, values))
         names = self._label_of
-        clause = None
-        key, values = _K.index_check(self.root, croot)
-        if key in ('meta_fp', 'fp', 'ns', 'release'):
-            clause = _K.different_index_clause(key, values)
-        else:
-            for l in labels:
-                if l.ref in names and names[l.ref].name != l.name:
-                    clause = _K.INDEX_CLAUSES['names'] % (l.ref, names[l.ref].name, l.name)
-                    break
-            else:
-                if key == 'names':
-                    clause = _K.different_index_clause(key, values)
-        if clause is not None:
-            raise CombineRefused('different_index', _T_DIFFERENT_INDEX % clause)
-        fp_p, fp_c = self.root.index_fp, croot.index_fp
-        if fp_p and fp_c:
-            return {'verified': True, 'index_fp': fp_p}
-        if fp_p or fp_c:
-            why = _T_INDEX_UNVERIFIABLE % ('an' if fp_c else 'no', 'one' if fp_p else 'none')
-            if not allow:
-                raise CombineRefused('index_unverifiable', why)
-            return {'verified': False, 'accepted': 'allow_unverified_index',
-                    'note': 'the child states %s index manifest digest (index_fp) and its '
-                            'parent %s: whether they are the same index cannot be verified '
-                            '(not proven different); stitched because the caller passed '
-                            'allow_unverified_index' % ('an' if fp_c else 'no',
-                                                         'one' if fp_p else 'none')}
-        return {'verified': False,
-                'note': 'neither the parent nor the child states an index manifest digest '
-                        '(index_fp): that they are the same index cannot be verified'}
+        for l in labels:
+            if l.ref in names and names[l.ref].name != l.name:
+                raise CombineRefused('different_index', _T_DIFFERENT_INDEX % (
+                    _K.INDEX_CLAUSES['names'] % (l.ref, names[l.ref].name, l.name)))
+        return _identity_of(mine, theirs, allow)
 
-    def _check_pair(self, proot, croot):
-        pp = answered_pair(proot.envelope)
-        cp = answered_pair(croot.envelope)
-        if pp is not None and cp is not None and pp != cp:
-            def show(p):
-                return json.dumps({'graph': p[0], 'graph_path': p[1], 'annotation_path': p[2]},
-                                  separators=(',', ':'), ensure_ascii=False)
-            raise CombineRefused('different_pair', _T_DIFFERENT_PAIR % (show(cp), show(pp)))
+    def _check_pairs(self, cparts):
+        """different_pair: a part of either side answered on another pair than a part of the
+        other (only pairs both state)."""
+        mine = {answered_pair(p.graphlet.envelope) for p in self._parts} - {None}
+        for p in cparts:
+            cp = answered_pair(p.graphlet.envelope)
+            if cp is None:
+                continue
+            for pp in sorted(mine, key=lambda x: tuple('' if v is None else v for v in x)):
+                if pp != cp:
+                    def show(x):
+                        return json.dumps({'graph': x[0], 'graph_path': x[1],
+                                           'annotation_path': x[2]},
+                                          separators=(',', ':'), ensure_ascii=False)
+                    raise CombineRefused('different_pair', _T_DIFFERENT_PAIR % (show(cp),
+                                                                                show(pp)))
 
     def _continued_walk(self, side, walk, cseq, b):
         """-> (part, path id, walk key) of the walk the child continues (no_continuation,
         not_a_continuation, ambiguous_walk)."""
         if walk is not None:
             key = self._walk_key(walk)
+            owner = self._by_key.get(tuple((side, w) for w in key[:-1]))
+            if owner is not None and side not in owner.graphlet.arms:
+                raise CombineRefused('not_a_continuation', _T_NOT_A_CONTINUATION_OF % (
+                    walk_name(key), side))
             part, pid = self._part_of_walk(side, key)
             g = part.graphlet
             a = g.arms[side]
@@ -667,99 +745,121 @@ class StitchedGraphlet:
 
     # ---------------------------------------------------------------- junctions
 
-    def _make_junction(self, part):
-        """The junction of a child part: its verdict and junction causes (W1-W7, no_bases;
-        exact_gated where none fails)."""
-        key = part.key
-        side, pid = key[-1]
-        ppart = self._by_key[key[:-1]]
-        pg, cg = ppart.graphlet, part.graphlet
+    def _core(self, pg, cg, side, pid, b=None):
+        """The junction causes of child |cg| continuing walk |pid| of |pg|'s arm |side| that
+        depend on these two parts only (W1-W7 and strategy_unknown; no_bases and the
+        positions are the stitched graphlet's): {L, causes: [(code, sentence)], sib: the
+        sibling walks of W6 (local ids), continued, not_continued: label refs}. Computed
+        once per pair of parts and carried into every stitched graphlet holding them, so
+        adding J children one at a time costs linear work; charged to |b| when computed."""
         a = pg.arms[side]
-        leaf = derive.paths(a)[pid].leaf
+        paths = derive.paths(a)
+        if b is not None:
+            b.charge(W_ELEM * (len(paths) + len(a.segments)) + 2 * W_ROW,
+                     list_bytes(len(paths)) + 2 * (STR + 64))
+        leaf = paths[pid].leaf
         L = a.segments[leaf].end_bp
         sp, sc = _strategy(pg), _strategy(cg)
+        mode = pg.mode
         causes = []
         if pg.support == 'trace':
             causes.append(('trace_restart', 'under support trace a lineage follows one '
                            'occurrence chain from the root seed; the child validated its seed '
                            'labels against any occurrence of the tail, so it can follow an '
                            'occurrence the parent\'s lineage never had (W1)'))
-        diff = _K.first_difference(_without_allowed(sp, sc), _without_allowed(sc, sp))
+        # strategy_unknown: a field the rules read missing on either part, or a field one
+        # part states and the other does not
+        wp, wc = _without_allowed(sp, sc), _without_allowed(sc, sp)
+        unknown = []
+        for path in _REQUIRED.get(mode, ()):
+            hp, hc = _has(sp, path), _has(sc, path)
+            if not (hp and hc):
+                unknown.append('%s (%s)' % ('.'.join(path), 'both' if not (hp or hc) else
+                                            'the parent' if not hp else 'the child'))
+        named = {u.split(' ')[0] for u in unknown}
+        for who, x, y in (('the child', wp, wc), ('the parent', wc, wp)):
+            for path in _paths_of(x):
+                dotted = '.'.join(path)
+                node = y
+                for k in path:
+                    node = node.get(k) if isinstance(node, dict) else None
+                    if node is None:
+                        break
+                if node is None and dotted not in named:
+                    named.add(dotted)
+                    unknown.append('%s (%s)' % (dotted, who))
+        diff = _K.first_difference(_common(wp, wc), _common(wc, wp))
         if diff is not None:
             causes.append(('strategy_differs', 'the child\'s normalized strategy differs from '
                            'the parent\'s at %s, a field a continuation keeps (W2)' % diff))
-        continued, not_cont, dropped = (), (), ()
-        if pg.mode == 'constrain':
-            pool = {l.name for l in pg.labels[:pg.seed.num_seed_labels]} | \
-                set(_knob(sp, 'labels', 'extra', []) or [])
-            foreign = [n for n in (_knob(sc, 'labels', 'extra', []) or []) if n not in pool]
-            if foreign:
-                causes.append(('extra_foreign', 'the child\'s labels.extra names %s, outside '
-                               'the parent\'s permitted pool (its seed labels and labels.extra) '
-                               '(W2)' % ', '.join(json.dumps(n, ensure_ascii=False)
-                                                   for n in foreign[:_SHOWN])
-                               + (' and %d more' % (len(foreign) - _SHOWN)
-                                  if len(foreign) > _SHOWN else '')))
-            mp = (_knob(sp, 'labels', 'change_cost') or {}).get('model', 'forbid')
-            mc = (_knob(sc, 'labels', 'change_cost') or {}).get('model', 'forbid')
-            if mp != 'forbid' or mc != 'forbid':
-                causes.append(('switching', 'labels.change_cost is %s in the parent and %s in '
-                               'the child: switching restarts with the child\'s loss budget '
-                               'and source lists (W3 needs forbid on both)' % (mp, mc)))
+        elif pg.reconverge != cg.reconverge:
+            causes.append(('strategy_differs', 'the child\'s normalized strategy differs from '
+                           'the parent\'s at branching.on_reconverge (%s in the parent, %s in '
+                           'the child, by their H records), a field a continuation keeps (W2, '
+                           'W6)' % (pg.reconverge, cg.reconverge)))
+        continued, not_cont, not_named, dropped, xnames = (), (), (), (), {}
+        if mode == 'constrain':
+            if _has(sp, ('labels', 'extra')) and _has(sc, ('labels', 'extra')):
+                pool = {l.name for l in pg.labels[:pg.seed.num_seed_labels]} | \
+                    set(_knob(sp, 'labels', 'extra', []) or [])
+                foreign = [n for n in (_knob(sc, 'labels', 'extra', []) or [])
+                           if n not in pool]
+                if foreign:
+                    causes.append(('extra_foreign', 'the child\'s labels.extra names %s, '
+                                   'outside the parent\'s permitted pool (its seed labels and '
+                                   'labels.extra) (W2)' % ', '.join(
+                                       json.dumps(n, ensure_ascii=False)
+                                       for n in foreign[:_SHOWN])
+                                   + (' and %d more' % (len(foreign) - _SHOWN)
+                                      if len(foreign) > _SHOWN else '')))
+            if _has(sp, ('labels', 'change_cost')) and _has(sc, ('labels', 'change_cost')):
+                mp = (_knob(sp, 'labels', 'change_cost') or {}).get('model', 'forbid')
+                mc = (_knob(sc, 'labels', 'change_cost') or {}).get('model', 'forbid')
+                if mp != 'forbid' or mc != 'forbid':
+                    causes.append(('switching', 'labels.change_cost is %s in the parent and %s '
+                                   'in the child: switching restarts with the child\'s loss '
+                                   'budget and source lists (W3 needs forbid on both)'
+                                   % (mp, mc)))
             seeds = {l.ref for l in cg.labels[:cg.seed.num_seed_labels]}
             ends = derive.end_labels(a, leaf)
             alive = [pg.labels[e.label] for e in ends]
-            continued = tuple(self._label_of[l.ref] for l in alive if l.ref in seeds)
-            xnames = {}
+            continued = tuple(l.ref for l in alive if l.ref in seeds)
             for x in cg.dropped:
                 xnames.setdefault(x.name, x.reason)
             dropped = tuple(l for l in alive if l.ref not in seeds and l.name in xnames)
             not_named = tuple(l for l in alive if l.ref not in seeds and l.name not in xnames)
-            not_cont = tuple(self._label_of[l.ref] for l in alive if l.ref not in seeds)
-            mlb_p = _knob(sp, 'branching', 'max_label_branches')
-            mlb_c = _knob(sc, 'branching', 'max_label_branches')
-            if not (mlb_p == 'unlimited' and mlb_c == 'unlimited'):
-                bs = {e.branches for e in ends if pg.labels[e.label].ref in seeds}
-                b = next(iter(bs)) if len(bs) == 1 else (0 if not bs else None)
-                ok = b is not None and isinstance(mlb_p, int) and isinstance(mlb_c, int) \
-                    and mlb_c == mlb_p - b
-                if not ok:
-                    causes.append(('branches_unequal', 'branching.max_label_branches is %s in '
-                                   'the parent and %s in the child, and the continued labels '
-                                   'ended the walk at branch counts %s: the allowance does not '
-                                   'shift uniformly (W4)'
-                                   % (mlb_p, mlb_c, sorted(bs) or '[]')))
+            not_cont = tuple(l.ref for l in alive if l.ref not in seeds)
+            if _has(sp, ('branching', 'max_label_branches')) and \
+                    _has(sc, ('branching', 'max_label_branches')):
+                mlb_p = _knob(sp, 'branching', 'max_label_branches')
+                mlb_c = _knob(sc, 'branching', 'max_label_branches')
+                if not (mlb_p == 'unlimited' and mlb_c == 'unlimited'):
+                    bs = {e.branches for e in ends if pg.labels[e.label].ref in seeds}
+                    br = next(iter(bs)) if len(bs) == 1 else (0 if not bs else None)
+                    ok = br is not None and isinstance(mlb_p, int) and \
+                        isinstance(mlb_c, int) and mlb_c == mlb_p - br
+                    if not ok:
+                        causes.append(('branches_unequal', 'branching.max_label_branches is %s '
+                                       'in the parent and %s in the child, and the continued '
+                                       'labels ended the walk at branch counts %s: the '
+                                       'allowance does not shift uniformly (W4)'
+                                       % (mlb_p, mlb_c, sorted(bs) or '[]')))
         knobs = []
         for who, st in (('parent', sp), ('child', sc)):
-            for block, name, bad in (
-                    ('branching', 'min_successor_labels', lambda v: v > 1),
-                    ('branching', 'min_successor_fraction', lambda v: v != 0),
-                    ('bounds', 'min_live_labels', lambda v: v > 1),
-                    ('frontier', 'on_overflow', lambda v: v != 'stop')):
+            for block, name, bad in _W5_KNOBS:
                 v = _knob(st, block, name)
                 if v is not None and bad(v):
                     knobs.append('%s.%s %s in the %s' % (block, name, json.dumps(v), who))
         if knobs:
             causes.append(('label_count_knob', 'a knob reads other labels\' counts, which '
                            'restart at the junction: %s (W5)' % ', '.join(knobs)))
+        sib = []
         if pg.reconverge == 'merge' and cg.reconverge == 'merge':
-            sib = []
-            for p in derive.paths(a):
-                if p.id == pid:
-                    continue
-                s = a.segments[p.leaf]
-                if s.leaf.continuation is not None or p.length_bp > L:
+            for p in paths:
+                if p.id != pid and (a.segments[p.leaf].leaf.continuation is not None
+                                    or p.length_bp > L):
                     sib.append(p.id)
-            if sib:
-                pre = _walk_prefix(ppart.key)
-                causes.append(('sibling_merge_unknown', 'under merge the reference joins paths '
-                               'that meet beyond %d bp; walks %s of the arm went on or ended '
-                               'beyond it, and the child cannot see them (W6)'
-                               % (ppart.offset_bp + L,
-                                  ', '.join(walk_name(pre + (w,)) for w in sib[:_SHOWN])
-                                  + (' and %d more' % (len(sib) - _SHOWN)
-                                     if len(sib) > _SHOWN else ''))))
-        if pg.mode == 'constrain':
+        if mode == 'constrain':
             if not_named:
                 causes.append(('not_continued', 'the child does not seed %s, alive at the end '
                                'of the walk: their lineages do not go on in the child (W7)'
@@ -769,15 +869,60 @@ class StitchedGraphlet:
                                % (_label_list(dropped), 'it' if len(dropped) == 1 else 'them',
                                   ', '.join('%s %s' % (l.name, xnames[l.name])
                                             for l in dropped[:_SHOWN]))))
-        if not (_K.has_bases(pg) and _K.has_bases(cg)):
-            causes.append(('no_bases', 'a part carries no bases (output.sequences false): the '
-                           'rule check (W8) cannot run'))
+        if unknown:
+            causes.append(('strategy_unknown', 'the envelopes do not state %s of the normalized '
+                           'strategy: the rules that read them (W2-W5, the split check of W8) '
+                           'cannot be judged' % (', '.join(unknown[:_SHOWN])
+                                                 + (' and %d more' % (len(unknown) - _SHOWN)
+                                                    if len(unknown) > _SHOWN else ''))))
+        return {'L': L, 'causes': tuple(causes), 'sib': tuple(sib), 'continued': continued,
+                'not_continued': not_cont, 'overlap': len(cg.seed.sequence)}
+
+    def _make_junction(self, part, inherited, b=None):
+        """The junction of a child part: its core (computed once per pair of parts, or taken
+        from |inherited|), placed in this graphlet: W6's siblings named with their keys and
+        position, no_bases when a part from the root to the child carries no bases, and
+        exact_gated where no cause applies."""
+        key = part.key
+        side, pid = key[-1]
+        ppart = self._by_key[key[:-1]]
+        pg, cg = ppart.graphlet, part.graphlet
+        ck = (id(pg), id(cg), side, pid)
+        core = None
+        for d in inherited:
+            core = d.get(ck)
+            if core is not None:
+                break
+        if core is None:
+            core = self._core(pg, cg, side, pid, b)
+        self._jcore[ck] = core
+        if b is not None:
+            b.charge(W_ROW + len(key), record_bytes(Junction) + 200)
+        causes = list(core['causes'])
+        pre = _walk_prefix(ppart.key)
+        at = ppart.offset_bp + core['L']
+        sib = core['sib']
+        if sib:
+            causes.append(('sibling_merge_unknown', 'under merge the reference joins paths that '
+                           'meet beyond %d bp; walks %s of the arm went on or ended beyond it, '
+                           'and the child cannot see them (W6)'
+                           % (at, ', '.join(walk_name(pre + (w,)) for w in sib[:_SHOWN])
+                              + (' and %d more' % (len(sib) - _SHOWN)
+                                 if len(sib) > _SHOWN else ''))))
+        if not all(self._bases(self._by_key[key[:i]].graphlet) for i in range(len(key) + 1)):
+            causes.append(_NO_BASES)
         if not causes:
             causes.append(_GATED)
         causes.sort(key=lambda c: _RANK[c[0]])
-        cseed = len(cg.seed.sequence)
-        return Junction(side, _walk_prefix(ppart.key) + (pid,), ppart.offset_bp + L, cseed,
-                        key, 'qualified', tuple(causes), continued, not_cont)
+        return Junction(side, pre + (pid,), at, core['overlap'], key, 'qualified',
+                        tuple(causes), tuple(self._label_of[r] for r in core['continued']),
+                        tuple(self._label_of[r] for r in core['not_continued']))
+
+    def _bases(self, g):
+        got = self._jcore.get(('bases', id(g)))
+        if got is None:
+            got = self._jcore[('bases', id(g))] = _K.has_bases(g)
+        return got
 
     def _junction_of_part(self, key):
         i = self._jindex[key]
@@ -1248,11 +1393,17 @@ class StitchedGraphlet:
                             c.loss_used, c.branches_used, coord, side, c.leaf, c.unverifiable,
                             c.losses, c.note)
 
+    def _walk_keys(self, walks):
+        """A walks= argument as walk keys: one key (a path id or a tuple of ints) or an
+        iterable of keys -- (1, 0) is the one walk 1.0, ((1, 0), (2,)) two walks."""
+        if isinstance(walks, int) and not isinstance(walks, bool) or \
+                isinstance(walks, tuple) and walks and all(
+                    isinstance(x, int) and not isinstance(x, bool) for x in walks):
+            return [self._walk_key(walks)]
+        return [self._walk_key(w) for w in walks]
+
     def _one_part(self, side, walks):
-        if isinstance(walks, (int, tuple)) and not isinstance(walks, bool) and (
-                isinstance(walks, int) or all(isinstance(x, int) for x in walks)):
-            walks = [walks]
-        keys = [self._walk_key(w) for w in walks]
+        keys = self._walk_keys(walks)
         located = [self._part_of_walk(side, k) for k in keys]
         if len({p.key for p, _ in located}) > 1:
             raise ValueError('next_request() continues walks of one part: %s lie in parts %s; '
@@ -1308,8 +1459,7 @@ class StitchedGraphlet:
                 else:
                     by = dict(rows)
                     chosen = []
-                    for w in walks:
-                        k = self._walk_key(w)
+                    for k in self._walk_keys(walks):
                         if k not in by:
                             raise IndexError('no stitched walk %s on the %s arm'
                                              % (walk_name(k), side))
@@ -1355,6 +1505,17 @@ class StitchedGraphlet:
         own certified depth), verdict, causes (the junction's cause codes)}."""
         return self._completeness(False)
 
+    def _causes_below(self, j, b=None):
+        """The walk-scope cause codes (exact_gated left out) on the stitched walks through
+        junction |j|, in Appendix B.2's order: W8 is judged per walk, so a junction whose own
+        rules hold can still stand above a walk the reference walks otherwise."""
+        codes = set()
+        for key, chain in self._rows(j.arm, b):
+            if key[:len(j.walk)] == j.walk and len(key) > len(j.walk):
+                codes.update(c[0] for c in self._walk_row(j.arm, key, chain, False, b)['causes']
+                             if c[0] != 'exact_gated')
+        return sorted(codes, key=_RANK.get)
+
     def _chain_of(self, side, key):
         """[(part, path id)] of walk key |key| on arm |side|, root first."""
         return [self._part_of_walk(side, key[:i + 1]) for i in range(len(key))]
@@ -1385,7 +1546,8 @@ class StitchedGraphlet:
                              'verdict': ('exact' if self._gated(j) else 'qualified')
                              if prospective else j.verdict,
                              'causes': [c[0] for c in j.causes
-                                        if not (prospective and c[0] == 'exact_gated')]})
+                                        if not (prospective and c[0] == 'exact_gated')],
+                             'walk_causes': self._causes_below(j)})
             out[side] = {'complete_to_bp': a.complete_to_bp, 'scope': a.scope,
                          'extensions': exts}
         return out
@@ -1416,9 +1578,8 @@ class StitchedGraphlet:
             if walks is None:
                 chosen = self._rows(side)
             else:
-                ws = walks if isinstance(walks, list) else [walks]
                 chosen = [(r['key'], r['chain']) for r in
-                          (self._row(side, w, prospective) for w in ws)]
+                          (self._row(side, w, prospective) for w in self._walk_keys(walks))]
             for key, chain in chosen:
                 for part, _ in chain:
                     read_parts.add(part.key)
@@ -1470,8 +1631,10 @@ class StitchedGraphlet:
     def summary(self, max_bytes=2048, *, budget=None):
         """Agent-facing, <= max_bytes of JSON: the root seed, per arm the root's certificate
         and the stitched walks' count and longest, the junctions with their verdicts and
-        cause codes, the identity, the outcome and exact of evidence(); marked
-        experimental. Junctions beyond the cap are cut (stated)."""
+        cause codes and the walk-scope cause codes on the walks below each (walk_causes),
+        the identity, the outcome and exact of evidence(); marked experimental. Junctions
+        beyond the cap are cut from the end (junctions_cut); the rest is never cut:
+        summary_too_small when it alone exceeds max_bytes."""
         def run(b):
             meta = (self.root.seed_summary or {}).get('seed') or {}
             out = {'stitched': True, 'experimental': True,
@@ -1490,7 +1653,8 @@ class StitchedGraphlet:
             for j in self._junctions:
                 out['junctions'].append({'arm': j.arm, 'walk': walk_name(j.walk),
                                          'at_bp': j.at_bp, 'verdict': j.verdict,
-                                         'causes': [c[0] for c in j.causes]})
+                                         'causes': [c[0] for c in j.causes],
+                                         'walk_causes': self._causes_below(j, b)})
             ev = self.evidence()
             out['identity'] = {'verified': self.identity.get('verified')}
             out['outcome'] = ev['outcome']
@@ -1504,6 +1668,10 @@ class StitchedGraphlet:
             while size() > max_bytes and out['junctions']:
                 out['junctions'].pop()
                 out['junctions_cut'] = True
+            n = size()
+            if n > max_bytes:
+                raise CombineRefused('summary_too_small', _T_SUMMARY_TOO_SMALL
+                                     % (n, max_bytes, n))
             return out
         return _K.run_scoped(budget, 'summary', run)
 
@@ -1529,13 +1697,13 @@ class StitchedGraphlet:
         return out
 
     def memory_bytes(self):
-        """The parts' models (a model held twice counted once) and the junction indexes."""
-        extra = 0
-        for key, v in self._cache.items():
-            if isinstance(key, tuple) and key[0] == 'ctx':
-                n = sum(len(e) for e in v['edges'][-1:]) + len(v['child_nodes'])
-                extra += set_bytes(n) + n * (STR + self.k + 1)
-        return _K.models_memory_bytes([p.graphlet for p in self._parts], extra)
+        """What this graphlet holds: the parts' models and everything it built from them --
+        its parts and labels, the junctions and their cores, and every cache of the queries
+        (rule-check indexes, walk causes, rows, ranked walks, tails) -- each object once."""
+        return _ops._deep_bytes([p.graphlet for p in self._parts]
+                                + [self._parts, self._by_key, self._labels, self._label_of,
+                                   self._junctions, self._jindex, self._jcore, self._cache,
+                                   self.identity])
 
     # ---------------------------------------------------------------- not offered
 
@@ -1588,32 +1756,34 @@ class StitchedGraphlet:
 
 # ------------------------------------------------------------------ identity
 
-def _identity_alone(g):
-    if g.index_fp:
-        return {'verified': True, 'index_fp': g.index_fp}
-    return {'verified': False, 'note': 'no index manifest digest (index_fp): the identity of '
-                                       'a later part cannot be verified'}
+def _index_key(g):
+    i = _ops.index_identity(g)
+    return (i['ns'], i['fp'], i['meta_fp'], i['release'])
 
 
-def _weaker_identity(a, b):
-    """The identity statement of a graphlet built from two: verified only when both are."""
-    if a.get('verified') and b.get('verified'):
-        return a
-    if not a.get('verified') and a.get('accepted'):
-        return a
-    if not b.get('verified'):
-        return b
-    return a
-
-
-class _StitchModule(type(json)):
-    """`import metagraph.traverse.stitch` binds the package attribute `stitch` to this
-    module (the import system does so after the module ran); calling it calls stitch(),
-    so metagraph.traverse.stitch(parent, child) works however the name was bound."""
-
-    def __call__(self, *args, **kw):
-        return stitch(*args, **kw)
-
-
-import sys as _sys  # noqa: E402
-_sys.modules[__name__].__class__ = _StitchModule
+def _identity_of(mine, theirs, allow):
+    """The identity statement of the parts |mine| (the parent's) and |theirs| (the child's),
+    no index difference between them proven: verified when every part states the index
+    manifest digest (then one digest); unverified, and not refused, when none does (OQ6);
+    otherwise index_unverifiable unless |allow| (allow_unverified_index), which the
+    statement then records."""
+    every = list(mine) + list(theirs)
+    fps = [g.index_fp for g in every]
+    if all(fps):
+        return {'verified': True, 'index_fp': fps[0]}
+    if not any(fps):
+        return {'verified': False,
+                'note': 'no part states an index manifest digest (index_fp): that the parts '
+                        'are one index cannot be verified'}
+    if not allow:
+        nm = sum(1 for g in mine if g.index_fp)
+        nt = sum(1 for g in theirs if g.index_fp)
+        if nm in (0, len(mine)) and nt in (0, len(theirs)):
+            raise CombineRefused('index_unverifiable', _T_INDEX_UNVERIFIABLE % (
+                'an' if nt else 'no', 'one' if nm else 'none'))
+        raise CombineRefused('index_unverifiable', _T_INDEX_UNVERIFIABLE_PARTS % (
+            nm, len(mine), nt, len(theirs)))
+    return {'verified': False, 'accepted': 'allow_unverified_index',
+            'note': 'some parts state an index manifest digest (index_fp) and others none: '
+                    'whether they are one index cannot be verified (not proven different); '
+                    'stitched because the caller passed allow_unverified_index'}

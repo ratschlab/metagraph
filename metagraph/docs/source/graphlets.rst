@@ -1507,8 +1507,9 @@ answer is computed from them.
   child's. In natural orientation the right flank reads the parent's then the child's,
   and the left flank the child's then the parent's. No reverse complement is involved.
 - **The continuation's length.** The child's seed is the walk's last n bases, n =
-  min(``continuation_bp``, max(k, L - b), seed length + L), b being where the last label
-  alive at the walk's end was entered. When L < k it reaches into the root seed. It is
+  min(``continuation_bp``, max(k, L - b), seed length + L), b being the deepest point
+  where a label alive at the walk's end was switched in or had its route joined by a
+  merge (``route_bp``). When L < k it reaches into the root seed. It is
   the overlap of the two parts (``Junction.overlap_bp``), spelled once.
 - **Walk keys.** A stitched walk is named by its walk ids along the chain: ``(3,)`` is
   root walk 3, and ``(3, 0)`` walk 0 of the child that continues root walk 3. Label ids
@@ -1550,17 +1551,21 @@ request, as named causes:
 - at the junction: ``trace_restart``, ``strategy_differs`` (a field a continuation keeps
   differs), ``extra_foreign``, ``switching`` (a change cost other than ``forbid``),
   ``branches_unequal``, ``label_count_knob``, ``sibling_merge_unknown`` (under ``merge``,
-  another walk went on past the junction), ``not_continued``, ``seed_dropped`` and
-  ``no_bases``;
+  another walk went on past the junction), ``not_continued``, ``seed_dropped``,
+  ``no_bases`` (a part from the root to the child carries no bases) and
+  ``strategy_unknown`` (an envelope does not state a strategy field the rules read);
 - on a walk, each with its position: ``rule_violation`` (a step the uninterrupted walk
   blocks), ``candidate_changed`` (a successor the child admitted is one the uninterrupted
   walk blocks, so its split or ambiguity there may not happen), ``seed_reentry`` (the
-  child stopped on a node of its own seed; ``same_stop`` or ``earlier_stop``),
+  child blocked a step into a node of its own seed; ``same_stop`` or ``earlier_stop``),
   ``split_limit_restarted`` and ``decisions_unrecorded`` (the walk ends at or beyond the
   child's evidence boundary).
 
 Where the rules find no difference, the one cause is ``exact_gated``: they are computed,
-but ``exact`` is switched on only after a comparison against uninterrupted traversals.
+but ``exact`` is switched on only after a comparison against uninterrupted traversals. At
+a junction it means its own rules hold, and the walk rule is judged per walk below it:
+``summary()`` and ``completeness()`` list, per junction, the walk causes below it
+(``walk_causes``).
 Until then a stitched walk is certified at most to its first junction, no walk that
 reaches into a child is ``complete``, and the evidence of an answer that reads a junction
 reads ``walks: partial`` and ``label_evidence: qualified`` and is never ``exact``. A walk
@@ -1592,13 +1597,15 @@ it, finds its label ambiguous at once and stops, while the uninterrupted walk go
 
 The checks run in this order, and the first that fails raises ``CombineRefused`` with its
 ``code``: ``not_combinable`` (also a ``TypeError``), ``view_unsupported``, the missing
-envelope, ``different_index``, ``index_unverifiable`` (a manifest digest on one side only;
-``allow_unverified_index=True`` stitches it and states the identity unverified),
+envelope, ``different_index``, ``index_unverifiable`` (a manifest digest on some parts only;
+``allow_unverified_index=True`` stitches it and states the identity unverified; both are
+checked against every part on both sides, so a chain gives one answer in either fold),
 ``different_pair``, ``different_graph``, ``different_mode``, ``not_one_arm``,
 ``wrong_arm``, ``no_continuation``, ``not_a_continuation``, ``ambiguous_walk``,
 ``already_continued`` and ``foreign_seed_labels``. Without ``walk=``, the continued walk
 is the one walk of the arm whose continuation is the child's seed. Stitching the same
-retrieval again at a walk returns the stitched graphlet unchanged. ``walks()``,
+retrieval (or, for a stitched child, the same subtree) again at a walk returns the
+stitched graphlet unchanged. ``walks()``,
 ``spell()``, ``continuation()``, ``next_request()``, ``to_fasta()`` (with ``walk=``,
 ``junctions=``, ``verdict=`` and ``certified_to=`` in each header), ``completeness()``,
 ``evidence()``, ``summary()``, ``provenance()``, ``digest`` and ``memory_bytes()`` are

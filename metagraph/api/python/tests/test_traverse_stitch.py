@@ -8,6 +8,7 @@ import copy
 import gc
 import json
 import os
+import random
 import re
 import sys
 import tempfile
@@ -60,6 +61,36 @@ def with_pair(graph, path):
         resp['graph'] = graph
         resp['graph_path'] = path
     return edit
+
+
+def with_dropped(name):
+    """An X line in the body: the child dropped seed label |name| (seed_unsupported)."""
+    def edit(resp):
+        r = resp['results'][0]
+        lines = r['graphlet'].split('\n')
+        i = next(i for i, l in enumerate(lines) if l.startswith('S '))
+        lines.insert(i + 1, 'X seed_unsupported 0-0 ' + name)
+        z = next(i for i, l in enumerate(lines) if l.startswith('Z '))
+        lines[z] = 'Z %d' % (int(lines[z].split()[1]) + 1)
+        r['graphlet'] = '\n'.join(lines)
+        r.pop('graphlet_bytes', None)
+        r.pop('graphlet_lines', None)
+    return edit
+
+
+def only_clamped(resp):
+    """An envelope whose normalized strategy states nothing but clamped."""
+    resp['strategy'] = {'clamped': []}
+
+
+def without(block, name):
+    def edit(resp):
+        del resp['strategy'][block][name]
+    return edit
+
+
+def quorum(resp):
+    resp['strategy']['branching']['min_successor_labels'] = 2
 
 
 def triple(name):
@@ -136,8 +167,8 @@ class TestStitchFixtures(unittest.TestCase):
                     self.assertEqual(req['sibling'], dict(nr))
                 if 'grandchild' in req:
                     child = T.stitch_graphlet(name, 'child')
-                    gc_ = fx['grandchild']
-                    nr = child.next_request(fx['arm'], [gc_['walk']], gc_['bp'])
+                    nr = child.next_request(fx['arm'], [req['fixture_index']['grandchild']],
+                                            fx['grandchild']['bp'])
                     self.assertEqual(req['grandchild'], dict(nr))
 
     def test_children_are_seeded_with_the_continuation(self):
@@ -232,6 +263,67 @@ class TestRefusals(unittest.TestCase):
         with self.assertRaises(ValueError):
             stitch(self.P, self.C, allow_unverified_index=1)
 
+    def test_identity_over_every_part(self):
+        """M4: the index proof and the pair check run against every part on both sides,
+        and allow_unverified_index waives only 'unverifiable': one code in both folds
+        (Appendix C.3's associativity)."""
+        def chain(fps, edits=(None, None, None)):
+            out = []
+            for role, fp, e in zip(('parent', 'child', 'grandchild'), fps, edits):
+                def edit(resp, fp=fp, e=e):
+                    if fp:
+                        with_fp(fp)(resp)
+                    if e:
+                        e(resp)
+                out.append(load('chain3', role, edit))
+            return out
+
+        def folds(p, c, g, **kw):
+            got = []
+            for fold in (lambda: stitch(stitch(p, c, **kw), g, **kw),
+                         lambda: stitch(p, stitch(c, g, **kw), **kw)):
+                try:
+                    got.append(fold().digest)
+                except CombineRefused as e:
+                    got.append(e.code)
+            return got
+        a, b = 'a' * 16, 'b' * 16
+        allow = {'allow_unverified_index': True}
+        # different digests anywhere in the chain: different_index in both folds, also
+        # when a part between them states none (the review's exp12)
+        for fps in ((a, None, b), (None, a, b), (a, b, None)):
+            with self.subTest(fps):
+                self.assertEqual(['different_index'] * 2, folds(*chain(fps), **allow))
+        refused(self, 'different_index', 'the child was retrieved from another index than its '
+                'parent (index_fp differs): a continuation runs on its parent\'s index, so a '
+                'child of another index continues none of its walks; union_pairs() combines '
+                'one seed\'s graphlets across pairs', stitch,
+                stitch(*chain((a, None, b))[:2], **allow), chain((a, None, b))[2], **allow)
+        # one digest on some parts: unverifiable without the opt-in, in both folds; with it
+        # both folds give one digest and the identity unverified
+        p, c, g = chain((a, None, a))
+        self.assertEqual(['index_unverifiable'] * 2, folds(p, c, g))
+        x, y = folds(p, c, g, **allow)
+        self.assertEqual(x, y)
+        sg = stitch(stitch(p, c, **allow), g, **allow)
+        self.assertEqual((False, 'allow_unverified_index'),
+                         (sg.identity['verified'], sg.identity['accepted']))
+        refused(self, 'index_unverifiable', 'the parts state an index manifest digest '
+                '(index_fp) unevenly (the parent\'s on 1 of 2 parts, the child\'s on 1 of 1): '
+                'whether they are the same index cannot be verified (not proven different), so '
+                'the child is not stitched automatically; pass allow_unverified_index=True to '
+                'stitch it anyway (the result then states the identity unverified)',
+                stitch, stitch(p, c, **allow), g)
+        # every part states it: verified in both folds
+        p, c, g = chain((a, a, a))
+        x, y = folds(p, c, g)
+        self.assertEqual(x, y)
+        self.assertEqual({'verified': True, 'index_fp': a}, stitch(stitch(p, c), g).identity)
+        # the pair check over every part too: the grandchild's pair against the root's
+        p, c, g = chain((None, None, None), (with_pair('g1', '/p/g1.dbg'), None,
+                                             with_pair('g2', '/p/g2.dbg')))
+        self.assertEqual(['different_pair'] * 2, folds(p, c, g))
+
     def test_different_pair(self):
         p = load('keep_forbid', 'parent', with_pair('g1', '/p/g1.dbg'))
         c = load('keep_forbid', 'child', with_pair('g2', '/p/g2.dbg'))
@@ -289,6 +381,11 @@ class TestRefusals(unittest.TestCase):
             refused(self, 'ambiguous_walk', 'the child\'s seed is the continuation of walks 0, 1 '
                     'of the right arm: name the one it continues with walk=', stitch,
                     self.P, self.C)
+        # walk= on a part without the arm
+        refused(self, 'not_a_continuation', 'the child\'s seed is not the continuation of walk '
+                '0 of the left arm: a stitched child is seeded with that walk\'s continuation '
+                '(continuation(), next_request())', stitch, self.P, load('fork_left', 'child'),
+                walk=0)
         with self.assertRaises(BadSelector):
             stitch(self.P, self.C, walk='0')
         with self.assertRaises(IndexError):
@@ -298,9 +395,10 @@ class TestRefusals(unittest.TestCase):
         _, lp, lc = triple('loop_branch')
         cut0 = load('loop_branch_cut0', 'child')
         sg = stitch(lp, lc)
+        # the digest named is the subtree's there (stitch() of it alone)
         refused(self, 'already_continued', 'walk 1 of the right arm is already continued by '
                 'another child (part right:1, digest %s): one child per walk'
-                % K.part_digest(lc), stitch, sg, cut0)
+                % stitch(lc).digest, stitch, sg, cut0)
 
         def later(resp):
             resp['strategy']['bounds']['time_budget_ms'] = 12345
@@ -312,6 +410,26 @@ class TestRefusals(unittest.TestCase):
                 stitch, sg, again)
         # the identical retrieval again: a no-op, the stitched graphlet itself
         self.assertIs(sg, stitch(sg, load('loop_branch', 'child')))
+
+    def test_already_continued_compares_the_subtree(self):
+        """The no-op rule compares the whole subtree, digests and retrieval identities (the
+        review's exp5); the text names the existing subtree's digest."""
+        p, c, g = load('chain3', 'parent'), load('chain3', 'child'), load('chain3', 'grandchild')
+        sga = stitch(p, stitch(c, g))
+        self.assertIs(sga, stitch(sga, stitch(c, g)))
+        # the grandchild is the same body from another request
+        refused(self, 'already_continued', 'walk 0 of the right arm is continued by this body '
+                'from another request (strategy.branching.min_successor_labels of part '
+                'right:0.0 differs): equal bodies are not equal retrievals, and the two would '
+                'continue differently', stitch, sga, stitch(c, load('chain3', 'grandchild',
+                                                                     quorum)))
+        # a child without the grandchild the subtree holds
+        refused(self, 'already_continued', 'walk 0 of the right arm is already continued by '
+                'another child (part right:0, digest %s): one child per walk'
+                % stitch(c, g).digest, stitch, sga, stitch(c))
+        refused(self, 'already_continued', 'walk 0 of the right arm is already continued by '
+                'another child (part right:0, digest %s): one child per walk'
+                % stitch(c).digest, stitch, stitch(p, c), stitch(c, g))
 
     def test_foreign_seed_labels(self):
         c = copy.copy(self.C)
@@ -479,6 +597,42 @@ class TestAlgebra(unittest.TestCase):
         self.assertEqual(cont.sequence, (p.seed.sequence + a.spell(arm, (0, 0, 0)))[lo:hi])
         self.assertEqual(n + 30, hi)
 
+    def test_seeded_random_orders(self):
+        """Commutativity and associativity as digest equality over seeded random
+        construction orders: any two items of the pool that stitch (either way round) are
+        replaced by their stitch until one is left."""
+        def build(parts, rng):
+            pool = list(parts)
+            while len(pool) > 1:
+                pairs = [(i, j) for i in range(len(pool)) for j in range(len(pool)) if i != j]
+                rng.shuffle(pairs)
+                for i, j in pairs:
+                    try:
+                        sg = stitch(pool[i], pool[j])
+                    except CombineRefused:
+                        continue
+                    pool = [x for k, x in enumerate(pool) if k not in (i, j)] + [sg]
+                    break
+                else:
+                    self.fail('no two items of the pool stitch')
+            return pool[0]
+        sets = {'keep_forbid': ('parent', 'child', 'sibling'),
+                'chain3': ('parent', 'child', 'grandchild'),
+                'chain_loop': ('parent', 'child', 'grandchild'),
+                'splits_chain': ('parent', 'child', 'grandchild'),
+                'comb_chain': ('parent', 'child', 'grandchild')}
+        for name, roles in sets.items():
+            with self.subTest(name):
+                parts = [load(name, r) for r in roles]
+                want = stitch(stitch(parts[0], parts[1]), parts[2])
+                for seed in range(12):
+                    rng = random.Random(1000 * len(name) + seed)
+                    order = list(parts)
+                    rng.shuffle(order)
+                    got = build(order, rng)
+                    self.assertEqual(want.digest, got.digest, (name, seed))
+                    self.assertEqual([x.key for x in want.parts], [x.key for x in got.parts])
+
     def test_parent_and_child_do_not_commute(self):
         _, fp, fc = triple('fork_right')
         with self.assertRaises(CombineRefused) as cm:
@@ -512,6 +666,11 @@ class TestAlgebra(unittest.TestCase):
         self.assertIsInstance(stitch(sg), StitchedGraphlet)
         self.assertIs(sg, stitch(sg))
         self.assertIsNone(sg._cache.get('never'))
+        # the digest covers each part's retrieval identity, as the union's does: the same
+        # child body from another request gives another digest
+        other = stitch(p, load('keep_forbid', 'child', quorum))
+        self.assertEqual(K.part_digest(c), K.part_digest(other.parts[1].graphlet))
+        self.assertNotEqual(sg.digest, other.digest)
 
 
 # ---------------------------------------------------------------------------------- T4
@@ -613,10 +772,97 @@ EXPECT = {
     'no_bases': (('no_bases',), {(0, 0): (40, 20, False, (), 20, False),
                                  (1,): (20, 20, True, (), 20, True)},
                  ('partial', 'complete', 'qualified', 'inline')),
+    # the Opus code review's cases: the parent without bases, the child with them
+    'no_bases_parent': (('no_bases',), {(0, 0): (30, 15, False, (), 15, False)},
+                        ('partial', 'complete', 'qualified', 'inline')),
+    # canonical: the step into rc(R) reuses an edge on the other strand (edge_reuse_rc)
+    'invrep': (('exact_gated',), {(0,): (96, 96, True, (), 96, True),
+                                  (1, 0): (142, 96, False, (('rule_violation', 111),
+                                                            ('candidate_changed', 112)),
+                                           111, False),
+                                  (1, 1): (182, 96, False, (('rule_violation', 111),),
+                                           111, False)},
+               ('partial', 'complete', 'qualified', 'inline')),
+    # canonical: the step into rc(S), the root seed's nodes on the other strand
+    'seed_rc': (('exact_gated',), {(0, 0): (70, 20, False, (('rule_violation', 54),), 54, False),
+                                   (1,): (20, 20, True, (), 20, True)},
+                ('partial', 'complete', 'qualified', 'inline')),
+    'chain_loop': (('exact_gated',), {(0,): (85, 85, True, (), 85, True),
+                                      (1, 0): (115, 100, False, (), 115, True)},
+                   ('complete', 'complete', 'complete', 'inline')),
+    'splits_chain': (('exact_gated',), {(0,): (18, 18, True, (), 18, True),
+                                        (1, 0): (49, 45, False, (), 49, True)},
+                     ('partial', 'complete', 'complete', 'inline')),
+    # W6 by length: the sibling ended at 60 without a continuation
+    'beam_sibling': (('label_count_knob', 'sibling_merge_unknown'),
+                     {(0, 0): (10, 1, False, (), 1, False), (1,): (60, 1, False, (), 1, False)},
+                     ('partial', 'complete', 'qualified', 'inline')),
+    # annotate mode: the split's other child is a step the reference blocks
+    'annotate_loop': (('exact_gated',), {(0,): (85, 85, True, (), 85, True),
+                                         (1, 0): (145, 90, False, (('candidate_changed', 115),),
+                                                  115, False),
+                                         (1, 1): (149, 90, False, (('rule_violation', 115),
+                                                                   ('seed_reentry', 149)),
+                                                  115, False)},
+                      ('partial', 'complete', 'qualified', 'inline')),
+    'annotate_merge': (('strategy_differs',), {(0, 0): (40, 20, False, (), 20, False),
+                                               (1,): (20, 20, True, (), 20, True)},
+                       ('partial', 'complete', 'qualified', 'inline')),
+    # a followed hairpin needs no cause: the prospective walks are the reference's
+    'hairpin': (('exact_gated',), {(0, 0): (56, 5, False, (), 56, True),
+                                   (0, 1): (56, 5, False, (), 56, True)},
+                ('complete', 'complete', 'complete', 'inline')),
+}
+
+
+def _comb_rows(depth):
+    """The comb chain's stitched walks: the root's 20 tips, then per part below the root
+    19 tips and the next part's backbone (the last part's two radius-ended walks), all
+    prospective exact; a walk that reaches into a child is certified to the first junction."""
+    rows = {(i,): (i + 1, i + 1, True, (), i + 1, True) for i in range(20)}
+    pre = (20,)
+    for d in range(1, depth + 1):
+        last = d == depth
+        for i in range(21 if last else 19):
+            n = 20 * d + 1 + min(i, 19)
+            rows[pre + (i,)] = (n, 20, False, (), n, True)
+        if not last:
+            rows[pre + (20,)] = (20 * (d + 1), 20, False, (), 20 * (d + 1), True)
+            pre = pre + (19,)
+    return rows
+
+
+EXPECT['comb_chain'] = (('exact_gated',), _comb_rows(1), ('complete', 'complete', 'complete',
+                                                          'inline'))
+
+# the chains (parent, child, grandchild): per junction its causes, the walks as in EXPECT
+EXPECT_CHAIN = {
+    'chain3': ((('exact_gated',), ('exact_gated',)),
+               {(0, 0, 0): (45, 15, False, (), 45, True)},
+               ('complete', 'complete', 'complete', 'inline')),
+    # M1: the root carries no bases, so neither junction runs the rule check
+    'no_bases_parent': ((('no_bases',), ('no_bases',)),
+                        {(0, 0, 0): (45, 15, False, (), 15, False)},
+                        ('partial', 'complete', 'qualified', 'inline')),
+    # the root part's edges: the grandchild takes the loop's first edge again
+    'chain_loop': ((('exact_gated',), ('exact_gated',)),
+                   {(0,): (85, 85, True, (), 85, True),
+                    (1, 0, 0): (145, 100, False, (('candidate_changed', 115),), 115, False),
+                    (1, 0, 1): (174, 100, False, (('rule_violation', 115), ('seed_reentry', 174)),
+                                115, False)},
+                   ('partial', 'complete', 'qualified', 'inline')),
+    # the root's two splits carried through the child into the grandchild's
+    'splits_chain': ((('exact_gated',), ('exact_gated',)),
+                     {(0,): (18, 18, True, (), 18, True),
+                      (1, 0, 0): (89, 45, False, (('split_limit_restarted', 50),), 50, False),
+                      (1, 0, 1): (89, 45, False, (('split_limit_restarted', 50),), 50, False)},
+                     ('partial', 'complete', 'qualified', 'inline')),
+    'comb_chain': ((('exact_gated',), ('exact_gated',)), _comb_rows(2),
+                   ('complete', 'complete', 'complete', 'inline')),
 }
 
 SEED_REENTRY = {'loop_same_stop': 'same_stop', 'earlier_stop': 'earlier_stop',
-                'loop_interior': 'same_stop'}
+                'loop_interior': 'same_stop', 'annotate_loop': 'same_stop'}
 
 
 class TestOracleTriples(unittest.TestCase):
@@ -625,6 +871,123 @@ class TestOracleTriples(unittest.TestCase):
 
     def test_every_triple_is_pinned(self):
         self.assertEqual(sorted(T.stitch_names()), sorted(EXPECT))
+        self.assertEqual(sorted(n for n in T.stitch_names()
+                                if 'grandchild' in T.stitch_requests(n)), sorted(EXPECT_CHAIN))
+
+    def _rows(self, sg, arm):
+        got = {}
+        for w in sg.walks(arm, by='id'):
+            pr = sg._prospective(arm, w.key)
+            own = tuple((x[0], x[2]) for x in w.causes if x[0] != 'exact_gated')
+            got[w.key] = (w.length_bp, w.certified_to_bp, w.complete, own,
+                          pr['certified_to_bp'], pr['complete'])
+        return got
+
+    def test_chains(self):
+        """The chains of three parts: each junction's causes, every walk, the prospective
+        evidence; the completeness extensions state the walk-scope causes below each."""
+        for name, (jcauses, walks, prospective_outcome) in EXPECT_CHAIN.items():
+            with self.subTest(name):
+                arm, p, c = triple(name)
+                sg = stitch(stitch(p, c), load(name, 'grandchild'))
+                self.assertEqual(jcauses, tuple(tuple(x[0] for x in j.causes)
+                                                for j in sg.junctions))
+                self.assertEqual(walks, self._rows(sg, arm))
+                pe = sg._prospective(arm)['evidence']
+                self.assertEqual(prospective_outcome, tuple(pe['outcome'][d] for d in RANK))
+                self.assertFalse(sg.evidence(arm)['exact'])
+                for ext, j in zip(sg.completeness()[arm]['extensions'], sg.junctions):
+                    below = sorted({x[0] for w in sg.walks(arm, by='id')
+                                    if w.key[:len(j.walk)] == j.walk and len(w.key) > len(j.walk)
+                                    for x in w.causes if x[0] != 'exact_gated'})
+                    self.assertEqual(below, sorted(ext['walk_causes']))
+
+    def test_strategy_unknown(self):
+        """M2: a strategy field W2-W5 or the split check reads, missing on either part, is
+        strategy_unknown; never exact, also not in the prospective result (the review's
+        exp6 and exp7)."""
+        def sentence(fields):
+            return ('the envelopes do not state %s of the normalized strategy: the rules that '
+                    'read them (W2-W5, the split check of W8) cannot be judged' % fields)
+        w5 = ('branching.min_successor_labels (both), branching.min_successor_fraction (both), '
+              'bounds.min_live_labels (both), frontier.on_overflow (both)')
+        constrain = w5 + (', labels.change_cost (both), labels.extra (both), '
+                          'branching.max_label_branches (both), branching.max_splits_per_path '
+                          '(both)')
+        cases = {'splits45': (('strategy_unknown',), constrain),
+                 'quorum_changed': (('strategy_unknown',), constrain),
+                 'trace': (('trace_restart', 'strategy_unknown'), constrain),
+                 'annotate_loop': (('strategy_unknown',), w5),
+                 # W6's keep-or-merge from the H records, not the envelopes
+                 'annotate_merge': (('strategy_differs', 'strategy_unknown'), w5)}
+        for name, (codes, fields) in cases.items():
+            with self.subTest(name):
+                arm = T.stitch_requests(name)['fixture_index']['arm']
+                sg = stitch(load(name, 'parent', only_clamped), load(name, 'child', only_clamped))
+                j = sg.junctions[0]
+                self.assertEqual(codes, tuple(x[0] for x in j.causes))
+                self.assertEqual(sentence(fields), dict((x[0], x[1]) for x in j.causes)[
+                    'strategy_unknown'])
+                self.assertFalse(sg._prospective(arm)['evidence']['exact'])
+                for w in sg.walks(arm, by='id'):
+                    if len(w.key) > 1:
+                        self.assertEqual('qualified', sg._prospective(arm, w.key)['verdict'])
+                        self.assertNotIn('exact_gated', [x[0] for x in w.causes])
+        j = stitch(load('annotate_merge', 'parent', only_clamped),
+                   load('annotate_merge', 'child', only_clamped)).junctions[0]
+        self.assertEqual('the child\'s normalized strategy differs from the parent\'s at '
+                         'branching.on_reconverge (keep in the parent, merge in the child, by '
+                         'their H records), a field a continuation keeps (W2, W6)', j.causes[0][1])
+        # a missing max_splits_per_path is unknown, not unlimited; a field one part states
+        # and the other does not is unknown too
+        for name, who, edit in (('splits45', 'parent', without('branching', 'max_splits_per_path')),
+                                ('switching', 'child', without('labels', 'extra'))):
+            with self.subTest(name):
+                p = load(name, 'parent', edit if who == 'parent' else None)
+                c = load(name, 'child', edit if who == 'child' else None)
+                j = stitch(p, c).junctions[0]
+                self.assertIn('strategy_unknown', [x[0] for x in j.causes])
+                self.assertNotIn('exact_gated', [x[0] for x in j.causes])
+        j = stitch(load('splits45', 'parent', without('branching', 'max_splits_per_path')),
+                   load('splits45', 'child')).junctions[0]
+        self.assertEqual([('strategy_unknown', sentence('branching.max_splits_per_path (the '
+                                                        'parent)'))],
+                         [(x[0], x[1]) for x in j.causes])
+
+    def test_seed_dropped(self):
+        """W7: a label alive at the end of the walk that the child named and dropped (X) is
+        seed_dropped, not not_continued. The CLI fixtures cannot reach it (the library's
+        labels alive but not covering the tail are ones the server accepts when named), so
+        the child's body states the drop."""
+        arm, p, _ = triple('not_continued')
+        c = load('not_continued', 'child', with_dropped('y.fa'))
+        j = stitch(p, c).junctions[0]
+        self.assertEqual(('switching', 'seed_dropped'), tuple(x[0] for x in j.causes))
+        self.assertEqual('the child named {"name": "y.fa", "ref": "c:2"} but dropped it (X): '
+                         'y.fa seed_unsupported (W7)', j.causes[1][1])
+        self.assertEqual(['c:2'], [l.ref for l in j.not_continued])
+
+    def test_whitelist_subtrees_equal_the_reference(self):
+        """T4(a) and its converse: on each whitelist fixture the stitched walks below w are
+        the uninterrupted retrieval's walks with w's prefix, per path."""
+        for name in ('keep_forbid', 'merge_only', 'unlimited', 'equal_finite', 'chain3',
+                     'comb_chain', 'hairpin'):
+            with self.subTest(name):
+                arm, p, c = triple(name)
+                w = T.stitch_requests(name)['fixture_index']['walk']
+                sg = stitch(p, c)
+                if 'grandchild' in T.stitch_requests(name):
+                    sg = stitch(sg, load(name, 'grandchild'))
+                ref = load(name, 'reference')
+                pre = p.spell(arm, w)
+                spelled = [ref.spell(arm, x.path_id) for x in ref.walks(arm, by='id')]
+                below = (sorted(x for x in spelled if x.startswith(pre)) if arm == 'right'
+                         else sorted(x for x in spelled if x.endswith(pre)))
+                mine = sorted(x.sequence for x in sg.walks(arm, by='id') if x.key[0] == w)
+                self.assertEqual(below, mine)
+                for x in sg.walks(arm, by='id'):
+                    if x.key[0] == w:
+                        self.assertEqual('exact', sg._prospective(arm, x.key)['verdict'])
 
     def test_triples(self):
         for name, (jcauses, walks, prospective_outcome) in EXPECT.items():
@@ -683,27 +1046,33 @@ class TestOracleTriples(unittest.TestCase):
 
     def test_differences_lie_below_a_stated_cause(self):
         """Every stitched walk the rules would call exact (prospective) is a walk of the
-        uninterrupted retrieval, base for base."""
+        uninterrupted retrieval, base for base (the chains against theirs)."""
         for name in T.stitch_names():
             req = T.stitch_requests(name)
             if 'reference' not in req:
                 continue
             arm, p, c = triple(name)
-            if not K.has_bases(c):
+            if not (K.has_bases(p) and K.has_bases(c)):
                 continue
             with self.subTest(name):
                 ref = load(name, 'reference')
                 spelled = [ref.spell(arm, w.path_id) for w in ref.walks(arm, by='id')]
+                if arm == 'left':
+                    spelled = [x[::-1] for x in spelled]
                 sg = stitch(p, c)
+                if 'grandchild' in req:
+                    sg = stitch(sg, load(name, 'grandchild'))
                 for w in sg.walks(arm, by='id'):
                     if sg._prospective(arm, w.key)['verdict'] != 'exact':
                         continue
                     # a walk ended by the child's radius goes on in the reference (its
                     # radius is larger); any other ends where the reference's ends
+                    # (outward: reversed on the left arm)
+                    seq = w.sequence[::-1] if arm == 'left' else w.sequence
                     if w.path_reason == 'max_extension_bp':
-                        self.assertTrue(any(x.startswith(w.sequence) for x in spelled), w.key)
+                        self.assertTrue(any(x.startswith(seq) for x in spelled), w.key)
                     else:
-                        self.assertIn(w.sequence, spelled, w.key)
+                        self.assertIn(seq, spelled, w.key)
 
     def test_index_fp_and_the_root_walks(self):
         """With an index_fp on both sides: the prospective evidence is exact where the parts
@@ -793,9 +1162,40 @@ class TestNoLaundering(unittest.TestCase):
                 self.assertFalse(s['exact'])
                 self.assertEqual(len(sg.junctions), len(s['junctions']))
                 self.assertLessEqual(len(json.dumps(s, separators=(',', ':'))), 2048)
-                small = sg.summary(max_bytes=300)
+                # per junction, the walk-scope cause codes on the walks below it
+                for js, j in zip(s['junctions'], sg.junctions):
+                    below = sorted({x[0] for w in sg.walks(arm, by='id')
+                                    if w.key[:len(j.walk)] == j.walk and len(w.key) > len(j.walk)
+                                    for x in w.causes if x[0] != 'exact_gated'})
+                    self.assertEqual(below, sorted(js['walk_causes']))
+                # junctions are cut from the end; the statements never are
+                floor = len(json.dumps(dict(s, junctions=[], junctions_cut=True),
+                                       separators=(',', ':'), ensure_ascii=False).encode())
+                small = sg.summary(max_bytes=floor)
                 self.assertEqual([], small['junctions'])
                 self.assertTrue(small['junctions_cut'])
+                refused(self, 'summary_too_small', 'the summary\'s statements alone take %d '
+                        'bytes, more than max_bytes=%d: they are never cut; pass max_bytes >= '
+                        '%d' % (floor, floor - 1, floor), sg.summary, max_bytes=floor - 1)
+
+    def test_walk_causes_below_a_gated_junction(self):
+        """M3: a junction whose rules found nothing says W1-W7 hold there and W8 is judged
+        per walk; summary() and completeness() state the walk-scope causes below it."""
+        arm, p, c = triple('loop_branch')
+        sg = stitch(p, c)
+        j = sg.junctions[0]
+        self.assertEqual([('exact_gated', 'W1-W7 hold at this junction, and W8 is judged per '
+                           'walk below it (the walks\' causes), but exact is not switched on: '
+                           'the junction rules found no difference from one uninterrupted walk '
+                           'and have not yet passed the randomized comparison against '
+                           'uninterrupted traversals')], [(x[0], x[1]) for x in j.causes])
+        self.assertEqual([{'arm': 'right', 'walk': '1', 'at_bp': 115, 'verdict': 'qualified',
+                           'causes': ['exact_gated'], 'walk_causes': ['candidate_changed']}],
+                         sg.summary()['junctions'])
+        self.assertEqual([{'walk': (1,), 'at_bp': 115, 'extended_to_bp': 1000,
+                           'certified_to_bp': 115, 'verdict': 'qualified',
+                           'causes': ['exact_gated'], 'walk_causes': ['candidate_changed']}],
+                         sg.completeness()[arm]['extensions'])
 
 
 # ---------------------------------------------------------------------------------- T6
@@ -860,6 +1260,19 @@ class TestExports(unittest.TestCase):
                     self.assertEqual(seed + nat if arm == 'right' else nat + seed, body)
                     fw = sg.to_fasta(arm, walks=[key], with_seed=False, orientation='walk')
                     self.assertEqual(pw + cw, fw.splitlines()[1])
+
+    def test_walk_keys(self):
+        """walks= is one key (an int, or a tuple of ints) or an iterable of keys."""
+        arm, p, c = triple('keep_forbid')
+        sg = stitch(stitch(p, c), load('keep_forbid', 'sibling'))
+        self.assertEqual(sg.to_fasta(arm, walks=[(0, 0)]), sg.to_fasta(arm, walks=(0, 0)))
+        self.assertEqual(sg.evidence(arm, walks=[(0, 0)]), sg.evidence(arm, walks=(0, 0)))
+        self.assertEqual(sg.to_fasta(arm, walks=[(0, 0), (1, 0)]),
+                         sg.to_fasta(arm, walks=iter([(0, 0), (1, 0)])))
+        _, lp, lc = triple('loop_branch')
+        one = stitch(lp, lc)
+        self.assertEqual(one.to_fasta(arm, walks=[(0,)]), one.to_fasta(arm, walks=0))
+        self.assertEqual(one.to_fasta(arm, walks=[(0,)]), one.to_fasta(arm, walks=[0]))
 
     def test_fasta_refusals(self):
         arm, p, c = triple('no_bases')
@@ -928,8 +1341,9 @@ class TestBudgets(unittest.TestCase):
                     op(LocalBudget(work_units=1))
 
     def test_account_bounds_the_peak(self):
-        arm, p, c = triple('chain3')
-        g3 = load('chain3', 'grandchild')
+        """On a chain of comb continuations (each part splits at every node)."""
+        arm, p, c = triple('comb_chain')
+        g3 = load('comb_chain', 'grandchild')
 
         def make():
             return stitch(stitch(p, c), g3)
@@ -947,6 +1361,46 @@ class TestBudgets(unittest.TestCase):
         self.assertLessEqual(peak, b.peak_bytes)
         self.assertGreaterEqual(sg.memory_bytes(),
                                 K.models_memory_bytes([x.graphlet for x in sg.parts]))
+
+    def test_memory_counts_the_caches(self):
+        arm, p, c = triple('comb_chain')
+        sg = stitch(stitch(p, c), load('comb_chain', 'grandchild'))
+        before = sg.memory_bytes()
+        sg.walks(arm, by='id')
+        sg.evidence(arm)
+        sg.summary()
+        sg.to_fasta()
+        after = sg.memory_bytes()
+        self.assertGreater(after, before)
+        self.assertGreaterEqual(after, K.models_memory_bytes([x.graphlet for x in sg.parts]))
+        self.assertGreaterEqual(after, ops._deep_bytes([sg._cache, sg._jcore]))
+
+    def test_junctions_are_computed_once(self):
+        """Each junction's core is computed once per pair of parts and carried into every
+        later stitch: adding J children one at a time costs J computations, charged."""
+        calls = []
+        core = StitchedGraphlet._core
+
+        def counting(self, *a, **kw):
+            calls.append(a[2:4])
+            return core(self, *a, **kw)
+        arm, p, c = triple('keep_forbid')
+        s = load('keep_forbid', 'sibling')
+        with mock.patch.object(StitchedGraphlet, '_core', counting):
+            sg = stitch(stitch(p, c), s)
+            self.assertEqual(2, len(calls))
+            stitch(sg, load('keep_forbid', 'child'))       # a no-op
+            self.assertEqual(2, len(calls))
+            g3 = load('comb_chain', 'grandchild')
+            _, cp, cc = triple('comb_chain')
+            del calls[:]
+            stitch(stitch(cp, cc), g3)
+            self.assertEqual(2, len(calls))
+        b = LocalBudget()
+        stitch(stitch(p, c), s, budget=b)
+        one = LocalBudget()
+        stitch(p, c, budget=one)
+        self.assertGreater(b.used_work, one.used_work)
 
 
 if __name__ == '__main__':

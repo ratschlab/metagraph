@@ -458,7 +458,7 @@ the subpackage from a non-editable install). `metagraph/__init__.py` does not im
 | `store.py` | `GraphletStore` (handles, LRU, disk spool) for the MCP layer |
 | `mcp_tools.py` | framework-agnostic tool functions returning dicts ≤ `max_bytes` (the MCP server, wherever it lives, registers them; §6) |
 | `frames.py` | `frames(g)` → dict of DataFrames, lazy `import pandas` |
-| `stitch.py` | (experimental, phase 1a-S of DESIGN-graphlet-merge.md §3) `stitch(parent, child=None, *, arm, walk, allow_unverified_index, budget)` → `StitchedGraphlet`, with `Part`, `Junction`, `StitchedWalk`: a continuation joined to the walk it continues, every junction and walk stating its causes; every verdict `qualified` |
+| `_stitch.py` | (experimental, phase 1a-S of DESIGN-graphlet-merge.md §3; private, its names exported from `metagraph.traverse`) `stitch(parent, child=None, *, arm, walk, allow_unverified_index, budget)` → `StitchedGraphlet`, with `Part`, `Junction`, `StitchedWalk`: a continuation joined to the walk it continues, every junction and walk stating its causes; every verdict `qualified` |
 
 Public API (one line each):
 
@@ -651,7 +651,7 @@ A continuation is a new traversal (§14): its result is certified on its own, wi
   seeded).
 - The request carries the record-coordinates setting forward (§18.3).
 
-A continuation can be stitched to the walk it continues (`stitch.py`, experimental): the result keeps both
+A continuation can be stitched to the walk it continues (`stitch()`, in `_stitch.py`, experimental): the result keeps both
 retrievals and states, at each junction and walk, why its walks may differ from one uninterrupted walk.
 DESIGN-graphlet-merge.md §3 is the design.
 
