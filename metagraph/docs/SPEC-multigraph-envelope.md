@@ -381,6 +381,12 @@ without `pairs` or `annotation_path` the release-9 selection texts (`... spans s
 in multi-graph mode`, `give the graph as 'graph' or as 'graphs', not both`), coded `traverse_single_pair`,
 `pair_ambiguous`, `pair_not_found` or `selection_conflict` where section 6 has a code. On a single-graph server
 `pairs` is an unknown field, as before (`request: unknown field 'pairs'`).
+A body that is one JSON text but no object (an array, a string, a number, a boolean, `null`) is refused on
+`/resolve` and `/traverse` before any selector is read, 400 `{"error": "request: expected an object"}` without a code,
+the single-graph server's refusal byte for byte (train 7: before, a multi-graph server read such a body as a request
+without selectors and refused it with a selection's text or jsoncpp's). `/pattern` refuses it as before
+(`invalid_request`, the same text), `/search` and `POST /traverse/cancel` as a single-graph server does; the probes
+read no body.
 
 ## 7. Resolve discovery ties (E18)
 

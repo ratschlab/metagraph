@@ -936,6 +936,74 @@ class TestMultiGraphServer(TestingBase):
             for server in servers:
                 server.stop()
 
+    # -------------------------------------------------------------------- a body that is no object
+
+    # One JSON text each, but no object: an array (holding a request, as a client that wraps its
+    # body in a list sends it), a string, a number, a boolean, null
+    NO_OBJECT_BODIES = (('array', '[{"sequence": "ACGTACGTACGTACGTACGTACGTACGTACGTACGT"}]'),
+                        ('empty array', '[]'), ('string', '"x"'), ('number', '7'),
+                        ('boolean', 'true'), ('null', 'null'))
+    # the single-graph server's refusal of each on the routes whose parser reads the body as an
+    # object (the error text; /pattern's with its code)
+    NO_OBJECT_REFUSALS = {
+        'resolve': {'error': 'request: expected an object'},
+        'traverse': {'error': 'request: expected an object'},
+        'traverse/cancel': {'error': 'request: expected an object'},
+        'pattern': {'code': 'invalid_request', 'error': 'request: expected an object'},
+    }
+
+    def test_a_body_that_is_no_object_is_refused_as_on_a_single_graph_server(self):
+        """A body that is one JSON text but no object is refused by a multi-graph server with
+        the single-graph server's status and bytes, on every route that reads a JSON body (T7-F1):
+        /resolve and /traverse refuse it before any selector is read, 400 "request: expected an
+        object" (before, the selection read it as a request without selectors: /traverse
+        answered "'graph' (index name) is required in multi-graph mode", /resolve jsoncpp's
+        "in Json::Value::removeMember(): requires objectValue"); /pattern, /traverse/cancel and
+        /search answered as the single-graph server already (/search's own texts: null is no
+        query). The probes (GET) read no body: one sent with them changes nothing. On the
+        class's server of four names too."""
+        d = self.tempdir.name
+        csv = os.path.join(d, 'graphs_no_object.csv')
+        with open(csv, 'w') as f:
+            for name in ('ecoli', 'kleb'):
+                f.write(f'{name},{self.pairs[name][0]},{self.pairs[name][1]}\n')
+        graph, anno = self.pairs['kleb']
+        single = Server(['-i', graph, '-a', anno], os.path.join(d, 'server_no_object_1.log'))
+        servers = [single]
+        try:
+            two = Server([csv], os.path.join(d, 'server_no_object_2.log'))
+            servers.append(two)
+
+            def post(server, route, data):
+                return requests.post(server.url(route), data=data, timeout=300)
+
+            for what, data in self.NO_OBJECT_BODIES:
+                for route in ('resolve', 'traverse', 'traverse/cancel', 'pattern', 'search'):
+                    with self.subTest(body=what, route=route):
+                        a = post(single, route, data)
+                        self.assertEqual(400, a.status_code, a.text[:500])
+                        if route in self.NO_OBJECT_REFUSALS:
+                            self.assertEqual(self.NO_OBJECT_REFUSALS[route], a.json())
+                        elif what == 'null':
+                            self.assertEqual({'error': 'No input sequences received from '
+                                                       'client'}, a.json())
+                        for server in (two, self.server):
+                            b = post(server, route, data)
+                            self.assertEqual((a.status_code, a.content),
+                                             (b.status_code, b.content))
+                # the probes: the answer without a body
+                for route in ('capabilities', 'traverse/capabilities', 'pattern/capabilities'):
+                    for server in (single, two, self.server):
+                        with self.subTest(body=what, probe=route, port=server.port):
+                            a = server.get(route)
+                            b = requests.get(server.url(route), data=data, timeout=60)
+                            self.assertEqual(200, a.status_code, a.text[:500])
+                            self.assertEqual((a.status_code, untimed(a.json())),
+                                             (b.status_code, untimed(b.json())))
+        finally:
+            for server in servers:
+                server.stop()
+
     def test_unmasked_pairs_are_sampled_at_load(self):
         """The dummy fraction of every graph without its mask is sampled at start-up, in its
         loading thread, as a single-graph server samples its graph: the first /pattern on an
