@@ -480,6 +480,35 @@ class TestExports(unittest.TestCase):
         self.assertTrue(gfa.startswith('H\tVN:Z:1.0\n# union_pairs: seed 30 bp'))
         self.assertIn('# scope: ' + U.SCOPE, gfa)
 
+    def test_gfa_full_labels_split_back_into_tag_and_names(self):
+        # labels='full': each entry is the tag once, '=', then each name escaped on its
+        # own, so a release-qualified tag (with '/') and a name holding the separators
+        # decode back to what segments() states
+        a, m = T.graphlet('annotate'), T.graphlet('merge')
+        a.labels[0].name = 'x,y;z=w/v%'
+        u = union_pairs([{'pair': {'graph': 'gA', 'release': 'r1'}, 'graphlet': a},
+                         {'pair': {'graph': 'gM', 'release': 'r2'}, 'graphlet': m}])
+        self.assertEqual(u.pairs, ('r1/gA', 'r2/gM'))
+        want = {}
+        for side in u.arms():
+            for s in u.segments(side):
+                want['s%d' % s.id] = {sup.pair: sorted(li.label.name for li in sup.labels)
+                                      for sup in s.support}
+        seen = 0
+        for line in u.to_gfa(labels='full').split('\n'):
+            f = line.split('\t')
+            if f[0] != 'S' or f[1].startswith('seed_'):
+                continue
+            (pl,) = [x[len('pl:Z:'):] for x in f if x.startswith('pl:Z:')]
+            got = {}
+            for entry in pl.split(';'):
+                tag, names = entry.split('=')
+                got[X.union_unescape(tag)] = sorted(
+                    X.union_unescape(x) for x in names.split(',')) if names else []
+            self.assertEqual(got, want[f[1]], line)
+            seen += 'x,y;z=w/v%' in got.get('r1/gA', ())
+        self.assertGreater(seen, 0)
+
 
 def response_of(*names, extra_results=(), seeds_sent=None):
     """A TraverseResponse as the client builds it from the fixtures' graphlet responses
