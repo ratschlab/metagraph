@@ -2532,16 +2532,19 @@ TEST(PatternRoute, TheServersAnswerHoldsTextsOnly) {
         ASSERT_EQ(answer.patterns.entries.size(), answer.patterns.results.size());
         size_t texts = 0;
         for (size_t i = 0; i < answer.patterns.entries.size(); ++i) {
-            if (!answer.patterns.results[i].empty())
+            if (!answer.patterns.results[i].empty()) {
                 EXPECT_FALSE(answer.patterns.entries[i].isMember("results"));
+            }
             texts += answer.patterns.results[i].size();
         }
-        if (body.find("count") == std::string::npos)
+        if (body.find("count") == std::string::npos) {
             EXPECT_LT(0u, texts);
+        }
         Json::Value written;
-        ASSERT_TRUE(Json::Reader().parse(pattern_answer_text(answer.head,
-                                                             std::move(answer.patterns)),
-                                         written));
+        std::istringstream text(pattern_answer_text(answer.head, std::move(answer.patterns)));
+        Json::CharReaderBuilder reader;
+        std::string errors;
+        ASSERT_TRUE(Json::parseFromStream(reader, text, &written, &errors)) << errors;
         // (compared as text: the reader reads a small unsigned integer as a signed one)
         EXPECT_EQ(compact(without_timing(run(*g, body))), compact(without_timing(written)));
     }
