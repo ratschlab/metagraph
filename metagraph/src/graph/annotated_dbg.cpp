@@ -1,6 +1,7 @@
 #include "annotated_dbg.hpp"
 
 #include <algorithm>
+#include <atomic>
 #include <cmath>
 #include <cstdlib>
 #include <limits>
@@ -877,6 +878,12 @@ constexpr size_t kFoldValuesBudget = size_t(16) << 20;
 #else
 constexpr size_t kFoldValuesBudget = 0;
 #endif
+// what the folds use (tests set it: set_record_fold_values_budget, review M2, lane T7-M5),
+// and what they did (record_fold_counts)
+std::atomic<size_t> fold_values_budget = kFoldValuesBudget;
+std::atomic<uint64_t> folds_freed = 0;
+std::atomic<uint64_t> folds_met_late = 0;
+std::atomic<uint64_t> folds_counts_only = 0;
 
 /**
  * The buffers that hold the values of the returned records after the cut, until they are
@@ -1119,6 +1126,12 @@ class RecordFold {
           : mapping_(mapping), values_(values), min_count_(min_count), num_top_(num_top),
             total_weight_(total_weight) {}
 
+    ~RecordFold() {
+        folds_freed += freed_;
+        folds_met_late += met_late_;
+        folds_counts_only += dropped_;
+    }
+
     // Add the row of query position |pos|, counted |weight| times, and without |values|
     // only counted. With per-position values, the positions must come in ascending
     // order, each once.
@@ -1143,8 +1156,10 @@ class RecordFold {
                     if (records_.size() == std::numeric_limits<uint32_t>::max())
                         throw std::runtime_error("A query matches 2^32 or more sequence records");
                     // a record first met too late to be returned holds no values
+                    const bool keeps_values = !dropped_ && remaining_weight() >= out_below_;
+                    met_late_ += !dropped_ && !keeps_values;
                     records_.push_back({ Header{column, seq_id}, 0, 0, 0, {}, 0, 0, 0,
-                                         !dropped_ && remaining_weight() >= out_below_ });
+                                         keeps_values });
                     slot = records_.size();
                 }
                 Record &record = records_[slot - 1];
@@ -1188,11 +1203,13 @@ class RecordFold {
     // After select(): true if the fold kept only the counts. The values of |selected|
     // are then held by adding the rows again after hold_only(selected).
     bool dropped(const HeaderCounts &selected) const {
-        // a record that lost its values alone could not be returned
-        assert(dropped_ || std::all_of(selected.begin(), selected.end(), [&](const auto &h) {
-            return record(h.first).keeps_values;
-        }));
-        (void)selected;
+        // a record that lost its values alone could not be returned: one that is would be
+        // returned without them (a cut that ranks by anything but the count)
+        if (!dropped_ && !std::all_of(selected.begin(), selected.end(), [&](const auto &h) {
+                return record(h.first).keeps_values; })) {
+            throw std::logic_error("The fold of a query by record freed the values of a "
+                                   "record it returns");
+        }
         return dropped_;
     }
 
@@ -1378,19 +1395,21 @@ class RecordFold {
         const size_t remaining = remaining_weight();
         size_t num_kept = 0;
         for (Record &record : records_) {
-            if (record.keeps_values && record.count + remaining < out_below_)
+            if (record.keeps_values && record.count + remaining < out_below_) {
                 drop_values(record);
+                ++freed_;
+            }
             num_kept += record.keeps_values;
         }
         const size_t bytes = num_runs_ * sizeof(Run);
-        if (num_kept > num_top_ && bytes > kFoldValuesBudget / 2) {
+        if (num_kept > num_top_ && bytes > budget_ / 2) {
             for (Record &record : records_) {
                 drop_values(record);
             }
             dropped_ = true;
         } else {
             // check again when the values have doubled
-            check_bytes_ = std::max(kFoldValuesBudget, 2 * bytes);
+            check_bytes_ = std::max(budget_, 2 * bytes);
         }
     }
 
@@ -1400,13 +1419,18 @@ class RecordFold {
     const size_t num_top_;
     const size_t total_weight_;
     size_t seen_weight_ = 0;
-    // the bytes of runs held, and those past which limit_values() is called
+    // the budget (fold_values_budget when the fold is made), the runs held, and the bytes
+    // of runs past which limit_values() is called
+    const size_t budget_ = fold_values_budget;
     size_t num_runs_ = 0;
-    size_t check_bytes_ = kFoldValuesBudget;
+    size_t check_bytes_ = budget_;
     // a record with fewer matches than this at the end is not returned
     size_t out_below_ = 0;
     // the fold kept only the counts
     bool dropped_ = false;
+    // records whose values limit_values() freed, and records met too late (the counts)
+    uint64_t freed_ = 0;
+    uint64_t met_late_ = 0;
     // the rows are added a second time, for the values of the returned records
     bool reading_again_ = false;
     // what the runs added a second time are charged to (hold_only)
@@ -1490,6 +1514,17 @@ HeaderCounts header_counts(const std::vector<TopRecord> &top) {
     return counts;
 }
 } // namespace
+
+size_t record_fold_values_budget() { return fold_values_budget; }
+void set_record_fold_values_budget(size_t bytes) { fold_values_budget = bytes; }
+RecordFoldCounts record_fold_counts() {
+    return { folds_freed, folds_met_late, folds_counts_only };
+}
+void reset_record_fold_counts() {
+    folds_freed = 0;
+    folds_met_late = 0;
+    folds_counts_only = 0;
+}
 
 
 void map_to_rows(const DeBruijnGraph &graph, std::string_view sequence,

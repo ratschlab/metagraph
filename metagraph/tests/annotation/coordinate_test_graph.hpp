@@ -12,6 +12,22 @@
 namespace mtg::test {
 struct CoordinateRecord { std::string sequence, column, header; };
 
+// The budget of the folds of the queries by record (graph::set_record_fold_values_budget)
+// while it lives: a release build's 16 MiB, or 0 as in a debug build (lane T7-M5, review M2)
+class FoldBudget {
+  public:
+    static constexpr size_t kRelease = size_t(16) << 20;
+    explicit FoldBudget(size_t bytes) : before_(graph::record_fold_values_budget()) {
+        graph::set_record_fold_values_budget(bytes);
+    }
+    ~FoldBudget() { graph::set_record_fold_values_budget(before_); }
+    FoldBudget(const FoldBudget &) = delete;
+    FoldBudget& operator=(const FoldBudget &) = delete;
+
+  private:
+    size_t before_;
+};
+
 // Small real coordinate-matrix fixture, with adjacent records in each column.
 // |verified_order|: its record mapping states its column labels and was checked against the
 // annotation, as a load of a .seqs written since H4 (CoordToHeader::column_order_verified).

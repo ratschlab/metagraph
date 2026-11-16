@@ -428,6 +428,92 @@ TEST(SearchBudget, AQueryByRecordReadAgainAfterTheCutIsCharged) {
     });
 }
 
+// The fold of a query by record past its budget (a release build's 16 MiB of runs) frees the
+// values of the records that can no longer be returned, and holds none for the records first
+// met too late to be returned. The answers are those of a fold that frees nothing, with three
+// of the five records tied at the cut, in the C5 order. Without a budget, the fold keeps only
+// the counts and reads the rows again. (Review M2, lane T7-M5: a release build reaches every
+// branch of the fold's pruning.)
+TEST(SearchBudget, TheFoldFreesOnlyTheValuesOfRecordsThatCannotBeReturned) {
+    std::mt19937 rng(764);
+    const size_t k = 15;
+    const size_t num_tied = 5, num_low = 1100, num_late = 10;
+    const size_t num_repeats = 300, num_shared = 1000, num_late_kmers = 100;
+    const std::string repeated = random_sequence(rng, k);
+    const std::string shared = random_sequence(rng, num_shared + k - 1);
+    const std::string late = random_sequence(rng, num_late_kmers + k - 1);
+    std::vector<CoordinateRecord> records;
+    auto add = [&](const std::string &sequence, const std::string &header) {
+        records.push_back({ random_sequence(rng, 10) + sequence + random_sequence(rng, 10),
+                            "F" + std::to_string(records.size() % 2), header });
+    };
+    for (size_t i = 0; i < num_tied; ++i) {
+        add(repeated + random_sequence(rng, 10) + shared, "h" + std::to_string(i));
+    }
+    for (size_t i = 0; i < num_low; ++i) {
+        add(shared, "l" + std::to_string(i));
+    }
+    for (size_t i = 0; i < num_late; ++i) {
+        add(late, "z" + std::to_string(i));
+    }
+    // |repeated| at many positions (one row, counted at its first position, values held for
+    // the returned records only), then the shared and the late k-mers one by one: a run each
+    std::string query;
+    for (size_t i = 0; i < num_repeats; ++i) {
+        query += repeated + "N";
+    }
+    for (size_t i = 0; i < num_shared; ++i) {
+        query += shared.substr(i, k) + "N";
+    }
+    for (size_t i = 0; i < num_late_kmers; ++i) {
+        query += late.substr(i, k) + "N";
+    }
+    // The runs pass the budget at the 949th shared k-mer. The records of the shared k-mers
+    // only then match 949 positions of the 151 left, the tied ones 300 + 949: they are freed,
+    // and the late ones, which can match 100 positions, are held without values.
+    ASSERT_LT(FoldBudget::kRelease, (num_tied + num_low) * num_shared * 16);
+    auto index = coordinate_test_graph(k, records, false, false, false, true);
+    const size_t top = 3;
+    auto check = [&](const std::string &mode, const auto &query_by) {
+        SCOPED_TRACE(mode);
+        graph::reset_record_fold_counts();
+        const auto unbounded = [&]() {
+            const FoldBudget fold_budget(std::numeric_limits<size_t>::max());
+            return query_by();
+        }();
+        EXPECT_EQ(0u, graph::record_fold_counts().freed);
+        EXPECT_EQ(0u, graph::record_fold_counts().met_late);
+        EXPECT_EQ(0u, graph::record_fold_counts().counts_only);
+        ASSERT_EQ(top, unbounded.size());
+        for (size_t r = 0; r < top; ++r) {
+            EXPECT_EQ("h" + std::to_string(r), std::get<0>(unbounded[r]));
+            EXPECT_EQ(num_repeats + num_shared, std::get<1>(unbounded[r]));
+        }
+        {
+            const FoldBudget fold_budget(FoldBudget::kRelease);
+            EXPECT_EQ(unbounded, query_by());
+            EXPECT_EQ(num_low, graph::record_fold_counts().freed);
+            EXPECT_EQ(num_late, graph::record_fold_counts().met_late);
+            EXPECT_EQ(0u, graph::record_fold_counts().counts_only);
+        }
+        graph::reset_record_fold_counts();
+        {
+            const FoldBudget fold_budget(0);
+            EXPECT_EQ(unbounded, query_by());
+            EXPECT_EQ(1u, graph::record_fold_counts().counts_only);
+        }
+    };
+    check("signatures", [&]() -> Signatures {
+        return index->get_top_label_signatures(query, top, 0, 0);
+    });
+    check("counts", [&]() -> Counts {
+        return index->get_kmer_counts(query, top, 0, 0);
+    });
+    check("coordinates", [&]() -> Coordinates {
+        return index->get_kmer_coordinates(query, top, 0, 0);
+    });
+}
+
 // A query by record for coordinates at a homopolymer charges the coordinates of the returned
 // records at its one repeated row to the values account's scratch: each record's buffer, grown
 // by doubling from one, 16 B per coordinate (not per coordinate and position). (Review m1, lane

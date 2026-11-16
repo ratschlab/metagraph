@@ -890,7 +890,8 @@ class CountingCoordinates : public annot::matrix::TupleCSCMatrix<annot::matrix::
 // then label), each with its coordinates at every position in the order of its rows, by brute
 // force, and with a record mapping the signatures and counts of the same records. On the
 // counting matrix and on row-diff over BRWT (r237's form), with and without a record mapping,
-// at the cuts 1, 2 and none.
+// at the cuts 1, 2 and none, with the folds' budget of a release build and of a debug build
+// (0: in every build, review M2 of lane T7-M5).
 TEST(AnnotatedSearchPositions, EachRowOfTheQueryDecodedOnce) {
     std::mt19937 rng(55);
     const size_t k = 9;
@@ -913,7 +914,12 @@ TEST(AnnotatedSearchPositions, EachRowOfTheQueryDecodedOnce) {
         std::string(k + 300, 'A'), periodic, repeated, records[4].sequence,
         random_sequence(rng, 20) + std::string(k + 50, 'A') + records[6].sequence
     };
-    for (bool by_record : { true, false }) {
+    for (const auto &setting : std::vector<std::pair<size_t, bool>> {
+                { 0, true }, { 0, false },
+                { FoldBudget::kRelease, true }, { FoldBudget::kRelease, false } }) {
+        const size_t budget = setting.first;
+        const bool by_record = setting.second;
+        const FoldBudget fold_budget(budget);
         auto counting = coordinate_test_graph<CountingCoordinates>(k, records, false, false,
                                                                    false, by_record);
         const auto &matrix = dynamic_cast<const CountingCoordinates &>(
@@ -935,8 +941,9 @@ TEST(AnnotatedSearchPositions, EachRowOfTheQueryDecodedOnce) {
             // the cuts: the number of records and the fraction of k-mers to match
             for (const auto &[top, fraction] : std::vector<std::pair<size_t, double>> {
                         { 1, 0. }, { 2, 0. }, { all, 0. }, { 2, 0.25 }, { all, 0.25 } }) {
-                SCOPED_TRACE(::testing::Message() << "by_record " << by_record << " query "
-                             << query << " top " << top << " fraction " << fraction);
+                SCOPED_TRACE(::testing::Message() << "budget " << budget << " by_record "
+                             << by_record << " query " << query << " top " << top
+                             << " fraction " << fraction);
                 const size_t min_count = std::max<size_t>(1, std::ceil(fraction * num_kmers));
                 const size_t num_expected
                     = std::count_if(expected.begin(), expected.end(),
@@ -950,10 +957,10 @@ TEST(AnnotatedSearchPositions, EachRowOfTheQueryDecodedOnce) {
                     return expected[a].label < expected[b].label;
                 });
                 // Each distinct row is read once, and with a record mapping a repeated row
-                // once more when records are returned. A debug build has no budget for
-                // the values of the fold. With more records in the race than the cut
-                // returns, it keeps only the counts, and every row is then read again.
-                // With fewer, it frees the values of the records below the fraction.
+                // once more when records are returned. Without a budget for the values of
+                // the fold, with more records in the race than the cut returns, it keeps
+                // only the counts, and every row is then read again. With fewer, it frees
+                // the values of the records below the fraction.
                 auto check_requests = [&](const std::vector<annot::matrix::BinaryMatrix::Row> &rows,
                                           bool returned, const std::string &what) {
                     std::map<annot::matrix::BinaryMatrix::Row, size_t> requests;
@@ -961,12 +968,10 @@ TEST(AnnotatedSearchPositions, EachRowOfTheQueryDecodedOnce) {
                         ++requests[row];
                     }
                     bool all_again = false;
-#ifndef NDEBUG
                     for (const auto &[row, positions] : positions_of_row) {
-                        all_again |= by_record && returned && positions == 1
+                        all_again |= !budget && by_record && returned && positions == 1
                                         && requests[row] == 2;
                     }
-#endif
                     std::map<annot::matrix::BinaryMatrix::Row, size_t> expected_requests;
                     for (const auto &[row, positions] : positions_of_row) {
                         expected_requests[row]

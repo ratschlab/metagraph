@@ -139,6 +139,24 @@ search_top_n(const std::vector<size_t> &scores,
 template <class Values>
 uint64_t search_store_bytes(size_t num_labels, size_t num_rows);
 
+/**
+ * For tests: the fold of a query by sequence record (RecordFold, annotated_dbg.cpp). Its
+ * budget is the bytes of per-position values it holds before the cut past which it frees
+ * the values of the records that can no longer be returned: 16 MiB, 0 in a debug build. A
+ * query reads it once, when it starts. The counts are what the folds did since the last
+ * reset, added as each fold ends. (Lane T7-M5, review M2: a release build reaches the
+ * pruning in tests.)
+ */
+struct RecordFoldCounts {
+    uint64_t freed = 0;       // records whose values were freed, their counts kept
+    uint64_t met_late = 0;    // records first met too late to be returned, held without values
+    uint64_t counts_only = 0; // folds that kept only the counts and read the rows again
+};
+size_t record_fold_values_budget();
+void set_record_fold_values_budget(size_t bytes);
+RecordFoldCounts record_fold_counts();
+void reset_record_fold_counts();
+
 
 class AnnotatedSequenceGraph {
   public:
