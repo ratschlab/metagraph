@@ -1,4 +1,4 @@
-"""Combining graphlets: what the cross-pair union (union.py) and stitching (stitch.py) share
+"""Combining graphlets: what the cross-pair union (union.py) and stitching (_stitch.py) share
 (docs/DESIGN-graphlet-merge.md, Appendix F.2).
 
 A combination is a container of unchanged parts plus a stated relation. It never builds an
