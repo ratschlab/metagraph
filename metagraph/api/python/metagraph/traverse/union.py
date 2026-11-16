@@ -252,6 +252,9 @@ class UnionWalk:
     held_in: tuple              # whole, extends, and routes held to the end
 
 
+_WalkFigures = collections.namedtuple('_WalkFigures', 'kind length_bp whole_in held_in')
+
+
 @dataclass(frozen=True)
 class Coverage:
     arm: Optional[str]
@@ -767,7 +770,7 @@ class PairUnion:
               a.seed_check] for a in self.absent],
             [[f['tag'], f['error'], f['kept']] for f in self._failures],
             self._seed_seq, sorted(self._expected_raw) if exp is not None else None])
-        self._walk_cache = {}
+        self._fig_cache = {}
         self._seg_cache = {}
 
     # ------------------------------------------------------------ basic properties
@@ -808,8 +811,11 @@ class PairUnion:
         raise _refuse('not_offered', None, 'next_request')
 
     def memory_bytes(self):
-        """The parts' models (a model given twice counted once) plus the union's own index."""
-        return C.models_memory_bytes([p.graphlet for p in self.parts] + [self._arms])
+        """The parts' models (a model given twice counted once) plus the union's own index
+        and what its queries keep: the walk figures per arm and the part segments' label
+        intervals."""
+        return C.models_memory_bytes([p.graphlet for p in self.parts] + [
+            self._arms, self._fig_cache, self._seg_cache])
 
     # ------------------------------------------------------------ helpers
 
@@ -1050,7 +1056,7 @@ class PairUnion:
             if t is None:
                 items.append('%s 0' % s)
                 continue
-            ws = self._all_walks(s, budget)
+            ws = self._figures(s, _B.resolve(budget))
             walks = [w for w in ws if w.kind == 'walk']
             stubs = len(ws) - len(walks)
             multi = sum(1 for w in walks if len(w.held_in) > 1)
@@ -1161,30 +1167,65 @@ class PairUnion:
 
     # ------------------------------------------------------------ walks
 
-    def _all_walks(self, side, budget=None, with_labels=False):
-        """Every union walk of |side| (walks and stubs) with its spans and routes, in id
-        order (cached per side; labels computed on demand)."""
-        key = (side, with_labels)
+    def _figures(self, side, b=None):
+        """Per union walk of |side|, in id order: (kind, length_bp, whole_in, held_in), from
+        one pass over the trie. Each part's stop is carried down the union segments, so a
+        walk's figures cost one step per part; only a merges span follows its route (the
+        walk's remaining length) to tell whether the part holds the walk. Kept per side
+        (memory_bytes() counts it); charged at its cold price on every call."""
         t = self._arms[side]
-        b = _B.resolve(budget)
+        n = len(self.parts)
         if b is not None:
-            # charged at its cold price on every call: per walk and pair its span, the
-            # route through the pair's merges (at most the walk's length) and, with labels,
-            # the alive sets read along the chain
-            w = m = 0
+            # per union segment a stop per part, per walk a step per part and, for a part
+            # that merges, its route along at most the walk's length
+            w = W_ELEM * n * len(t.order)
             for node in t.markers:
-                d = len(t.path_usegs(node))
-                w += W_ROW + len(self.parts) * (W_ELEM * (1 + d) + (t.depth[node] >> 4))
-                m += 300 + 200 * len(self.parts)
-                if with_labels:
-                    w += len(self.parts) * W_ELEM * 4 * (1 + d)
-            b.charge(w, m)
-        got = self._walk_cache.get(key)
+                w += W_ROW + n * (W_ELEM + (t.depth[node] >> 4))
+            b.charge(w, 8 * n * len(t.order) + len(t.markers) * (300 + 16 * n))
+        got = self._fig_cache.get(side)
         if got is not None:
             return got
-        out = [self._walk(t, wid, node, with_labels) for wid, node in enumerate(t.markers)]
-        self._walk_cache[key] = out
+        has_arm = [side in p.graphlet.arms for p in self.parts]
+        root = (0,) * n
+        stops = [None] * len(t.useg)
+        for u in t.order:
+            us = t.useg[u]
+            up = root if us.parent is None else stops[us.parent]
+            stops[u] = tuple(us.end if pi in us.cover else up[pi] for pi in range(n))
+        out = []
+        for wid, node in enumerate(t.markers):
+            u = t.node_in.get(node)
+            st = root if u is None else stops[u]
+            length = t.depth[node]
+            whole, held = [], []
+            for pi in range(n):
+                if not has_arm[pi]:
+                    continue
+                how, _ = _case(t, pi, st[pi], length)
+                if how == 'whole':
+                    whole.append(self.parts[pi].tag)
+                    held.append(self.parts[pi].tag)
+                elif how == 'extends':
+                    held.append(self.parts[pi].tag)
+                elif how == 'merges':
+                    sp = _span(self, t, pi, self.parts[pi], node, length, False)
+                    if sp.route.how == 'held':
+                        held.append(self.parts[pi].tag)
+            kind = 'walk' if any(t.walk_end.get(node, ())) else 'stub'
+            out.append(_WalkFigures(kind, length, tuple(whole), tuple(held)))
+        self._fig_cache[side] = out
         return out
+
+    def _charge_walk(self, b, t, node, with_labels):
+        """A union walk built whole: per part its span (the segments past its stop, at most
+        the walk's) and route (at most the walk's length) and, with labels, the alive sets
+        read along its chain."""
+        d = t.nsegs(node)
+        n = len(self.parts)
+        w = W_ROW + n * (W_ELEM * (1 + d) + (t.depth[node] >> 4))
+        if with_labels:
+            w += n * W_ELEM * 4 * (1 + d)
+        b.charge(w, 300 + 200 * n + 8 * d)
 
     def _walk(self, t, wid, node, with_labels=False, spell=False, at_bp=None):
         path = t.path_usegs(node)
@@ -1192,13 +1233,29 @@ class PairUnion:
         kind = 'walk' if any(t.walk_end.get(node, ())) else 'stub'
         spans = []
         for pi, part in enumerate(self.parts):
-            spans.append(_span(self, t, pi, part, node, path, length, with_labels, at_bp))
+            spans.append(_span(self, t, pi, part, node, length, with_labels, at_bp))
         whole = tuple(s.pair for s in spans if s.how == 'whole')
         held = tuple(s.pair for s in spans if s.how in ('whole', 'extends')
                      or (s.how == 'merges' and s.route is not None and s.route.how == 'held'))
         seq = self._spell_nodes(t, path, 'natural', True) if spell else None
         return UnionWalk(wid, t.side, kind, length, seq, tuple(t.useg[u].id for u in path),
                          tuple(spans), whole, held)
+
+    def _walks_full(self, side, b, with_labels, ids=None, stubs=True):
+        """The union walks of |side| built whole on demand, one at a time in id order (only
+        |ids| when given; stub walks only with |stubs|), each charged before it is built;
+        nothing is kept."""
+        t = self._arms[side]
+        figs = self._figures(side, b)
+        want = None if ids is None else set(ids)
+        for wid, node in enumerate(t.markers):
+            if want is not None and wid not in want:
+                continue
+            if not stubs and figs[wid].kind != 'walk':
+                continue
+            if b is not None:
+                self._charge_walk(b, t, node, with_labels)
+            yield self._walk(t, wid, node, with_labels)
 
     def walks(self, arm, *, paths='supported', max_transitions=1, max_paths=1000, top=None,
               by='pairs', pairs=None, labels=None, min_bp=0, spell=False, stubs=False,
@@ -1236,38 +1293,48 @@ class PairUnion:
                                 out)
 
     def _walks_body(self, t, by, top, pairs, labels, min_bp, spell, stubs, b, start, out):
-        ws = self._all_walks(t.side, b, with_labels=labels is not None)
-        sel = [w for w in ws if (stubs or w.kind == 'walk') and w.length_bp >= min_bp]
+        # the walks are selected and ranked on their figures (one trie pass); only the
+        # walks returned are built, with their spans and path
+        figs = self._figures(t.side, b)
+        sel = [wid for wid, f in enumerate(figs)
+               if (stubs or f.kind == 'walk') and f.length_bp >= min_bp]
         if pairs:
             for p in pairs:
                 if p not in self._part_of:
                     raise KeyError('no part has the tag %r' % (p,))
-            sel = [w for w in sel if all(p in w.held_in for p in pairs)]
+            sel = [wid for wid in sel if all(p in figs[wid].held_in for p in pairs)]
         if labels is not None:
             want = {self.label(x) for x in labels}
             # only a span that holds the walk carries it: its own labels (whole, extends) or
             # its route's (merges, held to the walk's end); a stub's labels before its merge
             # and the labels of a span that ends or turns off carry nothing to the end
-            sel = [w for w in sel if any(sl.from_bp == 0 and sl.label in want
-                                         for s in w.spans if s.pair in w.held_in
-                                         for sl in _carrying_labels(s))]
+            keep = []
+            for wid in sel:
+                node = t.markers[wid]
+                held = figs[wid].held_in
+                if b is not None:
+                    self._charge_walk(b, t, node, True)
+                if any(sl.from_bp == 0 and sl.label in want
+                       for pi, part in enumerate(self.parts) if part.tag in held
+                       for sl in _carrying_labels(_span(self, t, pi, part, node,
+                                                        figs[wid].length_bp, True))):
+                    keep.append(wid)
+            sel = keep
         if by == 'pairs':
-            sel.sort(key=lambda w: (-len(w.held_in), -len(w.whole_in), -w.length_bp, w.id))
+            sel.sort(key=lambda i: (-len(figs[i].held_in), -len(figs[i].whole_in),
+                                    -figs[i].length_bp, i))
         elif by == 'length':
-            sel.sort(key=lambda w: (-w.length_bp, w.id))
+            sel.sort(key=lambda i: (-figs[i].length_bp, i))
         if top is not None:
             sel = sel[:top]
-        for w in sel[start:]:
+        for wid in sel[start:]:
+            node = t.markers[wid]
+            length = figs[wid].length_bp
             if b is not None:
-                b.charge(W_ROW + (w.length_bp >> BASE_SHIFT if spell else 0),
-                         400 + (STR + w.length_bp if spell else 0))
-            w2 = _copy_walk(w)
-            if labels is None:
-                w2.spans = tuple(_without_labels(s) for s in w2.spans)
-            if spell:
-                w2.sequence = self._spell_nodes(t, t.path_usegs(t.markers[w.id]), 'natural',
-                                                True)
-            out.append(w2)
+                self._charge_walk(b, t, node, False)
+                b.charge(W_ROW + (length >> BASE_SHIFT if spell else 0),
+                         400 + (STR + length if spell else 0))
+            out.append(self._walk(t, wid, node, False, spell))
         return out
 
     def _walk_by_id(self, side, walk):
@@ -1312,7 +1379,7 @@ class PairUnion:
         if b is not None:
             with b.scope('spell'):
                 n = t.depth[node] + len(self._seed_seq)
-                b.charge(W_ROW + W_STEP * len(t.path_usegs(node)) + (n >> 8), 3 * (STR + n))
+                b.charge(W_ROW + W_STEP * t.nsegs(node) + (n >> 8), 3 * (STR + n))
                 return self._spell_nodes(t, t.path_usegs(node), orientation, with_seed)
         return self._spell_nodes(t, t.path_usegs(node), orientation, with_seed)
 
@@ -1325,7 +1392,6 @@ class PairUnion:
         t, node = self._walk_by_id(side, walk)
         args = [side, walk if isinstance(walk, int) else getattr(walk, 'id', None), at_bp]
         start = C.resume_pos(self.digest, 'carriers', args, resume, 1)[0]
-        path = t.path_usegs(node)
         length = t.depth[node]
         b = _B.resolve(budget)
         out = Carriers()
@@ -1334,14 +1400,13 @@ class PairUnion:
             if b is not None:
                 with b.scope('carriers'):
                     for pi in range(start, len(self.parts)):
-                        b.charge(W_ROW + W_STEP * length // 16 + W_ELEM * len(path),
+                        b.charge(W_ROW + W_STEP * length // 16 + W_ELEM * t.nsegs(node),
                                  600 + 120 * len(self.parts[pi].graphlet.labels))
-                        out.append(_span(self, t, pi, self.parts[pi], node, path, length, True,
+                        out.append(_span(self, t, pi, self.parts[pi], node, length, True,
                                          at_bp))
             else:
                 for pi in range(start, len(self.parts)):
-                    out.append(_span(self, t, pi, self.parts[pi], node, path, length, True,
-                                     at_bp))
+                    out.append(_span(self, t, pi, self.parts[pi], node, length, True, at_bp))
         except LocalBudgetExceeded as e:
             raise e.restate(partial=Partial(list(out), C.token(self.digest, 'carriers', args,
                                                                  start + len(out)),
@@ -1411,7 +1476,7 @@ class PairUnion:
             out['notes'].append('pairs left out (max_bytes)')
         arms = {}
         for s in self.arms():
-            ws = self._all_walks(s, b)
+            ws = self._figures(s, b)
             walks = [w for w in ws if w.kind == 'walk']
             arms[s] = {'walks': len(walks), 'stub_walks': len(ws) - len(walks),
                        'segments': len(self._arms[s].order), 'top': []}
@@ -1419,12 +1484,13 @@ class PairUnion:
         if fits(cand):
             out = cand
             for s in self.arms():
-                ranked = sorted((w for w in self._all_walks(s, b) if w.kind == 'walk'),
-                                key=lambda w: (-len(w.held_in), -len(w.whole_in),
-                                               -w.length_bp, w.id))
-                for w in ranked[:10]:
-                    arms[s]['top'].append({'id': w.id, 'length_bp': w.length_bp,
-                                           'held_in': list(w.held_in)})
+                figs = self._figures(s, b)
+                ranked = sorted((i for i, w in enumerate(figs) if w.kind == 'walk'),
+                                key=lambda i: (-len(figs[i].held_in), -len(figs[i].whole_in),
+                                               -figs[i].length_bp, i))
+                for i in ranked[:10]:
+                    arms[s]['top'].append({'id': i, 'length_bp': figs[i].length_bp,
+                                           'held_in': list(figs[i].held_in)})
                     if not fits(out):
                         arms[s]['top'].pop()
                         out['notes'].append('top walks cut (max_bytes)')
@@ -1711,8 +1777,8 @@ def _core_sentence(cov):
 # ------------------------------------------------------------------ the trie
 
 class _USeg:
-    __slots__ = ('id', 'from_bp', 'to_bp', 'parent', 'children', 'cover', 'pieces', 'start',
-                 'end', 'first')
+    __slots__ = ('id', 'from_bp', 'to_bp', 'parent', 'children', 'cover', 'pieces', 'end',
+                 'first', 'n')
 
     def __init__(self):
         self.id = -1
@@ -1888,8 +1954,8 @@ class _Trie:
                 u = _USeg()
                 u.parent = parent
                 u.from_bp = self.depth[node]
-                u.start = node
                 u.first = ch
+                u.n = 1 if parent is None else self.useg[parent].n + 1
                 u.cover = dict.fromkeys(self.e_cover[e])
                 edges = [e]
                 cur = self.e_to[e]
@@ -1928,7 +1994,6 @@ class _Trie:
             self.node_out[node] = outs
             for item in reversed(todo):
                 stack.append(item)
-        self._paths = {}
 
     def number(self, n):
         """Number the union segments in preorder from |n| -> the next free id."""
@@ -1943,16 +2008,40 @@ class _Trie:
         return n
 
     def path_usegs(self, node):
-        got = self._paths.get(node)
-        if got is None:
-            out = []
-            u = self.node_in.get(node)
-            while u is not None:
-                out.append(u)
-                u = self.useg[u].parent
-            out.reverse()
-            got = self._paths[node] = tuple(out)
-        return got
+        """The union segments from the root to |node|, root first: built from the parent
+        pointers on each call (nothing kept per node)."""
+        out = []
+        u = self.node_in.get(node)
+        while u is not None:
+            out.append(u)
+            u = self.useg[u].parent
+        out.reverse()
+        return out
+
+    def nsegs(self, node):
+        """How many union segments lie between the root and |node|."""
+        u = self.node_in.get(node)
+        return 0 if u is None else self.useg[u].n
+
+    def stop_of(self, pi, node):
+        """(stop, below): the deepest node on the path to |node| whose spellings part |pi|
+        follows (covers are prefix-closed), and the union segments past it to |node|, root
+        first. Costs the segments past the stop only."""
+        below = []
+        u = self.node_in.get(node)
+        while u is not None and pi not in self.useg[u].cover:
+            below.append(u)
+            u = self.useg[u].parent
+        below.reverse()
+        return (0 if u is None else self.useg[u].end), below
+
+    def last_seg(self, pi, a, stop):
+        """The segment of part |pi| (arm |a|) that holds the stop's depth: the last piece
+        of the union segment ending at |stop|, or the arm's root at the trie root."""
+        u = self.node_in.get(stop)
+        if u is None:
+            return next((s.id for s in a.segments if not s.parents), None)
+        return self.useg[u].pieces[pi][-1][0]
 
     def node_name(self, node, merge_seg_len, first=None):
         """The trie node of a merge: 's<id>' (the start of the union segment holding the
@@ -1965,17 +2054,6 @@ class _Trie:
         u = self.node_in.get(node)
         return 'seed' if u is None else 's%d$' % self.useg[u].id
 
-    def base_at(self, path, pos):
-        """The walk-order base at outward |pos| on a path of union segments."""
-        for u in path:
-            us = self.useg[u]
-            if us.from_bp <= pos < us.to_bp:
-                pi = min(us.cover)
-                for seg, f, t in us.pieces[pi]:
-                    if f <= pos < t:
-                        s = self.parts[pi].graphlet.arms[self.side].segments[seg]
-                        return s.walk[pos - s.from_bp]
-        return None
 
 
 # ------------------------------------------------------------------ spans
@@ -2006,16 +2084,11 @@ def _leaf_cert(a, seg, code):
     return complete, min(n, a.complete_to_bp)
 
 
-def _events_at(t, pi, a, node, path_segs):
-    """The part segments whose node at depth node's is the stop: the one ending there or
-    holding it, and the zero-length ones there."""
-    d = t.depth[node]
-    out = []
-    for seg in path_segs:
-        s = a.segments[seg]
-        if s.from_bp <= d <= s.end_bp:
-            out.append(s)
-    for pi2, z in t.zero_at.get(node, ()):
+def _events_at(t, pi, a, stop, last):
+    """The part segments whose node at the stop's depth is the stop: |last|, the one ending
+    there or holding it, and the zero-length ones there."""
+    out = [a.segments[last]] if last is not None else []
+    for pi2, z in t.zero_at.get(stop, ()):
         if pi2 == pi:
             out.append(a.segments[z])
     return out
@@ -2042,90 +2115,87 @@ def _absence(g, a, segs_here, d, c, code=None):
     return 'under_strategy'
 
 
-def _part_seg_at(t, pi, path, d):
-    """The part segments of part |pi| covering the union path's segments up to depth |d|
-    (the chain, in order)."""
-    out = []
-    for u in path:
-        us = t.useg[u]
-        if us.from_bp >= d:
-            break
-        for seg, f, to in us.pieces.get(pi, ()):
-            if not out or out[-1] != seg:
-                out.append(seg)
-    return out
+def _case(t, pi, stop, length):
+    """How part |pi| stops on a union walk of |length| bp whose spellings it follows to
+    trie node |stop|: ('whole' or 'ends', its walk end there), ('extends', None), ('merges',
+    its stub end there) or ('diverges', None). One decision for the walk figures and the
+    spans."""
+    d = t.depth[stop]
+    wh = next((x for x in t.walk_end.get(stop, ()) if x[0] == pi), None)
+    if wh is not None:
+        return ('whole' if d == length else 'ends'), wh
+    if d == length and any(pi in t.useg[u].cover for u in t.node_out.get(stop, {}).values()):
+        return 'extends', None
+    sh = next((x for x in t.stub_end.get(stop, ()) if x[0] == pi), None)
+    if sh is not None:
+        return 'merges', sh
+    return 'diverges', None
 
 
-def _span(un, t, pi, part, node, path, length, with_labels, at_bp=None):
+def _labels_to(un, part, a, seg, end, with_labels, at_bp):
+    """_labels_for() along the first-parent chain to |seg| (the chain built only when the
+    query computes labels)."""
+    if not with_labels:
+        return None, False
+    if seg is None:
+        return (), False
+    return _labels_for(un, part, a, _fp_chain(a, seg), end, True, at_bp)
+
+
+def _span(un, t, pi, part, node, length, with_labels, at_bp=None):
     g = part.graphlet
     a = g.arms.get(t.side)
     mode = g.mode
     if a is None:
         return PairSpan(part.tag, mode, 'none', 0, None, None, None, None, (), {}, None if not
                         with_labels else (), False, False, 0, 'under_strategy', g.k, g.regime)
-    # how far the pair's spellings follow the path (a prefix: covers are prefix-closed)
-    k = 0
-    while k < len(path) and pi in t.useg[path[k]].cover:
-        k += 1
-    d = t.useg[path[k - 1]].to_bp if k else 0
-    stop = t.useg[path[k - 1]].end if k else 0
-    covered = path[:k]
-    chain = _part_seg_at(t, pi, covered, d + 1)
-    if not chain:
-        root = next((s.id for s in a.segments if not s.parents), None)
-        chain = [root] if root is not None else []
-    walk_here = [x for x in t.walk_end.get(stop, ()) if x[0] == pi]
-    stub_here = [x for x in t.stub_end.get(stop, ()) if x[0] == pi]
-    continues = any(pi in t.useg[u].cover for u in t.node_out.get(stop, {}).values()) \
-        if d == length else False
-    if d == length and walk_here:
-        _, leaf, pid = walk_here[0]
+    # how far the pair's spellings follow the walk: to trie node |stop|; |below|: the
+    # walk's union segments past it (what a route reads), never the whole path
+    stop, below = t.stop_of(pi, node)
+    d = t.depth[stop]
+    how, item = _case(t, pi, stop, length)
+    if how == 'whole':
+        _, leaf, pid = item
         reasons, code = _leaf_reasons(g, a, leaf)
         complete, cert = _leaf_cert(a, leaf, code)
-        labels, cut = _labels_for(un, part, a, _fp_chain(a, leaf), length, with_labels, at_bp)
+        labels, cut = _labels_to(un, part, a, leaf, length, with_labels, at_bp)
         return PairSpan(part.tag, mode, 'whole', length, pid, None, None, None, (), reasons,
                         labels, cut, complete, cert, None, g.k, g.regime)
-    if d == length and continues:
-        seg = chain[-1] if chain else None
-        pid = _ops._first_paths(a)[seg] if seg is not None else None
+    last = t.last_seg(pi, a, stop)
+    if how == 'extends':
+        pid = _ops._first_paths(a)[last] if last is not None else None
         cert = min(length, a.complete_to_bp)
-        labels, cut = _labels_for(un, part, a, _fp_chain(a, seg), length, with_labels, at_bp)
+        labels, cut = _labels_to(un, part, a, last, length, with_labels, at_bp)
         return PairSpan(part.tag, mode, 'extends', length, pid, None, None, None, (),
                         {'path_reason': None, 'labels': {}}, labels, cut,
                         length <= a.complete_to_bp, cert, None, g.k, g.regime)
-    if d < length and walk_here:
-        _, leaf, pid = walk_here[0]
+    # the union walk's base after the stop (none where the walk ends there)
+    c = t.useg[below[0]].first if below else None
+    if how == 'ends':
+        _, leaf, pid = item
         reasons, code = _leaf_reasons(g, a, leaf)
         complete, cert = _leaf_cert(a, leaf, code)
-        c = t.base_at(path, d)
-        absence = _absence(g, a, _events_at(t, pi, a, stop, chain), d, c, code)
-        labels, cut = _labels_for(un, part, a, _fp_chain(a, leaf), d, with_labels, at_bp)
+        absence = _absence(g, a, _events_at(t, pi, a, stop, last), d, c, code)
+        labels, cut = _labels_to(un, part, a, leaf, d, with_labels, at_bp)
         return PairSpan(part.tag, mode, 'ends', d, pid, None, None, None, (), reasons, labels,
                         cut, complete, cert, absence, g.k, g.regime)
-    if stub_here:
-        _, stub, m = stub_here[0]
+    if how == 'merges':
+        _, stub, m = item
         ms = a.segments[m]
         into = t.node_name(t.seg_nodes[pi][m][0], ms.length_bp,
                            ms.walk[0] if ms.length_bp and ms.walk else None)
         j = ms.parents.index(stub)
         cont = tuple(un._pair_label(part, x) for x in (ms.partition[j] if j < len(
             ms.partition) else ()))
-        route = _route(un, t, pi, part, a, stub, m, j, d, path, length, into, with_labels,
-                       at_bp)
-        labels, cut = _labels_for(un, part, a, _fp_chain(a, stub), d, with_labels, at_bp)
+        route = _route(un, t, pi, part, a, stub, m, j, d, below, into, with_labels, at_bp)
+        labels, cut = _labels_to(un, part, a, stub, d, with_labels, at_bp)
         return PairSpan(part.tag, mode, 'merges', d, None, stub, into, route, cont,
                         {'path_reason': None, 'labels': {}}, labels, cut, route.complete,
                         route.certified_to_bp, None, g.k, g.regime)
     # diverges: the pair goes on with other bases (or a stub/walk elsewhere)
-    c = t.base_at(path, d)
-    absence = _absence(g, a, _events_at(t, pi, a, stop, chain), d, c)
-    labels, cut = (None, False)
-    if with_labels:
-        seg = chain[-1] if chain else None
-        labels, cut = _labels_for(un, part, a, _fp_chain(a, seg), d, True, at_bp) \
-            if seg is not None else ((), False)
-    pid = None
-    return PairSpan(part.tag, mode, 'diverges', d, pid, None, None, None, (),
+    absence = _absence(g, a, _events_at(t, pi, a, stop, last), d, c)
+    labels, cut = _labels_to(un, part, a, last, d, with_labels, at_bp)
+    return PairSpan(part.tag, mode, 'diverges', d, None, None, None, None, (),
                     {'path_reason': None, 'labels': {}}, labels, cut, False,
                     min(d, a.complete_to_bp), absence, g.k, g.regime)
 
@@ -2137,17 +2207,16 @@ def _fp_chain(a, seg):
     return [(x, 0) for x in derive.chain(a, seg)]
 
 
-def _route(un, t, pi, part, a, stub, m, j, d, path, length, into, with_labels, at_bp):
+def _route(un, t, pi, part, a, stub, m, j, d, below, into, with_labels, at_bp):
     """The pair's route from its merge |m| (entered from the stub through parent |j|)
-    along the union walk's remaining bases (§2.4 'Routes through merges')."""
+    along the union walk's remaining bases, those of the union segments |below| the stop
+    (§2.4 'Routes through merges')."""
     g = part.graphlet
     segs = a.segments
     # the union walk's remaining bases, walking order
     rest = []
-    for u in path:
+    for u in below:
         us = t.useg[u]
-        if us.to_bp <= d:
-            continue
         pi0 = min(us.cover)
         g0 = un.parts[pi0].graphlet
         for seg, f, to in us.pieces[pi0]:
@@ -2326,20 +2395,6 @@ def _carrying_labels(s):
     if s.how == 'merges' and s.route is not None and s.route.how == 'held':
         return s.route.labels or ()
     return ()
-
-
-def _without_labels(s):
-    s2 = PairSpan(*[getattr(s, f) for f in PairSpan.__slots__])
-    s2.labels = None
-    if s.route is not None:
-        r = Route(*[getattr(s.route, f) for f in Route.__slots__])
-        r.labels = ()
-        s2.route = r
-    return s2
-
-
-def _copy_walk(w):
-    return UnionWalk(*[getattr(w, f) for f in UnionWalk.__slots__])
 
 
 def _carrier_line(s):

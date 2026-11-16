@@ -120,12 +120,17 @@ __all__ = ['LocalLimits', 'LocalBudget', 'LocalStop', 'LocalBudgetExceeded', 'Pa
 #     4 W_ELEM per part segment (its element, the compare of its bases, at most two trie
 #     nodes, an edge and a cover entry) and 1 lwu per 16 of its bases, 600 bytes per part
 #     segment; the parts' own parses are the caller's (a union takes parsed models);
-#   * PairUnion's queries charge the parts' cold prices plus the trie work: the union walks
-#     of an arm (walks(), statements(), summary(), the exports) at their cold price on every
-#     call, per walk W_ROW and per pair W_ELEM per union segment of the walk's path plus 1 lwu
-#     per 16 bases of its depth (its span and the route through the pair's merges), with
-#     labels 4 W_ELEM more per pair and segment (the alive sets read along the chain), 300 +
-#     200 per pair bytes; segments() per union segment W_ROW and W_ELEM per entry label,
+#   * PairUnion's queries charge the parts' cold prices plus the trie work: an arm's walk
+#     figures (kind, length, whole_in, held_in: walks(), statements(), print(), summary(),
+#     the exports) at their cold price on every call, per union segment W_ELEM per pair (the
+#     stop carried down), per walk W_ROW and per pair W_ELEM plus 1 lwu per 16 bases of its
+#     depth (a merges span's route), 8 bytes per pair and union segment and 300 + 16 per
+#     pair bytes per walk; each walk built whole (a walk walks() returns, a walk labels=
+#     reads, an exported walk) W_ROW and per pair W_ELEM per union segment of its path plus
+#     1 lwu per 16 bases of its depth (its span and route), with labels 4 W_ELEM more per
+#     pair and segment (the alive sets read along the chain), 300 + 200 per pair + 8 per
+#     segment bytes; a part segment's label intervals are built once per union (counted in
+#     memory_bytes()); segments() per union segment W_ROW and W_ELEM per entry label,
 #     event and presence run of the part segments it covers (label_intervals(), linear),
 #     200 + 120 per pair bytes and a tuple of three ints per element; carriers() per pair
 #     W_ROW, W_STEP per 16 bases of the walk and W_ELEM per union segment, 600 + 120 per label

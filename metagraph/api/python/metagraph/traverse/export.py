@@ -1094,13 +1094,7 @@ def union_fasta(u, arm, walks, with_seed, orientation, width, at_bp, stubs, bud)
         if side not in u._arms:
             continue
         t = u._arms[side]
-        ws = u._all_walks(side, bud, with_labels=True)
-        if walks is not None:
-            want = set(walks)
-            ws = [w for w in ws if w.id in want]
-        for w in ws:
-            if w.kind == 'stub' and not stubs:
-                continue
+        for w in u._walks_full(side, bud, True, walks, stubs):
             if bud is not None:
                 n = w.length_bp + len(u._seed_seq)
                 bud.charge(W_RECORD + (n >> 8) + len(w.spans), 3 * (STR + n) + STR + 400)
@@ -1198,9 +1192,7 @@ def union_gfa(u, with_seed, labels, at_bp, bud):
             if par is not None:
                 a, b = (par, name) if side == 'right' else (name, par)
                 links.append('L\t%s\t+\t%s\t+\t0M' % (a, b))
-        for w in u._all_walks(side, bud, with_labels=True):
-            if w.kind != 'walk':
-                continue
+        for w in u._walks_full(side, bud, False, stubs=False):
             node = t.markers[w.id]
             names = ['s%d+' % t.useg[x].id for x in t.path_usegs(node)]
             if side == 'left':

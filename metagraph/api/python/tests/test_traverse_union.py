@@ -1246,6 +1246,75 @@ R237_BODIES = {'bact_other': 'cda902d0df71afab3d9fe1bcf33a04630468c22a1748777941
                    '6d48f657aa3af50bd79c3ed39126d42c4c8c1e1bc431f8f9d6d5155cc732d522'}
 
 
+def comb_part(n):
+    """test_traverse_scale's comb (n splits, each into a 1-bp leaf and the next spine
+    segment) with the merge fixture's envelope and seed, so it unions."""
+    from metagraph.traverse import parse
+    from tests.test_traverse_scale import comb_annotate
+    ref = T.graphlet('merge')
+    g = parse(comb_annotate(n))
+    g.envelope = copy.deepcopy(ref.envelope)
+    g.seed_summary = copy.deepcopy(ref.seed_summary)
+    return g
+
+
+class TestScale(unittest.TestCase):
+    """P5: construction, walks(top=3) and print() linear on a comb, n = 250, 1000 and 2000,
+    checked as ratios to n = 250, never as seconds: a linear cost grows 4 and 8 times, a
+    quadratic one 16 and 64 times; the bound is three times linear. A second part that
+    stops after 2 bp makes every walk's figures carry a stop below the walk's end."""
+
+    SIZES = (250, 1000, 2000)
+
+    @staticmethod
+    def best(fn, reps=5):
+        out = None
+        for _ in range(reps):
+            dt = fn()
+            out = dt if out is None else min(out, dt)
+        return out
+
+    def test_comb_is_linear(self):
+        import gc
+        import time
+        short = comb_part(1)
+        cost = {}
+        for n in self.SIZES:
+            parts = [{'pair': 'C', 'graphlet': comb_part(n)}, {'pair': 'D', 'graphlet': short}]
+
+            def timed(query):
+                u = union_pairs(parts)
+                t0 = time.perf_counter()
+                query(u)
+                return time.perf_counter() - t0
+
+            def build():
+                t0 = time.perf_counter()
+                union_pairs(parts)
+                return time.perf_counter() - t0
+
+            gc.disable()
+            try:
+                cost[n] = (self.best(build),
+                           self.best(lambda: timed(lambda u: u.walks('right', top=3))),
+                           self.best(lambda: timed(str)))
+            finally:
+                gc.enable()
+            u = union_pairs(parts)
+            top = u.walks('right', top=3)
+            # D's two walks first (held by both pairs, one whole in both), then C's longest
+            self.assertEqual([(w.length_bp, w.held_in, w.whole_in) for w in top],
+                             [(2, ('C', 'D'), ('C', 'D')), (2, ('C', 'D'), ('D',)),
+                              (n + 1, ('C',), ('C',))])
+            self.assertIn('walks: right %d (2 held by two or more pairs)' % (n + 2), str(u))
+        base = cost[self.SIZES[0]]
+        for n in self.SIZES[1:]:
+            bound = 3.0 * n / self.SIZES[0]
+            for what, t, t0 in zip(('construction', 'walks(top=3)', 'print'), cost[n], base):
+                self.assertLess(t / t0, bound, '%s at n=%d: %.4f s against %.4f s at n=%d'
+                                % (what, n, t, t0, self.SIZES[0]))
+
+
 class TestLoadGzip(unittest.TestCase):
     """load() reads a gzip file (the service's .mgt.gz export) as the text it holds,
     inflated as a stream within the local limits; a corrupt or truncated one is refused."""
