@@ -1051,6 +1051,9 @@ def _union_tokens(u, w, absent_tok, modes_tok, mapping_tok):
     lst('diverges', [_span_token(s) for s in w.spans if s.how == 'diverges'])
     lst('certified', ['%s:%d' % (e(s.pair), s.certified_to_bp) for s in w.spans
                       if s.how != 'none'])
+    # a stitched part's junctions the walk reads (experimental; every verdict qualified)
+    lst('junctions', ['%s@%d:%s' % (e(s.pair), j.at_bp, j.verdict) for s in w.spans
+                      for j in s.junctions])
     labs = []
     for s in w.spans:
         if s.pair in held:
@@ -1134,6 +1137,14 @@ def union_gfa(u, with_seed, labels, at_bp, bud):
                           'once per arm, so no path of this file runs from a left flank '
                           'through the seed into a right flank: each part\'s own GFA has '
                           'those paths'))
+    from ._stitch import StitchedGraphlet, walk_name
+    for p in u.parts:
+        if isinstance(p.graphlet, StitchedGraphlet) and p.graphlet.junctions:
+            lines.append(_comment(
+                'stitched (experimental): %s joins %s; nothing past a junction is complete '
+                'or exact' % (p.tag, ', '.join(
+                    '%s walk %s at %d bp (%s)' % (j.arm, walk_name(j.walk), j.at_bp, j.verdict)
+                    for j in p.graphlet.junctions))))
     from .union import SCOPE, TURN_OFFS, _core_sentence
     for side in (u.arms() or [None]):
         lines.append(_comment(_core_sentence(u.coverage(side, at_bp))))
@@ -1154,7 +1165,7 @@ def union_gfa(u, with_seed, labels, at_bp, bud):
             if u_in is None:
                 continue
             for pi, stub, m in items:
-                part = u.parts[pi]
+                part = u._src[pi]
                 ms = part.graphlet.arms[side].segments[m]
                 into = t.node_name(t.seg_nodes[pi][m][0], ms.length_bp,
                                    ms.walk[0] if ms.length_bp and ms.walk else None)
@@ -1168,18 +1179,20 @@ def union_gfa(u, with_seed, labels, at_bp, bud):
             text = w if side == 'right' else w[::-1]
             name = 's%d' % us.id
             tags = ['LN:i:%d' % len(text)]
-            pp = [u.parts[pi].tag for pi in sorted(us.cover)]
+            # sources: a part's are consecutive, at most one of them on a union segment
+            pp = [u._src[pi].tag for pi in sorted(us.cover)]
             tags.append('pp:Z:%s' % ','.join(e(x) for x in pp))
             pl = []
             for pi in sorted(us.cover):
-                part = u.parts[pi]
+                part = u._src[pi]
                 g = part.graphlet
+                off = part.offset
                 info = u._seg_labels(part, g.arms[side], bud)
                 ids = set()
                 cut = False
                 for seg, f, to in us.pieces[pi]:
                     for lab, a0, z0 in info(seg)[0]:
-                        if max(a0, f) < min(z0, to):
+                        if max(a0 + off, f) < min(z0 + off, to):
                             ids.add(lab)
                     cut = cut or info(seg)[2]
                 if labels == 'full':

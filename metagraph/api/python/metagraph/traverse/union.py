@@ -19,6 +19,16 @@ with every summary, printout and export (§2.1):
 Inferred paths (paths='inferred') are a later phase and are refused 'not_offered' here.
 Positions are outward from the seed's boundary in the seed's orientation; bases are compared
 in walking order (outward), so spellings compare across k, regime and radius.
+
+A StitchedGraphlet (_stitch.py, experimental) is one pair's answer (§2.3): its root goes
+into the trie as a plain part, and each child's first-parent tree at the trie node where the
+walk it continues ends (the continued walk ends no union walk there). Where no junction is
+read, the part answers as its root alone. A span read past a junction names the junctions it
+reads (PairSpan.junctions), is never complete, is certified at most to the first junction
+(the stitched walk's certified_to_bp), states absence 'graph' (a dead end) or 'uncertified'
+only, and carries the child's own labels from the junction on: labels are not joined across a
+junction (DESIGN-graphlet-merge.md D.1, phase 1b), so the union states less than
+StitchedWalk.labels_full.
 """
 
 import collections
@@ -34,13 +44,14 @@ from ._codec import REASON, GraphletFormatError
 from .attempts import TraverseResponse
 from .budget import (BASE_SHIFT, DICT, DICT_KEY, INT, LIST_ITEM, SET, SET_ITEM, STR, TUPLE,
                      W_ELEM, W_ROW, W_STEP, LocalBudgetExceeded, Partial)
+from ._stitch import StitchedGraphlet
 from .client import answered_pair
 from .model import ARM_SIDES, BadSelector, Graphlet, UnknownLabel
 
 __all__ = [
     'union_pairs', 'PairUnion', 'PairPart', 'PairAbsent', 'PairLabel', 'SpanLabel',
-    'LabelInterval', 'SegmentSupport', 'UnionSegment', 'Route', 'PairSpan', 'Carriers',
-    'UnionWalk', 'Coverage', 'Statements', 'TEXTS', 'CATEGORIES',
+    'LabelInterval', 'SegmentSupport', 'UnionSegment', 'Route', 'PairSpan', 'SpanJunction',
+    'Carriers', 'UnionWalk', 'Coverage', 'Statements', 'TEXTS', 'CATEGORIES',
 ]
 
 OP = 'union_pairs()'
@@ -53,9 +64,9 @@ TEXTS = {
     'bad_expected_str': 'expected_pairs= is a string: pass a list of graph names',
     'bad_seqs_order': 'seqs_order= maps pairs (graph names or pair objects) to "verified", '
                       '"count_only" or None, as GET /capabilities states them; %s is not one',
-    'not_combinable': 'union_pairs() takes results: a Graphlet, a TraverseResponse, '
-                      '{response, sequence}, or {pair, graphlet}, {pair, result} or '
-                      '{pair, error}; not %s',
+    'not_combinable': 'union_pairs() takes results: a Graphlet, a StitchedGraphlet, a '
+                      'TraverseResponse, {response, sequence}, or {pair, graphlet}, '
+                      '{pair, result} or {pair, error}; not %s',
     'view_unsupported': 'union_pairs() reads whole retrievals, not views: pass view.backing, '
                         'and select labels on the union (labels=)',
     'not_one_seed': 'result %s holds %d seed results: pass {response, index} for this '
@@ -199,6 +210,7 @@ class SegmentSupport:
     pieces: tuple               # (part segment id, from_bp, to_bp), in order
     labels: tuple               # LabelInterval, from the alive sets and runs, in order
     labels_cut: bool            # the lists read were cut (a lower bound)
+    part: tuple = ()            # a stitched part's sub-part key (Part.key); () for a plain part
 
 
 @dataclass(slots=True)
@@ -231,7 +243,8 @@ class PairSpan:
     mode: str
     how: str                    # whole | extends | ends | merges | diverges | none
     to_bp: int
-    walk: Optional[int]         # the part's path id (whole, extends, ends)
+    walk: Any                   # the part's path id (whole, extends, ends); past a junction
+                                # the stitched walk key (a tuple, StitchedWalk.key)
     stub_end: Optional[int]     # merges: the part segment ending the stub
     into: Optional[str]         # merges: the trie node of the merge, 's31' | 's30$'
     route: Optional[Route]      # merges only
@@ -244,6 +257,18 @@ class PairSpan:
     absence: Optional[str]      # graph | walk_rule | under_strategy | uncertified | None
     k: int = 0
     regime: str = ''
+    junctions: tuple = ()       # SpanJunction per junction of a stitched part the span reads
+
+
+@dataclass(frozen=True)
+class SpanJunction:
+    """A junction of a stitched part that a span reads (§2.3): where the child continues a
+    walk (|at_bp|, outward from the seed), the junction's |verdict| ('qualified': every verdict
+    in this phase), the child's part key (Part.key) and the junction's cause codes."""
+    at_bp: int
+    verdict: str
+    part: tuple
+    causes: tuple
 
 
 class Carriers(list):
@@ -309,10 +334,10 @@ class PairPart:
     key: tuple
     pair_stated_by: str         # 'envelope' | 'caller'
     seqs_order: str             # 'verified' | 'count_only' | 'none' | 'unknown'
-    graphlet: Any
+    graphlet: Any               # a Graphlet, or a StitchedGraphlet (experimental)
     identity: dict              # {verified, index_fp} | {verified: False, note}
     retrieval: tuple            # (pair key, retrieval identity as canonical JSON)
-    digest: str                 # the body's digest
+    digest: str                 # the body's digest (a stitched part's: StitchedGraphlet.digest)
 
 
 @dataclass(frozen=True)
@@ -340,6 +365,28 @@ class _Elem:
         self.cls = None
         self.kind = None           # 'part' | 'absent' | 'failed'
         self.by = None             # 'envelope' | 'caller'
+
+
+def _root(g):
+    """The graphlet a part's pair, envelope, seed, request and certificate are read from: a
+    stitched part's root (its children run on the same pair, §3.1), else the part itself."""
+    return g.root if isinstance(g, StitchedGraphlet) else g
+
+
+def _sub_graphlets(g):
+    """The retrievals a part holds: a stitched part's parts, root first, else the part."""
+    return [p.graphlet for p in g.parts] if isinstance(g, StitchedGraphlet) else [g]
+
+
+class _Src:
+    """One retrieval the trie reads: part |pi|'s graphlet, or one part of a stitched part
+    (|key| its Part.key, |offset| its Part.offset_bp, |parent| the source it continues,
+    |leaf| the parent's segment ending the walk it continues, |junction| that Junction)."""
+    __slots__ = ('pi', 'tag', 'graphlet', 'offset', 'key', 'parent', 'leaf', 'junction')
+
+    def __init__(self, pi, tag, graphlet, offset, key, parent, leaf, junction):
+        self.pi, self.tag, self.graphlet, self.offset = pi, tag, graphlet, offset
+        self.key, self.parent, self.leaf, self.junction = key, parent, leaf, junction
 
 
 def _describe(x):
@@ -422,7 +469,7 @@ def _seed_meta(result):
 def _classify(results):
     elems = []
     for i, x in enumerate(results):
-        if C.is_view(x) or isinstance(x, Graphlet):
+        if C.is_view(x) or isinstance(x, (Graphlet, StitchedGraphlet)):
             e = _Elem(i, 'graphlet')
             e.graphlet = x
         elif isinstance(x, TraverseResponse):
@@ -442,7 +489,8 @@ def _classify(results):
                 e.response, e.sequence = x['response'], x['sequence']
             elif 'pair' in keys and _pair_desc(x['pair']) is not None:
                 rest = keys - {'pair'}
-                if rest == {'graphlet'} and (isinstance(x['graphlet'], Graphlet)
+                if rest == {'graphlet'} and (isinstance(x['graphlet'],
+                                                        (Graphlet, StitchedGraphlet))
                                              or C.is_view(x['graphlet'])):
                     e = _Elem(i, 'pair_graphlet')
                     e.graphlet = x['graphlet']
@@ -509,9 +557,9 @@ def union_pairs(results, *, seed=None, expected_pairs=None, seqs_order=None, bud
     """The cross-pair union of one seed's results (§2): a new PairUnion every time, its parts
     held by reference, never copied or modified.
 
-    results: a list of Graphlet | TraverseResponse (one seed) | {response, index} |
-    {response, sequence} | {pair, graphlet} | {pair, result[, error][, sequence]} |
-    {pair, error}. seed: the oriented seed sequence; required only when no result carries a
+    results: a list of Graphlet | StitchedGraphlet (experimental, §2.3) | TraverseResponse
+    (one seed) | {response, index} | {response, sequence} | {pair, graphlet} | {pair,
+    result[, error][, sequence]} | {pair, error}. seed: the oriented seed sequence; required only when no result carries a
     graphlet. expected_pairs: the pairs the request was sent to (graph names or pair
     objects); None: not known, and every statement is then over the pairs given.
     seqs_order: pair (a graph name, or a (graph, graph_path, annotation_path) tuple) ->
@@ -643,13 +691,15 @@ class PairUnion:
         # MissingEnvelope
         for e in elems:
             if e.kind == 'part':
-                C.require_envelope(e.graphlet, OP)
-        # pair_mismatch: the stated pair against the envelope's
+                C.require_envelope(_root(e.graphlet), OP)
+        # pair_mismatch: the stated pair against the envelope's (a stitched part's: its
+        # root's; stitch() checked its parts against each other)
         for e in elems:
             if e.kind == 'part':
-                env = _env_desc(e.graphlet.envelope, e.graphlet)
+                g0 = _root(e.graphlet)
+                env = _env_desc(g0.envelope, g0)
                 if e.stated is not None:
-                    if answered_pair(e.graphlet.envelope) is not None or any(
+                    if answered_pair(g0.envelope) is not None or any(
                             e.stated.get(k) and env.get(k) and e.stated[k] != env[k]
                             for k in ('index_fp', 'index_meta_fp', 'index_ns')):
                         if not _matches(e.stated, env):
@@ -688,16 +738,16 @@ class PairUnion:
         # no_bases, different_alphabet
         parts = [e for e in elems if e.kind == 'part']
         for e in parts:
-            if not C.has_bases(e.graphlet):
+            if not all(C.has_bases(g) for g in _sub_graphlets(e.graphlet)):
                 raise _refuse('no_bases', None, tags[id(cls_of[id(e.desc)])])
         if parts:
             ref = parts[0]
             ref_tag = tags[id(cls_of[id(ref.desc)])]
             for e in parts[1:]:
-                if C.alphabet_key(e.graphlet) != C.alphabet_key(ref.graphlet):
+                if C.alphabet_key(_root(e.graphlet)) != C.alphabet_key(_root(ref.graphlet)):
                     raise _refuse('different_alphabet', None, tags[id(cls_of[id(e.desc)])],
-                                  C.alphabet_key(e.graphlet), ref_tag,
-                                  C.alphabet_key(ref.graphlet))
+                                  C.alphabet_key(_root(e.graphlet)), ref_tag,
+                                  C.alphabet_key(_root(ref.graphlet)))
         # different_seed
         alphabet = parts[0].graphlet.alphabet if parts else None
         if parts:
@@ -742,7 +792,10 @@ class PairUnion:
                 expected_pairs, b):
         if b is not None:
             n = sum(1 for e in kept['by_class'].values() if e.kind == 'part')
-            b.charge(W_ROW * len(classes), _M_PART * n + _M_RECORD * (
+            # a part record per part, and per sub-part of a stitched part (its source)
+            ns = sum(len(_sub_graphlets(e.graphlet)) for e in kept['by_class'].values()
+                     if e.kind == 'part')
+            b.charge(W_ROW * len(classes), _M_PART * ns + _M_RECORD * (
                 len(classes) - n + sum(map(len, kept['failures'].values()))))
         parts, absent = [], []
         self._failures = []
@@ -752,10 +805,17 @@ class PairUnion:
             key = _key(c['desc'])
             if e is not None and e.kind == 'part':
                 g = e.graphlet
-                ident = _identity_statement(g)
-                ri = C.retrieval_identity(g)
-                parts.append(PairPart(tag, key, e.by, seqs[id(c)], g, ident,
-                                      (key, C.canonical_json(ri)), C.part_digest(g)))
+                if isinstance(g, StitchedGraphlet):
+                    # its digest is its retrieval identity (§2.3, C.2); stitch(g), no
+                    # junction, states g's identity
+                    ident = dict(g.identity) if g.junctions else _identity_statement(g.root)
+                    parts.append(PairPart(tag, key, e.by, seqs[id(c)], g, ident,
+                                          (key, C.canonical_json(g.digest)), g.digest))
+                else:
+                    ident = _identity_statement(g)
+                    ri = C.retrieval_identity(g)
+                    parts.append(PairPart(tag, key, e.by, seqs[id(c)], g, ident,
+                                          (key, C.canonical_json(ri)), C.part_digest(g)))
             elif e is not None:
                 if e.kind == 'absent':
                     detail = _absent_detail(e)
@@ -791,9 +851,10 @@ class PairUnion:
         self._tag_index = {p.tag: i for i, p in enumerate(self.parts)}
         self._exp_given = expected_pairs is not None
         self._expected_raw = [C.canonical_json(d) for d in (exp or [])]
+        self._sources(b)
         self._arms = {}
         for side in ARM_SIDES:
-            if any(side in p.graphlet.arms for p in self.parts):
+            if any(side in _root(p.graphlet).arms for p in self.parts):
                 self._arms[side] = _Trie(self, side, b)
         self._number_segments()
         self.digest = C.combined_digest([
@@ -859,6 +920,45 @@ class PairUnion:
     def _trie(self, arm):
         return self._arms.get(self._side(arm))
 
+    def _sources(self, b=None):
+        """The sources the trie reads, one per retrieval: a plain part's graphlet, or each
+        part of a stitched part, root first (Part order: a parent before its children). For
+        a union without a stitched part source i is part i."""
+        self._src, self._root_src = [], []
+        for pi, p in enumerate(self.parts):
+            g = p.graphlet
+            self._root_src.append(len(self._src))
+            if not isinstance(g, StitchedGraphlet):
+                self._src.append(_Src(pi, p.tag, g, 0, (), None, None, None))
+                continue
+            index = {}
+            js = {j.part: j for j in g.junctions}
+            for sp in g.parts:
+                parent = leaf = None
+                if sp.key:
+                    parent = index[sp.key[:-1]]
+                    side, pid = sp.key[-1]
+                    pg = self._src[parent].graphlet
+                    pa = pg.arms[side]
+                    derive.uses(b, pg, pa, 'paths')
+                    leaf = derive.paths(pa)[pid].leaf
+                index[sp.key] = len(self._src)
+                self._src.append(_Src(pi, p.tag, sp.graphlet, sp.offset_bp, sp.key, parent,
+                                      leaf, js.get(sp.key)))
+
+    def _resolve(self, t, pi, node):
+        """(source, stop, below) of part |pi| on the union walk ending at trie node |node|:
+        t.stop_of() of the part's root; where that stop is where a child continues the
+        walk (a graft), the child's own stop below it, and so on down the chain."""
+        si = self._root_src[pi]
+        stop, below = t.stop_of(si, node)
+        while True:
+            c = t.graft.get((si, stop))
+            if c is None:
+                return si, stop, below
+            stop, below = t.stop_of(c, node, stop)
+            si = c
+
     def _number_segments(self):
         n = 0
         for side in ARM_SIDES:
@@ -871,7 +971,9 @@ class PairUnion:
         a part segment, built once per union (counted in memory_bytes()). |b|: each segment
         read is charged once per call at its cold price (label_intervals()' own, and its
         end set), whether the union holds it or not."""
-        key = (part.tag, a.side)
+        # |part|: a source (a stitched part's sub-parts each have their own segments)
+        key = (part.tag, a.side) if not getattr(part, 'key', ()) else (part.tag, a.side,
+                                                                         part.key)
         cache = self._seg_cache.get(key)
         if cache is None:
             cache = self._seg_cache[key] = {}
@@ -937,13 +1039,13 @@ class PairUnion:
             if len(tags) > 1:
                 raise _refuse('ambiguous_name', None, name, ', '.join(tags))
             p = hits[0][0]
-            return self._pair_label(p, _ops.label(p.graphlet, {'name': name}).id)
+            return self._pair_label(p, _label_in(p.graphlet, {'name': name}).id)
         if keys in ({'pair', 'ref'}, {'pair', 'name'}):
             p = self._part_of.get(selector['pair'])
             if p is None:
                 raise UnknownLabel('no part has the tag %r' % (selector['pair'],))
             k = 'ref' if 'ref' in keys else 'name'
-            return self._pair_label(p, _ops.label(p.graphlet, {k: selector[k]}).id)
+            return self._pair_label(p, _label_in(p.graphlet, {k: selector[k]}).id)
         raise BadSelector('a pair union selects labels by {pair, ref}, {pair, name} or {name}, '
                           'not %r' % (selector,))
 
@@ -985,12 +1087,15 @@ class PairUnion:
     def _default_depth(self):
         r = 0
         for p in self.parts:
-            bounds = ((p.graphlet.envelope or {}).get('strategy') or {}).get('bounds') or {}
+            # a stitched part: its root's request (stitching certifies nothing past the
+            # root's complete_to_bp, §3.5)
+            g = _root(p.graphlet)
+            bounds = ((g.envelope or {}).get('strategy') or {}).get('bounds') or {}
             v = bounds.get('max_extension_bp')
             if isinstance(v, int) and not isinstance(v, bool):
                 r = max(r, v)
             else:
-                r = max([r] + [a.complete_to_bp for a in p.graphlet.arms.values()])
+                r = max([r] + [a.complete_to_bp for a in g.arms.values()])
         return r
 
     def coverage(self, arm=None, at_bp=None):
@@ -1191,7 +1296,7 @@ class PairUnion:
         us = t.useg[sid]
         n = 0
         for pi in us.cover:
-            part = self.parts[pi]
+            part = self._src[pi]
             info = self._seg_labels(part, part.graphlet.arms[t.side], b)
             for x in us.pieces[pi]:
                 n += len(info(x[0])[0])
@@ -1200,20 +1305,23 @@ class PairUnion:
     def _segment(self, t, sid, b=None):
         us = t.useg[sid]
         sup = []
+        # sources in order: a part's sources are consecutive and at most one of them
+        # spells a union segment, so this is the canonical pair order
         for pi in sorted(us.cover):
-            part = self.parts[pi]
+            part = self._src[pi]
+            off = part.offset
             info = self._seg_labels(part, part.graphlet.arms[t.side], b)
             ivs = []
             cut = False
             for seg, f, to in us.pieces[pi]:
                 for lab, a, z in info(seg)[0]:
-                    lo, hi = max(a, f), min(z, to)
+                    lo, hi = max(a + off, f), min(z + off, to)
                     if lo < hi:
                         ivs.append(LabelInterval(self._pair_label(part, lab), lo, hi))
                 cut = cut or info(seg)[2]
             last = us.pieces[pi][-1][0]
             sup.append(SegmentSupport(part.tag, t.below_walks[pi][last], t.below_stubs[pi][last],
-                                      tuple(us.pieces[pi]), tuple(ivs), cut))
+                                      tuple(us.pieces[pi]), tuple(ivs), cut, part.key))
         return UnionSegment(us.id, t.side, us.from_bp, us.to_bp,
                             None if us.parent is None else t.useg[us.parent].id,
                             tuple(t.useg[c].id for c in us.children), tuple(sup))
@@ -1228,20 +1336,21 @@ class PairUnion:
         (memory_bytes() counts it); charged at its cold price on every call."""
         t = self._arms[side]
         n = len(self.parts)
+        ns = len(self._src)
         if b is not None:
-            # per union segment a stop per part, per walk a step per part and, for a part
-            # that merges, its route along at most the walk's length (one span at a time);
-            # the derivations a span reads; the stops are dropped at the end, the figures
-            # kept
-            w = W_ELEM * n * len(t.order)
+            # per union segment a stop per source, per walk a step per source and, for a
+            # part that merges, its route along at most the walk's length (one span at a
+            # time); the derivations a span reads; the stops are dropped at the end, the
+            # figures kept
+            w = W_ELEM * ns * len(t.order)
             for node in t.markers:
-                w += W_ROW + n * (W_ELEM + (t.depth[node] >> 4))
-            for p in self.parts:
+                w += W_ROW + ns * (W_ELEM + (t.depth[node] >> 4))
+            for p in self._src:
                 a = p.graphlet.arms.get(side)
                 if a is not None:
                     derive.uses(b, p.graphlet, a, 'first_paths', *(
                         ('end_labels',) if p.graphlet.mode == 'constrain' else ()))
-            tmp = len(t.order) * (TUPLE + 8 * n + LIST_ITEM) + _M_SPAN
+            tmp = len(t.order) * (TUPLE + 8 * ns + LIST_ITEM) + _M_SPAN
             b.charge(w, tmp + len(t.markers) * (_M_FIG + 16 * n))
         got = self._fig_cache.get(side)
         if got is None:
@@ -1251,13 +1360,16 @@ class PairUnion:
         return got
 
     def _build_figures(self, t, side, n):
-        has_arm = [side in p.graphlet.arms for p in self.parts]
-        root = (0,) * n
+        has_arm = [side in _root(p.graphlet).arms for p in self.parts]
+        ns = len(self._src)
+        # a stop per source; a child source's is None until it spells a segment (its stop
+        # is then where it continues the walk, PairUnion._resolve())
+        root = tuple(0 if s.parent is None else None for s in self._src)
         stops = [None] * len(t.useg)
         for u in t.order:
             us = t.useg[u]
             up = root if us.parent is None else stops[us.parent]
-            stops[u] = tuple(us.end if pi in us.cover else up[pi] for pi in range(n))
+            stops[u] = tuple(us.end if si in us.cover else up[si] for si in range(ns))
         out = []
         for wid, node in enumerate(t.markers):
             u = t.node_in.get(node)
@@ -1267,7 +1379,14 @@ class PairUnion:
             for pi in range(n):
                 if not has_arm[pi]:
                     continue
-                how, _ = _case(t, pi, st[pi], length)
+                si = self._root_src[pi]
+                stop = st[si]
+                while True:
+                    c = t.graft.get((si, stop))
+                    if c is None:
+                        break
+                    si, stop = c, (stop if st[c] is None else st[c])
+                how, _ = _case(t, si, stop, length)
                 if how == 'whole':
                     whole.append(self.parts[pi].tag)
                     held.append(self.parts[pi].tag)
@@ -1288,9 +1407,10 @@ class PairUnion:
         read along its chain."""
         d = t.nsegs(node)
         n = len(self.parts)
-        w = W_ROW + n * (W_ELEM * (1 + d) + (t.depth[node] >> 4))
+        ns = len(self._src)
+        w = W_ROW + ns * (W_ELEM * (1 + d) + (t.depth[node] >> 4))
         if with_labels:
-            w += n * W_ELEM * 4 * (1 + d)
+            w += ns * W_ELEM * 4 * (1 + d)
         # the walk, its path (a slot and an id per union segment) and the spans' tuple; each
         # span charges itself (_span)
         b.charge(w, _walk_bytes(d, n))
@@ -1445,9 +1565,10 @@ class PairUnion:
         for u in path:
             us = t.useg[u]
             pi = min(us.cover)
-            g = self.parts[pi].graphlet
+            g = self._src[pi].graphlet
+            off = self._src[pi].offset
             for seg, f, to in us.pieces[pi]:
-                pieces.append((g, t.side, seg, f, to))
+                pieces.append((g, t.side, seg, f - off, to - off))
         w = C.spell_pieces(pieces, t.side, 'walk')
         seed = self._seed_seq
         if orientation == 'natural':
@@ -1561,8 +1682,7 @@ class PairUnion:
             return len(C.canonical_json(o)) <= max_bytes
 
         cand = dict(out)
-        cand['pairs'] = {p.tag: {'part': True, 'mode': p.graphlet.mode, 'k': p.graphlet.k,
-                                 'stated_by': p.pair_stated_by} for p in self.parts}
+        cand['pairs'] = {p.tag: _summary_part(p) for p in self.parts}
         cand['pairs'].update({a.tag: {'absent': a.category, 'seed_check': a.seed_check}
                               for a in self.absent})
         cand['pairs'].update({t: {'not_included': True} for t in self._not_included})
@@ -1604,8 +1724,7 @@ class PairUnion:
         statements (without an arm: each arm's coverage sentence, then the provenance over
         every arm, the turn-offs, the labels and the scope)."""
         side = None if arm is None else self._side(arm)
-        ev = C.combined_evidence([(p.tag, p.graphlet, p.identity.get('verified'))
-                                  for p in self.parts], side)
+        ev = _combined_evidence(self.parts, side)
         if side is not None or not self.parts:
             sentences = self.statements(side).sentences()
         else:
@@ -1634,17 +1753,22 @@ class PairUnion:
         from .store import GraphletStore
         out = []
         for p in self.parts:
-            g = p.graphlet
+            g = _root(p.graphlet)
             pair = dict(zip(_KEY_FIELDS, p.key))
-            out.append({'tag': p.tag, 'kind': 'part', 'pair': pair,
-                        'pair_stated_by': p.pair_stated_by, 'identity': p.identity,
-                        'seed_id': ((g.seed_summary or {}).get('seed') or {}).get('seed_id'),
-                        'digest': p.digest,
-                        'request': GraphletStore.request_of(
-                            g, graph=pair['graph'], graph_path=pair['graph_path'],
-                            annotation_path=pair['annotation_path'])
-                        if p.pair_stated_by == 'caller' and pair['graph'] else
-                        GraphletStore.request_of(g)})
+            entry = {'tag': p.tag, 'kind': 'part', 'pair': pair,
+                     'pair_stated_by': p.pair_stated_by, 'identity': p.identity,
+                     'seed_id': ((g.seed_summary or {}).get('seed') or {}).get('seed_id'),
+                     'digest': p.digest,
+                     'request': GraphletStore.request_of(
+                         g, graph=pair['graph'], graph_path=pair['graph_path'],
+                         annotation_path=pair['annotation_path'])
+                     if p.pair_stated_by == 'caller' and pair['graph'] else
+                     GraphletStore.request_of(g)}
+            if isinstance(p.graphlet, StitchedGraphlet) and p.graphlet.junctions:
+                # a stitched part: its root's request above, and each child's entry
+                # (StitchedGraphlet.provenance()): no single request reproduces it
+                entry['stitched'] = p.graphlet.provenance()[1:]
+            out.append(entry)
         for a in self.absent:
             out.append({'tag': a.tag, 'kind': 'absent', 'pair': dict(zip(_KEY_FIELDS, a.key)),
                         'pair_stated_by': a.pair_stated_by, 'category': a.category,
@@ -1751,8 +1875,11 @@ def _dedupe(elems, cls_of, tags):
             continue
         tag = tags[id(c)]
         if prev.kind == 'part' and e.kind == 'part':
-            same_body = C.part_digest(prev.graphlet) == C.part_digest(e.graphlet)
-            ra, rb = C.retrieval_identity(prev.graphlet), C.retrieval_identity(e.graphlet)
+            # a stitched part: its digest is its body and its retrieval identity, so two
+            # equal ones are a no-op, and one beside a plain graphlet of its pair is
+            # duplicate_pair (stitch(g) and g included)
+            same_body = _body_digest(prev.graphlet) == _body_digest(e.graphlet)
+            ra, rb = _retrieval_of(prev.graphlet), _retrieval_of(e.graphlet)
             if same_body and ra == rb:
                 # a no-op: the envelope-stated form wins; of two, the smaller envelope
                 if _prefer(e, prev):
@@ -1800,13 +1927,85 @@ def _part_rank(e):
     """Which of two forms of one retrieval is kept: the envelope-stated one, then the
     envelope's canonical JSON, then the seed summary's (the caller's seed_id) and the
     stated pair: a total order over what the union reports of a part."""
-    g = e.graphlet
+    g = _root(e.graphlet)
     return (e.by != 'envelope', C.canonical_json(g.envelope),
             C.canonical_json(g.seed_summary or {}), C.canonical_json(e.stated or {}))
 
 
 def _prefer(e, prev):
     return _part_rank(e) < _part_rank(prev)
+
+
+def _body_digest(g):
+    return g.digest if isinstance(g, StitchedGraphlet) else C.part_digest(g)
+
+
+def _retrieval_of(g):
+    return {'stitched': g.digest} if isinstance(g, StitchedGraphlet) else \
+        C.retrieval_identity(g)
+
+
+def _label_in(g, selector):
+    """A label of a part by {'ref'} or {'name'}: a stitched part's over its parts' labels
+    (StitchedGraphlet.label(); ids in its own numbering)."""
+    return g.label(selector) if isinstance(g, StitchedGraphlet) else _ops.label(g, selector)
+
+
+def _arm_junctions(g, side):
+    """The junctions of a stitched part on |side| (every arm: None); () for a plain part."""
+    if not isinstance(g, StitchedGraphlet):
+        return ()
+    return tuple(j for j in g.junctions if side is None or j.arm == side)
+
+
+def _junction_note(g, side):
+    """The coverage note of a stitched part's junctions on |side|, or None: its category is
+    its root's (stitching certifies nothing past a junction)."""
+    js = _arm_junctions(g, side)
+    if not js:
+        return None
+    verdicts = sorted({j.verdict for j in js})
+    return 'stitched (experimental): junction%s at %s bp, %s; nothing past a junction is ' \
+        'certified' % ('s' if len(js) > 1 else '', ', '.join(str(j.at_bp) for j in js),
+                       ' or '.join(verdicts))
+
+
+def _summary_part(p):
+    out = {'part': True, 'mode': p.graphlet.mode, 'k': p.graphlet.k,
+           'stated_by': p.pair_stated_by}
+    js = _arm_junctions(p.graphlet, None)
+    if js:
+        out['junctions'] = [{'arm': j.arm, 'at_bp': j.at_bp, 'verdict': j.verdict,
+                             'causes': [c[0] for c in j.causes]} for j in js]
+    return out
+
+
+def _part_block(p, side):
+    """A part's evidence block: its own (ops.evidence_block()); a stitched part's
+    StitchedGraphlet.evidence() where it has a junction on |side| (every arm: None), its
+    root's otherwise (no junction is read there)."""
+    g = p.graphlet
+    if _arm_junctions(g, side):
+        return g.evidence(side)
+    g = _root(g)
+    return _ops.evidence_block(g, side if side is None or side in g.arms else None)
+
+
+def _combined_evidence(parts, side):
+    """composite.combined_evidence() over the parts, a stitched part's block by
+    _part_block()."""
+    if not any(_arm_junctions(p.graphlet, side) for p in parts):
+        return C.combined_evidence([(p.tag, _root(p.graphlet), p.identity.get('verified'))
+                                    for p in parts], side)
+    blocks = {}
+    exact = True
+    for p in parts:
+        blk = _part_block(p, side)
+        blocks[p.tag] = blk
+        exact = exact and bool(blk.get('exact')) and bool(p.identity.get('verified'))
+    return {'parts': blocks,
+            'outcome': C.weakest_outcome([x.get('outcome') for x in blocks.values()]),
+            'exact': exact and bool(blocks)}
 
 
 def _identity_statement(g):
@@ -1842,7 +2041,16 @@ def _cut60(text):
 
 
 def _part_category(p, side, depth):
-    g = p.graphlet
+    """A part's coverage entry; a stitched part's is its root's, with a note naming its
+    junctions on |side|."""
+    got = _root_category(_root(p.graphlet), side, depth)
+    note = _junction_note(p.graphlet, side) if side is not None else None
+    if note:
+        got['note'] = note if not got.get('note') else '%s; %s' % (got['note'], note)
+    return got
+
+
+def _root_category(g, side, depth):
     if side is None or side not in g.arms:
         return {'category': 'arm_not_walked', 'certified_to_bp': 0,
                 'note': None if side is None else 'direction %s' % (
@@ -1922,7 +2130,8 @@ class _Trie:
 
     def __init__(self, union, side, b):
         self.side = side
-        self.parts = union.parts
+        # the sources (PairUnion._sources()): part i for a union without a stitched part
+        self.parts = union._src
         order = union._order
         self.kids = [{}]                # node -> {char: edge}
         self.depth = [0]
@@ -1933,15 +2142,35 @@ class _Trie:
         self.seg_nodes = []             # pi -> {seg: (start node, end node)}
         self.zero_at = {}               # node -> [(pi, zero-length seg)]
         self.below_walks, self.below_stubs = [], []
+        # a stitched part (§2.3): a child's tree goes in where the walk it continues ends,
+        # (parent source, that node) -> the child's source; the continued leaf ends no walk
+        self.graft = {}
+        self.graft_nodes = set()
+        self.continued = {}             # (parent source, leaf seg) -> the child's source
+        for si, src in enumerate(self.parts):
+            if src.parent is not None and side in src.graphlet.arms:
+                self.continued[(src.parent, src.leaf)] = si
+        fp_kids_of = []
         for pi, part in enumerate(self.parts):
             g = part.graphlet
             a = g.arms.get(side)
             self.seg_nodes.append({})
             self.below_walks.append({})
             self.below_stubs.append({})
+            fp_kids_of.append(None)
             if a is None:
                 continue
-            self._insert_part(pi, part, g, a, b)
+            start = 0
+            if part.parent is not None:
+                start = self.seg_nodes[part.parent][part.leaf][1]
+                self.graft[(part.parent, start)] = pi
+                self.graft_nodes.add(start)
+            fp_kids_of[pi] = self._insert_part(pi, part, g, a, b, start)
+        # the walks and stubs below each segment (first-parent subtree), children before
+        # their parents: a continued leaf counts its child's
+        for pi in range(len(self.parts) - 1, -1, -1):
+            if fp_kids_of[pi] is not None:
+                self._below(pi, self.parts[pi].graphlet.arms[side], fp_kids_of[pi])
         if b is not None:
             # the union segments at their bound: one per raw edge, a piece per cover entry
             b.charge(W_ELEM * len(self.e_from),
@@ -2010,7 +2239,9 @@ class _Trie:
             i += m
         return node
 
-    def _insert_part(self, pi, part, g, a, b):
+    def _insert_part(self, pi, part, g, a, b, start=0):
+        """Insert source |pi|'s first-parent tree at trie node |start| (the root, or where a
+        stitched child continues its walk) -> the first-parent children per segment."""
         segs = a.segments
         if b is not None:
             # one pass over the part's first-parent tree: an element per segment, its bases
@@ -2034,7 +2265,7 @@ class _Trie:
                 roots.append(s.id)
         pol = derive.path_of_leaf(a)
         nodes = self.seg_nodes[pi]
-        stack = [(r, 0) for r in reversed(roots)]
+        stack = [(r, start) for r in reversed(roots)]
         first = {}                      # (trie node, first base) -> the segment starting so
         while stack:
             sid, start = stack.pop()
@@ -2057,7 +2288,8 @@ class _Trie:
                 self.merge_at.setdefault(start, []).append((pi, sid))
             kids = fp_kids[sid]
             if s.leaf is not None:
-                self.walk_end.setdefault(end, []).append((pi, sid, pol[sid]))
+                if (pi, sid) not in self.continued:
+                    self.walk_end.setdefault(end, []).append((pi, sid, pol[sid]))
             elif not kids:
                 merges = [c for c in s.children if segs[c].parents[0] != sid]
                 if len(merges) != 1:
@@ -2072,11 +2304,21 @@ class _Trie:
                     % (part.tag, sid, self.side))
             for c in reversed(kids):
                 stack.append((c, end))
-        # the walks and stubs below each segment (first-parent subtree)
+        return fp_kids
+
+    def _below(self, pi, a, fp_kids):
+        """The walks and stubs below each segment of source |pi| (first-parent subtree); a
+        continued leaf ends no walk and counts those of the child continuing it."""
         bw, bs = self.below_walks[pi], self.below_stubs[pi]
-        for s in reversed(segs):
-            w = 1 if s.leaf is not None else 0
-            st = 1 if (s.leaf is None and not fp_kids[s.id]) else 0
+        for s in reversed(a.segments):
+            c = self.continued.get((pi, s.id)) if s.leaf is not None else None
+            if c is not None:
+                ca = self.parts[c].graphlet.arms[self.side]
+                w = sum(self.below_walks[c][r.id] for r in ca.segments if not r.parents)
+                st = sum(self.below_stubs[c][r.id] for r in ca.segments if not r.parents)
+            else:
+                w = 1 if s.leaf is not None else 0
+                st = 1 if (s.leaf is None and not fp_kids[s.id]) else 0
             for c in fp_kids[s.id]:
                 w += bw[c]
                 st += bs[c]
@@ -2114,7 +2356,8 @@ class _Trie:
                 while True:
                     k = self.kids[cur]
                     if len(k) != 1 or cur in self.walk_end or cur in self.stub_end \
-                            or cur in self.merge_at or cur in self.zero_at:
+                            or cur in self.merge_at or cur in self.zero_at \
+                            or cur in self.graft_nodes:
                         break
                     (e2,) = k.values()
                     if set(self.e_cover[e2]) != set(u.cover):
@@ -2126,10 +2369,12 @@ class _Trie:
                 u.pieces = {}
                 for pi in u.cover:
                     ps = []
+                    # positions outward from the seed: a stitched child's at its offset
+                    base = self.parts[pi].offset
                     for x in edges:
                         seg, off = self.e_cover[x][pi]
                         s = self.parts[pi].graphlet.arms[self.side].segments[seg]
-                        f = s.from_bp + off
+                        f = base + s.from_bp + off
                         t = f + self.e_len[x]
                         if ps and ps[-1][0] == seg and ps[-1][2] == f:
                             ps[-1] = (seg, ps[-1][1], t)
@@ -2175,13 +2420,15 @@ class _Trie:
         u = self.node_in.get(node)
         return 0 if u is None else self.useg[u].n
 
-    def stop_of(self, pi, node):
+    def stop_of(self, pi, node, floor=None):
         """(stop, below): the deepest node on the path to |node| whose spellings part |pi|
         follows (covers are prefix-closed), and the union segments past it to |node|, root
-        first. Costs the segments past the stop only."""
+        first. Costs the segments past the stop only. |floor|: a stitched child's graft
+        node, where it starts (its stop when it spells nothing of the path below it)."""
         below = []
         u = self.node_in.get(node)
-        while u is not None and pi not in self.useg[u].cover:
+        while u is not None and pi not in self.useg[u].cover \
+                and (floor is None or self.useg[u].end != floor):
             below.append(u)
             u = self.useg[u].parent
         below.reverse()
@@ -2191,7 +2438,8 @@ class _Trie:
         """The segment of part |pi| (arm |a|) that holds the stop's depth: the last piece
         of the union segment ending at |stop|, or the arm's root at the trie root."""
         u = self.node_in.get(stop)
-        if u is None:
+        if u is None or pi not in self.useg[u].cover:
+            # the trie root, or a stitched child's graft node: the arm's root segment
             return next((s.id for s in a.segments if not s.parents), None)
         return self.useg[u].pieces[pi][-1][0]
 
@@ -2288,79 +2536,150 @@ def _case(t, pi, stop, length):
 
 def _labels_to(un, part, a, seg, end, with_labels, at_bp, b=None):
     """_labels_for() along the first-parent chain to |seg| (the chain built only when the
-    query computes labels)."""
+    query computes labels). |part|: the source (_labels_src())."""
     if not with_labels:
         return None, False
     if seg is None:
         return (), False
-    return _labels_for(un, part, a, _fp_chain(a, seg), end, True, at_bp, b)
+    return _labels_src(un, part, a, lambda: _fp_chain(a, seg), end, at_bp, b)
+
+
+def _labels_src(un, src, a, chain, end, at_bp, b=None):
+    """_labels_for() of source |src| at outward depth |end| (or |at_bp| when smaller) along
+    chain() -> (SpanLabels, cut), positions outward from the seed. A stitched child's labels
+    are its own from the junction on (from_bp at least its offset: not joined across a
+    junction, D.1); at a depth no base of the child reaches, its parent's along the walk it
+    continues."""
+    e = end if at_bp is None else min(end, at_bp)
+    if src.key and e <= src.offset:
+        p = un._src[src.parent]
+        pa = p.graphlet.arms[a.side]
+        return _labels_src(un, p, pa, lambda: _fp_chain(pa, src.leaf), e, None, b)
+    if not src.offset:
+        return _labels_for(un, src, a, chain(), end, True, at_bp, b)
+    got, cut = _labels_for(un, src, a, chain(), e - src.offset, True, None, b)
+    return tuple(SpanLabel(x.label, x.from_bp + src.offset) for x in got), cut
+
+
+def _absence_at(src, g, a, segs_here, d, c, code=None):
+    """_absence() at local depth |d| of source |src|; past a junction (a stitched child)
+    only a dead end is the graph's, every other turn-off 'uncertified' (§2.3): the child's
+    own seed re-entry and edge history may block where the reference goes on."""
+    if src.key:
+        return 'graph' if code is not None and code[0] == 'D' else 'uncertified'
+    return _absence(g, a, segs_here, d, c, code)
+
+
+def _past_junction(un, src, span):
+    """A span read in a stitched child (§2.3): its walk named by its stitched key, never
+    complete, certified at most to the first junction (the stitched walk's certified_to_bp:
+    no junction is exact in this phase), and the junctions it reads, root first."""
+    if not src.key:
+        return span
+    js = []
+    s = src
+    while s.key:
+        j = s.junction
+        js.append(SpanJunction(j.at_bp, j.verdict, j.part, tuple(c[0] for c in j.causes)))
+        first = s
+        s = un._src[s.parent]
+    js.reverse()
+    # the root's certificate on the walk the first child continues: its certified_to_bp
+    side, pid = first.key[0]
+    ra = s.graphlet.arms[side]
+    cert = min(derive.paths(ra)[pid].length_bp, ra.complete_to_bp)
+    if span.walk is not None:
+        span.walk = tuple(w for _, w in src.key) + (span.walk,)
+    span.complete = False
+    span.junctions = tuple(js)
+    r = span.route
+    if r is not None:
+        # a merges span: certified as its route (which may cross the junction)
+        r.complete = False
+        r.certified_to_bp = min(r.certified_to_bp, cert)
+        span.certified_to_bp = r.certified_to_bp
+    else:
+        span.certified_to_bp = min(span.certified_to_bp, cert)
+    return span
 
 
 def _span(un, t, pi, part, node, length, with_labels, at_bp=None, b=None):
     """Part |pi|'s PairSpan on the union walk ending at trie node |node|. |b|: its memory
     (the span and route, _M_SPAN; the labels, by _labels_for()) and the part's derivations
-    it reads, at their cold price."""
-    g = part.graphlet
-    a = g.arms.get(t.side)
+    it reads, at their cold price. A stitched part answers from the source that holds the
+    deepest of its spellings on the walk (PairUnion._resolve())."""
+    g0 = _root(part.graphlet)
+    if t.side not in g0.arms:
+        if b is not None:
+            b.charge(0, _M_SPAN)
+        return PairSpan(part.tag, g0.mode, 'none', 0, None, None, None, None, (), {},
+                        None if not with_labels else (), False, False, 0, 'under_strategy',
+                        g0.k, g0.regime)
+    # how far the pair's spellings follow the walk: to trie node |stop| of source |si|;
+    # |below|: the walk's union segments past it (what a route reads), never the whole path
+    si, stop, below = un._resolve(t, pi, node)
+    src = un._src[si]
+    g = src.graphlet
+    a = g.arms[t.side]
+    off = src.offset
     mode = g.mode
     if b is not None:
         b.charge(0, _M_SPAN)
-        if a is not None:
-            derive.uses(b, g, a, 'first_paths', *(('end_labels',) if mode == 'constrain'
-                                                  else ()))
-    if a is None:
-        return PairSpan(part.tag, mode, 'none', 0, None, None, None, None, (), {}, None if not
-                        with_labels else (), False, False, 0, 'under_strategy', g.k, g.regime)
-    # how far the pair's spellings follow the walk: to trie node |stop|; |below|: the
-    # walk's union segments past it (what a route reads), never the whole path
-    stop, below = t.stop_of(pi, node)
+        derive.uses(b, g, a, 'first_paths', *(('end_labels',) if mode == 'constrain'
+                                              else ()))
     d = t.depth[stop]
-    how, item = _case(t, pi, stop, length)
+    how, item = _case(t, si, stop, length)
     if how == 'whole':
         _, leaf, pid = item
         reasons, code = _leaf_reasons(g, a, leaf)
         complete, cert = _leaf_cert(a, leaf)
-        labels, cut = _labels_to(un, part, a, leaf, length, with_labels, at_bp, b)
-        return PairSpan(part.tag, mode, 'whole', length, pid, None, None, None, (), reasons,
-                        labels, cut, complete, cert, None, g.k, g.regime)
-    last = t.last_seg(pi, a, stop)
+        labels, cut = _labels_to(un, src, a, leaf, length, with_labels, at_bp, b)
+        return _past_junction(un, src, PairSpan(
+            part.tag, mode, 'whole', length, pid, None, None, None, (), reasons, labels, cut,
+            complete, off + cert, None, g.k, g.regime))
+    last = t.last_seg(si, a, stop)
     if how == 'extends':
         pid = _ops._first_paths(a)[last] if last is not None else None
-        cert = min(length, a.complete_to_bp)
-        labels, cut = _labels_to(un, part, a, last, length, with_labels, at_bp, b)
-        return PairSpan(part.tag, mode, 'extends', length, pid, None, None, None, (),
-                        {'path_reason': None, 'labels': {}}, labels, cut,
-                        length <= a.complete_to_bp, cert, None, g.k, g.regime)
+        cert = off + min(length - off, a.complete_to_bp)
+        labels, cut = _labels_to(un, src, a, last, length, with_labels, at_bp, b)
+        return _past_junction(un, src, PairSpan(
+            part.tag, mode, 'extends', length, pid, None, None, None, (),
+            {'path_reason': None, 'labels': {}}, labels, cut,
+            length - off <= a.complete_to_bp, cert, None, g.k, g.regime))
     # the union walk's base after the stop (none where the walk ends there)
     c = t.useg[below[0]].first if below else None
     if how == 'ends':
         _, leaf, pid = item
         reasons, code = _leaf_reasons(g, a, leaf)
         complete, cert = _leaf_cert(a, leaf)
-        absence = _absence(g, a, _events_at(t, pi, a, stop, last), d, c, code)
-        labels, cut = _labels_to(un, part, a, leaf, d, with_labels, at_bp, b)
-        return PairSpan(part.tag, mode, 'ends', d, pid, None, None, None, (), reasons, labels,
-                        cut, complete, cert, absence, g.k, g.regime)
+        absence = _absence_at(src, g, a, _events_at(t, si, a, stop, last), d - off, c, code)
+        labels, cut = _labels_to(un, src, a, leaf, d, with_labels, at_bp, b)
+        return _past_junction(un, src, PairSpan(
+            part.tag, mode, 'ends', d, pid, None, None, None, (), reasons, labels, cut,
+            complete, off + cert, absence, g.k, g.regime))
     if how == 'merges':
         _, stub, m = item
         ms = a.segments[m]
-        into = t.node_name(t.seg_nodes[pi][m][0], ms.length_bp,
+        into = t.node_name(t.seg_nodes[si][m][0], ms.length_bp,
                            ms.walk[0] if ms.length_bp and ms.walk else None)
         j = ms.parents.index(stub)
-        cont = tuple(un._pair_label(part, x) for x in (ms.partition[j] if j < len(
+        cont = tuple(un._pair_label(src, x) for x in (ms.partition[j] if j < len(
             ms.partition) else ()))
-        route = _route(un, t, pi, part, a, stub, m, j, d, below, into, with_labels, at_bp,
-                       b)
-        labels, cut = _labels_to(un, part, a, stub, d, with_labels, at_bp, b)
-        return PairSpan(part.tag, mode, 'merges', d, None, stub, into, route, cont,
-                        {'path_reason': None, 'labels': {}}, labels, cut, route.complete,
-                        route.certified_to_bp, None, g.k, g.regime)
+        route, rsrc = _route(un, t, si, src, a, stub, m, j, d, below, into, with_labels,
+                             at_bp, b)
+        labels, cut = _labels_to(un, src, a, stub, d, with_labels, at_bp, b)
+        # the source the route ends in: a stitched child when it crossed a junction
+        return _past_junction(un, rsrc, PairSpan(
+            part.tag, mode, 'merges', d, None, stub, into, route, cont,
+            {'path_reason': None, 'labels': {}}, labels, cut, route.complete,
+            route.certified_to_bp, None, g.k, g.regime))
     # diverges: the pair goes on with other bases (or a stub/walk elsewhere)
-    absence = _absence(g, a, _events_at(t, pi, a, stop, last), d, c)
-    labels, cut = _labels_to(un, part, a, last, d, with_labels, at_bp, b)
-    return PairSpan(part.tag, mode, 'diverges', d, None, None, None, None, (),
-                    {'path_reason': None, 'labels': {}}, labels, cut, False,
-                    min(d, a.complete_to_bp), absence, g.k, g.regime)
+    absence = _absence_at(src, g, a, _events_at(t, si, a, stop, last), d - off, c)
+    labels, cut = _labels_to(un, src, a, last, d, with_labels, at_bp, b)
+    return _past_junction(un, src, PairSpan(
+        part.tag, mode, 'diverges', d, None, None, None, None, (),
+        {'path_reason': None, 'labels': {}}, labels, cut, False,
+        off + min(d - off, a.complete_to_bp), absence, g.k, g.regime))
 
 
 def _fp_chain(a, seg):
@@ -2373,23 +2692,28 @@ def _fp_chain(a, seg):
 def _route(un, t, pi, part, a, stub, m, j, d, below, into, with_labels, at_bp, b=None):
     """The pair's route from its merge |m| (entered from the stub through parent |j|)
     along the union walk's remaining bases, those of the union segments |below| the stop
-    (§2.4 'Routes through merges')."""
-    g = part.graphlet
-    segs = a.segments
+    (§2.4 'Routes through merges') -> (Route, the source it ends in). |pi|, |part|: the
+    source; |d| and the route's positions outward from the seed. A route that reaches the
+    end of a walk a stitched child continues goes on in the child (§2.3): the junction is
+    read, and the route is certified at most to the first junction."""
     # the union walk's remaining bases, walking order
     rest = []
     for u in below:
         us = t.useg[u]
         pi0 = min(us.cover)
-        g0 = un.parts[pi0].graphlet
+        g0 = un._src[pi0].graphlet
+        off0 = un._src[pi0].offset
         for seg, f, to in us.pieces[pi0]:
             lo = max(f, d)
             if lo < to:
                 s0 = g0.arms[t.side].segments[seg]
-                rest.append(s0.walk[lo - s0.from_bp:to - s0.from_bp])
+                rest.append(s0.walk[lo - off0 - s0.from_bp:to - off0 - s0.from_bp])
     rest = ''.join(rest)
     chain = [(x, 0) for x in derive.chain(a, stub)]
     route = []
+    # per source the route reads: (source index, source, arm, its chain and route)
+    legs = [(pi, part, a, chain, route)]
+    g, segs, off = part.graphlet, a.segments, part.offset
     merges = [(d, into)]
     cur, cur_j = m, j
     n = 0                       # bases of |rest| matched
@@ -2404,6 +2728,18 @@ def _route(un, t, pi, part, a, stub, m, j, d, below, into, with_labels, at_bp, b
         while i < len(w) and n < len(rest) and w[i] == rest[n]:
             i += 1
             n += 1
+        kid = t.continued.get((pi, cur)) if s.leaf is not None and i == len(w) else None
+        if kid is not None:
+            # the route reaches the end of a walk a stitched child continues: it goes on
+            # in the child's tree, from its root segment (its offset is this leaf's end),
+            # as a span there does (PairUnion._resolve())
+            pi, part = kid, un._src[kid]
+            g, a, off = part.graphlet, part.graphlet.arms[t.side], part.offset
+            segs = a.segments
+            route = []
+            legs.append((pi, part, a, [], route))
+            cur, cur_j = next(x.id for x in segs if not x.parents), 0
+            continue
         if n == len(rest):
             how = 'held'
             goes_on = i < len(w) or any(segs[c].length_bp or segs[c].children
@@ -2436,28 +2772,38 @@ def _route(un, t, pi, part, a, stub, m, j, d, below, into, with_labels, at_bp, b
             break
         for x, xj in step[:-1]:
             route.append((x, xj))
-            _note_merge(t, pi, segs[x], merges)
+            _note_merge(t, pi, segs[x], merges, off)
         cur, cur_j = step[-1]
-        _note_merge(t, pi, segs[cur], merges)
+        _note_merge(t, pi, segs[cur], merges, off)
     pos = d + n
     # certification
     if how == 'ends':
         complete, cert = _leaf_cert(a, cur)
+        cert += off
     elif held_leaf is not None:
         complete, cert = _leaf_cert(a, held_leaf)
+        cert += off
     else:
-        cert = min(pos, a.complete_to_bp)
-        complete = how == 'held' and pos <= a.complete_to_bp
+        cert = off + min(pos - off, a.complete_to_bp)
+        complete = how == 'held' and pos - off <= a.complete_to_bp
     absence = None
     if how != 'held':
         c = rest[n] if n < len(rest) else None
-        here = [segs[x] for x, _ in route if segs[x].from_bp <= pos <= segs[x].end_bp]
-        absence = _absence(g, a, here, pos, c, code)
+        lpos = pos - off
+        here = [segs[x] for x, _ in route if segs[x].from_bp <= lpos <= segs[x].end_bp]
+        absence = _absence_at(part, g, a, here, lpos, c, code)
     labels = ()
     if with_labels:
-        full = chain + route
-        labels, _ = _labels_for(un, part, a, full, pos, True, at_bp, b)
-    return Route(pos, how, goes_on, reasons, absence, tuple(merges), labels, complete, cert)
+        # the labels at the route's end (or |at_bp|) are those of the leg holding that
+        # depth: never joined across a junction (D.1)
+        e = pos if at_bp is None else min(pos, at_bp)
+        k = len(legs) - 1
+        while k > 0 and e <= legs[k][1].offset:
+            k -= 1
+        _, lsrc, la, lchain, lroute = legs[k]
+        labels, _ = _labels_src(un, lsrc, la, lambda: lchain + lroute, pos, at_bp, b)
+    return Route(pos, how, goes_on, reasons, absence, tuple(merges), labels, complete,
+                 cert), part
 
 
 def _step(segs, cur, ch):
@@ -2476,10 +2822,11 @@ def _step(segs, cur, ch):
     return None
 
 
-def _note_merge(t, pi, s, merges):
+def _note_merge(t, pi, s, merges, off=0):
     if s.is_merge:
         first = s.walk[0] if s.length_bp and s.walk else None
-        merges.append((s.from_bp, t.node_name(t.seg_nodes[pi][s.id][0], s.length_bp, first)))
+        merges.append((off + s.from_bp, t.node_name(t.seg_nodes[pi][s.id][0], s.length_bp,
+                                                    first)))
 
 
 # ------------------------------------------------------------------ span labels

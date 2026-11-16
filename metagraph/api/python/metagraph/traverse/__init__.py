@@ -60,7 +60,7 @@ _NAMES = {
     'composite': ('CombineRefused',),
     'union': ('union_pairs', 'PairUnion', 'PairPart', 'PairAbsent', 'PairLabel', 'SpanLabel',
               'LabelInterval', 'SegmentSupport', 'UnionSegment', 'Route', 'PairSpan',
-              'Carriers', 'UnionWalk', 'Coverage', 'Statements'),
+              'SpanJunction', 'Carriers', 'UnionWalk', 'Coverage', 'Statements'),
     '_stitch': ('Junction', 'Part', 'StitchedGraphlet', 'StitchedWalk', 'stitch'),
 }
 _HOME = {name: mod for mod, names in _NAMES.items() for name in names}
@@ -90,8 +90,8 @@ __all__ = [
     'local_budget',
     'CombineRefused',
     'union_pairs', 'PairUnion', 'PairPart', 'PairAbsent', 'PairLabel', 'SpanLabel',
-    'LabelInterval', 'SegmentSupport', 'UnionSegment', 'Route', 'PairSpan', 'Carriers',
-    'UnionWalk', 'Coverage', 'Statements', 'PairResults',
+    'LabelInterval', 'SegmentSupport', 'UnionSegment', 'Route', 'PairSpan', 'SpanJunction',
+    'Carriers', 'UnionWalk', 'Coverage', 'Statements', 'PairResults',
     'stitch', 'StitchedGraphlet', 'Part', 'Junction', 'StitchedWalk',
 ]
 
