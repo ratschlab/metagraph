@@ -532,7 +532,9 @@ PairUnion.carriers(arm, walk, *, at_bp=None) -> Carriers[PairSpan]  # per pair: 
                                               # diverges|none), to_bp, route, absence, span labels with from_bp
 PairUnion.segments(arm) -> list[UnionSegment];  .spell(arm, walk, orientation, with_seed) -> str
 PairUnion.labels(pair=None) / .label(selector) / .shared_names()   # labels each pair's own: PairLabel(pair, ref, name, kind)
-PairUnion.to_fasta(...) / .to_gfa(...) / .summary(max_bytes=4096) / .evidence(arm) / .provenance() / .memory_bytes()
+PairUnion.to_fasta(..., at_bp=None) / .to_gfa(...) / .summary(max_bytes=4096) / .provenance() / .memory_bytes()
+PairUnion.evidence(arm=None)                        # each part's evidence block and the five statements, of one
+                                                    # arm or (arm=None) of every arm
 TraverseClient(host, port, api_path=None, *, session=None, timeout=900, release=None)
     .capabilities(graph=None, graph_path=None) -> dict;  .server_capabilities() -> dict
     .resolve(sequence, *, labels=None, discover=None, select=None, **opts) -> dict
@@ -540,7 +542,9 @@ TraverseClient(host, port, api_path=None, *, session=None, timeout=900, release=
     .traverse_raw(request) -> dict;  .deepen(graphlet, arm, leaves, bp=None, **overrides) -> TraverseResponse
     .traverse_pairs(seed, strategy=None, *, pairs=None, detail='graphlet') -> PairResults(results, seed,
         expected_pairs, seqs_order)           # one request per pair, the input of union_pairs(); a response keeps
-                                              # the seeds it sent (TraverseResponse.seeds_sent)
+                                              # the seeds it sent (TraverseResponse.seeds_sent); a pair whose
+                                              # request raised TraverseError or OSError is {pair, error}, any
+                                              # other exception propagates
     # requests only; explicit Accept-Encoding: gzip, deflate; non-2xx → TraverseError(status, message); 503 →
     # ServerInitializing; an expired not_after_ms → AttemptExpired
 GraphletStore(spool_dir, max_ram_mb=512, max_handles=64, ttl_ram_s=1800, ttl_disk_s=7*86400)

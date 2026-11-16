@@ -1716,7 +1716,9 @@ is ``not_included``, and without it every statement says that it covers only the
 given. ``seqs_order=`` maps each pair to its record-mapping certificate as ``GET
 /capabilities`` states it (``'verified'``, ``'count_only'`` or ``None``); a pair not in it
 reads ``unknown``. ``TraverseClient.traverse_pairs(seed, strategy, pairs=...)`` sends one
-request per pair and returns all four (``PairResults``):
+request per pair and returns all four (``PairResults``); a pair whose request failed
+(``TraverseError`` or ``OSError``) is ``{'pair': ..., 'error': e}``, and any other
+exception propagates:
 
 .. code-block:: python
 
@@ -1732,10 +1734,13 @@ retrievals of one pair). A refusal is a ``CombineRefused`` (a ``ValueError``) wi
 then ``not_combinable`` (also a ``TypeError``), ``view_unsupported``, ``not_one_seed``,
 ``result_has_graphlet``, ``no_graphlet``, ``no_seed``, ``pair_mismatch``, ``no_pair``,
 ``ambiguous_pair``, ``no_bases``, ``different_alphabet``, ``different_seed``,
-``duplicate_pair`` and ``not_expected``. A refusal names the first failing result in the
-order given. A part without its envelope raises ``MissingEnvelope``. ``dump()``,
-``to_json()``, ``compare()``, ``save()``, ``support_by_depth()`` and ``next_request()``
-are refused ``not_offered``: a union is not an MGT document, and each part keeps them.
+``duplicate_pair`` and ``not_expected``; two ``seqs_order`` keys that give one pair two
+values are ``bad_seqs_order``, found among the keys first and otherwise right after
+``ambiguous_pair``, once the results name the pairs. A refusal names the first failing
+result in the order given. A part without its envelope raises ``MissingEnvelope``.
+``dump()``, ``to_json()``, ``compare()``, ``save()``, ``support_by_depth()`` and
+``next_request()`` are refused ``not_offered``: a union is not an MGT document, and each
+part keeps them.
 
 Walks, spans and absence
 ^^^^^^^^^^^^^^^^^^^^^^^^
