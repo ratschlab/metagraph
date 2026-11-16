@@ -3716,6 +3716,8 @@ class TestRecordMappingAtLoad(TestingBase):
         run(['transform_anno', '-p', '1', '--anno-type', 'row_diff_brwt_coord', '--greedy',
              '-o', 'anno', '-i', 'graph.dbg', 'anno.column.annodbg'])
         run(['relax_brwt', '-p', '1', '-o', 'anno', 'anno.row_diff_brwt_coord.annodbg'])
+        run(['transform_anno', '-p', '1', '--anno-type', 'brwt_coord', '--coordinates', '-o', 'anno',
+             'anno.column.annodbg'])
         # an annotation of three columns over the same graph (small.fa's record again, in
         # third.fa), for an annotation replaced under a running server
         with open(os.path.join(d, 'small.fa')) as f, open(os.path.join(d, 'third.fa'), 'w') as g:
@@ -3737,6 +3739,18 @@ class TestRecordMappingAtLoad(TestingBase):
                             ('subset', ['big.fa'])):
             run(['annotate', '-p', '1', '-i', 'graph.dbg', '--anno-filename',
                  '--index-header-coords', '-o', name, *files])
+        # a mapping written while small.fa held only a record shorter than k: the annotation's
+        # columns and their labels, small.fa's column without records
+        short = os.path.join(d, 'short')
+        os.makedirs(short)
+        shutil.copyfile(os.path.join(d, 'big.fa'), os.path.join(short, 'big.fa'))
+        with open(os.path.join(short, 'small.fa'), 'w') as f:
+            f.write('>s1\nACGT\n')
+        res = subprocess.run(shlex.split(METAGRAPH) + [
+                'annotate', '-p', '1', '-i', '../graph.dbg', '--anno-filename',
+                '--index-header-coords', '-o', '../recordless', 'big.fa', 'small.fa'],
+                cwd=short, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+        assert res.returncode == 0, res.stdout.decode()[-3000:]
         cls.graph = os.path.join(d, 'graph.dbg')
 
     def pair(self, form, mapping, labels=True):
@@ -4326,6 +4340,120 @@ class TestRecordMappingAtLoad(TestingBase):
                     self.assertEqual(resident.json(), ret.json())
                 finally:
                     fresh.stop()
+
+    def test_a_column_without_records_is_skipped(self):
+        """A column holding coordinates that the mapping has no records for (written while
+        small.fa held only a record shorter than k; Q-M4) has no header labels. The row-diff
+        form loads it (column_coord refuses it at load: 30 coordinates, more than its 0 k-mers),
+        and the queries by record skip it: /search in every mode and `metagraph query` answer as
+        the full mapping without small.fa's record s1, a header discovery of /resolve finds b1
+        alone, a /traverse seed in s1 derives no header label, and a walk in annotate mode
+        through s1 states none there. Until train 7 each answered 400 `Coordinate 0 for column
+        1 out of range (CoordToHeader has 0 coordinates for that column)`, the CLI exited 1.
+        /pattern, where it maps the column's coordinates to records (placed occurrences,
+        supported paths), still answers that 400. The load says it, once per such column."""
+        warning = ("has no sequence records for column 1 ('small.fa'): the queries by record skip "
+                   "its k-mers. If the annotation holds k-mers in that column, the mapping was "
+                   "written for other files: rebuild it with every input file in column order "
+                   "(metagraph annotate --anno-filename --index-header-coords)")
+        for form in ('column_coord', 'brwt_coord'):
+            with self.subTest(form=form):
+                status, log = run_to_exit(['-i', self.graph, '-a', self.pair(form, 'recordless')[1]],
+                                          os.path.join(self.d, f'recordless_{form}.log'))
+                self.assertEqual(1, status, log)
+                # (column_coord counts the column's 30 coordinates; brwt_coord's count, stated as
+                # it is, is 1 here)
+                self.assertRegex(log, r"column 1 \('small\.fa'\) of the annotation holds "
+                                      + (r"30" if form == 'column_coord' else r"\d+")
+                                      + r" coordinates, more than the 0 k-mers the mapping "
+                                      r"states for it")
+        graph, anno = self.pair('row_diff_brwt_coord', 'recordless')
+        _, full = self.pair('row_diff_brwt_coord', 'right')
+        records = dict(named_records_of([os.path.join(self.d, 'big.fa'),
+                                         os.path.join(self.d, 'small.fa')]))
+        s1, b1 = records['s1'], records['b1']
+        query = s1 + 'A' + b1[:100]
+        server = Server(['-i', graph, '-a', anno], os.path.join(self.d, 'recordless.log'))
+        reference = Server(['-i', graph, '-a', full], os.path.join(self.d, 'recordless_full.log'))
+        try:
+            for mode in (None, 'query_coords', 'query_counts', 'with_signature', 'abundance_sum'):
+                body = {'FASTA': f'>q\n{query}', 'discovery_fraction': 0.0}
+                if mode:
+                    body[mode] = True
+                with self.subTest(mode=mode):
+                    ret = server.post('search', body)
+                    self.assertEqual(200, ret.status_code, ret.text)
+                    expected = reference.post('search', body).json()
+                    self.assertEqual(['b1', 's1'],
+                                     [r['sample'] for r in expected[0]['results']])
+                    expected[0]['results'] = expected[0]['results'][:1]
+                    expected[0]['cuts'][0]['returned'] = 1
+                    self.assertEqual(expected, ret.json())
+            # a query of s1 alone matches no record
+            ret = server.post('search', {'FASTA': f'>q\n{s1}', 'discovery_fraction': 0.0})
+            self.assertEqual((200, []), (ret.status_code, ret.json()[0]['results']))
+
+            for support in ('kmer', 'trace'):
+                with self.subTest(support=support):
+                    ret = server.post('resolve', {'sequence': query, 'support': support,
+                                                  'discover': {'max_labels': 10,
+                                                               'kind': 'header'}})
+                    self.assertEqual(200, ret.status_code, ret.text)
+                    self.assertEqual([['b1']], [c['labels'] for c in ret.json()['candidates']])
+            # the column labels as before
+            ret = server.post('resolve', {'sequence': query,
+                                          'discover': {'max_labels': 10, 'kind': 'column'}})
+            self.assertEqual([['big.fa'], ['small.fa']],
+                             [c['labels'] for c in ret.json()['candidates']])
+
+            def walk(mode, seed):
+                ret = server.post('traverse', {
+                    'seeds': [{'sequence': seed}],
+                    'strategy': {'direction': 'right', 'labels': {'mode': mode},
+                                 'bounds': {'max_extension_bp': 50},
+                                 'output': {'detail': 'summary', 'timing': False}}})
+                self.assertEqual(200, ret.status_code, ret.text)
+                return ret.json()['results'][0]
+
+            result = walk('constrain', s1[:40])
+            self.assertEqual('failed', result['outcome']['walks'], result)
+            self.assertIn('No label supports every k-mer', result['error'], result)
+            self.assertEqual(['no_carrier'], [l['cause'] for l in result['limitations']], result)
+            result = walk('annotate', s1[:40])
+            self.assertNotEqual('failed', result['outcome']['walks'], result)
+            self.assertNotIn('"s1"', json.dumps(result))
+            self.assertEqual(['b1'], [l['name'] for l in walk('constrain', b1[:40])['label_dict']])
+
+            ret = server.post('pattern', {'patterns': [{'dna': s1[5:25]}], 'mode': 'partial',
+                                          'output': {'labels': 'all', 'occurrences': True}})
+            self.assertEqual(400, ret.status_code, ret.text)
+            self.assertIn('for column 1 out of range (CoordToHeader has 0 coordinates for that '
+                          'column)', ret.json()['error'])
+            # the supported paths' support is checked within records, whatever the output
+            ret = server.post('pattern', {'patterns': [{'dna': s1[5:45]}], 'mode': 'partial',
+                                          'long_search': 'supported_paths',
+                                          'output': {'labels': 'all', 'occurrences': False}})
+            self.assertEqual(400, ret.status_code, ret.text)
+            self.assertIn('for column 1 out of range (CoordToHeader has 0 coordinates for that '
+                          'column)', ret.json()['error'])
+            self.assertIsNone(server.process.poll())
+            # the load's warning, once (the reference's mapping has small.fa's record)
+            self.assertEqual(1, server.text().count(warning))
+            self.assertNotIn('has no sequence records', reference.text())
+        finally:
+            server.stop()
+            reference.stop()
+        query_fa = os.path.join(self.d, 'recordless_query.fa')
+        with open(query_fa, 'w') as f:
+            f.write(f'>q\n{query}\n')
+        res = subprocess.run(shlex.split(METAGRAPH) + ['query', '--query-mode', 'coords',
+                                                       '--min-kmers-fraction-label', '0',
+                                                       '-i', graph, '-a', anno, query_fa],
+                             stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        self.assertEqual(0, res.returncode, res.stderr.decode()[-2000:])
+        self.assertIn('b1', res.stdout.decode())
+        self.assertNotIn('s1', res.stdout.decode())
+        self.assertEqual(1, res.stderr.decode().count(warning))
 
     def test_the_row_diff_form_checks_an_old_mapping_by_its_count_only(self):
         # the documented limit: the row-diff forms state no coordinates per column, so an old

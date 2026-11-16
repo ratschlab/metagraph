@@ -2005,14 +2005,17 @@ bool Walker::derive_seed_labels(const std::vector<node_index> &keys,
         };
 
         // the entries of a k-mer's row: its columns, plus its coordinates where they are
-        // read (each costs a map_coord); also the row's work units beyond its key's 8
+        // read (each costs a map_coord; a header derivation reads none of a column without
+        // sequence records); also the row's work units beyond its key's 8
         auto cost_of = [&](size_t i) {
             const size_t r = row_of(i);
             if (!with_coords)
                 return plain[r].size();
             size_t n = 0;
             for (const auto &entry : tuples[r]) {
-                n += 1 + entry.second.size();
+                n += 1;
+                if (kind != LabelKind::HEADER || !oracle_.column_without_records(entry.first))
+                    n += entry.second.size();
             }
             return n;
         };
@@ -2096,7 +2099,9 @@ bool Walker::derive_seed_labels(const std::vector<node_index> &keys,
             } else {
                 flat.clear();
                 for (const auto &[c, coords] : tuples[r]) {
-                    if (skip(first, c))
+                    // a column without sequence records has no header labels (b02de7e81 of
+                    // the traversal-v1 stack for master)
+                    if (skip(first, c) || oracle_.column_without_records(c))
                         continue;
                     oracle_.map_coords(c, coords.data(), coords.size(),
                                        [&, column = c](Coord, uint64_t seq_id, Coord local) {

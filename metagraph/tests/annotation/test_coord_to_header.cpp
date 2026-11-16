@@ -1,5 +1,6 @@
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <atomic>
 #include <cstring>
 #include <fstream>
@@ -18,6 +19,8 @@
 #include "graph/alignment/alignment.hpp"
 #include "annotation/representation/base/annotation.hpp"
 #include "coordinate_test_graph.hpp"
+#include "dense_search_values.hpp"
+#include "test_annotated_dbg_helpers.hpp"
 
 
 namespace {
@@ -1858,17 +1861,83 @@ TEST(CoordToHeader, MapCoordsOfRandomRows) {
     }
 }
 
-// master's fold (#764) skips the coordinates of a column without records; staging's refuses
-// them as map_single_coord does (std::out_of_range from map_coords), until the owner decides
-// (Q-M4; staging refuses a mismatched mapping at load, so neither case reaches a request on a
-// sound index)
-TEST(CoordToHeader, MapCoordsRefusesARecordlessColumn) {
+// The queries by record on an annotation whose column G has coordinates and no records in its
+// mapping (|g_records| false), or one record, acc3 (true): column F holds acc1 and acc2, and G's
+// sequence shares a block with acc1. The query is G's sequence twice, so that its rows repeat
+// (the values of the repeated rows are read for the records returned: call_selected_coords)
+template <class Annotation>
+std::unique_ptr<graph::AnnotatedDBG> recordless_column_graph(bool g_records, std::string *query) {
+    const size_t k = 11;
+    std::mt19937 rng(17);
+    auto random_dna = [&](size_t n) {
+        std::string s(n, 'A');
+        for (char &c : s) {
+            c = "ACGT"[rng() % 4];
+        }
+        return s;
+    };
+    const std::string s1 = random_dna(70), s2 = random_dna(70);
+    const std::string s3 = random_dna(20) + s1.substr(10, 30) + random_dna(20);
+    const uint64_t n1 = s1.size() - k + 1, n2 = s2.size() - k + 1, n3 = s3.size() - k + 1;
+    auto anno = test::build_anno_graph<graph::DBGSuccinct, Annotation>(
+            k, { s1, s2, s3 }, { "F", "F", "G" }, graph::DeBruijnGraph::BASIC, true, { 0, n1, 0 });
+    const auto &encoder = anno->get_annotator().get_label_encoder();
+    std::vector<std::vector<std::string>> headers(2);
+    std::vector<std::vector<uint64_t>> num_kmers(2);
+    headers[encoder.encode("F")] = { "acc1", "acc2" };
+    num_kmers[encoder.encode("F")] = { n1, n2 };
+    if (g_records) {
+        headers[encoder.encode("G")] = { "acc3" };
+        num_kmers[encoder.encode("G")] = { n3 };
+    }
+    *query = s3 + s3;
+    return test::with_coord_to_header(std::move(anno), std::move(headers), std::move(num_kmers));
+}
+
+// |rows| without the rows of record acc3
+template <class Rows>
+Rows without_acc3(Rows rows) {
+    rows.erase(std::remove_if(rows.begin(), rows.end(),
+                              [](const auto &row) { return std::get<0>(row) == "acc3"; }),
+               rows.end());
+    return rows;
+}
+
+template <class Annotation>
+void check_recordless_column_skipped() {
+    std::string query;
+    const auto reference = recordless_column_graph<Annotation>(true, &query);
+    const auto graph = recordless_column_graph<Annotation>(false, &query);
+    const auto top = graph->get_top_labels(query, 10);
+    ASSERT_EQ(1u, top.size());
+    EXPECT_EQ("acc1", top[0].first);
+    EXPECT_EQ(without_acc3(reference->get_top_labels(query, 10)), top);
+    EXPECT_EQ(without_acc3(reference->get_top_labels(query, 10, 0, 0, true)),
+              graph->get_top_labels(query, 10, 0, 0, true));
+    EXPECT_EQ(std::vector<std::string>{ "acc1" }, graph->get_labels(query));
+    EXPECT_EQ(test::dense(without_acc3(reference->get_top_label_signatures(query, 10))),
+              test::dense(graph->get_top_label_signatures(query, 10)));
+    EXPECT_EQ(test::dense(without_acc3(reference->get_kmer_counts(query, 10, 0, 0))),
+              test::dense(graph->get_kmer_counts(query, 10, 0, 0)));
+    EXPECT_EQ(test::dense(without_acc3(reference->get_kmer_coordinates(query, 10, 0, 0))),
+              test::dense(graph->get_kmer_coordinates(query, 10, 0, 0)));
+}
+
+// A column of the record mapping without sequence records (its coordinates in the annotation,
+// none of its records in the .seqs): map_coords refuses its coordinates (std::out_of_range, as
+// map_single_coord: they name no record), so the queries by record skip the column, as master's
+// fold does (#764; Q-M4): no record of it, the other records as the same mapping with a record
+// of that column states them. Before (until Q-M4), every such query threw std::out_of_range
+TEST(CoordToHeader, QueriesByRecordSkipARecordlessColumn) {
     // column 1 has no sequence records
     CoordToHeader cth({ { "h0", "h1" }, {} }, { { 3, 4 }, {} });
     auto ignore = [](size_t, uint64_t) {};
     EXPECT_THROW(cth.map_coords(1, { 0 }, ignore), std::out_of_range);
     EXPECT_NO_THROW(cth.map_coords(1, {}, ignore));
     EXPECT_NO_THROW(cth.map_coords(0, { 0, 6 }, ignore));
+
+    check_recordless_column_skipped<ColumnCompressed<>>();
+    check_recordless_column_skipped<RowDiffColumnAnnotator>();
 }
 
 TEST(CoordToHeader, MapCoordsRefusesUnknownColumnsAndCoordinates) {

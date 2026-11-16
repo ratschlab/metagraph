@@ -266,6 +266,13 @@ class LabelOracle {
     // oracles of the same loaded index, and gone with it.
     std::optional<LabelRef> find_header(const std::string &name) const;
     const std::string& header_name(Column column, uint64_t seq_id) const;
+    // Whether |column| is a column of the record mapping without sequence records: it has no
+    // header labels, so a header derivation, discovery or recording skips its coordinates (as
+    // b02de7e81 of the traversal-v1 stack for master skips a column without
+    // has_header_records in its derivation and discovery). A column outside the
+    // mapping is not one: the mapping refuses its coordinates (std::out_of_range). Requires a
+    // CoordToHeader.
+    bool column_without_records(Column column) const;
     // (seq_id, local coordinate) of a column coordinate. Requires a CoordToHeader.
     std::pair<uint64_t, Coord> map_coord(Column column, Coord coord) const;
     // The sequence of a column coordinate with its first and last column coordinates
