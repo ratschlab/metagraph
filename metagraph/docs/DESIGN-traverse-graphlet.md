@@ -515,8 +515,10 @@ Graphlet.compare(other, *, arm=None, labels=None, mode='claims'|'walks'|'labels'
     # Comparison(comparable, reason, depth_used, equal, only_in_a, only_in_b, notes) — notes carry the merge qualification
 Graphlet.memory_bytes() -> int
 load(path) -> Graphlet                        # a .mgt file, or its gzip (the service's .mgt.gz export, first bytes
-                                              # 1f 8b): inflated as a stream, at most GZIP_TEXT_MAX bytes without budget=,
-                                              # charged chunk by chunk with it; a corrupt gzip -> GraphletFormatError
+                                              # 1f 8b): inflated as a stream; without budget= at most GZIP_TEXT_MAX
+                                              # (512 MiB) and, beyond GZIP_RATIO_FLOOR (16 MiB), at most GZIP_RATIO_MAX (64)
+                                              # times the file's size, peak about twice the text; with budget= charged
+                                              # chunk by chunk; a corrupt gzip -> GraphletFormatError
 union_pairs(results, *, seed=None, expected_pairs=None, seqs_order=None, budget=None) -> PairUnion
     # one seed's answers on several pairs (DESIGN-graphlet-merge.md §2), any order: Graphlet, one-seed TraverseResponse,
     # {response, index}, {response, sequence}, {pair, graphlet}, {pair, result[, error][, sequence]}, {pair, error};

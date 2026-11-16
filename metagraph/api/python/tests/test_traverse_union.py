@@ -16,6 +16,7 @@ from metagraph.traverse import (BadSelector, CombineRefused, LocalBudget, LocalB
 from metagraph.traverse import export as X
 from metagraph.traverse import derive, ops
 from metagraph.traverse import union as U
+from metagraph.traverse.union import _core_sentence as _core
 from metagraph.traverse._codec import GraphletFormatError
 
 UNION = os.path.join(T.DOCS, 'union')
@@ -973,6 +974,22 @@ class TestCoverage(unittest.TestCase):
         left = u.coverage('left', at_bp=50)
         self.assertEqual(left.by_category['arm_not_walked'], ['g1', 'g6'])
 
+    def test_evidence_states_the_five_statements(self):
+        u = locus()
+        ev = u.evidence()
+        self.assertEqual(u.arms(), ['left', 'right'])
+        self.assertEqual(ev['statements'], [
+            _core(u.coverage('left')), _core(u.coverage('right')),
+            'walks: ' + ', '.join(u.statements(s).provenance[len('walks: '):]
+                                  for s in u.arms()),
+            U.TURN_OFFS, u._labels_sentence(), U.SCOPE])
+        self.assertEqual(u.evidence('right')['statements'],
+                         u.statements('right').sentences())
+        # an arm-less union: its own five
+        v = union_pairs([{'pair': 'g2', 'result': absent_result('not_in_graph')}],
+                        seed=T.graphlet('merge').seed.sequence)
+        self.assertEqual(v.evidence()['statements'], v.statements().sentences())
+        self.assertEqual(len(v.evidence()['statements']), 5)
     def test_depths_and_every_pair_certified(self):
         m = T.graphlet('merge')               # complete_to_bp 100
         u = union_pairs([{'pair': 'g1', 'graphlet': m}], expected_pairs=['g1'])
@@ -1476,14 +1493,27 @@ class TestLoadGzip(unittest.TestCase):
         with open(out, 'rb') as f:
             self.assertEqual(f.read(2), b'H ')
 
-    def test_a_high_ratio_gzip_stops_at_the_cap(self):
+    def test_a_high_ratio_gzip_stops_at_the_default_bound(self):
         import gzip
         from metagraph.traverse import load
         from metagraph.traverse import parser as P
         text = T.doc_text('merge')
-        # 64 MiB of one byte in a comment-free document: about 64 KiB of gzip
+        # 64 MiB of one byte in a comment-free document: about 64 KiB of gzip, so the
+        # default bound is GZIP_RATIO_FLOOR (16 MiB), far below GZIP_TEXT_MAX: not patched
         bomb = self.write('bomb.mgt.gz', gzip.compress(text.encode('utf-8') + b'A' * (64 << 20)))
-        self.assertLess(os.path.getsize(bomb), 1 << 20)
+        size = os.path.getsize(bomb)
+        self.assertLess(size * P.GZIP_RATIO_MAX, P.GZIP_RATIO_FLOOR)
+        self.assertEqual((P.GZIP_TEXT_MAX, P.GZIP_RATIO_MAX, P.GZIP_RATIO_FLOOR),
+                         (512 << 20, 64, 16 << 20))
+        with self.assertRaises(GraphletFormatError) as cm:
+            load(bomb)
+        self.assertEqual(str(cm.exception),
+                         'the gzip file bomb.mgt.gz (%d bytes) inflates to more than 16777216 '
+                         'bytes, the most a load() without budget= inflates (GZIP_TEXT_MAX, or '
+                         'GZIP_RATIO_MAX times the file beyond GZIP_RATIO_FLOOR): refused, not '
+                         'inflated further; pass budget= to bound it by its memory account '
+                         'instead' % size)
+        # GZIP_TEXT_MAX caps whatever the ratio allows (lowered here to see it act)
         old = P.GZIP_TEXT_MAX
         P.GZIP_TEXT_MAX = 1 << 20
         try:
@@ -1491,11 +1521,7 @@ class TestLoadGzip(unittest.TestCase):
                 load(bomb)
         finally:
             P.GZIP_TEXT_MAX = old
-        self.assertEqual(str(cm.exception),
-                         'the gzip file bomb.mgt.gz inflates to more than 1048576 bytes, the most '
-                         'a load() without budget= inflates (GZIP_TEXT_MAX): refused, not '
-                         'inflated further; pass budget= to bound it by its memory account '
-                         'instead')
+        self.assertIn('inflates to more than 1048576 bytes', str(cm.exception))
         # with budget=, the memory account stops it as it stops a plain text that size
         plain = self.write('big.mgt', text.encode('utf-8') + b'A' * (64 << 20))
         stops = []
@@ -1506,6 +1532,15 @@ class TestLoadGzip(unittest.TestCase):
                           cm.exception.stop.limit))
         self.assertEqual(stops[0], stops[1])
         self.assertEqual(stops[0][0], 'memory')
+
+    def test_real_exports_load_far_below_the_ratio(self):
+        import gzip
+        from metagraph.traverse import parser as P
+        for name in ('bact_other', 'bact_pseudomonadota'):
+            path = os.path.join(R237, name + '.mgt.gz')
+            with gzip.open(path, 'rb') as f:
+                ratio = len(f.read()) / os.path.getsize(path)
+            self.assertLess(ratio, P.GZIP_RATIO_MAX / 8, name)
 
     def test_corrupt_or_truncated_gzip_refused(self):
         import gzip

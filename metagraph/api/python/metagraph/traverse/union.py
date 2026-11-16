@@ -1510,11 +1510,21 @@ class PairUnion:
     def evidence(self, arm=None):
         """Each part's own evidence block under its tag, the absent records, the expected
         pairs not included, each part's identity and pair source, the weakest outcome over
-        the parts, exact (every part exact and its identity verified) and the statements."""
+        the parts, exact (every part exact and its identity verified) and the five
+        statements (without an arm: each arm's coverage sentence, then the provenance over
+        every arm, the turn-offs, the labels and the scope)."""
         side = None if arm is None else self._side(arm)
         ev = C.combined_evidence([(p.tag, p.graphlet, p.identity.get('verified'))
                                   for p in self.parts], side)
-        st = self.statements(side) if (side or not self.parts) else None
+        if side is not None or not self.parts:
+            sentences = self.statements(side).sentences()
+        else:
+            # every arm: the coverage sentence of each, then the provenance over them all
+            sides = self.arms()
+            sentences = [_core_sentence(self.coverage(s)) for s in sides] + [
+                'walks: ' + ', '.join(self._provenance_sentence(s)[len('walks: '):]
+                                      for s in sides),
+                TURN_OFFS, self._labels_sentence(), SCOPE]
         return {
             'parts': ev['parts'],
             'outcome': ev['outcome'],
@@ -1524,8 +1534,7 @@ class PairUnion:
             'absent': [{'pair': a.tag, 'category': a.category, 'seed_check': a.seed_check}
                        for a in self.absent],
             'not_included': list(self._not_included),
-            'statements': st.sentences() if st is not None else
-            [self._labels_sentence(), TURN_OFFS, SCOPE],
+            'statements': sentences,
         }
 
     def provenance(self):
