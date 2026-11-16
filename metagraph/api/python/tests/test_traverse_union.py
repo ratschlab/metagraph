@@ -969,6 +969,57 @@ class TestBudgets(unittest.TestCase):
         for name, fn in self._ops(u).items():
             fn(LocalBudget(work_units=10 ** 9))
 
+    def test_memory_bytes_bounds_the_heap_on_11_parts(self):
+        """P12: memory_bytes() bounds the traced heap the union holds on 11 parts, after
+        construction and after every query (their answers dropped): the figures and label
+        intervals the queries keep are counted. Warm (the pattern of test_traverse_memory):
+        free lists filled by a first run, the collector held off while tracing. The models
+        are loaded before tracing; what the union adds to their caches is in both sides.
+        memory_bytes() is a getsizeof deep size and tracemalloc counts allocations: they
+        differ by a few percent, so the bound after the queries has 10% slack."""
+        import gc
+        import tracemalloc
+        from metagraph.traverse import composite as C
+        names = [n for n in UNION_DOCS if not n.startswith('repeat')][:11]
+        self.assertEqual(len(names), 11)
+
+        def queries(u):
+            out = []
+            for side in u.arms():
+                for w in u.walks(side, stubs=True):
+                    out.append(u.carriers(side, w.id))
+                out += [u.segments(side), u.statements(side), u.coverage(side)]
+            out += [str(u), u.summary(), u.to_fasta(stubs=True), u.to_gfa(labels='full'),
+                    u.evidence(), u.provenance()]
+            return len(out)
+
+        warm = union_pairs([{'pair': n, 'graphlet': union_doc(n)} for n in names])
+        queries(warm)
+        warm.memory_bytes()
+        del warm
+        gs = [union_doc(n) for n in names]
+        before = C.models_memory_bytes(gs)
+        gc.collect()
+        gc.disable()
+        tracemalloc.start()
+        try:
+            base = tracemalloc.get_traced_memory()[0]
+            u = union_pairs([{'pair': n, 'graphlet': g} for n, g in zip(names, gs)])
+            gc.collect()
+            built = tracemalloc.get_traced_memory()[0] - base
+            counted_built = u.memory_bytes() - before
+            queries(u)
+            gc.collect()
+            held = tracemalloc.get_traced_memory()[0] - base
+            counted = u.memory_bytes() - before
+        finally:
+            tracemalloc.stop()
+            gc.enable()
+        self.assertLessEqual(built, 1.1 * counted_built, (built, counted_built))
+        self.assertLessEqual(held, 1.1 * counted, (held, counted))
+        # the queries keep their figures and label intervals, and memory_bytes() says so
+        self.assertGreater(counted - counted_built, 0.8 * (held - built))
+
     def test_construction_charged(self):
         b = LocalBudget(work_units=10 ** 9)
         union_pairs(stated(gA='annotate', gM='merge'), budget=b)

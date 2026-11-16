@@ -811,11 +811,10 @@ class PairUnion:
         raise _refuse('not_offered', None, 'next_request')
 
     def memory_bytes(self):
-        """The parts' models (a model given twice counted once) plus the union's own index
-        and what its queries keep: the walk figures per arm and the part segments' label
-        intervals."""
-        return C.models_memory_bytes([p.graphlet for p in self.parts] + [
-            self._arms, self._fig_cache, self._seg_cache])
+        """What the union holds in the heap: the parts' models (a model given twice counted
+        once), the absent records, its own index and what its queries keep (the walk
+        figures per arm, the part segments' label intervals)."""
+        return C.models_memory_bytes([self])
 
     # ------------------------------------------------------------ helpers
 
