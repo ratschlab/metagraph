@@ -429,6 +429,32 @@ def _chain_bases(arm, seg_id, lo, hi):
     return w if arm.side == 'right' else w[::-1]
 
 
+# ------------------------------------------------------------------ the walk rule's edges
+
+_COMPLEMENT = str.maketrans('ACGT', 'TGCA')
+
+
+def step_of(side, kmer, char):
+    """The step from node |kmer| to base |char| on arm |side|, as the (k+1)-mer the walk
+    rule reads (walker.cpp step_kmer): natural orientation, the k-mer and the base on the
+    right arm, the base and the k-mer on the left (|kmer| in natural orientation too)."""
+    return kmer + char if side == 'right' else char + kmer
+
+
+def edge_key(regime, step):
+    """The edge identity of a step (SPEC §6.6, walker.cpp edge_key) -> (key, rc): the
+    forward (k+1)-mer |step| in the basic regime; in the canonical and primary regimes
+    min(step, rc(step)), with rc True when the key is the reverse complement. A path uses
+    each key once in either orientation (edge_reuse, edge_reuse_rc). The engine compares
+    keys packed, or as 128-bit hashes where the (k+1)-mer does not fit 64 bits (DNA k >= 32,
+    protein k > 11); this compares the (k+1)-mers themselves, so a hash collision that
+    blocks a step in the engine is not seen here."""
+    if regime == 'basic':
+        return step, False
+    rc = step.translate(_COMPLEMENT)[::-1]
+    return (rc, True) if rc < step else (step, False)
+
+
 # ------------------------------------------------------------------ alive sets
 
 def _segment_ops(arm, s):
