@@ -744,6 +744,36 @@ class TestInputs(unittest.TestCase):
                          ['HTTP 503', 'timeout'])
         self.assertNotEqual(union_pairs([g]).digest, got[0][0])
 
+    def test_a_single_graph_pair_is_named_by_its_tag_everywhere(self):
+        # a single-graph server's answer names no graph: its tag is its index_ns, and one
+        # rule (A.4) matches that name in expected_pairs=, seqs_order= and against records
+        g = T.graphlet('merge')
+        ns = g.index_ns
+        self.assertIsNone(g.envelope.get('graph'))
+        u = union_pairs([g], expected_pairs=[ns, 'g9'], seqs_order={ns: 'verified'})
+        self.assertEqual((u.parts[0].tag, u.expected, u._not_included, u.parts[0].seqs_order),
+                         (ns, ('g9', ns), ('g9',), 'verified'))
+        refused(self, 'not_expected', lambda: union_pairs([g], expected_pairs=['g9']))
+        refused(self, 'duplicate_pair', lambda: union_pairs(
+            [g, {'pair': ns, 'result': absent_result('not_in_graph')}]))
+
+    def test_two_seqs_order_values_for_one_pair_come_before_the_results(self):
+        a, b = T.graphlet('merge'), T.graphlet('merge_ties')
+        so = {'g': 'verified', ('g', None, None): 'count_only'}
+        # an argument error: reported before the two answers on one pair are
+        text = refused(self, 'bad_seqs_order', lambda: union_pairs(
+            [{'pair': 'g', 'graphlet': a}, {'pair': 'g', 'graphlet': b}], seqs_order=so))
+        self.assertIn("seqs_order['g'] and seqs_order[('g', None, None)] (two values for one "
+                      "pair)", text)
+        # two keys that only a result's pair joins: found once the pairs are known
+        self.assertEqual(union_pairs([{'pair': 'g', 'graphlet': a}],
+                                     seqs_order={'g': 'verified'}).parts[0].seqs_order,
+                         'verified')
+        text = refused(self, 'bad_seqs_order', lambda: union_pairs(
+            [{'pair': 'g', 'graphlet': a}], seqs_order={
+                ('g', '/x/a.dbg'): 'verified', ('g', '/y/b.dbg'): 'count_only'}))
+        self.assertIn('two values for pair g', text)
+
     def test_seed_check_ignores_a_matching_seed_id(self):
         seq = T.graphlet('merge').seed.sequence
         r = absent_result('not_in_graph')
@@ -752,26 +782,66 @@ class TestInputs(unittest.TestCase):
         self.assertEqual(u.absent[0].seed_check, 'unchecked')
 
 
+def seed_id_variant(g, seed_id):
+    """A shallow copy of |g| asked with another seed_id (one retrieval: seed_id is not part
+    of the retrieval identity)."""
+    h = copy.copy(g)
+    h.seed_summary = copy.deepcopy(g.seed_summary)
+    h.seed_summary['seed']['seed_id'] = seed_id
+    return h
+
+
 class TestOrder(unittest.TestCase):
-    """P3: any order of the results gives the same digest and byte-equal answers."""
+    """P3: any order of the results gives the same digest and byte-equal answers, also with
+    duplicate forms of one retrieval (envelope-stated and caller-stated, seed_id variants),
+    absent records that differ only in seed_id or in the seed check, two failures of one
+    pair and parts whose alphabets are spelled differently."""
+
+    def answers(self, u):
+        return (u.digest, u.alphabet, u.seed.sequence, str(u), u.to_fasta(stubs=True),
+                u.to_gfa(), u.to_gfa(labels='full'), json.dumps(u.summary(), sort_keys=True),
+                repr(u.walks('right', stubs=True)), str(u.carriers('right', 1)),
+                json.dumps(u.provenance(), sort_keys=True, default=repr),
+                json.dumps(u.evidence('right'), sort_keys=True, default=repr),
+                repr(u.coverage('right')))
 
     def test_permutations(self):
         seq = T.graphlet('merge').seed.sequence
-        items = stated(gA='annotate', gM='merge', gT='merge_ties') + [
-            {'pair': 'g2', 'result': absent_result('not_in_graph')},
-            {'pair': 'g5', 'error': 'HTTP 503'}]
-        ref = union_pairs(items, expected_pairs=['gA', 'gM', 'gT', 'g2', 'g5', 'g9'])
-        want = (ref.digest, str(ref), ref.to_fasta(stubs=True), ref.to_gfa(),
-                json.dumps(ref.summary(), sort_keys=True), repr(ref.walks('right')),
-                str(ref.carriers('right', 1)))
+        e = with_env(T.graphlet('merge'), graph='gE')
+        x = absent_result('not_in_graph')
+        y = copy.deepcopy(x)
+        y['seed']['seed_id'] = 'other'
+        items = stated(gA='annotate') + [
+            # one retrieval in four forms: envelope-stated and caller-stated, two seed_ids
+            e, seed_id_variant(e, 'zz'), {'pair': 'gE', 'graphlet': e},
+            {'pair': 'gE', 'graphlet': seed_id_variant(e, 'aa')},
+            # an alphabet spelled without the sentinel (the same key)
+            {'pair': 'gT', 'graphlet': with_fields(T.graphlet('merge_ties'),
+                                                   alphabet='ACGT')},
+            {'pair': 'g2', 'result': x}, {'pair': 'g2', 'result': y},
+            {'pair': 'g3', 'result': absent_result('labels_not_in_graph')},
+            {'pair': 'g3', 'result': absent_result('labels_not_in_graph'), 'sequence': seq},
+            {'pair': 'g5', 'error': 'HTTP 503'}, {'pair': 'g5', 'error': 'timeout'}]
+        expected = ['gA', 'gE', 'gT', 'g2', 'g3', 'g5', 'g9']
+        ref = union_pairs(items, expected_pairs=expected)
+        self.assertEqual((len(ref.parts), len(ref.absent)), (3, 3))
+        want = self.answers(ref)
         rng = random.Random(7)
-        for _ in range(6):
+        for _ in range(12):
             perm = items[:]
             rng.shuffle(perm)
-            u = union_pairs(perm, expected_pairs=['g9', 'g5', 'g2', 'gT', 'gM', 'gA'])
-            self.assertEqual((u.digest, str(u), u.to_fasta(stubs=True), u.to_gfa(),
-                              json.dumps(u.summary(), sort_keys=True), repr(u.walks('right')),
-                              str(u.carriers('right', 1))), want)
+            exp = expected[:]
+            rng.shuffle(exp)
+            self.assertEqual(self.answers(union_pairs(perm, expected_pairs=exp)), want)
+        # what is kept: the envelope-stated form with the first seed summary, the record
+        # sorting first, the stronger seed check, the alphabet of the canonical first part
+        prov = {p['tag']: p for p in ref.provenance() if p['kind'] == 'part'}
+        self.assertEqual(prov['gE']['pair_stated_by'], 'envelope')
+        self.assertEqual(prov['gE']['seed_id'], 'merge')
+        absent = {a.tag: a for a in ref.absent}
+        self.assertEqual(absent['g2'].detail['seed']['seed_id'], 'other')
+        self.assertEqual(absent['g3'].seed_check, 'stated')
+        self.assertEqual(ref.alphabet, ref.parts[0].graphlet.alphabet)
         self.assertEqual(seq, ref.seed.sequence)
 
 

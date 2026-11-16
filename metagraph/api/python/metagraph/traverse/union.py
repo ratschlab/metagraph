@@ -358,18 +358,26 @@ def _env_desc(env, g=None):
 
 
 def _matches(a, b):
-    """The one rule of Appendix A.4: do descriptions |a| and |b| name one pair?"""
+    """The one rule of Appendix A.4: do descriptions |a| and |b| name one pair? It decides
+    every match: duplicate_pair, pair_mismatch, not_expected, not_included, an absent record
+    against a part, and seqs_order=. A single-graph server's pair states no graph name: its
+    tag is its index_ns, and a bare name equal to it names that pair."""
     if a.get('index_meta_fp') and b.get('index_meta_fp') \
             and a['index_meta_fp'] != b['index_meta_fp']:
         return False
     if a.get('index_fp') and b.get('index_fp'):
         return a['index_fp'] == b['index_fp']
     if a.get('graph') != b.get('graph'):
-        return False
+        return _names_ns(a, b) or _names_ns(b, a)
     for k in ('graph_path', 'annotation_path', 'release', 'index_ns', 'index_meta_fp'):
         if a.get(k) and b.get(k) and a[k] != b[k]:
             return False
     return True
+
+
+def _names_ns(bare, d):
+    """Bare name |bare| names the single-graph pair |d| (no graph name) by its index_ns."""
+    return set(bare) == {'graph'} and not d.get('graph') and d.get('index_ns') == bare['graph']
 
 
 def _key(d):
@@ -520,6 +528,15 @@ def _check_args(results, seed, expected_pairs, seqs_order):
             if d is None or v not in _SEQS_ORDER:
                 raise _refuse('bad_seqs_order', None, 'seqs_order[%r] = %r' % (k, v))
             so.append((d, 'none' if v is None else v, k))
+        # two values for one pair, seen among the keys themselves (an argument error, so
+        # before any result is read); a conflict only a result's pair shows is found once
+        # the pairs are known (_seqs_of)
+        for i in range(len(so)):
+            for j in range(i + 1, len(so)):
+                if so[i][1] != so[j][1] and _matches(so[i][0], so[j][0]):
+                    raise _refuse('bad_seqs_order', None,
+                                  'seqs_order[%r] and seqs_order[%r] (two values for one pair)'
+                                  % (so[i][2], so[j][2]))
     if seed is not None and not isinstance(seed, str):
         raise TypeError('seed= is the oriented seed sequence (a string), not %r' % (seed,))
     if not isinstance(results, (list, tuple)):
@@ -645,6 +662,7 @@ class PairUnion:
         classes = _classes([d for _, d in descs])
         cls_of = {id(d): c for c in classes for d in c['members']}
         tags = _tags(classes)
+        seqs = _seqs_of(classes, so, tags)
         self._b = b
         # no_bases, different_alphabet
         parts = [e for e in elems if e.kind == 'part']
@@ -695,25 +713,12 @@ class PairUnion:
                 c = cls_of[id(e.desc)]
                 if not any(id(m) in exp_ids for m in c['members']):
                     raise _refuse('not_expected', None, tags[id(c)])
-        self._finish(kept, classes, cls_of, tags, exp, so, useed, alphabet, seed,
+        self._finish(kept, classes, cls_of, tags, exp, seqs, useed, alphabet, seed,
                      expected_pairs, b)
         return self
 
-    def _finish(self, kept, classes, cls_of, tags, exp, so, useed, alphabet, seed,
+    def _finish(self, kept, classes, cls_of, tags, exp, seqs, useed, alphabet, seed,
                 expected_pairs, b):
-        seqs = {}
-        def hits(d, desc):
-            # a bare name also names a single-graph server's pair by its index namespace
-            return _matches(d, desc) or (set(d) == {'graph'} and not desc.get('graph')
-                                         and desc.get('index_ns') == d['graph'])
-
-        for c in classes:
-            vals = {v for d, v, _ in so if hits(d, c['desc'])}
-            if len(vals) > 1:
-                k = next(k for d, v, k in so if hits(d, c['desc']))
-                raise _refuse('bad_seqs_order', None, 'seqs_order[%r] (two values for pair %s)'
-                              % (k, tags[id(c)]))
-            seqs[id(c)] = vals.pop() if vals else 'unknown'
         parts, absent = [], []
         self._failures = []
         for c in sorted(classes, key=lambda c: _sort_key(_key(c['desc']))):
@@ -752,8 +757,10 @@ class PairUnion:
             if any(id(m) in exp_ids for m in c['members']))
         self.pairs = tuple(p.tag for p in self.parts) + tuple(a.tag for a in self.absent) \
             + self._not_included
-        self._seed_seq = useed
-        self.alphabet = alphabet
+        # the seed and alphabet as the canonical first part states them (the parts agree
+        # base for base after case mapping and on the alphabet's key, not on its spelling)
+        self._seed_seq = self.parts[0].graphlet.seed.sequence if self.parts else useed
+        self.alphabet = self.parts[0].graphlet.alphabet if self.parts else alphabet
         self._order = {ch: i for i, ch in enumerate(C._letters(alphabet or ''))}
         self._part_of = {p.tag: p for p in self.parts}
         self._tag_index = {p.tag: i for i, p in enumerate(self.parts)}
@@ -1560,6 +1567,20 @@ class _SeedStandIn:
 
 # ------------------------------------------------------------------ pairs, tags, dedupe
 
+def _seqs_of(classes, so, tags):
+    """id(class) -> its seqs_order value ('unknown' where seqs_order= names it not), by the
+    one matching rule; bad_seqs_order where two keys give one pair two values."""
+    seqs = {}
+    for c in classes:
+        vals = {v for d, v, _ in so if _matches(d, c['desc'])}
+        if len(vals) > 1:
+            k = next(k for d, v, k in so if _matches(d, c['desc']))
+            raise _refuse('bad_seqs_order', None, 'seqs_order[%r] (two values for pair %s)'
+                          % (k, tags[id(c)]))
+        seqs[id(c)] = vals.pop() if vals else 'unknown'
+    return seqs
+
+
 def _classes(descs):
     """The pair classes of |descs| (match is transitive once ambiguous_pair passed):
     [{'members': [desc...], 'desc': the fullest description}]."""
@@ -1668,15 +1689,25 @@ def _seed_check(e):
 
 
 def _absent_rank(e):
-    return (e.by != 'envelope', ('sent', 'stated', 'unchecked').index(_seed_check(e)))
+    """Which of two forms of one absent record is kept: the envelope-stated one, then the
+    stronger seed check, then the whole record as canonical JSON (its seed_id included)
+    and the stated pair: a total order, so the form kept never depends on the order
+    given."""
+    return (e.by != 'envelope', ('sent', 'stated', 'unchecked').index(_seed_check(e)),
+            C.canonical_json(e.result), C.canonical_json(e.stated or {}), e.error or '')
+
+
+def _part_rank(e):
+    """Which of two forms of one retrieval is kept: the envelope-stated one, then the
+    envelope's canonical JSON, then the seed summary's (the caller's seed_id) and the
+    stated pair: a total order over what the union reports of a part."""
+    g = e.graphlet
+    return (e.by != 'envelope', C.canonical_json(g.envelope),
+            C.canonical_json(g.seed_summary or {}), C.canonical_json(e.stated or {}))
 
 
 def _prefer(e, prev):
-    """Of two forms of one retrieval: the envelope-stated one; of two, the one whose
-    envelope's canonical JSON sorts first."""
-    if e.by != prev.by:
-        return e.by == 'envelope'
-    return C.canonical_json(e.graphlet.envelope) < C.canonical_json(prev.graphlet.envelope)
+    return _part_rank(e) < _part_rank(prev)
 
 
 def _identity_statement(g):
