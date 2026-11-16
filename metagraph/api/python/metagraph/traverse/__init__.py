@@ -54,12 +54,13 @@ _NAMES = {
                  'release_verdict'),
     'client': ('ResolveDeadline', 'TraverseClient', 'UnsupportedFeature'),
     'store': ('Entry', 'GraphletStore', 'StoreLimitExceeded', 'UnknownHandle'),
+    'composite': ('CombineRefused',),
 }
 _HOME = {name: mod for mod, names in _NAMES.items() for name in names}
 # the package's modules, also reachable as attributes before anything imported them
 # (metagraph.traverse.ops right after `import metagraph.traverse`)
-_MODULES = frozenset(('_codec', 'attempts', 'budget', 'client', 'coords', 'derive', 'export',
-                      'frames', 'mcp_tools', 'model', 'ops', 'parser', 'store'))
+_MODULES = frozenset(('_codec', 'attempts', 'budget', 'client', 'composite', 'coords', 'derive',
+                      'export', 'frames', 'mcp_tools', 'model', 'ops', 'parser', 'store'))
 
 __all__ = [
     'FORMAT_VERSION', 'parse', 'dump', 'is_canonical', 'load', 'save', 'from_response',
@@ -79,6 +80,7 @@ __all__ = [
     'StoreLimitExceeded',
     'LocalBudget', 'LocalLimits', 'LocalStop', 'LocalBudgetExceeded', 'Partial',
     'local_budget',
+    'CombineRefused',
 ]
 
 
