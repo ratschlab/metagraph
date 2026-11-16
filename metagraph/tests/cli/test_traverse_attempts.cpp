@@ -11,11 +11,13 @@
 #include <limits>
 #include <map>
 #include <memory>
+#include <optional>
 #include <random>
 #include <set>
 #include <stdexcept>
 #include <string>
 #include <thread>
+#include <utility>
 #include <vector>
 
 #include <arpa/inet.h>
@@ -3036,6 +3038,187 @@ TEST(ServerRequest, TheResolveRouteWritesUnderItsGoneCheck) {
         EXPECT_EQ(json_text(resolve_deadline_body(ResolveDeadline("past the deadline")), true),
                   answer.body);
     }
+}
+
+// The pieces a held member's value is kept in (T7-D3): an array as `[`, its elements' texts each
+// after the first with its comma, `]`; any other value as its one text
+std::vector<std::string> held_value(const Json::Value &value) {
+    if (!value.isArray())
+        return { json_text(value, true) };
+    std::vector<std::string> pieces { "[" };
+    for (Json::ArrayIndex i = 0; i < value.size(); ++i) {
+        pieces.push_back((i ? "," : "") + json_text(value[i], true));
+    }
+    pieces.push_back("]");
+    return pieces;
+}
+
+// |object| without the members |keys|, which it holds as text (held_value)
+std::pair<Json::Value, HeldMembers> held_of(Json::Value object,
+                                            const std::vector<std::string> &keys) {
+    HeldMembers held;
+    for (const std::string &key : keys) {
+        held.members.emplace_back(key, held_value(object[key]));
+        object.removeMember(key);
+    }
+    return { std::move(object), std::move(held) };
+}
+
+// An object's text cut around keys it does not hold (json_text_around): with a key before every
+// member, after every member, two keys side by side, between members and in an empty object,
+// the texts around the keys' values are json_text's of the object holding them; keys out of
+// order, or a key the object holds, are refused
+TEST(ResolveText, TheTextAroundKeysIsTheObjectsText) {
+    Json::Value object;
+    object["b"] = 1;
+    object["d"]["x"] = "y";
+    object["f"] = Json::Value(Json::arrayValue);
+    object["h\xc3\xa9"] = "q\"\n";
+    const Json::Value value = Json::Value("v");
+    for (const std::vector<std::string> &keys : std::vector<std::vector<std::string>> {
+                 {}, { "a" }, { "z" }, { "a", "c" }, { "c", "e" }, { "c", "ca" }, { "a", "e", "z" },
+                 { "e", "g", "i" } }) {
+        for (bool empty : { false, true }) {
+            const Json::Value base = empty ? Json::Value(Json::objectValue) : object;
+            Json::Value full = base;
+            for (const std::string &key : keys) {
+                full[key] = value;
+            }
+            const std::vector<std::string> around = json_text_around(base, keys);
+            ASSERT_EQ(keys.size() + 1, around.size());
+            std::string text = around[0];
+            for (size_t i = 0; i < keys.size(); ++i) {
+                text += json_text(value, true) + around[i + 1];
+            }
+            EXPECT_EQ(json_text(full, true), text) << keys.size() << " keys, empty " << empty;
+        }
+    }
+    EXPECT_THROW(json_text_around(object, { "c", "a" }), std::logic_error);
+    EXPECT_THROW(json_text_around(object, { "a", "a" }), std::logic_error);
+    EXPECT_THROW(json_text_around(object, { "a", "b" }), std::logic_error);
+}
+
+// A /resolve answer's members held as text (json_text_with_members, the route's writing): an
+// answer's shape (arrays of objects, empty arrays, an rle string, a selection split at its seeds,
+// names a writer escapes) written from the head and the texts is byte for byte the tree's text,
+// with the delivery check read as the body is copied; an envelope of an answered pair (its entry
+// tagged, with its members held), a refused one, a pair not reached and one unfinished is
+// written likewise (envelope_text_with_members); a head holding a held key is refused
+TEST(ResolveText, HeldMembersAreWrittenByteForByte) {
+    Json::Value answer;
+    answer["k"] = 31;
+    answer["regime"] = "basic";
+    answer["support"] = "kmer";
+    answer["graph_runs"] = "x3o70x2";
+    answer["labels_truncated"] = Json::Value();
+    for (size_t i = 0; i < 3000; ++i) {
+        Json::Value label;
+        label["label"] = "rec" + std::to_string(i) + (i % 7 ? "" : " q\"b\\ \x01\x7f \xe2\x82\xac");
+        label["kind"] = "header";
+        label["kmers_supported"] = Json::UInt64(i * 1000003);
+        for (size_t r = 0; r < i % 5; ++r) {
+            Json::Value run(Json::arrayValue);
+            run.append(Json::UInt64(r));
+            run.append(Json::UInt64(r + 1));
+            label["runs"].append(run);
+        }
+        if (!label.isMember("runs"))
+            label["runs"] = Json::Value(Json::arrayValue);
+        answer["labels"].append(label);
+    }
+    answer["candidates"] = Json::Value(Json::arrayValue);
+    answer["selection"]["policy"]["policy"] = "longest_first";
+    answer["selection"]["counts"]["selected"] = 2;
+    for (size_t i = 0; i < 2; ++i) {
+        Json::Value seed;
+        seed["sequence"] = std::string(100 + i, 'A');
+        seed["labels"].append("rec" + std::to_string(i));
+        answer["selection"]["seeds"].append(seed);
+    }
+    answer["unknown_labels"].append("absent");
+    answer["work"]["memory_bytes"] = 12345;
+    answer["timing"]["elapsed_ms"] = 1.25;
+    const std::string expected = json_text(answer, true);
+
+    auto held = [&]() {
+        auto [head, members] = held_of(answer, { "labels", "graph_runs", "candidates",
+                                                 "unknown_labels" });
+        // the selection: its policy and counts around its seeds' texts
+        Json::Value selection = head["selection"];
+        head.removeMember("selection");
+        const Json::Value seeds = selection["seeds"];
+        selection.removeMember("seeds");
+        const std::vector<std::string> around = json_text_around(selection, { "seeds" });
+        std::vector<std::string> pieces = held_value(seeds);
+        pieces.front() = around[0] + pieces.front();
+        pieces.back() += around[1];
+        members.members.emplace_back("selection", std::move(pieces));
+        return std::make_pair(head, members);
+    };
+    {
+        auto [head, members] = held();
+        size_t checks = 0;
+        EXPECT_EQ(expected, json_text_with_members(head, std::move(members),
+                                                   [&]() { ++checks; }));
+        // (every 64 KiB of the body)
+        EXPECT_LE(expected.size() / (64 << 10), checks);
+        EXPECT_LT(0u, checks);
+    }
+    {
+        // a head that holds a held key, or a key held twice
+        auto [head, members] = held();
+        Json::Value with = head;
+        with["labels"] = 1;
+        EXPECT_THROW(json_text_with_members(with, members), std::logic_error);
+        HeldMembers twice = members;
+        twice.members.push_back(twice.members.front());
+        EXPECT_THROW(json_text_with_members(head, twice), std::logic_error);
+    }
+    // the envelope
+    Json::Value envelope;
+    envelope["envelope_version"] = 1;
+    envelope["route"] = "/resolve";
+    envelope["request_id"] = Json::Value();
+    envelope["timing"]["elapsed_ms"] = 3.5;
+    Json::Value entry = answer;
+    entry["graph"] = "bact_other";
+    entry["outcome"] = "answered";
+    entry["index_fp"] = "abc";
+    Json::Value refused;
+    refused["graph"] = "bact_pseudomonadota";
+    refused["outcome"] = "refused";
+    refused["refusal"]["code"] = "resolve_answer_too_large";
+    refused["refusal"]["http_status"] = 400;
+    Json::Value not_reached;
+    not_reached["graph"] = "inv_insecta";
+    not_reached["outcome"] = "not_reached";
+    for (const Json::Value *e : { &entry, &refused, &not_reached, &entry }) {
+        envelope["answers"].append(*e);
+    }
+    const std::string whole = json_text(envelope, true);
+    auto [head, members] = held();
+    Json::Value written = envelope;
+    for (Json::ArrayIndex i : { 0u, 3u }) {
+        for (const auto &[key, pieces] : members.members) {
+            written["answers"][i].removeMember(key);
+        }
+    }
+    std::vector<std::optional<HeldMembers>> answers { members, std::nullopt, std::nullopt, members };
+    EXPECT_EQ(whole, envelope_text_with_members(written, answers));
+    // every entry as it is
+    EXPECT_EQ(whole, envelope_text_with_members(envelope, { std::nullopt, std::nullopt,
+                                                            std::nullopt, std::nullopt }));
+    answers.pop_back();
+    EXPECT_THROW(envelope_text_with_members(written, answers), std::logic_error);
+    // the route's writing: from the members it holds, then (reset) from a tree alone
+    ResolveWriting writing([]() { return false; }, std::chrono::hours(1), 1);
+    writing.single = members;
+    EXPECT_EQ(expected, writing.control.write(head, {}));
+    EXPECT_FALSE(writing.single);
+    EXPECT_EQ(expected, writing.control.write(answer, {}));
+    writing.enveloped = { members, std::nullopt, std::nullopt, members };
+    EXPECT_EQ(whole, writing.control.write(written, {}));
+    EXPECT_TRUE(writing.enveloped.empty());
 }
 
 // What process_request writes (answer_request, without the HTTP library) for every outcome of

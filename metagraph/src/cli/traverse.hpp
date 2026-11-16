@@ -645,9 +645,12 @@ class ResolveDelivery {
 // whatever the client did as long as no registry entry records the request (a request refused
 // before it was admitted, or one without a request_id on a single-graph server); once |tracked|
 // answers true, ResponseControl::gone asks too, so that an entry records client_gone, not an
-// error that nobody received (SPEC-multigraph-envelope.md section 5). The answer's text is
-// written into a buffer reserved to its exact size (compact_json_size), the same bytes as
-// json_text's. The route builds its control only here
+// error that nobody received (SPEC-multigraph-envelope.md section 5). The answer is written
+// from the members it holds as text (T7-D3, §4.6): |single| (a single-graph answer's,
+// json_text_with_members) or |enveloped| (a multi-graph envelope's entries',
+// envelope_text_with_members), into a buffer reserved to its exact size, each text freed once
+// copied; without them (a tree alone) into a buffer reserved to its exact size
+// (compact_json_size): the same bytes as json_text's either way. The route builds its control only here
 // (ServerRequest.TheResolveRouteWritesUnderItsGoneCheck). Not copyable: |control| refers to the
 // members
 struct ResolveWriting {
@@ -666,9 +669,21 @@ struct ResolveWriting {
                 throw HttpError(503, resolve_deadline_body(e));
             }
         };
-        // the answer's text reserved to its exact size, so that writing it holds the tree and
-        // the text once, as the answer account prices it (§4.6; T4 review R1, F3)
-        control.write = [](const Json::Value &result, const std::function<void()> &check) {
+        // the answer's text reserved to its exact size, written from the texts it holds (each
+        // freed once copied), so that writing it holds what the answer account prices: the
+        // texts, the body and its copy (§4.6; T7-D3); a tree alone, the tree and its text once
+        // (T4 review R1, F3)
+        control.write = [this](const Json::Value &result, const std::function<void()> &check) {
+            if (single) {
+                HeldMembers held = std::move(*single);
+                single.reset();
+                return json_text_with_members(result, std::move(held), check);
+            }
+            if (!enveloped.empty()) {
+                std::vector<std::optional<HeldMembers>> answers;
+                answers.swap(enveloped);
+                return envelope_text_with_members(result, std::move(answers), check);
+            }
             return json_text(result, true, check, nullptr, compact_json_size(result));
         };
     }
@@ -678,6 +693,10 @@ struct ResolveWriting {
     ResolveDelivery delivery;
     GoneCheck writing_gone;
     ResponseControl control;
+    // the members the answer holds as text: a single-graph answer's, or each entry's of a
+    // multi-graph envelope (its answered pairs'), set by the handler with the answer it returns
+    std::optional<HeldMembers> single;
+    std::vector<std::optional<HeldMembers>> enveloped;
     // whether a registry entry records this request (unset: never)
     std::function<bool()> tracked;
 };

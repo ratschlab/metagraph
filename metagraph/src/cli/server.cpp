@@ -2234,16 +2234,20 @@ int run_server(Config *config) {
                 if (control.inline_run() && without_deadline)
                     control.stop_at_cutoff();
                 // the pair answers for the labels it holds and lists the others
-                // (unknown_labels, SPEC-multigraph-envelope.md section 2)
-                Json::Value out = process_resolve_request(
+                // (unknown_labels, SPEC-multigraph-envelope.md section 2); its answer held as
+                // text (SPEC-labeled-traversal-core.md §4.6): its head becomes the entry, its
+                // held members are written into it by the envelope's writing
+                ResolveAnswer answer = process_resolve_answer(
                         json, lease->index(), config->index_release, config->resolve_max_query_bp,
                         &identity, control.stop_predicate(), resolve_time, pair_delivery,
                         nullptr, /* labels_not_in_graph_dropped */ true);
+                Json::Value &out = answer.head;
                 // in_ram: the time before the work began, waiting for and loading its index
                 if (in_ram)
                     out["timing"]["load_ms"] = lease->load_ms();
                 result.memory_bytes = out["work"]["memory_bytes"].asUInt64();
                 result.entry = envelope_entry_answered(selected, identity.fp, std::move(out));
+                result.held = std::move(answer.held);
                 result.answered = true;
             } catch (const PairNotStarted &) {
                 result.not_started = true;
@@ -2307,6 +2311,8 @@ int run_server(Config *config) {
         context.request_id = handles.request_id;
         context.server_instance = attempts.server_instance();
         context.deadline = deadlines.json();
+        // each answered pair's members held as text, beside its entry in the envelope's order
+        writing->enveloped = std::move(outcome.held);
         Json::Value out = post_envelope("/resolve", names, std::move(outcome.entries), context,
                                         timer.elapsed() * 1000);
         put_thread_usage(&out["timing"], pairs.size() > 1
@@ -2404,12 +2410,15 @@ int run_server(Config *config) {
                 // a single-graph server keeps the 400 for a label it does not hold
                 // (SPEC-multigraph-envelope.md section 2): multi is false here. A client that
                 // is gone is not answered: abandoned between the request's phases
-                Json::Value out = process_resolve_request(json, *anno_graph.get(),
-                                                          config->index_release,
-                                                          config->resolve_max_query_bp,
-                                                          &identity, gone_of(request),
-                                                          resolve_time, &writing.delivery,
-                                                          nullptr, multi, admitted);
+                // the answer held as text (SPEC-labeled-traversal-core.md §4.6): its head is
+                // returned, its held members written into it by the writing (ResolveWriting)
+                ResolveAnswer answer = process_resolve_answer(json, *anno_graph.get(),
+                                                              config->index_release,
+                                                              config->resolve_max_query_bp,
+                                                              &identity, gone_of(request),
+                                                              resolve_time, &writing.delivery,
+                                                              nullptr, multi, admitted);
+                Json::Value &out = answer.head;
                 // in_ram: a single-graph server's index is the one it holds, nothing is loaded
                 if (in_ram)
                     out["timing"]["load_ms"] = 0.0;
@@ -2420,7 +2429,8 @@ int run_server(Config *config) {
                                           ? std::optional<double>(out["timing"]["cpu_ms"].asDouble())
                                           : std::nullopt);
                 }
-                return out;
+                writing.single = std::move(answer.held);
+                return std::move(out);
             } catch (...) {
                 // (an entry refused before its admission was never registered)
                 if (tracked) {

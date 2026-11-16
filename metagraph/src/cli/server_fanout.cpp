@@ -706,6 +706,8 @@ class FanoutState {
         Json::Value entry;
         // the entry's patterns as texts (/pattern, PairResult::patterns)
         std::optional<PatternEntries> patterns;
+        // the entry's members held as text (/resolve, PairResult::held)
+        std::optional<HeldMembers> held;
         bool aborted = false;
         common::ThreadUsage usage = common::ThreadUsage::zero();
         bool usage_final = false;
@@ -1003,6 +1005,7 @@ class FanoutState {
             } else {
                 slot.entry = std::move(result.entry);
                 slot.patterns = std::move(result.patterns);
+                slot.held = std::move(result.held);
                 slot.resolved = true;
                 slot.usage = result.usage;
                 slot.usage_final = true;
@@ -1158,6 +1161,7 @@ FanoutOutcome run_fanout(const FanoutSettings &settings,
         outcome.client_gone = slot.aborted;
         outcome.entries.push_back(std::move(slot.entry));
         outcome.patterns.push_back(std::move(slot.patterns));
+        outcome.held.push_back(std::move(slot.held));
         return outcome;
     }
     const RequestDeadlines &d = state->settings.deadlines;
@@ -1256,6 +1260,8 @@ FanoutOutcome run_fanout(const FanoutSettings &settings,
         slot.entry = Json::Value();
         outcome.patterns.push_back(std::move(slot.patterns));
         slot.patterns.reset();
+        outcome.held.push_back(std::move(slot.held));
+        slot.held.reset();
     }
     state->inline_gone = nullptr;
     return outcome;
