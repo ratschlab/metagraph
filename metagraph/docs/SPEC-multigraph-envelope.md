@@ -135,13 +135,15 @@ The answer keeps its upstream shape (a list of `{seq_description, results, ...}`
   connection, as on `/traverse`, `/resolve` and `/pattern`. A request whose work has all started (every record on
   every pair) is not stopped: it is answered as before (to a gone client, a write that fails). With `--cache-size`
   above 0 a client gone stops nothing: the request computes to its end and stores its answer, so that a retry is a
-  hit; only a shutdown stops it (and the identical requests waiting for it, written nothing either). The server logs
+  hit; only a shutdown stops it, and the identical requests waiting for it (written nothing either). The server logs
   `[Server] Request <id>: <client gone|shutdown>, /search stopped: <r> of <n> records started, <p> of <P> pairs
   started; no response written` (the reason the stop answered first; <r>: the most records one pair started, on the
   batched path the records whose query on their batch's query graph began; <n>: the request's records, with
   `--fwd-and-reverse` each record and its reverse complement; <P>: the pairs selected, 1 on a single-graph server;
-  <p>: those whose search began). No capability states it: a client that is there, and has not half-closed, gets the
-  same answer.
+  <p>: those whose search began). A request that waited for a stopped one logs `[Server] Request <id>: shutdown,
+  /search stopped while waiting for request <producer>; no response written` instead (<producer>: the stopped
+  request's id, whose line has the counts). No capability states it: a client that is there, and has not
+  half-closed, gets the same answer.
 - `GET /column_labels` (H3), which tags nothing with a name, lists each distinct pair once, at its first place in
   the answers' order (the names in byte order, each name's pairs in the list's order), its labels in column
   order (section 8).
