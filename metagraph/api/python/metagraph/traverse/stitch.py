@@ -388,6 +388,7 @@ class StitchedGraphlet:
         self._labels, self._label_of = self._union_labels()
         self._junctions = tuple(self._make_junction(p) for p in self._parts[1:])
         self._junctions = tuple(sorted(self._junctions, key=lambda j: (j.arm, j.walk)))
+        self._jindex = {j.part: i for i, j in enumerate(self._junctions)}
         self.digest = _K.combined_digest([[[list(s) for s in p.key], p.digest]
                                           for p in self._parts])
 
@@ -779,10 +780,8 @@ class StitchedGraphlet:
                         key, 'qualified', tuple(causes), continued, not_cont)
 
     def _junction_of_part(self, key):
-        for i, j in enumerate(self._junctions):
-            if j.part == key:
-                return i, j
-        raise KeyError(key)
+        i = self._jindex[key]
+        return i, self._junctions[i]
 
     @staticmethod
     def _gated(j):
