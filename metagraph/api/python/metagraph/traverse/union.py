@@ -32,8 +32,8 @@ from . import derive
 from . import ops as _ops
 from ._codec import REASON, RESOURCE_CODES, GraphletFormatError
 from .attempts import TraverseResponse
-from .budget import (BASE_SHIFT, STR, TUPLE, W_ELEM, W_ROW, W_STEP, LocalBudgetExceeded,
-                     Partial, list_bytes)
+from .budget import (BASE_SHIFT, DICT, DICT_KEY, INT, LIST_ITEM, SET, SET_ITEM, STR, TUPLE,
+                     W_ELEM, W_ROW, W_STEP, LocalBudgetExceeded, Partial)
 from .client import answered_pair
 from .model import (ARM_SIDES, AmbiguousLabel, BadSelector, Graphlet, UnknownLabel)
 
@@ -127,6 +127,24 @@ _PAIR_FIELDS = ('graph', 'graph_path', 'annotation_path', 'release', 'index_ns',
 _KEY_FIELDS = ('release', 'index_ns', 'graph', 'graph_path', 'annotation_path', 'index_fp',
                'index_meta_fp')
 _SEQS_ORDER = ('verified', 'count_only', None)
+
+# The memory prices of the union's own objects (bytes): fitted to tracemalloc's traced peak
+# of each operation, cold, on CPython 3.11 and 3.14 (the split fixtures' 11 parts, r237's
+# export, a comb), so that the budget's account bounds the call's peak (budget.py).
+_M_NODE = 300           # a raw trie node: its children dict, its depth
+_M_EDGE = 420           # a raw edge: its five list slots, its reference, its cover dict
+_M_COVER = 110          # a cover entry of an edge (part -> (segment, offset))
+_M_SEG = 200            # a part segment's entries: its nodes, the walks and stubs below it
+_M_USEG = 1280          # a union segment: the object, its dicts and lists, node_in/out
+_M_PIECE = 200          # a piece of a union segment (part, segment, from, to)
+_M_PART = 4096          # a part's record: its identity, retrieval identity, digests
+_M_RECORD = 1024        # an absent or failed record
+_M_SPAN = 900           # a PairSpan with its Route, merges and continues tuples
+_M_LABEL = 320          # a span label: its SpanLabel, PairLabel (with its ref) and slot
+_M_INTERVAL = 360       # a LabelInterval with its PairLabel, its ints and slot
+_M_NAME = 300           # shared_names() per label: the name sets, the dict and its lists
+_M_LABEL_WORK = 260     # what _labels_for() holds per label while it runs
+_M_FIG = 160            # a walk's figures: the record, whole_in and held_in, its slot
 _DERIVATION_CAUSES = {'no_carrier': 'no label carries the whole seed',
                       'no_trace_carrier': 'no label carries the whole seed by trace',
                       'too_wide': 'the seed\'s rows are too wide to derive from',
@@ -719,6 +737,10 @@ class PairUnion:
 
     def _finish(self, kept, classes, cls_of, tags, exp, seqs, useed, alphabet, seed,
                 expected_pairs, b):
+        if b is not None:
+            n = sum(1 for e in kept['by_class'].values() if e.kind == 'part')
+            b.charge(W_ROW * len(classes), _M_PART * n + _M_RECORD * (
+                len(classes) - n + sum(map(len, kept['failures'].values()))))
         parts, absent = [], []
         self._failures = []
         for c in sorted(classes, key=lambda c: _sort_key(_key(c['desc']))):
@@ -841,9 +863,11 @@ class PairUnion:
             if t is not None:
                 n = t.number(n)
 
-    def _seg_labels(self, part, a):
+    def _seg_labels(self, part, a, b=None):
         """seg -> (label_intervals(), the end set as a frozenset, label_intervals_cut()) of
-        a part segment, built once per union (counted in memory_bytes())."""
+        a part segment, built once per union (counted in memory_bytes()). |b|: each segment
+        read is charged once per call at its cold price (label_intervals()' own, and its
+        end set), whether the union holds it or not."""
         key = (part.tag, a.side)
         cache = self._seg_cache.get(key)
         if cache is None:
@@ -851,6 +875,11 @@ class PairUnion:
         g = part.graphlet
 
         def info(sid):
+            if b is not None:
+                pw, pm = _ops._interval_prices(b, g, a)
+                b.uses_of(a, 'union_seg_labels', pw[sid] + W_ELEM,
+                          pm[sid] + SET + SET_ITEM * len(a.segments[sid].end) + TUPLE,
+                          depth=sid)
             got = cache.get(sid)
             if got is None:
                 got = cache[sid] = (_ops.label_intervals(g, a.side, sid),
@@ -1048,11 +1077,15 @@ class PairUnion:
         any part walked) at |at_bp|."""
         self._check_paths(paths)
         side = None if arm is None else self._side(arm)
+        return _B.run_scoped(budget, 'union_statements', (),
+                             lambda b: self._statements(side, at_bp, paths, b))
+
+    def _statements(self, side, at_bp, paths, b):
         if side is None and self.parts:
             side = self.arms()[0]
         cov = self.coverage(side, at_bp)
-        return Statements(side, cov.at_bp, paths, cov, self._provenance_sentence(side, budget),
-                          TURN_OFFS, self._labels_sentence(), SCOPE)
+        return Statements(side, cov.at_bp, paths, cov, self._provenance_sentence(side, b),
+                          TURN_OFFS, self._labels_sentence(b), SCOPE)
 
     def _provenance_sentence(self, side, budget=None):
         sides = [side] if side else []
@@ -1074,8 +1107,15 @@ class PairUnion:
             return 'walks: none (no part carries a graphlet)'
         return 'walks: ' + ', '.join(items)
 
-    def _labels_sentence(self):
+    def _labels_sentence(self, b=None):
+        if b is not None:
+            # shared_names(): a set of names per part and the dict of names seen
+            n = sum(len(p.graphlet.labels) for p in self.parts)
+            nbytes = n * _M_NAME + DICT
+            b.charge(W_ELEM * n, nbytes)
         n = len(self.shared_names())
+        if b is not None:
+            b.release(nbytes)
         s = ('labels: each pair\'s own, shown as <tag>/<name>; equal names in two pairs are not '
              'claimed to be one record (%s)' % (
                  'no name occurs in more than one pair' if n == 0 else
@@ -1132,7 +1172,7 @@ class PairUnion:
                 with b.scope('segments'):
                     for sid in t.order[start:]:
                         self._charge_segment(b, t, sid)
-                        out.append(self._segment(t, sid))
+                        out.append(self._segment(t, sid, b))
             else:
                 for sid in t.order[start:]:
                     out.append(self._segment(t, sid))
@@ -1142,28 +1182,32 @@ class PairUnion:
         return out
 
     def _charge_segment(self, b, t, sid):
+        """A union segment's row: per covering part its support and a LabelInterval per
+        interval of the part segments it covers (at most their entry labels and changes,
+        or P-run labels); the intervals read are charged by _seg_labels()."""
         us = t.useg[sid]
         n = 0
         for pi in us.cover:
+            part = self.parts[pi]
+            info = self._seg_labels(part, part.graphlet.arms[t.side], b)
             for x in us.pieces[pi]:
-                s = self.parts[pi].graphlet.arms[t.side].segments[x[0]]
-                n += len(s.entry) + len(s.events) + len(s.presence) + 1
-        b.charge(W_ROW + W_ELEM * n, 200 + 120 * len(us.cover) + n * (TUPLE + 3 * 28))
+                n += len(info(x[0])[0])
+        b.charge(W_ROW + W_ELEM * n, 400 + 300 * len(us.cover) + n * _M_INTERVAL)
 
-    def _segment(self, t, sid):
+    def _segment(self, t, sid, b=None):
         us = t.useg[sid]
         sup = []
         for pi in sorted(us.cover):
             part = self.parts[pi]
-            g = part.graphlet
+            info = self._seg_labels(part, part.graphlet.arms[t.side], b)
             ivs = []
             cut = False
             for seg, f, to in us.pieces[pi]:
-                for lab, a, z in _ops.label_intervals(g, t.side, seg):
+                for lab, a, z in info(seg)[0]:
                     lo, hi = max(a, f), min(z, to)
                     if lo < hi:
                         ivs.append(LabelInterval(self._pair_label(part, lab), lo, hi))
-                cut = cut or _ops.label_intervals_cut(g, t.side, seg)
+                cut = cut or info(seg)[2]
             last = us.pieces[pi][-1][0]
             sup.append(SegmentSupport(part.tag, t.below_walks[pi][last], t.below_stubs[pi][last],
                                       tuple(us.pieces[pi]), tuple(ivs), cut))
@@ -1183,14 +1227,27 @@ class PairUnion:
         n = len(self.parts)
         if b is not None:
             # per union segment a stop per part, per walk a step per part and, for a part
-            # that merges, its route along at most the walk's length
+            # that merges, its route along at most the walk's length (one span at a time);
+            # the derivations a span reads; the stops are dropped at the end, the figures
+            # kept
             w = W_ELEM * n * len(t.order)
             for node in t.markers:
                 w += W_ROW + n * (W_ELEM + (t.depth[node] >> 4))
-            b.charge(w, 8 * n * len(t.order) + len(t.markers) * (300 + 16 * n))
+            for p in self.parts:
+                a = p.graphlet.arms.get(side)
+                if a is not None:
+                    derive.uses(b, p.graphlet, a, 'first_paths', *(
+                        ('end_labels',) if p.graphlet.mode == 'constrain' else ()))
+            tmp = len(t.order) * (TUPLE + 8 * n + LIST_ITEM) + _M_SPAN
+            b.charge(w, tmp + len(t.markers) * (_M_FIG + 16 * n))
         got = self._fig_cache.get(side)
-        if got is not None:
-            return got
+        if got is None:
+            got = self._build_figures(t, side, n)
+        if b is not None:
+            b.release(tmp)
+        return got
+
+    def _build_figures(self, t, side, n):
         has_arm = [side in p.graphlet.arms for p in self.parts]
         root = (0,) * n
         stops = [None] * len(t.useg)
@@ -1231,15 +1288,17 @@ class PairUnion:
         w = W_ROW + n * (W_ELEM * (1 + d) + (t.depth[node] >> 4))
         if with_labels:
             w += n * W_ELEM * 4 * (1 + d)
-        b.charge(w, 300 + 200 * n + 8 * d)
+        # the walk, its path (a slot and an id per union segment) and the spans' tuple; each
+        # span charges itself (_span)
+        b.charge(w, _walk_bytes(d, n))
 
-    def _walk(self, t, wid, node, with_labels=False, spell=False, at_bp=None):
+    def _walk(self, t, wid, node, with_labels=False, spell=False, at_bp=None, b=None):
         path = t.path_usegs(node)
         length = t.depth[node]
         kind = 'walk' if any(t.walk_end.get(node, ())) else 'stub'
         spans = []
         for pi, part in enumerate(self.parts):
-            spans.append(_span(self, t, pi, part, node, length, with_labels, at_bp))
+            spans.append(_span(self, t, pi, part, node, length, with_labels, at_bp, b))
         whole = tuple(s.pair for s in spans if s.how == 'whole')
         held = tuple(s.pair for s in spans if s.how in ('whole', 'extends')
                      or (s.how == 'merges' and s.route is not None and s.route.how == 'held'))
@@ -1254,6 +1313,7 @@ class PairUnion:
         t = self._arms[side]
         figs = self._figures(side, b)
         want = None if ids is None else set(ids)
+        prev = 0
         for wid, node in enumerate(t.markers):
             if want is not None and wid not in want:
                 continue
@@ -1261,7 +1321,14 @@ class PairUnion:
                 continue
             if b is not None:
                 self._charge_walk(b, t, node, with_labels)
-            yield self._walk(t, wid, node, with_labels)
+            w = self._walk(t, wid, node, with_labels, b=b)
+            yield w
+            # the consumer has moved on: the walk before this one is gone (this one is
+            # still bound to its loop variable while the next is built)
+            if b is not None:
+                b.release(prev)
+                prev = _walk_bytes(len(w.segments), len(w.spans)) + sum(map(_span_bytes,
+                                                                            w.spans))
 
     def walks(self, arm, *, paths='supported', max_transitions=1, max_paths=1000, top=None,
               by='pairs', pairs=None, labels=None, min_bp=0, spell=False, stubs=False,
@@ -1302,6 +1369,9 @@ class PairUnion:
         # the walks are selected and ranked on their figures (one trie pass); only the
         # walks returned are built, with their spans and path
         figs = self._figures(t.side, b)
+        if b is not None:
+            # the selection, and the sort's key per walk (a tuple of four, its ints)
+            b.charge(W_ELEM * len(figs), len(figs) * (LIST_ITEM + TUPLE + 4 * 8 + 2 * INT))
         sel = [wid for wid, f in enumerate(figs)
                if (stubs or f.kind == 'walk') and f.length_bp >= min_bp]
         if pairs:
@@ -1320,10 +1390,20 @@ class PairUnion:
                 held = figs[wid].held_in
                 if b is not None:
                     self._charge_walk(b, t, node, True)
-                if any(sl.from_bp == 0 and sl.label in want
-                       for pi, part in enumerate(self.parts) if part.tag in held
-                       for sl in _carrying_labels(_span(self, t, pi, part, node,
-                                                        figs[wid].length_bp, True))):
+                hit = False
+                for pi, part in enumerate(self.parts):
+                    if part.tag not in held:
+                        continue
+                    sp = _span(self, t, pi, part, node, figs[wid].length_bp, True, None, b)
+                    hit = any(sl.from_bp == 0 and sl.label in want
+                              for sl in _carrying_labels(sp))
+                    if b is not None:
+                        b.release(_span_bytes(sp))
+                    if hit:
+                        break
+                if b is not None:
+                    b.release(_walk_bytes(t.nsegs(node), len(self.parts)))
+                if hit:
                     keep.append(wid)
             sel = keep
         if by == 'pairs':
@@ -1331,6 +1411,8 @@ class PairUnion:
                                     -figs[i].length_bp, i))
         elif by == 'length':
             sel.sort(key=lambda i: (-figs[i].length_bp, i))
+        if b is not None:
+            b.release(len(figs) * (TUPLE + 4 * 8 + 2 * INT))
         if top is not None:
             sel = sel[:top]
         for wid in sel[start:]:
@@ -1340,7 +1422,7 @@ class PairUnion:
                 self._charge_walk(b, t, node, False)
                 b.charge(W_ROW + (length >> BASE_SHIFT if spell else 0),
                          400 + (STR + length if spell else 0))
-            out.append(self._walk(t, wid, node, False, spell))
+            out.append(self._walk(t, wid, node, False, spell, b=b))
         return out
 
     def _walk_by_id(self, side, walk):
@@ -1407,9 +1489,9 @@ class PairUnion:
                 with b.scope('carriers'):
                     for pi in range(start, len(self.parts)):
                         b.charge(W_ROW + W_STEP * length // 16 + W_ELEM * t.nsegs(node),
-                                 600 + 120 * len(self.parts[pi].graphlet.labels))
+                                 LIST_ITEM)
                         out.append(_span(self, t, pi, self.parts[pi], node, length, True,
-                                         at_bp))
+                                         at_bp, b))
             else:
                 for pi in range(start, len(self.parts)):
                     out.append(_span(self, t, pi, self.parts[pi], node, length, True, at_bp))
@@ -1455,13 +1537,17 @@ class PairUnion:
                              lambda b: self._summary(max_bytes, b))
 
     def _summary(self, max_bytes, b):
+        if b is not None:
+            # the answer (at most max_bytes of JSON as dicts and lists) and the JSON text
+            # each fit test writes, two at a time; a record per pair
+            b.charge(W_ROW * len(self.pairs), 8 * max_bytes + 600 * len(self.pairs))
         sts = []
         for s in (self.arms() or [None]):
-            st = self.statements(s)
+            st = self._statements(s, None, 'supported', b)
             sts.append({'arm': s, 'coverage': _core_sentence(st.coverage),
                         'provenance': st.provenance})
         out = {'statements': {'per_arm': sts, 'turn_offs': TURN_OFFS,
-                              'labels': self._labels_sentence(), 'scope': SCOPE}}
+                              'labels': self._labels_sentence(b), 'scope': SCOPE}}
         size = len(C.canonical_json(out))
         if size > max_bytes:
             raise _refuse('summary_too_small', None, size, max_bytes, size)
@@ -1852,6 +1938,10 @@ class _Trie:
             if a is None:
                 continue
             self._insert_part(pi, part, g, a, b)
+        if b is not None:
+            # the union segments at their bound: one per raw edge, a piece per cover entry
+            b.charge(W_ELEM * len(self.e_from),
+                     _M_USEG * len(self.e_from) + _M_PIECE * sum(map(len, self.e_cover)))
         self._compress(order)
 
     # ---------------------------------------------------------- insertion
@@ -1920,9 +2010,17 @@ class _Trie:
         segs = a.segments
         if b is not None:
             # one pass over the part's first-parent tree: an element per segment, its bases
-            # compared, and at most two trie nodes, an edge and a cover entry per segment
+            # compared, and at most two trie nodes, an edge and a cover entry per segment.
+            # Memory at its bound: the first part's segments each add one node and one edge
+            # (siblings start with distinct bases); a later part's segment at most two of
+            # each (a split) and a copy of the split edge's cover (one entry per part before
+            # it)
             n = sum(s.length_bp for s in segs)
-            b.charge(W_ELEM * 4 * len(segs) + (n >> 4), len(segs) * 600)
+            per = (_M_NODE + _M_EDGE + _M_COVER) if pi == 0 else \
+                2 * (_M_NODE + _M_EDGE) + _M_COVER * (pi + 1)
+            b.charge(W_ELEM * 4 * len(segs) + (n >> 4),
+                     3 * DICT + len(segs) * (per + _M_SEG))
+            derive.uses(b, g, a, 'leaves', 'paths', 'path_of_leaf')
         fp_kids = [[] for _ in segs]
         roots = []
         for s in segs:
@@ -2171,20 +2269,28 @@ def _case(t, pi, stop, length):
     return 'diverges', None
 
 
-def _labels_to(un, part, a, seg, end, with_labels, at_bp):
+def _labels_to(un, part, a, seg, end, with_labels, at_bp, b=None):
     """_labels_for() along the first-parent chain to |seg| (the chain built only when the
     query computes labels)."""
     if not with_labels:
         return None, False
     if seg is None:
         return (), False
-    return _labels_for(un, part, a, _fp_chain(a, seg), end, True, at_bp)
+    return _labels_for(un, part, a, _fp_chain(a, seg), end, True, at_bp, b)
 
 
-def _span(un, t, pi, part, node, length, with_labels, at_bp=None):
+def _span(un, t, pi, part, node, length, with_labels, at_bp=None, b=None):
+    """Part |pi|'s PairSpan on the union walk ending at trie node |node|. |b|: its memory
+    (the span and route, _M_SPAN; the labels, by _labels_for()) and the part's derivations
+    it reads, at their cold price."""
     g = part.graphlet
     a = g.arms.get(t.side)
     mode = g.mode
+    if b is not None:
+        b.charge(0, _M_SPAN)
+        if a is not None:
+            derive.uses(b, g, a, 'first_paths', *(('end_labels',) if mode == 'constrain'
+                                                  else ()))
     if a is None:
         return PairSpan(part.tag, mode, 'none', 0, None, None, None, None, (), {}, None if not
                         with_labels else (), False, False, 0, 'under_strategy', g.k, g.regime)
@@ -2197,14 +2303,14 @@ def _span(un, t, pi, part, node, length, with_labels, at_bp=None):
         _, leaf, pid = item
         reasons, code = _leaf_reasons(g, a, leaf)
         complete, cert = _leaf_cert(a, leaf, code)
-        labels, cut = _labels_to(un, part, a, leaf, length, with_labels, at_bp)
+        labels, cut = _labels_to(un, part, a, leaf, length, with_labels, at_bp, b)
         return PairSpan(part.tag, mode, 'whole', length, pid, None, None, None, (), reasons,
                         labels, cut, complete, cert, None, g.k, g.regime)
     last = t.last_seg(pi, a, stop)
     if how == 'extends':
         pid = _ops._first_paths(a)[last] if last is not None else None
         cert = min(length, a.complete_to_bp)
-        labels, cut = _labels_to(un, part, a, last, length, with_labels, at_bp)
+        labels, cut = _labels_to(un, part, a, last, length, with_labels, at_bp, b)
         return PairSpan(part.tag, mode, 'extends', length, pid, None, None, None, (),
                         {'path_reason': None, 'labels': {}}, labels, cut,
                         length <= a.complete_to_bp, cert, None, g.k, g.regime)
@@ -2215,7 +2321,7 @@ def _span(un, t, pi, part, node, length, with_labels, at_bp=None):
         reasons, code = _leaf_reasons(g, a, leaf)
         complete, cert = _leaf_cert(a, leaf, code)
         absence = _absence(g, a, _events_at(t, pi, a, stop, last), d, c, code)
-        labels, cut = _labels_to(un, part, a, leaf, d, with_labels, at_bp)
+        labels, cut = _labels_to(un, part, a, leaf, d, with_labels, at_bp, b)
         return PairSpan(part.tag, mode, 'ends', d, pid, None, None, None, (), reasons, labels,
                         cut, complete, cert, absence, g.k, g.regime)
     if how == 'merges':
@@ -2226,14 +2332,15 @@ def _span(un, t, pi, part, node, length, with_labels, at_bp=None):
         j = ms.parents.index(stub)
         cont = tuple(un._pair_label(part, x) for x in (ms.partition[j] if j < len(
             ms.partition) else ()))
-        route = _route(un, t, pi, part, a, stub, m, j, d, below, into, with_labels, at_bp)
-        labels, cut = _labels_to(un, part, a, stub, d, with_labels, at_bp)
+        route = _route(un, t, pi, part, a, stub, m, j, d, below, into, with_labels, at_bp,
+                       b)
+        labels, cut = _labels_to(un, part, a, stub, d, with_labels, at_bp, b)
         return PairSpan(part.tag, mode, 'merges', d, None, stub, into, route, cont,
                         {'path_reason': None, 'labels': {}}, labels, cut, route.complete,
                         route.certified_to_bp, None, g.k, g.regime)
     # diverges: the pair goes on with other bases (or a stub/walk elsewhere)
     absence = _absence(g, a, _events_at(t, pi, a, stop, last), d, c)
-    labels, cut = _labels_to(un, part, a, last, d, with_labels, at_bp)
+    labels, cut = _labels_to(un, part, a, last, d, with_labels, at_bp, b)
     return PairSpan(part.tag, mode, 'diverges', d, None, None, None, None, (),
                     {'path_reason': None, 'labels': {}}, labels, cut, False,
                     min(d, a.complete_to_bp), absence, g.k, g.regime)
@@ -2246,7 +2353,7 @@ def _fp_chain(a, seg):
     return [(x, 0) for x in derive.chain(a, seg)]
 
 
-def _route(un, t, pi, part, a, stub, m, j, d, below, into, with_labels, at_bp):
+def _route(un, t, pi, part, a, stub, m, j, d, below, into, with_labels, at_bp, b=None):
     """The pair's route from its merge |m| (entered from the stub through parent |j|)
     along the union walk's remaining bases, those of the union segments |below| the stop
     (§2.4 'Routes through merges')."""
@@ -2332,7 +2439,7 @@ def _route(un, t, pi, part, a, stub, m, j, d, below, into, with_labels, at_bp):
     labels = ()
     if with_labels:
         full = chain + route
-        labels, _ = _labels_for(un, part, a, full, pos, True, at_bp)
+        labels, _ = _labels_for(un, part, a, full, pos, True, at_bp, b)
     return Route(pos, how, goes_on, reasons, absence, tuple(merges), labels, complete, cert)
 
 
@@ -2360,10 +2467,11 @@ def _note_merge(t, pi, s, merges):
 
 # ------------------------------------------------------------------ span labels
 
-def _labels_for(un, part, a, chain, end, with_labels, at_bp=None):
+def _labels_for(un, part, a, chain, end, with_labels, at_bp=None, b=None):
     """(SpanLabels, cut) at outward depth |end| (or |at_bp| when smaller) along |chain|
     [(segment, the parent index it was entered through)], root first; (None, False) when
-    the query does not compute labels."""
+    the query does not compute labels. |b|: the segments read at their cold price, the
+    labels returned and, while it runs, its working sets (released)."""
     if not with_labels:
         return None, False
     if at_bp is not None:
@@ -2377,9 +2485,15 @@ def _labels_for(un, part, a, chain, end, with_labels, at_bp=None):
     chain = chain[:k]
     if not chain:
         return (), False
-    info = un._seg_labels(part, a)
+    info = un._seg_labels(part, a, b)
     last = segs[chain[-1][0]]
     cut = any(info(x)[2] for x, _ in chain)
+    if b is not None:
+        # at most the labels alive anywhere in the last segment: those returned, and the
+        # working sets (out, open, starts) held while the chain is read
+        li, le = info(last.id)[:2]
+        n = max(len(li), len(le))
+        b.charge(W_ELEM * len(chain), (_M_LABEL + _M_LABEL_WORK) * n)
     if end >= last.end_bp:
         alive = set(info(last.id)[1])
     else:
@@ -2423,7 +2537,22 @@ def _labels_for(un, part, a, chain, end, with_labels, at_bp=None):
             open_.discard(lab)
         pos = par.end_bp
     labs = sorted(out.items(), key=lambda x: (x[1], x[0]))
-    return tuple(SpanLabel(un._pair_label(part, lab), f) for lab, f in labs), cut
+    got = tuple(SpanLabel(un._pair_label(part, lab), f) for lab, f in labs)
+    if b is not None:
+        b.release(_M_LABEL_WORK * n)
+    return got, cut
+
+
+def _walk_bytes(d, n):
+    """A UnionWalk's own bytes: the record, its path (the list of union segments built, then
+    a tuple of their ids) and its tuples of n spans and pairs."""
+    return 300 + (LIST_ITEM + 8) * d + 3 * 8 * n
+
+
+def _span_bytes(s):
+    """What a built PairSpan holds (at most what _span() and _labels_for() charged)."""
+    n = len(s.labels or ()) + (len(s.route.labels or ()) if s.route is not None else 0)
+    return _M_SPAN + _M_LABEL * n
 
 
 def _carrying_labels(s):

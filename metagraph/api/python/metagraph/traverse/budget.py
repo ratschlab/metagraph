@@ -118,25 +118,36 @@ __all__ = ['LocalLimits', 'LocalBudget', 'LocalStop', 'LocalBudgetExceeded', 'Pa
 #   * union_pairs() (union.py, docs/DESIGN-graphlet-merge.md Appendix F.1): the trie is one
 #     pass over each part's first-parent tree, charged per part and arm before the pass:
 #     4 W_ELEM per part segment (its element, the compare of its bases, at most two trie
-#     nodes, an edge and a cover entry) and 1 lwu per 16 of its bases, 600 bytes per part
-#     segment; the parts' own parses are the caller's (a union takes parsed models);
+#     nodes, an edge and a cover entry) and 1 lwu per 16 of its bases; its memory at its
+#     bound (union.py's _M_* prices, fitted to the traced peak on CPython 3.11 and 3.14):
+#     a first part's segment one node, edge and cover entry, a later part's at most two
+#     nodes and edges and a copy of the split edge's cover; before the union segments are
+#     made, one per raw edge and a piece per cover entry; a record per part and absent or
+#     failed record; the parts' leaves, paths and path_of_leaf (derive.uses); the parts'
+#     own parses are the caller's (a union takes parsed models);
 #   * PairUnion's queries charge the parts' cold prices plus the trie work: an arm's walk
 #     figures (kind, length, whole_in, held_in: walks(), statements(), print(), summary(),
 #     the exports) at their cold price on every call, per union segment W_ELEM per pair (the
-#     stop carried down), per walk W_ROW and per pair W_ELEM plus 1 lwu per 16 bases of its
-#     depth (a merges span's route), 8 bytes per pair and union segment and 300 + 16 per
-#     pair bytes per walk; each walk built whole (a walk walks() returns, a walk labels=
-#     reads, an exported walk) W_ROW and per pair W_ELEM per union segment of its path plus
-#     1 lwu per 16 bases of its depth (its span and route), with labels 4 W_ELEM more per
-#     pair and segment (the alive sets read along the chain), 300 + 200 per pair + 8 per
-#     segment bytes; a part segment's label intervals are built once per union (counted in
-#     memory_bytes()); segments() per union segment W_ROW and W_ELEM per entry label,
-#     event and presence run of the part segments it covers (label_intervals(), linear),
-#     200 + 120 per pair bytes and a tuple of three ints per element; carriers() per pair
-#     W_ROW, W_STEP per 16 bases of the walk and W_ELEM per union segment, 600 + 120 per label
-#     of the pair bytes; spell() W_ROW, W_STEP per union segment and 1 lwu per 256 bases,
-#     three copies of the text; a listed walk W_ROW (and its bases at BASE_SHIFT when
-#     spelled), 400 bytes and its text;
+#     stop carried down, a tuple held while the figures are built), per walk W_ROW and per
+#     pair W_ELEM plus 1 lwu per 16 bases of its depth (a merges span's route, one span at
+#     a time) and its figures' record, the parts' first_paths and end_labels (derive.uses);
+#     each walk built whole (a walk walks() returns, a walk labels= reads, an exported
+#     walk) W_ROW and per pair W_ELEM per union segment of its path plus 1 lwu per 16 bases
+#     of its depth (its span and route), with labels 4 W_ELEM more per pair and segment,
+#     the walk's record and path, and each span itself: its record (_M_SPAN) and, with
+#     labels, per label alive in its last segment a span label and, while they are read,
+#     the working sets (released); an exported walk is released once the next is built; a
+#     part segment's label intervals and end set are built once per union (counted in
+#     memory_bytes()) and charged once per call per segment read, at label_intervals()'
+#     cold price plus the set; segments() per union segment W_ROW and W_ELEM per interval
+#     of the part segments it covers and a LabelInterval each; carriers() per pair W_ROW,
+#     W_STEP per 16 bases of the walk and W_ELEM per union segment, and its span; the
+#     labels sentence (shared_names()) per label of every part its name sets (released);
+#     summary() its answer and fit tests, 8 bytes per byte of max_bytes; to_gfa() with
+#     labels='full' the names written, and per path line a name per union segment;
+#     spell() W_ROW, W_STEP per union segment and 1 lwu per 256 bases, three copies of the
+#     text; a listed walk W_ROW (and its bases at BASE_SHIFT when spelled), 400 bytes and
+#     its text;
 #   * label_intervals() (ops.py): per segment W_ELEM, W_ELEM per entry label and label
 #     change (constrain; the segment's ops, derived once) or per P run and label of a run
 #     (annotate), the sort of its intervals, and their list, tuples and dict; the price

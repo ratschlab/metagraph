@@ -66,9 +66,10 @@ def absent_result(kind, seed_len=30, **extra):
     return base
 
 
-def admitted_paths(gfa):
+def admitted_paths(gfa, names=False):
     """Every maximal path a GFA file admits (oriented walks along its L lines from any
-    segment with no incoming link to a segment with no outgoing one), spelled."""
+    segment with no incoming link to a segment with no outgoing one), spelled; with
+    |names|, (spelling, [segment names]) pairs."""
     seqs, out_links, has_in = {}, {}, set()
     for line in gfa.split('\n'):
         f = line.split('\t')
@@ -79,18 +80,57 @@ def admitted_paths(gfa):
             has_in.add(f[3])
     paths = []
 
-    def walk(name, acc):
+    def walk(name, acc, via):
         nxt = out_links.get(name, [])
         if not nxt:
-            paths.append(acc)
+            paths.append((acc, via) if names else acc)
             return
         for n in nxt:
-            walk(n, acc + seqs[n])
+            walk(n, acc + seqs[n], via + [n])
 
     for name in seqs:
         if name not in has_in:
-            walk(name, seqs[name])
+            walk(name, seqs[name], [name])
     return paths
+
+
+def gfa_segment_pairs(gfa):
+    """segment name -> (its bases, the pairs of its pp tag)."""
+    out = {}
+    for line in gfa.split('\n'):
+        f = line.split('\t')
+        if f[0] == 'S':
+            pp = next((x[5:] for x in f[3:] if x.startswith('pp:Z:')), '')
+            out[f[1]] = (f[2], [X.union_unescape(t) for t in pp.split(',') if t])
+    return out
+
+
+def check_gfa_paths(test, u, gfa):
+    """P9, by the paths the file admits: every admitted path, and every part of it from the
+    seed out to one of its segments, is spelled whole by each pair spelling that segment:
+    a root-to-leaf spelling of that pair's own segment DAG (its walks and its routes
+    through merges, the seed included) in that arm starts with it (right arm) or ends with
+    it (left arm, written on the seed strand). No path holds both arms' seed."""
+    segs = gfa_segment_pairs(gfa)
+    seed = u.seed.sequence
+    refs = {}
+    for p in u.parts:
+        for side in p.graphlet.arms:
+            refs[p.tag, side] = [seed + w if side == 'right' else w[::-1] + seed
+                                 for w in dag_spellings(p.graphlet, side)]
+    paths = admitted_paths(gfa, names=True)
+    test.assertTrue(paths)
+    for spelled, via in paths:
+        test.assertFalse('seed_l' in via and 'seed_r' in via, via)
+        side = 'right' if 'seed_r' in via else 'left'
+        for k, name in enumerate(via):
+            if name in ('seed_l', 'seed_r'):
+                continue
+            part = ''.join(segs[x][0] for x in (via[:k + 1] if side == 'right' else via[k:]))
+            for tag in segs[name][1]:
+                ok = any(r.startswith(part) if side == 'right' else r.endswith(part)
+                         for r in refs[tag, side])
+                test.assertTrue(ok, (tag, side, via[:k + 1] if side == 'right' else via[k:]))
 
 
 def limits_with_bases():
@@ -350,26 +390,40 @@ class TestExports(unittest.TestCase):
         self.assertEqual(X.union_escape('café'), 'caf%C3%A9')
 
     def test_gfa_admits_only_paths_one_pair_spells(self):
-        u = locus()
+        for u in (locus(), split_union('annotate', 'keep')[3], split_union('constrain',
+                                                                            'merge')[3]):
+            gfa = u.to_gfa()
+            for line in gfa.split('\n'):
+                self.assertTrue(all(' ' <= ch <= '~' or ch == '\t' for ch in line), line)
+            check_gfa_paths(self, u, gfa)
+
+    def test_g4_must_2_no_cross_source_path(self):
+        """Appendix G.4, Must 2: A spells AACGT and, through a merge, TACGT; B spells AACGA.
+        The file admits no TACGA. Here A is merge.mgt (its stub at 20 bp, 'T...', merges at
+        36 bp into the segment its walk 'A...' reaches) and B the same graph with that stub
+        starting 'C' and the walk's last base changed: a stub linked to the merge's union
+        segment would admit A's stub followed by B's last base."""
+        a = T.graphlet('merge')
+        b = copy.deepcopy(a)
+        segs = b.arms['right'].segments
+        self.assertEqual((segs[2].walk[0], segs[3].parents), ('T', (1, 2)))
+        segs[2].walk = 'C' + segs[2].walk[1:]
+        last = segs[6].walk[-1]
+        segs[6].walk = segs[6].walk[:-1] + next(c for c in 'ACGT' if c != last)
+        u = union_pairs([{'pair': 'A', 'graphlet': a}, {'pair': 'B', 'graphlet': b}])
         gfa = u.to_gfa()
-        for line in gfa.split('\n'):
-            self.assertTrue(all(' ' <= ch <= '~' or ch == '\t' for ch in line), line)
-        spellings = []
-        for p in u.parts:
-            g = p.graphlet
-            for side in g.arms:
-                for w in g.walks(side):
-                    spellings.append((side, g.spell(side, w.path_id, 'natural', True)))
-                for w in u.walks(side, stubs=True, by='id') if side in u.arms() else []:
-                    if p.tag in w.held_in or any(s.pair == p.tag and s.how in ('merges',)
-                                                 for s in w.spans):
-                        spellings.append((side, u.spell(side, w.id, 'natural', True)))
-        seed = u.seed.sequence
-        for path in admitted_paths(gfa):
-            ok = any(path in s for _, s in spellings)
-            self.assertTrue(ok, path)
-            # no path joins a left flank to a right flank through the seed
-            self.assertFalse(path.count(seed) > 1)
+        check_gfa_paths(self, u, gfa)
+        sa = a.arms['right'].segments
+        tacga = u.seed.sequence + sa[0].walk + sa[2].walk + sa[3].walk + sa[5].walk + \
+            segs[6].walk
+        self.assertFalse(any(tacga.startswith(p) and len(p) > len(u.seed.sequence) + 36
+                             for p in admitted_paths(gfa)))
+        self.assertNotIn(tacga, admitted_paths(gfa))
+        # A's stub is a tag on its own union segment, never a link
+        (stub_line,) = [x for x in gfa.split('\n') if x.startswith('S\t') and '\tmg:Z:A' in x
+                        and x.split('\t')[2].startswith(sa[2].walk[:4])]
+        name = stub_line.split('\t')[1]
+        self.assertFalse(any(x.startswith('L\t%s\t' % name) for x in gfa.split('\n')))
 
     def test_gfa_seed_once_per_arm_and_stub_tags(self):
         u = locus()
@@ -1106,6 +1160,68 @@ class TestBudgets(unittest.TestCase):
         self.assertLessEqual(held, 1.1 * counted, (held, counted))
         # the queries keep their figures and label intervals, and memory_bytes() says so
         self.assertGreater(counted - counted_built, 0.8 * (held - built))
+
+    def test_the_account_bounds_the_peak(self):
+        """budget.py: "the account bounds the call's peak", for union_pairs() and every union
+        query: the budget's peak_bytes against tracemalloc's peak of the same call on fresh
+        models and a fresh union (every derivation and cache cold), on the split fixtures'
+        11 parts, r237's export and a comb. The interpreter's free lists are filled first by
+        the same call on other fresh copies, the collector held off (the pattern of
+        test_traverse_memory: a collection empties the free lists, and freed tuples parked
+        there stay traced; warm, the peak is the library's own). Each charge is the cold
+        price: a second call on the warm union charges the same."""
+        import gc
+        import tracemalloc
+
+        def split11():
+            return [{'pair': n, 'graphlet': union_doc(n)}
+                    for n in [n for n in UNION_DOCS if not n.startswith('repeat')][:11]]
+
+        def comb():
+            return [{'pair': 'C', 'graphlet': comb_part(200)},
+                    {'pair': 'D', 'graphlet': comb_part(3)}]
+
+        def peak(fn, warm):
+            gc.collect()
+            gc.disable()
+            try:
+                warm()
+                tracemalloc.start()
+                base = tracemalloc.get_traced_memory()[0]
+                fn()
+                return tracemalloc.get_traced_memory()[1] - base
+            finally:
+                tracemalloc.stop()
+                gc.enable()
+
+        ops_ = {'walks': lambda u, **k: u.walks('right', stubs=True, **k),
+                'walks(top=3)': lambda u, **k: u.walks('right', top=3, **k),
+                'segments': lambda u, **k: u.segments('right', **k),
+                'carriers': lambda u, **k: u.carriers('right', 1, **k),
+                'statements': lambda u, **k: u.statements('right', **k),
+                'summary': lambda u, **k: u.summary(**k),
+                'to_fasta': lambda u, **k: u.to_fasta(stubs=True, **k),
+                'to_gfa': lambda u, **k: u.to_gfa(labels='full', **k),
+                'spell': lambda u, **k: u.spell('right', 1, **k)}
+        for name, make in (('split11', split11), ('r237', lambda: r237_union()[0]),
+                           ('comb', comb)):
+            b = LocalBudget()
+            union_pairs(make(), budget=b)
+            parts, other = make(), make()
+            got = peak(lambda: union_pairs(parts), lambda: union_pairs(other))
+            self.assertLessEqual(got, b.peak_bytes, (name, 'union_pairs'))
+            for op, fn in ops_.items():
+                b = LocalBudget()
+                v = union_pairs(make())
+                fn(v, budget=b)
+                # the cold price: the same charge again on the warm union
+                again = LocalBudget()
+                fn(v, budget=again)
+                self.assertEqual((again.used_work, again.peak_bytes),
+                                 (b.used_work, b.peak_bytes), (name, op))
+                u, w = union_pairs(make()), union_pairs(make())
+                got = peak(lambda: fn(u), lambda: fn(w))
+                self.assertLessEqual(got, b.peak_bytes, (name, op))
 
     def test_construction_charged(self):
         b = LocalBudget(work_units=10 ** 9)

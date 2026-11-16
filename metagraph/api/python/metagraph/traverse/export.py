@@ -1133,7 +1133,7 @@ def union_gfa(u, with_seed, labels, at_bp, bud):
     for side in (u.arms() or [None]):
         lines.append(_comment(_core_sentence(u.coverage(side, at_bp))))
     lines.append(_comment('turn-offs: ' + TURN_OFFS))
-    lines.append(_comment(u._labels_sentence()))
+    lines.append(_comment(u._labels_sentence(bud)))
     lines.append(_comment('scope: ' + SCOPE))
     segs_out, links, paths = [], [], []
     seed = u._seed_seq
@@ -1169,15 +1169,21 @@ def union_gfa(u, with_seed, labels, at_bp, bud):
             for pi in sorted(us.cover):
                 part = u.parts[pi]
                 g = part.graphlet
+                info = u._seg_labels(part, g.arms[side], bud)
                 ids = set()
                 cut = False
                 for seg, f, to in us.pieces[pi]:
-                    for lab, a0, z0 in _union_intervals(g, side, seg):
+                    for lab, a0, z0 in info(seg)[0]:
                         if max(a0, f) < min(z0, to):
                             ids.add(lab)
-                    cut = cut or _union_cut(g, side, seg)
+                    cut = cut or info(seg)[2]
                 if labels == 'full':
-                    names = [e('%s/%s' % (part.tag, g.labels[i].name)) for i in sorted(ids)]
+                    # the tag once, then each name escaped on its own: ',', ';' and '=' in a
+                    # name are escaped, so the entry splits back into tag and names
+                    if bud is not None:
+                        n = sum(len(g.labels[i].name.encode('utf-8')) for i in ids)
+                        bud.charge(W_ELEM * len(ids), 4 * (3 * n + STR) + len(ids) * STR)
+                    names = [e(g.labels[i].name) for i in sorted(ids)]
                     pl.append('%s=%s' % (e(part.tag), ','.join(names)))
                 else:
                     pl.append('%s=%d%s' % (e(part.tag), len(ids), '+' if cut else ''))
@@ -1194,6 +1200,12 @@ def union_gfa(u, with_seed, labels, at_bp, bud):
                 links.append('L\t%s\t+\t%s\t+\t0M' % (a, b))
         for w in u._walks_full(side, bud, False, stubs=False):
             node = t.markers[w.id]
+            if bud is not None:
+                # the P line: a name per union segment (dropped once joined), the line, and
+                # the file's text joined at the end
+                d = t.nsegs(node)
+                bud.charge(W_GFA_LINE + W_ELEM * d, 3 * (STR + 12 * (d + 2)) + d * (STR + 12))
+                bud.release(d * (STR + 12))
             names = ['s%d+' % t.useg[x].id for x in t.path_usegs(node)]
             if side == 'left':
                 names.reverse()
@@ -1225,11 +1237,3 @@ def collections_od():
     return collections.OrderedDict()
 
 
-def _union_intervals(g, side, seg):
-    from .ops import label_intervals
-    return label_intervals(g, side, seg)
-
-
-def _union_cut(g, side, seg):
-    from .ops import label_intervals_cut
-    return label_intervals_cut(g, side, seg)
