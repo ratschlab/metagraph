@@ -140,11 +140,12 @@ template <class Values>
 uint64_t search_store_bytes(size_t num_labels, size_t num_rows);
 
 /**
- * For tests: the fold of a query by sequence record (RecordFold, annotated_dbg.cpp). Its
- * budget is the bytes of per-position values it holds before the cut past which it frees
- * the values of the records that can no longer be returned: 16 MiB, 0 in a debug build. A
- * query reads it once, when it starts. The counts are what the folds did since the last
- * reset, added as each fold ends. (Lane T7-M5, review M2: a release build reaches the
+ * Test hooks, not for production code: the fold of a query by sequence record (RecordFold,
+ * annotated_dbg.cpp). Its budget is the bytes of per-position values it holds before the
+ * cut past which it frees the values of the records that can no longer be returned: 16 MiB,
+ * 0 in a debug build. A query reads it once, when it starts. The counts are what the folds
+ * did since the last reset, added as each fold ends; record_fold_counts() reads the three
+ * one by one, not as one snapshot. (Lane T7-M5, review M2: a release build reaches the
  * pruning in tests.)
  */
 struct RecordFoldCounts {
