@@ -1343,7 +1343,8 @@ class TestPatternMini(PatternChecks, unittest.TestCase):
         """SPEC §31: the server writes /pattern from its result objects' held texts, never from
         their trees. Its body is, byte for byte, the compact text of the answer's tree as the
         CLI writes it (`metagraph pattern --json`, the tree API, one process for every request)
-        once the clock's members are masked (and timing.load_ms, which only the server states),
+        once the clock's members are masked (the *_ms values and, on Linux only, the
+        page_faults object; timing.load_ms, which only the server states, is removed),
         with gzip off and on: every fixture request of the masked server (contexts and paths
         with and without labels, supported paths, predicates and their projections,
         mismatches, lists withheld, refused slots, count mode) and two of ids with escapes and
@@ -1371,7 +1372,8 @@ class TestPatternMini(PatternChecks, unittest.TestCase):
         self.assertEqual(0, res.returncode, res.stderr.decode()[-2000:])
         trees = res.stdout.rstrip(b'\n').split(b'\n')
         self.assertEqual(len(files), len(trees))
-        clock = re.compile(rb'"(?:[a-z_]*_ms|page_faults)":[-0-9.e+]+')
+        clock = re.compile(rb'"[a-z_]*_ms":[-0-9.e+]+'
+                           rb'|"page_faults":\{"major":[0-9]+,"minor":[0-9]+\}')
         compared = 0
         for path, tree in zip(files, trees):
             with open(path, 'rb') as f:
