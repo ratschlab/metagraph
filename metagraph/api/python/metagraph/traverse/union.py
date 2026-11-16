@@ -113,9 +113,9 @@ TEXTS = {
                       'to be one record; select by {pair, name} or {pair, ref}',
     'label_id': 'label ids are local to each part of a pair union: select by {pair, ref} or '
                 '{pair, name}',
-    'summary_too_small': 'the statements alone take %d bytes with the notes of what is left '
-                         'out, more than max_bytes=%d: they are never cut; pass max_bytes '
-                         '>= %d',
+    # %d: the least answer, the statements with the notes of what is left out
+    'summary_too_small': 'the statements alone take %d bytes, more than max_bytes=%d: they '
+                         'are never cut; pass max_bytes >= %d',
     'not_offered_dump': 'a pair union is not an MGT document: each part dumps on its own '
                         '(parts[i].graphlet.dump())',
     'not_offered_json': 'to_json() is detail "full" of one server result, and a pair union '
