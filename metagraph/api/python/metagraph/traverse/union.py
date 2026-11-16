@@ -1962,14 +1962,23 @@ class _Trie:
 # ------------------------------------------------------------------ spans
 
 def _leaf_reasons(g, a, seg):
+    """(end reasons, code) of a part leaf. In constrain mode a structural dead end has no
+    path reason: the walker ends every label there with a bare dead end (D), so a leaf whose
+    every label ended with D reads code 'D' (a hairpin dead end, Dh, does not count: a
+    hairpin successor exists, and successors no label carries may too)."""
     s = a.segments[seg]
     code = s.leaf.path_reason if s.leaf is not None else None
     labels = {}
     if g.mode == 'constrain' and s.leaf is not None:
-        for e in derive.end_labels(a, seg):
+        ends = derive.end_labels(a, seg)
+        for e in ends:
             name = a.runs[e.run].reason
             labels[name] = labels.get(name, 0) + 1
-    return {'path_reason': REASON[code] if code else None, 'labels': labels}, code
+        if code is None and ends and all(a.runs[e.run].end == 'D' for e in ends):
+            code = 'D'
+    path_reason = s.leaf.path_reason if s.leaf is not None else None
+    return {'path_reason': REASON[path_reason] if path_reason else None,
+            'labels': labels}, code
 
 
 def _leaf_cert(a, seg, code):

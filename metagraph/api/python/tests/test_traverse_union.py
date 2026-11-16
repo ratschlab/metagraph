@@ -14,7 +14,7 @@ from tests import traverse_testlib as T  # noqa: F401  (puts the library on sys.
 from metagraph.traverse import (BadSelector, CombineRefused, LocalBudget, LocalBudgetExceeded,
                                 MissingEnvelope, TraverseResponse, union_pairs)
 from metagraph.traverse import export as X
-from metagraph.traverse import ops
+from metagraph.traverse import derive, ops
 from metagraph.traverse import union as U
 from metagraph.traverse._codec import GraphletFormatError
 
@@ -1091,6 +1091,27 @@ class TestAbsence(unittest.TestCase):
         u = union_pairs([{'pair': 'A', 'graphlet': edge}, {'pair': 'B', 'graphlet': b}])
         s = self.spans(u, 'right', z)['A']
         self.assertEqual((s.to_bp, s.absence), (76, 'graph'))
+
+    def test_constrain_dead_end_is_graph_and_a_hairpin_end_is_not(self):
+        # constrain mode ends every label at a structural dead end with D and no path reason
+        a, b = union_doc('a_constrain_keep'), union_doc('b_annotate_keep')
+        z = split_record('pl')[30:] + split_record('b2')[len(split_record('pl')):]
+        u = union_pairs([{'pair': 'A', 'graphlet': a}, {'pair': 'B', 'graphlet': b}])
+        s = self.spans(u, 'right', z)['A']
+        self.assertEqual((s.how, s.to_bp, s.end_reasons, s.absence),
+                         ('ends', 76, {'path_reason': None, 'labels': {'dead_end': 1}}, 'graph'))
+        self.assertIn('ends=A@76:dead_end/graph', u.to_fasta('right'))
+        # the same leaf ended by a hairpin dead end (Dh): a hairpin successor exists there
+        h = copy.deepcopy(a)
+        arm = h.arms['right']
+        (leaf,) = [x for x in arm.segments if x.leaf is not None and x.end_bp == 76]
+        for e in derive.end_labels(arm, leaf.id):
+            run = arm.runs[e.run]
+            self.assertEqual(run.end, 'D')
+            run.end, run.qualifier = 'Dh', 'hairpin'
+        u = union_pairs([{'pair': 'A', 'graphlet': h}, {'pair': 'B', 'graphlet': b}])
+        s = self.spans(u, 'right', z)['A']
+        self.assertEqual((s.how, s.to_bp, s.absence), ('ends', 76, 'under_strategy'))
 
     def test_walk_rule_against_another_k(self):
         r11, r21 = union_doc('repeat11'), union_doc('repeat21')
