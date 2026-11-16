@@ -5239,10 +5239,25 @@ written it is held at `held_result_bytes` (`src/cli/pattern.hpp`):
 A label-free path is settled one by one in the release, as it is written (`Admission::settle`): the next objects of
 its list find the room its tree took. Every other object is settled when its pattern ends, from the charge the route
 holds for it: the labelled retrieval's descriptors, the selection's result objects, the supported paths' listed
-descriptors. A label-free context without a predicate is charged nothing, as before; a slot refused after its work
-(`unrepresentable_label`) keeps its charges; the answer volume (§7.6) is unchanged. Nothing else changes: the walks
-and their half of the account, the extension's depth-first stack (§30), the labels, rows, occurrence runs, the
-selection's pass and every other structure keep their charges and their order.
+descriptors (the sum the sink leaves with them, checked against the objects listed). A list withheld after its
+pattern's work (`all_or_count`, its labels withheld) is counted, not written, and gives its objects' charges back
+whole: the labelled retrieval gives its descriptors back as it withholds, and the supported paths' list, whose
+descriptors the sink leaves with the listed paths, gives them back when its pattern ends (until the review of
+66558cb1f, M1, those were settled to their text and kept to the request's end). A label-free context without a
+predicate is charged nothing, as before; a slot refused after its work (`unrepresentable_label`) keeps its charges;
+the answer volume (§7.6) is unchanged. Nothing else changes: the walks and their half of the account, the extension's
+depth-first stack (§30), the labels, rows, occurrence runs, the selection's pass and every other structure keep their
+charges and their order.
+
+**The writing's time.** A label-free path or context is written in the engine's callback, under the release's clock
+(read every 64 objects, §5.3); every other object when its pattern ends, inside the request's work time, where before
+§31 the whole answer was written in the finalisation. That writing reads the delivery's check every 64 objects
+(`Budget::kReleaseClockStride`), as the finalisation's writing does every 64 KiB: past the respond time the request
+answers 503 `deadline`, and a client that left gets nothing. It does not read the work time's clock, since the
+pattern's answer is complete; the next pattern's first clock reading (§5.3) sees the time the writing took. So a
+later pattern's `stop: time` can come earlier than before §31, by the time its predecessors' objects took to write,
+and a request whose work time ends while its last pattern's objects are written answers them in full. The answer
+volume (§7.6) still reserves finalisation time for those bytes.
 
 **Memory measured** (the decision's condition: the server's peak at the cap must not exceed that of the trees). One
 `server_query` per request (`-p 2 --threads-each 2`, macOS, peak RSS by `/usr/bin/time -l`; idle 61 MB) on a DNA graph
@@ -5256,9 +5271,16 @@ ten sites; the request: 16 copies of an 840-base IUPAC pattern with 1,024 paths 
 | `partial`, gzip | 358 MB; 2.0 MB | 268 MB; 7.2 MB | 610 MB; 19.4 MB |
 | `all_or_count`, identity | 1,785 MB; 14.9 MB, 1,024 paths | 332 MB; 74.6 MB, 5,120 paths | 818 MB; 238.6 MB |
 | `all_or_count`, gzip | 1,785 MB; 1.2 MB | 260 MB; 6.1 MB | 610 MB; 19.4 MB |
+| `partial`, labelled (`output.labels: "all"`), identity | 385 MB; body 24.8 MB, 1,691 paths | 377 MB; 81.3 MB, 5,558 paths | |
+| `partial`, labelled, gzip | 361 MB; 2.1 MB | 297 MB; 6.9 MB | |
+| `partial`, two pairs of the graph (a multi-graph envelope), identity | 972 MB; 49.3 MB, 3,382 paths | 629 MB; 178.3 MB, 12,244 paths | |
+| `partial`, two pairs, gzip | 949 MB; 4.1 MB | 475 MB; 14.5 MB | |
 
 Before §31 an `all_or_count` list the account cut kept its trees, uncharged, until the answer was assembled (1.8 GB
-of process memory at a 256 MiB account); §31 frees them as the list is withheld.
+of process memory at a 256 MiB account); §31 frees them as the list is withheld. The labelled rows ask the same
+request with `output.labels: "all"` (`allow_unbudgeted_annotation`, the graph's column annotation); the two-pair rows
+ask it of a multi-graph server that lists the graph twice, each pair with its own 256 MiB account, so an envelope's
+body grows with its pairs (the review of 66558cb1f; measured on its fixes, which leave label-free paths as they were).
 
 **Client-visible change.**
 - `work.memory_bytes` (the request's and every entry's, §8.1, §8.7) falls where result objects were part of the peak:
@@ -5296,12 +5318,23 @@ extension's stack, §30). The validator's mutations of `supported_paths_memory` 
 `rows_refused`, the ninth's stop).
 
 Tests: `PatternRoute.HeldResultsAreTheTreesTexts`, `PatternRoute.TheAnswerTextIsTheTreesText`,
-`PatternRoute.TheServersAnswerHoldsTextsOnly` (`tests/cli/test_pattern_route.cpp`: the texts are the trees' texts, the
-answer's text is the tree's, the server's answer holds no result tree); `PatternPaths.EarlierAnswersHoldTheirTextOnly`
-(B-M1, `partial` and `all_or_count`), `PatternPaths.LMemory0001StopsAtALevelOfTheStack` (every mode),
-`PatternPaths.HeldPathsAreChargedTheirText`, `PatternPaths.HeldResultsAreSettledAtTheirText` (labelled and selected
-contexts, a projection, supported paths, the settlement byte for byte through `RetrievalHooks::held_hook`),
+`PatternRoute.TheServersAnswerHoldsTextsOnly` (`tests/cli/test_pattern_route.cpp`: the texts are the trees' texts,
+the answer's text is the tree's, the server's answer holds no result tree);
+`PatternPaths.EarlierAnswersHoldTheirTextOnly` (B-M1, `partial` and `all_or_count`),
+`PatternPaths.LMemory0001StopsAtALevelOfTheStack` (every mode), `PatternPaths.HeldPathsAreChargedTheirText`,
+`PatternPaths.HeldResultsAreSettledAtTheirText` (labelled and selected contexts, a projection, supported paths, the
+settlement byte for byte through `RetrievalHooks::held_hook`),
 `PatternPaths.TheRouteCutsALabelFreeListAtAnObjectsPrice`, and `PatternPaths.TheMemoryAccountBoundsLabelFreePaths`,
 `PatternPaths.TheRouteCutPrecedesALaterTimeStopOfTheRelease` and
 `PatternSelection.ResultObjectsWithoutLabelsAreChargedUntilTheRequestEnds` on the new charge (the cuts a test index
-reaches only with the objects held at their price through `RetrievalHooks::hold_at_price`).
+reaches only with the objects held at their price through `RetrievalHooks::hold_at_price`). The review of 66558cb1f
+added `PatternPaths.AWithheldListGivesItsObjectsBack` (a supported-path list withheld by its labels gives its
+descriptors back whole: the account's held bytes fall by the paths listed × the price, through
+`RetrievalHooks::held_hook`), `PatternRoute.AFailedTextThrows` (a writer whose buffer fails throws, then and later,
+never an empty or cut text), the all-refused envelope in `PatternRoute.TheAnswerTextIsTheTreesText`,
+`ServerFanout.ALatePatternPairLeavesNoTexts` (a pooled pair published after the cutoff leaves no texts beside its
+unfinished entry), and the integration tests `TestPatternMini.test_the_servers_bytes_are_the_trees_text` (the
+server's body, byte for byte, the CLI's tree text but for the clock, over every fixture request of the masked server,
+gzip off and on, and the jsoncpp text of its own parse) and
+`TestMultiGraphServer.test_pattern_envelope_bytes_are_the_trees_text` (the envelope's bytes, every pair answered, one
+refused, every pair refused).
