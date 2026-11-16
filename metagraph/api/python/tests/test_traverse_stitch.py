@@ -44,5 +44,42 @@ class TestEdgeKey(unittest.TestCase):
             self.assertEqual(('ACGT', False), ops.edge_key(regime, 'ACGT'))
 
 
+class TestStitchFixtures(unittest.TestCase):
+    """The CLI triples: each child ran the request parent.next_request() builds (the
+    script builds it without the library, stitch_child_request(); these pin the two
+    equal), on the parent's index, seeded with the continued walk's continuation."""
+
+    def test_child_requests_are_next_request(self):
+        fixtures = T.fixture_script().STITCH_FIXTURES
+        self.assertTrue(fixtures)
+        for name, fx in fixtures.items():
+            with self.subTest(name):
+                req = T.stitch_requests(name)
+                parent = T.stitch_graphlet(name, 'parent')
+                walk = req['fixture_index']['walk']
+                nr = parent.next_request(fx['arm'], [walk], fx['bp'],
+                                         reset_branches=fx.get('reset_branches', False),
+                                         **(fx.get('overrides') or {}))
+                self.assertEqual(req['child'], dict(nr), T.json_diff(req['child'], dict(nr)))
+                if 'sibling' in req:
+                    nr = parent.next_request(fx['arm'], [fx['sibling']], fx['bp'])
+                    self.assertEqual(req['sibling'], dict(nr))
+                if 'grandchild' in req:
+                    child = T.stitch_graphlet(name, 'child')
+                    gc = fx['grandchild']
+                    nr = child.next_request(fx['arm'], [gc['walk']], gc['bp'])
+                    self.assertEqual(req['grandchild'], dict(nr))
+
+    def test_children_are_seeded_with_the_continuation(self):
+        for name in T.stitch_names():
+            with self.subTest(name):
+                req = T.stitch_requests(name)
+                arm, walk = req['fixture_index']['arm'], req['fixture_index']['walk']
+                parent = T.stitch_graphlet(name, 'parent')
+                child = T.stitch_graphlet(name, 'child')
+                self.assertEqual(parent.continuation(arm, walk).sequence, child.seed.sequence)
+                self.assertEqual([arm], list(child.arms))
+
+
 if __name__ == '__main__':
     unittest.main()

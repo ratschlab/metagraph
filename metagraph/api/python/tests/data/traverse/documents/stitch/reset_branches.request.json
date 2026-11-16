@@ -1,0 +1,124 @@
+{
+ "fixture_index": {
+  "cli": "whitelist",
+  "k": 15,
+  "doc": "equal_finite's parent with the child's allowance restarted (reset_branches=True): 1, not 1 - 1 (branches_unequal)",
+  "arm": "right",
+  "walk": 1
+ },
+ "parent": {
+  "seeds": [
+   {
+    "seed_id": "reset_branches",
+    "sequence": "TTGCCGTGAGGCTTGCTGGGCAGAGTGATG",
+    "labels": [
+     "a.fa"
+    ]
+   }
+  ],
+  "strategy": {
+   "direction": "right",
+   "labels": {
+    "seed_label_kind": "column"
+   },
+   "bounds": {
+    "max_extension_bp": 30
+   },
+   "branching": {
+    "max_label_branches": 1
+   },
+   "output": {
+    "timing": false
+   }
+  }
+ },
+ "child": {
+  "seeds": [
+   {
+    "sequence": "GTTGTTCGTACCACGTTACCACTAACAATA",
+    "labels": [
+     "a.fa"
+    ]
+   }
+  ],
+  "strategy": {
+   "annotation": {
+    "batch_kmers": 64
+   },
+   "bounds": {
+    "max_extension_bp": 70,
+    "max_live_paths": 1000,
+    "max_output_bp": 2000000,
+    "max_paths": 10000,
+    "max_steps": 1000000,
+    "min_live_labels": 1,
+    "time_budget_ms": 30000.0
+   },
+   "branching": {
+    "bubble_window_bp": 0,
+    "hairpins": "skip",
+    "max_label_branches": 1,
+    "max_splits_per_path": 64,
+    "min_successor_fraction": 0.0,
+    "min_successor_labels": 1,
+    "on_reconverge": "merge",
+    "tip_window_bp": 0
+   },
+   "direction": "right",
+   "exhaustive": false,
+   "frontier": {
+    "on_overflow": "stop",
+    "order": "breadth_first"
+   },
+   "labels": {
+    "change_cost": {
+     "model": "forbid"
+    },
+    "extra": [],
+    "loss_budget": 0.0,
+    "max_labels_per_node": 64,
+    "max_seed_labels": 1000,
+    "max_switch_sources": 64,
+    "mode": "constrain",
+    "seed_label_kind": "column",
+    "switch_on": "loss"
+   },
+   "output": {
+    "continuation_bp": 1000,
+    "detail": "graphlet",
+    "max_branch_events": 100,
+    "profile_bin_bp": 100,
+    "sequences": true,
+    "timing": false
+   },
+   "schema_version": 1,
+   "support": "kmer"
+  }
+ },
+ "reference": {
+  "seeds": [
+   {
+    "seed_id": "reset_branches",
+    "sequence": "TTGCCGTGAGGCTTGCTGGGCAGAGTGATG",
+    "labels": [
+     "a.fa"
+    ]
+   }
+  ],
+  "strategy": {
+   "direction": "right",
+   "labels": {
+    "seed_label_kind": "column"
+   },
+   "bounds": {
+    "max_extension_bp": 100
+   },
+   "branching": {
+    "max_label_branches": 1
+   },
+   "output": {
+    "timing": false
+   }
+  }
+ }
+}

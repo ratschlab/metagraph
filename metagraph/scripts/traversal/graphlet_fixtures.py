@@ -188,6 +188,66 @@ INDEXES = {
         'files': {'path.fa': [('acc_path', ['P'])],
                   'rep.fa': [('acc_rep', [('repeat', 'P', 51, 66, 120000, 10, 1112)])]},
     },
+    # ---- the stitching triples' indexes (STITCH_FIXTURES; DESIGN-graphlet-merge.md E.2 T4).
+    # Each seed was chosen so that the records hold exactly the repeats named (no other
+    # k-mer or (k+1)-mer repeats).
+    # the external review's counterexample (Appendix G.4): one record S P U C U Y whose 15-mer
+    # U is the one repeat, so the node u has two successors, C[0] (the loop) and Y[0]
+    'loop': {
+        'k': 15, 'seed': 1301,
+        'blocks': {'S': 30, 'P': 40, 'U': 15, 'C': 45, 'Y': 30},
+        'files': {'a.fa': [('r1', ['S', 'P', 'U', 'C', 'U', 'Y'])]},
+    },
+    # a repeat of one (k+1)-mer R preceded by two different bases: S P R Q R T. A walk along Q
+    # enters R's first k-mer again by a new edge and then needs R's own edge (edge_reuse); a
+    # child seeded with the walk blocks the new edge as rejoined_seed one base earlier
+    'repeat': {
+        'k': 15, 'seed': 1405,
+        'blocks': {'S': 30, 'P': 30, 'R': 16, 'Q': 40, 'T': 20},
+        'files': {'a.fa': [('r1', ['S', 'P', 'R', 'Q', 'R', 'T'])]},
+    },
+    # one label on three records: S M A1, S M A2 and S M A1[0:20] B, so the label is ambiguous
+    # at the end of M and again 20 bp into A1 (branch events at two depths)
+    'branchy': {
+        'k': 15, 'seed': 1502,
+        'blocks': {'S': 30, 'M': 40, 'A1': 60, 'A2': 10, 'B': 30},
+        'files': {'a.fa': [('a1', ['S', 'M', 'A1']), ('a2', ['S', 'M', 'A2']),
+                           ('a3', ['S', 'M', ('A1', 0, 20), 'B'])]},
+    },
+    # a.fa on both successors of the seed (S X1, S X2: an ambiguous split, X2 a 10 bp dead
+    # end), b.fa on the X1 side only and shorter (45 bp)
+    'whitelist': {
+        'k': 15, 'seed': 1601,
+        'blocks': {'S': 30, 'X1': 60, 'X2': 10},
+        'files': {'a.fa': [('a1', ['S', 'X1']), ('a2', ['S', 'X2'])],
+                  'b.fa': [('b1', ['S', ('X1', 0, 45)])]},
+    },
+    # x.fa on S T, z.fa on S T[0:20], y.fa on T[5:60]: z.fa is lost at 20 and switches to
+    # y.fa, which is alive 5 bp later without covering a continuation's 15 bp tail
+    'switch_tail': {
+        'k': 15, 'seed': 1701,
+        'blocks': {'S': 30, 'T': 60},
+        'files': {'x.fa': [('x1', ['S', 'T'])], 'z.fa': [('z1', ['S', ('T', 0, 20)])],
+                  'y.fa': [('y1', [('T', 5, 60)])]},
+    },
+    # the full Fable review's split-count counterexample (Appendix G.5, `splits45`), k 11:
+    # A = S U VA R TA, B = S U VB, C = D = S WC R TC: the walk of A and C reconverges on R
+    # through a merge whose parents hold one and two splits
+    'splits': {
+        'k': 11, 'seed': 1801,
+        'blocks': {'S': 30, 'U': 10, 'VA': 10, 'VB': 8, 'WC': 20, 'R': 30, 'TA': 40, 'TC': 40},
+        'files': {'a.fa': [('A', ['S', 'U', 'VA', 'R', 'TA'])],
+                  'b.fa': [('B', ['S', 'U', 'VB'])],
+                  'c.fa': [('C', ['S', 'WC', 'R', 'TC'])],
+                  'd.fa': [('D', ['S', 'WC', 'R', 'TC'])]},
+    },
+    # the GPT review's circular record (Appendix G.6): its last 15 bases are its first, so
+    # the continuation of a walk from either 15 bp seed is the other's seed
+    'cycle': {
+        'k': 15, 'seed': 1901, 'blocks': {},
+        'files': {'A.fa': [('record', [('=', 'GGCCCCGCCGCAACTGACATCAAGTTGATTGGTCGTTAATGCGCACC'
+                                              'TCTGGCCCCGCCGCAACT')])]},
+    },
 }
 
 
@@ -507,6 +567,299 @@ COMPARE_FIXTURES = {
 
 # hand-made: what the CLI cannot produce today
 HAND_MADE = ('clipped_merge', 'limits')
+
+# The stitching triples (DESIGN-graphlet-merge.md §3, Appendix E.2 T4), written to
+# documents/stitch/: a parent at radius R, its child -- the continuation of one walk, run
+# with the request parent.next_request(arm, [walk], bp=E, ...) builds (stitch_child_request()
+# below follows its rules; test_traverse_stitch pins the two equal) -- and the uninterrupted
+# retrieval at R + E. Some add a sibling (the continuation of another walk of the parent)
+# or a grandchild (a continuation of the child's walk). Files: <name>.request.json (the
+# requests, the child's among them) and <name>.<role>.json, the detail graphlet response of
+# each role. Each fixture states what its walks must look like (expect: the continued
+# walk's length L and continuation length n, the walk lengths of the child and of the
+# reference on the arm), so a walker change cannot silently turn it into another case.
+# The verdicts and causes are the library's to derive (test_traverse_stitch).
+STITCH_DIR = 'stitch'
+
+
+def _stitch_request(seed_id, sequence, strategy, labels=None):
+    seed = {'seed_id': seed_id, 'sequence': sequence}
+    if labels is not None:
+        seed['labels'] = labels
+    return {'seeds': [seed], 'strategy': strategy}
+
+
+_KEEP_FORBID = {'direction': 'right', 'branching': {'on_reconverge': 'keep'},
+                'bounds': {'max_extension_bp': 20}}
+_LOOP = {'direction': 'right', 'branching': {'max_label_branches': 1, 'on_reconverge': 'keep'},
+         'bounds': {'max_extension_bp': 115}, 'output': {'continuation_bp': 40}}
+_WHITELIST = {'direction': 'right', 'labels': {'seed_label_kind': 'column'},
+              'bounds': {'max_extension_bp': 30}}
+_CHAIN = {'direction': 'right',
+          'labels': {'extra': ['B', 'C', 'D'], 'change_cost': {'model': 'constant', 'value': 1},
+                     'loss_budget': 3},
+          'branching': {'max_label_branches': 1}, 'bounds': {'max_extension_bp': 50}}
+_BRANCHY = {'direction': 'right', 'labels': {'seed_label_kind': 'column'},
+            'branching': {'on_reconverge': 'keep'}, 'bounds': {'max_extension_bp': 10}}
+
+
+def _with(base, **blocks):
+    """|base| with each block's fields updated (a block given as a non-dict replaces it)."""
+    s = copy.deepcopy(base)
+    for block, values in blocks.items():
+        if isinstance(values, dict):
+            s.setdefault(block, {}).update(values)
+        else:
+            s[block] = values
+    return s
+
+
+STITCH_FIXTURES = {
+    # ---- (a) the whitelist cases (every rule holds: qualified with exact_gated in 1a-S)
+    'keep_forbid': {
+        'index': 'fork',
+        'doc': 'keep and forbid: the right arm diverges at 0 (R1: acc1, acc3; R2: acc2), both '
+               'walks end at the radius 20; the child continues walk 0 to the end of R1. A '
+               'sibling continues walk 1',
+        'parent': _stitch_request('keep_forbid', ['E'], _KEEP_FORBID),
+        'arm': 'right', 'walk': 0, 'bp': 40, 'sibling': 1,
+        'expect': {'L': 20, 'n': 20, 'child': [20], 'sibling': [20], 'reference': [40, 40]},
+    },
+    'merge_only': {
+        'index': 'whitelist',
+        'doc': 'merge with w the arm\'s only open walk: a.fa splits ambiguously at 0 '
+               '(unlimited), its X2 walk dead-ends at 10, the X1 walk (a.fa, b.fa) is open '
+               'at the radius',
+        'parent': _stitch_request('merge_only', ['S'], _with(
+            _WHITELIST, branching={'max_label_branches': 'unlimited'}), ['a.fa', 'b.fa']),
+        'arm': 'right', 'walk': None, 'bp': 70,
+        'expect': {'L': 30, 'n': 30, 'child': [30], 'reference': [10, 60]},
+    },
+    'unlimited': {
+        'index': 'whitelist',
+        'doc': 'an unlimited branch allowance under keep: a.fa used one branch, b.fa none',
+        'parent': _stitch_request('unlimited', ['S'], _with(
+            _WHITELIST, branching={'max_label_branches': 'unlimited', 'on_reconverge': 'keep'}),
+            ['a.fa', 'b.fa']),
+        'arm': 'right', 'walk': None, 'bp': 70,
+        'expect': {'L': 30, 'n': 30, 'child': [30], 'reference': [10, 60]},
+    },
+    'equal_finite': {
+        'index': 'whitelist',
+        'doc': 'an equal finite allowance: a.fa alone, max_label_branches 1, its one branch '
+               'spent at 0; the child\'s allowance is 1 - 1 = 0',
+        'parent': _stitch_request('equal_finite', ['S'], _with(
+            _WHITELIST, branching={'max_label_branches': 1}), ['a.fa']),
+        'arm': 'right', 'walk': None, 'bp': 70,
+        'expect': {'L': 30, 'n': 30, 'child': [30], 'reference': [10, 60]},
+    },
+    'chain3': {
+        'index': 'whitelist',
+        'doc': 'a chain of three parts on one walk: b.fa alone (no split), the parent to 15, '
+               'the child to 30, the grandchild to the end of b1 at 45',
+        'parent': _stitch_request('chain3', ['S'], _with(
+            _WHITELIST, bounds={'max_extension_bp': 15}), ['b.fa']),
+        'arm': 'right', 'walk': 0, 'bp': 15, 'grandchild': {'walk': 0, 'bp': 30},
+        'expect': {'L': 15, 'n': 15, 'child': [15], 'grandchild': [15], 'reference': [45]},
+    },
+    'fork_right': {
+        'index': 'fork',
+        'doc': 'the fork fixture\'s request (both arms, radius 10 < k): the continuation of '
+               'right walk 0 reaches 5 bases into the seed (L 10, n 15)',
+        'parent': _stitch_request('fork', ['E'], {'direction': 'both',
+                                                  'bounds': {'max_extension_bp': 10}}),
+        'arm': 'right', 'walk': 0, 'bp': 40,
+        'expect': {'L': 10, 'n': 15, 'child': [30], 'reference': [40, 40]},
+    },
+    'fork_left': {
+        'index': 'fork',
+        'doc': 'as fork_right, on the left arm',
+        'parent': _stitch_request('fork', ['E'], {'direction': 'both',
+                                                  'bounds': {'max_extension_bp': 10}}),
+        'arm': 'left', 'walk': 0, 'bp': 40,
+        'expect': {'L': 10, 'n': 15, 'child': [30], 'reference': [40, 40]},
+    },
+    # ---- (b) one fixture per cause
+    'sibling_merge': {
+        'index': 'bubbles',
+        'doc': 'merge: both alleles of the first SNP bubble end at the radius 30, each with a '
+               'continuation, and reconverge at 36, beyond it (sibling_merge_unknown)',
+        'parent': _stitch_request('sibling_merge', ['S'], {
+            'direction': 'right', 'labels': {'seed_label_kind': 'column'},
+            'branching': {'max_label_branches': 'unlimited'},
+            'bounds': {'max_extension_bp': 30}}),
+        'arm': 'right', 'walk': 0, 'bp': 70,
+        'expect': {'L': 30, 'n': 30, 'child': [70], 'reference': [100]},
+    },
+    'trace': {
+        'index': 'fork',
+        'doc': 'keep_forbid under support trace (trace_restart)',
+        'parent': _stitch_request('trace', ['E'], _with(_KEEP_FORBID, support='trace')),
+        'arm': 'right', 'walk': 0, 'bp': 40,
+        'expect': {'L': 20, 'n': 20, 'child': [20], 'reference': [40, 40]},
+    },
+    'quorum_changed': {
+        'index': 'fork',
+        'doc': 'keep_forbid with the child\'s quorum raised (min_successor_labels 2): '
+               'strategy_differs and label_count_knob',
+        'parent': _stitch_request('quorum_changed', ['E'], _KEEP_FORBID),
+        'arm': 'right', 'walk': 0, 'bp': 40,
+        'overrides': {'branching': {'min_successor_labels': 2}},
+        'expect': {'L': 20, 'n': 20, 'child': [0], 'reference': [40, 40]},
+    },
+    'reset_branches': {
+        'index': 'whitelist',
+        'doc': 'equal_finite\'s parent with the child\'s allowance restarted '
+               '(reset_branches=True): 1, not 1 - 1 (branches_unequal)',
+        'parent': _stitch_request('reset_branches', ['S'], _with(
+            _WHITELIST, branching={'max_label_branches': 1}), ['a.fa']),
+        'arm': 'right', 'walk': None, 'bp': 70, 'reset_branches': True,
+        'expect': {'L': 30, 'n': 30, 'child': [30], 'reference': [10, 60]},
+    },
+    'switching': {
+        'index': 'chain',
+        'doc': 'A -> B by a switch at 30 (constant cost 1, loss_budget 3); the walk ends at '
+               'the radius 50 under B (switching)',
+        'parent': _stitch_request('switching', ['S'], _CHAIN, ['A']),
+        'arm': 'right', 'walk': 0, 'bp': 50,
+        'expect': {'L': 50, 'n': 20, 'child': [40, 40], 'reference': [90, 90]},
+    },
+    'extra_foreign': {
+        'index': 'chain',
+        'doc': 'switching\'s parent with labels.extra B, C; the child names D, outside the '
+               'parent\'s pool (extra_foreign)',
+        'parent': _stitch_request('extra_foreign', ['S'], _with(
+            _CHAIN, labels={'extra': ['B', 'C']}), ['A']),
+        'arm': 'right', 'walk': 0, 'bp': 50,
+        'overrides': {'labels': {'extra': ['A', 'C', 'D']}},
+        'expect': {'L': 50, 'n': 20, 'child': [40, 40], 'reference': [90]},
+    },
+    'not_continued': {
+        'index': 'switch_tail',
+        'doc': 'z.fa is lost at 20 and switches to y.fa; at the radius 25 y.fa is alive but '
+               'does not cover the continuation\'s 15 bp tail, so the child does not seed it '
+               '(not_continued)',
+        'parent': _stitch_request('not_continued', ['S'], {
+            'direction': 'right',
+            'labels': {'seed_label_kind': 'column', 'extra': ['y.fa'],
+                       'change_cost': {'model': 'constant', 'value': 1}, 'loss_budget': 2},
+            'bounds': {'max_extension_bp': 25}}, ['x.fa', 'z.fa']),
+        'arm': 'right', 'walk': 0, 'bp': 35,
+        'expect': {'L': 25, 'n': 15, 'child': [35], 'reference': [60]},
+    },
+    'loop_branch': {
+        'index': 'loop',
+        'doc': 'the external review\'s counterexample (G.4): forbid, max_label_branches 1, '
+               'keep, radius 115, continuation_bp 40. The walk P U C U ends at the radius at '
+               'u, its one branch spent at the first u; the child (allowance 0) sees two exits '
+               'and stops at 0 bp with branch, the reference goes on to 145 (candidate_changed)',
+        'parent': _stitch_request('loop_branch', ['S'], _LOOP),
+        'arm': 'right', 'walk': None, 'bp': 885,
+        'expect': {'L': 115, 'n': 40, 'child': [0], 'reference': [85, 145]},
+    },
+    'loop_branch_cut0': {
+        'index': 'loop',
+        'doc': 'loop_branch\'s child run with output.max_branch_events 0: its one branch '
+               'event is not kept, its boundary is 0 and its walk 0 bp (decisions_unrecorded)',
+        'parent': _stitch_request('loop_branch_cut0', ['S'], _LOOP),
+        'arm': 'right', 'walk': None, 'bp': 885,
+        'overrides': {'output': {'max_branch_events': 0}},
+        'expect': {'L': 115, 'n': 40, 'child': [0], 'reference': [85, 145]},
+    },
+    'loop_same_stop': {
+        'index': 'loop',
+        'doc': 'loop_branch with the default continuation_bp: the child is seeded with the '
+               'whole walk, so it blocks the loop\'s first edge as rejoined_seed, an edge the '
+               'parent used (seed_reentry, same_stop), and goes on along Y as the reference does',
+        'parent': _stitch_request('loop_same_stop', ['S'], {
+            'direction': 'right',
+            'branching': {'max_label_branches': 1, 'on_reconverge': 'keep'},
+            'bounds': {'max_extension_bp': 115}}),
+        'arm': 'right', 'walk': None, 'bp': 885,
+        'expect': {'L': 115, 'n': 115, 'child': [30], 'reference': [85, 145]},
+    },
+    'loop_interior': {
+        'index': 'loop',
+        'doc': 'unlimited branches, radius 90, continuation_bp 15: the walk into C ends inside '
+               'it; 25 bp into the child it reaches u, where the loop\'s first edge, used by '
+               'the parent, is admitted again: the walk through it takes a step in B '
+               '(rule_violation), the walk through Y has a changed candidate '
+               '(candidate_changed), both past the child\'s first base',
+        'parent': _stitch_request('loop_interior', ['S'], _with(
+            _LOOP, branching={'max_label_branches': 'unlimited', 'on_reconverge': 'keep'},
+            bounds={'max_extension_bp': 90}, output={'continuation_bp': 15})),
+        'arm': 'right', 'walk': None, 'bp': 910,
+        'expect': {'L': 90, 'n': 15, 'child': [55, 59], 'reference': [85, 145]},
+    },
+    'earlier_stop': {
+        'index': 'repeat',
+        'doc': 'unlimited branches, keep, radius 70: the walk along Q is the child\'s seed; the '
+               'child blocks the new edge into R\'s first k-mer as rejoined_seed, where the '
+               'reference takes it and stops one base later with edge_reuse (seed_reentry, '
+               'earlier_stop)',
+        'parent': _stitch_request('earlier_stop', ['S'], {
+            'direction': 'right',
+            'branching': {'max_label_branches': 'unlimited', 'on_reconverge': 'keep'},
+            'bounds': {'max_extension_bp': 70}}),
+        'arm': 'right', 'walk': None, 'bp': 930,
+        'expect': {'L': 70, 'n': 70, 'child': [30], 'reference': [66, 101]},
+    },
+    'splits45': {
+        'index': 'splits',
+        'doc': 'the full Fable review\'s split-count case (G.5): k 11, forbid, merge, '
+               'max_label_branches 0, max_splits_per_path 2, radius 45; the walk\'s leaf holds '
+               'two splits through a merge parent, one on its displayed chain; the child '
+               'splits again, which the reference refuses (split_limit_restarted)',
+        'parent': _stitch_request('splits45', ['S'], {
+            'direction': 'right', 'labels': {'seed_label_kind': 'column'},
+            'branching': {'max_label_branches': 0, 'max_splits_per_path': 2},
+            'bounds': {'max_extension_bp': 45}}),
+        'arm': 'right', 'walk': None, 'bp': 40,
+        'expect': {'L': 45, 'n': 14, 'child': [40, 40], 'reference': [18, 50]},
+    },
+    'events_cut': {
+        'index': 'branchy',
+        'doc': 'max_label_branches 2: the child splits ambiguously at 30 and again at 50, and '
+               'keeps one branch event (output.max_branch_events 1): its boundary is 50 and '
+               'its walks end beyond it (decisions_unrecorded)',
+        'parent': _stitch_request('events_cut', ['S'], _with(
+            _BRANCHY, branching={'max_label_branches': 2})),
+        'arm': 'right', 'walk': 0, 'bp': 190,
+        'overrides': {'output': {'max_branch_events': 1}},
+        'expect': {'L': 10, 'n': 15, 'child': [40, 80, 90], 'reference': [50, 90, 100]},
+    },
+    'events_at_end': {
+        'index': 'branchy',
+        'doc': 'max_label_branches 1: the child splits at 30 and its label ends with branch at '
+               '50, where the one branch event kept is followed by one not kept: the boundary '
+               '50 equals the walk\'s end (decisions_unrecorded)',
+        'parent': _stitch_request('events_at_end', ['S'], _with(
+            _BRANCHY, branching={'max_label_branches': 1})),
+        'arm': 'right', 'walk': 0, 'bp': 190,
+        'overrides': {'output': {'max_branch_events': 1}},
+        'expect': {'L': 10, 'n': 15, 'child': [50, 40], 'reference': [60, 50]},
+    },
+    'circular': {
+        'index': 'cycle',
+        'doc': 'the GPT review\'s circular record (G.6): k 15, radius 25, continuation_bp 15; '
+               'the parent\'s continuation is the child\'s seed and the child\'s continuation '
+               'the parent\'s, and the child\'s walk enters the root seed\'s node '
+               '(rule_violation)',
+        'parent': _stitch_request('circular', [('=', 'GGCCCCGCCGCAACT')], {
+            'direction': 'right', 'branching': {'on_reconverge': 'keep'},
+            'bounds': {'max_extension_bp': 25}, 'output': {'continuation_bp': 15}}),
+        'arm': 'right', 'walk': 0, 'bp': 25,
+        'expect': {'L': 25, 'n': 15, 'child': [25], 'reference': [49]},
+    },
+    'no_bases': {
+        'index': 'fork',
+        'doc': 'keep_forbid with output.sequences false: the rule check cannot run (no_bases)',
+        'parent': _stitch_request('no_bases', ['E'], _with(_KEEP_FORBID,
+                                                          output={'sequences': False})),
+        'arm': 'right', 'walk': 0, 'bp': 40,
+        'expect': {'L': 20, 'n': 20, 'child': [20], 'reference': [40, 40]},
+    },
+}
 
 # CLI fixtures of the request budgets (DESIGN-traverse-graphlet.md §14), written to
 # documents/budgets/ (the top-level fixture list stays as it is). A work stop is the same
@@ -913,6 +1266,159 @@ def build_compare(metagraph, root, name):
     return run_traverse(metagraph, graph, annotation, r)['results'][0]['graphlet']
 
 
+def _merge_overrides(strategy, overrides):
+    """next_request()'s deep merge of keyword overrides (a change_cost naming another model
+    replaces the whole; the fixtures override nothing else that needs care)."""
+    for k, v in overrides.items():
+        cur = strategy.get(k)
+        if isinstance(v, dict) and isinstance(cur, dict) and not (
+                k == 'change_cost' and v.get('model', cur.get('model')) != cur.get('model')):
+            _merge_overrides(cur, v)
+        else:
+            strategy[k] = copy.deepcopy(v)
+
+
+def stitch_child_request(parent, full, arm, walk, bp, overrides=None, reset_branches=False):
+    """The request parent.next_request(arm, [walk], bp, reset_branches=..., **overrides)
+    builds (ops.next_request), for the cases the fixtures use: one walk, the parent's
+    normalized strategy with direction = |arm| and max_extension_bp = |bp|, the walk's
+    continuation as the seed with its labels named (constrain), labels.loss_budget reduced
+    by the largest terminal loss of those labels, branching.max_label_branches by their
+    largest terminal branch count (unless "unlimited", 0, or reset_branches), labels.extra
+    rebuilt around the new seed labels (forbid: none; constant: every other label of the
+    retrieval when one switch fits the budget), then the overrides merged. |parent| is the
+    detail graphlet response, |full| the detail full one of the same request. A cost table
+    is not supported here (the library's switch search would be needed)."""
+    overrides = copy.deepcopy(overrides or {})
+    strategy = copy.deepcopy(parent['strategy'])
+    strategy.pop('clamped', None)
+    strategy['direction'] = arm
+    strategy.setdefault('bounds', {})['max_extension_bp'] = bp
+    r = full['results'][0]
+    names = [l['name'] for l in r['label_dict']]
+    path = r['arms'][arm]['paths'][walk]
+    cont = path['continuation']
+    seed = {'sequence': cont['sequence']}
+    labels = strategy['labels']
+    if labels['mode'] == 'constrain':
+        if cont['labels']:
+            seed['labels'] = [names[l] for l in cont['labels']]
+        ends = {e['label']: e for e in path.get('end_labels', [])}
+        budget = float(labels.get('loss_budget') or 0.0)
+        top = max([ends[l]['loss'] for l in cont['labels'] if l in ends] or [0.0])
+        effective = budget
+        if budget > 0 and top > 0:
+            effective = max(0.0, budget - top)
+            labels['loss_budget'] = effective
+        cost = labels.get('change_cost') or {'model': 'forbid'}
+        given = overrides.get('labels') or {}
+        if 'change_cost' in given:
+            cost = dict(cost, **given['change_cost']) \
+                if given['change_cost'].get('model', cost['model']) == cost['model'] \
+                else given['change_cost']
+        model = cost.get('model', 'forbid')
+        if model == 'table':
+            raise NotImplementedError('a cost table: the fixtures use forbid or constant')
+        seeded = set(cont['labels'])
+        if model == 'constant' and cost.get('value', 0) <= given.get('loss_budget', effective):
+            labels['extra'] = [n for i, n in enumerate(names) if i not in seeded]
+        else:
+            labels['extra'] = []
+        branches = max([cont.get('branches_used', 0)]
+                       + [ends[l]['branches'] for l in cont['labels'] if l in ends])
+        original = strategy['branching'].get('max_label_branches')
+        if original == 'unlimited' or (isinstance(original, int) and original > 0):
+            strategy['branching']['max_label_branches'] = \
+                original if original == 'unlimited' or reset_branches \
+                else max(0, original - branches)
+    _merge_overrides(strategy, overrides)
+    out = strategy.get('output') or {}
+    if out.get('coordinates') is not True:
+        out.pop('max_coordinate_occurrences', None)
+    request = {'seeds': [seed]}
+    if parent.get('release'):
+        request['release'] = parent['release']
+    request['strategy'] = strategy
+    return request
+
+
+def _arm_lengths(resp, arm):
+    a = resp['results'][0]['arms'].get(arm)
+    return None if a is None else [p['length_bp'] for p in a['paths']]
+
+
+def _pick_walk(full, arm, walk):
+    """|walk| as given, or (None) the first walk of the arm that ended at the radius."""
+    if walk is not None:
+        return walk
+    for p in full['results'][0]['arms'][arm]['paths']:
+        if p.get('path_reason') == 'max_extension_bp':
+            return p['id']
+    raise RuntimeError('no walk of the %s arm ended at the radius' % arm)
+
+
+def build_stitch(metagraph, root, name):
+    """-> ({filename: text} for stitching fixture |name| (in STITCH_DIR), [what differs from
+    its expect])."""
+    fx = STITCH_FIXTURES[name]
+    spec = INDEXES[fx['index']]
+    graph = os.path.join(root, fx['index'], 'graph.dbg')
+    if not os.path.exists(graph):
+        build_index(fx['index'], metagraph, root)
+    annotation = annotation_of(fx['index'], root)
+    arm = fx['arm']
+
+    def run(request):
+        """-> (detail graphlet response, detail full response) of |request|."""
+        outs = {}
+        for detail in ('graphlet', 'full'):
+            r = copy.deepcopy(request)
+            r['strategy'].setdefault('output', {})['detail'] = detail
+            outs[detail] = run_traverse(metagraph, graph, annotation, r)
+        return outs['graphlet'], outs['full']
+
+    parent_req = materialize(fx['parent'], blocks_of(spec))
+    parent, parent_full = run(parent_req)
+    walk = _pick_walk(parent_full, arm, fx['walk'])
+    child_req = stitch_child_request(parent, parent_full, arm, walk, fx['bp'],
+                                     fx.get('overrides'), fx.get('reset_branches', False))
+    child, child_full = run(child_req)
+    reference_req = copy.deepcopy(parent_req)
+    radius = parent['strategy']['bounds']['max_extension_bp']
+    reference_req['strategy'].setdefault('bounds', {})['max_extension_bp'] = radius + fx['bp']
+    reference, reference_full = run(reference_req)
+    requests = {'fixture_index': {'cli': fx['index'], 'k': spec['k'], 'doc': fx['doc'],
+                                  'arm': arm, 'walk': walk},
+                'parent': parent_req, 'child': child_req, 'reference': reference_req}
+    responses = {'parent': parent, 'child': child, 'reference': reference}
+    fulls = {'parent': parent_full, 'child': child_full, 'reference': reference_full}
+    if 'sibling' in fx:
+        sib_req = stitch_child_request(parent, parent_full, arm, fx['sibling'], fx['bp'],
+                                       fx.get('overrides'), fx.get('reset_branches', False))
+        requests['fixture_index']['sibling'] = fx['sibling']
+        requests['sibling'] = sib_req
+        responses['sibling'], fulls['sibling'] = run(sib_req)
+    if 'grandchild' in fx:
+        gc = fx['grandchild']
+        gc_req = stitch_child_request(child, child_full, arm, gc['walk'], gc['bp'])
+        requests['fixture_index']['grandchild'] = gc['walk']
+        requests['grandchild'] = gc_req
+        responses['grandchild'], fulls['grandchild'] = run(gc_req)
+        reference_req['strategy']['bounds']['max_extension_bp'] += gc['bp']
+        responses['reference'], fulls['reference'] = run(reference_req)
+    have = {'L': parent_full['results'][0]['arms'][arm]['paths'][walk]['length_bp'],
+            'n': len(child_req['seeds'][0]['sequence'])}
+    for role in ('child', 'sibling', 'grandchild', 'reference'):
+        if role in fulls:
+            have[role] = _arm_lengths(fulls[role], arm)
+    problems = ['%s: %s is %r, expected %r' % (name, k, have.get(k), v)
+                for k, v in fx['expect'].items() if have.get(k) != v]
+    files = {name + '.request.json': dumps(requests)}
+    for role, resp in responses.items():
+        files['%s.%s.json' % (name, role)] = dumps(resp)
+    return {os.path.join(STITCH_DIR, f): text for f, text in files.items()}, problems, have
+
+
 # The CLI fixtures are the reference platform's answers: Linux, where the servers run (the
 # CI's Linux build writes and checks them byte for byte). The memory account counts the
 # platform's object sizes (libstdc++ and libc++ lay out std::string and the structs holding
@@ -1151,6 +1657,25 @@ def main(argv=None):
                     with open(path, 'w', encoding='utf-8', newline='') as f:
                         f.write(text)
                     print('wrote', fname)
+            for name in STITCH_FIXTURES:
+                if args.only and name not in args.only:
+                    continue
+                files, problems, _ = build_stitch(args.from_cli, root, name)
+                if problems:
+                    stale.extend(problems)
+                    continue
+                os.makedirs(os.path.join(args.dir, STITCH_DIR), exist_ok=True)
+                for fname, text in files.items():
+                    path = os.path.join(args.dir, fname)
+                    if not differs(path, text):
+                        continue
+                    if args.check:
+                        stale.append(fname)
+                        show_diff(path, text)
+                    else:
+                        with open(path, 'w', encoding='utf-8', newline='') as f:
+                            f.write(text)
+                        print('wrote', fname)
         finally:
             if not args.keep:
                 shutil.rmtree(root, ignore_errors=True)

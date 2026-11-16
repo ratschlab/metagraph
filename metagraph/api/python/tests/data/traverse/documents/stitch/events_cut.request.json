@@ -1,0 +1,120 @@
+{
+ "fixture_index": {
+  "cli": "branchy",
+  "k": 15,
+  "doc": "max_label_branches 2: the child splits ambiguously at 30 and again at 50, and keeps one branch event (output.max_branch_events 1): its boundary is 50 and its walks end beyond it (decisions_unrecorded)",
+  "arm": "right",
+  "walk": 0
+ },
+ "parent": {
+  "seeds": [
+   {
+    "seed_id": "events_cut",
+    "sequence": "CACCGTGTATCTCAAGAGACAGCTACGGGG"
+   }
+  ],
+  "strategy": {
+   "direction": "right",
+   "labels": {
+    "seed_label_kind": "column"
+   },
+   "branching": {
+    "on_reconverge": "keep",
+    "max_label_branches": 2
+   },
+   "bounds": {
+    "max_extension_bp": 10
+   },
+   "output": {
+    "timing": false
+   }
+  }
+ },
+ "child": {
+  "seeds": [
+   {
+    "sequence": "CGGGGCTAAAATGAC",
+    "labels": [
+     "a.fa"
+    ]
+   }
+  ],
+  "strategy": {
+   "annotation": {
+    "batch_kmers": 64
+   },
+   "bounds": {
+    "max_extension_bp": 190,
+    "max_live_paths": 1000,
+    "max_output_bp": 2000000,
+    "max_paths": 10000,
+    "max_steps": 1000000,
+    "min_live_labels": 1,
+    "time_budget_ms": 30000.0
+   },
+   "branching": {
+    "bubble_window_bp": 0,
+    "hairpins": "skip",
+    "max_label_branches": 2,
+    "max_splits_per_path": 64,
+    "min_successor_fraction": 0.0,
+    "min_successor_labels": 1,
+    "on_reconverge": "keep",
+    "tip_window_bp": 0
+   },
+   "direction": "right",
+   "exhaustive": false,
+   "frontier": {
+    "on_overflow": "stop",
+    "order": "breadth_first"
+   },
+   "labels": {
+    "change_cost": {
+     "model": "forbid"
+    },
+    "extra": [],
+    "loss_budget": 0.0,
+    "max_labels_per_node": 64,
+    "max_seed_labels": 1000,
+    "max_switch_sources": 64,
+    "mode": "constrain",
+    "seed_label_kind": "column",
+    "switch_on": "loss"
+   },
+   "output": {
+    "continuation_bp": 1000,
+    "detail": "graphlet",
+    "max_branch_events": 1,
+    "profile_bin_bp": 100,
+    "sequences": true,
+    "timing": false
+   },
+   "schema_version": 1,
+   "support": "kmer"
+  }
+ },
+ "reference": {
+  "seeds": [
+   {
+    "seed_id": "events_cut",
+    "sequence": "CACCGTGTATCTCAAGAGACAGCTACGGGG"
+   }
+  ],
+  "strategy": {
+   "direction": "right",
+   "labels": {
+    "seed_label_kind": "column"
+   },
+   "branching": {
+    "on_reconverge": "keep",
+    "max_label_branches": 2
+   },
+   "bounds": {
+    "max_extension_bp": 200
+   },
+   "output": {
+    "timing": false
+   }
+  }
+ }
+}
