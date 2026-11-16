@@ -768,6 +768,7 @@ class PairUnion:
             [[f['tag'], f['error'], f['kept']] for f in self._failures],
             self._seed_seq, sorted(self._expected_raw) if exp is not None else None])
         self._walk_cache = {}
+        self._seg_cache = {}
 
     # ------------------------------------------------------------ basic properties
 
@@ -827,6 +828,24 @@ class PairUnion:
             t = self._arms.get(side)
             if t is not None:
                 n = t.number(n)
+
+    def _seg_labels(self, part, a):
+        """seg -> (label_intervals(), the end set as a frozenset, label_intervals_cut()) of
+        a part segment, built once per union (counted in memory_bytes())."""
+        key = (part.tag, a.side)
+        cache = self._seg_cache.get(key)
+        if cache is None:
+            cache = self._seg_cache[key] = {}
+        g = part.graphlet
+
+        def info(sid):
+            got = cache.get(sid)
+            if got is None:
+                got = cache[sid] = (_ops.label_intervals(g, a.side, sid),
+                                    frozenset(a.segments[sid].end),
+                                    _ops.label_intervals_cut(g, a.side, sid))
+            return got
+        return info
 
     def _pair_label(self, part, lab_id):
         lab = part.graphlet.labels[lab_id]
@@ -2250,17 +2269,20 @@ def _labels_for(un, part, a, chain, end, with_labels, at_bp=None):
     chain = chain[:k]
     if not chain:
         return (), False
+    info = un._seg_labels(part, a)
     last = segs[chain[-1][0]]
-    cut = any(_ops.label_intervals_cut(g, a.side, x) for x, _ in chain)
+    cut = any(info(x)[2] for x, _ in chain)
     if end >= last.end_bp:
-        alive = set(last.end)
+        alive = set(info(last.id)[1])
     else:
-        alive = {lab for lab, f, to in _ops.label_intervals(g, a.side, last.id)
-                 if f <= end - 1 < to}
+        alive = {lab for lab, f, to in info(last.id)[0] if f <= end - 1 < to}
     out = {}
-    open_ = set(alive)
+    open_ = alive
     pos = end
     constrain = g.mode == 'constrain'
+    # linear in the labels of each segment of the chain and in the merges' partitions: the
+    # intervals and the end set of a segment are built once per union (_seg_labels), each
+    # boundary tests every open label once against a set
     for idx in range(len(chain) - 1, -1, -1):
         sid, j = chain[idx]
         s = segs[sid]
@@ -2268,8 +2290,8 @@ def _labels_for(un, part, a, chain, end, with_labels, at_bp=None):
             break
         if s.length_bp:
             starts = {}
-            for lab, f, to in _ops.label_intervals(g, a.side, sid):
-                if lab in open_ and f < pos <= to:
+            for lab, f, to in info(sid)[0]:
+                if f < pos <= to and lab in open_:
                     starts[lab] = f
             for lab in list(open_):
                 f = starts.get(lab)
@@ -2285,14 +2307,12 @@ def _labels_for(un, part, a, chain, end, with_labels, at_bp=None):
             break
         # the boundary into |s| from its parent chain[idx - 1]
         par = segs[chain[idx - 1][0]]
-        for lab in list(open_):
-            ok = lab in par.end
-            if ok and constrain and s.is_merge:
-                part_j = s.partition[j] if j < len(s.partition) else ()
-                ok = lab in set(part_j)
-            if not ok:
-                out[lab] = s.from_bp
-                open_.discard(lab)
+        keep = info(par.id)[1]
+        if constrain and s.is_merge:
+            keep = keep & frozenset(s.partition[j] if j < len(s.partition) else ())
+        for lab in [x for x in open_ if x not in keep]:
+            out[lab] = s.from_bp
+            open_.discard(lab)
         pos = par.end_bp
     labs = sorted(out.items(), key=lambda x: (x[1], x[0]))
     return tuple(SpanLabel(un._pair_label(part, lab), f) for lab, f in labs), cut
