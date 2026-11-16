@@ -945,3 +945,300 @@ def _to_gfa(g, with_seed, bud, done=None):
     lines.extend(paths)
     lines.append('')
     return '\n'.join(lines)
+
+
+# ------------------------------------------------------------------ the cross-pair union
+# (docs/DESIGN-graphlet-merge.md §2.9, Appendix A.5): FASTA and GFA of a PairUnion in the
+# source-supported mode, every name and tag in a token percent-escaped so that each token
+# decodes back to what it names
+
+# the bytes a token writes as %XX: every byte outside printable ASCII ('!' to '~') and the
+# token characters
+UNION_TOKEN_CHARS = '%,;=@/:>~+|[]$'
+
+
+def union_escape(text):
+    """|text| as a header token or GFA tag value: every byte outside '!'..'~' (the space,
+    control characters and the UTF-8 bytes of non-ASCII characters) and '%' and the token
+    characters ,;=@/:>~+|[]$ written as %XX (upper-case hex)."""
+    out = []
+    for byte in str(text).encode('utf-8'):
+        ch = chr(byte)
+        if byte < 0x21 or byte > 0x7e or ch in UNION_TOKEN_CHARS:
+            out.append('%%%02X' % byte)
+        else:
+            out.append(ch)
+    return ''.join(out)
+
+
+def union_unescape(token):
+    """The inverse of union_escape()."""
+    raw = bytearray()
+    i = 0
+    while i < len(token):
+        if token[i] == '%':
+            raw.append(int(token[i + 1:i + 3], 16))
+            i += 3
+        else:
+            raw.extend(token[i].encode('ascii'))
+            i += 1
+    return raw.decode('utf-8')
+
+
+def _comment(text):
+    """A GFA comment line's text in printable ASCII: '%' and every byte outside ' '..'~'
+    escaped as %XX (spaces kept)."""
+    out = []
+    for byte in str(text).encode('utf-8'):
+        ch = chr(byte)
+        if byte < 0x20 or byte > 0x7e or ch == '%':
+            out.append('%%%02X' % byte)
+        else:
+            out.append(ch)
+    return '# ' + ''.join(out)
+
+
+def _end_reason(r):
+    """The end reason a span token names: the path reason, else the label end reasons
+    ('|' between them, in byte order), else none. Reason names are enum names
+    ([a-z_]+), so they are written as they are: '|' joins them unescaped, and a decoder
+    splits on it."""
+    if not r:
+        return None
+    if r.get('path_reason'):
+        return r['path_reason']
+    labs = sorted(r.get('labels') or {})
+    return '|'.join(labs) if labs else None
+
+
+def _span_token(s, sep='@'):
+    """A span token of Appendix A.5: the tag escaped; the trie node ('s31', 's30$',
+    'seed') and the end reasons written as they are (their grammar holds no other
+    character)."""
+    e = union_escape
+    if s.how == 'merges':
+        tok = '%s%s%d>%s' % (e(s.pair), sep, s.to_bp, s.into)
+        r = s.route
+        if r is not None and r.how != 'held':
+            why = _end_reason(r.end_reasons) if r.how == 'ends' else None
+            tok += '~%d%s/%s' % (r.to_bp, ':' + why if why else '', r.absence)
+        return tok
+    why = _end_reason(s.end_reasons) if s.how == 'ends' else None
+    return '%s%s%d%s/%s' % (e(s.pair), sep, s.to_bp, ':' + why if why else '', s.absence)
+
+
+def _held_labels(s):
+    """(labels, cut) of a span held whole: its own (whole, extends) or its route's."""
+    if s.how == 'merges':
+        return (s.route.labels if s.route is not None else ()), s.labels_cut
+    return s.labels or (), s.labels_cut
+
+
+def _union_tokens(u, w, absent_tok, modes_tok, mapping_tok):
+    e = union_escape
+    toks = ['kind=%s' % w.kind, 'len=%d' % w.length_bp]
+    held = set(w.held_in)
+
+    def lst(key, items):
+        if items:
+            toks.append('%s=%s' % (key, ','.join(items)))
+
+    lst('held', [e(t) for t in w.held_in])
+    lst('whole', [e(t) for t in w.whole_in])
+    lst('extends', [e(s.pair) for s in w.spans if s.how == 'extends'])
+    lst('merges', [_span_token(s) for s in w.spans if s.how == 'merges'])
+    lst('ends', [_span_token(s) for s in w.spans if s.how == 'ends'])
+    lst('diverges', [_span_token(s) for s in w.spans if s.how == 'diverges'])
+    lst('certified', ['%s:%d' % (e(s.pair), s.certified_to_bp) for s in w.spans
+                      if s.how != 'none'])
+    labs = []
+    for s in w.spans:
+        if s.pair in held:
+            ls, cut = _held_labels(s)
+            labs.append('%s:%d%s/%d' % (e(s.pair), len(ls), '+' if cut else '',
+                                        sum(1 for x in ls if x.from_bp == 0)))
+    lst('labels', labs)
+    if modes_tok:
+        toks.append(modes_tok)
+    nones = ['%s:arm_not_walked' % e(s.pair) for s in w.spans if s.how == 'none']
+    lst('absent', absent_tok + nones)
+    lst('not_included', [e(t) for t in u._not_included])
+    if mapping_tok:
+        toks.append(mapping_tok)
+    toks.append('scope=within_one_graph')
+    return toks
+
+
+def _modes_token(u):
+    modes = [(p.tag, p.graphlet.mode) for p in u.parts]
+    if all(m == 'annotate' for _, m in modes) or not modes:
+        return None
+    if len({m for _, m in modes}) == 1:
+        return 'modes=%s' % modes[0][1]
+    return 'modes=' + ','.join('%s:%s' % (union_escape(t), m) for t, m in modes)
+
+
+def _mapping_token(u):
+    w = u._mapping_warnings()
+    if not w:
+        return None
+    if len(w) == len(u.parts) and len({v for _, v in w}) == 1:
+        return 'mapping=%s' % w[0][1]
+    return 'mapping=' + ','.join('%s:%s' % (union_escape(t), v) for t, v in w)
+
+
+def union_fasta(u, arm, walks, with_seed, orientation, width, at_bp, stubs, bud):
+    """PairUnion.to_fasta(): one record per union walk of |arm| (every arm when None),
+    '>{arm}.u{id}' and the tokens of Appendix A.5; stub walks only with |stubs|."""
+    sides = u.arms() if arm is None else [u._side(arm)]
+    absent_tok = ['%s:%s' % (union_escape(a.tag), a.category) for a in u.absent]
+    modes_tok = _modes_token(u)
+    mapping_tok = _mapping_token(u)
+    out = []
+    for side in sides:
+        if side not in u._arms:
+            continue
+        t = u._arms[side]
+        for w in u._walks_full(side, bud, True, walks, stubs, at_bp):
+            if bud is not None:
+                n = w.length_bp + len(u._seed_seq)
+                bud.charge(W_RECORD + (n >> 8) + len(w.spans), 3 * (STR + n) + STR + 400)
+            head = '>%s.u%d %s' % (side, w.id, ' '.join(
+                _union_tokens(u, w, absent_tok, modes_tok, mapping_tok)))
+            seq = u._spell_nodes(t, t.path_usegs(t.markers[w.id]), orientation, with_seed)
+            out.append(head)
+            out.append(_wrap(seq, width))
+    out.append('')
+    return '\n'.join(out)
+
+
+def union_gfa(u, with_seed, labels, at_bp, bud):
+    """PairUnion.to_gfa() in the source-supported mode: one tree per arm, union segments
+    linked to their children only (0M: a trie of spellings), the seed written once per arm
+    (seed_l, seed_r), a stub's merge a tag (mg, mt) and no link; P per union walk of kind
+    walk. Every path the file admits is spelled whole by each pair spelling its last
+    segment."""
+    e = union_escape
+    lines = ['H\tVN:Z:1.0']
+    cats = collections_od()
+    for a in u.absent:
+        cats.setdefault(a.category, []).append(a.tag)
+    head = 'union_pairs: seed %d bp; parts %s' % (
+        len(u._seed_seq), ' '.join(p.tag for p in u.parts) or 'none')
+    for c, ts in cats.items():
+        head += '; %s %s' % (c.replace('_', ' '), ' '.join(ts))
+    if u._not_included:
+        head += '; not included %s' % ' '.join(u._not_included)
+    lines.append(_comment(head))
+    lines.append(_comment('paths: source-supported; seed_l and seed_r are one seed, written '
+                          'once per arm, so no path of this file runs from a left flank '
+                          'through the seed into a right flank: each part\'s own GFA has '
+                          'those paths'))
+    from .union import SCOPE, TURN_OFFS, _core_sentence
+    for side in (u.arms() or [None]):
+        lines.append(_comment(_core_sentence(u.coverage(side, at_bp))))
+    lines.append(_comment('turn-offs: ' + TURN_OFFS))
+    lines.append(_comment(u._labels_sentence(bud)))
+    lines.append(_comment('scope: ' + SCOPE))
+    segs_out, links, paths = [], [], []
+    seed = u._seed_seq
+    for side in u.arms():
+        t = u._arms[side]
+        sname = 'seed_l' if side == 'left' else 'seed_r'
+        if with_seed:
+            segs_out.append('S\t%s\t%s\tLN:i:%d' % (sname, seed, len(seed)))
+        # the stubs ending at each node: their merge tags
+        stub_tags = {}
+        for node, items in t.stub_end.items():
+            u_in = t.node_in.get(node)
+            if u_in is None:
+                continue
+            for pi, stub, m in items:
+                part = u.parts[pi]
+                ms = part.graphlet.arms[side].segments[m]
+                into = t.node_name(t.seg_nodes[pi][m][0], ms.length_bp,
+                                   ms.walk[0] if ms.length_bp and ms.walk else None)
+                stub_tags.setdefault(u_in, []).append((part.tag, into))
+        for idx in t.order:
+            us = t.useg[idx]
+            if bud is not None:
+                bud.charge(W_GFA_LINE * (2 + len(us.cover)) + ((us.to_bp - us.from_bp) >> 8),
+                           4 * (STR + us.to_bp - us.from_bp) + 200)
+            w = u._spell_nodes(t, [idx], 'walk', False)
+            text = w if side == 'right' else w[::-1]
+            name = 's%d' % us.id
+            tags = ['LN:i:%d' % len(text)]
+            pp = [u.parts[pi].tag for pi in sorted(us.cover)]
+            tags.append('pp:Z:%s' % ','.join(e(x) for x in pp))
+            pl = []
+            for pi in sorted(us.cover):
+                part = u.parts[pi]
+                g = part.graphlet
+                info = u._seg_labels(part, g.arms[side], bud)
+                ids = set()
+                cut = False
+                for seg, f, to in us.pieces[pi]:
+                    for lab, a0, z0 in info(seg)[0]:
+                        if max(a0, f) < min(z0, to):
+                            ids.add(lab)
+                    cut = cut or info(seg)[2]
+                if labels == 'full':
+                    # the tag once, then each name escaped on its own: ',', ';' and '=' in a
+                    # name are escaped, so the entry splits back into tag and names
+                    if bud is not None:
+                        n = sum(len(g.labels[i].name.encode('utf-8')) for i in ids)
+                        bud.charge(W_ELEM * len(ids), 4 * (3 * n + STR) + len(ids) * STR)
+                    names = [e(g.labels[i].name) for i in sorted(ids)]
+                    pl.append('%s=%s' % (e(part.tag), ','.join(names)))
+                else:
+                    pl.append('%s=%d%s' % (e(part.tag), len(ids), '+' if cut else ''))
+            tags.append('pl:Z:%s' % ';'.join(pl))
+            st = stub_tags.get(idx)
+            if st:
+                tags.append('mg:Z:%s' % ','.join(e(x) for x, _ in st))
+                tags.append('mt:Z:%s' % ','.join(x for _, x in st))
+            segs_out.append('S\t%s\t%s\t%s' % (name, text, '\t'.join(tags)))
+            par = 's%d' % t.useg[us.parent].id if us.parent is not None else (
+                sname if with_seed else None)
+            if par is not None:
+                a, b = (par, name) if side == 'right' else (name, par)
+                links.append('L\t%s\t+\t%s\t+\t0M' % (a, b))
+        for w in u._walks_full(side, bud, False, stubs=False):
+            node = t.markers[w.id]
+            if bud is not None:
+                # the P line: a name per union segment (dropped once joined), the line, and
+                # the file's text joined at the end
+                d = t.nsegs(node)
+                bud.charge(W_GFA_LINE + W_ELEM * d, 3 * (STR + 12 * (d + 2)) + d * (STR + 12))
+                bud.release(d * (STR + 12))
+            names = ['s%d+' % t.useg[x].id for x in t.path_usegs(node)]
+            if side == 'left':
+                names.reverse()
+            if with_seed:
+                names = names + [sname + '+'] if side == 'left' else [sname + '+'] + names
+            if not names:
+                continue
+            pp = [s.pair for s in w.spans if s.how in ('whole', 'extends')]
+            pe = [_span_token(s, '=') for s in w.spans if s.pair not in w.held_in
+                  and s.how != 'none']
+            ptags = []
+            if pp:
+                ptags.append('pp:Z:%s' % ','.join(e(x) for x in pp))
+            if w.held_in:
+                ptags.append('ph:Z:%s' % ','.join(e(x) for x in w.held_in))
+            if pe:
+                ptags.append('pe:Z:%s' % ';'.join(pe))
+            paths.append('P\t%s.u%d\t%s\t*%s' % (side, w.id, ','.join(names),
+                                                 ''.join('\t' + x for x in ptags)))
+    lines.extend(segs_out)
+    lines.extend(links)
+    lines.extend(paths)
+    lines.append('')
+    return '\n'.join(lines)
+
+
+def collections_od():
+    import collections
+    return collections.OrderedDict()
+
+

@@ -20,14 +20,19 @@ single retrieval, the **graphlet**:
 * going further is a **new traversal**: the library builds the request from a walk's
   continuation, the server runs it. Nothing about the first retrieval is resumed.
 
-**Merging graphlets is not supported.** Every operation reads one retrieval, or compares
-two: ``subgraph()`` is a filtered view of one graphlet, ``compare()`` compares two
-retrievals of the same locus on the same index, and a continuation (``deepen()``,
-``next_request()``) returns a new graphlet that is not joined to its parent.
-``branching.on_reconverge: "merge"`` merges paths within one traversal only. Combining
-graphlets would need rules for their overlaps, their orientation, labels whose ids are
-local to each index, provenance and incomplete evidence; concatenating their records
-does not make a graphlet.
+**Graphlets are not merged.** One combination is offered: the graphlets of one seed
+answered on several pairs (the graphs of a release, or two databases) can be combined by
+sequence (`Combining one seed across pairs`_). The result keeps every retrieval unchanged
+and states, with every answer, how complete each pair is, which pairs carry each walk and
+how far, that a pair not following a walk did not follow it under its own request, and
+that labels are each pair's own. Every path it gives is held whole by one graph; inferred
+paths that switch graphs where the parts allow it, with every switch named, come in a
+later release. Every other combination is not offered, with the reason (`What is not
+combined`_). Every other operation reads one retrieval, or compares two: ``subgraph()`` is
+a filtered view of one graphlet, ``compare()`` compares two retrievals of the same locus
+on the same index, and a continuation (``deepen()``, ``next_request()``) returns a new
+graphlet that is not joined to its parent. ``branching.on_reconverge: "merge"`` merges
+paths within one traversal only.
 
 The traversal itself (seed validation, the walk rule, label modes, termination reasons)
 is specified in ``metagraph/docs/SPEC-labeled-traversal-core.md`` (§5 to §7); the
@@ -1654,6 +1659,284 @@ beside them); ``records(g)`` returns the same rows as plain dicts without pandas
 
    labels=4 segments=7 runs=6 walks=1 splits=2 claims=6 events=0 presence=0
    True
+
+
+Combining one seed across pairs
+-------------------------------
+
+A ``/traverse`` request runs on one pair: a graph and its annotation. A release split into
+several graphs (RefSeq r237: 11 graphs, one per taxonomic group) answers one seed once per
+graph, and ``union_pairs(results)`` combines those answers by sequence. It returns a
+``PairUnion``: per arm, one trie of every part's spellings, with the pairs and labels that
+carry each stretch. The parts stay unchanged, and every answer is computed from them. The
+design is ``metagraph/docs/DESIGN-graphlet-merge.md`` §2.
+
+The union is not exact, and it does not pretend to be. Five statements come with every
+summary and export: as sentences in ``print(union)``, ``coverage()``, ``statements()``,
+``summary()`` (which never cuts them), ``evidence()`` and the GFA comment lines, and as
+tokens in the FASTA headers:
+
+1. **Coverage per pair.** At the depth asked: which pairs are complete, complete with a
+   named qualification, or certified only to a smaller depth (and why); which do not hold
+   the seed, were not walked or failed; which were expected but not given. A pair is
+   complete only as its own graphlet says, so the union is never more complete than its
+   parts.
+2. **Provenance per walk.** Which pairs spell each union walk and how far each holds it
+   (as a displayed walk, or through a merge into its other walks), where it ends or turns
+   off, and which of its labels carry the walk from where.
+3. **What a turn-off means.** "A pair that does not follow a walk did not follow it under
+   its own request": its mode, its permitted labels and its caps decide that, not only its
+   graph. Only a span marked ``absence: graph`` says the pair's graph lacks the walk.
+4. **Labels per pair.** Every label is shown with its pair (``bact_other/NC_000913.3``);
+   equal names in two pairs are not claimed to be one record, and header names whose record
+   mapping was not checked are marked so.
+5. **The scope of the paths.** "A walk that no single graph holds entirely is in no part,
+   so not in this union." On r237 a path across graphs would join two organisms. Paths
+   that switch graphs where the parts allow it, each switch named, come in a later release
+   (``paths='inferred'`` is refused ``not_offered`` until then).
+
+Inputs
+^^^^^^
+
+``union_pairs(results, *, seed=None, expected_pairs=None, seqs_order=None, budget=None)``
+takes everything one seed's request returned across pairs, in any order:
+
+* a ``Graphlet`` whose envelope names its pair (``graph``, ``graph_path``,
+  ``annotation_path``, ``index_fp``, ...), or ``{'pair': ..., 'graphlet': g}`` for a body
+  without one (a graph name or a pair object, stated by the caller);
+* a ``TraverseResponse`` of one seed (``{'response': r, 'index': i}`` picks one seed of
+  several), with or without a graphlet: a result without one is an *absent record*;
+* ``{'pair': ..., 'result': r}`` (with ``'error'`` and ``'sequence'`` beside it if known)
+  for a seed result without a graphlet, and ``{'pair': ..., 'error': e}`` for a request
+  that failed.
+
+``seed=`` is the oriented seed sent; it is needed only when no result carries a graphlet.
+``expected_pairs=`` lists the pairs the request was sent to: a pair expected and not given
+is ``not_included``, and without it every statement says that it covers only the pairs
+given. ``seqs_order=`` maps each pair to its record-mapping certificate as ``GET
+/capabilities`` states it (``'verified'``, ``'count_only'`` or ``None``); a pair not in it
+reads ``unknown``. ``TraverseClient.traverse_pairs(seed, strategy, pairs=...)`` sends one
+request per pair and returns all four (``PairResults``); a pair whose request failed
+(``TraverseError`` or ``OSError``) is ``{'pair': ..., 'error': e}``, and any other
+exception propagates:
+
+.. code-block:: python
+
+   r = client.traverse_pairs(seed, strategy)            # every pair GET /capabilities lists
+   u = union_pairs(r.results, seed=r.seed, expected_pairs=r.expected_pairs,
+                   seqs_order=r.seqs_order)
+
+Every part must carry bases and walk one alphabet, and every part and absent record must
+be about one oriented seed, base for base. One pair holds one answer: the same retrieval
+given twice is one, and two retrievals of one pair are refused (``compare()`` reads two
+retrievals of one pair). A refusal is a ``CombineRefused`` (a ``ValueError``) with a
+``code``, checked in this order: the arguments (``bad_expected``, ``bad_seqs_order``),
+then ``not_combinable`` (also a ``TypeError``), ``view_unsupported``, ``not_one_seed``,
+``result_has_graphlet``, ``no_graphlet``, ``no_seed``, ``pair_mismatch``, ``no_pair``,
+``ambiguous_pair``, ``no_bases``, ``different_alphabet``, ``different_seed``,
+``duplicate_pair`` and ``not_expected``; two ``seqs_order`` keys that give one pair two
+values are ``bad_seqs_order``, found among the keys first and otherwise right after
+``ambiguous_pair``, once the results name the pairs. A refusal names the first failing
+result in the order given. A part without its envelope raises ``MissingEnvelope``.
+``dump()``, ``to_json()``, ``compare()``, ``save()``, ``support_by_depth()`` and
+``next_request()`` are refused ``not_offered``: a union is not an MGT document, and each
+part keeps them.
+
+Walks, spans and absence
+^^^^^^^^^^^^^^^^^^^^^^^^
+
+``walks(arm, by='pairs')`` lists the union walks: every spelling a part displays as a walk,
+whole, and (with ``stubs=True``) every stub of a merge, counted apart. ``by='pairs'`` puts
+the walks held by the most pairs first; ``pairs=[...]`` keeps the walks every named pair
+holds; ``labels=[...]`` the walks those labels carry whole. Each ``UnionWalk`` has its
+``spans``, one ``PairSpan`` per part, saying how far that pair holds it (``how``):
+
+=============  =================================================================================
+``whole``      the pair displays exactly this walk
+``extends``    a displayed walk of the pair goes on beyond it
+``ends``       the pair's walk ends inside it, at ``to_bp``, with its end reasons
+``merges``     the pair's walk merges into its other walks at ``to_bp``; ``route`` says whether
+               the pair holds the rest through the merge (``held``) or ends or turns off on it
+``diverges``   the pair's spellings turn off at ``to_bp``
+``none``       the pair did not walk this arm
+=============  =================================================================================
+
+``held_in`` names the pairs that hold the whole walk (``whole``, ``extends``, or a route
+held to its end), ``whole_in`` those that display it. Where a pair stops, ``absence`` says
+what decided it: ``graph`` (its graph has no successor: a dead end, or annotate mode under
+the per-path rule inside its certificate), ``walk_rule`` (an event the pair recorded blocked
+this very base: edge reuse, seed re-entry, a skipped hairpin), ``under_strategy`` (its mode,
+labels or caps, or a merge that united histories) or ``uncertified`` (at or beyond the depth
+it certifies). ``carriers(arm, walk)`` gives the spans with their labels and the depth from
+which each label carries the walk (``SpanLabel.from_bp``); ``segments(arm)`` gives the union
+segments with their support per pair, the labels as intervals.
+
+Coverage
+^^^^^^^^
+
+``coverage(arm, at_bp=None)`` puts every pair in one category at a depth (by default the
+largest radius among the parts): ``complete``, ``complete_qualified`` (a seed-label cap,
+or a merge that united histories), ``incomplete`` (with its certified depth and the reason),
+``seed_not_in_graph`` (with its k-mers present), ``labels_not_in_graph``, ``not_walked``
+(the seed is in the graph, but no walk was derived), ``arm_not_walked``, ``failed`` and
+``not_included``. ``every_pair_certified_to_bp`` is set only when every expected pair is
+complete or lacks the seed, and is never above any part's own certificate.
+
+Labels
+^^^^^^
+
+Labels are each pair's own: ``labels()`` lists them as ``PairLabel(pair, ref, name, kind)``,
+``label({'name': n})`` resolves a name held by one pair and refuses ``ambiguous_name`` for a
+name in two (select ``{'pair': p, 'name': n}`` or ``{'pair': p, 'ref': r}``), and
+``shared_names()`` lists the names in more than one pair. A header name (an accession) is
+read through the pair's record mapping; where ``seqs_order`` is not ``verified`` the
+statements, ``carriers()``, the FASTA ``mapping=`` token and the GFA comment say so.
+
+An example: one record split across two graphs
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+The fixture splits a tiny index by record into two graphs: graph A holds ``a1`` and a
+"plasmid" ``pl``, graph B holds ``b1``, ``b2`` and the same ``pl``. One seed, both graphs,
+annotate mode, ``on_reconverge: keep``:
+
+.. graphlet-example: union
+
+.. code-block:: python
+
+   from metagraph.traverse import union_pairs
+
+   a, b = fixture('union/a_annotate_keep'), fixture('union/b_annotate_keep')
+   u = union_pairs([{'pair': 'A', 'graphlet': a}, {'pair': 'B', 'graphlet': b}],
+                   expected_pairs=['A', 'B'])
+   print(u)
+   for w in u.walks('right'):
+       print(w.id, w.length_bp, w.held_in, w.whole_in)
+   print(u.carriers('right', 1))
+
+.. code-block:: text
+
+   union of one seed (30 bp) over 2 expected pairs: 2 parts, 0 absent records
+   left arm, to 200 bp (annotate, kmer, k 15, in every pair): complete in A, B. Pairs stated by the caller: A, B.
+   right arm, to 200 bp (annotate, kmer, k 15, in every pair): complete in A, B. Pairs stated by the caller: A, B.
+   walks: left 1 (1 held by two or more pairs), right 6 (1 held by two or more pairs)
+   labels: each pair's own, shown as <tag>/<name>; equal names in two pairs are not claimed to be one record (1 name occurs in more than one pair); header names of every pair rest on an unchecked record mapping (unknown)
+   A pair that does not follow a walk did not follow it under its own request.
+   A walk that no single graph holds entirely is in no part, so not in this union.
+   0 76 ('A', 'B') ('A',)
+   2 126 ('A',) ('A',)
+   4 126 ('A',) ('A',)
+   1 106 ('B',) ('B',)
+   5 106 ('B',) ('B',)
+   3 76 ('A',) ('A',)
+   A      ends      at 76  dead_end                    labels 1, from 0 bp                absence: graph
+   B      whole     to 106                             labels 1, 0 of them from 0 bp      complete
+   header names of every pair rest on an unchecked record mapping (unknown)
+
+Walk 0, the plasmid's, is held by both pairs: A displays it, and B spells on beyond it
+(``b2`` goes on with a block the plasmid lacks). Walk 1 is B's: A's graph ends where the
+plasmid ends (``absence: graph``, a dead end). Group A's walks are A's alone, and B's graph
+lacks them (``absence: graph`` again: annotate mode under the per-path rule). The unsplit
+index also holds a walk that runs from ``a1`` into ``b1``; neither graph holds it whole, so
+it is in no part and not in this union, as the scope statement says.
+
+RefSeq r237: one 16S seed over 11 graphs
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+The fixture ``union/r237/`` is the staging service's export of one 200 bp 16S seed over
+r237's 11 graphs: two answered with a graphlet (the ``.mgt.gz`` files exactly as the
+service delivered them; ``load()`` reads gzip), nine do not hold the seed (their records,
+``absent.json``):
+
+.. graphlet-example: union-r237
+
+.. code-block:: python
+
+   from metagraph.traverse import load
+
+   parts = [load('union/r237/%s.mgt.gz' % n) for n in ('bact_other', 'bact_pseudomonadota')]
+   with open('union/r237/absent.json') as f:
+       absent = json.load(f)
+   r237 = union_pairs(parts + absent, seed=parts[0].seed.sequence,
+                      expected_pairs=['bact_other', 'bact_pseudomonadota']
+                      + [x['pair']['graph'] for x in absent])
+   c = r237.coverage('right', at_bp=50)
+   for category, pairs in c.by_category.items():
+       print(category, pairs)
+   print(c.per_pair['bact_pseudomonadota']['note'])
+   for w in r237.walks('right', pairs=['bact_other', 'bact_pseudomonadota']):
+       print(w.id, w.length_bp, [(s.pair, s.how, s.to_bp) for s in w.spans])
+
+.. code-block:: text
+
+   complete_qualified ['bact_other', 'bact_pseudomonadota']
+   seed_not_in_graph ['inv_insecta', 'inv_other', 'plant', 'vm_laurasiatheria', 'vm_other', 'vo_actinopterygii', 'vo_amphibia_lobefins', 'vo_other', 'vo_sauropsida']
+   complete for 1000 of 12313 seed labels; a merge united histories: complete for the united-history rule, not per path
+   3 55 [('bact_other', 'extends', 55), ('bact_pseudomonadota', 'whole', 55)]
+   5 55 [('bact_other', 'extends', 55), ('bact_pseudomonadota', 'whole', 55)]
+   9 55 [('bact_other', 'extends', 55), ('bact_pseudomonadota', 'whole', 55)]
+
+Both parts are complete to 50 bp only with qualifications (a seed-label cap and united
+histories); bact_pseudomonadota is certified to 55 bp, and its walks there are spelled on by
+bact_other (``extends``).
+
+FASTA and GFA
+^^^^^^^^^^^^^
+
+``to_fasta()`` writes one record per union walk, its header the walk's provenance as
+``key=value`` tokens (``held=``, ``whole=``, ``extends=``, ``merges=``, ``ends=``,
+``diverges=`` with each span's absence, ``certified=``, ``labels=``, ``modes=``,
+``absent=``, ``not_included=``, ``mapping=``, and always ``scope=within_one_graph``); pair
+names escape the reserved characters as ``%XX``. ``to_gfa()`` writes the statements as
+comment lines, then one tree per arm on the seed strand: union segments linked to their
+children only, the seed once per arm (``seed_l``, ``seed_r``), a stub's merge a tag
+(``mg``, ``mt``) and not a link. Every path the file admits is therefore spelled whole by
+one pair; no path joins one pair's flank to another's.
+
+.. graphlet-example: union-exports
+
+.. code-block:: python
+
+   print(u.to_fasta('right').split('\n')[0])
+   gfa = u.to_gfa().split('\n')
+   for line in gfa:
+       if line.startswith(('# union_pairs', '# scope', 'P\tright')):
+           print(line.replace('\t', '  '))             # tabs shown as two spaces
+
+.. code-block:: text
+
+   >right.u0 kind=walk len=76 held=A,B whole=A extends=B certified=A:76,B:76 labels=A:1/1,B:2/1 mapping=unknown scope=within_one_graph
+   # union_pairs: seed 30 bp; parts A B
+   # scope: A walk that no single graph holds entirely is in no part, so not in this union.
+   P  right.u0  seed_r+,s0+,s1+,s2+  *  pp:Z:A,B  ph:Z:A,B
+   P  right.u1  seed_r+,s0+,s1+,s2+,s3+  *  pp:Z:B  ph:Z:B  pe:Z:A=76:dead_end/graph
+   P  right.u2  seed_r+,s0+,s1+,s4+  *  pp:Z:A  ph:Z:A  pe:Z:B=51/graph
+   P  right.u3  seed_r+,s0+,s5+,s6+  *  pp:Z:A  ph:Z:A  pe:Z:B=25/graph
+   P  right.u4  seed_r+,s0+,s5+,s7+  *  pp:Z:A  ph:Z:A  pe:Z:B=25/graph
+   P  right.u5  seed_r+,s0+,s8+  *  pp:Z:B  ph:Z:B  pe:Z:A=25/graph
+
+
+What is not combined
+--------------------
+
+A combination is a container of unchanged bodies with a stated relation, never a merged
+MGT body: one ``H`` record, one identity and one set of counters cannot describe two
+traversals.
+
+=======================================================  ===========================================
+operation                                                status
+=======================================================  ===========================================
+one seed across pairs (``union_pairs``)                  offered (`Combining one seed across pairs`_)
+a continuation stitched to the walk it continues          designed, built next
+two retrievals of one pair                               designed, built later: until then
+                                                         ``union_pairs()`` refuses them
+                                                         (``duplicate_pair``) and ``compare()``
+                                                         reads them
+the two arms of one seed against a two-sided fetch       not needed: a ``direction: both`` fetch
+                                                         answers it
+different seeds, overlapping or not                      not offered: placing one seed in another's
+                                                         walks is an alignment, a different product
+                                                         (``to_gfa()`` plus a graph tool)
+=======================================================  ===========================================
 
 
 Record coordinates

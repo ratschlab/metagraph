@@ -52,14 +52,19 @@ _NAMES = {
                  'AttemptSent', 'InstanceMismatch', 'ReleaseVerdict', 'ServerInitializing',
                  'Suppression', 'TraverseError', 'TraverseResponse', 'classify_409',
                  'release_verdict'),
-    'client': ('ResolveDeadline', 'TraverseClient', 'UnsupportedFeature'),
+    'client': ('PairResults', 'ResolveDeadline', 'TraverseClient', 'UnsupportedFeature'),
     'store': ('Entry', 'GraphletStore', 'StoreLimitExceeded', 'UnknownHandle'),
+    'composite': ('CombineRefused',),
+    'union': ('union_pairs', 'PairUnion', 'PairPart', 'PairAbsent', 'PairLabel', 'SpanLabel',
+              'LabelInterval', 'SegmentSupport', 'UnionSegment', 'Route', 'PairSpan',
+              'Carriers', 'UnionWalk', 'Coverage', 'Statements'),
 }
 _HOME = {name: mod for mod, names in _NAMES.items() for name in names}
 # the package's modules, also reachable as attributes before anything imported them
 # (metagraph.traverse.ops right after `import metagraph.traverse`)
-_MODULES = frozenset(('_codec', 'attempts', 'budget', 'client', 'coords', 'derive', 'export',
-                      'frames', 'mcp_tools', 'model', 'ops', 'parser', 'store'))
+_MODULES = frozenset(('_codec', 'attempts', 'budget', 'client', 'composite', 'coords', 'derive',
+                      'export', 'frames', 'mcp_tools', 'model', 'ops', 'parser', 'store',
+                      'union'))
 
 __all__ = [
     'FORMAT_VERSION', 'parse', 'dump', 'is_canonical', 'load', 'save', 'from_response',
@@ -79,6 +84,10 @@ __all__ = [
     'StoreLimitExceeded',
     'LocalBudget', 'LocalLimits', 'LocalStop', 'LocalBudgetExceeded', 'Partial',
     'local_budget',
+    'CombineRefused',
+    'union_pairs', 'PairUnion', 'PairPart', 'PairAbsent', 'PairLabel', 'SpanLabel',
+    'LabelInterval', 'SegmentSupport', 'UnionSegment', 'Route', 'PairSpan', 'Carriers',
+    'UnionWalk', 'Coverage', 'Statements', 'PairResults',
 ]
 
 

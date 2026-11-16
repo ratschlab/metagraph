@@ -458,6 +458,8 @@ the subpackage from a non-editable install). `metagraph/__init__.py` does not im
 | `store.py` | `GraphletStore` (handles, LRU, disk spool) for the MCP layer |
 | `mcp_tools.py` | framework-agnostic tool functions returning dicts ≤ `max_bytes` (the MCP server, wherever it lives, registers them; §6) |
 | `frames.py` | `frames(g)` → dict of DataFrames, lazy `import pandas` |
+| `composite.py` | what every combination of graphlets shares (DESIGN-graphlet-merge.md): `CombineRefused(code, message)`, the preconditions (envelope, bases, alphabet, one oriented seed), the index identity rules (`ops.index_rule`, `ops.seed_rule`), retrieval identity, the weakest-of evidence, digests, the budget plumbing, the streaming speller over pieces of parts |
+| `union.py` | `union_pairs(results)` → `PairUnion`, the cross-pair union of one seed (DESIGN-graphlet-merge.md §2): the inputs, pair tags and record-mapping warnings, the trie of every part's spellings per arm, spans and their absence, coverage per pair, the five statements, `PairPart`, `PairAbsent`, `UnionWalk`, `PairSpan`, `Route`, `UnionSegment`, `SegmentSupport`, `LabelInterval`, `PairLabel`, `SpanLabel`, `Carriers`, `Coverage`, `Statements` |
 
 Public API (one line each):
 
@@ -512,11 +514,37 @@ Graphlet.compare(other, *, arm=None, labels=None, mode='claims'|'walks'|'labels'
     # min(complete_to_bp) does not make their termination comparable;
     # Comparison(comparable, reason, depth_used, equal, only_in_a, only_in_b, notes) — notes carry the merge qualification
 Graphlet.memory_bytes() -> int
+load(path) -> Graphlet                        # a .mgt file, or its gzip (the service's .mgt.gz export, first bytes
+                                              # 1f 8b): inflated as a stream; without budget= at most GZIP_TEXT_MAX
+                                              # (512 MiB) and, beyond GZIP_RATIO_FLOOR (16 MiB), at most GZIP_RATIO_MAX (64)
+                                              # times the file's size, peak about twice the text; with budget= charged
+                                              # chunk by chunk; a corrupt gzip -> GraphletFormatError
+union_pairs(results, *, seed=None, expected_pairs=None, seqs_order=None, budget=None) -> PairUnion
+    # one seed's answers on several pairs (DESIGN-graphlet-merge.md §2), any order: Graphlet, one-seed TraverseResponse,
+    # {response, index}, {response, sequence}, {pair, graphlet}, {pair, result[, error][, sequence]}, {pair, error};
+    # refusals CombineRefused(code) in the order of DESIGN-graphlet-merge.md Appendix A.2; the parts stay unchanged
+PairUnion.parts / .absent / .pairs / .expected / .digest / .seed / .arms()
+PairUnion.coverage(arm=None, at_bp=None) -> Coverage(per_pair, by_category, every_pair_certified_to_bp, sentence)
+PairUnion.statements(arm=None, at_bp=None) -> Statements          # the five, never cut
+PairUnion.walks(arm, *, by='pairs'|'length'|'id', top=None, pairs=None, labels=None, min_bp=0, spell=False,
+                stubs=False) -> list[UnionWalk(id, arm, kind, length_bp, sequence, segments, spans, whole_in, held_in)]
+PairUnion.carriers(arm, walk, *, at_bp=None) -> Carriers[PairSpan]  # per pair: how (whole|extends|ends|merges|
+                                              # diverges|none), to_bp, route, absence, span labels with from_bp
+PairUnion.segments(arm) -> list[UnionSegment];  .spell(arm, walk, orientation, with_seed) -> str
+PairUnion.labels(pair=None) / .label(selector) / .shared_names()   # labels each pair's own: PairLabel(pair, ref, name, kind)
+PairUnion.to_fasta(..., at_bp=None) / .to_gfa(...) / .summary(max_bytes=4096) / .provenance() / .memory_bytes()
+PairUnion.evidence(arm=None)                        # each part's evidence block and the five statements, of one
+                                                    # arm or (arm=None) of every arm
 TraverseClient(host, port, api_path=None, *, session=None, timeout=900, release=None)
     .capabilities(graph=None, graph_path=None) -> dict;  .server_capabilities() -> dict
     .resolve(sequence, *, labels=None, discover=None, select=None, **opts) -> dict
     .traverse(seeds, strategy=None, *, detail='graphlet', timing=True, graph=None) -> TraverseResponse(envelope, graphlets, errors)
     .traverse_raw(request) -> dict;  .deepen(graphlet, arm, leaves, bp=None, **overrides) -> TraverseResponse
+    .traverse_pairs(seed, strategy=None, *, pairs=None, detail='graphlet') -> PairResults(results, seed,
+        expected_pairs, seqs_order)           # one request per pair, the input of union_pairs(); a response keeps
+                                              # the seeds it sent (TraverseResponse.seeds_sent); a pair whose
+                                              # request raised TraverseError or OSError is {pair, error}, any
+                                              # other exception propagates
     # requests only; explicit Accept-Encoding: gzip, deflate; non-2xx → TraverseError(status, message); 503 →
     # ServerInitializing; an expired not_after_ms → AttemptExpired
 GraphletStore(spool_dir, max_ram_mb=512, max_handles=64, ttl_ram_s=1800, ttl_disk_s=7*86400)
@@ -649,6 +677,9 @@ A continuation is a new traversal (§14): its result is certified on its own, wi
 - Labels alive at a leaf but not seeded are named (`left_out`, with the reason: unreachable, or alive but not
   seeded).
 - The request carries the record-coordinates setting forward (§18.3).
+
+A continuation stays a graphlet of its own. Combining graphlets (one seed's answers across pairs, which `union.py`
+builds; a continuation stitched to its parent) is designed in `DESIGN-graphlet-merge.md`.
 
 ## 5.4 Local limits
 

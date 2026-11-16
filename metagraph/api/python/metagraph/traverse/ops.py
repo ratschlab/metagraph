@@ -226,8 +226,11 @@ __all__ = [
     'splits', 'continuation', 'next_request', 'next_requests', 'resubmittable_names',
     'subgraph',
     'GraphletView', 'view_from_saved', 'view_from_spec',
-    'compare', 'compare_cost', 'comparability', 'index_identity', 'memory_bytes',
-    'cache_bytes', 'cache_signature', 'segment_support',
+    'compare', 'compare_cost', 'comparability', 'index_identity', 'index_rule',
+    'index_rule_check', 'seed_rule',
+    'memory_bytes',
+    'cache_bytes', 'cache_signature', 'segment_support', 'label_intervals',
+    'label_intervals_cut',
     'summary', 'evidence_block',
     'END_CLASS', 'alive_at', 'limitation_dict', 'resource_stop_dict', 'informational',
 ]
@@ -587,6 +590,104 @@ def _iter_alive_pieces(arm, s):
         nxt = min(max(nxt, pos + 1), s.end_bp)
         yield pos, nxt, frozenset(cur)
         pos = nxt
+
+
+def label_intervals(g, arm, seg, *, budget=None):
+    """Where each label is alive inside segment |seg| of arm |arm|, as (label id, from_bp,
+    to_bp) in outward positions within [from_bp, end_bp), ordered by (from_bp, label id);
+    nothing for a zero-length segment. A label alive, gone and alive again inside the
+    segment has one interval per stretch, in order (the reentry fixture: A, B, A).
+    Constrain: built from the entry set and the segment's label changes in the order of
+    the G.end rule (derive.label_changes(), the order alive_at() applies them): an entry
+    label's interval opens at from_bp, a switch-in opens one at its at_bp, and a run end
+    closes the label's interval at its to_bp. A run end and a switch-in of one label at
+    one position are two intervals that touch: a new run starts there (the label is alive
+    throughout, as alive_at() says). Annotate: consecutive P runs that hold a label
+    extend its interval. Linear: the entry set plus the changes (constrain), the P
+    runs' sizes (annotate), never a copy of the alive set per change. The lists are those
+    the body records: label_intervals_cut() says whether they were cut. budget= (local
+    limits): charged before it is built; a stop raises, with no partial."""
+    a = g.arm(arm)
+    s = a.segments[seg]
+    b = _B.resolve(budget)
+    if b is not None:
+        with b.scope('label_intervals'):
+            pw, pm = _interval_prices(b, g, a)
+            b.charge(pw[s.id], pm[s.id])
+            b.phase = 'label_intervals'
+            return _label_intervals(g, a, s)
+    return _label_intervals(g, a, s)
+
+
+def label_intervals_cut(g, arm, seg):
+    """Whether the label lists label_intervals() reads for segment |seg| were cut
+    (labels.max_labels_per_node): the entry set (constrain) or a P run (annotate) records
+    fewer labels than it held, so the intervals are a lower bound."""
+    s = g.arm(arm).segments[seg]
+    if g.mode == 'constrain':
+        return s.entry_total > len(s.entry)
+    return any(p.truncated for p in s.presence)
+
+
+def _interval_prices(b, g, arm):
+    """(lwu, bytes) per segment of label_intervals(): an element per entry label and per
+    label change (constrain) or per label of a P run (annotate), and per interval its
+    tuple, at most one per entry label and change (cached)."""
+    def prices():
+        w, m = [], []
+        if g.mode == 'constrain':
+            ops_ = derive.segment_ops(arm)
+            for s in arm.segments:
+                n = len(s.entry) + ops_[s.id]
+                w.append(W_ELEM * (1 + n) + sort_work(n))
+                m.append(list_bytes(n) + n * (TUPLE + 3 * INT) + dict_bytes(n))
+        else:
+            for s in arm.segments:
+                n = sum(len(p.labels) for p in s.presence)
+                w.append(W_ELEM * (1 + len(s.presence) + n) + sort_work(n))
+                m.append(list_bytes(n) + n * (TUPLE + 3 * INT) + dict_bytes(n))
+        return w, m
+    if g.mode == 'constrain':
+        derive.uses(b, g, arm, 'segment_ops')
+    return derive.price_list(b, g, arm, 'interval_prices', prices)
+
+
+def _label_intervals(g, arm, s):
+    lo, hi = s.from_bp, s.end_bp
+    if lo >= hi:
+        return []
+    out = []
+    if g.mode == 'constrain':
+        start = dict.fromkeys(s.entry, lo)      # label -> where its open interval began
+        for at, kind, lab in _segment_ops(arm, s):
+            at = min(max(at, lo), hi)
+            if kind == 0:
+                f = start.pop(lab, None)
+                if f is not None and f < at:
+                    out.append((lab, f, at))
+            elif lab not in start:
+                start[lab] = at
+        out.extend((lab, f, hi) for lab, f in start.items() if f < hi)
+    else:
+        start = {}
+        last = None
+        for p in s.presence:
+            here = set(p.labels)
+            if last is not None and p.from_bp != last:
+                out.extend((lab, f, last) for lab, f in start.items())
+                start = {}
+            for lab in [x for x in start if x not in here]:
+                out.append((lab, start.pop(lab), p.from_bp))
+            for lab in p.labels:
+                if lab not in start:
+                    start[lab] = p.from_bp
+            last = p.to_bp
+        if last is not None:
+            out.extend((lab, f, last) for lab, f in start.items())
+        out = [(lab, max(f, lo), min(t, hi)) for lab, f, t in out]
+        out = [x for x in out if x[1] < x[2]]
+    out.sort(key=lambda x: (x[1], x[0], x[2]))
+    return out
 
 
 def _presence_profile(arm, leaf_seg, b=None, g=None):
@@ -3588,28 +3689,79 @@ COMPARE_REASONS = {
 def _identity(a, b):
     """The identity and seed rule of compare() -> (comparable, phrase, statement): the
     verdict, its fixed phrase (COMPARE_REASONS) and the rule's whole statement (the
-    phrase itself where that says everything)."""
-    ia, ib = index_identity(a), index_identity(b)
-    if ia['meta_fp'] and ib['meta_fp'] and ia['meta_fp'] != ib['meta_fp']:
-        return False, COMPARE_REASONS['meta_fp'], COMPARE_REASONS['meta_fp']
-    if ia['fp'] and ib['fp'] and ia['fp'] != ib['fp']:
-        return False, COMPARE_REASONS['fp'], COMPARE_REASONS['fp']
-    for k in ('ns', 'release'):
-        if ia[k] and ib[k] and ia[k] != ib[k]:
-            return _valued(False, k, 'different index %s (%r vs %r)' % (k, ia[k], ib[k]))
+    phrase itself where that says everything). The index rule's proof of two indexes,
+    then the seed rule, then the rest of the index rule: index_rule() is the same checks
+    without the seed rule, which stitching reads (parent and child seeds differ)."""
+    proof = _index_proof(a, b)
+    if proof is not None:
+        return _index_verdict(*proof)
+    return seed_rule(a, b) or _index_verdict(*_index_rest(a, b))
+
+
+def index_rule(a, b):
+    """The index rule of compare() without its seed rule -> (comparable, phrase,
+    statement), as _identity() states them: False when the indexes are proven different
+    (index_meta_fp, index_fp, namespace or release differ) or one label ref names two
+    labels; 'unverifiable' when either side has no index manifest digest (index_fp); else
+    True."""
+    return _index_verdict(*index_rule_check(a, b))
+
+
+def index_rule_check(a, b):
+    """The index rule as (key, values), in the rule's order: 'meta_fp' or 'fp' (),
+    'ns' or 'release' (a's, b's), 'names' (ref, a's name, b's name) -- proven different;
+    then 'unverifiable_both' or 'unverifiable_one' (), else 'same' (). What a caller
+    words its own refusal from (stitching's different_index)."""
+    return _index_proof(a, b) or _index_rest(a, b)
+
+
+def seed_rule(a, b):
+    """The seed rule of compare(): (False, phrase, statement) when |a| and |b| have
+    different oriented seed sequences, else None."""
     if a.seed.sequence != b.seed.sequence:
         return False, COMPARE_REASONS['seed'], COMPARE_REASONS['seed']
-    # names must agree per ref (a cheap guard on top of the digest)
+    return None
+
+
+def _index_proof(a, b):
+    """The index rule's proof of two indexes: index_meta_fp, index_fp, then the namespace
+    and the release where both state one -> (key, values), or None when nothing proves
+    them different."""
+    ia, ib = index_identity(a), index_identity(b)
+    if ia['meta_fp'] and ib['meta_fp'] and ia['meta_fp'] != ib['meta_fp']:
+        return 'meta_fp', ()
+    if ia['fp'] and ib['fp'] and ia['fp'] != ib['fp']:
+        return 'fp', ()
+    for k in ('ns', 'release'):
+        if ia[k] and ib[k] and ia[k] != ib[k]:
+            return k, (ia[k], ib[k])
+    return None
+
+
+def _index_rest(a, b):
+    """The rest of the index rule, after its proof: names must agree per ref (a cheap
+    guard on top of the digest), then whether a manifest digest verifies the identity ->
+    (key, values), always."""
     names_a = {l.ref: l.name for l in a.labels}
     for l in b.labels:
         if l.ref in names_a and names_a[l.ref] != l.name:
-            return _valued(False, 'names', 'label %s is %r in one and %r in the other'
-                           % (l.ref, names_a[l.ref], l.name))
-    if not ia['fp'] or not ib['fp']:
-        why = COMPARE_REASONS['unverifiable_both' if not ia['fp'] and not ib['fp']
-                              else 'unverifiable_one']
+            return 'names', (l.ref, names_a[l.ref], l.name)
+    fa, fb = a.index_fp, b.index_fp
+    if not fa or not fb:
+        return ('unverifiable_both' if not fa and not fb else 'unverifiable_one'), ()
+    return 'same', ()
+
+
+def _index_verdict(key, values):
+    """(comparable, phrase, statement) of an index rule's (key, values)."""
+    if key in ('ns', 'release'):
+        return _valued(False, key, 'different index %s (%r vs %r)' % ((key,) + values))
+    if key == 'names':
+        return _valued(False, 'names', 'label %s is %r in one and %r in the other' % values)
+    why = COMPARE_REASONS[key]
+    if key in ('unverifiable_both', 'unverifiable_one'):
         return 'unverifiable', why, why
-    return True, COMPARE_REASONS['same'], COMPARE_REASONS['same']
+    return key == 'same', why, why            # 'same': True; 'meta_fp', 'fp': False
 
 
 def _valued(comparable, key, statement):

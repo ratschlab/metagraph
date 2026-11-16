@@ -18,6 +18,11 @@ Two kinds of fixture live side by side:
     named cli_*.mgt, pairs of retrievals of one seed whose comparisons (compare(), T39)
     the library tests check: a tuned and an exhaustive trie, and one locus at two radii
     and under a step cap.
+  * CLI union documents (UNION_FIXTURES): responses (detail graphlet) under
+    documents/union/ named <name>.graphlet.json, retrievals of one seed from a tiny index
+    split by record into two graphs and from the unsplit index, which the cross-pair union
+    (DESIGN-graphlet-merge.md §6, P6, P10, P11) combines. Written without the modelled byte
+    counts (ACCOUNTING_FIELDS), so that every platform writes the same bytes.
   * Hand-made fixtures (HAND_MADE): situations the CLI cannot produce -- a Q record and an
     unknown counter (no resource stop exists yet), a resource-stopped delivery, and the
     clipped-merge case of §5.1 with its hand-derived claims. The .mgt body and full.json
@@ -64,6 +69,17 @@ CLI_INDEX_NAME = 'fixtures'
 # index, so a block's bases never depend on another index). A record is a list of parts: a
 # block name, a (block, start, end) slice, or a literal ('=', bases). Files are columns;
 # record headers are the header labels (CoordToHeader).
+
+# the split-graph indexes of the cross-pair union (below): their blocks and records
+_SPLIT_BLOCKS = {'S': 30, 'M1': 25, 'M2': 25, 'U': 25, 'J': 20, 'YA': 30, 'T': 30, 'XB': 30,
+                 'Y2': 25, 'Z': 30}
+_SPLIT_RECORDS = {
+    'pl': ('pl', ['S', 'M1', ('=', 'A'), 'M2', 'Y2']),
+    'a1': ('a1', ['S', 'M1', ('=', 'C'), 'M2', 'U', 'J', 'YA']),
+    'b1': ('b1', ['XB', 'J', 'T']),
+    'b2': ('b2', ['S', 'M1', ('=', 'G'), 'M2', 'Y2', 'Z']),
+}
+_REPEAT_BLOCKS = {'S': 30, 'X1': 20, 'R': 16, 'X2': 20, 'X3': 24}
 
 INDEXES = {
     # the integration fixture's shape at k=15: acc1 = L1 E R1, acc2 = L1 E R2, acc3 = L2 E R1,
@@ -176,6 +192,45 @@ INDEXES = {
         'blocks': {'B': 260},
         'files': {'comb.fa': [('backbone', ['B'])]
                   + [('tip%d' % i, [('B', i - 14, i), ('alt', 'B', i)]) for i in range(15, 245)]},
+    },
+    # the cross-pair union (DESIGN-graphlet-merge.md §6, P6): one tiny index split by record
+    # into two graphs, two "taxonomic groups", with one record in both, a "plasmid" (pl.fa),
+    # and the unsplit index. Every record but b1 starts with the seed S. pl and group A's a1
+    # form a bubble at the base after M1 and part after M2 (pl: Y2, a1: U J YA); group B's
+    # b2 forms a bubble with pl there too (another allele), goes on with pl's Y2 and ends
+    # with Z, where pl ends (a dead end in graph A that graph B goes on from). b1 holds J T
+    # without the seed, so the unsplit index has the walk S M1 C M2 U J T that no single
+    # graph holds entirely (graph A has no J -> T, graph B no U -> J)
+    'split_a': {
+        'k': 15, 'seed': 1212, 'blocks': _SPLIT_BLOCKS,
+        'files': {'a.fa': [_SPLIT_RECORDS['a1']], 'pl.fa': [_SPLIT_RECORDS['pl']]},
+    },
+    'split_b': {
+        'k': 15, 'seed': 1212, 'blocks': _SPLIT_BLOCKS,
+        'files': {'b.fa': [_SPLIT_RECORDS['b1'], _SPLIT_RECORDS['b2']],
+                  'pl.fa': [_SPLIT_RECORDS['pl']]},
+    },
+    'split_all': {
+        'k': 15, 'seed': 1212, 'blocks': _SPLIT_BLOCKS,
+        'files': {'a.fa': [_SPLIT_RECORDS['a1']],
+                  'b.fa': [_SPLIT_RECORDS['b1'], _SPLIT_RECORDS['b2']],
+                  'pl.fa': [_SPLIT_RECORDS['pl']]},
+    },
+    # graph A at a second k (P11: parts at two k)
+    'split_a21': {
+        'k': 21, 'seed': 1212, 'blocks': _SPLIT_BLOCKS,
+        'files': {'a.fa': [_SPLIT_RECORDS['a1']], 'pl.fa': [_SPLIT_RECORDS['pl']]},
+    },
+    # one record that repeats a 16 bp block R: at k 11 the walk meets R's (k+1)-mers again
+    # and stops by edge_reuse (a blocked successor: absence walk_rule), at k 21 R is shorter
+    # than a (k+1)-mer and the walk spells the whole record (P10)
+    'repeat11': {
+        'k': 11, 'seed': 1313, 'blocks': _REPEAT_BLOCKS,
+        'files': {'rep.fa': [('rep', ['S', 'X1', 'R', 'X2', 'R', 'X3'])]},
+    },
+    'repeat21': {
+        'k': 21, 'seed': 1313, 'blocks': _REPEAT_BLOCKS,
+        'files': {'rep.fa': [('rep', ['S', 'X1', 'R', 'X2', 'R', 'X3'])]},
     },
     # a row-diff annotation with coordinates (the budget-aware reads of
     # DESIGN-traverse-graphlet.md §14.1): the path P (acc_path) and a record acc_rep that
@@ -507,6 +562,36 @@ COMPARE_FIXTURES = {
 
 # hand-made: what the CLI cannot produce today
 HAND_MADE = ('clipped_merge', 'limits')
+
+# CLI union documents (DESIGN-graphlet-merge.md §6): name -> (index, request), written to
+# documents/union/<name>.graphlet.json without ACCOUNTING_FIELDS. The split-graph parts
+# (graph A, graph B, the unsplit index) in annotate and constrain mode, each under keep and
+# merge (P6); graph A at k 21 (P11) and at the radius 76 (P10); one right-only part (an arm
+# not walked); the repeat record at k 11 and k 21 (P10, walk_rule)
+UNION_DIR = 'union'
+_UNION_REQUEST = {'seeds': [{'seed_id': 'u', 'sequence': ['S']}],
+                  'strategy': {'direction': 'both',
+                               'labels': {'seed_label_kind': 'header'},
+                               'branching': {'max_label_branches': 'unlimited'},
+                               'bounds': {'max_extension_bp': 200},
+                               'output': {'continuation_bp': 0}}}
+_UNION_ANNOTATE = _variant(_UNION_REQUEST, labels={'mode': 'annotate'})
+UNION_FIXTURES = {}
+for _graph in ('a', 'b', 'all'):
+    for _mode, _base in (('annotate', _UNION_ANNOTATE), ('constrain', _UNION_REQUEST)):
+        for _rec in ('merge', 'keep'):
+            UNION_FIXTURES['%s_%s_%s' % (_graph, _mode, _rec)] = (
+                'split_' + _graph, _variant(_base, branching={'on_reconverge': _rec}))
+UNION_FIXTURES['a21_annotate_merge'] = ('split_a21', _variant(
+    _UNION_ANNOTATE, branching={'on_reconverge': 'merge'}))
+# graph A cut at the radius where pl ends (its dead end at the certificate's edge, P10)
+UNION_FIXTURES['a_annotate_keep_r76'] = ('split_a', _variant(
+    _UNION_ANNOTATE, branching={'on_reconverge': 'keep'}, bounds={'max_extension_bp': 76}))
+UNION_FIXTURES['b_annotate_merge_right'] = ('split_b', _variant(
+    _UNION_ANNOTATE, branching={'on_reconverge': 'merge'}, direction='right'))
+for _k in (11, 21):
+    UNION_FIXTURES['repeat%d' % _k] = ('repeat%d' % _k, _variant(
+        _UNION_ANNOTATE, direction='right', bounds={'max_extension_bp': 200}))
 
 # CLI fixtures of the request budgets (DESIGN-traverse-graphlet.md §14), written to
 # documents/budgets/ (the top-level fixture list stays as it is). A work stop is the same
@@ -913,6 +998,19 @@ def build_compare(metagraph, root, name):
     return run_traverse(metagraph, graph, annotation, r)['results'][0]['graphlet']
 
 
+def build_union(metagraph, root, name):
+    """-> the response text of union document |name| (detail graphlet, timing off, without
+    the modelled byte counts)."""
+    index, request = UNION_FIXTURES[name]
+    graph = os.path.join(root, index, 'graph.dbg')
+    if not os.path.exists(graph):
+        build_index(index, metagraph, root)
+    annotation = annotation_of(index, root)
+    r = materialize(request, blocks_of(INDEXES[index]))
+    r['strategy']['output']['detail'] = 'graphlet'
+    return dumps(without_accounting(run_traverse(metagraph, graph, annotation, r)))
+
+
 # The CLI fixtures are the reference platform's answers: Linux, where the servers run (the
 # CI's Linux build writes and checks them byte for byte). The memory account counts the
 # platform's object sizes (libstdc++ and libc++ lay out std::string and the structs holding
@@ -1136,6 +1234,22 @@ def main(argv=None):
                         with open(path, 'w', encoding='utf-8', newline='') as f:
                             f.write(text)
                         print('wrote', fname)
+            for name in UNION_FIXTURES:
+                if args.only and name not in args.only:
+                    continue
+                fname = os.path.join(UNION_DIR, name + '.graphlet.json')
+                text = build_union(args.from_cli, root, name)
+                path = os.path.join(args.dir, fname)
+                if not differs(path, text):
+                    continue
+                if args.check:
+                    stale.append(fname)
+                    show_diff(path, text)
+                else:
+                    os.makedirs(os.path.join(args.dir, UNION_DIR), exist_ok=True)
+                    with open(path, 'w', encoding='utf-8', newline='') as f:
+                        f.write(text)
+                    print('wrote', fname)
             for name in COMPARE_FIXTURES:
                 if args.only and name not in args.only:
                     continue

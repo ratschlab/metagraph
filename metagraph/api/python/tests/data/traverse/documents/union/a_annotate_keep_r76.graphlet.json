@@ -1,0 +1,220 @@
+{
+ "algorithm_version": "traverse-0.2",
+ "capabilities": {
+  "alphabet": "$ACGT",
+  "cost_models_available": [
+   "forbid",
+   "constant",
+   "table"
+  ],
+  "detail_levels": [
+   "summary",
+   "tree",
+   "full",
+   "graphlet"
+  ],
+  "direct_access": true,
+  "discovery_trace_scale": "traced",
+  "feature_level": 6,
+  "graphlet_format": 1,
+  "has_coord_to_header": true,
+  "has_coordinates": true,
+  "index_fp": null,
+  "index_meta_fp": "799c78b54bde0a6e",
+  "index_ns": "fixtures",
+  "k": 15,
+  "label_modes": [
+   "constrain",
+   "annotate"
+  ],
+  "num_labels": 2,
+  "regime": "basic",
+  "release": "",
+  "schema_version": 1,
+  "supports_trace": true
+ },
+ "release": "",
+ "results": [
+  {
+   "annotation": {
+    "access_path": "tuples",
+    "direct_reads": 0,
+    "keys_mapped": 179,
+    "rows_requested": 179
+   },
+   "arms": {
+    "left": {
+     "branch_events_total": 0,
+     "complete_to_bp": 76,
+     "completeness_scope": "per_path",
+     "counters": {
+      "edge_reuse_probes": 0,
+      "max_reminimisation_rounds": 0,
+      "output_bp": 0,
+      "pair_evaluations": 0,
+      "refusal_scans": 0,
+      "reminimisation_rounds": 0,
+      "steps": 0,
+      "successor_enumerations": 1,
+      "switch_sources_cut": 0
+     },
+     "counts": {
+      "bases": 0,
+      "label_ends": {},
+      "leaves": 1,
+      "leaves_by_reason": {
+       "dead_end": 1
+      },
+      "max_bp": 0,
+      "merges": 0,
+      "runs": 0,
+      "segments": 1,
+      "splits": 0
+     },
+     "evidence": {
+      "complete": true,
+      "complete_to_bp": null
+     },
+     "frontier_remaining": {
+      "exact": true,
+      "live_labels": 0,
+      "live_paths": 0
+     },
+     "labels_per_node": {
+      "cap": 1000,
+      "max_seen": 2,
+      "nodes_truncated": 0
+     },
+     "limitations": [],
+     "status": "complete"
+    },
+    "right": {
+     "branch_events_total": 0,
+     "complete_to_bp": 76,
+     "completeness_scope": "per_path",
+     "counters": {
+      "edge_reuse_probes": 60,
+      "max_reminimisation_rounds": 0,
+      "output_bp": 177,
+      "pair_evaluations": 0,
+      "refusal_scans": 0,
+      "reminimisation_rounds": 0,
+      "steps": 177,
+      "successor_enumerations": 174,
+      "switch_sources_cut": 0
+     },
+     "counts": {
+      "bases": 177,
+      "label_ends": {},
+      "leaves": 4,
+      "leaves_by_reason": {
+       "max_extension_bp": 4
+      },
+      "max_bp": 76,
+      "merges": 0,
+      "runs": 0,
+      "segments": 7,
+      "splits": 3
+     },
+     "evidence": {
+      "complete": true,
+      "complete_to_bp": null
+     },
+     "frontier_remaining": {
+      "exact": true,
+      "live_labels": 0,
+      "live_paths": 0
+     },
+     "labels_per_node": {
+      "cap": 1000,
+      "max_seen": 2,
+      "nodes_truncated": 0
+     },
+     "limitations": [],
+     "status": "complete"
+    }
+   },
+   "graphlet": "H mgt 1 15 basic $ACGT a k k 1000 0 0 walk fixtures * 799c78b54bde0a6e\nS fefcd779fe54fb0e 30 16 0 CATTATACTGAATCCCTCAAGAACGTCAGG\nL h 0 0 0 a1\nL h 1 0 0 pl\nO c c c i\nA l c 76 p 0 0 1 2 0 steps=0,successor_enumerations=1,output_bp=0,pair_evaluations=0,edge_reuse_probes=0,reminimisation_rounds=0,max_reminimisation_rounds=0,refusal_scans=0,switch_sources_cut=0 * 0 * 1 0 1 0 0 0\nB 0 1 2 2 1 0 0 0 0 0 0 0 0 .\nG * 0 0 0-1 * * * * * .\nT D .\nA r c 76 p 0 0 1 2 0 steps=177,successor_enumerations=174,output_bp=177,pair_evaluations=0,edge_reuse_probes=60,reminimisation_rounds=0,max_reminimisation_rounds=0,refusal_scans=0,switch_sources_cut=0 * 0 * 7 0 4 3 0 177\nB 0 4 2 4 1 177 3 0 3 0 0 0 0 .\nG * 0 25 0-1 * * * 0 * CAAATTCTAATTACGATGCGAGTAC\nP 0 25 2 !\nG 0 25 26 1 * * * 0 * ACTGCGAGACGTATACAACGAGTGGT\nP 25 40 1 1\nP 40 51 2 0-1\nG 0 25 26 0 * * * 0 * CCTGCGAGACGTATACAACGAGTGGT\nP 25 40 1 0\nP 40 51 2 0-1\nE 41 v 1 =\nG 1 51 25 1 * * * * * ATCGGCGACATTCCAGTTAATGAGT\nP 51 76 1 1\nT X .\nC 0 0 0 1\nG 1 51 25 0 * * * * * GTCCTGTCCTGCACCTTTATGGTTT\nP 51 76 1 0\nT X .\nC 0 0 0 0\nG 2 51 25 1 * * * * * ATCGGCGACATTCCAGTTAATGAGT\nP 51 76 1 1\nE 52 v 3 =\nT X .\nC 0 0 0 1\nG 2 51 25 0 * * * * * GTCCTGTCCTGCACCTTTATGGTTT\nP 51 76 1 0\nE 52 v 4 =\nT X .\nC 0 0 0 0\nZ 39\n",
+   "graphlet_bytes": 1242,
+   "graphlet_lines": 39,
+   "label_mode": "annotate",
+   "limitations": [],
+   "outcome": {
+    "branch_diagnostics": "complete",
+    "delivery": "inline",
+    "label_evidence": "complete",
+    "walks": "complete"
+   },
+   "seed": {
+    "labels_dropped": 0,
+    "labels_dropped_digest": "",
+    "labels_from_seed": false,
+    "labels_supporting_total": 0,
+    "length_bp": 30,
+    "num_kmers": 16,
+    "num_labels": 2,
+    "num_seed_labels": 0,
+    "seed_id": "u",
+    "seed_id_mismatch": true,
+    "validated_seed_id": "fefcd779fe54fb0e"
+   },
+   "work": {}
+  }
+ ],
+ "strategy": {
+  "annotation": {
+   "batch_kmers": 64
+  },
+  "bounds": {
+   "max_extension_bp": 76,
+   "max_live_paths": 1000,
+   "max_output_bp": 2000000,
+   "max_paths": 10000,
+   "max_steps": 1000000,
+   "min_live_labels": 1,
+   "time_budget_ms": 30000.0
+  },
+  "branching": {
+   "bubble_window_bp": 0,
+   "hairpins": "skip",
+   "max_label_branches": "unlimited",
+   "max_splits_per_path": "unlimited",
+   "min_successor_fraction": 0.0,
+   "min_successor_labels": 1,
+   "on_reconverge": "keep",
+   "tip_window_bp": 0
+  },
+  "clamped": [],
+  "direction": "both",
+  "exhaustive": false,
+  "frontier": {
+   "on_overflow": "stop",
+   "order": "breadth_first"
+  },
+  "labels": {
+   "change_cost": {
+    "model": "forbid"
+   },
+   "extra": [],
+   "loss_budget": 0.0,
+   "max_labels_per_node": 1000,
+   "max_seed_labels": 1000,
+   "max_switch_sources": 64,
+   "mode": "annotate",
+   "seed_label_kind": "header",
+   "switch_on": "loss"
+  },
+  "output": {
+   "continuation_bp": 0,
+   "detail": "graphlet",
+   "max_branch_events": 100,
+   "profile_bin_bp": 100,
+   "sequences": true,
+   "timing": false
+  },
+  "schema_version": 1,
+  "support": "kmer"
+ },
+ "walk_rule": "every walk of at most complete_to_bp bases from the seed boundary is present when it uses no (k+1)-mer edge twice on its own path (edges are compared as (k+1)-mers), enters no seed node, and takes every step regardless of strand (a single-strand graph has no hairpins); every such walk is followed and the labels present at its nodes are recorded",
+ "work": {}
+}
