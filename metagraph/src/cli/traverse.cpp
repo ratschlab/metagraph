@@ -2368,7 +2368,7 @@ static Json::Value interval_json(const KmerInterval &iv) {
 // a block of its own (48 B; libc++ 24 B: 32) and a string in a copy of its bytes with a 4-byte
 // length and a terminator. An interval in a run list: 336 B of heap with libstdc++ (from its
 // sizes; 320 measured with libc++ on macOS) and 12 B of text, priced 336 + 13. A model of the
-// heap, never a measurement; ResolveAnswer.ThePriceCoversTheTree checks it against the allocator
+// heap, never a measurement; ResolveAnswer.ThePriceCoversTheTexts checks it against the allocator
 constexpr uint64_t kJsonValueBytes = 96;
 constexpr uint64_t kJsonContainerBytes = 48;
 // what an answer holds beside its labels, graph runs, candidates, seeds and names (its scalar
@@ -2502,21 +2502,35 @@ static void charge_json(AnswerAccount *answer, const JsonPrice &price) {
         answer->charge_text(price.heap, price.text, "answer");
 }
 
+// An object of the answer written as its text (T7-D3, §4.6): charged |price| (its tree and its
+// text) before it was built, it is held at held_result_bytes, three copies of its |own| text and
+// 128 B (the text held, its copy in the body, the transport's copy of the body; the string, its
+// heap block and its slot in a vector), at most its price
+static void settle_json(AnswerAccount *answer, const JsonPrice &price, uint64_t own) {
+    if (answer) {
+        const uint64_t charged = price.heap + price.text;
+        answer->settle(charged, held_result_bytes(charged, own));
+    }
+}
+
 void charge_answer_text(AnswerAccount *answer) {
     if (!answer)
         return;
-    // the text's buffer, reserved to its exact size, at the allocator's class beyond the bytes
+    // the body's buffer, reserved to its exact size, at the allocator's class beyond the bytes
     // charged (the fixed members' text within their 64 KiB)
     const uint64_t text = answer->text() + kJsonAnswerFixedText;
     answer->charge(annot::matrix::alloc_bytes(text + 1) - text, "answer");
-    // once the text is written the tree is freed (and the profile and the selection before it):
-    // the text then holds beside its copy, the compressed body or the transport's, each at its
-    // last growth up to three times the text, and the compressor's state. More than the tree
-    // held only for an answer that is mostly long strings, which the account then covers
-    const uint64_t after_tree = annot::matrix::alloc_bytes(text + 1) + 3 * text
-                              + kCompressorBytes;
-    if (after_tree > answer->held())
-        answer->charge(after_tree - answer->held(), "answer");
+    // writing the answer holds its objects' texts (each freed once copied, but a freed text
+    // does not give its pages back), the body they are copied into, and one copy of the body
+    // (the transport's, reserved to its size; or the compressed body at its last growth, up to
+    // three times the compressed bytes, at most the text for this JSON), and the compressor's
+    // state: three copies of the text (T7-D3; before, the tree's text beside its copy at its
+    // last growth, four). Each object is held at three copies of its text already
+    // (settle_json), but an object of long strings at its price, about twice its text: such an
+    // answer, and one smaller than the compressor's state, is charged up to this here
+    const uint64_t writing = annot::matrix::alloc_bytes(text + 1) + 2 * text + kCompressorBytes;
+    if (writing > answer->held())
+        answer->charge(writing - answer->held(), "answer");
 }
 
 // The labels_capped member (SPEC-labeled-traversal-core.md §4.6): where a discovery's label cap
@@ -2573,23 +2587,61 @@ static Json::Value labels_capped_json(const SupportProfile &p) {
     return c;
 }
 
-Json::Value profile_to_json(const SupportProfile &p, const SeedSelection *sel, const std::string &run_format,
-                            const std::function<void()> &check, AnswerAccount *answer) {
+/**
+ * The answer of |p| and |sel| with its objects held as text (profile_answer; T7-D3, §4.6): each
+ * object -- graph_runs, a label, a candidate, a frozen seed -- is final when it is built (made
+ * from a finished profile, candidate or seed; nothing is added to it later), so its compact text
+ * is written at once, its tree freed and its charge settled (settle_json). An array's elements
+ * after the first hold their comma, so that an array is held as `[`, its elements' texts and
+ * `]`. With |trees| (the tree API) each held member's tree is kept in *trees (an object of those
+ * members), outside the account.
+ */
+static ResolveAnswer answer_of_profile(const SupportProfile &p, const SeedSelection *sel,
+                                       const std::string &run_format,
+                                       const std::function<void()> &check, AnswerAccount *answer,
+                                       Json::Value *trees) {
     // the answer's deadline, read every kResolveCheckLabels objects (labels, candidates, seeds)
     size_t objects = 0;
     auto built = [&]() {
         if (check && ++objects % kResolveCheckLabels == 0)
             check();
     };
-    // the answer account: each part priced before it is built (§4.6)
+    // the answer account: each object priced before it is built (§4.6)
     auto charge = [&](const JsonPrice &price) { charge_json(answer, price); };
     const bool rle = run_format == "rle";
     const bool trace = p.support == Support::TRACE;
-    if (answer) {
-        charge(JsonPrice { kJsonAnswerFixedBytes, 0 } + member_price("graph_runs", 0)
-               + runs_price(p.graph_runs, p.num_kmers, rle));
-    }
-    Json::Value j;
+    // each object's compact text, written once it is built: one writer for the answer
+    CompactJsonWriter writer;
+    // |tree|'s text, after a comma unless it is |first| in its array, and its charge |price|
+    // settled to it (the tree is the caller's to keep or free)
+    auto text_of = [&](const Json::Value &tree, bool first, const JsonPrice &price) {
+        std::string text = writer.text(tree);
+        if (!first) {
+            std::string element;
+            element.reserve(text.size() + 1);
+            element += ',';
+            element += text;
+            text.swap(element);
+        }
+        settle_json(answer, price, text.size());
+        return text;
+    };
+    // a held array of |n| elements, begun
+    auto array_of = [](size_t n, std::string open) {
+        std::vector<std::string> pieces;
+        // reserved: no growth holds an old and a new vector
+        pieces.reserve(n + 2);
+        pieces.push_back(std::move(open));
+        return pieces;
+    };
+    auto kept = [&](const char *key) -> Json::Value * {
+        return trees ? &((*trees)[key] = Json::Value(Json::arrayValue)) : nullptr;
+    };
+
+    ResolveAnswer out;
+    Json::Value &j = out.head;
+    if (answer)
+        charge(JsonPrice { kJsonAnswerFixedBytes, 0 });
     j["k"] = uint_json(p.k);
     j["regime"] = to_string(p.regime);
     j["num_kmers"] = uint_json(p.num_kmers);
@@ -2601,12 +2653,24 @@ Json::Value profile_to_json(const SupportProfile &p, const SeedSelection *sel, c
         for (const auto &r : runs) arr.append(interval_json(r));
         return arr;
     };
-    j["graph_runs"] = runs_json(p.graph_runs);
-    Json::Value labels(Json::arrayValue);
+    {
+        const JsonPrice price = answer ? member_price("graph_runs", 0)
+                                         + runs_price(p.graph_runs, p.num_kmers, rle)
+                                       : JsonPrice();
+        charge(price);
+        Json::Value runs = runs_json(p.graph_runs);
+        std::vector<std::string> value;
+        value.push_back(text_of(runs, true, price));
+        out.held.members.emplace_back("graph_runs", std::move(value));
+        if (trees)
+            (*trees)["graph_runs"] = std::move(runs);
+    }
+    std::vector<std::string> labels = array_of(p.labels.size(), "[");
+    Json::Value *kept_labels = kept("labels");
     for (const auto &l : p.labels) {
         built();
-        if (answer)
-            charge(label_price(l, p.num_kmers, rle, trace));
+        const JsonPrice price = answer ? label_price(l, p.num_kmers, rle, trace) : JsonPrice();
+        charge(price);
         Json::Value lj;
         lj["label"] = l.label.name;
         lj["kind"] = to_string(l.label.kind);
@@ -2617,9 +2681,12 @@ Json::Value profile_to_json(const SupportProfile &p, const SeedSelection *sel, c
             for (uint64_t x : l.trace_breaks) tb.append(uint_json(x));
             lj["trace_breaks"] = std::move(tb);
         }
-        labels.append(std::move(lj));
+        labels.push_back(text_of(lj, labels.size() == 1, price));
+        if (kept_labels)
+            kept_labels->append(std::move(lj));
     }
-    j["labels"] = std::move(labels);
+    labels.emplace_back("]");
+    out.held.members.emplace_back("labels", std::move(labels));
     if (p.labels_truncated) {
         Json::Value t;
         t["kept"] = uint_json(p.labels_truncated->kept);
@@ -2639,11 +2706,12 @@ Json::Value profile_to_json(const SupportProfile &p, const SeedSelection *sel, c
     // bound, so that every other answer keeps its bytes
     if (p.labels_capped)
         j["labels_capped"] = labels_capped_json(p);
-    Json::Value cands(Json::arrayValue);
+    std::vector<std::string> cands = array_of(p.candidates.size(), "[");
+    Json::Value *kept_cands = kept("candidates");
     for (const auto &c : p.candidates) {
         built();
-        if (answer)
-            charge(candidate_price(p, c));
+        const JsonPrice price = answer ? candidate_price(p, c) : JsonPrice();
+        charge(price);
         Json::Value cj;
         cj["kmer_interval"] = interval_json(c.kmers);
         auto [a, b] = p.bp_interval(c.kmers);
@@ -2651,10 +2719,15 @@ Json::Value profile_to_json(const SupportProfile &p, const SeedSelection *sel, c
         Json::Value ls(Json::arrayValue);
         for (LabelId l : c.labels) ls.append(p.labels[l].label.name);
         cj["labels"] = std::move(ls);
-        cands.append(std::move(cj));
+        cands.push_back(text_of(cj, cands.size() == 1, price));
+        if (kept_cands)
+            kept_cands->append(std::move(cj));
     }
-    j["candidates"] = std::move(cands);
+    cands.emplace_back("]");
+    out.held.members.emplace_back("candidates", std::move(cands));
     if (sel) {
+        // the selection's policy and counts (within the answer's fixed price), its seeds held
+        // as text between them and its end
         Json::Value s;
         Json::Value pol;
         pol["policy"] = sel->policy.policy == SelectionPolicy::LONGEST_FIRST ? "longest_first"
@@ -2672,11 +2745,13 @@ Json::Value profile_to_json(const SupportProfile &p, const SeedSelection *sel, c
         counts["eligible"] = uint_json(sel->num_eligible);
         counts["selected"] = uint_json(sel->seeds.size());
         s["counts"] = std::move(counts);
-        Json::Value seeds(Json::arrayValue);
+        std::vector<std::string> around = json_text_around(s, { "seeds" });
+        std::vector<std::string> seeds = array_of(sel->seeds.size(), around[0] + '[');
+        Json::Value kept_seeds(Json::arrayValue);
         for (const auto &seed : sel->seeds) {
             built();
-            if (answer)
-                charge(seed_price(seed));
+            const JsonPrice price = answer ? seed_price(seed) : JsonPrice();
+            charge(price);
             Json::Value sj;
             sj["seed_id"] = seed.seed_id;
             sj["sequence"] = seed.sequence;
@@ -2703,12 +2778,47 @@ Json::Value profile_to_json(const SupportProfile &p, const SeedSelection *sel, c
                 for (const auto &l : seed.labels_not_covering) nc.append(l);
                 sj["labels_not_covering"] = std::move(nc);
             }
-            seeds.append(std::move(sj));
+            seeds.push_back(text_of(sj, seeds.size() == 1, price));
+            if (trees)
+                kept_seeds.append(std::move(sj));
         }
-        s["seeds"] = std::move(seeds);
-        j["selection"] = std::move(s);
+        seeds.push_back(']' + around[1]);
+        out.held.members.emplace_back("selection", std::move(seeds));
+        if (trees) {
+            s["seeds"] = std::move(kept_seeds);
+            (*trees)["selection"] = std::move(s);
+        }
     }
-    return j;
+    return out;
+}
+
+// The tree of |answer| with its held members' trees |trees| (the tree API), checked against the
+// text the server writes from |answer| (json_text_with_members) in every build type: CI's and the
+// deployed builds are Release, where an assert would never run (T7-D3, as /pattern's, T7-D2)
+static Json::Value tree_of(ResolveAnswer answer, Json::Value trees, const char *what) {
+    const std::string text = json_text_with_members(answer.head, std::move(answer.held));
+    Json::Value out = std::move(answer.head);
+    for (const std::string &name : trees.getMemberNames()) {
+        out[name] = std::move(trees[name]);
+    }
+    if (json_text(out, true) != text) {
+        throw std::logic_error(std::string(what)
+                               + ": the text of the answer differs from its tree's");
+    }
+    return out;
+}
+
+ResolveAnswer profile_answer(const SupportProfile &p, const SeedSelection *sel,
+                             const std::string &run_format, const std::function<void()> &check,
+                             AnswerAccount *answer) {
+    return answer_of_profile(p, sel, run_format, check, answer, nullptr);
+}
+
+Json::Value profile_to_json(const SupportProfile &p, const SeedSelection *sel, const std::string &run_format,
+                            const std::function<void()> &check, AnswerAccount *answer) {
+    Json::Value trees(Json::objectValue);
+    ResolveAnswer out = answer_of_profile(p, sel, run_format, check, answer, &trees);
+    return tree_of(std::move(out), std::move(trees), "resolve");
 }
 
 static IndexIdentity identity_or_default(const IndexIdentity *given, const LabelOracle &oracle);
@@ -6218,7 +6328,12 @@ void check_resolve_fields(const ResolveRequest &req, uint64_t max_query_bp,
     }
 }
 
-Json::Value process_resolve_request(
+/**
+ * One /resolve request answered (process_resolve_answer, process_resolve_request): the answer's
+ * objects held as text (answer_of_profile; T7-D3, §4.6). With |trees| (the tree API) each held
+ * member's tree is kept in *trees, outside the answer account; otherwise |trees| is null.
+ */
+static ResolveAnswer answer_resolve(
         const Json::Value &json,
         const graph::AnnotatedDBG &anno_graph,
         const std::string &release,
@@ -6229,7 +6344,8 @@ Json::Value process_resolve_request(
         ResolveDelivery *delivery,
         const std::function<std::chrono::steady_clock::time_point()> &clock,
         bool labels_not_in_graph_dropped,
-        const std::function<void()> &admit) {
+        const std::function<void()> &admit,
+        Json::Value *trees) {
     // the request's CPU time and page faults (timing.cpu_ms, timing.page_faults): its work runs
     // on this thread from here to its timing block (the answer's text and compression after it)
     const common::ThreadUsageMeter request_usage;
@@ -6458,8 +6574,12 @@ Json::Value process_resolve_request(
     // and once the selection is done (or none was made)
     if (after_work)
         after_work();
-    Json::Value out = profile_to_json(profile, selection ? &*selection : nullptr, req.run_format,
-                                      after_work, req.options.answer);
+    // the answer: its objects held as text, each written once built (§4.6; T7-D3); what follows
+    // adds to its head only
+    ResolveAnswer result = answer_of_profile(profile, selection ? &*selection : nullptr,
+                                             req.run_format, after_work, req.options.answer,
+                                             trees);
+    Json::Value &out = result.head;
     if (!not_made.empty()) {
         out["selection"] = Json::Value();
         // a stop states it in its message (below); a cut by the label cap alone in its own
@@ -6471,11 +6591,19 @@ Json::Value process_resolve_request(
     // the labels this pair does not hold (a multi-graph server's): its answer is that of the
     // others, and none of these is in it
     if (labels_not_in_graph_dropped) {
-        if (answer) {
-            charge_json(&*answer, member_price("unknown_labels", 0)
-                                      + names_price(profile.unknown_labels));
-        }
-        out["unknown_labels"] = names_json(profile.unknown_labels);
+        // held as text as the answer's other objects (§4.6; T7-D3)
+        const JsonPrice price = answer ? member_price("unknown_labels", 0)
+                                         + names_price(profile.unknown_labels)
+                                       : JsonPrice();
+        if (answer)
+            charge_json(&*answer, price);
+        Json::Value names = names_json(profile.unknown_labels);
+        std::vector<std::string> value;
+        value.push_back(json_text(names, true));
+        settle_json(answer ? &*answer : nullptr, price, value.back().size());
+        result.held.members.emplace_back("unknown_labels", std::move(value));
+        if (trees)
+            (*trees)["unknown_labels"] = std::move(names);
     }
     out["release"] = release;
     out["capabilities"] = capabilities_to_json(oracle, release, identity);
@@ -6514,8 +6642,8 @@ Json::Value process_resolve_request(
         out["limits"] = std::move(l);
     }
     // the request's modelled memory at its largest (SPEC §4.4, §7.2.2): the work's peak, or
-    // the profile with the selection made from it, whichever is larger (the answer's tree and
-    // text are not counted); deterministic unless a deadline stopped the work
+    // the profile with the selection made from it, whichever is larger (the answer's objects
+    // and text are not counted); deterministic unless a deadline stopped the work
     out["work"]["memory_bytes"] = uint_json(std::max(
             profile.memory_peak,
             graph::traversal::profile_bytes(profile)
@@ -6524,11 +6652,46 @@ Json::Value process_resolve_request(
     t["elapsed_ms"] = timer.elapsed() * 1000;
     put_thread_usage(&t, request_usage.elapsed());
     out["timing"] = std::move(t);
-    // what the answer's text holds once the tree is complete (§4.6)
+    // what writing the answer's text holds (§4.6)
     charge_answer_text(answer ? &*answer : nullptr);
     if (req.options.finish_check)
         req.options.finish_check();
-    return out;
+    return result;
+}
+
+ResolveAnswer process_resolve_answer(
+        const Json::Value &json,
+        const graph::AnnotatedDBG &anno_graph,
+        const std::string &release,
+        uint64_t max_query_bp,
+        const IndexIdentity *identity,
+        const std::function<bool()> &client_gone,
+        const ResolveTimeLimits &time,
+        ResolveDelivery *delivery,
+        const std::function<std::chrono::steady_clock::time_point()> &clock,
+        bool labels_not_in_graph_dropped,
+        const std::function<void()> &admit) {
+    return answer_resolve(json, anno_graph, release, max_query_bp, identity, client_gone, time,
+                          delivery, clock, labels_not_in_graph_dropped, admit, nullptr);
+}
+
+Json::Value process_resolve_request(
+        const Json::Value &json,
+        const graph::AnnotatedDBG &anno_graph,
+        const std::string &release,
+        uint64_t max_query_bp,
+        const IndexIdentity *identity,
+        const std::function<bool()> &client_gone,
+        const ResolveTimeLimits &time,
+        ResolveDelivery *delivery,
+        const std::function<std::chrono::steady_clock::time_point()> &clock,
+        bool labels_not_in_graph_dropped,
+        const std::function<void()> &admit) {
+    Json::Value trees(Json::objectValue);
+    ResolveAnswer out = answer_resolve(json, anno_graph, release, max_query_bp, identity,
+                                       client_gone, time, delivery, clock,
+                                       labels_not_in_graph_dropped, admit, &trees);
+    return tree_of(std::move(out), std::move(trees), "resolve");
 }
 
 

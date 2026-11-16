@@ -276,21 +276,50 @@ Json::Value strategy_to_json(const graph::traversal::Strategy &strategy, const C
 Json::Value seed_result_to_json(const graph::traversal::SeedResult &result,
                                 const graph::traversal::Strategy &strategy,
                                 const std::string &detail, bool timing);
-// |check|: read every graph::traversal::kResolveCheckLabels objects built (a /resolve's stop
-// and deadline: it throws to abandon the answer). |answer| (null: none): the answer account,
-// charged with the tree and its text before each part is built (the prices in traverse.cpp: its
-// heap and its text's bytes, AnswerAccount::charge_text), throwing
-// graph::traversal::AnswerTooLarge at the part that passes it
+/**
+ * A /resolve answer as the server holds it until it is written (SPEC-labeled-traversal-core.md
+ * §4.6; T7-D3): |head|, the answer without the members held as text, and |held|, those members'
+ * compact texts (graph_runs, labels, candidates, selection, unknown_labels: each object written
+ * once built, its tree freed), which the writing splices in (json_text_with_members,
+ * envelope_text_with_members): byte for byte json_text(answer, true). The server adds members to
+ * |head| (timing.load_ms; a multi-graph entry's tags), never a held one.
+ */
+struct ResolveAnswer {
+    Json::Value head;
+    HeldMembers held;
+};
+
+// The answer's members from |profile| and |selection| (none: no member "selection"), the
+// server's form: each object of graph_runs, labels, candidates and the selection's seeds
+// written as its compact text when it is built (final then: nothing is added to it later) and
+// its tree freed. |check|: read every graph::traversal::kResolveCheckLabels objects built (a
+// /resolve's stop and deadline: it throws to abandon the answer). |answer| (null: none): the
+// answer account, charged with each object's tree and its text before it is built (the prices
+// in traverse.cpp: its heap and its text's bytes, AnswerAccount::charge_text), throwing
+// graph::traversal::AnswerTooLarge at the object that passes it, and once the object is written
+// settled to held_result_bytes(price, its text): three copies of its text and 128 B, at most
+// its price
+ResolveAnswer profile_answer(const graph::traversal::SupportProfile &profile,
+                             const graph::traversal::SeedSelection *selection,
+                             const std::string &run_format,
+                             const std::function<void()> &check = nullptr,
+                             graph::traversal::AnswerAccount *answer = nullptr);
+// The same as one tree (the tree API: the tests, the CLI): each object's tree kept beside its
+// text, outside |answer|, which is charged as by profile_answer; the tree's json_text(tree,
+// true) must equal the text the server writes from profile_answer's form, else std::logic_error
+// (in every build type)
 Json::Value profile_to_json(const graph::traversal::SupportProfile &profile,
                             const graph::traversal::SeedSelection *selection,
                             const std::string &run_format,
                             const std::function<void()> &check = nullptr,
                             graph::traversal::AnswerAccount *answer = nullptr);
-// Once the answer's tree is complete (process_resolve_request, after its last member): charges
-// |answer| (null: nothing) with its text's buffer at the allocator's class beyond the text's
-// bytes charged, and, where it holds less, with what the text holds once the tree is freed: the
-// text, its copy (the compressed body or the transport's, at its last growth up to three times
-// the text) and the compressor's state (SPEC-labeled-traversal-core.md §4.6)
+// Once the answer is complete (process_resolve_request, after its last member): charges
+// |answer| (null: nothing) with the body's buffer at the allocator's class beyond the text's
+// bytes charged, and, where it holds less, with what writing the text holds: the objects'
+// texts (whose pages a freed text does not give back), the body they are copied into and one
+// copy of it (the transport's, or the compressed body at its last growth) beside the
+// compressor's state (SPEC-labeled-traversal-core.md §4.6; T7-D3: three copies of the text,
+// where the tree's text was charged beside its copy at its last growth, four)
 void charge_answer_text(graph::traversal::AnswerAccount *answer);
 // The `coordinates` block of GET /traverse/capabilities (feature level 6; not in the
 // per-request capabilities, which change only in their feature_level): whether this index
@@ -616,9 +645,12 @@ class ResolveDelivery {
 // whatever the client did as long as no registry entry records the request (a request refused
 // before it was admitted, or one without a request_id on a single-graph server); once |tracked|
 // answers true, ResponseControl::gone asks too, so that an entry records client_gone, not an
-// error that nobody received (SPEC-multigraph-envelope.md section 5). The answer's text is
-// written into a buffer reserved to its exact size (compact_json_size), the same bytes as
-// json_text's. The route builds its control only here
+// error that nobody received (SPEC-multigraph-envelope.md section 5). The answer is written
+// from the members it holds as text (T7-D3, §4.6): |single| (a single-graph answer's,
+// json_text_with_members) or |enveloped| (a multi-graph envelope's entries',
+// envelope_text_with_members), into a buffer reserved to its exact size, each text freed once
+// copied; without them (a tree alone) into a buffer reserved to its exact size
+// (compact_json_size): the same bytes as json_text's either way. The route builds its control only here
 // (ServerRequest.TheResolveRouteWritesUnderItsGoneCheck). Not copyable: |control| refers to the
 // members
 struct ResolveWriting {
@@ -637,9 +669,21 @@ struct ResolveWriting {
                 throw HttpError(503, resolve_deadline_body(e));
             }
         };
-        // the answer's text reserved to its exact size, so that writing it holds the tree and
-        // the text once, as the answer account prices it (§4.6; T4 review R1, F3)
-        control.write = [](const Json::Value &result, const std::function<void()> &check) {
+        // the answer's text reserved to its exact size, written from the texts it holds (each
+        // freed once copied), so that writing it holds what the answer account prices: the
+        // texts, the body and its copy (§4.6; T7-D3); a tree alone, the tree and its text once
+        // (T4 review R1, F3)
+        control.write = [this](const Json::Value &result, const std::function<void()> &check) {
+            if (single) {
+                HeldMembers held = std::move(*single);
+                single.reset();
+                return json_text_with_members(result, std::move(held), check);
+            }
+            if (!enveloped.empty()) {
+                std::vector<std::optional<HeldMembers>> answers;
+                answers.swap(enveloped);
+                return envelope_text_with_members(result, std::move(answers), check);
+            }
             return json_text(result, true, check, nullptr, compact_json_size(result));
         };
     }
@@ -649,6 +693,10 @@ struct ResolveWriting {
     ResolveDelivery delivery;
     GoneCheck writing_gone;
     ResponseControl control;
+    // the members the answer holds as text: a single-graph answer's, or each entry's of a
+    // multi-graph envelope (its answered pairs'), set by the handler with the answer it returns
+    std::optional<HeldMembers> single;
+    std::vector<std::optional<HeldMembers>> enveloped;
     // whether a registry entry records this request (unset: never)
     std::function<bool()> tracked;
 };
@@ -685,6 +733,23 @@ Json::Value resolve_discovery_json(const ResolveTimeLimits &limits);
 // can find (a seed not fully in the graph) comes after it: the server frees the request_id when
 // it answers it, so that a 400 never holds one (SPEC-multigraph-envelope.md section 5).
 // Throws ResolveDeadline when the answer could not be built by the deadline.
+// The server's form (T7-D3, §4.6): the answer held as text (ResolveAnswer), no tree of a held
+// object kept beside it
+ResolveAnswer process_resolve_answer(
+        const Json::Value &json,
+        const graph::AnnotatedDBG &anno_graph,
+        const std::string &release,
+        uint64_t max_query_bp = 0,
+        const IndexIdentity *identity = nullptr,
+        const std::function<bool()> &client_gone = nullptr,
+        const ResolveTimeLimits &time = {},
+        ResolveDelivery *delivery = nullptr,
+        const std::function<std::chrono::steady_clock::time_point()> &clock = nullptr,
+        bool labels_not_in_graph_dropped = false,
+        const std::function<void()> &admit = nullptr);
+// The same as one tree (the tree API: the CLI, the tests): each held object's tree kept beside
+// its text, outside the answer account; json_text(answer, true) must equal the text the server
+// writes from process_resolve_answer's form, else std::logic_error (in every build type)
 Json::Value process_resolve_request(
         const Json::Value &json,
         const graph::AnnotatedDBG &anno_graph,

@@ -638,16 +638,28 @@ a piece, released with the round; each pick before it is made, an explicit seed 
 checks (this stays charged: the selection keeps a copy of the explicit seeds until the answer is written), and the
 explicit picks' own lists as the freeze starts; each frozen seed before it is built, its sequence and id, the
 names it keeps (`max_labels_per_seed`) and lists, and while it is built the label order's copy of every covering
-label's name; its overlaps: `selection`); and the answer's JSON tree with its text, part `answer`. The picks are
+label's name; its overlaps: `selection`); and the answer's objects and the writing of its text, part `answer`. The picks are
 released once the seeds are frozen, so that the selection stays charged for what it holds *(train 5b, T5b-Y1; Fable
 review 2026-11-12: before, every covering label's name and every pick stayed charged, and a selection that fit could
 be refused)*. Each label, candidate and seed is priced before it is built at the deployed build's sizes (libstdc++ and
 jemalloc's size classes, so that a price is the same on every platform): a value in an array or an object 96 B, an
 object member's name its bytes and a terminator, a container 48 B, a string its bytes and 5; and its compact text's
-bytes; 64 KiB for the members beside them. Once the tree is complete, the text's buffer at its size class (the route
-writes the text into a buffer reserved to its exact size, so no growth holds an old and a new buffer) and, where the
-account holds less, what the text holds once the tree is freed: the text, its copy (the compressed body or the
-transport's, at its last growth up to three times the text) and the compressor's state, 272 KiB. On jsoncpp 1.9.3
+bytes; 64 KiB for the members beside them. **The answer is held as text** *(T7-D3, 2026-11-16; before, as one JSON
+tree until it was written, then the tree, its text and a copy of the text at once)*: an object of the answer
+(`graph_runs`, a label, a candidate, a frozen seed) is final once it is built, made from a finished profile,
+candidate or seed with nothing added to it later, so its compact text is written at once, its tree freed, and its
+charge settled to three copies of that text and 128 B, never more than its price (the rule of
+SPEC-pattern-search.md §31: the text held, its copy in the body and the transport's copy of the body; an object of
+long strings, priced at about twice its text, stays at its price). The route writes the body from the held texts in
+one buffer, byte for byte the text of the tree; a multi-graph envelope holds every answered pair's texts until it is
+written from them. The CLI and the C++ API keep the tree and check, in every build type, that its text is the one
+the route writes. Once every object is held, the body's buffer at its size class (reserved to its exact size, so no
+growth holds an old and a new buffer) and, where the account holds less, what writing holds: the held texts (each
+freed once copied, but a freed text does not give its pages back), the body, one copy of it (the compressed body,
+at most the text for this JSON, or the transport's) and the compressor's state, 272 KiB: three copies of the text
+where four were charged before. Nothing an answered request returns changes (`work.memory_bytes` is the pass's, not
+the answer account's): the account holds at most what it held before at every charge, so a request refused before
+at part `answer` may now be answered, and no request answered before is refused. On jsoncpp 1.9.3
 an element holds 96 B, and an interval in a run list 336 B with libstdc++ (from its sizes) or 320 B with libc++
 (measured on macOS), beside 12 B of text. A charge that would pass M ends the request with **400**, nothing partial
 sent:
@@ -668,10 +680,12 @@ refused entry of a 200 envelope (SPEC-multigraph-envelope.md §1): its `refusal`
 `http_status` 400, in byte order as every entry's refusal (`code`, `error`, `http_status`, `max_memory_mb`), and the
 other pairs are answered. As for every 400 that only the work finds (SPEC-multigraph-envelope.md §5), the
 single-graph refusal frees the `request_id`, and the multi-graph envelope retains it. Contract sample 39 is such an
-envelope and states the single-graph text. The run format
-`rle` writes a label's runs as one string (a few bytes a run against about 1 KB a run as intervals, tree and text),
-so the same request is often answered with it. A model of the heap, never a measurement:
-`ResolveAnswer.ThePriceCoversTheTree` checks it against the allocator's live bytes. **So per pair at the default
+envelope and states the single-graph text (re-recorded by T7-D3 with record names of 1,000 bytes: with T4's short
+names the same request is now answered under 1 MiB). The run format
+`rle` writes a label's runs as one string (a few bytes a run against about 350 B a run as intervals while a label is
+built, and about 40 B, three copies of its text, once it is held), so the same request is often answered with it,
+and a larger `min_block_kmers` leaves out the short candidates, each of which lists its labels' names. A model of the
+heap, never a measurement: `ResolveAnswer.ThePriceCoversTheTexts` checks it against the allocator's live bytes. **So per pair at the default
 flags a `/resolve` holds at most M charged during its pass and M charged for its answer after it** (the
 accumulators that become the profile counted in both), beside what is bounded otherwise (below); a multi-graph
 envelope holds every pair's answer, each within its M, until it is written.
@@ -688,6 +702,18 @@ MiB and refused at the default. On the deployed build the model is the tree's ow
 maps are smaller, the unit test finds the price 1.04-1.09x jemalloc's peak of the tree, the text and its copies. An
 answer of long strings is priced for its text and a copy at its last growth beside it: about 2x what a plain copy
 holds. The refusal stays: the answer is priced after the work, as above.
+
+*Since the answer is held as text (T7-D3, `e23/T7/D3/rss/`: the same fixture and servers, the peak RSS sampled every
+10 ms, and the process's maximum).* The 6,500 explicit labels grow the server to 222 MB where it grew to 1,022 MB (the
+discovery that keeps them 213 against 1,017 MB, with `rle` 198 against 420 MB; gzip alike). With `min_block_kmers` 2
+(no candidates, an answer of 24.3 MB) the server grows to 177 MB against 770 MB; that answer is now refused at 120 MiB
+and answered from 130 MiB (it was refused at 600 and answered at 800), and its request then grows the process by
+106-113 MB. At the default 1024 MiB the largest answer of that shape measured is 194.7 MB (the query seven times,
+14,196,000 runs; the server's peak 961-1,007 MB, its maximum 1,037-1,043 MB), the query eight times (about 223 MB) refused
+at part `answer`; before, the query twice (about 53 MB) was refused (the server's peak then 1,025 MB, and 1,146 MB for the
+query seven times). A refusal at `candidates` is unchanged: the 312 candidates of 2,028,000 runs (168 B a run
+grouped) are refused at 256 MiB as before. On macOS the unit test finds the price 1.46-1.85x jemalloc's peak of the
+objects, their texts, the body and its copy.
 
 **What this bounds.** Per discovery and pair: M (1 GiB by default) charged; at the default N, 1,000,000 records hold
 about 272 MB of it (column labels 152 MB). The memory bound binds on a k-mer whose row, read alone (on the
@@ -4751,12 +4777,24 @@ ExplicitLabelsStopAtAPrefix` (explicit labels on every annotation form and path 
 stop by reason `memory` in phase `rows` exactly the resolve of the prefix with every label, never moving back; past
 the last stop the unbounded profile), `.ExplicitLabelsHoldOneKmersHits` (the pass holds one k-mer's hits: the same
 profile under every batch, kept-rows bound and deadline that does not pass, and the smallest bound that answers the
-query answers it as without one), `ResolveAnswer.ThePriceCoversTheTree` (the answer's priced bytes at least the
-allocator's live bytes of the tree and text it builds — profiles of many labels, of many runs, with long names,
-candidates and overlapping seeds, `intervals` and `rle`, presence and trace —, and, T4 review R1, F3, jemalloc's
-peak over the tree, its text written into a buffer reserved as the route reserves it, then the gzip body or a copy
-for the transport; the price within 1.15x of that peak on shapes of many small elements; the answer the same as
-without an account, an account a byte short refused at part `answer`; `ServerRequest.
+query answers it as without one), `ResolveAnswer.ThePriceCoversTheTexts` (T7-D3; before, `.ThePriceCoversTheTree`,
+T4 review R1, F3: the answer's priced bytes at least the allocator's live bytes of the texts it holds — profiles of
+many labels, of many runs, with long names, candidates and overlapping seeds, `intervals` and `rle`, presence and
+trace —, at least three copies of its text, and jemalloc's peak over the objects built and written one by one, the
+body written from their texts into a buffer reserved to its size, then the gzip body or a copy for the transport;
+the body the tree's text), `.HeldTextsAreTheTreesTexts` (T7-D3: the server's form holds `graph_runs`, `labels`,
+`candidates` and the selection as text and none of them in its head, an array as `[`, its elements, each after the
+first with its comma, and `]`; written, byte for byte the tree's text, names a writer escapes included),
+`.AnObjectIsHeldAtItsText` (T7-D3: on shapes of many small elements the account holds exactly 64 KiB and three
+copies of each object's text and 128 B; an object of long names at its price; the peak above what is held; the
+answer made under its peak and refused a byte below it at part `answer`), `ResolveText.TheTextAroundKeysIsTheObjectsText`
+and `.HeldMembersAreWrittenByteForByte` (T7-D3: the pieces around held members, a single answer and a multi-graph
+envelope of answered, refused and not reached pairs written from held texts byte for byte as their trees, the
+gone check read at least once every 64 KiB, a mismatched count of held answers a logic error),
+`ResolveBoundsRoute.AnAnswerThatFitsAsTextIsAnswered` (T7-D3: sample 39's former shape, 40 records with a SNP every
+32 bp and their 40 labels named, which the base refused at part `answer` under a 1 MiB bound, answered as without the
+bound, the server's form written to the same bytes) and `.TheServersAnswerHoldsTextsOnly` (the route's answer holds
+no member it holds as text in its tree, a pair's `unknown_labels` included; `ServerRequest.
 TheResolveRouteWritesUnderItsGoneCheck`: the route's text `json_text`'s bytes at a capacity of its exact size), `ResolveAnswer.TheSelectionChargesTheClippedPieces` (T4
 review R1, F1: long runs split by 250 `max_support` picks; at every reading of the selection's check the heap it added
 within what its account holds then, 64 KiB aside; the seeds those made without an account),

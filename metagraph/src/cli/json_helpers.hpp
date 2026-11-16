@@ -8,6 +8,7 @@
  * Header-only.
  */
 
+#include <algorithm>
 #include <cmath>
 #include <cstdint>
 #include <initializer_list>
@@ -764,6 +765,32 @@ inline Json::StreamWriterBuilder json_writer_builder(bool compact) {
     if (compact)
         builder["indentation"] = "";
     return builder;
+}
+
+/**
+ * The fixed overhead of a result object held as its text (SPEC-pattern-search.md §12.1, §31;
+ * SPEC-labeled-traversal-core.md §4.6): the std::string (24 to 32 bytes), its heap block's
+ * header and rounding (up to 32), and its slot in its vector of texts at up to twice its 32
+ * bytes while the vector doubles
+ */
+constexpr uint64_t kHeldResultBytes = 128;
+
+/**
+ * The copies of a result object's text a request holds at its peak (SPEC-pattern-search.md
+ * §12.1, §31): the text held, its copy in the response body (written in one piece while every
+ * text is held), and the transport's copy of the body (made before the body is freed). Freed
+ * texts do not give their pages back, so the three are counted at once
+ */
+constexpr uint64_t kWrittenTextCopies = 3;
+
+// The charge of a result object held as its text (SPEC-pattern-search.md §12.1, §31; a
+// /resolve answer's objects, SPEC-labeled-traversal-core.md §4.6): its own text (|own|: the
+// compact length of the fields the route built for it, without those merged into it later; a
+// /pattern object's labels and selection fields keep their own charges) kWrittenTextCopies
+// times and kHeldResultBytes, never more than |price|, what it was charged while it was a tree
+// (so that settling only releases)
+inline uint64_t held_result_bytes(uint64_t price, uint64_t own) {
+    return std::min(price, kWrittenTextCopies * own + kHeldResultBytes);
 }
 
 /**

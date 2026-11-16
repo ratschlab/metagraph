@@ -397,6 +397,9 @@ struct PairResult {
     // /pattern: an answered pair's entries with their results' texts (|entry| then holds no
     // "patterns": the envelope's writing splices them in, pattern_envelope_text)
     std::optional<PatternEntries> patterns;
+    // /resolve: an answered pair's members held as text (|entry| then holds none of them: the
+    // envelope's writing splices them in, envelope_text_with_members)
+    std::optional<HeldMembers> held;
     // the job's CPU time and page faults on its thread (from the job's start)
     common::ThreadUsage usage = common::ThreadUsage::zero();
 };
@@ -497,6 +500,8 @@ struct FanoutOutcome {
     std::vector<Json::Value> entries;
     // beside each entry: its PairResult::patterns (/pattern's answered pairs), else nullopt
     std::vector<std::optional<PatternEntries>> patterns;
+    // beside each entry: its PairResult::held (/resolve's answered pairs), else nullopt
+    std::vector<std::optional<HeldMembers>> held;
     // the client left (or the server stops) before the answer: nothing is written
     bool client_gone = false;
     // the completed pairs' CPU time and page faults

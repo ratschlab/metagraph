@@ -313,29 +313,9 @@ Json::Value parse_pattern_body(const std::string &content, uint64_t max_values =
  */
 double validate_pattern_request(const Json::Value &json, const PatternLimits &limits);
 
-/**
- * The fixed overhead of a result object held as its text (SPEC §12.1): the std::string (24 to 32
- * bytes), its heap block's header and rounding (up to 32), and its slot in its pattern's vector
- * of texts at up to twice its 32 bytes while the vector doubles
- */
-constexpr uint64_t kHeldResultBytes = 128;
-
-/**
- * The copies of a result object's text the request holds at its peak (SPEC §12.1): the text
- * held, its copy in the response body (written in one piece while every text is held), and the
- * transport's copy of the body (made before the body is freed). Freed texts do not give their
- * pages back, so the three are counted at once
- */
-constexpr uint64_t kWrittenTextCopies = 3;
-
-// The charge of a result object held as its text (SPEC §12.1): its own text (|own|: the compact
-// length of the fields the route built for it, without those merged into it later, its labels
-// and selection fields, which keep their own charges) kWrittenTextCopies times and
-// kHeldResultBytes, never more than |price|, what it was charged while it was a tree (so that
-// settling only releases)
-inline uint64_t held_result_bytes(uint64_t price, uint64_t own) {
-    return std::min(price, kWrittenTextCopies * own + kHeldResultBytes);
-}
+// kHeldResultBytes, kWrittenTextCopies and held_result_bytes, the charge of a result object
+// held as its text (SPEC §12.1), are in json_helpers.hpp: /resolve holds its answer's objects
+// the same way (SPEC-labeled-traversal-core.md §4.6)
 
 /**
  * One pattern's result objects as its answer holds them (SPEC §12.1): each the compact JSON text

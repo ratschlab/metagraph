@@ -368,6 +368,50 @@ std::string assemble_traverse_envelope(const Json::Value &envelope,
                                        const std::function<void()> &check = nullptr,
                                        double *max_gap_ms = nullptr);
 
+// |object|'s compact text cut at the members |keys| (ascending byte order, none of them a
+// member of |object|): the keys.size() + 1 texts around their values -- the first `{`, the
+// members before keys[0] with their comma and `"keys[0]":`, each next the members between
+// two keys (after a comma) and `,"key":`, the last the members after the last key (after a
+// comma) and `}` -- so that t0 v0 t1 v1 ... tn is byte for byte json_text(object with each
+// keys[i] holding a value of the compact text vi, true) (jsoncpp writes an object's members
+// in byte order of their names). Without keys, json_text(object, true). |check| and
+// |max_gap_ms| as json_text's. Throws std::logic_error when |keys| are not ascending and
+// distinct or |object| holds one of them
+std::vector<std::string> json_text_around(const Json::Value &object,
+                                          const std::vector<std::string> &keys,
+                                          const std::function<void()> &check = nullptr,
+                                          double *max_gap_ms = nullptr);
+
+/**
+ * Members of an object held as text instead of as trees (a /resolve answer,
+ * SPEC-labeled-traversal-core.md §4.6): each member's key and its value's compact text in
+ * pieces, which written one after the other are byte for byte json_text(value, true) (an
+ * array as `[`, its elements' texts each after the first with its comma, `]`). The object
+ * they belong to holds none of these keys.
+ */
+struct HeldMembers {
+    std::vector<std::pair<std::string, std::vector<std::string>>> members;
+};
+
+// The compact text of |object| with the members |held| (byte for byte json_text of the object
+// holding them, true), written in one copy: the exact size reserved once, each piece moved in
+// and freed once copied, |check| and |max_gap_ms| as json_text's (the pieces copied in pieces
+// of at most 64 KiB with a check between them). Throws std::logic_error when |object| holds a
+// held key or a key is held twice
+std::string json_text_with_members(const Json::Value &object, HeldMembers held,
+                                   const std::function<void()> &check = nullptr,
+                                   double *max_gap_ms = nullptr);
+
+// The same for a multi-graph server's envelope (SPEC-multigraph-envelope.md section 1): each
+// entry of |envelope|'s "answers" written with the members |answers|[i] when set (an answered
+// /resolve pair, whose entry then holds none of them), else as it is (a refused, not reached
+// or unfinished pair). Throws std::logic_error when |answers| does not have one element per
+// entry
+std::string envelope_text_with_members(const Json::Value &envelope,
+                                       std::vector<std::optional<HeldMembers>> answers,
+                                       const std::function<void()> &check = nullptr,
+                                       double *max_gap_ms = nullptr);
+
 // |text| compressed by zlib at |level| (1-9), in a gzip container when |gzip|, else a zlib
 // stream; |check| called before each 32 KiB block of output and before each piece of input,
 // its exception (after the stream is released) reaching the caller. zlib counts its input in

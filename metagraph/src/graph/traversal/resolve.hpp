@@ -44,7 +44,8 @@ constexpr uint64_t kResolveKeptBytes = uint64_t(256) << 20;
 
 // A /resolve answer priced past its account (AnswerAccount): nothing partial is sent (the
 // server: 400 resolve_answer_too_large). |part| is what passed it: "profile", "candidates",
-// "selection" or "answer" (the JSON tree and its text)
+// "selection" or "answer" (its objects, as trees while built and as text after, and the text's
+// writing)
 class AnswerTooLarge : public std::runtime_error {
   public:
     AnswerTooLarge(const std::string &part, uint64_t max_bytes)
@@ -68,11 +69,13 @@ class AnswerTooLarge : public std::runtime_error {
  * GPT review 7, finding 2), each part priced BEFORE it is built: the profile (its labels with
  * their names, runs and trace breaks, at their vectors' capacities), the candidates' grouping
  * (kCandidateRunBytes a run grouped, then what the candidates hold), the selection (its scratch,
- * each pick and each frozen seed as it is made) and the answer's JSON tree with its text (each
- * label, candidate and seed before it is built: traverse.cpp, profile_to_json). A charge that
- * would pass |max_bytes| throws AnswerTooLarge, so what the answer holds stays within it
- * (the server: --resolve-max-discover-memory-mb, the bound of the pass before it). A model of the
- * heap from sizes and element sizes, never a measurement
+ * each pick and each frozen seed as it is made) and the answer's objects (graph_runs, each
+ * label, candidate and seed, unknown_labels: traverse.cpp, profile_to_json), each at its JSON
+ * tree's price with its text before it is built, then, written as its text, at what its text
+ * holds (settle; T7-D3), and the writing of the text. A charge that would pass |max_bytes|
+ * throws AnswerTooLarge, so what the answer holds stays within it (the server:
+ * --resolve-max-discover-memory-mb, the bound of the pass before it). A model of the heap from
+ * sizes and element sizes, never a measurement
  */
 class AnswerAccount {
   public:
@@ -91,6 +94,9 @@ class AnswerAccount {
         text_ += text;
     }
     void release(uint64_t bytes) { held_ -= std::min(bytes, held_); }
+    // an object charged |price| before it was built, now held at |held| (its text: at most
+    // its price, so that settling only releases; T7-D3, §4.6)
+    void settle(uint64_t price, uint64_t held) { release(price - std::min(held, price)); }
 
     uint64_t max_bytes() const { return max_; }
     uint64_t held() const { return held_; }
