@@ -1853,9 +1853,11 @@ is ``not_included``, and without it every statement says that it covers only the
 given. ``seqs_order=`` maps each pair to its record-mapping certificate as ``GET
 /capabilities`` states it (``'verified'``, ``'count_only'`` or ``None``); a pair not in it
 reads ``unknown``. ``TraverseClient.traverse_pairs(seed, strategy, pairs=...)`` sends one
-request per pair and returns all four (``PairResults``); a pair whose request failed
-(``TraverseError`` or ``OSError``) is ``{'pair': ..., 'error': e}``, and any other
-exception propagates:
+request per pair (``pairs=None``: every pair ``GET /capabilities`` lists; ``pairs=[]``: none,
+and nothing is sent) and returns all four (``PairResults``); a pair whose request failed
+(``TraverseError``; ``ResponseFormatError``, a ``TraverseError``, for an answer not shaped
+as a response; ``OSError``; ``GraphletFormatError``) is ``{'pair': ..., 'error': e}``, and
+any other exception propagates:
 
 .. code-block:: python
 

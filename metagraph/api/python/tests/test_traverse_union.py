@@ -1742,6 +1742,56 @@ class TestTraversePairs(unittest.TestCase):
         r = c.traverse_pairs('ACGT')
         self.assertEqual(r.results[0]['pair'], {'index_ns': 'refseq_ns'})
 
+    def test_an_empty_selection_sends_nothing(self):
+        # GPT review m3: pairs=[] selects no pair; only pairs=None discovers them
+        for caps in (self.CAPS, {'graph_summary': {}}):
+            c = _FanOutClient.make(caps, {None: 'unexpected request'}, ns='index')
+            asked = []
+            c.server_capabilities = lambda: asked.append(1) or caps
+            r = c.traverse_pairs('ACGT', pairs=[])
+            self.assertEqual((c.sent, asked), ([], []))
+            self.assertEqual((r.results, r.seed, r.expected_pairs, r.seqs_order),
+                             ([], 'ACGT', (), {}))
+        with self.assertRaises(ValueError):
+            _FanOutClient.make(self.CAPS, {}).traverse_pairs('ACGT', pairs='g1')
+
+    def test_a_malformed_answer_is_that_pairs_error(self):
+        # GPT review m4: an answer that is not a response object (a JSON array, results
+        # that are not objects) is that pair's ResponseFormatError; the other pairs are
+        # still requested, and a programming error is still raised
+        from metagraph.traverse import ResponseFormatError, TraverseClient, TraverseResponse
+        caps = self.CAPS
+
+        class Client(TraverseClient):
+            def __init__(self, answers):
+                super().__init__('localhost', 1)
+                self.answers, self.sent = answers, []
+
+            def server_capabilities(self):
+                return caps
+
+            def traverse_raw(self, request):
+                self.sent.append(request['graph'])
+                got = self.answers[request['graph']]
+                if isinstance(got, BaseException):
+                    raise got
+                return got
+
+        c = Client({'g1': [], 'g2': {'results': ['not a result']}, 'g3': {'results': []}})
+        r = c.traverse_pairs('ACGT', coordinates=None)
+        self.assertEqual(c.sent, ['g1', 'g2', 'g3'])
+        (e1, e2), ok = [x['error'] for x in r.results[:2]], r.results[2]
+        self.assertEqual([x['pair'] for x in r.results[:2]], [{'graph': 'g1'}, {'graph': 'g2'}])
+        self.assertIsInstance(e1, ResponseFormatError)
+        self.assertIsInstance(e2, ResponseFormatError)
+        self.assertEqual(str(e1), 'not a /traverse response: the answer is a JSON array, not '
+                         'an object')
+        self.assertEqual(e1.body, [])
+        self.assertIsInstance(ok, TraverseResponse)
+        c = Client({'g1': {'results': []}, 'g2': KeyError('a library bug'), 'g3': []})
+        with self.assertRaises(KeyError):
+            c.traverse_pairs('ACGT', coordinates=None)
+
 
 class TestLoadGzip(unittest.TestCase):
     """load() reads a gzip file (the service's .mgt.gz export) as the text it holds,

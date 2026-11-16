@@ -557,8 +557,10 @@ TraverseClient(host, port, api_path=None, *, session=None, timeout=900, release=
     .traverse_pairs(seed, strategy=None, *, pairs=None, detail='graphlet') -> PairResults(results, seed,
         expected_pairs, seqs_order)           # one request per pair, the input of union_pairs(); a response keeps
                                               # the seeds it sent (TraverseResponse.seeds_sent); a pair whose
-                                              # request raised TraverseError or OSError is {pair, error}, any
-                                              # other exception propagates
+                                              # request raised TraverseError (ResponseFormatError: an answer
+                                              # not shaped as a response), OSError or GraphletFormatError is
+                                              # {pair, error}, any other exception propagates; pairs=[] sends
+                                              # nothing
     # requests only; explicit Accept-Encoding: gzip, deflate; non-2xx → TraverseError(status, message); 503 →
     # ServerInitializing; an expired not_after_ms → AttemptExpired
 GraphletStore(spool_dir, max_ram_mb=512, max_handles=64, ttl_ram_s=1800, ttl_disk_s=7*86400)

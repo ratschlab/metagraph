@@ -79,7 +79,8 @@ from .attempts import (AttemptAnswer, AttemptAtBound, AttemptConflict, AttemptEx
 
 __all__ = ['TraverseClient', 'TraverseResponse', 'TraverseError', 'ServerInitializing',
            'AttemptAtBound', 'AttemptExpired', 'AttemptConflict', 'InstanceMismatch',
-           'UnsupportedFeature', 'ResolveDeadline', 'AttemptAnswer', 'AttemptSent',
+           'UnsupportedFeature', 'ResolveDeadline', 'ResponseFormatError', 'AttemptAnswer',
+           'AttemptSent',
            'Suppression', 'ReleaseVerdict', 'release_verdict', 'classify_409', 'ACCEPT_ENCODING',
            'SUPPRESSION_LEVEL', 'COORDINATES_LEVEL', 'AUTO_COORDINATES_UNDER_MEMORY_BUDGET',
            'auto_coordinates', 'drop_coordinates_note', 'strip_coordinate_cap',
@@ -281,6 +282,11 @@ def single_answer(out):
     return answer
 
 
+def _json_kind(v):
+    return {list: 'array', str: 'string', bool: 'boolean', type(None): 'null'}.get(
+        type(v), 'number' if isinstance(v, (int, float)) else type(v).__name__)
+
+
 def _unknown_field(status, message):
     """The field a 400's |message| refuses as unknown, else None."""
     if status != 400 or not isinstance(message, str):
@@ -295,6 +301,16 @@ class ResolveDeadline(TraverseError):
     -- its finalisation overran the reserve (SPEC §4.5). Nothing partial was sent and nothing
     was registered; send it again with a larger budget or a shorter sequence. Not a loading
     server (whose 503 has Retry-After and no code): never retry it as one."""
+
+
+class ResponseFormatError(TraverseError):
+    """A 2xx answer whose JSON is not shaped as a /traverse response (not an object, its
+    `results` not a list of objects): |status| None, |message| what is wrong, |body| the
+    answer. A TraverseError, so traverse_pairs() reports it as that pair's {pair, error}."""
+
+    def __init__(self, message, body=None):
+        super().__init__(None, message, body)
+        self.args = ('not a /traverse response: %s' % message,)
 
 
 class UnsupportedFeature(ValueError):
@@ -901,6 +917,14 @@ class TraverseClient:
         from .parser import from_response
         # a multi-graph server's answer: its one entry, the attempt's usage beside it
         out = single_answer(out)
+        # the answer's shape, checked before it is read (review m4): an object whose results
+        # are objects; anything else is this answer's ResponseFormatError
+        if not isinstance(out, dict):
+            raise ResponseFormatError('the answer is a JSON %s, not an object'
+                                      % _json_kind(out), out)
+        if not isinstance(out.get('results', []), list) or not all(
+                isinstance(r, dict) for r in out.get('results', [])):
+            raise ResponseFormatError('the answer\'s results are not a list of objects', out)
         envelope = {k: v for k, v in out.items() if k != 'results'}
         graphlets, errors = [], []
         for i, r in enumerate(out.get('results', [])):
@@ -937,10 +961,12 @@ class TraverseClient:
                        timing=True, coordinates='auto', not_after_ms=None):
         """One /traverse request per pair for one seed (docs/DESIGN-graphlet-merge.md §5.2):
         the fan-out whose results union_pairs() combines. |pairs|: graph names or {graph,
-        graph_path, annotation_path} objects; by default every pair GET /capabilities
-        lists (graph_summary.pairs), or the client's own pair on a single-graph server.
-        Every answer is kept as returned (a TraverseResponse of one seed, which keeps the
-        seed it sent); a refused request (TraverseError) or a transport failure (OSError)
+        graph_path, annotation_path} objects; by default (None) every pair GET /capabilities
+        lists (graph_summary.pairs), or the client's own pair on a single-graph server; an
+        empty list selects no pair and sends nothing. Every answer is kept as returned (a
+        TraverseResponse of one seed, which keeps the seed it sent); a refused request
+        (TraverseError, ResponseFormatError for an answer not shaped as a response), a
+        transport failure (OSError) or a body that does not parse (GraphletFormatError)
         becomes {pair, error}, and any other exception is raised. attempt_id and
         expect_server_instance are not accepted: attempt ids share one server-wide namespace
         with request ids, so one id sent to several pairs is refused from the second request
@@ -955,6 +981,14 @@ class TraverseClient:
         if not isinstance(seq, str) or not seq:
             raise ValueError('traverse_pairs() takes one seed: a sequence or {sequence, ...}, '
                              'not %r' % (seed,))
+        if pairs is not None:
+            if isinstance(pairs, (str, dict)) or not isinstance(pairs, (list, tuple)):
+                raise ValueError('pairs= is a list of graph names or {graph, graph_path, '
+                                 'annotation_path} objects, not %r' % (pairs,))
+            if not pairs:
+                # an explicit empty selection: no pair, no request (only pairs=None
+                # discovers the pairs)
+                return PairResults([], seq, (), {})
         caps = self.server_capabilities()
         caps = caps if isinstance(caps, dict) else {}
         summary = caps.get('graph_summary') if isinstance(caps.get('graph_summary'), dict) \
@@ -970,9 +1004,6 @@ class TraverseClient:
                     seen.add(t)
                     targets.append(t)
         else:
-            if isinstance(pairs, (str, dict)) or not isinstance(pairs, (list, tuple)):
-                raise ValueError('pairs= is a list of graph names or {graph, graph_path, '
-                                 'annotation_path} objects, not %r' % (pairs,))
             for p in pairs:
                 if isinstance(p, str) and p:
                     targets.append((p, None, None))
