@@ -3716,6 +3716,8 @@ class TestRecordMappingAtLoad(TestingBase):
         run(['transform_anno', '-p', '1', '--anno-type', 'row_diff_brwt_coord', '--greedy',
              '-o', 'anno', '-i', 'graph.dbg', 'anno.column.annodbg'])
         run(['relax_brwt', '-p', '1', '-o', 'anno', 'anno.row_diff_brwt_coord.annodbg'])
+        run(['transform_anno', '-p', '1', '--anno-type', 'brwt_coord', '--coordinates', '-o', 'anno',
+             'anno.column.annodbg'])
         # an annotation of three columns over the same graph (small.fa's record again, in
         # third.fa), for an annotation replaced under a running server
         with open(os.path.join(d, 'small.fa')) as f, open(os.path.join(d, 'third.fa'), 'w') as g:
@@ -4348,12 +4350,23 @@ class TestRecordMappingAtLoad(TestingBase):
         alone, a /traverse seed in s1 derives no header label, and a walk in annotate mode
         through s1 states none there. Until train 7 each answered 400 `Coordinate 0 for column
         1 out of range (CoordToHeader has 0 coordinates for that column)`, the CLI exited 1.
-        /pattern placing the column's occurrences in records still answers that 400."""
-        status, log = run_to_exit(['-i', self.graph, '-a', self.pair('column_coord', 'recordless')[1]],
-                                  os.path.join(self.d, 'recordless_column_coord.log'))
-        self.assertEqual(1, status, log)
-        self.assertIn("column 1 ('small.fa') of the annotation holds 30 coordinates, more than "
-                      "the 0 k-mers the mapping states for it", log)
+        /pattern, where it maps the column's coordinates to records (placed occurrences,
+        supported paths), still answers that 400. The load says it, once per such column."""
+        warning = ("has no sequence records for column 1 ('small.fa'): the queries by record skip "
+                   "its k-mers. If the annotation holds k-mers in that column, the mapping was "
+                   "written for other files: rebuild it with every input file in column order "
+                   "(metagraph annotate --anno-filename --index-header-coords)")
+        for form in ('column_coord', 'brwt_coord'):
+            with self.subTest(form=form):
+                status, log = run_to_exit(['-i', self.graph, '-a', self.pair(form, 'recordless')[1]],
+                                          os.path.join(self.d, f'recordless_{form}.log'))
+                self.assertEqual(1, status, log)
+                # (column_coord counts the column's 30 coordinates; brwt_coord's count, stated as
+                # it is, is 1 here)
+                self.assertRegex(log, r"column 1 \('small\.fa'\) of the annotation holds "
+                                      + (r"30" if form == 'column_coord' else r"\d+")
+                                      + r" coordinates, more than the 0 k-mers the mapping "
+                                      r"states for it")
         graph, anno = self.pair('row_diff_brwt_coord', 'recordless')
         _, full = self.pair('row_diff_brwt_coord', 'right')
         records = dict(named_records_of([os.path.join(self.d, 'big.fa'),
@@ -4416,7 +4429,17 @@ class TestRecordMappingAtLoad(TestingBase):
             self.assertEqual(400, ret.status_code, ret.text)
             self.assertIn('for column 1 out of range (CoordToHeader has 0 coordinates for that '
                           'column)', ret.json()['error'])
+            # the supported paths' support is checked within records, whatever the output
+            ret = server.post('pattern', {'patterns': [{'dna': s1[5:45]}], 'mode': 'partial',
+                                          'long_search': 'supported_paths',
+                                          'output': {'labels': 'all', 'occurrences': False}})
+            self.assertEqual(400, ret.status_code, ret.text)
+            self.assertIn('for column 1 out of range (CoordToHeader has 0 coordinates for that '
+                          'column)', ret.json()['error'])
             self.assertIsNone(server.process.poll())
+            # the load's warning, once (the reference's mapping has small.fa's record)
+            self.assertEqual(1, server.text().count(warning))
+            self.assertNotIn('has no sequence records', reference.text())
         finally:
             server.stop()
             reference.stop()
@@ -4430,6 +4453,7 @@ class TestRecordMappingAtLoad(TestingBase):
         self.assertEqual(0, res.returncode, res.stderr.decode()[-2000:])
         self.assertIn('b1', res.stdout.decode())
         self.assertNotIn('s1', res.stdout.decode())
+        self.assertEqual(1, res.stderr.decode().count(warning))
 
     def test_the_row_diff_form_checks_an_old_mapping_by_its_count_only(self):
         # the documented limit: the row-diff forms state no coordinates per column, so an old

@@ -797,9 +797,17 @@ stack for master), the queries by record skip its coordinates: `/search` in ever
 discovery of `/resolve`, and the header labels of `/traverse` (a seed's derived labels, the labels of a walk in
 annotate mode). Its column label is answered as before. Until train 7 each of these answered the 400 named above
 (`Coordinate <c> for column <j> out of range (CoordToHeader has 0 coordinates for that column)`); `metagraph query`
-exited 1. `/pattern` with occurrences placed in records still answers that 400: there the column is the label, and the
-mapping has no record to place its occurrences in. None of the indexes served in November 2026 (refseq33m, the 11
-graphs of r237) has such a column.
+exited 1. `/pattern` still answers that 400 wherever it maps the column's coordinates to records: occurrences placed
+in records (`output.occurrences: true`), and `long_search: "supported_paths"` whatever its output (its support is
+checked within records). There the column is the label, and the mapping has no record to place it in. A file has
+k-mers only in its records of k or more bases, which the mapping states, so such a column holding k-mers means the
+mapping was written for other files; the queries do not say so, and since train 7 the mapping's load logs, once per
+column without records (a server at start-up, where a request with `in_ram` reuses the loaded mapping; `metagraph
+query` and the other commands that load it): `[warning] The record mapping '<anno-base>.seqs' has no sequence records
+for column <j> ('<label>'): the queries by record skip its k-mers. If the annotation holds k-mers in that column, the
+mapping was written for other files: rebuild it with every input file in column order (metagraph annotate
+--anno-filename --index-header-coords)`. None of the indexes served in November 2026 (refseq33m, the 11 graphs of
+r237) has such a column.
 
 **The stated labels.** `annotate --index-header-coords` writes, after the columns, the number `0x6d74672d636f6c73`
 (the bytes `mtg-cols`, 8 bytes big-endian as every number of the file), then the column labels (their number, equal

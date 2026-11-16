@@ -6575,6 +6575,19 @@ class TestTraverseWideIndex(TestingBase):
                             # the budget's stop, as the seed's deadline record states it
                             self.assertEqual('time_budget', timing['deadline'].get('stopped_by'),
                                              what)
+                            # The engine's own record, independent of the load: on row_diff a
+                            # level's read of its costly rows is split, so a piece that reads
+                            # rows holds few of them (8-40 here: a first chunk of at most 8,
+                            # then at most 4 times the previous one, each sized to 50 ms; a
+                            # load slows the rows and shrinks the chunks). Read whole, it holds
+                            # the level's 1024 rows (182 and 63 under the memory budget)
+                            piece = timing['deadline']['longest_piece']
+                            if anno_type == 'row_diff' and piece['kind'] in ('read', 'chunk',
+                                                                             'rest'):
+                                self.assertLessEqual(piece['rows'], 128, what)
+                            # The seed's CPU time: its walking thread's, which decodes its
+                            # rows too, since the server runs with --parallel-each 1 (the
+                            # default: "Threads per graph: 1", row-diff decoding on one thread)
                             self.assertLessEqual(timing['cpu_ms'], budget + 50 + 150, what)
 
     def test_wide_index_budget_is_kept_within_a_chunk(self):

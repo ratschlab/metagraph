@@ -758,6 +758,36 @@ TYPED_TEST(ResolveCoordTest, HeaderDiscoverySkipsAColumnWithoutRecords) {
         EXPECT_EQ((std::vector<std::string>{ "E", "F" }), names_of(resolve_support(oracle, q, opts)))
             << what;
     }
+
+    // Under the label cap (discover_max_tracked 1: k-mer 0 meets two records of F) the
+    // admission counts a k-mer's new labels before it admits them (count_tuples), and skips
+    // the column there too: the discovery is that of the same records without E's column
+    auto only_f = build_anno_graph<Graph, Annotation>(kK, { q, part }, { "F", "F" },
+                                                      DeBruijnGraph::BASIC, true, { 0, n });
+    annot::CoordToHeader f_records({ { "hq", "hp" } }, { { n, m } });
+    LabelOracle without_column(*only_f, &f_records);
+    for (Support support : { Support::KMER, Support::TRACE }) {
+        const std::string what = support == Support::TRACE ? "trace" : "kmer";
+        ResolveOptions opts;
+        opts.discover = true;
+        opts.discover_kind = LabelKind::HEADER;
+        opts.discover_max_labels = 1;
+        opts.discover_max_tracked = 1;
+        opts.support = support;
+        const SupportProfile expected = resolve_support(without_column, q, opts);
+        ASSERT_TRUE(expected.labels_capped) << what;
+        const SupportProfile profile = resolve_support(oracle, q, opts);
+        ASSERT_TRUE(profile.labels_capped) << what;
+        EXPECT_EQ(names_of(expected), names_of(profile)) << what;
+        EXPECT_EQ(expected.labels_capped->cut_kmer, profile.labels_capped->cut_kmer) << what;
+        EXPECT_EQ(expected.labels_capped->labels_at_cut, profile.labels_capped->labels_at_cut)
+            << what;
+        ASSERT_EQ(expected.labels.size(), profile.labels.size()) << what;
+        for (size_t i = 0; i < profile.labels.size(); ++i) {
+            EXPECT_EQ(expected.labels[i].kmers_supported, profile.labels[i].kmers_supported)
+                << what << " " << i;
+        }
+    }
 }
 
 // SPEC-multigraph-envelope.md §7 under support "trace" (E18): a discovery ranks, cuts and

@@ -401,6 +401,22 @@ load_coord_to_header(const annot::MultiLabelAnnotation<std::string> &annotation,
                 logger->error("{}", message);
                 exit_at_load();
             }
+            // A column without sequence records has no header labels, and the queries by record
+            // skip its coordinates (Q-M4). A file has k-mers only in its records of k or more
+            // bases, each of which the mapping states, so such a column holding k-mers means
+            // the mapping was written for other files (a stale .seqs, which the row-diff forms
+            // cannot detect at load): said here, once per column, as the queries are silent
+            const auto &labels = annotation.get_label_encoder().get_labels();
+            for (uint64_t j = 0; j < coord_to_header->num_columns(); ++j) {
+                if (!coord_to_header->num_sequences(j)) {
+                    logger->warn("The record mapping '{}' has no sequence records for column {} "
+                                 "('{}'): the queries by record skip its k-mers. If the "
+                                 "annotation holds k-mers in that column, the mapping was "
+                                 "written for other files: rebuild it with every input file in "
+                                 "column order (metagraph annotate --anno-filename "
+                                 "--index-header-coords)", cth_fname, j, labels.at(j));
+                }
+            }
             logger->trace("CoordToHeader mapping loaded successfully from {}. "
                           "All queries will be performed against individual sequences.",
                           cth_fname);
