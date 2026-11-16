@@ -1226,8 +1226,12 @@ class PairUnion:
             sel = [w for w in sel if all(p in w.held_in for p in pairs)]
         if labels is not None:
             want = {self.label(x) for x in labels}
+            # only a span that holds the walk carries it: its own labels (whole, extends) or
+            # its route's (merges, held to the walk's end); a stub's labels before its merge
+            # and the labels of a span that ends or turns off carry nothing to the end
             sel = [w for w in sel if any(sl.from_bp == 0 and sl.label in want
-                                         for s in w.spans for sl in _span_labels_all(s))]
+                                         for s in w.spans if s.pair in w.held_in
+                                         for sl in _carrying_labels(s))]
         if by == 'pairs':
             sel.sort(key=lambda w: (-len(w.held_in), -len(w.whole_in), -w.length_bp, w.id))
         elif by == 'length':
@@ -2274,11 +2278,14 @@ def _labels_for(un, part, a, chain, end, with_labels, at_bp=None):
     return tuple(SpanLabel(un._pair_label(part, lab), f) for lab, f in labs), cut
 
 
-def _span_labels_all(s):
-    out = list(s.labels or ())
-    if s.route is not None:
-        out.extend(s.route.labels or ())
-    return out
+def _carrying_labels(s):
+    """The span labels of a span that holds its walk: its own (whole, extends) or its
+    route's (merges, the route held to the walk's end); () for any other span."""
+    if s.how in ('whole', 'extends'):
+        return s.labels or ()
+    if s.how == 'merges' and s.route is not None and s.route.how == 'held':
+        return s.route.labels or ()
+    return ()
 
 
 def _without_labels(s):

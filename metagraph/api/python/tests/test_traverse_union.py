@@ -713,6 +713,51 @@ class TestOrder(unittest.TestCase):
         self.assertEqual(seq, ref.seed.sequence)
 
 
+class TestWalksByLabels(unittest.TestCase):
+    """walks(labels=): the walks those labels carry whole in some pair -- a span that holds
+    the walk, its own labels or its route's, never a stub's labels before its merge nor a
+    span that ends or turns off (review B1)."""
+
+    def check(self, u, side, pair, label, excluded):
+        got = u.walks(side, by='id', stubs=True, labels=[{'pair': pair, 'ref': label.ref}])
+        self.assertNotIn(excluded, [w.id for w in got])
+        for w in got:
+            self.assertIn(pair, w.held_in)
+            (s,) = [s for s in u.carriers(side, w.id) if s.pair == pair]
+            carried = s.labels if s.how in ('whole', 'extends') else s.route.labels
+            self.assertIn((label, 0), [(x.label, x.from_bp) for x in carried], w.id)
+        return got
+
+    def test_a_stub_label_before_its_merge_carries_nothing(self):
+        u = union_pairs(stated(gM='merge', gT='merge_ties'))
+        seen = False
+        for w in u.walks('right', by='id', stubs=True):
+            for s in u.carriers('right', w.id):
+                if s.pair == 'gM' and s.how == 'merges' and s.route.how == 'held':
+                    stub0 = {x.label.name for x in s.labels if x.from_bp == 0}
+                    route0 = {x.label.name for x in s.route.labels if x.from_bp == 0}
+                    for lab in stub0 - route0:          # both.fa: from 62 bp on the route
+                        seen = True
+                        self.check(u, 'right', 'gM', u.label({'pair': 'gM', 'name': lab}), w.id)
+                    for lab in route0:                  # a.fa carries it whole
+                        got = u.walks('right', by='id', stubs=True,
+                                      labels=[{'pair': 'gM', 'name': lab}])
+                        self.assertIn(w.id, [x.id for x in got])
+        self.assertTrue(seen)
+
+    def test_r237_a_pair_that_ends_carries_nothing(self):
+        parts, u = r237_union()
+        pair, seen = 'bact_pseudomonadota', 0
+        for w in u.walks('right', by='id', stubs=True):
+            (s,) = [s for s in u.carriers('right', w.id) if s.pair == pair]
+            if s.how in ('ends', 'diverges'):
+                whole = [x.label for x in s.labels if x.from_bp == 0]
+                if whole:
+                    seen += 1
+                    self.check(u, 'right', pair, whole[0], w.id)
+        self.assertGreaterEqual(seen, 3)                # walks 4, 6 and 10 at 56d9a56fc
+
+
 class TestLabels(unittest.TestCase):
     """P7: labels per pair, shared names, the header-name warnings (OQ20)."""
 
