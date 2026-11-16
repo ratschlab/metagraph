@@ -159,6 +159,11 @@ _M_SPAN = 900           # a PairSpan with its Route, merges and continues tuples
 _M_LABEL = 320          # a span label: its SpanLabel, PairLabel (with its ref) and slot
 _M_INTERVAL = 360       # a LabelInterval with its PairLabel, its ints and slot
 _M_NAME = 300           # shared_names() per label: the name sets, the dict and its lists
+_M_PAIR_LABEL = 260     # a PairLabel: the record and its ref string
+_M_COV_PAIR = 700       # a coverage entry per pair (its dict, note and category lists)
+_M_COV_NOTE = 120       # a coverage note per pair beside its tag (certified to ..., k-mers)
+_M_SENTENCE = 1500      # a sentence's fixed words (coverage, the turn-offs and the scope)
+_M_BLOCK = 2500         # a part's evidence block and identity entry
 _M_LABEL_WORK = 260     # what _labels_for() holds per label while it runs
 _M_FIG = 160            # a walk's figures: the record, whole_in and held_in, its slot
 _DERIVATION_CAUSES = {'no_carrier': 'no label carries the whole seed',
@@ -1037,22 +1042,32 @@ class PairUnion:
 
     # ------------------------------------------------------------ labels
 
-    def labels(self, pair=None):
+    def labels(self, pair=None, *, budget=None):
         """Every label of the parts as PairLabel (canonical pair order, label ids in
-        order), or one pair's (its tag)."""
+        order), or one pair's (its tag). budget=: per label read, and each PairLabel."""
+        if pair is not None and pair not in self._part_of:
+            raise KeyError('no part has the tag %r (parts: %s)'
+                           % (pair, ', '.join(self._part_of) or 'none'))
+        return _B.run_scoped(budget, 'union_labels', (), lambda b: self._labels(pair, b))
+
+    def _labels(self, pair, b):
         out = []
         for p in self.parts:
             if pair is not None and p.tag != pair:
                 continue
+            if b is not None:
+                n = len(p.graphlet.labels)
+                b.charge(W_ROW + W_ELEM * n, n * (_M_PAIR_LABEL + LIST_ITEM))
             out.extend(self._pair_label(p, l.id) for l in p.graphlet.labels)
-        if pair is not None and pair not in self._part_of:
-            raise KeyError('no part has the tag %r (parts: %s)'
-                           % (pair, ', '.join(self._part_of) or 'none'))
         return out
 
-    def label(self, selector):
+    def label(self, selector, *, budget=None):
         """{'pair', 'ref'} | {'pair', 'name'} | {'name'} (when only one pair has it) ->
-        PairLabel. {'id'} is refused: ids are local to each part."""
+        PairLabel. {'id'} is refused: ids are local to each part. budget=: per label of
+        the parts searched (every part's for {'name'})."""
+        return _B.run_scoped(budget, 'union_label', (), lambda b: self._label(selector, b))
+
+    def _label(self, selector, b):
         if isinstance(selector, PairLabel):
             selector = {'pair': selector.pair, 'ref': selector.ref}
         if not isinstance(selector, dict):
@@ -1063,6 +1078,11 @@ class PairUnion:
         keys = set(selector)
         if keys == {'name'}:
             name = selector['name']
+            if b is not None:
+                n = sum(len(p.graphlet.labels) for p in self.parts)
+                b.charge(W_ELEM * n, _M_PAIR_LABEL * len(self.parts))
+                for p in self.parts:
+                    _label_index_price(b, p.graphlet)
             hits = [(p, l) for p in self.parts for l in p.graphlet.labels if l.name == name]
             tags = list(dict.fromkeys(p.tag for p, _ in hits))
             if not hits:
@@ -1076,13 +1096,25 @@ class PairUnion:
             if p is None:
                 raise UnknownLabel('no part has the tag %r' % (selector['pair'],))
             k = 'ref' if 'ref' in keys else 'name'
+            if b is not None:
+                b.charge(W_ELEM * len(p.graphlet.labels), _M_PAIR_LABEL)
+                _label_index_price(b, p.graphlet)
             return self._pair_label(p, _label_in(p.graphlet, {k: selector[k]}).id)
         raise BadSelector('a pair union selects labels by {pair, ref}, {pair, name} or {name}, '
                           'not %r' % (selector,))
 
-    def shared_names(self):
+    def shared_names(self, *, budget=None):
         """name -> the tags of the parts where it occurs, for names seen in two or more
-        parts (names in byte order)."""
+        parts (names in byte order). budget=: per label, its name set and the dicts."""
+        return _B.run_scoped(budget, 'union_shared_names', (),
+                             lambda b: self._shared_names(b))
+
+    def _shared_names(self, b):
+        """shared_names(); with |b| its charge: per label an element, and at its bound a
+        name set entry, a sort key and the dict's lists (_M_NAME)."""
+        if b is not None:
+            n = sum(len(p.graphlet.labels) for p in self.parts)
+            b.charge(W_ELEM * n, n * _M_NAME + DICT)
         seen = collections.defaultdict(list)
         for p in self.parts:
             for n in sorted({l.name for l in p.graphlet.labels}):
@@ -1129,16 +1161,32 @@ class PairUnion:
                 r = max([r] + [a.complete_to_bp for a in g.arms.values()])
         return r
 
-    def coverage(self, arm=None, at_bp=None):
+    def coverage(self, arm=None, at_bp=None, *, budget=None):
         """Every pair in one category at depth |at_bp| (default: the largest radius among
         the parts), §2.6. arm None: an arm-less union only (no part) -- or both arms' absent
-        categories."""
+        categories. budget=: per pair and limitation read, the entries and the sentence."""
         side = None if arm is None else self._side(arm)
         if side is None and self.parts:
             raise ValueError('name an arm (left or right): the union has parts')
+        self._depth_of(at_bp)
+        return _B.run_scoped(budget, 'union_coverage', (),
+                             lambda b: self._coverage(side, at_bp, b))
+
+    def _depth_of(self, at_bp):
         depth = self._default_depth() if at_bp is None else at_bp
         if not isinstance(depth, int) or isinstance(depth, bool) or depth < 0:
             raise ValueError('at_bp is a depth in bp (an int >= 0), not %r' % (at_bp,))
+        return depth
+
+    def _coverage(self, side, at_bp, b):
+        depth = self._depth_of(at_bp)
+        if b is not None:
+            # per pair its entry and the limitations read; the sentence and the strings it
+            # is joined from, at their bound (every tag at most three times, each note)
+            n = len(self.pairs)
+            nl = sum(len(_root(p.graphlet).limitations) for p in self.parts)
+            b.charge(W_ROW * n + W_ELEM * nl, n * _M_COV_PAIR + 4 * (
+                STR + _M_SENTENCE + sum(3 * len(t) + _M_COV_NOTE for t in self.pairs)))
         per = collections.OrderedDict()
         for p in self.parts:
             per[p.tag] = _part_category(p, side, depth, self._below_codes(p.tag))
@@ -1222,11 +1270,11 @@ class PairUnion:
     def _statements(self, side, at_bp, paths, b):
         if side is None and self.parts:
             side = self.arms()[0]
-        cov = self.coverage(side, at_bp)
+        cov = self._coverage(side, at_bp, b)
         return Statements(side, cov.at_bp, paths, cov, self._provenance_sentence(side, b),
                           TURN_OFFS, self._labels_sentence(b), SCOPE)
 
-    def _provenance_sentence(self, side, budget=None):
+    def _provenance_sentence(self, side, b=None):
         sides = [side] if side else []
         items = []
         for s in sides:
@@ -1234,7 +1282,7 @@ class PairUnion:
             if t is None:
                 items.append('%s 0' % s)
                 continue
-            ws = self._figures(s, _B.resolve(budget))
+            ws = self._figures(s, b)
             walks = [w for w in ws if w.kind == 'walk']
             stubs = len(ws) - len(walks)
             multi = sum(1 for w in walks if len(w.held_in) > 1)
@@ -1247,14 +1295,10 @@ class PairUnion:
         return 'walks: ' + ', '.join(items)
 
     def _labels_sentence(self, b=None):
+        n = len(self._shared_names(b))
         if b is not None:
-            # shared_names(): a set of names per part and the dict of names seen
-            n = sum(len(p.graphlet.labels) for p in self.parts)
-            nbytes = n * _M_NAME + DICT
-            b.charge(W_ELEM * n, nbytes)
-        n = len(self.shared_names())
-        if b is not None:
-            b.release(nbytes)
+            # shared_names()' sets and dicts, dropped once counted
+            b.release(sum(len(p.graphlet.labels) for p in self.parts) * _M_NAME + DICT)
         s = ('labels: each pair\'s own, shown as <tag>/<name>; equal names in two pairs are not '
              'claimed to be one record (%s)' % (
                  'no name occurs in more than one pair' if n == 0 else
@@ -1266,6 +1310,11 @@ class PairUnion:
         return s
 
     def __str__(self):
+        """The statements as sentences: print(union). Under an ambient budget
+        (local_budget()) it is charged as statements() is."""
+        return _B.run_scoped(None, 'union_str', (), self._text)
+
+    def _text(self, b):
         n_failed = sum(1 for a in self.absent if a.category == 'failed')
         if self.expected is not None:
             head = 'union of one seed (%d bp) over %d expected pairs: ' % (
@@ -1281,13 +1330,13 @@ class PairUnion:
         lines = [head]
         sides = self.arms() or [None]
         for s in sides:
-            lines.append(_core_sentence(self.coverage(s)))
+            lines.append(_core_sentence(self._coverage(s, None, b)))
         if self.parts:
             prov = []
             for s in self.arms():
-                prov.append(self._provenance_sentence(s)[len('walks: '):])
+                prov.append(self._provenance_sentence(s, b)[len('walks: '):])
             lines.append('walks: ' + ', '.join(prov))
-        lines.append(self._labels_sentence())
+        lines.append(self._labels_sentence(b))
         lines.append(TURN_OFFS)
         lines.append(SCOPE)
         return '\n'.join(lines)
@@ -1534,7 +1583,7 @@ class PairUnion:
                     raise KeyError('no part has the tag %r' % (p,))
             sel = [wid for wid in sel if all(p in figs[wid].held_in for p in pairs)]
         if labels is not None:
-            want = {self.label(x) for x in labels}
+            want = {self._label(x, b) for x in labels}
             # only a span that holds the walk carries it: its own labels (whole, extends) or
             # its route's (merges, held to the walk's end); a stub's labels before its merge
             # and the labels of a span that ends or turns off carry nothing to the end
@@ -1755,23 +1804,33 @@ class PairUnion:
             out['notes'] = notes
         return out
 
-    def evidence(self, arm=None):
+    def evidence(self, arm=None, *, budget=None):
         """Each part's own evidence block under its tag, the absent records, the expected
         pairs not included, each part's identity and pair source, the weakest outcome over
         the parts, exact (every part exact and its identity verified) and the five
         statements (without an arm: each arm's coverage sentence, then the provenance over
-        every arm, the turn-offs, the labels and the scope)."""
+        every arm, the turn-offs, the labels and the scope). budget=: the blocks, and the
+        coverage and statements as coverage() and statements() charge them; a stitched
+        part's own evidence() runs under it as the ambient budget."""
         side = None if arm is None else self._side(arm)
-        ev = _combined_evidence(self.parts, side)
+        return _B.run_scoped(budget, 'union_evidence', (), lambda b: self._evidence(side, b))
+
+    def _evidence(self, side, b):
+        if b is not None:
+            # per part its block (and its identity entry), per absent record its entry
+            b.charge(W_ROW * (len(self.parts) + len(self.absent)) + W_ELEM * sum(
+                len(_root(p.graphlet).limitations) for p in self.parts),
+                _M_BLOCK * len(self.parts) + _M_COV_PAIR * len(self.absent))
+        ev = _combined_evidence(self.parts, side, b)
         if side is not None or not self.parts:
-            sentences = self.statements(side).sentences()
+            sentences = self._statements(side, None, 'supported', b).sentences()
         else:
             # every arm: the coverage sentence of each, then the provenance over them all
             sides = self.arms()
-            sentences = [_core_sentence(self.coverage(s)) for s in sides] + [
-                'walks: ' + ', '.join(self._provenance_sentence(s)[len('walks: '):]
+            sentences = [_core_sentence(self._coverage(s, None, b)) for s in sides] + [
+                'walks: ' + ', '.join(self._provenance_sentence(s, b)[len('walks: '):]
                                       for s in sides),
-                TURN_OFFS, self._labels_sentence(), SCOPE]
+                TURN_OFFS, self._labels_sentence(b), SCOPE]
         return {
             'parts': ev['parts'],
             'outcome': ev['outcome'],
@@ -1990,6 +2049,13 @@ def _retrieval_of(g):
         C.retrieval_identity(g)
 
 
+def _label_index_price(b, g):
+    """A lookup by name or ref in part |g| at its cold price: the name/ref index of each of
+    its graphlets (ops.label() scans or builds it; the index's price either way)."""
+    for x in _sub_graphlets(g):
+        _ops._uses_g(b, x, 'label_index')
+
+
 def _label_in(g, selector):
     """A label of a part by {'ref'} or {'name'}: a stitched part's over its parts' labels
     (StitchedGraphlet.label(); ids in its own numbering)."""
@@ -2032,27 +2098,31 @@ def _summary_part(p, below):
     return out
 
 
-def _part_block(p, side):
+def _part_block(p, side, b=None):
     """A part's evidence block: its own (ops.evidence_block()); a stitched part's
-    StitchedGraphlet.evidence() where it has a junction on |side| (every arm: None), its
-    root's otherwise (no junction is read there)."""
+    StitchedGraphlet.evidence() where it has a junction on |side| (every arm: None), run
+    under the union call's budget |b| as the ambient one, its root's otherwise (no junction
+    is read there)."""
     g = p.graphlet
     if _arm_junctions(g, side):
-        return g.evidence(side)
+        if b is None:
+            return g.evidence(side)
+        with _B.local_budget(b):
+            return g.evidence(side)
     g = _root(g)
     return _ops.evidence_block(g, side if side is None or side in g.arms else None)
 
 
-def _combined_evidence(parts, side):
+def _combined_evidence(parts, side, b=None):
     """composite.combined_evidence() over the parts, a stitched part's block by
-    _part_block()."""
+    _part_block() (|b|: the union call's budget)."""
     if not any(_arm_junctions(p.graphlet, side) for p in parts):
         return C.combined_evidence([(p.tag, _root(p.graphlet), _part_verified(p, side))
                                     for p in parts], side)
     blocks = {}
     exact = True
     for p in parts:
-        blk = _part_block(p, side)
+        blk = _part_block(p, side, b)
         blocks[p.tag] = blk
         exact = exact and bool(blk.get('exact')) and bool(_part_verified(p, side))
     return {'parts': blocks,

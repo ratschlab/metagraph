@@ -526,7 +526,8 @@ union_pairs(results, *, seed=None, expected_pairs=None, seqs_order=None, budget=
     # {response, index}, {response, sequence}, {pair, graphlet}, {pair, result[, error][, sequence]}, {pair, error};
     # refusals CombineRefused(code) in the order of DESIGN-graphlet-merge.md Appendix A.2; the parts stay unchanged
 PairUnion.parts / .absent / .pairs / .expected / .digest / .seed / .arms()
-PairUnion.coverage(arm=None, at_bp=None) -> Coverage(per_pair, by_category, every_pair_certified_to_bp, sentence)
+PairUnion.coverage(arm=None, at_bp=None, *, budget=None) -> Coverage(per_pair, by_category,
+    every_pair_certified_to_bp, sentence)
 PairUnion.statements(arm=None, at_bp=None) -> Statements          # the five, never cut
 PairUnion.walks(arm, *, by='pairs'|'length'|'id', top=None, pairs=None, labels=None, min_bp=0, spell=False,
                 stubs=False) -> list[UnionWalk(id, arm, kind, length_bp, sequence, segments, spans, whole_in, held_in)]
@@ -535,8 +536,11 @@ PairUnion.carriers(arm, walk, *, at_bp=None) -> Carriers[PairSpan]  # per pair: 
                                               # junctions (SpanJunction: a stitched part's, read by the span)
 PairUnion.segments(arm) -> list[UnionSegment];  .spell(arm, walk, orientation, with_seed) -> str
 PairUnion.labels(pair=None) / .label(selector) / .shared_names()   # labels each pair's own: PairLabel(pair, ref, name, kind)
+    # every query whose work grows with the trie, walks, segments or labels takes budget= (keyword-only; None: the
+    # ambient one), charged at its cold price; print(u) honours the ambient budget; exempt: arms(), provenance(),
+    # memory_bytes() and the stored attributes
 PairUnion.to_fasta(..., at_bp=None) / .to_gfa(...) / .summary(max_bytes=4096) / .provenance() / .memory_bytes()
-PairUnion.evidence(arm=None)                        # each part's evidence block and the five statements, of one
+PairUnion.evidence(arm=None, *, budget=None)       # each part's evidence block and the five statements, of one
                                                     # arm or (arm=None) of every arm
 stitch(parent, child=None, *, arm=None, walk=None, allow_unverified_index=False, budget=None) -> StitchedGraphlet
     # experimental (DESIGN-graphlet-merge.md §3): a continuation joined to the walk it continues, on one pair; parent a

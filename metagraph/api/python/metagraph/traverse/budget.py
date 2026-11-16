@@ -147,7 +147,14 @@ __all__ = ['LocalLimits', 'LocalBudget', 'LocalStop', 'LocalBudgetExceeded', 'Pa
 #     labels='full' the names written, and per path line a name per union segment;
 #     spell() W_ROW, W_STEP per union segment and 1 lwu per 256 bases, three copies of the
 #     text; a listed walk W_ROW (and its bases at BASE_SHIFT when spelled), 400 bytes and
-#     its text;
+#     its text; labels() per part W_ROW and per label W_ELEM and a PairLabel; label() per
+#     label of the parts it searches W_ELEM and each part's name/ref index at its cold
+#     price (ops' label_index); shared_names() per label W_ELEM and its name sets and dict;
+#     coverage() per pair W_ROW and per limitation W_ELEM, an entry per pair and its
+#     sentence at its bound (every tag three times and a note, four copies); evidence() a
+#     block per part, an entry per absent record, and its coverage and statements as those
+#     charge (a stitched part's evidence() under the call's budget, ambient); print() as
+#     statements() under an ambient budget (GPT review M3);
 #   * label_intervals() (ops.py): per segment W_ELEM, W_ELEM per entry label and label
 #     change (constrain; the segment's ops, derived once) or per P run and label of a run
 #     (annotate), the sort of its intervals, and their list, tuples and dict; the price

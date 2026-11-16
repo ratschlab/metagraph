@@ -1289,6 +1289,13 @@ class TestCoverage(unittest.TestCase):
                 self.assertEqual(sp.k, 15)
 
 
+def _first_label(u):
+    """{pair, ref} of the first part's first label (read off the model, unbudgeted and
+    nothing allocated beyond the ref)."""
+    p = u.parts[0]
+    return {'pair': p.tag, 'ref': p.graphlet.labels[0].ref}
+
+
 class TestBudgets(unittest.TestCase):
     """P12: every operation under budget= completes or stops at the same row every run."""
 
@@ -1325,6 +1332,74 @@ class TestBudgets(unittest.TestCase):
         u = locus()
         for name, fn in self._ops(u).items():
             fn(LocalBudget(work_units=10 ** 9))
+
+    # every public PairUnion method that takes budget= (GPT review M3), as (name, call);
+    # arms(), provenance(), memory_bytes() and the stored attributes are exempt
+    BUDGETED = (
+        ('walks', lambda u, **k: u.walks('right', stubs=True, **k)),
+        ('walks(top=3)', lambda u, **k: u.walks('right', top=3, **k)),
+        ('walks(labels=)', lambda u, **k: u.walks('right', labels=[_first_label(u)], **k)),
+        ('segments', lambda u, **k: u.segments('right', **k)),
+        ('carriers', lambda u, **k: u.carriers('right', 1, **k)),
+        ('spell', lambda u, **k: u.spell('right', 1, **k)),
+        ('statements', lambda u, **k: u.statements('right', **k)),
+        ('coverage', lambda u, **k: u.coverage('right', **k)),
+        ('labels', lambda u, **k: u.labels(**k)),
+        ('label', lambda u, **k: u.label(_first_label(u), **k)),
+        ('label(name)', lambda u, **k: u.label({'pair': u.parts[0].tag, 'name': 'a.fa'}, **k)),
+        ('shared_names', lambda u, **k: u.shared_names(**k)),
+        ('evidence', lambda u, **k: u.evidence(**k)),
+        ('evidence(arm)', lambda u, **k: u.evidence('right', **k)),
+        ('summary', lambda u, **k: u.summary(**k)),
+        ('to_fasta', lambda u, **k: u.to_fasta(stubs=True, **k)),
+        ('to_gfa', lambda u, **k: u.to_gfa(labels='full', **k)))
+
+    def test_cold_and_warm_stop_alike(self):
+        """GPT review M3: each budgeted method charges the same cold (a fresh union) and
+        warm (after an unbudgeted call filled its caches), so a budget one unit or one byte
+        short of a cold call's charge stops the warm call too, at the same row, and the
+        cold call's charge lets both finish."""
+        def run(u, fn, **lim):
+            try:
+                fn(u, budget=LocalBudget(**lim))
+                return 'done'
+            except LocalBudgetExceeded as e:
+                p = e.partial
+                return ('stop', e.stop.kind if hasattr(e.stop, 'kind') else None,
+                        None if p is None else repr(p.rows))
+
+        for name, fn in self.BUDGETED:
+            b = LocalBudget()
+            fn(locus(), budget=b)
+            work, peak = b.used_work, b.peak_bytes
+            warm = locus()
+            fn(warm)
+            again = LocalBudget()
+            fn(warm, budget=again)
+            self.assertEqual((again.used_work, again.peak_bytes), (work, peak), name)
+            for lim in ({'work_units': work - 1}, {'memory_mb': (peak - 1) / (1 << 20)}):
+                cold = run(locus(), fn, **lim)
+                self.assertNotEqual(cold, 'done', (name, lim))
+                self.assertEqual(run(warm, fn, **lim), cold, (name, lim))
+            for lim in ({'work_units': work}, {'memory_mb': peak / (1 << 20)}):
+                self.assertEqual((run(locus(), fn, **lim), run(warm, fn, **lim)),
+                                 ('done', 'done'), (name, lim))
+
+    def test_the_ambient_budget(self):
+        """A budget set by local_budget() is every budgeted method's (print(u) included,
+        charged as statements()); the exempt accessors return under it."""
+        from metagraph.traverse import local_budget
+        u = locus()
+        for name, fn in self.BUDGETED + (('str', lambda u: str(u)),):
+            with local_budget(work_units=0) as b:
+                with self.assertRaises(LocalBudgetExceeded, msg=name):
+                    fn(u)
+            with local_budget(work_units=10 ** 9) as b:
+                fn(u)
+            self.assertGreater(b.used_work, 0, name)
+        with local_budget(work_units=0) as b:
+            u.arms(), u.provenance(), u.memory_bytes(), u.digest, u.parts
+        self.assertEqual(b.used_work, 0)
 
     def test_memory_bytes_bounds_the_heap_on_11_parts(self):
         """P12: memory_bytes() bounds the traced heap the union holds on 11 parts, after
@@ -1418,7 +1493,12 @@ class TestBudgets(unittest.TestCase):
                 'summary': lambda u, **k: u.summary(**k),
                 'to_fasta': lambda u, **k: u.to_fasta(stubs=True, **k),
                 'to_gfa': lambda u, **k: u.to_gfa(labels='full', **k),
-                'spell': lambda u, **k: u.spell('right', 1, **k)}
+                'spell': lambda u, **k: u.spell('right', 1, **k),
+                'coverage': lambda u, **k: u.coverage('right', **k),
+                'labels': lambda u, **k: u.labels(**k),
+                'label': lambda u, **k: u.label(_first_label(u), **k),
+                'shared_names': lambda u, **k: u.shared_names(**k),
+                'evidence': lambda u, **k: u.evidence(**k)}
         for name, make in (('split11', split11), ('r237', lambda: r237_union()[0]),
                            ('comb', comb)):
             b = LocalBudget()

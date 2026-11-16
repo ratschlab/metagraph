@@ -1157,7 +1157,7 @@ def union_gfa(u, with_seed, labels, at_bp, bud):
                     for j in p.graphlet.junctions))))
     from .union import SCOPE, TURN_OFFS, _core_sentence
     for side in (u.arms() or [None]):
-        lines.append(_comment(_core_sentence(u.coverage(side, at_bp))))
+        lines.append(_comment(_core_sentence(u._coverage(side, at_bp, bud))))
     lines.append(_comment('turn-offs: ' + TURN_OFFS))
     lines.append(_comment(u._labels_sentence(bud)))
     lines.append(_comment('scope: ' + SCOPE))
