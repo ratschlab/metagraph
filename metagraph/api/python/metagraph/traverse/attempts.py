@@ -373,6 +373,11 @@ class TraverseResponse:
     # traverse(coordinates='auto'): what the automatic rule decided ({requested, reason,
     # memory_budget?, note?}, auto_coordinates()); None where it did not apply
     coordinates_auto: Optional[dict] = None
+    # traverse() and deepen(): the seeds as sent (copies of the request's seeds[] objects,
+    # in order), so that a result without a graphlet read from this response can be checked
+    # against a union's seed (union_pairs(), seed_check 'sent'); None where the response
+    # was not made by the client's own request
+    seeds_sent: Optional[List[dict]] = None
 
     @property
     def usage(self):

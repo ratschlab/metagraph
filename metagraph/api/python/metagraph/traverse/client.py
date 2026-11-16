@@ -68,6 +68,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 import zlib
+from dataclasses import dataclass
 
 # the answers' readers and the release rule live in the light module attempts.py (importing
 # it loads no model): re-exported here as the same objects
@@ -82,7 +83,7 @@ __all__ = ['TraverseClient', 'TraverseResponse', 'TraverseError', 'ServerInitial
            'Suppression', 'ReleaseVerdict', 'release_verdict', 'classify_409', 'ACCEPT_ENCODING',
            'SUPPRESSION_LEVEL', 'COORDINATES_LEVEL', 'AUTO_COORDINATES_UNDER_MEMORY_BUDGET',
            'auto_coordinates', 'drop_coordinates_note', 'strip_coordinate_cap',
-           'SELECTORS', 'pair_members', 'answered_pair', 'requested_pair']
+           'SELECTORS', 'pair_members', 'answered_pair', 'requested_pair', 'PairResults']
 
 ACCEPT_ENCODING = 'gzip, deflate'
 # the feature level of the tombstone's suppression (a cancel with not_after_ms,
@@ -886,6 +887,7 @@ class TraverseClient:
                 pass
             raise
         resp.sent = sent
+        resp.seeds_sent = copy.deepcopy(req['seeds'])
         resp.coordinates_auto = auto
         if auto is not None and auto.get('note'):
             resp.notes.append(auto['note'])
@@ -928,4 +930,108 @@ class TraverseClient:
         req = graphlet.next_request(arm, leaves, bp, **overrides)
         out = self.response(self.traverse_raw(req))
         out.notes = list(getattr(req, 'notes', ()))
+        out.seeds_sent = copy.deepcopy(req.get('seeds')) if isinstance(req, dict) else None
         return out
+
+    def traverse_pairs(self, seed, strategy=None, *, pairs=None, detail='graphlet',
+                       timing=True, coordinates='auto', not_after_ms=None):
+        """One /traverse request per pair for one seed (docs/DESIGN-graphlet-merge.md §5.2):
+        the fan-out whose results union_pairs() combines. |pairs|: graph names or {graph,
+        graph_path, annotation_path} objects; by default every pair GET /capabilities
+        lists (graph_summary.pairs), or the client's own pair on a single-graph server.
+        Every answer is kept as returned (a TraverseResponse of one seed, which keeps the
+        seed it sent); a refused or failed request becomes {pair, error}. attempt_id and
+        expect_server_instance are not accepted: attempt ids share one server-wide namespace
+        with request ids, so one id sent to several pairs is refused from the second request
+        on (a ledger-managed fan-out is a later extension).
+
+        -> PairResults(results, seed, expected_pairs, seqs_order): |seed| the oriented
+        seed sent, |expected_pairs| the pair objects the requests were sent to, |seqs_order|
+        each pair's record-mapping certificate as GET /capabilities states it (keys:
+        (graph, graph_path, annotation_path), or the index namespace on a single-graph
+        server; values 'verified', 'count_only' or None)."""
+        seq = seed.get('sequence') if isinstance(seed, dict) else seed
+        if not isinstance(seq, str) or not seq:
+            raise ValueError('traverse_pairs() takes one seed: a sequence or {sequence, ...}, '
+                             'not %r' % (seed,))
+        caps = self.server_capabilities()
+        caps = caps if isinstance(caps, dict) else {}
+        summary = caps.get('graph_summary') if isinstance(caps.get('graph_summary'), dict) \
+            else {}
+        listed = [p for p in (summary.get('pairs') or []) if isinstance(p, dict)
+                  and _text(p.get('graph'))]
+        targets = []
+        if pairs is None:
+            seen = set()
+            for p in listed:
+                t = (p['graph'], _text(p.get('graph_path')), _text(p.get('annotation_path')))
+                if t not in seen:
+                    seen.add(t)
+                    targets.append(t)
+        else:
+            if isinstance(pairs, (str, dict)) or not isinstance(pairs, (list, tuple)):
+                raise ValueError('pairs= is a list of graph names or {graph, graph_path, '
+                                 'annotation_path} objects, not %r' % (pairs,))
+            for p in pairs:
+                if isinstance(p, str) and p:
+                    targets.append((p, None, None))
+                elif isinstance(p, dict) and _text(p.get('graph')):
+                    targets.append((p['graph'], _text(p.get('graph_path')),
+                                    _text(p.get('annotation_path'))))
+                else:
+                    raise ValueError('a pair is a graph name or a {graph, graph_path, '
+                                     'annotation_path} object, not %r' % (p,))
+        seqs_order = {}
+        if targets:
+            for t in targets:
+                hit = [p for p in listed if p['graph'] == t[0]
+                       and (t[1] is None or _text(p.get('graph_path')) == t[1])
+                       and (t[2] is None or _text(p.get('annotation_path')) == t[2])]
+                vals = {p.get('seqs_order') for p in hit if 'seqs_order' in p}
+                if len(vals) == 1:
+                    seqs_order[t] = vals.pop()
+            expected = tuple({k: v for k, v in zip(('graph', 'graph_path', 'annotation_path'), t)
+                              if v} for t in targets)
+        else:
+            # a single-graph server (or no pair listed): the client's own pair, named by its
+            # index namespace
+            sel = self.selection()
+            targets = [sel if sel[0] else (None, None, None)]
+            ns = None
+            try:
+                ns = _text((self.capabilities() or {}).get('index_ns'))
+            except TraverseError:
+                pass
+            ps = caps.get('pair_summary')
+            if ns is not None and isinstance(ps, dict) and 'seqs_order' in ps:
+                seqs_order[ns] = ps.get('seqs_order')
+            if sel[0]:
+                expected = ({k: v for k, v in zip(('graph', 'graph_path', 'annotation_path'),
+                                                  sel) if v},)
+            else:
+                expected = ({'index_ns': ns},) if ns is not None else ()
+        results = []
+        for t in targets:
+            try:
+                results.append(self.traverse([seed], strategy, detail=detail, timing=timing,
+                                             graph=t[0], graph_path=t[1],
+                                             annotation_path=t[2], coordinates=coordinates,
+                                             not_after_ms=not_after_ms))
+            except Exception as e:      # a refused request or a transport failure
+                pair = {k: v for k, v in zip(('graph', 'graph_path', 'annotation_path'), t)
+                        if v} or (expected[0] if expected else {})
+                results.append({'pair': pair, 'error': e})
+        return PairResults(results, seq, expected, seqs_order)
+
+
+@dataclass(frozen=True)
+class PairResults:
+    """traverse_pairs()' answer: |results| one per pair (a TraverseResponse, or {pair,
+    error}), |seed| the oriented seed sent, |expected_pairs| the pair objects the requests
+    were sent to, |seqs_order| each pair's record-mapping certificate (GET /capabilities).
+    union_pairs(r.results, seed=r.seed, expected_pairs=r.expected_pairs,
+    seqs_order=r.seqs_order) combines them."""
+    results: list
+    seed: str
+    expected_pairs: tuple
+    seqs_order: dict
