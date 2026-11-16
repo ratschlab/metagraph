@@ -1,7 +1,8 @@
 # Design: combining graphlets — the cross-pair union and stitching a continuation
 
-**Owner-review edition, 2026-11-15, revised after the full Fable and GPT reviews.** Nothing here is implemented, and
-nothing is final. The owner asked to "write this design down first and I will review it end to end", and said of his
+**Owner-review edition, 2026-11-15, revised after the full Fable and GPT reviews.** Implemented since in train 7:
+phase 1a-U (`union.py`, the source-supported mode) and phase 1a-S (`_stitch.py`, experimental, every verdict
+`qualified`); the rest is design. Nothing is final. The owner asked to "write this design down first and I will review it end to end", and said of his
 answers so far: "do not take my answers as the final answers yet". Every decision that rests on one of them is marked
 provisional, and §8 lists them all.
 
@@ -711,8 +712,9 @@ The default mode's file, abridged:
     P	right.u12	seed_r+,s3+,s12+	*	pp:Z:g1,g4	ph:Z:g1,g4,g6	pe:Z:g7=120:dead_end/graph;g8=40/under_strategy
 
 The lower-case tags are user tags: `pp` the pairs spelling a segment or following a path whole, `ph` the pairs
-holding a path whole (displayed or through a route), `pl` the label entries per pair (counts, or `<tag>/<name>` lists
-with `labels='full'`), `pe` the other spans of a path, as in FASTA, `mg` and `mt` a stub's merge. Tests check the
+holding a path whole (displayed or through a route), `pl` the label entries per pair (counts, or with
+`labels='full'` the names, `<tag>=<name>,<name>;…`, each tag once and each name escaped on its own), `pe` the other
+spans of a path, as in FASTA, `mg` and `mt` a stub's merge. Tests check the
 paths the file admits, not its lines (Appendix E.1, P9).
 
 **Comparing.** A union-level `compare()` is not in 1a-U (§7.1). Each common pair's two retrievals compare with the
@@ -1013,8 +1015,8 @@ Appendix C.3 states these rules in full.
 
 | operation | status | where |
 |---|---|---|
-| cross-pair union `union_pairs(results)` | proposed, phase 1a-U, first | §2 |
-| continuation stitching `stitch(parent, child)` | proposed, phase 1a-S, after the union | §3 |
+| cross-pair union `union_pairs(results)` | phase 1a-U, first (built in train 7, source-supported mode) | §2 |
+| continuation stitching `stitch(parent, child)` | phase 1a-S, after the union (built in train 7, experimental, `qualified` only) | §3 |
 | two retrievals of one pair | designed, built later | §4.2 |
 | the two arms of one seed against a `direction: both` fetch | later, a validation helper: as an answer a `direction: both` fetch serves it; as a check the three fetches should agree arm by arm (the owner's provisional answer to OQ2) | Appendix D.5 |
 | different seeds, overlapping or not | left out: a different product | §4.3 |
@@ -1445,8 +1447,8 @@ its result as canonical JSON without `seed_id`); a failed record's, (the pair ke
 - A `merges` token is `<tag>@<to_bp>><trie node>` (`s31`, or `s30$` for a merge segment without bases), followed by
   `~<route to_bp>[:<end reason>]/<absence>` when the route stops short.
 - `certified=` each pair's `certified_to_bp`, as `<tag>:<bp>`.
-- `labels=` label entries per pair as `<alive>/<carrying the whole walk>`, `+` marking a lower bound (cut lists); with
-  `labels='full'` the full lists, as `<tag>/<name>@<from_bp>`.
+- `labels=` label entries per pair as `<alive>/<carrying the whole walk>`, `+` marking a lower bound (cut lists). The
+  full lists with their `from_bp` are `carriers()`'s; `to_fasta()` writes the counts only.
 - `modes=` whenever a part is not in annotate mode (`modes=g1:constrain,g7:annotate` when they differ).
 - `absent=` the absent records as `<tag>:<category>`; `not_included=` the expected pairs not given.
 - `mapping=` the pairs whose header labels rest on an unchecked record mapping, as `<tag>:count_only` or
@@ -1633,7 +1635,8 @@ class StitchedGraphlet:
     summary(max_bytes=2048, *, budget=None) -> dict
     provenance() -> list[dict]            # §3.6
     save(path, *, budget=None)            # [1c] the bundle, Appendix D.3; metagraph.traverse.load(path) returns it
-    digest -> str                         # sha256 of the canonical tree: the part keys and the parts' digests (§3.7)
+    digest -> str                         # sha256 of the canonical tree: the part keys and the parts' digests,
+                                          # each with its retrieval identity (§3.7, C.3)
     memory_bytes() -> int                 # sum of the parts' models + the junction indexes
     # Deliberately refused (CombineRefused 'not_offered', text in §3.1): dump(), to_json(), compare(),
     # subgraph(), to_gfa() (phase 2), label_walks(), routes(), label_summary(), splits() (phase 2)
