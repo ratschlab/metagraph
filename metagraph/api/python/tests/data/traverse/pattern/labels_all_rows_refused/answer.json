@@ -22522,10 +22522,14 @@
     "-"
    ],
    "timing": {
-    "cpu_ms": 22.343583,
-    "elapsed_ms": 3.259666,
-    "label_discovery_ms": 9.319791,
-    "placement_ms": 8.654958
+    "cpu_ms": 28.088583,
+    "elapsed_ms": 3.375959,
+    "label_discovery_ms": 10.132292,
+    "page_faults": {
+     "major": 0,
+     "minor": 4
+    },
+    "placement_ms": 9.36775
    },
    "withheld": null,
    "work": {
@@ -22549,7 +22553,7 @@
      "contexts": {
       "relation": "at_least",
       "unit": "graph_contexts",
-      "value": 202
+      "value": 268
      },
      "contexts_suffix": {
       "relation": "at_least",
@@ -22560,7 +22564,7 @@
      "occurrences": {
       "relation": "at_least",
       "unit": "placed_occurrences",
-      "value": 91
+      "value": 96
      }
     },
     {
@@ -22568,7 +22572,64 @@
      "contexts": {
       "relation": "at_least",
       "unit": "graph_contexts",
-      "value": 7
+      "value": 8
+     },
+     "contexts_suffix": {
+      "relation": "at_least",
+      "unit": "graph_contexts",
+      "value": 1
+     },
+     "graph": "mini_refseq",
+     "occurrences": {
+      "relation": "at_least",
+      "unit": "placed_occurrences",
+      "value": 15
+     }
+    },
+    {
+     "column": "158836",
+     "contexts": {
+      "relation": "at_least",
+      "unit": "graph_contexts",
+      "value": 5
+     },
+     "contexts_suffix": {
+      "relation": "at_least",
+      "unit": "graph_contexts",
+      "value": 1
+     },
+     "graph": "mini_refseq",
+     "occurrences": {
+      "relation": "at_least",
+      "unit": "placed_occurrences",
+      "value": 3
+     }
+    },
+    {
+     "column": "470",
+     "contexts": {
+      "relation": "at_least",
+      "unit": "graph_contexts",
+      "value": 5
+     },
+     "contexts_suffix": {
+      "relation": "at_least",
+      "unit": "graph_contexts",
+      "value": 1
+     },
+     "graph": "mini_refseq",
+     "occurrences": {
+      "relation": "at_least",
+      "unit": "placed_occurrences",
+      "value": 3
+     }
+    },
+    {
+     "column": "573",
+     "contexts": {
+      "relation": "at_least",
+      "unit": "graph_contexts",
+      "value": 5
      },
      "contexts_suffix": {
       "relation": "at_least",
@@ -22583,68 +22644,11 @@
      }
     },
     {
-     "column": "158836",
-     "contexts": {
-      "relation": "at_least",
-      "unit": "graph_contexts",
-      "value": 4
-     },
-     "contexts_suffix": {
-      "relation": "at_least",
-      "unit": "graph_contexts",
-      "value": 1
-     },
-     "graph": "mini_refseq",
-     "occurrences": {
-      "relation": "at_least",
-      "unit": "placed_occurrences",
-      "value": 2
-     }
-    },
-    {
-     "column": "470",
-     "contexts": {
-      "relation": "at_least",
-      "unit": "graph_contexts",
-      "value": 4
-     },
-     "contexts_suffix": {
-      "relation": "at_least",
-      "unit": "graph_contexts",
-      "value": 1
-     },
-     "graph": "mini_refseq",
-     "occurrences": {
-      "relation": "at_least",
-      "unit": "placed_occurrences",
-      "value": 2
-     }
-    },
-    {
-     "column": "573",
-     "contexts": {
-      "relation": "at_least",
-      "unit": "graph_contexts",
-      "value": 4
-     },
-     "contexts_suffix": {
-      "relation": "at_least",
-      "unit": "graph_contexts",
-      "value": 1
-     },
-     "graph": "mini_refseq",
-     "occurrences": {
-      "relation": "at_least",
-      "unit": "placed_occurrences",
-      "value": 5
-     }
-    },
-    {
      "column": "72407",
      "contexts": {
       "relation": "at_least",
       "unit": "graph_contexts",
-      "value": 4
+      "value": 5
      },
      "contexts_suffix": {
       "relation": "at_least",
@@ -22655,7 +22659,7 @@
      "occurrences": {
       "relation": "at_least",
       "unit": "placed_occurrences",
-      "value": 2
+      "value": 4
      }
     },
     {
@@ -22663,7 +22667,7 @@
      "contexts": {
       "relation": "at_least",
       "unit": "graph_contexts",
-      "value": 2
+      "value": 3
      },
      "contexts_suffix": {
       "relation": "at_least",
@@ -22682,7 +22686,7 @@
      "contexts": {
       "relation": "at_least",
       "unit": "graph_contexts",
-      "value": 2
+      "value": 3
      },
      "contexts_suffix": {
       "relation": "at_least",
@@ -22701,7 +22705,7 @@
      "contexts": {
       "relation": "at_least",
       "unit": "graph_contexts",
-      "value": 2
+      "value": 3
      },
      "contexts_suffix": {
       "relation": "at_least",
@@ -22849,7 +22853,7 @@
     "occurrences": {
      "relation": "at_least",
      "unit": "placed_occurrences",
-     "value": 114
+     "value": 133
     }
    },
    "cut": {
@@ -26617,15 +26621,7 @@
      "labels": [
       {
        "column": "287",
-       "occurrence_list": [
-        {
-         "nt_coords": "1125449-1125460",
-         "nt_length": 6937609,
-         "record": "NZ_CP034369.1",
-         "seq_id": 2,
-         "strand": "-"
-        }
-       ],
+       "occurrence_list": [],
        "occurrences": {
         "relation": "exact",
         "unit": "placed_occurrences",
@@ -26837,8 +26833,162 @@
     {
      "instance": "CTGGCGCTGGCG",
      "kmer": "GCTGGCGCTGGCGACGGGCAGCGCCTTCCAC",
-     "labels": null,
-     "labels_status": "output_budget",
+     "labels": [
+      {
+       "column": "562",
+       "occurrence_list": [
+        {
+         "nt_coords": "11340-11351",
+         "nt_length": 111688,
+         "record": "NZ_CP021206.1",
+         "seq_id": 4,
+         "strand": "-"
+        },
+        {
+         "nt_coords": "1690-1701",
+         "nt_length": 7845,
+         "record": "NZ_RYBD01000068.1",
+         "seq_id": 5,
+         "strand": "-"
+        },
+        {
+         "nt_coords": "75871-75882",
+         "nt_length": 87021,
+         "record": "NC_019089.1",
+         "seq_id": 6,
+         "strand": "-"
+        },
+        {
+         "nt_coords": "1641-1652",
+         "nt_length": 8995,
+         "record": "NZ_RYEE01000044.1",
+         "seq_id": 9,
+         "strand": "-"
+        },
+        {
+         "nt_coords": "5356-5367",
+         "nt_length": 7130,
+         "record": "NZ_MOGZ01000079.1",
+         "seq_id": 10,
+         "strand": "-"
+        },
+        {
+         "nt_coords": "21105-21116",
+         "nt_length": 144225,
+         "record": "NZ_CP025626.1",
+         "seq_id": 11,
+         "strand": "-"
+        }
+       ],
+       "occurrences": {
+        "relation": "exact",
+        "unit": "placed_occurrences",
+        "value": 6
+       },
+       "support": "kmer"
+      },
+      {
+       "column": "158836",
+       "occurrence_list": [
+        {
+         "nt_coords": "1678-1689",
+         "nt_length": 18783,
+         "record": "NZ_SSCT01000033.1",
+         "seq_id": 2,
+         "strand": "-"
+        }
+       ],
+       "occurrences": {
+        "relation": "exact",
+        "unit": "placed_occurrences",
+        "value": 1
+       },
+       "support": "kmer"
+      },
+      {
+       "column": "470",
+       "occurrence_list": [
+        {
+         "nt_coords": "5647-5658",
+         "nt_length": 7338,
+         "record": "NZ_NQXH01000034.1",
+         "seq_id": 2,
+         "strand": "-"
+        }
+       ],
+       "occurrences": {
+        "relation": "exact",
+        "unit": "placed_occurrences",
+        "value": 1
+       },
+       "support": "kmer"
+      },
+      {
+       "column": "573",
+       "occurrence_list": [
+        {
+         "nt_coords": "57564-57575",
+         "nt_length": 105259,
+         "record": "NZ_CP031884.1",
+         "seq_id": 4,
+         "strand": "-"
+        },
+        {
+         "nt_coords": "9353-9364",
+         "nt_length": 11788,
+         "record": "NZ_BFCQ01000022.1",
+         "seq_id": 5,
+         "strand": "-"
+        },
+        {
+         "nt_coords": "5230-5241",
+         "nt_length": 54064,
+         "record": "NZ_CP014757.1",
+         "seq_id": 6,
+         "strand": "-"
+        },
+        {
+         "nt_coords": "26662-26673",
+         "nt_length": 110723,
+         "record": "NZ_CABHKL010000003.1",
+         "seq_id": 9,
+         "strand": "-"
+        }
+       ],
+       "occurrences": {
+        "relation": "exact",
+        "unit": "placed_occurrences",
+        "value": 4
+       },
+       "support": "kmer"
+      },
+      {
+       "column": "72407",
+       "occurrence_list": [
+        {
+         "nt_coords": "66940-66951",
+         "nt_length": 212326,
+         "record": "NZ_CP023554.1",
+         "seq_id": 2,
+         "strand": "-"
+        },
+        {
+         "nt_coords": "12999-13010",
+         "nt_length": 15007,
+         "record": "NZ_STBI01000048.1",
+         "seq_id": 3,
+         "strand": "-"
+        }
+       ],
+       "occurrences": {
+        "relation": "exact",
+        "unit": "placed_occurrences",
+        "value": 2
+       },
+       "support": "kmer"
+      }
+     ],
+     "labels_status": "complete",
      "labels_total": 5,
      "node": 557276,
      "offset": 1,
@@ -26849,8 +26999,19 @@
     {
      "instance": "CGCCAGCGCCAG",
      "kmer": "CGCCAGCGCCAGCGTGCGCGACGAGTTCCAG",
-     "labels": null,
-     "labels_status": "output_budget",
+     "labels": [
+      {
+       "column": "287",
+       "occurrence_list": [],
+       "occurrences": {
+        "relation": "exact",
+        "unit": "placed_occurrences",
+        "value": 1
+       },
+       "support": "kmer"
+      }
+     ],
+     "labels_status": "complete",
      "labels_total": 1,
      "node": 560260,
      "offset": 0,
@@ -26861,8 +27022,19 @@
     {
      "instance": "CGCCAGCGCCAG",
      "kmer": "AATGGCCGAGCAACGCCAGCGCCAGAAGCAT",
-     "labels": null,
-     "labels_status": "output_budget",
+     "labels": [
+      {
+       "column": "287",
+       "occurrence_list": [],
+       "occurrences": {
+        "relation": "exact",
+        "unit": "placed_occurrences",
+        "value": 1
+       },
+       "support": "kmer"
+      }
+     ],
+     "labels_status": "complete",
      "labels_total": 1,
      "node": 568343,
      "offset": 13,
@@ -26873,8 +27045,19 @@
     {
      "instance": "CGCCAGCGCCAG",
      "kmer": "GCTGATCGCCCGCCAGCGCCAGACCCAGCAA",
-     "labels": null,
-     "labels_status": "output_budget",
+     "labels": [
+      {
+       "column": "287",
+       "occurrence_list": [],
+       "occurrences": {
+        "relation": "exact",
+        "unit": "placed_occurrences",
+        "value": 1
+       },
+       "support": "kmer"
+      }
+     ],
+     "labels_status": "complete",
      "labels_total": 1,
      "node": 575863,
      "offset": 10,
@@ -26885,8 +27068,19 @@
     {
      "instance": "CGCCAGCGCCAG",
      "kmer": "CGGTAGCGGTCGCGAACGCCAGCGCCAGCAG",
-     "labels": null,
-     "labels_status": "output_budget",
+     "labels": [
+      {
+       "column": "287",
+       "occurrence_list": [],
+       "occurrences": {
+        "relation": "exact",
+        "unit": "placed_occurrences",
+        "value": 1
+       },
+       "support": "kmer"
+      }
+     ],
+     "labels_status": "complete",
      "labels_total": 1,
      "node": 577871,
      "offset": 16,
@@ -26897,8 +27091,19 @@
     {
      "instance": "CGCCAGCGCCAG",
      "kmer": "CCAGCACCCAGACCGCCGCCAGCGCCAGCAG",
-     "labels": null,
-     "labels_status": "output_budget",
+     "labels": [
+      {
+       "column": "287",
+       "occurrence_list": [],
+       "occurrences": {
+        "relation": "exact",
+        "unit": "placed_occurrences",
+        "value": 1
+       },
+       "support": "kmer"
+      }
+     ],
+     "labels_status": "complete",
      "labels_total": 1,
      "node": 577872,
      "offset": 16,
@@ -26909,8 +27114,19 @@
     {
      "instance": "CGCCAGCGCCAG",
      "kmer": "CTCCTCAGGCCGACCGCGCCAGCGCCAGCAG",
-     "labels": null,
-     "labels_status": "output_budget",
+     "labels": [
+      {
+       "column": "287",
+       "occurrence_list": [],
+       "occurrences": {
+        "relation": "exact",
+        "unit": "placed_occurrences",
+        "value": 1
+       },
+       "support": "kmer"
+      }
+     ],
+     "labels_status": "complete",
      "labels_total": 1,
      "node": 577873,
      "offset": 16,
@@ -26921,8 +27137,19 @@
     {
      "instance": "CGCCAGCGCCAG",
      "kmer": "CCAGCGAGGCATCCGGCGCCAGCGCCAGCAG",
-     "labels": null,
-     "labels_status": "output_budget",
+     "labels": [
+      {
+       "column": "287",
+       "occurrence_list": [],
+       "occurrences": {
+        "relation": "exact",
+        "unit": "placed_occurrences",
+        "value": 1
+       },
+       "support": "kmer"
+      }
+     ],
+     "labels_status": "complete",
      "labels_total": 1,
      "node": 577874,
      "offset": 16,
@@ -26933,8 +27160,19 @@
     {
      "instance": "CGCCAGCGCCAG",
      "kmer": "ACCAGGGGCCGACCATCGCCAGCGCCAGCAT",
-     "labels": null,
-     "labels_status": "output_budget",
+     "labels": [
+      {
+       "column": "287",
+       "occurrence_list": [],
+       "occurrences": {
+        "relation": "exact",
+        "unit": "placed_occurrences",
+        "value": 1
+       },
+       "support": "kmer"
+      }
+     ],
+     "labels_status": "complete",
      "labels_total": 1,
      "node": 577875,
      "offset": 16,
@@ -26945,8 +27183,19 @@
     {
      "instance": "CTGGCGCTGGCG",
      "kmer": "GCGCCGCCTGTTCCTGGCGCTGGCGCAGCAG",
-     "labels": null,
-     "labels_status": "output_budget",
+     "labels": [
+      {
+       "column": "287",
+       "occurrence_list": [],
+       "occurrences": {
+        "relation": "exact",
+        "unit": "placed_occurrences",
+        "value": 1
+       },
+       "support": "kmer"
+      }
+     ],
+     "labels_status": "complete",
      "labels_total": 1,
      "node": 586355,
      "offset": 13,
@@ -26957,8 +27206,19 @@
     {
      "instance": "CGCCAGCGCCAG",
      "kmer": "CCGCCAGCGCCAGACCCAGCAATTGCAGCAG",
-     "labels": null,
-     "labels_status": "output_budget",
+     "labels": [
+      {
+       "column": "287",
+       "occurrence_list": [],
+       "occurrences": {
+        "relation": "exact",
+        "unit": "placed_occurrences",
+        "value": 1
+       },
+       "support": "kmer"
+      }
+     ],
+     "labels_status": "complete",
      "labels_total": 1,
      "node": 589607,
      "offset": 1,
@@ -26969,8 +27229,19 @@
     {
      "instance": "CTGGCGCTGGCG",
      "kmer": "CACTGGCGCTGGCGTGCAGTCTCGACCGCAG",
-     "labels": null,
-     "labels_status": "output_budget",
+     "labels": [
+      {
+       "column": "287",
+       "occurrence_list": [],
+       "occurrences": {
+        "relation": "exact",
+        "unit": "placed_occurrences",
+        "value": 1
+       },
+       "support": "kmer"
+      }
+     ],
+     "labels_status": "complete",
      "labels_total": 1,
      "node": 617692,
      "offset": 2,
@@ -26981,8 +27252,19 @@
     {
      "instance": "CTGGCGCTGGCG",
      "kmer": "TCGGCGCTGGCGCTGGCGGCGGATTCCGCAG",
-     "labels": null,
-     "labels_status": "output_budget",
+     "labels": [
+      {
+       "column": "287",
+       "occurrence_list": [],
+       "occurrences": {
+        "relation": "exact",
+        "unit": "placed_occurrences",
+        "value": 1
+       },
+       "support": "kmer"
+      }
+     ],
+     "labels_status": "complete",
      "labels_total": 1,
      "node": 628745,
      "offset": 6,
@@ -26993,8 +27275,19 @@
     {
      "instance": "CGCCAGCGCCAG",
      "kmer": "TGCGCCAGCGCCAGGAACTGCAGGCGCGCAT",
-     "labels": null,
-     "labels_status": "output_budget",
+     "labels": [
+      {
+       "column": "287",
+       "occurrence_list": [],
+       "occurrences": {
+        "relation": "exact",
+        "unit": "placed_occurrences",
+        "value": 1
+       },
+       "support": "kmer"
+      }
+     ],
+     "labels_status": "complete",
      "labels_total": 1,
      "node": 637168,
      "offset": 2,
@@ -27005,8 +27298,19 @@
     {
      "instance": "CGCCAGCGCCAG",
      "kmer": "CAAGCTCGGCGGTCGCCAGCGCCAGGCGCAG",
-     "labels": null,
-     "labels_status": "output_budget",
+     "labels": [
+      {
+       "column": "287",
+       "occurrence_list": [],
+       "occurrences": {
+        "relation": "exact",
+        "unit": "placed_occurrences",
+        "value": 1
+       },
+       "support": "kmer"
+      }
+     ],
+     "labels_status": "complete",
      "labels_total": 1,
      "node": 641225,
      "offset": 13,
@@ -27017,8 +27321,19 @@
     {
      "instance": "CTGGCGCTGGCG",
      "kmer": "CCGCCCTGGCGCTGGCGGCGATCCGGCGCAA",
-     "labels": null,
-     "labels_status": "output_budget",
+     "labels": [
+      {
+       "column": "287",
+       "occurrence_list": [],
+       "occurrences": {
+        "relation": "exact",
+        "unit": "placed_occurrences",
+        "value": 1
+       },
+       "support": "kmer"
+      }
+     ],
+     "labels_status": "complete",
      "labels_total": 1,
      "node": 643504,
      "offset": 5,
@@ -27029,8 +27344,19 @@
     {
      "instance": "CGCCAGCGCCAG",
      "kmer": "CGCGCCGCCAGCGCCAGCCTGCAGGGCGCAA",
-     "labels": null,
-     "labels_status": "output_budget",
+     "labels": [
+      {
+       "column": "287",
+       "occurrence_list": [],
+       "occurrences": {
+        "relation": "exact",
+        "unit": "placed_occurrences",
+        "value": 1
+       },
+       "support": "kmer"
+      }
+     ],
+     "labels_status": "complete",
      "labels_total": 1,
      "node": 645027,
      "offset": 5,
@@ -27041,8 +27367,19 @@
     {
      "instance": "CGCCAGCGCCAG",
      "kmer": "ATTGCGCCAGCGCCAGAGCGAACTGGCGCAG",
-     "labels": null,
-     "labels_status": "output_budget",
+     "labels": [
+      {
+       "column": "287",
+       "occurrence_list": [],
+       "occurrences": {
+        "relation": "exact",
+        "unit": "placed_occurrences",
+        "value": 1
+       },
+       "support": "kmer"
+      }
+     ],
+     "labels_status": "complete",
      "labels_total": 1,
      "node": 646260,
      "offset": 4,
@@ -27053,8 +27390,19 @@
     {
      "instance": "CTGGCGCTGGCG",
      "kmer": "CGCCCCGCTGGCGCTGGCGCGCCTGGCGCAA",
-     "labels": null,
-     "labels_status": "output_budget",
+     "labels": [
+      {
+       "column": "287",
+       "occurrence_list": [],
+       "occurrences": {
+        "relation": "exact",
+        "unit": "placed_occurrences",
+        "value": 1
+       },
+       "support": "kmer"
+      }
+     ],
+     "labels_status": "complete",
      "labels_total": 1,
      "node": 646669,
      "offset": 7,
@@ -27065,8 +27413,19 @@
     {
      "instance": "CTGGCGCTGGCG",
      "kmer": "CGCTGTAGGCGTCGACCTGGCGCTGGCGCAC",
-     "labels": null,
-     "labels_status": "output_budget",
+     "labels": [
+      {
+       "column": "287",
+       "occurrence_list": [],
+       "occurrences": {
+        "relation": "exact",
+        "unit": "placed_occurrences",
+        "value": 1
+       },
+       "support": "kmer"
+      }
+     ],
+     "labels_status": "complete",
      "labels_total": 1,
      "node": 647086,
      "offset": 16,
@@ -27077,8 +27436,19 @@
     {
      "instance": "CTGGCGCTGGCG",
      "kmer": "GCCGTTCCACCAGGGCCTGGCGCTGGCGCAG",
-     "labels": null,
-     "labels_status": "output_budget",
+     "labels": [
+      {
+       "column": "287",
+       "occurrence_list": [],
+       "occurrences": {
+        "relation": "exact",
+        "unit": "placed_occurrences",
+        "value": 1
+       },
+       "support": "kmer"
+      }
+     ],
+     "labels_status": "complete",
      "labels_total": 1,
      "node": 647087,
      "offset": 16,
@@ -27089,8 +27459,19 @@
     {
      "instance": "CTGGCGCTGGCG",
      "kmer": "GTTCCGAGCGGGCTTCCTGGCGCTGGCGCAA",
-     "labels": null,
-     "labels_status": "output_budget",
+     "labels": [
+      {
+       "column": "287",
+       "occurrence_list": [],
+       "occurrences": {
+        "relation": "exact",
+        "unit": "placed_occurrences",
+        "value": 1
+       },
+       "support": "kmer"
+      }
+     ],
+     "labels_status": "complete",
      "labels_total": 1,
      "node": 647088,
      "offset": 16,
@@ -27101,8 +27482,19 @@
     {
      "instance": "CTGGCGCTGGCG",
      "kmer": "TCGCGTCGAGTCGTTCCTGGCGCTGGCGCAG",
-     "labels": null,
-     "labels_status": "output_budget",
+     "labels": [
+      {
+       "column": "287",
+       "occurrence_list": [],
+       "occurrences": {
+        "relation": "exact",
+        "unit": "placed_occurrences",
+        "value": 1
+       },
+       "support": "kmer"
+      }
+     ],
+     "labels_status": "complete",
      "labels_total": 1,
      "node": 647089,
      "offset": 16,
@@ -27113,8 +27505,19 @@
     {
      "instance": "CTGGCGCTGGCG",
      "kmer": "GCTGCGCCGCCTGTTCCTGGCGCTGGCGCAG",
-     "labels": null,
-     "labels_status": "output_budget",
+     "labels": [
+      {
+       "column": "287",
+       "occurrence_list": [],
+       "occurrences": {
+        "relation": "exact",
+        "unit": "placed_occurrences",
+        "value": 1
+       },
+       "support": "kmer"
+      }
+     ],
+     "labels_status": "complete",
      "labels_total": 1,
      "node": 647090,
      "offset": 16,
@@ -27125,8 +27528,27 @@
     {
      "instance": "CTGGCGCTGGCG",
      "kmer": "CGCCGGCCTGCCGCCGCTGGCGCTGGCGCAG",
-     "labels": null,
-     "labels_status": "output_budget",
+     "labels": [
+      {
+       "column": "287",
+       "occurrence_list": [
+        {
+         "nt_coords": "820797-820808",
+         "nt_length": 6937609,
+         "record": "NZ_CP034369.1",
+         "seq_id": 2,
+         "strand": "-"
+        }
+       ],
+       "occurrences": {
+        "relation": "exact",
+        "unit": "placed_occurrences",
+        "value": 1
+       },
+       "support": "kmer"
+      }
+     ],
+     "labels_status": "complete",
      "labels_total": 1,
      "node": 647091,
      "offset": 16,
@@ -27137,8 +27559,19 @@
     {
      "instance": "CTGGCGCTGGCG",
      "kmer": "TGCCAAGCAATGGCCGCTGGCGCTGGCGCAG",
-     "labels": null,
-     "labels_status": "output_budget",
+     "labels": [
+      {
+       "column": "287",
+       "occurrence_list": [],
+       "occurrences": {
+        "relation": "exact",
+        "unit": "placed_occurrences",
+        "value": 1
+       },
+       "support": "kmer"
+      }
+     ],
+     "labels_status": "complete",
      "labels_total": 1,
      "node": 647092,
      "offset": 16,
@@ -27149,8 +27582,27 @@
     {
      "instance": "CTGGCGCTGGCG",
      "kmer": "CCGGCACCCGGCCGCGCTGGCGCTGGCGCAA",
-     "labels": null,
-     "labels_status": "output_budget",
+     "labels": [
+      {
+       "column": "287",
+       "occurrence_list": [
+        {
+         "nt_coords": "1009740-1009751",
+         "nt_length": 6937609,
+         "record": "NZ_CP034369.1",
+         "seq_id": 2,
+         "strand": "-"
+        }
+       ],
+       "occurrences": {
+        "relation": "exact",
+        "unit": "placed_occurrences",
+        "value": 1
+       },
+       "support": "kmer"
+      }
+     ],
+     "labels_status": "complete",
      "labels_total": 1,
      "node": 647093,
      "offset": 16,
@@ -27161,8 +27613,27 @@
     {
      "instance": "CTGGCGCTGGCG",
      "kmer": "CGACGTGGAGGCGGCGCTGGCGCTGGCGCAG",
-     "labels": null,
-     "labels_status": "output_budget",
+     "labels": [
+      {
+       "column": "287",
+       "occurrence_list": [
+        {
+         "nt_coords": "913900-913911",
+         "nt_length": 6937609,
+         "record": "NZ_CP034369.1",
+         "seq_id": 2,
+         "strand": "-"
+        }
+       ],
+       "occurrences": {
+        "relation": "exact",
+        "unit": "placed_occurrences",
+        "value": 1
+       },
+       "support": "kmer"
+      }
+     ],
+     "labels_status": "complete",
      "labels_total": 1,
      "node": 647094,
      "offset": 16,
@@ -27173,8 +27644,19 @@
     {
      "instance": "CTGGCGCTGGCG",
      "kmer": "CGGCCGTGGTGCGCGGCTGGCGCTGGCGCAG",
-     "labels": null,
-     "labels_status": "output_budget",
+     "labels": [
+      {
+       "column": "287",
+       "occurrence_list": [],
+       "occurrences": {
+        "relation": "exact",
+        "unit": "placed_occurrences",
+        "value": 1
+       },
+       "support": "kmer"
+      }
+     ],
+     "labels_status": "complete",
      "labels_total": 1,
      "node": 647095,
      "offset": 16,
@@ -27185,8 +27667,19 @@
     {
      "instance": "CTGGCGCTGGCG",
      "kmer": "CAGTACCAGCAATTTGCTGGCGCTGGCGCAA",
-     "labels": null,
-     "labels_status": "output_budget",
+     "labels": [
+      {
+       "column": "287",
+       "occurrence_list": [],
+       "occurrences": {
+        "relation": "exact",
+        "unit": "placed_occurrences",
+        "value": 1
+       },
+       "support": "kmer"
+      }
+     ],
+     "labels_status": "complete",
      "labels_total": 1,
      "node": 647096,
      "offset": 16,
@@ -27197,8 +27690,19 @@
     {
      "instance": "CTGGCGCTGGCG",
      "kmer": "CGCCCGCCTGCCCCCTCTGGCGCTGGCGCAG",
-     "labels": null,
-     "labels_status": "output_budget",
+     "labels": [
+      {
+       "column": "287",
+       "occurrence_list": [],
+       "occurrences": {
+        "relation": "exact",
+        "unit": "placed_occurrences",
+        "value": 1
+       },
+       "support": "kmer"
+      }
+     ],
+     "labels_status": "complete",
      "labels_total": 1,
      "node": 647097,
      "offset": 16,
@@ -27209,8 +27713,34 @@
     {
      "instance": "CTGGCGCTGGCG",
      "kmer": "ACCGATTGCTCACCGTCTGGCGCTGGCGCAG",
-     "labels": null,
-     "labels_status": "output_budget",
+     "labels": [
+      {
+       "column": "562",
+       "occurrence_list": [
+        {
+         "nt_coords": "53566-53577",
+         "nt_length": 144225,
+         "record": "NZ_CP025626.1",
+         "seq_id": 11,
+         "strand": "-"
+        },
+        {
+         "nt_coords": "81212-81223",
+         "nt_length": 117536,
+         "record": "NC_013122.1",
+         "seq_id": 12,
+         "strand": "-"
+        }
+       ],
+       "occurrences": {
+        "relation": "exact",
+        "unit": "placed_occurrences",
+        "value": 2
+       },
+       "support": "kmer"
+      }
+     ],
+     "labels_status": "complete",
      "labels_total": 1,
      "node": 647098,
      "offset": 16,
@@ -27221,8 +27751,34 @@
     {
      "instance": "CTGGCGCTGGCG",
      "kmer": "CTCACCGTCTGGCGCTGGCGCAGCGTCGCAA",
-     "labels": null,
-     "labels_status": "output_budget",
+     "labels": [
+      {
+       "column": "562",
+       "occurrence_list": [
+        {
+         "nt_coords": "53566-53577",
+         "nt_length": 144225,
+         "record": "NZ_CP025626.1",
+         "seq_id": 11,
+         "strand": "-"
+        },
+        {
+         "nt_coords": "81212-81223",
+         "nt_length": 117536,
+         "record": "NC_013122.1",
+         "seq_id": 12,
+         "strand": "-"
+        }
+       ],
+       "occurrences": {
+        "relation": "exact",
+        "unit": "placed_occurrences",
+        "value": 2
+       },
+       "support": "kmer"
+      }
+     ],
+     "labels_status": "complete",
      "labels_total": 1,
      "node": 656017,
      "offset": 8,
@@ -27233,8 +27789,27 @@
     {
      "instance": "CTGGCGCTGGCG",
      "kmer": "GTAGCGGCTGGCGCTGGCGCGCCGGTCGCAC",
-     "labels": null,
-     "labels_status": "output_budget",
+     "labels": [
+      {
+       "column": "287",
+       "occurrence_list": [
+        {
+         "nt_coords": "1007406-1007417",
+         "nt_length": 6937609,
+         "record": "NZ_CP034369.1",
+         "seq_id": 2,
+         "strand": "-"
+        }
+       ],
+       "occurrences": {
+        "relation": "exact",
+        "unit": "placed_occurrences",
+        "value": 1
+       },
+       "support": "kmer"
+      }
+     ],
+     "labels_status": "complete",
      "labels_total": 1,
      "node": 656453,
      "offset": 7,
@@ -27245,8 +27820,254 @@
     {
      "instance": "CGCCAGCGCCAG",
      "kmer": "CTGCCCGTCGCCAGCGCCAGCGATGTCGCAC",
-     "labels": null,
-     "labels_status": "output_budget",
+     "labels": [
+      {
+       "column": "287",
+       "occurrence_list": [],
+       "occurrences": {
+        "relation": "exact",
+        "unit": "placed_occurrences",
+        "value": 1
+       },
+       "support": "kmer"
+      },
+      {
+       "column": "562",
+       "occurrence_list": [
+        {
+         "nt_coords": "60141-60152",
+         "nt_length": 138340,
+         "record": "NZ_CP021936.1",
+         "seq_id": 0,
+         "strand": "+"
+        },
+        {
+         "nt_coords": "2237-2248",
+         "nt_length": 4525,
+         "record": "NZ_MOHB01000080.1",
+         "seq_id": 1,
+         "strand": "+"
+        },
+        {
+         "nt_coords": "5662-5673",
+         "nt_length": 15095,
+         "record": "NZ_RJAB01000061.1",
+         "seq_id": 2,
+         "strand": "+"
+        },
+        {
+         "nt_coords": "89492-89503",
+         "nt_length": 133234,
+         "record": "NZ_MPCO01000003.1",
+         "seq_id": 3,
+         "strand": "+"
+        },
+        {
+         "nt_coords": "7238-7249",
+         "nt_length": 8746,
+         "record": "NZ_MOIC01000010.1",
+         "seq_id": 7,
+         "strand": "+"
+        },
+        {
+         "nt_coords": "1763-1774",
+         "nt_length": 7144,
+         "record": "NZ_MOHX01000127.1",
+         "seq_id": 8,
+         "strand": "+"
+        },
+        {
+         "nt_coords": "76358-76369",
+         "nt_length": 144225,
+         "record": "NZ_CP025626.1",
+         "seq_id": 11,
+         "strand": "+"
+        }
+       ],
+       "occurrences": {
+        "relation": "exact",
+        "unit": "placed_occurrences",
+        "value": 7
+       },
+       "support": "kmer"
+      },
+      {
+       "column": "158836",
+       "occurrence_list": [
+        {
+         "nt_coords": "22551-22562",
+         "nt_length": 152715,
+         "record": "NZ_CP030345.1",
+         "seq_id": 0,
+         "strand": "+"
+        },
+        {
+         "nt_coords": "2040-2051",
+         "nt_length": 7852,
+         "record": "NZ_MRAB01000034.1",
+         "seq_id": 1,
+         "strand": "+"
+        }
+       ],
+       "occurrences": {
+        "relation": "exact",
+        "unit": "placed_occurrences",
+        "value": 2
+       },
+       "support": "kmer"
+      },
+      {
+       "column": "470",
+       "occurrence_list": [
+        {
+         "nt_coords": "10580-10591",
+         "nt_length": 47098,
+         "record": "NC_020818.1",
+         "seq_id": 0,
+         "strand": "+"
+        },
+        {
+         "nt_coords": "1682-1693",
+         "nt_length": 8078,
+         "record": "NZ_NXGU01000132.1",
+         "seq_id": 1,
+         "strand": "+"
+        }
+       ],
+       "occurrences": {
+        "relation": "exact",
+        "unit": "placed_occurrences",
+        "value": 2
+       },
+       "support": "kmer"
+      },
+      {
+       "column": "573",
+       "occurrence_list": [
+        {
+         "nt_coords": "72768-72779",
+         "nt_length": 110432,
+         "record": "NZ_CM008882.1",
+         "seq_id": 0,
+         "strand": "+"
+        },
+        {
+         "nt_coords": "1941-1952",
+         "nt_length": 5501,
+         "record": "NZ_CDQG01000062.1",
+         "seq_id": 1,
+         "strand": "+"
+        },
+        {
+         "nt_coords": "1998-2009",
+         "nt_length": 15013,
+         "record": "NZ_STBC01000047.1",
+         "seq_id": 2,
+         "strand": "+"
+        },
+        {
+         "nt_coords": "4146-4157",
+         "nt_length": 54064,
+         "record": "NZ_CP021947.1",
+         "seq_id": 3,
+         "strand": "+"
+        },
+        {
+         "nt_coords": "41009-41020",
+         "nt_length": 44058,
+         "record": "NZ_NICZ01000017.1",
+         "seq_id": 8,
+         "strand": "+"
+        }
+       ],
+       "occurrences": {
+        "relation": "exact",
+        "unit": "placed_occurrences",
+        "value": 5
+       },
+       "support": "kmer"
+      },
+      {
+       "column": "72407",
+       "occurrence_list": [
+        {
+         "nt_coords": "139734-139745",
+         "nt_length": 223434,
+         "record": "NZ_CP023488.1",
+         "seq_id": 0,
+         "strand": "+"
+        },
+        {
+         "nt_coords": "1998-2009",
+         "nt_length": 15009,
+         "record": "NZ_STDH01000048.1",
+         "seq_id": 1,
+         "strand": "+"
+        }
+       ],
+       "occurrences": {
+        "relation": "exact",
+        "unit": "placed_occurrences",
+        "value": 2
+       },
+       "support": "kmer"
+      },
+      {
+       "column": "1296536",
+       "occurrence_list": [
+        {
+         "nt_coords": "5061-5072",
+         "nt_length": 11137,
+         "record": "NZ_LPPQ01000025.1",
+         "seq_id": 0,
+         "strand": "+"
+        }
+       ],
+       "occurrences": {
+        "relation": "exact",
+        "unit": "placed_occurrences",
+        "value": 1
+       },
+       "support": "kmer"
+      },
+      {
+       "column": "546",
+       "occurrence_list": [
+        {
+         "nt_coords": "9308-9319",
+         "nt_length": 26537,
+         "record": "NZ_LJES02000051.1",
+         "seq_id": 0,
+         "strand": "+"
+        }
+       ],
+       "occurrences": {
+        "relation": "exact",
+        "unit": "placed_occurrences",
+        "value": 1
+       },
+       "support": "kmer"
+      },
+      {
+       "column": "615",
+       "occurrence_list": [
+        {
+         "nt_coords": "72838-72849",
+         "nt_length": 105614,
+         "record": "NZ_CM008884.1",
+         "seq_id": 0,
+         "strand": "+"
+        }
+       ],
+       "occurrences": {
+        "relation": "exact",
+        "unit": "placed_occurrences",
+        "value": 1
+       },
+       "support": "kmer"
+      }
+     ],
+     "labels_status": "complete",
      "labels_total": 9,
      "node": 656825,
      "offset": 8,
@@ -27257,8 +28078,19 @@
     {
      "instance": "CTGGCGCTGGCG",
      "kmer": "CTGGCGCTGGCGCGCGAATTCACCAAGGCAG",
-     "labels": null,
-     "labels_status": "output_budget",
+     "labels": [
+      {
+       "column": "287",
+       "occurrence_list": [],
+       "occurrences": {
+        "relation": "exact",
+        "unit": "placed_occurrences",
+        "value": 1
+       },
+       "support": "kmer"
+      }
+     ],
+     "labels_status": "complete",
      "labels_total": 1,
      "node": 658805,
      "offset": 0,
@@ -27269,8 +28101,19 @@
     {
      "instance": "CGCCAGCGCCAG",
      "kmer": "GCTGCGCGCCAGCGCCAGGCTGGCCAGGCAC",
-     "labels": null,
-     "labels_status": "output_budget",
+     "labels": [
+      {
+       "column": "287",
+       "occurrence_list": [],
+       "occurrences": {
+        "relation": "exact",
+        "unit": "placed_occurrences",
+        "value": 1
+       },
+       "support": "kmer"
+      }
+     ],
+     "labels_status": "complete",
      "labels_total": 1,
      "node": 661424,
      "offset": 6,
@@ -27281,8 +28124,19 @@
     {
      "instance": "CTGGCGCTGGCG",
      "kmer": "TGCTGCTGCTGGCGCTGGCGCGGACCGGCAG",
-     "labels": null,
-     "labels_status": "output_budget",
+     "labels": [
+      {
+       "column": "287",
+       "occurrence_list": [],
+       "occurrences": {
+        "relation": "exact",
+        "unit": "placed_occurrences",
+        "value": 1
+       },
+       "support": "kmer"
+      }
+     ],
+     "labels_status": "complete",
      "labels_total": 1,
      "node": 670226,
      "offset": 8,
@@ -27293,8 +28147,19 @@
     {
      "instance": "CGCCAGCGCCAG",
      "kmer": "CCGCCAGCGCCAGGGCGAAGGCCGCCGGCAC",
-     "labels": null,
-     "labels_status": "output_budget",
+     "labels": [
+      {
+       "column": "287",
+       "occurrence_list": [],
+       "occurrences": {
+        "relation": "exact",
+        "unit": "placed_occurrences",
+        "value": 1
+       },
+       "support": "kmer"
+      }
+     ],
+     "labels_status": "complete",
      "labels_total": 1,
      "node": 673003,
      "offset": 1,
@@ -27305,8 +28170,19 @@
     {
      "instance": "CGCCAGCGCCAG",
      "kmer": "GCAGCATCGACAACGCCAGCGCCAGCGGCAC",
-     "labels": null,
-     "labels_status": "output_budget",
+     "labels": [
+      {
+       "column": "287",
+       "occurrence_list": [],
+       "occurrences": {
+        "relation": "exact",
+        "unit": "placed_occurrences",
+        "value": 1
+       },
+       "support": "kmer"
+      }
+     ],
+     "labels_status": "complete",
      "labels_total": 1,
      "node": 677892,
      "offset": 13,
@@ -27317,8 +28193,19 @@
     {
      "instance": "CGCCAGCGCCAG",
      "kmer": "ACGCCAGCGCCAGCGGCACGCTGGTCGGCAA",
-     "labels": null,
-     "labels_status": "output_budget",
+     "labels": [
+      {
+       "column": "287",
+       "occurrence_list": [],
+       "occurrences": {
+        "relation": "exact",
+        "unit": "placed_occurrences",
+        "value": 1
+       },
+       "support": "kmer"
+      }
+     ],
+     "labels_status": "complete",
      "labels_total": 1,
      "node": 689327,
      "offset": 1,
@@ -27493,10 +28380,802 @@
      "row": 739555,
      "strand": "+",
      "support": "kmer"
+    },
+    {
+     "instance": "CGCCAGCGCCAG",
+     "kmer": "GGCCGAGCAACGCCAGCGCCAGAAGCATCAG",
+     "labels": null,
+     "labels_status": "output_budget",
+     "labels_total": 1,
+     "node": 751015,
+     "offset": 10,
+     "row": 751014,
+     "strand": "+",
+     "support": "kmer"
+    },
+    {
+     "instance": "CTGGCGCTGGCG",
+     "kmer": "GCCTGCCGCCGCTGGCGCTGGCGCAGATCAA",
+     "labels": null,
+     "labels_status": "output_budget",
+     "labels_total": 1,
+     "node": 757698,
+     "offset": 11,
+     "row": 757697,
+     "strand": "-",
+     "support": "kmer"
+    },
+    {
+     "instance": "CTGGCGCTGGCG",
+     "kmer": "GCCTGCCCCCTCTGGCGCTGGCGCAGATCAA",
+     "labels": null,
+     "labels_status": "output_budget",
+     "labels_total": 1,
+     "node": 757699,
+     "offset": 11,
+     "row": 757698,
+     "strand": "-",
+     "support": "kmer"
+    },
+    {
+     "instance": "CTGGCGCTGGCG",
+     "kmer": "TGCTGGCGCTGGCGAGGAACTGGTCGATCAG",
+     "labels": null,
+     "labels_status": "output_budget",
+     "labels_total": 1,
+     "node": 763779,
+     "offset": 2,
+     "row": 763778,
+     "strand": "-",
+     "support": "kmer"
+    },
+    {
+     "instance": "CGCCAGCGCCAG",
+     "kmer": "CCGCCAGCGCCAGGCCGAGGGTCCCTATCAC",
+     "labels": null,
+     "labels_status": "output_budget",
+     "labels_total": 1,
+     "node": 771708,
+     "offset": 1,
+     "row": 771707,
+     "strand": "+",
+     "support": "kmer"
+    },
+    {
+     "instance": "CTGGCGCTGGCG",
+     "kmer": "CGCTGGCGCTGGCGCTGCTCAACTTCCTCAC",
+     "labels": null,
+     "labels_status": "output_budget",
+     "labels_total": 1,
+     "node": 781243,
+     "offset": 2,
+     "row": 781242,
+     "strand": "-",
+     "support": "kmer"
+    },
+    {
+     "instance": "CGCCAGCGCCAG",
+     "kmer": "AACGCCAGCGCCAGCAGGGCGAACTGCTCAG",
+     "labels": null,
+     "labels_status": "output_budget",
+     "labels_total": 1,
+     "node": 788427,
+     "offset": 2,
+     "row": 788426,
+     "strand": "+",
+     "support": "kmer"
+    },
+    {
+     "instance": "CTGGCGCTGGCG",
+     "kmer": "TCTGGGGGGCGCTGGCGCTGGCGCTGCTCAA",
+     "labels": null,
+     "labels_status": "output_budget",
+     "labels_total": 1,
+     "node": 789182,
+     "offset": 11,
+     "row": 789181,
+     "strand": "-",
+     "support": "kmer"
+    },
+    {
+     "instance": "CTGGCGCTGGCG",
+     "kmer": "ACCAGGGCCTGGCGCTGGCGCAGTTGCTCAG",
+     "labels": null,
+     "labels_status": "output_budget",
+     "labels_total": 1,
+     "node": 790411,
+     "offset": 8,
+     "row": 790410,
+     "strand": "-",
+     "support": "kmer"
+    },
+    {
+     "instance": "CGCCAGCGCCAG",
+     "kmer": "CGCGCCAGCGCCAGGCCCTGGCGATTCTCAA",
+     "labels": null,
+     "labels_status": "output_budget",
+     "labels_total": 1,
+     "node": 792535,
+     "offset": 2,
+     "row": 792534,
+     "strand": "+",
+     "support": "kmer"
+    },
+    {
+     "instance": "CTGGCGCTGGCG",
+     "kmer": "AATGGCCGCTGGCGCTGGCGCAGAAGGTCAA",
+     "labels": null,
+     "labels_status": "output_budget",
+     "labels_total": 1,
+     "node": 803788,
+     "offset": 8,
+     "row": 803787,
+     "strand": "-",
+     "support": "kmer"
+    },
+    {
+     "instance": "CGCCAGCGCCAG",
+     "kmer": "CGACCATCGCCAGCGCCAGCATCCAGGTCAG",
+     "labels": null,
+     "labels_status": "output_budget",
+     "labels_total": 1,
+     "node": 804557,
+     "offset": 7,
+     "row": 804556,
+     "strand": "+",
+     "support": "kmer"
+    },
+    {
+     "instance": "CTGGCGCTGGCG",
+     "kmer": "TGCTGGCGCTGGCGCAACTGGCGTCGGTCAG",
+     "labels": null,
+     "labels_status": "output_budget",
+     "labels_total": 1,
+     "node": 808878,
+     "offset": 2,
+     "row": 808877,
+     "strand": "-",
+     "support": "kmer"
+    },
+    {
+     "instance": "CTGGCGCTGGCG",
+     "kmer": "CCTTCTGCTGGCGCTGGCGGGTGGTGGTCAC",
+     "labels": null,
+     "labels_status": "output_budget",
+     "labels_total": 1,
+     "node": 814697,
+     "offset": 7,
+     "row": 814696,
+     "strand": "-",
+     "support": "kmer"
+    },
+    {
+     "instance": "CTGGCGCTGGCG",
+     "kmer": "TCGCCGGCCTGGCGCTGGCGCGCGAATTCAC",
+     "labels": null,
+     "labels_status": "output_budget",
+     "labels_total": 1,
+     "node": 818627,
+     "offset": 8,
+     "row": 818626,
+     "strand": "-",
+     "support": "kmer"
+    },
+    {
+     "instance": "CTGGCGCTGGCG",
+     "kmer": "TGGACGTGCTGGCGCTGGCGGCGGACAAGAA",
+     "labels": null,
+     "labels_status": "output_budget",
+     "labels_total": 1,
+     "node": 850786,
+     "offset": 8,
+     "row": 850785,
+     "strand": "-",
+     "support": "kmer"
+    },
+    {
+     "instance": "CGCCAGCGCCAG",
+     "kmer": "CAAGCCCGGCGCCAGCGCCAGCGAGGAAGAG",
+     "labels": null,
+     "labels_status": "output_budget",
+     "labels_total": 1,
+     "node": 861468,
+     "offset": 9,
+     "row": 861467,
+     "strand": "+",
+     "support": "kmer"
+    },
+    {
+     "instance": "CGCCAGCGCCAG",
+     "kmer": "TCGCCAGCGCCAGCTCGATCTCGAACCAGAA",
+     "labels": null,
+     "labels_status": "output_budget",
+     "labels_total": 1,
+     "node": 871173,
+     "offset": 1,
+     "row": 871172,
+     "strand": "+",
+     "support": "kmer"
+    },
+    {
+     "instance": "CGCCAGCGCCAG",
+     "kmer": "AGGGAATGGCCGAGCAACGCCAGCGCCAGAA",
+     "labels": null,
+     "labels_status": "output_budget",
+     "labels_total": 1,
+     "node": 875712,
+     "offset": 17,
+     "row": 875711,
+     "strand": "+",
+     "support": "kmer"
+    },
+    {
+     "instance": "CGCCAGCGCCAG",
+     "kmer": "TCGACCGGCTGATCGCCCGCCAGCGCCAGAC",
+     "labels": null,
+     "labels_status": "output_budget",
+     "labels_total": 1,
+     "node": 875713,
+     "offset": 17,
+     "row": 875712,
+     "strand": "+",
+     "support": "kmer"
+    },
+    {
+     "instance": "CGCCAGCGCCAG",
+     "kmer": "TCGCTGCGCAGCGTCGCCGCCAGCGCCAGAG",
+     "labels": null,
+     "labels_status": "output_budget",
+     "labels_total": 1,
+     "node": 875714,
+     "offset": 17,
+     "row": 875713,
+     "strand": "+",
+     "support": "kmer"
+    },
+    {
+     "instance": "CGCCAGCGCCAG",
+     "kmer": "ATCTCCCCGCCGAATTGCGCCAGCGCCAGAG",
+     "labels": null,
+     "labels_status": "output_budget",
+     "labels_total": 1,
+     "node": 875715,
+     "offset": 17,
+     "row": 875714,
+     "strand": "+",
+     "support": "kmer"
+    },
+    {
+     "instance": "CGCCAGCGCCAG",
+     "kmer": "AGCTCGGCGGTCGCCAGCGCCAGGCGCAGAA",
+     "labels": null,
+     "labels_status": "output_budget",
+     "labels_total": 1,
+     "node": 883700,
+     "offset": 11,
+     "row": 883699,
+     "strand": "+",
+     "support": "kmer"
+    },
+    {
+     "instance": "CTGGCGCTGGCG",
+     "kmer": "CCGGCCTGCCGCCGCTGGCGCTGGCGCAGAT",
+     "labels": null,
+     "labels_status": "output_budget",
+     "labels_total": 1,
+     "node": 884141,
+     "offset": 14,
+     "row": 884140,
+     "strand": "-",
+     "support": "kmer"
+    },
+    {
+     "instance": "CTGGCGCTGGCG",
+     "kmer": "CCAAGCAATGGCCGCTGGCGCTGGCGCAGAA",
+     "labels": null,
+     "labels_status": "output_budget",
+     "labels_total": 1,
+     "node": 884142,
+     "offset": 14,
+     "row": 884141,
+     "strand": "-",
+     "support": "kmer"
+    },
+    {
+     "instance": "CTGGCGCTGGCG",
+     "kmer": "CCCGCCTGCCCCCTCTGGCGCTGGCGCAGAT",
+     "labels": null,
+     "labels_status": "output_budget",
+     "labels_total": 1,
+     "node": 884143,
+     "offset": 14,
+     "row": 884142,
+     "strand": "-",
+     "support": "kmer"
+    },
+    {
+     "instance": "CGCCAGCGCCAG",
+     "kmer": "CCGAGCAACGCCAGCGCCAGAAGCATCAGAC",
+     "labels": null,
+     "labels_status": "output_budget",
+     "labels_total": 1,
+     "node": 889860,
+     "offset": 8,
+     "row": 889859,
+     "strand": "+",
+     "support": "kmer"
+    },
+    {
+     "instance": "CGCCAGCGCCAG",
+     "kmer": "TCACCGACGCCAGCGCCAGTTTCGACGAGAA",
+     "labels": null,
+     "labels_status": "output_budget",
+     "labels_total": 1,
+     "node": 896539,
+     "offset": 7,
+     "row": 896538,
+     "strand": "+",
+     "support": "kmer"
+    },
+    {
+     "instance": "CGCCAGCGCCAG",
+     "kmer": "ACCGGCGCCAGCGCCAGGTCGAGATCGAGAG",
+     "labels": null,
+     "labels_status": "output_budget",
+     "labels_total": 1,
+     "node": 902568,
+     "offset": 5,
+     "row": 902567,
+     "strand": "+",
+     "support": "kmer"
+    },
+    {
+     "instance": "CGCCAGCGCCAG",
+     "kmer": "TGCTCCACCGGCGCCAGCGCCAGGTCGAGAT",
+     "labels": null,
+     "labels_status": "output_budget",
+     "labels_total": 1,
+     "node": 903431,
+     "offset": 11,
+     "row": 903430,
+     "strand": "+",
+     "support": "kmer"
+    },
+    {
+     "instance": "CTGGCGCTGGCG",
+     "kmer": "TCTGGCGCTGGCGCTTGACCCATTCGGAGAG",
+     "labels": null,
+     "labels_status": "output_budget",
+     "labels_total": 1,
+     "node": 907926,
+     "offset": 1,
+     "row": 907925,
+     "strand": "-",
+     "support": "kmer"
+    },
+    {
+     "instance": "CTGGCGCTGGCG",
+     "kmer": "CCCCTGGCGCTGGCGTGAAAGCCGGGTAGAC",
+     "labels": null,
+     "labels_status": "output_budget",
+     "labels_total": 1,
+     "node": 920780,
+     "offset": 3,
+     "row": 920779,
+     "strand": "-",
+     "support": "kmer"
+    },
+    {
+     "instance": "CGCCAGCGCCAG",
+     "kmer": "GCTGGAAGTCGCCAGCGCCAGCCTGCACGAC",
+     "labels": null,
+     "labels_status": "output_budget",
+     "labels_total": 1,
+     "node": 933430,
+     "offset": 9,
+     "row": 933429,
+     "strand": "+",
+     "support": "kmer"
+    },
+    {
+     "instance": "CGCCAGCGCCAG",
+     "kmer": "CGCCAGCGCCAGCGCCAGCGTGCGCGACGAG",
+     "labels": null,
+     "labels_status": "output_budget",
+     "labels_total": 1,
+     "node": 939439,
+     "offset": 0,
+     "row": 939438,
+     "strand": "+",
+     "support": "kmer"
+    },
+    {
+     "instance": "CGCCAGCGCCAG",
+     "kmer": "CGCCAGCGCCAGCGCCAGCGTGCGCGACGAG",
+     "labels": null,
+     "labels_status": "output_budget",
+     "labels_total": 1,
+     "node": 939439,
+     "offset": 6,
+     "row": 939438,
+     "strand": "+",
+     "support": "kmer"
+    },
+    {
+     "instance": "CGCCAGCGCCAG",
+     "kmer": "CGATGCGTCCCCGCCAGCGCCAGGCGACGAG",
+     "labels": null,
+     "labels_status": "output_budget",
+     "labels_total": 1,
+     "node": 939584,
+     "offset": 11,
+     "row": 939583,
+     "strand": "+",
+     "support": "kmer"
+    },
+    {
+     "instance": "CGCCAGCGCCAG",
+     "kmer": "GGTCACCGACGCCAGCGCCAGTTTCGACGAG",
+     "labels": null,
+     "labels_status": "output_budget",
+     "labels_total": 1,
+     "node": 942998,
+     "offset": 9,
+     "row": 942997,
+     "strand": "+",
+     "support": "kmer"
+    },
+    {
+     "instance": "CTGGCGCTGGCG",
+     "kmer": "GGCGGAGAATCCGCTGGCGCTGGCGGACGAC",
+     "labels": null,
+     "labels_status": "output_budget",
+     "labels_total": 1,
+     "node": 944642,
+     "offset": 13,
+     "row": 944641,
+     "strand": "-",
+     "support": "kmer"
+    },
+    {
+     "instance": "CTGGCGCTGGCG",
+     "kmer": "CGAACGCGGCCTGGCGCTGGCGGTGGACGAC",
+     "labels": null,
+     "labels_status": "output_budget",
+     "labels_total": 1,
+     "node": 946066,
+     "offset": 10,
+     "row": 946065,
+     "strand": "-",
+     "support": "kmer"
+    },
+    {
+     "instance": "CGCCAGCGCCAG",
+     "kmer": "CTGGCGCCAGCGCCAGGCGTTGCGTGACGAA",
+     "labels": null,
+     "labels_status": "output_budget",
+     "labels_total": 1,
+     "node": 947469,
+     "offset": 4,
+     "row": 947468,
+     "strand": "+",
+     "support": "kmer"
+    },
+    {
+     "instance": "CGCCAGCGCCAG",
+     "kmer": "GCAACGCCAGCGCCAGAAGCATCAGACCGAG",
+     "labels": null,
+     "labels_status": "output_budget",
+     "labels_total": 1,
+     "node": 958192,
+     "offset": 4,
+     "row": 958191,
+     "strand": "+",
+     "support": "kmer"
+    },
+    {
+     "instance": "CGCCAGCGCCAG",
+     "kmer": "CCAGCAGGGCCGCCGCCAGCGCCAGCCCGAT",
+     "labels": null,
+     "labels_status": "output_budget",
+     "labels_total": 1,
+     "node": 965179,
+     "offset": 13,
+     "row": 965178,
+     "strand": "+",
+     "support": "kmer"
+    },
+    {
+     "instance": "CGCCAGCGCCAG",
+     "kmer": "CCATCACCGCCAGCGCCAGGCCGGCGCCGAT",
+     "labels": null,
+     "labels_status": "output_budget",
+     "labels_total": 1,
+     "node": 981456,
+     "offset": 7,
+     "row": 981455,
+     "strand": "+",
+     "support": "kmer"
+    },
+    {
+     "instance": "CGCCAGCGCCAG",
+     "kmer": "CCGCCAGCGCCAGGTACTCGATGGCGCCGAG",
+     "labels": null,
+     "labels_status": "output_budget",
+     "labels_total": 1,
+     "node": 982399,
+     "offset": 1,
+     "row": 982398,
+     "strand": "+",
+     "support": "kmer"
+    },
+    {
+     "instance": "CTGGCGCTGGCG",
+     "kmer": "TCTGGAGCCTGGGCCTGGCGCTGGCGCCGAG",
+     "labels": null,
+     "labels_status": "output_budget",
+     "labels_total": 1,
+     "node": 982502,
+     "offset": 14,
+     "row": 982501,
+     "strand": "-",
+     "support": "kmer"
+    },
+    {
+     "instance": "CTGGCGCTGGCG",
+     "kmer": "TGTCCATCTCGCGGCTGGCGCTGGCGCCGAA",
+     "labels": null,
+     "labels_status": "output_budget",
+     "labels_total": 1,
+     "node": 982503,
+     "offset": 14,
+     "row": 982502,
+     "strand": "-",
+     "support": "kmer"
+    },
+    {
+     "instance": "CGCCAGCGCCAG",
+     "kmer": "GCTCCGCCAGCGCCAGTTCGCCTTCGCCGAA",
+     "labels": null,
+     "labels_status": "output_budget",
+     "labels_total": 1,
+     "node": 986849,
+     "offset": 4,
+     "row": 986848,
+     "strand": "+",
+     "support": "kmer"
+    },
+    {
+     "instance": "CGCCAGCGCCAG",
+     "kmer": "CGTCGCGCTGATCCGCCAGCGCCAGGCCGAG",
+     "labels": null,
+     "labels_status": "output_budget",
+     "labels_total": 1,
+     "node": 988641,
+     "offset": 13,
+     "row": 988640,
+     "strand": "+",
+     "support": "kmer"
+    },
+    {
+     "instance": "CGCCAGCGCCAG",
+     "kmer": "CCCAGACCGCCGCCAGCGCCAGCAGGCCGAA",
+     "labels": null,
+     "labels_status": "output_budget",
+     "labels_total": 1,
+     "node": 989144,
+     "offset": 10,
+     "row": 989143,
+     "strand": "+",
+     "support": "kmer"
+    },
+    {
+     "instance": "CTGGCGCTGGCG",
+     "kmer": "GGAGGCGGCGCTGGCGCTGGCGCAGGCCGAT",
+     "labels": null,
+     "labels_status": "output_budget",
+     "labels_total": 1,
+     "node": 989467,
+     "offset": 10,
+     "row": 989466,
+     "strand": "-",
+     "support": "kmer"
+    },
+    {
+     "instance": "CTGGCGCTGGCG",
+     "kmer": "GACCCTGGCGCTGGCGGCGGCCATGGCCGAG",
+     "labels": null,
+     "labels_status": "output_budget",
+     "labels_total": 1,
+     "node": 993645,
+     "offset": 4,
+     "row": 993644,
+     "strand": "-",
+     "support": "kmer"
+    },
+    {
+     "instance": "CTGGCGCTGGCG",
+     "kmer": "TGCTGCTGGCGCTGGCGGCGTTCTGGCCGAG",
+     "labels": null,
+     "labels_status": "output_budget",
+     "labels_total": 1,
+     "node": 995770,
+     "offset": 5,
+     "row": 995769,
+     "strand": "-",
+     "support": "kmer"
+    },
+    {
+     "instance": "CGCCAGCGCCAG",
+     "kmer": "CCAGCTCAAGCCCGGCGCCAGCGCCAGCGAG",
+     "labels": null,
+     "labels_status": "output_budget",
+     "labels_total": 1,
+     "node": 1010399,
+     "offset": 15,
+     "row": 1010398,
+     "strand": "+",
+     "support": "kmer"
+    },
+    {
+     "instance": "CGCCAGCGCCAG",
+     "kmer": "GAAGGCGCTGCCCGTCGCCAGCGCCAGCGAT",
+     "labels": null,
+     "labels_status": "output_budget",
+     "labels_total": 9,
+     "node": 1010400,
+     "offset": 15,
+     "row": 1010399,
+     "strand": "+",
+     "support": "kmer"
+    },
+    {
+     "instance": "CGCCAGCGCCAG",
+     "kmer": "CCCCGCCGAATTGCGCCAGCGCCAGAGCGAA",
+     "labels": null,
+     "labels_status": "output_budget",
+     "labels_total": 1,
+     "node": 1014533,
+     "offset": 13,
+     "row": 1014532,
+     "strand": "+",
+     "support": "kmer"
+    },
+    {
+     "instance": "CGCCAGCGCCAG",
+     "kmer": "CCGCCGCCAGCGCCAGCCCGATCCCCGCGAG",
+     "labels": null,
+     "labels_status": "output_budget",
+     "labels_total": 1,
+     "node": 1021033,
+     "offset": 4,
+     "row": 1021032,
+     "strand": "+",
+     "support": "kmer"
+    },
+    {
+     "instance": "CGCCAGCGCCAG",
+     "kmer": "CGCCAGCGCCAGCGCCTACATGAGCCGCGAC",
+     "labels": null,
+     "labels_status": "output_budget",
+     "labels_total": 1,
+     "node": 1022183,
+     "offset": 0,
+     "row": 1022182,
+     "strand": "+",
+     "support": "kmer"
+    },
+    {
+     "instance": "CTGGCGCTGGCG",
+     "kmer": "CGGGATCGCCGGCCTGGCGCTGGCGCGCGAA",
+     "labels": null,
+     "labels_status": "output_budget",
+     "labels_total": 1,
+     "node": 1028076,
+     "offset": 13,
+     "row": 1028075,
+     "strand": "-",
+     "support": "kmer"
+    },
+    {
+     "instance": "CTGGCGCTGGCG",
+     "kmer": "TGGGCCTGGCGCTGGCGGCCGTCGGCGCGAC",
+     "labels": null,
+     "labels_status": "output_budget",
+     "labels_total": 1,
+     "node": 1029322,
+     "offset": 5,
+     "row": 1029321,
+     "strand": "-",
+     "support": "kmer"
+    },
+    {
+     "instance": "CGCCAGCGCCAG",
+     "kmer": "GTTCGCCAGCGCCAGCGCCAGCGTGCGCGAC",
+     "labels": null,
+     "labels_status": "output_budget",
+     "labels_total": 1,
+     "node": 1031615,
+     "offset": 3,
+     "row": 1031614,
+     "strand": "+",
+     "support": "kmer"
+    },
+    {
+     "instance": "CGCCAGCGCCAG",
+     "kmer": "GTTCGCCAGCGCCAGCGCCAGCGTGCGCGAC",
+     "labels": null,
+     "labels_status": "output_budget",
+     "labels_total": 1,
+     "node": 1031615,
+     "offset": 9,
+     "row": 1031614,
+     "strand": "+",
+     "support": "kmer"
+    },
+    {
+     "instance": "CGCCAGCGCCAG",
+     "kmer": "AGTCGATGCGTCCCCGCCAGCGCCAGGCGAC",
+     "labels": null,
+     "labels_status": "output_budget",
+     "labels_total": 1,
+     "node": 1036251,
+     "offset": 14,
+     "row": 1036250,
+     "strand": "+",
+     "support": "kmer"
+    },
+    {
+     "instance": "CTGGCGCTGGCG",
+     "kmer": "GGCTGGCGCTGGCGCCGAAGTTCGAGGCGAT",
+     "labels": null,
+     "labels_status": "output_budget",
+     "labels_total": 1,
+     "node": 1037923,
+     "offset": 2,
+     "row": 1037922,
+     "strand": "-",
+     "support": "kmer"
+    },
+    {
+     "instance": "CGCCAGCGCCAG",
+     "kmer": "AATAGCGCGTCGCCAGCGCCAGCCCGGCGAC",
+     "labels": null,
+     "labels_status": "output_budget",
+     "labels_total": 1,
+     "node": 1041562,
+     "offset": 10,
+     "row": 1041561,
+     "strand": "+",
+     "support": "kmer"
+    },
+    {
+     "instance": "CTGGCGCTGGCG",
+     "kmer": "CCCGTGGCGCCGCCCTGGCGCTGGCGGCGAT",
+     "labels": null,
+     "labels_status": "output_budget",
+     "labels_total": 1,
+     "node": 1048689,
+     "offset": 14,
+     "row": 1048688,
+     "strand": "-",
+     "support": "kmer"
+    },
+    {
+     "instance": "CTGGCGCTGGCG",
+     "kmer": "TCCGCTGGCGCTGGCGGACGACCTCGGCGAA",
+     "labels": null,
+     "labels_status": "output_budget",
+     "labels_total": 1,
+     "node": 1050212,
+     "offset": 4,
+     "row": 1050211,
+     "strand": "-",
+     "support": "kmer"
     }
    ],
    "retrieval_complete": false,
-   "returned": 207,
+   "returned": 273,
    "rows_refused": [],
    "scope": "any_offset",
    "stop": {
@@ -27508,16 +29187,20 @@
     "-"
    ],
    "timing": {
-    "cpu_ms": 6.663541,
-    "elapsed_ms": 1.890541,
-    "label_discovery_ms": 2.560709,
-    "placement_ms": 1.967708
+    "cpu_ms": 9.663625,
+    "elapsed_ms": 2.323458,
+    "label_discovery_ms": 3.092958,
+    "page_faults": {
+     "major": 0,
+     "minor": 0
+    },
+    "placement_ms": 2.788208
    },
    "withheld": null,
    "work": {
-    "annotation_rows": 412,
-    "annotation_rows_distinct": 206,
-    "annotation_units": 160651,
+    "annotation_rows": 540,
+    "annotation_rows_distinct": 270,
+    "annotation_units": 204790,
     "mask_scans": 0,
     "memory_bytes": 1048138,
     "ranges_visited": 6694,
@@ -27535,7 +29218,7 @@
      "contexts": {
       "relation": "at_least",
       "unit": "graph_contexts",
-      "value": 50
+      "value": 81
      },
      "contexts_suffix": {
       "relation": "at_least",
@@ -27546,7 +29229,7 @@
      "occurrences": {
       "relation": "at_least",
       "unit": "placed_occurrences",
-      "value": 35
+      "value": 54
      }
     },
     {
@@ -27702,7 +29385,7 @@
     "occurrences": {
      "relation": "at_least",
      "unit": "placed_occurrences",
-     "value": 37
+     "value": 56
     }
    },
    "cut": {
@@ -27893,15 +29576,7 @@
      "labels": [
       {
        "column": "287",
-       "occurrence_list": [
-        {
-         "nt_coords": "1605567-1605578",
-         "nt_length": 6937609,
-         "record": "NZ_CP034369.1",
-         "seq_id": 2,
-         "strand": "-"
-        }
-       ],
+       "occurrence_list": [],
        "occurrences": {
         "relation": "exact",
         "unit": "placed_occurrences",
@@ -27924,15 +29599,7 @@
      "labels": [
       {
        "column": "287",
-       "occurrence_list": [
-        {
-         "nt_coords": "2059339-2059350",
-         "nt_length": 6937609,
-         "record": "NZ_CP034369.1",
-         "seq_id": 2,
-         "strand": "-"
-        }
-       ],
+       "occurrence_list": [],
        "occurrences": {
         "relation": "exact",
         "unit": "placed_occurrences",
@@ -28101,15 +29768,7 @@
      "labels": [
       {
        "column": "287",
-       "occurrence_list": [
-        {
-         "nt_coords": "2753346-2753357",
-         "nt_length": 6937609,
-         "record": "NZ_CP034369.1",
-         "seq_id": 2,
-         "strand": "-"
-        }
-       ],
+       "occurrence_list": [],
        "occurrences": {
         "relation": "exact",
         "unit": "placed_occurrences",
@@ -28309,15 +29968,7 @@
      "labels": [
       {
        "column": "287",
-       "occurrence_list": [
-        {
-         "nt_coords": "2698775-2698786",
-         "nt_length": 6937609,
-         "record": "NZ_CP034369.1",
-         "seq_id": 2,
-         "strand": "+"
-        }
-       ],
+       "occurrence_list": [],
        "occurrences": {
         "relation": "exact",
         "unit": "placed_occurrences",
@@ -28717,15 +30368,7 @@
      "labels": [
       {
        "column": "287",
-       "occurrence_list": [
-        {
-         "nt_coords": "2824791-2824802",
-         "nt_length": 6937609,
-         "record": "NZ_CP034369.1",
-         "seq_id": 2,
-         "strand": "+"
-        }
-       ],
+       "occurrence_list": [],
        "occurrences": {
         "relation": "exact",
         "unit": "placed_occurrences",
@@ -28748,15 +30391,7 @@
      "labels": [
       {
        "column": "287",
-       "occurrence_list": [
-        {
-         "nt_coords": "2059339-2059350",
-         "nt_length": 6937609,
-         "record": "NZ_CP034369.1",
-         "seq_id": 2,
-         "strand": "-"
-        }
-       ],
+       "occurrence_list": [],
        "occurrences": {
         "relation": "exact",
         "unit": "placed_occurrences",
@@ -28779,15 +30414,7 @@
      "labels": [
       {
        "column": "287",
-       "occurrence_list": [
-        {
-         "nt_coords": "2461026-2461037",
-         "nt_length": 6937609,
-         "record": "NZ_CP034369.1",
-         "seq_id": 2,
-         "strand": "-"
-        }
-       ],
+       "occurrence_list": [],
        "occurrences": {
         "relation": "exact",
         "unit": "placed_occurrences",
@@ -28861,8 +30488,27 @@
     {
      "instance": "CTGGCGCTGGCG",
      "kmer": "CAGGCGGCTGTATTCGCTGGCGCTGGCGAAC",
-     "labels": null,
-     "labels_status": "output_budget",
+     "labels": [
+      {
+       "column": "287",
+       "occurrence_list": [
+        {
+         "nt_coords": "1599994-1600005",
+         "nt_length": 6937609,
+         "record": "NZ_CP034369.1",
+         "seq_id": 2,
+         "strand": "-"
+        }
+       ],
+       "occurrences": {
+        "relation": "exact",
+        "unit": "placed_occurrences",
+        "value": 1
+       },
+       "support": "kmer"
+      }
+     ],
+     "labels_status": "complete",
      "labels_total": 1,
      "node": 214150,
      "offset": 16,
@@ -28873,8 +30519,19 @@
     {
      "instance": "CGCCAGCGCCAG",
      "kmer": "CAAGCTCGCCAGCGCCAGCTCGATCTCGAAC",
-     "labels": null,
-     "labels_status": "output_budget",
+     "labels": [
+      {
+       "column": "287",
+       "occurrence_list": [],
+       "occurrences": {
+        "relation": "exact",
+        "unit": "placed_occurrences",
+        "value": 1
+       },
+       "support": "kmer"
+      }
+     ],
+     "labels_status": "complete",
      "labels_total": 1,
      "node": 220797,
      "offset": 6,
@@ -28885,8 +30542,27 @@
     {
      "instance": "CTGGCGCTGGCG",
      "kmer": "CCGCCGCTGGCGCTGGCGCAGATCAAGGAAG",
-     "labels": null,
-     "labels_status": "output_budget",
+     "labels": [
+      {
+       "column": "287",
+       "occurrence_list": [
+        {
+         "nt_coords": "820797-820808",
+         "nt_length": 6937609,
+         "record": "NZ_CP034369.1",
+         "seq_id": 2,
+         "strand": "-"
+        }
+       ],
+       "occurrences": {
+        "relation": "exact",
+        "unit": "placed_occurrences",
+        "value": 1
+       },
+       "support": "kmer"
+      }
+     ],
+     "labels_status": "complete",
      "labels_total": 1,
      "node": 227476,
      "offset": 6,
@@ -28897,8 +30573,19 @@
     {
      "instance": "CGCCAGCGCCAG",
      "kmer": "GCCGACGCCCAGGCCCGCCAGCGCCAGGAAT",
-     "labels": null,
-     "labels_status": "output_budget",
+     "labels": [
+      {
+       "column": "287",
+       "occurrence_list": [],
+       "occurrences": {
+        "relation": "exact",
+        "unit": "placed_occurrences",
+        "value": 1
+       },
+       "support": "kmer"
+      }
+     ],
+     "labels_status": "complete",
      "labels_total": 1,
      "node": 229598,
      "offset": 15,
@@ -28909,8 +30596,27 @@
     {
      "instance": "CGCCAGCGCCAG",
      "kmer": "CTGCTGGAGGCACTGCGCCAGCGCCAGGAAG",
-     "labels": null,
-     "labels_status": "output_budget",
+     "labels": [
+      {
+       "column": "287",
+       "occurrence_list": [
+        {
+         "nt_coords": "1407855-1407866",
+         "nt_length": 6937609,
+         "record": "NZ_CP034369.1",
+         "seq_id": 2,
+         "strand": "+"
+        }
+       ],
+       "occurrences": {
+        "relation": "exact",
+        "unit": "placed_occurrences",
+        "value": 1
+       },
+       "support": "kmer"
+      }
+     ],
+     "labels_status": "complete",
      "labels_total": 1,
      "node": 229599,
      "offset": 15,
@@ -28921,8 +30627,19 @@
     {
      "instance": "CGCCAGCGCCAG",
      "kmer": "CGCGACCTGCTGCTGCGCCAGCGCCAGGAAC",
-     "labels": null,
-     "labels_status": "output_budget",
+     "labels": [
+      {
+       "column": "287",
+       "occurrence_list": [],
+       "occurrences": {
+        "relation": "exact",
+        "unit": "placed_occurrences",
+        "value": 1
+       },
+       "support": "kmer"
+      }
+     ],
+     "labels_status": "complete",
      "labels_total": 1,
      "node": 229600,
      "offset": 15,
@@ -28933,8 +30650,19 @@
     {
      "instance": "CTGGCGCTGGCG",
      "kmer": "TTCCTGGCGCTGGCGCAGTAGGGCCAGGAAT",
-     "labels": null,
-     "labels_status": "output_budget",
+     "labels": [
+      {
+       "column": "287",
+       "occurrence_list": [],
+       "occurrences": {
+        "relation": "exact",
+        "unit": "placed_occurrences",
+        "value": 1
+       },
+       "support": "kmer"
+      }
+     ],
+     "labels_status": "complete",
      "labels_total": 1,
      "node": 229799,
      "offset": 3,
@@ -28945,8 +30673,19 @@
     {
      "instance": "CGCCAGCGCCAG",
      "kmer": "GCGTCCCCGCCAGCGCCAGGCGACGAGGAAC",
-     "labels": null,
-     "labels_status": "output_budget",
+     "labels": [
+      {
+       "column": "287",
+       "occurrence_list": [],
+       "occurrences": {
+        "relation": "exact",
+        "unit": "placed_occurrences",
+        "value": 1
+       },
+       "support": "kmer"
+      }
+     ],
+     "labels_status": "complete",
      "labels_total": 1,
      "node": 232673,
      "offset": 7,
@@ -28957,36 +30696,727 @@
     {
      "instance": "CGCCAGCGCCAG",
      "kmer": "CTCAAGCCCGGCGCCAGCGCCAGCGAGGAAG",
-     "labels": null,
-     "labels_status": "output_budget",
+     "labels": [
+      {
+       "column": "287",
+       "occurrence_list": [
+        {
+         "nt_coords": "489575-489586",
+         "nt_length": 6937609,
+         "record": "NZ_CP034369.1",
+         "seq_id": 2,
+         "strand": "+"
+        }
+       ],
+       "occurrences": {
+        "relation": "exact",
+        "unit": "placed_occurrences",
+        "value": 1
+       },
+       "support": "kmer"
+      }
+     ],
+     "labels_status": "complete",
      "labels_total": 1,
      "node": 233316,
      "offset": 11,
      "row": 233315,
      "strand": "+",
      "support": "kmer"
+    },
+    {
+     "instance": "CTGGCGCTGGCG",
+     "kmer": "GCTGCGCCGGTTGCTGGCGCTGGCGAGGAAC",
+     "labels": [
+      {
+       "column": "287",
+       "occurrence_list": [
+        {
+         "nt_coords": "1535066-1535077",
+         "nt_length": 6937609,
+         "record": "NZ_CP034369.1",
+         "seq_id": 2,
+         "strand": "-"
+        }
+       ],
+       "occurrences": {
+        "relation": "exact",
+        "unit": "placed_occurrences",
+        "value": 1
+       },
+       "support": "kmer"
+      }
+     ],
+     "labels_status": "complete",
+     "labels_total": 1,
+     "node": 233863,
+     "offset": 13,
+     "row": 233862,
+     "strand": "-",
+     "support": "kmer"
+    },
+    {
+     "instance": "CGCCAGCGCCAG",
+     "kmer": "ATCACCAGGAACGCCAGCGCCAGGTAGGAAC",
+     "labels": [
+      {
+       "column": "287",
+       "occurrence_list": [],
+       "occurrences": {
+        "relation": "exact",
+        "unit": "placed_occurrences",
+        "value": 1
+       },
+       "support": "kmer"
+      }
+     ],
+     "labels_status": "complete",
+     "labels_total": 1,
+     "node": 236111,
+     "offset": 11,
+     "row": 236110,
+     "strand": "+",
+     "support": "kmer"
+    },
+    {
+     "instance": "CTGGCGCTGGCG",
+     "kmer": "GGCTGGCGCTGGCGTGCGGTAGCGCCGGAAC",
+     "labels": [
+      {
+       "column": "287",
+       "occurrence_list": [],
+       "occurrences": {
+        "relation": "exact",
+        "unit": "placed_occurrences",
+        "value": 1
+       },
+       "support": "kmer"
+      }
+     ],
+     "labels_status": "complete",
+     "labels_total": 1,
+     "node": 239251,
+     "offset": 2,
+     "row": 239250,
+     "strand": "-",
+     "support": "kmer"
+    },
+    {
+     "instance": "CGCCAGCGCCAG",
+     "kmer": "CGAGCGCCAGCGCCAGCTCGACTACTGGAAG",
+     "labels": [
+      {
+       "column": "287",
+       "occurrence_list": [],
+       "occurrences": {
+        "relation": "exact",
+        "unit": "placed_occurrences",
+        "value": 1
+       },
+       "support": "kmer"
+      }
+     ],
+     "labels_status": "complete",
+     "labels_total": 1,
+     "node": 254858,
+     "offset": 4,
+     "row": 254857,
+     "strand": "+",
+     "support": "kmer"
+    },
+    {
+     "instance": "CTGGCGCTGGCG",
+     "kmer": "CGCGCTGGCGCTGGCGCAACGGACCTGGAAA",
+     "labels": [
+      {
+       "column": "287",
+       "occurrence_list": [
+        {
+         "nt_coords": "1009740-1009751",
+         "nt_length": 6937609,
+         "record": "NZ_CP034369.1",
+         "seq_id": 2,
+         "strand": "-"
+        }
+       ],
+       "occurrences": {
+        "relation": "exact",
+        "unit": "placed_occurrences",
+        "value": 1
+       },
+       "support": "kmer"
+      }
+     ],
+     "labels_status": "complete",
+     "labels_total": 1,
+     "node": 255235,
+     "offset": 4,
+     "row": 255234,
+     "strand": "-",
+     "support": "kmer"
+    },
+    {
+     "instance": "CTGGCGCTGGCG",
+     "kmer": "GGCGCTGGCGCTGGCGCTGGTGGCGCTGAAC",
+     "labels": [
+      {
+       "column": "287",
+       "occurrence_list": [],
+       "occurrences": {
+        "relation": "exact",
+        "unit": "placed_occurrences",
+        "value": 1
+       },
+       "support": "kmer"
+      }
+     ],
+     "labels_status": "complete",
+     "labels_total": 1,
+     "node": 275900,
+     "offset": 4,
+     "row": 275899,
+     "strand": "-",
+     "support": "kmer"
+    },
+    {
+     "instance": "CTGGCGCTGGCG",
+     "kmer": "ACGAGGCGGGCCCCCTGGCGCTGGCGTGAAA",
+     "labels": [
+      {
+       "column": "287",
+       "occurrence_list": [],
+       "occurrences": {
+        "relation": "exact",
+        "unit": "placed_occurrences",
+        "value": 1
+       },
+       "support": "kmer"
+      }
+     ],
+     "labels_status": "complete",
+     "labels_total": 1,
+     "node": 281080,
+     "offset": 14,
+     "row": 281079,
+     "strand": "-",
+     "support": "kmer"
+    },
+    {
+     "instance": "CGCCAGCGCCAG",
+     "kmer": "CGCCAGCGCCAGCCTGCTGCTCGAGCGTAAC",
+     "labels": [
+      {
+       "column": "287",
+       "occurrence_list": [
+        {
+         "nt_coords": "1393948-1393959",
+         "nt_length": 6937609,
+         "record": "NZ_CP034369.1",
+         "seq_id": 2,
+         "strand": "+"
+        }
+       ],
+       "occurrences": {
+        "relation": "exact",
+        "unit": "placed_occurrences",
+        "value": 1
+       },
+       "support": "kmer"
+      }
+     ],
+     "labels_status": "complete",
+     "labels_total": 1,
+     "node": 307430,
+     "offset": 0,
+     "row": 307429,
+     "strand": "+",
+     "support": "kmer"
+    },
+    {
+     "instance": "CGCCAGCGCCAG",
+     "kmer": "GCGTGACGCCAGCGCCAGCCGCCTGCGTAAC",
+     "labels": [
+      {
+       "column": "287",
+       "occurrence_list": [
+        {
+         "nt_coords": "61499-61510",
+         "nt_length": 6937609,
+         "record": "NZ_CP034369.1",
+         "seq_id": 2,
+         "strand": "+"
+        }
+       ],
+       "occurrences": {
+        "relation": "exact",
+        "unit": "placed_occurrences",
+        "value": 1
+       },
+       "support": "kmer"
+      }
+     ],
+     "labels_status": "complete",
+     "labels_total": 1,
+     "node": 307945,
+     "offset": 6,
+     "row": 307944,
+     "strand": "+",
+     "support": "kmer"
+    },
+    {
+     "instance": "CTGGCGCTGGCG",
+     "kmer": "GCTGGCGCTGGCGCAACGGACCTGGAAACAG",
+     "labels": [
+      {
+       "column": "287",
+       "occurrence_list": [
+        {
+         "nt_coords": "1009740-1009751",
+         "nt_length": 6937609,
+         "record": "NZ_CP034369.1",
+         "seq_id": 2,
+         "strand": "-"
+        }
+       ],
+       "occurrences": {
+        "relation": "exact",
+        "unit": "placed_occurrences",
+        "value": 1
+       },
+       "support": "kmer"
+      }
+     ],
+     "labels_status": "complete",
+     "labels_total": 1,
+     "node": 323253,
+     "offset": 1,
+     "row": 323252,
+     "strand": "-",
+     "support": "kmer"
+    },
+    {
+     "instance": "CGCCAGCGCCAG",
+     "kmer": "AGACCGCCGCCAGCGCCAGCAGGCCGAACAA",
+     "labels": [
+      {
+       "column": "287",
+       "occurrence_list": [],
+       "occurrences": {
+        "relation": "exact",
+        "unit": "placed_occurrences",
+        "value": 1
+       },
+       "support": "kmer"
+      }
+     ],
+     "labels_status": "complete",
+     "labels_total": 1,
+     "node": 334392,
+     "offset": 7,
+     "row": 334391,
+     "strand": "+",
+     "support": "kmer"
+    },
+    {
+     "instance": "CTGGCGCTGGCG",
+     "kmer": "GGCGGCTGTATTCGCTGGCGCTGGCGAACAG",
+     "labels": [
+      {
+       "column": "287",
+       "occurrence_list": [
+        {
+         "nt_coords": "1599994-1600005",
+         "nt_length": 6937609,
+         "record": "NZ_CP034369.1",
+         "seq_id": 2,
+         "strand": "-"
+        }
+       ],
+       "occurrences": {
+        "relation": "exact",
+        "unit": "placed_occurrences",
+        "value": 1
+       },
+       "support": "kmer"
+      }
+     ],
+     "labels_status": "complete",
+     "labels_total": 1,
+     "node": 335839,
+     "offset": 14,
+     "row": 335838,
+     "strand": "-",
+     "support": "kmer"
+    },
+    {
+     "instance": "CGCCAGCGCCAG",
+     "kmer": "GTCCCCGCCAGCGCCAGGCGACGAGGAACAC",
+     "labels": [
+      {
+       "column": "287",
+       "occurrence_list": [],
+       "occurrences": {
+        "relation": "exact",
+        "unit": "placed_occurrences",
+        "value": 1
+       },
+       "support": "kmer"
+      }
+     ],
+     "labels_status": "complete",
+     "labels_total": 1,
+     "node": 337755,
+     "offset": 5,
+     "row": 337754,
+     "strand": "+",
+     "support": "kmer"
+    },
+    {
+     "instance": "CTGGCGCTGGCG",
+     "kmer": "AGCGGCTGGCGCTGGCGCGCCGGTCGCACAA",
+     "labels": [
+      {
+       "column": "287",
+       "occurrence_list": [
+        {
+         "nt_coords": "1007406-1007417",
+         "nt_length": 6937609,
+         "record": "NZ_CP034369.1",
+         "seq_id": 2,
+         "strand": "-"
+        }
+       ],
+       "occurrences": {
+        "relation": "exact",
+        "unit": "placed_occurrences",
+        "value": 1
+       },
+       "support": "kmer"
+      }
+     ],
+     "labels_status": "complete",
+     "labels_total": 1,
+     "node": 353319,
+     "offset": 5,
+     "row": 353318,
+     "strand": "-",
+     "support": "kmer"
+    },
+    {
+     "instance": "CGCCAGCGCCAG",
+     "kmer": "TGCGCGCCAGCGCCAGGCTGGCCAGGCACAG",
+     "labels": [
+      {
+       "column": "287",
+       "occurrence_list": [],
+       "occurrences": {
+        "relation": "exact",
+        "unit": "placed_occurrences",
+        "value": 1
+       },
+       "support": "kmer"
+      }
+     ],
+     "labels_status": "complete",
+     "labels_total": 1,
+     "node": 353562,
+     "offset": 4,
+     "row": 353561,
+     "strand": "+",
+     "support": "kmer"
+    },
+    {
+     "instance": "CTGGCGCTGGCG",
+     "kmer": "GGCCTGGCGCTGGCGGCCGTCGGCGCGACAG",
+     "labels": [
+      {
+       "column": "287",
+       "occurrence_list": [],
+       "occurrences": {
+        "relation": "exact",
+        "unit": "placed_occurrences",
+        "value": 1
+       },
+       "support": "kmer"
+      }
+     ],
+     "labels_status": "complete",
+     "labels_total": 1,
+     "node": 366734,
+     "offset": 3,
+     "row": 366733,
+     "strand": "-",
+     "support": "kmer"
+    },
+    {
+     "instance": "CTGGCGCTGGCG",
+     "kmer": "AGCTGGACGTGCTGGCGCTGGCGGCGGACAA",
+     "labels": [
+      {
+       "column": "287",
+       "occurrence_list": [
+        {
+         "nt_coords": "817346-817357",
+         "nt_length": 6937609,
+         "record": "NZ_CP034369.1",
+         "seq_id": 2,
+         "strand": "-"
+        }
+       ],
+       "occurrences": {
+        "relation": "exact",
+        "unit": "placed_occurrences",
+        "value": 1
+       },
+       "support": "kmer"
+      }
+     ],
+     "labels_status": "complete",
+     "labels_total": 1,
+     "node": 375012,
+     "offset": 11,
+     "row": 375011,
+     "strand": "-",
+     "support": "kmer"
+    },
+    {
+     "instance": "CTGGCGCTGGCG",
+     "kmer": "GCAACTGGCGCTGGCGCTCGTCGCGGGACAG",
+     "labels": [
+      {
+       "column": "287",
+       "occurrence_list": [],
+       "occurrences": {
+        "relation": "exact",
+        "unit": "placed_occurrences",
+        "value": 1
+       },
+       "support": "kmer"
+      }
+     ],
+     "labels_status": "complete",
+     "labels_total": 1,
+     "node": 376294,
+     "offset": 4,
+     "row": 376293,
+     "strand": "-",
+     "support": "kmer"
+    },
+    {
+     "instance": "CGCCAGCGCCAG",
+     "kmer": "TCCAGGAAATCGCCAGCGCCAGCGCCTACAT",
+     "labels": [
+      {
+       "column": "287",
+       "occurrence_list": [],
+       "occurrences": {
+        "relation": "exact",
+        "unit": "placed_occurrences",
+        "value": 1
+       },
+       "support": "kmer"
+      }
+     ],
+     "labels_status": "complete",
+     "labels_total": 1,
+     "node": 385674,
+     "offset": 10,
+     "row": 385673,
+     "strand": "+",
+     "support": "kmer"
+    },
+    {
+     "instance": "CTGGCGCTGGCG",
+     "kmer": "ACTGGCTGGCGCTGGCGGCGGTGGCCTACAA",
+     "labels": [
+      {
+       "column": "287",
+       "occurrence_list": [],
+       "occurrences": {
+        "relation": "exact",
+        "unit": "placed_occurrences",
+        "value": 1
+       },
+       "support": "kmer"
+      }
+     ],
+     "labels_status": "complete",
+     "labels_total": 1,
+     "node": 385915,
+     "offset": 5,
+     "row": 385914,
+     "strand": "-",
+     "support": "kmer"
+    },
+    {
+     "instance": "CTGGCGCTGGCG",
+     "kmer": "GCTGGCGCTGGCGCAGGTCGGCGATGTACAG",
+     "labels": [
+      {
+       "column": "287",
+       "occurrence_list": [],
+       "occurrences": {
+        "relation": "exact",
+        "unit": "placed_occurrences",
+        "value": 1
+       },
+       "support": "kmer"
+      }
+     ],
+     "labels_status": "complete",
+     "labels_total": 1,
+     "node": 391656,
+     "offset": 1,
+     "row": 391655,
+     "strand": "-",
+     "support": "kmer"
+    },
+    {
+     "instance": "CTGGCGCTGGCG",
+     "kmer": "GCCGCTGGCGCTGGCGCAGAAGGTCAACCAG",
+     "labels": [
+      {
+       "column": "287",
+       "occurrence_list": [],
+       "occurrences": {
+        "relation": "exact",
+        "unit": "placed_occurrences",
+        "value": 1
+       },
+       "support": "kmer"
+      }
+     ],
+     "labels_status": "complete",
+     "labels_total": 1,
+     "node": 397161,
+     "offset": 4,
+     "row": 397160,
+     "strand": "-",
+     "support": "kmer"
+    },
+    {
+     "instance": "CGCCAGCGCCAG",
+     "kmer": "GCTCGCCAGCGCCAGCTCGATCTCGAACCAG",
+     "labels": [
+      {
+       "column": "287",
+       "occurrence_list": [],
+       "occurrences": {
+        "relation": "exact",
+        "unit": "placed_occurrences",
+        "value": 1
+       },
+       "support": "kmer"
+      }
+     ],
+     "labels_status": "complete",
+     "labels_total": 1,
+     "node": 398262,
+     "offset": 3,
+     "row": 398261,
+     "strand": "+",
+     "support": "kmer"
+    },
+    {
+     "instance": "CGCCAGCGCCAG",
+     "kmer": "CCCGCCAGCGCCAGGCGACGAGGAACACCAG",
+     "labels": null,
+     "labels_status": "output_budget",
+     "labels_total": 1,
+     "node": 400301,
+     "offset": 2,
+     "row": 400300,
+     "strand": "+",
+     "support": "kmer"
+    },
+    {
+     "instance": "CTGGCGCTGGCG",
+     "kmer": "TGTAGGCGTCGACCTGGCGCTGGCGCACCAC",
+     "labels": null,
+     "labels_status": "output_budget",
+     "labels_total": 1,
+     "node": 408981,
+     "offset": 13,
+     "row": 408980,
+     "strand": "-",
+     "support": "kmer"
+    },
+    {
+     "instance": "CTGGCGCTGGCG",
+     "kmer": "CCGGCCTGGCGCTGGCGCGCGAATTCACCAA",
+     "labels": null,
+     "labels_status": "output_budget",
+     "labels_total": 1,
+     "node": 413435,
+     "offset": 5,
+     "row": 413434,
+     "strand": "-",
+     "support": "kmer"
+    },
+    {
+     "instance": "CTGGCGCTGGCG",
+     "kmer": "CCTGGCGCTGGCGCAGCAGTTCCTCGACCAG",
+     "labels": null,
+     "labels_status": "output_budget",
+     "labels_total": 1,
+     "node": 421093,
+     "offset": 1,
+     "row": 421092,
+     "strand": "-",
+     "support": "kmer"
+    },
+    {
+     "instance": "CGCCAGCGCCAG",
+     "kmer": "CCGGCTGATCGCCCGCCAGCGCCAGACCCAG",
+     "labels": null,
+     "labels_status": "output_budget",
+     "labels_total": 1,
+     "node": 435402,
+     "offset": 13,
+     "row": 435401,
+     "strand": "+",
+     "support": "kmer"
+    },
+    {
+     "instance": "CGCCAGCGCCAG",
+     "kmer": "GCGCGTCGCCAGCGCCAGCCCGGCGACCCAG",
+     "labels": null,
+     "labels_status": "output_budget",
+     "labels_total": 1,
+     "node": 435923,
+     "offset": 6,
+     "row": 435922,
+     "strand": "+",
+     "support": "kmer"
+    },
+    {
+     "instance": "CTGGCGCTGGCG",
+     "kmer": "CTGGGGCATCTGGCGCTGGCGCTTGACCCAT",
+     "labels": null,
+     "labels_status": "output_budget",
+     "labels_total": 1,
+     "node": 436909,
+     "offset": 9,
+     "row": 436908,
+     "strand": "-",
+     "support": "kmer"
+    },
+    {
+     "instance": "CTGGCGCTGGCG",
+     "kmer": "TCTATCACCTGGCGCTGGCGTTGCTGCCCAG",
+     "labels": null,
+     "labels_status": "output_budget",
+     "labels_total": 1,
+     "node": 455259,
+     "offset": 8,
+     "row": 455258,
+     "strand": "-",
+     "support": "kmer"
     }
    ],
    "retrieval_complete": false,
-   "returned": 51,
-   "rows_refused": [
-    {
-     "available_bytes": 26865,
-     "kmer": "GCCGACGCCCAGGCCCGCCAGCGCCAGGAAT",
-     "needed_bytes": 27216,
-     "phase": "placement",
-     "reason": "max_memory",
-     "row": 229597
-    },
-    {
-     "available_bytes": 26450,
-     "kmer": "CTGCTGGAGGCACTGCGCCAGCGCCAGGAAG",
-     "needed_bytes": 27216,
-     "phase": "placement",
-     "reason": "max_memory",
-     "row": 229598
-    }
-   ],
+   "returned": 82,
+   "rows_refused": [],
    "scope": "any_offset",
    "stop": {
     "phase": "output",
@@ -28997,18 +31427,22 @@
     "-"
    ],
    "timing": {
-    "cpu_ms": 2.064084,
-    "elapsed_ms": 1.014,
-    "label_discovery_ms": 0.554334,
-    "placement_ms": 0.4225
+    "cpu_ms": 3.699459,
+    "elapsed_ms": 1.267291,
+    "label_discovery_ms": 1.0105,
+    "page_faults": {
+     "major": 0,
+     "minor": 0
+    },
+    "placement_ms": 0.993584
    },
    "withheld": null,
    "work": {
-    "annotation_rows": 100,
-    "annotation_rows_distinct": 51,
-    "annotation_units": 40548,
+    "annotation_rows": 164,
+    "annotation_rows_distinct": 82,
+    "annotation_units": 66765,
     "mask_scans": 0,
-    "memory_bytes": 1048138,
+    "memory_bytes": 1048420,
     "ranges_visited": 6694,
     "steps": 6694
    }
@@ -29024,6 +31458,25 @@
      "contexts": {
       "relation": "at_least",
       "unit": "graph_contexts",
+      "value": 8
+     },
+     "contexts_suffix": {
+      "relation": "at_least",
+      "unit": "graph_contexts",
+      "value": 0
+     },
+     "graph": "mini_refseq",
+     "occurrences": {
+      "relation": "at_least",
+      "unit": "placed_occurrences",
+      "value": 6
+     }
+    },
+    {
+     "column": "562",
+     "contexts": {
+      "relation": "at_least",
+      "unit": "graph_contexts",
       "value": 1
      },
      "contexts_suffix": {
@@ -29033,9 +31486,28 @@
      },
      "graph": "mini_refseq",
      "occurrences": {
-      "relation": "unknown",
+      "relation": "at_least",
       "unit": "placed_occurrences",
-      "value": null
+      "value": 2
+     }
+    },
+    {
+     "column": "72407",
+     "contexts": {
+      "relation": "at_least",
+      "unit": "graph_contexts",
+      "value": 1
+     },
+     "contexts_suffix": {
+      "relation": "at_least",
+      "unit": "graph_contexts",
+      "value": 0
+     },
+     "graph": "mini_refseq",
+     "occurrences": {
+      "relation": "at_least",
+      "unit": "placed_occurrences",
+      "value": 1
      }
     }
    ],
@@ -29167,12 +31639,12 @@
     "labels": {
      "relation": "at_least",
      "unit": "labels",
-     "value": 1
+     "value": 3
     },
     "occurrences": {
-     "relation": "unknown",
+     "relation": "at_least",
      "unit": "placed_occurrences",
-     "value": null
+     "value": 9
     }
    },
    "cut": {
@@ -29234,11 +31706,19 @@
      "labels": [
       {
        "column": "287",
-       "occurrence_list": null,
+       "occurrence_list": [
+        {
+         "nt_coords": "5695005-5695016",
+         "nt_length": 6937609,
+         "record": "NZ_CP034369.1",
+         "seq_id": 2,
+         "strand": "+"
+        }
+       ],
        "occurrences": {
-        "relation": "unknown",
+        "relation": "exact",
         "unit": "placed_occurrences",
-        "value": null
+        "value": 1
        },
        "support": "kmer"
       }
@@ -29254,9 +31734,28 @@
     {
      "instance": "CGCCGCCGCCGC",
      "kmer": "GCGACCGCCGCCGCCGCGTGCGCGCAACAAC",
-     "labels": null,
-     "labels_status": "refused",
-     "labels_total": null,
+     "labels": [
+      {
+       "column": "287",
+       "occurrence_list": [
+        {
+         "nt_coords": "4277317-4277328",
+         "nt_length": 6937609,
+         "record": "NZ_CP034369.1",
+         "seq_id": 2,
+         "strand": "-"
+        }
+       ],
+       "occurrences": {
+        "relation": "exact",
+        "unit": "placed_occurrences",
+        "value": 1
+       },
+       "support": "kmer"
+      }
+     ],
+     "labels_status": "complete",
+     "labels_total": 1,
      "node": 71172,
      "offset": 5,
      "row": 71171,
@@ -29290,9 +31789,53 @@
     {
      "instance": "GCGGCGGCGGCG",
      "kmer": "ACTGCGTACCAGCGGCGGCGGCGCGGACAAG",
-     "labels": null,
-     "labels_status": "refused",
-     "labels_total": null,
+     "labels": [
+      {
+       "column": "562",
+       "occurrence_list": [
+        {
+         "nt_coords": "55167-55178",
+         "nt_length": 138340,
+         "record": "NZ_CP021936.1",
+         "seq_id": 0,
+         "strand": "+"
+        },
+        {
+         "nt_coords": "77345-77356",
+         "nt_length": 133234,
+         "record": "NZ_MPCO01000003.1",
+         "seq_id": 3,
+         "strand": "+"
+        }
+       ],
+       "occurrences": {
+        "relation": "exact",
+        "unit": "placed_occurrences",
+        "value": 2
+       },
+       "support": "kmer"
+      },
+      {
+       "column": "72407",
+       "occurrence_list": [
+        {
+         "nt_coords": "78644-78655",
+         "nt_length": 212326,
+         "record": "NZ_CP023554.1",
+         "seq_id": 2,
+         "strand": "+"
+        }
+       ],
+       "occurrences": {
+        "relation": "exact",
+        "unit": "placed_occurrences",
+        "value": 1
+       },
+       "support": "kmer"
+      }
+     ],
+     "labels_status": "complete",
+     "labels_total": 2,
      "node": 81331,
      "offset": 11,
      "row": 81330,
@@ -29310,82 +31853,405 @@
      "row": 89766,
      "strand": "-",
      "support": "kmer"
+    },
+    {
+     "instance": "GCGGCGGCGGCG",
+     "kmer": "CGAGGGCGCCGAGGGCGGCGGCGGCGCCAAG",
+     "labels": [
+      {
+       "column": "287",
+       "occurrence_list": [
+        {
+         "nt_coords": "6632094-6632105",
+         "nt_length": 6937609,
+         "record": "NZ_CP034369.1",
+         "seq_id": 2,
+         "strand": "+"
+        }
+       ],
+       "occurrences": {
+        "relation": "exact",
+        "unit": "placed_occurrences",
+        "value": 1
+       },
+       "support": "kmer"
+      }
+     ],
+     "labels_status": "complete",
+     "labels_total": 1,
+     "node": 96970,
+     "offset": 14,
+     "row": 96969,
+     "strand": "+",
+     "support": "kmer"
+    },
+    {
+     "instance": "CGCCGCCGCCGC",
+     "kmer": "CACCGCCGCCGCCGCCATCGGCATGGCCAAC",
+     "labels": [
+      {
+       "column": "287",
+       "occurrence_list": [
+        {
+         "nt_coords": "4434637-4434648",
+         "nt_length": 6937609,
+         "record": "NZ_CP034369.1",
+         "seq_id": 2,
+         "strand": "-"
+        }
+       ],
+       "occurrences": {
+        "relation": "exact",
+        "unit": "placed_occurrences",
+        "value": 1
+       },
+       "support": "kmer"
+      }
+     ],
+     "labels_status": "complete",
+     "labels_total": 1,
+     "node": 100588,
+     "offset": 3,
+     "row": 100587,
+     "strand": "-",
+     "support": "kmer"
+    },
+    {
+     "instance": "CGCCGCCGCCGC",
+     "kmer": "TCGCCGCCGCCGCGCGGAATGGATGGCCAAT",
+     "labels": null,
+     "labels_status": "refused",
+     "labels_total": null,
+     "node": 100663,
+     "offset": 1,
+     "row": 100662,
+     "strand": "-",
+     "support": "kmer"
+    },
+    {
+     "instance": "GCGGCGGCGGCG",
+     "kmer": "GACCAGGGCGTCCGCGGCGGCGGCGTCCAAT",
+     "labels": null,
+     "labels_status": "refused",
+     "labels_total": null,
+     "node": 104606,
+     "offset": 13,
+     "row": 104605,
+     "strand": "+",
+     "support": "kmer"
+    },
+    {
+     "instance": "GCGGCGGCGGCG",
+     "kmer": "GGCGGCGGCGGCGAACAGGGAACGAAGCAAT",
+     "labels": [
+      {
+       "column": "287",
+       "occurrence_list": [
+        {
+         "nt_coords": "6114428-6114439",
+         "nt_length": 6937609,
+         "record": "NZ_CP034369.1",
+         "seq_id": 2,
+         "strand": "+"
+        }
+       ],
+       "occurrences": {
+        "relation": "exact",
+        "unit": "placed_occurrences",
+        "value": 1
+       },
+       "support": "kmer"
+      }
+     ],
+     "labels_status": "complete",
+     "labels_total": 1,
+     "node": 106511,
+     "offset": 1,
+     "row": 106510,
+     "strand": "+",
+     "support": "kmer"
+    },
+    {
+     "instance": "CGCCGCCGCCGC",
+     "kmer": "CGCCCGGCGGATGTCGCCGCCGCCGCGCAAC",
+     "labels": null,
+     "labels_status": "refused",
+     "labels_total": null,
+     "node": 117882,
+     "offset": 14,
+     "row": 117881,
+     "strand": "-",
+     "support": "kmer"
+    },
+    {
+     "instance": "GCGGCGGCGGCG",
+     "kmer": "CGTACCGGCGAGCGGCGGCGGCGCGCGCAAC",
+     "labels": null,
+     "labels_status": "refused",
+     "labels_total": null,
+     "node": 118234,
+     "offset": 11,
+     "row": 118233,
+     "strand": "+",
+     "support": "kmer"
+    },
+    {
+     "instance": "GCGGCGGCGGCG",
+     "kmer": "CAACGCGAAGACCGCGGCGGCGGCGCGCAAG",
+     "labels": null,
+     "labels_status": "refused",
+     "labels_total": null,
+     "node": 118362,
+     "offset": 13,
+     "row": 118361,
+     "strand": "+",
+     "support": "kmer"
+    },
+    {
+     "instance": "CGCCGCCGCCGC",
+     "kmer": "CCAGCGACCGCCGCCGCCGCGTGCGCGCAAC",
+     "labels": [
+      {
+       "column": "287",
+       "occurrence_list": [
+        {
+         "nt_coords": "4277317-4277328",
+         "nt_length": 6937609,
+         "record": "NZ_CP034369.1",
+         "seq_id": 2,
+         "strand": "-"
+        }
+       ],
+       "occurrences": {
+        "relation": "exact",
+        "unit": "placed_occurrences",
+        "value": 1
+       },
+       "support": "kmer"
+      }
+     ],
+     "labels_status": "complete",
+     "labels_total": 1,
+     "node": 118530,
+     "offset": 8,
+     "row": 118529,
+     "strand": "-",
+     "support": "kmer"
+    },
+    {
+     "instance": "GCGGCGGCGGCG",
+     "kmer": "CCGCGGCGGCGGCGTCCAATTGACCGGCAAA",
+     "labels": null,
+     "labels_status": "refused",
+     "labels_total": null,
+     "node": 124912,
+     "offset": 2,
+     "row": 124911,
+     "strand": "+",
+     "support": "kmer"
+    },
+    {
+     "instance": "GCGGCGGCGGCG",
+     "kmer": "CTCCAGCGGGTCGCGCGGCGGCGGCGGCAAC",
+     "labels": [
+      {
+       "column": "287",
+       "occurrence_list": [
+        {
+         "nt_coords": "3541208-3541219",
+         "nt_length": 6937609,
+         "record": "NZ_CP034369.1",
+         "seq_id": 2,
+         "strand": "+"
+        }
+       ],
+       "occurrences": {
+        "relation": "exact",
+        "unit": "placed_occurrences",
+        "value": 1
+       },
+       "support": "kmer"
+      }
+     ],
+     "labels_status": "complete",
+     "labels_total": 1,
+     "node": 127408,
+     "offset": 14,
+     "row": 127407,
+     "strand": "+",
+     "support": "kmer"
+    },
+    {
+     "instance": "CGCCGCCGCCGC",
+     "kmer": "CCTGGCCAGGTTCGCCGCCGCCGCGGGCAAG",
+     "labels": null,
+     "labels_status": "refused",
+     "labels_total": null,
+     "node": 130587,
+     "offset": 12,
+     "row": 130586,
+     "strand": "-",
+     "support": "kmer"
+    },
+    {
+     "instance": "GCGGCGGCGGCG",
+     "kmer": "GGCTGCGGCGGCGGCGTTGATGTCGATCAAC",
+     "labels": null,
+     "labels_status": "refused",
+     "labels_total": null,
+     "node": 143414,
+     "offset": 4,
+     "row": 143413,
+     "strand": "+",
+     "support": "kmer"
+    },
+    {
+     "instance": "CGCCGCCGCCGC",
+     "kmer": "ACCACCCAGATCGCCGCCGCCGCGGAAGAAC",
+     "labels": null,
+     "labels_status": "refused",
+     "labels_total": null,
+     "node": 165865,
+     "offset": 11,
+     "row": 165864,
+     "strand": "-",
+     "support": "kmer"
+    },
+    {
+     "instance": "CGCCGCCGCCGC",
+     "kmer": "GAACAGCGGCGTTCCGCCGCCGCCGCAGAAG",
+     "labels": null,
+     "labels_status": "output_budget",
+     "labels_total": 1,
+     "node": 171900,
+     "offset": 14,
+     "row": 171899,
+     "strand": "-",
+     "support": "kmer"
     }
    ],
    "retrieval_complete": false,
-   "returned": 9,
+   "returned": 24,
    "rows_refused": [
     {
-     "available_bytes": 5570,
+     "available_bytes": 13943,
      "kmer": "CCGATAAGAGCGGCGGCGGCGTGCGGAAAAT",
-     "needed_bytes": 10288,
+     "needed_bytes": 14288,
      "phase": "label_discovery",
      "reason": "max_memory",
      "row": 14474
     },
     {
-     "available_bytes": 5155,
+     "available_bytes": 13528,
      "kmer": "CGCGGCGGCGGCGTCCAATTGACCGGCAAAG",
-     "needed_bytes": 5232,
+     "needed_bytes": 14288,
      "phase": "label_discovery",
      "reason": "max_memory",
      "row": 28394
     },
     {
-     "available_bytes": 4740,
+     "available_bytes": 13113,
      "kmer": "ACCGATAAGAGCGGCGGCGGCGTGCGGAAAA",
-     "needed_bytes": 5232,
+     "needed_bytes": 14288,
      "phase": "label_discovery",
      "reason": "max_memory",
      "row": 49605
     },
     {
-     "available_bytes": 4309,
-     "kmer": "GCGACCGCCGCCGCCGCGTGCGCGCAACAAC",
-     "needed_bytes": 5232,
-     "phase": "label_discovery",
-     "reason": "max_memory",
-     "row": 71171
-    },
-    {
-     "available_bytes": 3894,
+     "available_bytes": 12666,
      "kmer": "GGCGAGCGGCGGCGGCGCGCGCAACGACAAC",
-     "needed_bytes": 5232,
+     "needed_bytes": 14288,
      "phase": "label_discovery",
      "reason": "max_memory",
      "row": 77934
     },
     {
-     "available_bytes": 3479,
+     "available_bytes": 12251,
      "kmer": "GTTCGCCGCCGCCGCGGGCAAGGCCGACAAG",
-     "needed_bytes": 5232,
+     "needed_bytes": 14000,
      "phase": "label_discovery",
      "reason": "max_memory",
      "row": 78799
     },
     {
-     "available_bytes": 3064,
-     "kmer": "ACTGCGTACCAGCGGCGGCGGCGCGGACAAG",
-     "needed_bytes": 3296,
-     "phase": "label_discovery",
-     "reason": "max_memory",
-     "row": 81330
-    },
-    {
-     "available_bytes": 2649,
+     "available_bytes": 11820,
      "kmer": "CGTTCCGCCGCCGCCGCAGAAGCCTACCAAT",
-     "needed_bytes": 5232,
+     "needed_bytes": 20400,
      "phase": "label_discovery",
      "reason": "max_memory",
      "row": 89766
     },
     {
-     "available_bytes": 2234,
-     "kmer": "TTGGCGGCGGCGGCGGAACCGGCGTTGAAAC",
-     "needed_bytes": 2288,
-     "phase": "placement",
+     "available_bytes": 11373,
+     "kmer": "TCGCCGCCGCCGCGCGGAATGGATGGCCAAT",
+     "needed_bytes": 20400,
+     "phase": "label_discovery",
      "reason": "max_memory",
-     "row": 60071
+     "row": 100662
+    },
+    {
+     "available_bytes": 10958,
+     "kmer": "GACCAGGGCGTCCGCGGCGGCGGCGTCCAAT",
+     "needed_bytes": 20400,
+     "phase": "label_discovery",
+     "reason": "max_memory",
+     "row": 104605
+    },
+    {
+     "available_bytes": 10527,
+     "kmer": "CGCCCGGCGGATGTCGCCGCCGCCGCGCAAC",
+     "needed_bytes": 13680,
+     "phase": "label_discovery",
+     "reason": "max_memory",
+     "row": 117881
+    },
+    {
+     "available_bytes": 10112,
+     "kmer": "CGTACCGGCGAGCGGCGGCGGCGCGCGCAAC",
+     "needed_bytes": 10288,
+     "phase": "label_discovery",
+     "reason": "max_memory",
+     "row": 118233
+    },
+    {
+     "available_bytes": 9697,
+     "kmer": "CAACGCGAAGACCGCGGCGGCGGCGCGCAAG",
+     "needed_bytes": 10288,
+     "phase": "label_discovery",
+     "reason": "max_memory",
+     "row": 118361
+    },
+    {
+     "available_bytes": 9266,
+     "kmer": "CCGCGGCGGCGGCGTCCAATTGACCGGCAAA",
+     "needed_bytes": 10288,
+     "phase": "label_discovery",
+     "reason": "max_memory",
+     "row": 124911
+    },
+    {
+     "available_bytes": 8835,
+     "kmer": "CCTGGCCAGGTTCGCCGCCGCCGCGGGCAAG",
+     "needed_bytes": 10288,
+     "phase": "label_discovery",
+     "reason": "max_memory",
+     "row": 130586
+    },
+    {
+     "available_bytes": 8420,
+     "kmer": "GGCTGCGGCGGCGGCGTTGATGTCGATCAAC",
+     "needed_bytes": 10288,
+     "phase": "label_discovery",
+     "reason": "max_memory",
+     "row": 143413
+    },
+    {
+     "available_bytes": 8005,
+     "kmer": "ACCACCCAGATCGCCGCCGCCGCGGAAGAAC",
+     "needed_bytes": 10288,
+     "phase": "label_discovery",
+     "reason": "max_memory",
+     "row": 165864
     }
    ],
    "scope": "any_offset",
@@ -29398,28 +32264,36 @@
     "-"
    ],
    "timing": {
-    "cpu_ms": 0.919,
-    "elapsed_ms": 0.858333,
-    "label_discovery_ms": 0.045333,
-    "placement_ms": 0.003625
+    "cpu_ms": 1.50625,
+    "elapsed_ms": 0.849542,
+    "label_discovery_ms": 0.510208,
+    "page_faults": {
+     "major": 0,
+     "minor": 0
+    },
+    "placement_ms": 0.034459
    },
    "withheld": null,
    "work": {
-    "annotation_rows": 1,
-    "annotation_rows_distinct": 1,
-    "annotation_units": 290,
+    "annotation_rows": 18,
+    "annotation_rows_distinct": 9,
+    "annotation_units": 5227,
     "mask_scans": 0,
-    "memory_bytes": 1048138,
+    "memory_bytes": 1048420,
     "ranges_visited": 5442,
     "steps": 5442
    }
   }
  ],
  "timing": {
-  "cpu_ms": 32.616167,
-  "elapsed_ms": 32.025541
+  "cpu_ms": 43.067874,
+  "elapsed_ms": 42.980375,
+  "page_faults": {
+   "major": 0,
+   "minor": 4
+  }
  },
  "work": {
-  "memory_bytes": 1048138
+  "memory_bytes": 1048420
  }
 }

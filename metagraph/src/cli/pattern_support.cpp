@@ -888,14 +888,16 @@ void SupportedPathSink::begin_pattern(Mode mode, uint64_t max_paths) {
     allowance_ = tracker_.env().account.left() / 2;
 }
 
-void SupportedPathSink::end_pattern(size_t returned) {
+uint64_t SupportedPathSink::end_pattern(size_t returned) {
     // the descriptors of the returned paths stay with the answer (their result objects)
     uint64_t answer = 0;
     for (size_t i = 0; i < returned && i < kept_.size(); ++i) {
         answer += kept_[i].descriptor;
     }
-    held_ -= std::min(answer, held_);
+    answer = std::min(answer, held_);
+    held_ -= answer;
     drop_all();
+    return answer;
 }
 
 void SupportedPathSink::drop_all() {

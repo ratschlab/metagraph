@@ -316,8 +316,8 @@ class SupportedPathSink final : public graph::pattern::PathSink {
     // after the pattern's answer was built (labels_answer before it, PathTracker::end_pattern
     // after it): frees what its paths still hold, but the descriptors of the first |returned|
     // (the result objects of the paths the answer lists stay in the account, as a released
-    // path's do)
-    void end_pattern(size_t returned = 0);
+    // path's do), whose sum it returns: the route's from here on (SPEC-pattern-search.md §31)
+    uint64_t end_pattern(size_t returned = 0);
 
     /**
      * After the search, before labels_answer: keeps the kept paths |indices| (ascending

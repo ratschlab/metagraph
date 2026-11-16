@@ -11,13 +11,17 @@
 #include <cmath>
 #include <cstdint>
 #include <initializer_list>
+#include <ios>
 #include <iomanip>
 #include <limits>
 #include <memory>
+#include <new>
 #include <optional>
+#include <ostream>
 #include <set>
 #include <sstream>
 #include <stdexcept>
+#include <streambuf>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -751,6 +755,84 @@ inline uint64_t json_escaped_size(std::string_view s) {
     }
     return n;
 }
+
+// The writer settings of every JSON text the server writes: compact (no indentation, the
+// traversal routes and /pattern) or the default writer's indentation (json_text,
+// server_checks.hpp, and CompactJsonWriter take them from here, so that they cannot differ)
+inline Json::StreamWriterBuilder json_writer_builder(bool compact) {
+    Json::StreamWriterBuilder builder;
+    if (compact)
+        builder["indentation"] = "";
+    return builder;
+}
+
+/**
+ * Many values written one after the other as compact JSON text, each byte for byte what
+ * json_text(value, true) writes (json_writer_builder(true), one writer reused), into a buffer
+ * that keeps its capacity between values: /pattern writes each result object once nothing
+ * changes it any more (SPEC-pattern-search.md §12.1), up to max_paths or max_contexts of them
+ * per pattern, where a writer and a stream per value would cost more than the value. Used by
+ * one thread. A write that fails (the buffer's allocation) throws, and so does every later one:
+ * the stream throws on badbit and failbit, so that a failed text is never returned empty or
+ * cut, nor are the texts after it.
+ */
+class CompactJsonWriter {
+  public:
+    // |max_text| (tests): the buffer fails as an allocation would (std::bad_alloc) once a
+    // text would pass that many bytes
+    explicit CompactJsonWriter(size_t max_text = std::numeric_limits<size_t>::max())
+          : writer_(json_writer_builder(true).newStreamWriter()),
+            buf_(&text_, max_text),
+            stream_(&buf_) {
+        stream_.exceptions(std::ios::badbit | std::ios::failbit);
+    }
+    CompactJsonWriter(const CompactJsonWriter &) = delete;
+    CompactJsonWriter& operator=(const CompactJsonWriter &) = delete;
+
+    // the compact text of |value|, at its exact size
+    std::string text(const Json::Value &value) {
+        text_.clear();
+        writer_->write(value, &stream_);
+        if (!stream_.good())
+            throw std::runtime_error("CompactJsonWriter: the text could not be written");
+        return std::string(text_);
+    }
+
+  private:
+    // appends what the writer hands over to |out| (no buffer of its own: nothing to flush)
+    class Appender : public std::streambuf {
+      public:
+        Appender(std::string *out, size_t max) : out_(out), max_(max) {}
+
+      protected:
+        int_type overflow(int_type c) override {
+            if (!traits_type::eq_int_type(c, traits_type::eof())) {
+                reserve(1);
+                out_->push_back(traits_type::to_char_type(c));
+            }
+            return traits_type::not_eof(c);
+        }
+        std::streamsize xsputn(const char_type *s, std::streamsize n) override {
+            reserve(static_cast<size_t>(n));
+            out_->append(s, static_cast<size_t>(n));
+            return n;
+        }
+
+      private:
+        std::string *out_;
+        size_t max_;
+
+        void reserve(size_t n) const {
+            if (n > max_ || out_->size() > max_ - n)
+                throw std::bad_alloc();
+        }
+    };
+
+    std::unique_ptr<Json::StreamWriter> writer_;
+    std::string text_;
+    Appender buf_;
+    std::ostream stream_;
+};
 
 } // namespace cli
 } // namespace mtg

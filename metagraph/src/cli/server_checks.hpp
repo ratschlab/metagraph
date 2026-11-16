@@ -295,6 +295,54 @@ std::string json_text(const Json::Value &value, bool compact,
                       const std::function<void()> &check = nullptr,
                       double *max_gap_ms = nullptr, size_t reserve = 0);
 
+// The compact text of |object| with the member |key|, which it does not hold, an array whose
+// elements' compact texts are |elements| (each json_text(element, true), or CompactJsonWriter's):
+// |object|'s members before |key| and after it (jsoncpp writes an object's members in byte order
+// of their names), with "key":[e0,e1,...] between them -- byte for byte json_text(object with
+// key: [elements], true). |check| and |max_gap_ms| as json_text's, the texts copied in pieces of
+// at most 64 KiB with a check between them. |elements| is taken by value: the text's exact
+// size is reserved before anything is copied, and each element's text is freed once copied.
+// Throws std::logic_error when |object| holds |key| already. A /traverse response's results
+// (assemble_traverse_response), a /pattern entry's results and an answer's patterns
+// (SPEC-pattern-search.md §12.1)
+std::string json_text_with_array(const Json::Value &object, const std::string &key,
+                                 std::vector<std::string> elements,
+                                 const std::function<void()> &check = nullptr,
+                                 double *max_gap_ms = nullptr);
+
+/**
+ * A /pattern answer's entries as the route holds them until the answer is written
+ * (SPEC-pattern-search.md §12.1): each pattern's entry as a tree and, beside it, the compact
+ * texts of its result objects in answer order. An entry with texts holds no member "results":
+ * the texts are written as its "results" array; an entry without texts is written as it is
+ * (with "results":[] where its list is empty or withheld, without where it has none).
+ */
+struct PatternEntries {
+    std::vector<Json::Value> entries;
+    std::vector<std::vector<std::string>> results;
+};
+
+// The compact text of a /pattern answer: |head| (the answer without "patterns") with
+// "patterns" the entries of |patterns|, each with its results' texts -- byte for byte
+// json_text(answer, true). Written in one copy: the texts are moved in as pieces beside the
+// small structural ones (the members around "patterns" and "results"), the exact size reserved
+// once and each piece freed once copied. |check| and |max_gap_ms| as json_text's (the pieces
+// copied in pieces of at most 64 KiB with a check between them). Throws std::logic_error when
+// |head| holds "patterns", or an entry with texts holds "results"
+std::string pattern_answer_text(const Json::Value &head, PatternEntries patterns,
+                                const std::function<void()> &check = nullptr,
+                                double *max_gap_ms = nullptr);
+
+// The same for a multi-graph server's /pattern envelope (SPEC-multigraph-envelope.md
+// section 1): each entry of |envelope|'s "answers" written with its patterns from
+// |answers|[i] when set (an answered pair, whose entry then holds no "patterns"), else as it
+// is (a refused or not reached pair). Throws std::logic_error when |answers| does not have
+// one element per entry
+std::string pattern_envelope_text(const Json::Value &envelope,
+                                  std::vector<std::optional<PatternEntries>> answers,
+                                  const std::function<void()> &check = nullptr,
+                                  double *max_gap_ms = nullptr);
+
 // The compact text of a /traverse response whose results were written as text one by one
 // (ResultTexts): |envelope|'s members before "results" and after it (jsoncpp writes an
 // object's members in byte order of their names), with "results":[t0,t1,...] between them —

@@ -431,6 +431,21 @@ std::string compact(const Json::Value &v) {
     return Json::writeString(b, v);
 }
 
+// what the result objects of |entry| are held at once written (SPEC §12.1, held_result_bytes):
+// each three copies of its own text (without the fields merged into it later, its labels and its
+// selection's, which keep their own charges) and kHeldResultBytes, never more than |price|
+uint64_t held_objects(const Json::Value &entry, uint64_t price) {
+    uint64_t held = 0;
+    for (Json::Value r : entry["results"]) {
+        for (const char *late : { "labels_status", "labels_total", "labels", "selection_labels",
+                                  "selection_strands" }) {
+            r.removeMember(late);
+        }
+        held += held_result_bytes(price, compact(r).size());
+    }
+    return held;
+}
+
 std::string body_of(const Ask &r) {
     Json::Value b;
     Json::Value patterns(Json::arrayValue);
@@ -2108,10 +2123,11 @@ TEST(PatternSelection, AllOrCountDeadlineAfter64ResultObjects) {
 }
 
 // The result objects of a predicate's selected contexts under output.labels "none" (512 + 2k
-// each) stay charged until the request ends (SPEC §19.9: the bound is the request's, over all
-// its patterns), as the labelled descriptors and a label-free path list's objects do: a later
-// pattern finds the account as the earlier ones left it. Two identical patterns: under a large
-// account the second's work.memory_bytes is the first's plus the first's objects; under every
+// each while built, held_result_bytes once written, SPEC §12.1) stay charged
+// until the request ends (SPEC §19.9: the bound is the request's, over all its patterns), as
+// the labelled descriptors and a label-free path list's objects do: a later pattern finds the
+// account as the earlier ones left it. Two identical patterns: under a large account the
+// second's work.memory_bytes is the first's plus the first's objects as held; under every
 // account of a band the second is answered as the pattern alone under the account less the
 // first's objects -- not whole where the first is, cut (partial: max_memory) or withheld
 // (all_or_count), and among them a stop at its own result objects (stop {output, max_memory};
@@ -2138,8 +2154,9 @@ TEST(PatternSelection, ResultObjectsWithoutLabelsAreChargedUntilTheRequestEnds) 
         const std::vector<Outcome> two = run_all(idx, r);
         ASSERT_EQ(2u, two.size());
         ASSERT_TRUE(two[0].entry["retrieval_complete"].asBool());
-        const uint64_t objects = two[0].results.size() * object;
+        const uint64_t objects = held_objects(two[0].entry, object);
         ASSERT_LT(0u, objects);
+        ASSERT_LT(objects, two[0].results.size() * object);
         same(two[0], two[1]);
         EXPECT_EQ(two[0].memory + objects, two[1].memory);
 

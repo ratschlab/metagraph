@@ -4,6 +4,7 @@
 #include <map>
 #include <limits>
 #include <memory>
+#include <optional>
 #include <random>
 #include <set>
 #include <sstream>
@@ -2350,6 +2351,246 @@ TEST(PatternRoute, TheCountersOfTheExtensionAndOfTheLabels) {
     EXPECT_EQ(0u, e["work"]["extension_anchors"].asUInt64());
     EXPECT_EQ(0u, e["work"]["extension_branches"].asUInt64());
     EXPECT_EQ(0u, e["work"]["extension_edges"].asUInt64());
+}
+
+// json_text(value, true), as the server writes it
+std::string compact(const Json::Value &value) {
+    Json::StreamWriterBuilder builder;
+    builder["indentation"] = "";
+    return Json::writeString(builder, value);
+}
+
+// values whose text takes the writer's escaping and number formats (SPEC §12.1: a held text is
+// byte for byte the tree's)
+Json::Value awkward_object(size_t i) {
+    Json::Value v;
+    v["sequence"] = std::string(70000, "ACGT"[i % 4]);
+    v["quote\"key"] = "tab\tnewline\nquote\"backslash\\";
+    v["control"] = std::string("\x01\x1f", 2);
+    v["utf8"] = "\xc3\xa9\xe2\x82\xac\xf0\x9f\x98\x80";
+    v["bad_utf8"] = std::string("\xff\xc3", 2);
+    v["max"] = Json::Value(static_cast<Json::UInt64>(std::numeric_limits<uint64_t>::max()));
+    v["negative"] = Json::Value(static_cast<Json::Int64>(-12345678901234LL));
+    v["null"] = Json::Value();
+    v["empty"] = Json::Value(Json::arrayValue);
+    v["nested"].append(Json::Value(Json::objectValue));
+    v["nested"].append(true);
+    v["nested"].append(Json::Value(static_cast<Json::UInt64>(i)));
+    return v;
+}
+
+TEST(PatternRoute, HeldResultsAreTheTreesTexts) {
+    CompactJsonWriter writer;
+    HeldResults kept(true), plain;
+    for (size_t i = 0; i < 3; ++i) {
+        kept.add(awkward_object(i), writer);
+        plain.add(awkward_object(i), writer);
+    }
+    ASSERT_EQ(3u, kept.texts().size());
+    for (size_t i = 0; i < 3; ++i) {
+        EXPECT_EQ(compact(awkward_object(i)), kept.texts()[i]);
+        EXPECT_EQ(kept.texts()[i], plain.texts()[i]);
+    }
+    // the trees kept with keep_trees only (the tree API), as built
+    const Json::Value trees = kept.take_trees();
+    ASSERT_EQ(3u, trees.size());
+    EXPECT_EQ(awkward_object(1), trees[1]);
+    EXPECT_EQ(0u, plain.take_trees().size());
+    // a list withheld after it was built is counted, its texts freed
+    plain.add_dropped(2);
+    EXPECT_EQ(5u, plain.built());
+    plain.drop();
+    EXPECT_EQ(5u, plain.built());
+    EXPECT_TRUE(plain.texts().empty());
+    // the texts move out once
+    EXPECT_EQ(3u, kept.take_texts().size());
+    EXPECT_TRUE(kept.texts().empty());
+    EXPECT_EQ(3u, kept.built());
+}
+
+// A text whose writing fails (the buffer's allocation: here a writer whose buffer fails past 64
+// bytes) throws, and so does every later text of that writer, never an empty or cut text; an
+// object whose text failed is not held (the review of 66558cb1f, m2). Without the stream's
+// check (no exceptions, no good()) the stream swallows the bad_alloc and a cut text, then
+// empty ones, would be returned
+TEST(PatternRoute, AFailedTextThrows) {
+    Json::Value small;
+    small["a"] = 1;
+    CompactJsonWriter writer(64);
+    EXPECT_EQ(compact(small), writer.text(small));
+    EXPECT_THROW(writer.text(awkward_object(0)), std::bad_alloc);
+    EXPECT_THROW(writer.text(small), std::exception);
+    EXPECT_THROW(writer.text(small), std::exception);
+
+    CompactJsonWriter failing(64);
+    HeldResults held;
+    held.add(small, failing);
+    EXPECT_THROW(held.add(awkward_object(1), failing), std::bad_alloc);
+    EXPECT_THROW(held.add(small, failing), std::exception);
+    EXPECT_EQ(1u, held.built());
+    ASSERT_EQ(1u, held.texts().size());
+    EXPECT_EQ(compact(small), held.texts()[0]);
+
+    // a writer without the limit writes the same objects whole
+    CompactJsonWriter whole;
+    EXPECT_EQ(compact(awkward_object(0)), whole.text(awkward_object(0)));
+}
+
+// The writing of an answer from its held texts (pattern_answer_text, pattern_envelope_text) is
+// byte for byte json_text of the whole tree: members around "patterns" and "results", entries
+// with and without texts, an empty or withheld list, a count's entry without results
+TEST(PatternRoute, TheAnswerTextIsTheTreesText) {
+    Json::Value head;
+    head["index"]["k"] = 7;
+    head["mode"] = "partial";
+    head["timing"]["elapsed_ms"] = 1.5;
+    head["work"]["memory_bytes"] = 123;
+    std::vector<Json::Value> trees;
+    PatternEntries held;
+    for (size_t i = 0; i < 4; ++i) {
+        Json::Value entry;
+        entry["id"] = "p\"" + std::to_string(i);
+        entry["absence_scope"] = "graph";
+        entry["stop"] = Json::Value();
+        entry["returned"] = Json::Value(static_cast<Json::UInt64>(i == 1 ? 0 : i));
+        Json::Value tree = entry;
+        std::vector<std::string> texts;
+        if (i == 1) {
+            // withheld: an empty list written as it is
+            entry["results"] = Json::Value(Json::arrayValue);
+            tree = entry;
+        } else if (i == 3) {
+            // a count: no results at all
+        } else {
+            tree["results"] = Json::Value(Json::arrayValue);
+            for (size_t j = 0; j < i + 1; ++j) {
+                tree["results"].append(awkward_object(j));
+                texts.push_back(compact(awkward_object(j)));
+            }
+        }
+        trees.push_back(tree);
+        held.entries.push_back(entry);
+        held.results.push_back(std::move(texts));
+    }
+    Json::Value whole = head;
+    whole["patterns"] = Json::Value(Json::arrayValue);
+    for (const Json::Value &t : trees) {
+        whole["patterns"].append(t);
+    }
+    size_t checks = 0;
+    const std::string text = pattern_answer_text(head, held, [&]() { checks++; });
+    EXPECT_EQ(compact(whole), text);
+    // checked every 64 KiB of text while it is copied
+    EXPECT_LE(text.size() / kDeliveryCheckBytes - 1, checks);
+    EXPECT_EQ(compact(whole), pattern_answer_text(head, held));
+
+    // a head that holds patterns, or an entry with texts that holds results: a logic error
+    Json::Value bad = head;
+    bad["patterns"] = Json::Value(Json::arrayValue);
+    EXPECT_THROW(pattern_answer_text(bad, held), std::logic_error);
+    PatternEntries twice = held;
+    twice.entries[0]["results"] = Json::Value(Json::arrayValue);
+    EXPECT_THROW(pattern_answer_text(head, twice), std::logic_error);
+    PatternEntries uneven = held;
+    uneven.results.pop_back();
+    EXPECT_THROW(pattern_answer_text(head, uneven), std::logic_error);
+
+    // the envelope of a multi-graph server: an answered pair's patterns spliced into its entry
+    // (beside the pair's tags), a refused pair's entry as it is
+    Json::Value envelope;
+    envelope["route"] = "/pattern";
+    envelope["answered"] = 2;
+    envelope["work"]["memory_bytes"] = 246;
+    Json::Value refused;
+    refused["graph"] = "b\u00e9";
+    refused["outcome"] = "refused";
+    refused["refusal"]["code"] = "representation_unsupported";
+    Json::Value answered = head;
+    answered["graph"] = "a";
+    answered["outcome"] = "answered";
+    envelope["answers"].append(answered);
+    envelope["answers"].append(refused);
+    envelope["answers"].append(answered);
+    Json::Value full = envelope;
+    full["answers"][0]["patterns"] = whole["patterns"];
+    full["answers"][2]["patterns"] = whole["patterns"];
+    std::vector<std::optional<PatternEntries>> answers { held, std::nullopt, held };
+    EXPECT_EQ(compact(full), pattern_envelope_text(envelope, answers, [&]() { checks++; }));
+    EXPECT_EQ(compact(full), pattern_envelope_text(envelope, answers));
+    answers.pop_back();
+    EXPECT_THROW(pattern_envelope_text(envelope, answers), std::logic_error);
+
+    // an envelope whose every pair is refused or not reached: no texts, each entry as it is
+    Json::Value none;
+    none["route"] = "/pattern";
+    none["answered"] = 0;
+    none["answers"].append(refused);
+    Json::Value unreached;
+    unreached["graph"] = "c";
+    unreached["outcome"] = "refused";
+    unreached["refusal"]["code"] = "not_reached";
+    unreached["refusal"]["reason"] = "cutoff";
+    none["answers"].append(unreached);
+    none["not_reached"].append("c");
+    EXPECT_EQ(compact(none),
+              pattern_envelope_text(none, { std::nullopt, std::nullopt }, [&]() { checks++; }));
+}
+
+// what a value's members say once the run's clock is left out: its timing members and every
+// member under them, read on another run
+Json::Value without_timing(Json::Value v) {
+    if (v.isObject()) {
+        v.removeMember("timing");
+        for (const std::string &name : v.getMemberNames()) {
+            v[name] = without_timing(v[name]);
+        }
+    } else if (v.isArray()) {
+        for (Json::Value &x : v) {
+            x = without_timing(x);
+        }
+    }
+    return v;
+}
+
+// The server's form (process_pattern_answer) holds each result object as its text and no tree
+// of it: an entry with texts holds no results, and the text written from it is the tree API's
+// answer (but for the run's clock), labelled or not, contexts and paths
+TEST(PatternRoute, TheServersAnswerHoldsTextsOnly) {
+    auto g = tiny();
+    for (const std::string &body : {
+            std::string("{\"patterns\": [{\"dna\": \"AACG\"}, {\"dna\": \"ACGT\"}], "
+                        "\"mode\": \"partial\"}"),
+            std::string("{\"patterns\": [{\"dna\": \"AACG\"}], \"output\": {\"labels\": "
+                        "\"all\"}, \"allow_unbudgeted_annotation\": true}"),
+            std::string("{\"patterns\": [{\"dna\": \"ACGTTGCAACGT\"}, {\"dna\": \"ACGT\"}], "
+                        "\"long_search\": \"paths\"}"),
+            std::string("{\"patterns\": [{\"dna\": \"ACGTTGCAACGT\"}], \"long_search\": "
+                        "\"paths\", \"output\": {\"labels\": \"all\"}, "
+                        "\"allow_unbudgeted_annotation\": true}"),
+            std::string("{\"patterns\": [{\"dna\": \"AACG\"}], \"mode\": \"count\"}") }) {
+        SCOPED_TRACE(body);
+        const Json::Value json = parse_pattern_body(body);
+        PatternAnswer answer = process_pattern_answer(json, *g, limits(), "rel");
+        ASSERT_FALSE(answer.head.isMember("patterns"));
+        ASSERT_EQ(answer.patterns.entries.size(), answer.patterns.results.size());
+        size_t texts = 0;
+        for (size_t i = 0; i < answer.patterns.entries.size(); ++i) {
+            if (!answer.patterns.results[i].empty()) {
+                EXPECT_FALSE(answer.patterns.entries[i].isMember("results"));
+            }
+            texts += answer.patterns.results[i].size();
+        }
+        if (body.find("count") == std::string::npos) {
+            EXPECT_LT(0u, texts);
+        }
+        Json::Value written;
+        std::istringstream text(pattern_answer_text(answer.head, std::move(answer.patterns)));
+        Json::CharReaderBuilder reader;
+        std::string errors;
+        ASSERT_TRUE(Json::parseFromStream(reader, text, &written, &errors)) << errors;
+        // (compared as text: the reader reads a small unsigned integer as a signed one)
+        EXPECT_EQ(compact(without_timing(run(*g, body))), compact(without_timing(written)));
+    }
 }
 
 #endif // ! _PROTEIN_GRAPH

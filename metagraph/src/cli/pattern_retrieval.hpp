@@ -225,6 +225,9 @@ struct RetrievalPath {
  */
 uint64_t path_descriptor_bytes(size_t k, size_t length);
 
+// The same for one released context (§14.4): its descriptor and its result object, 512 + 2k
+uint64_t context_descriptor_bytes(size_t k);
+
 namespace retrieval {
 
 /**
@@ -285,6 +288,10 @@ class Admission {
     // previous release was taken over by its caller (take())
     void begin(unsigned share = 1);
     bool admit(uint64_t bytes);
+    // one object admitted at |price| is held at |held| from now on (at most |price|: its
+    // result object written as its text, SPEC §12.1): the difference is released, and the
+    // allowance counts |held| for it
+    void settle(uint64_t price, uint64_t held);
     // closes the admission: what it holds is the caller's from here on (to release)
     uint64_t take();
     uint64_t held() const { return held_; }
@@ -315,7 +322,15 @@ struct RetrievalHooks {
     std::function<bool(uint64_t ordinal)> deny_decode;
     std::function<void(size_t context)> output_hook;
     std::function<void()> work_done_hook;
+    // after each pattern of the request (its index), once its result objects are held as text:
+    // the account's held bytes before and after the objects' charges were settled (SPEC §12.1;
+    // equal where they were settled one by one, a label-free path list, or nothing was charged)
+    std::function<void(size_t pattern, uint64_t before, uint64_t after)> held_hook;
     std::function<void(size_t item)> occurrences_hook;
+    // the result objects stay charged at their price once written, not at their text (SPEC
+    // §12.1): the cuts a test index reaches only so (its node ids short, its texts small): a
+    // label-free list cut before its 64th path, a later pattern stopped at its anchor's level
+    bool hold_at_price = false;
 };
 
 /**
@@ -363,8 +378,12 @@ struct LabelsAnswer {
     Json::Value work = Json::Value(Json::objectValue);
     Json::Value timing = Json::Value(Json::objectValue);
     // per admitted context, in order: support, labels_status, labels_total, labels (merged
-    // into the result objects); empty when nothing was read
+    // into the result objects by the route when the pattern ends); empty when nothing was read
     std::vector<Json::Value> result_fields;
+    // the descriptors of the admitted contexts (paths) that the account still holds for their
+    // result objects (admit_context's, admit_path's): the route's from here on, to settle once
+    // the objects are held as text (SPEC §12.1); 0 when the list is withheld (released here)
+    uint64_t descriptors = 0;
     // all_or_count: the results are withheld for this reason (rows refused, a truncated
     // anchor, a budget or deadline stop of the reads)
     std::optional<std::string> withheld;
@@ -856,10 +875,12 @@ class PatternRetrieval {
 };
 
 /**
- * Merges |answer| into the pattern's |entry| (written by the route for the engine's result,
- * with every released context in `results`): the label fields, the counts, the results'
- * labels, and — when the reads did not complete — withheld (all_or_count), the cut
- * (partial), retrieval_complete, stop and determinism.
+ * Merges |answer| into the pattern's |entry| (written by the route for the engine's result):
+ * the label fields, the counts, and — when the reads did not complete — withheld
+ * (all_or_count: `returned` 0, `results` empty), the cut (partial), retrieval_complete, stop and
+ * determinism. The results' labels (|answer|.result_fields) are not merged here: the route
+ * merges each into its result object when the pattern ends, before the object is written as
+ * its text (SPEC-pattern-search.md §12.1).
  */
 void apply_labels(Json::Value *entry, LabelsAnswer &&answer, graph::pattern::Mode mode);
 

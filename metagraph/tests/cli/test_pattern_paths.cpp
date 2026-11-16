@@ -1166,19 +1166,52 @@ TEST(PatternPaths, TheMemoryAccountStopsPathRetention) {
     }
 }
 
+// json_text(value, true): what the server writes
+std::string compact(const Json::Value &value) {
+    Json::StreamWriterBuilder builder;
+    builder["indentation"] = "";
+    return Json::writeString(builder, value);
+}
+
+// a result object's own text (SPEC §12.1): without the fields merged into it after it was built
+// (its labels, its selection's), which keep their own charges
+uint64_t own_text(Json::Value r) {
+    for (const char *late : { "support", "labels_status", "labels_total", "labels",
+                              "labels_excluded_unverified", "selection_labels",
+                              "selection_strands" }) {
+        r.removeMember(late);
+    }
+    return compact(r).size();
+}
+
+// The account's held bytes after each pattern, before and after its result objects' charges
+// were settled (RetrievalHooks::held_hook)
+struct Held {
+    std::vector<std::pair<uint64_t, uint64_t>> at;
+    RetrievalHooks hooks(RetrievalHooks h = {}) {
+        h.held_hook = [this](size_t i, uint64_t before, uint64_t after) {
+            EXPECT_EQ(at.size(), i);
+            at.emplace_back(before, after);
+        };
+        return h;
+    }
+};
+
 // The request's one memory account bounds a long pattern's label-free paths too (§5.3): the
 // walks the engine keeps for the release (retained_path_bytes each, within half of what the
 // account has left when the extension begins, each freed as it is handed over) and each path's
-// result object (path_descriptor_bytes, charged before it is built from what the account has
-// left), beside the extension's depth-first stack (kExtensionLevelBytes a level, released as
-// the DFS backs out of it). The engine's refusal: stop {extension, max_memory}, partial
-// releases the walks kept before it (cut max_memory), all_or_count withholds output_budget;
-// the route's: the list ends
-// at the first object that does not fit (cut max_memory, stop {output, max_memory};
-// all_or_count output_budget). A request the account holds is answered as without one, and
+// result object (path_descriptor_bytes while it is built, charged before it is built from what
+// the account has left; held_result_bytes once written, SPEC §12.1), beside the extension's
+// depth-first stack (kExtensionLevelBytes a level, released as the DFS backs out of it). The
+// engine's refusal: stop {extension, max_memory}, partial releases the walks kept before it
+// (cut max_memory), all_or_count withholds output_budget; the route's: the list ends at the
+// first object that does not fit (cut max_memory, stop {output, max_memory}; all_or_count
+// output_budget). A request the account holds is answered as without one, and
 // work.memory_bytes (stated in every answered entry since 2026-10-21, SPEC §8.7) is the same
-// account's peak with and without it: the objects built stay to the request's end, the walks
-// are freed as they are handed over
+// account's peak with and without it: the objects built stay to the request's end (as their
+// written text), the walks are freed as they are handed over. A later pattern stopped at its
+// anchor's level is reached here with the objects held at their price
+// (RetrievalHooks::hold_at_price)
 TEST(PatternPaths, TheMemoryAccountBoundsLabelFreePaths) {
     std::mt19937 rng(17);
     std::vector<Record> records;
@@ -1200,15 +1233,31 @@ TEST(PatternPaths, TheMemoryAccountBoundsLabelFreePaths) {
     const uint64_t paths = f["returned"].asUInt64();
     ASSERT_GT(paths, 3u);
     ASSERT_TRUE(f["retrieval_complete"].asBool());
-    EXPECT_GE(f["work"]["memory_bytes"].asUInt64(), paths * object);
-    EXPECT_LE(f["work"]["memory_bytes"].asUInt64(), paths * (walk + object));
+    // each object as it is held once written (three copies of its text and the overhead), less
+    // than its price
+    std::vector<uint64_t> text;
+    uint64_t texts = 0;
+    for (const Json::Value &r : f["results"]) {
+        text.push_back(held_result_bytes(object, compact(r).size()));
+        ASSERT_EQ(kWrittenTextCopies * compact(r).size() + kHeldResultBytes, text.back());
+        ASSERT_LT(text.back(), object);
+        texts += text.back();
+    }
+    // the peak: at least the last object built beside the last walk and the texts before it,
+    // at most every walk, every text and one price
+    EXPECT_GE(f["work"]["memory_bytes"].asUInt64(), texts - text.back() + walk + object);
+    EXPECT_LE(f["work"]["memory_bytes"].asUInt64(), paths * walk + texts + object);
     EXPECT_EQ(f["work"]["memory_bytes"], full["work"]["memory_bytes"]);
 
-    // the objects the route builds beside |held| walks within |max|: the j-th needs the walks
-    // not yet handed over (held - j), the objects before it and itself
-    auto admitted = [&](uint64_t max, uint64_t held) {
-        uint64_t j = 0;
-        while (j < held && (held - j) * walk + (j + 1) * object <= max) {
+    // the objects the route builds beside |held| walks within |max|, after |before| bytes the
+    // request holds already: the j-th needs the walks not yet handed over (held - j), the
+    // objects before it as they are held (|at|: their written texts, or their price) and its
+    // own price
+    auto admitted = [&](uint64_t max, uint64_t held, const std::vector<uint64_t> &at,
+                        uint64_t before = 0) {
+        uint64_t j = 0, built = before;
+        while (j < held && (held - j) * walk + built + object <= max) {
+            built += at[j];
             ++j;
         }
         return j;
@@ -1218,15 +1267,16 @@ TEST(PatternPaths, TheMemoryAccountBoundsLabelFreePaths) {
     // held: the answer of a request without one, byte for byte
     RetrievalHooks hooks;
     hooks.max_memory_bytes = 2 * paths * walk + paths * object;
-    ASSERT_EQ(paths, admitted(hooks.max_memory_bytes, paths));
+    ASSERT_EQ(paths, admitted(hooks.max_memory_bytes, paths, text));
     EXPECT_EQ(untimed(full), untimed(run(idx, body(spec, "\"mode\": \"partial\"", "none"), hooks)));
     Json::Value all = run(idx, body(spec, "", "none"));
     EXPECT_EQ(untimed(all), untimed(run(idx, body(spec, "", "none"), hooks)));
     EXPECT_TRUE(all["patterns"][0]["retrieval_complete"].asBool());
 
     // the route's cut: every walk fits its half, the objects end where the next does not fit
+    // (each written one held at its text, the next charged its price)
     hooks.max_memory_bytes = 2 * paths * walk + 2 * object;
-    const uint64_t built = admitted(hooks.max_memory_bytes, paths);
+    const uint64_t built = admitted(hooks.max_memory_bytes, paths, text);
     ASSERT_GT(built, 0u);
     ASSERT_LT(built, paths);
     Json::Value out = run(idx, body(spec, "\"mode\": \"partial\"", "none"), hooks);
@@ -1252,6 +1302,14 @@ TEST(PatternPaths, TheMemoryAccountBoundsLabelFreePaths) {
     EXPECT_EQ("max_memory", w["stop"]["reason"].asString());
     EXPECT_EQ("exact", w["counts"]["paths"]["relation"].asString());
     EXPECT_FALSE(w["retrieval_complete"].asBool());
+    // the same account, the objects held at their price: fewer of them are built
+    RetrievalHooks priced_hooks = hooks;
+    priced_hooks.hold_at_price = true;
+    const std::vector<uint64_t> priced(paths, object);
+    const uint64_t built_priced = admitted(hooks.max_memory_bytes, paths, priced);
+    ASSERT_LT(built_priced, built);
+    EXPECT_EQ(built_priced, run(idx, body(spec, "\"mode\": \"partial\"", "none"),
+                                priced_hooks)["patterns"][0]["returned"].asUInt64());
 
     // the engine's stop: the account holds the extension's depth-first stack at its deepest
     // (L - k levels) and two walks beside it (both within the walks' half), not a third: the
@@ -1261,7 +1319,7 @@ TEST(PatternPaths, TheMemoryAccountBoundsLabelFreePaths) {
     const uint64_t stack = (8 - 5) * pattern::kExtensionLevelBytes;
     hooks.max_memory_bytes = stack + (kept + 1) * walk - 1;
     ASSERT_LE(kept * walk, hooks.max_memory_bytes / 2);
-    const uint64_t released = admitted(hooks.max_memory_bytes, kept);
+    const uint64_t released = admitted(hooks.max_memory_bytes, kept, text);
     out = run(idx, body(spec, "\"mode\": \"partial\"", "none"), hooks);
     const Json::Value &s = out["patterns"][0];
     EXPECT_EQ(released, s["returned"].asUInt64());
@@ -1301,14 +1359,16 @@ TEST(PatternPaths, TheMemoryAccountBoundsLabelFreePaths) {
         EXPECT_EQ(kept + 1, p["counts"]["paths"]["value"].asUInt64()) << i;
     }
 
-    // the objects a pattern answered stay charged until the request ends (the bound is the
-    // request's, not each pattern's): an account that holds one pattern's answer whole, and
-    // one more walk, holds the second pattern's walks in its half of what is left but only
-    // the objects that fit beside them, so the second is cut where alone it is not
-    hooks.max_memory_bytes = 2 * paths * walk + paths * object + 2 * walk;
-    const uint64_t second = admitted(hooks.max_memory_bytes - paths * object, paths);
+    // the objects a pattern answered stay charged until the request ends, as their written
+    // text (the bound is the request's, not each pattern's): an account that holds the first
+    // pattern's texts and twice the walks leaves the second its walks in its half of what is
+    // left but only the objects that fit beside them, so the second is cut where alone it is
+    // not
+    hooks.max_memory_bytes = texts + 2 * paths * walk;
+    const uint64_t second = admitted(hooks.max_memory_bytes, paths, text, texts);
     ASSERT_GT(second, 0u);
     ASSERT_LT(second, paths);
+    ASSERT_EQ(paths, admitted(hooks.max_memory_bytes, paths, text));
     out = run(idx, body(spec + ", " + spec, "\"mode\": \"partial\"", "none"), hooks);
     EXPECT_EQ(untimed(full["patterns"][0]), untimed(out["patterns"][0]));
     const Json::Value &t = out["patterns"][1];
@@ -1330,14 +1390,21 @@ TEST(PatternPaths, TheMemoryAccountBoundsLabelFreePaths) {
     EXPECT_EQ("exact", u["counts"]["paths"]["relation"].asString());
     EXPECT_EQ(paths, u["counts"]["paths"]["value"].asUInt64());
 
-    // an account that holds the first pattern's answer whole (its last object built beside its
-    // last walk) and less than a level of the stack beside its objects: the second pattern's
-    // extension stops at its anchor's level, before any walk (paths at_least 0)
+    // held at their price, an account that holds the first pattern's answer whole (its last
+    // object built beside its last walk) and less than a level of the stack beside its
+    // objects: the second pattern's extension stops at its anchor's level, before any walk
+    // (paths at_least 0). Held as their written text, the second finds room for its walks
+    // (B-M1's case, EarlierAnswersHoldTheirTextOnly)
+    auto unpriced = [](const Json::Value &entry) {
+        Json::Value v = untimed(entry);
+        v["work"].removeMember("memory_bytes");
+        return v;
+    };
     ASSERT_LT(walk, pattern::kExtensionLevelBytes);
-    hooks.max_memory_bytes = paths * object + walk;
-    ASSERT_EQ(paths, admitted(hooks.max_memory_bytes, paths));
-    out = run(idx, body(spec + ", " + spec, "\"mode\": \"partial\"", "none"), hooks);
-    EXPECT_EQ(untimed(full["patterns"][0]), untimed(out["patterns"][0]));
+    priced_hooks.max_memory_bytes = paths * object + walk;
+    ASSERT_EQ(paths, admitted(priced_hooks.max_memory_bytes, paths, priced));
+    out = run(idx, body(spec + ", " + spec, "\"mode\": \"partial\"", "none"), priced_hooks);
+    EXPECT_EQ(unpriced(full["patterns"][0]), unpriced(out["patterns"][0]));
     const Json::Value &v = out["patterns"][1];
     EXPECT_EQ("extension", v["stop"]["phase"].asString());
     EXPECT_EQ("max_memory", v["stop"]["reason"].asString());
@@ -1347,6 +1414,74 @@ TEST(PatternPaths, TheMemoryAccountBoundsLabelFreePaths) {
     EXPECT_EQ("max_memory", v["cut"]["reason"].asString());
     EXPECT_EQ(0u, v["returned"].asUInt64());
     EXPECT_EQ("full", v["determinism"].asString());
+    priced_hooks.hold_at_price = false;
+    out = run(idx, body(spec + ", " + spec, "\"mode\": \"partial\"", "none"), priced_hooks);
+    EXPECT_EQ("completed", out["patterns"][1]["counts"]["paths"]["extension"].asString());
+    EXPECT_LT(0u, out["patterns"][1]["returned"].asUInt64());
+}
+
+// A label-free path's result object is charged its price while it is built and
+// held_result_bytes once written (SPEC §12.1): the route's cut of the list (stop {output,
+// max_memory}; partial cut max_memory, all_or_count withheld output_budget) comes where an
+// object's price does not fit beside the walks not yet handed over and the texts written.
+// One path of A^700 on a self-loop: an account of its walk and its price lists it, a byte less
+// cuts it; two such patterns: the second needs the first's text besides, not its price.
+// work.memory_bytes is the account's peak: the walk and the price (and the first's text)
+TEST(PatternPaths, TheRouteCutsALabelFreeListAtAnObjectsPrice) {
+    const size_t k = 5;
+    Index idx = build<annot::RowDiffColumnAnnotator>(
+            k, { { "poly", "r0", std::string(100, 'A') } }, true);
+    const size_t L = 700;
+    const std::string spec = "{\"dna\": \"" + std::string(L, 'A') + "\"}";
+    const uint64_t walk = pattern::retained_path_bytes(k, L);
+    const uint64_t price = path_descriptor_bytes(k, L);
+    const uint64_t stack = (L - k) * pattern::kExtensionLevelBytes;
+    const Json::Value full = run(idx, body(spec, "\"mode\": \"partial\"", "none"));
+    ASSERT_EQ(1u, full["patterns"][0]["returned"].asUInt64());
+    const uint64_t text = held_result_bytes(price,
+                                            compact(full["patterns"][0]["results"][0]).size());
+    ASSERT_LT(text, price);
+    // the extension (its stack at the full depth, the walk beside it) fits every account
+    // below, its walk within its half
+    ASSERT_LT(stack, price);
+    RetrievalHooks hooks;
+    for (const std::string mode : { "partial", "all_or_count" }) {
+        SCOPED_TRACE(mode);
+        const std::string rest = "\"mode\": \"" + mode + "\"";
+        hooks.max_memory_bytes = walk + price;
+        Json::Value out = run(idx, body(spec, rest, "none"), hooks);
+        EXPECT_EQ(untimed(full["patterns"][0]["results"]), untimed(out["patterns"][0]["results"]));
+        EXPECT_TRUE(out["patterns"][0]["retrieval_complete"].asBool());
+        EXPECT_EQ(walk + price, out["work"]["memory_bytes"].asUInt64());
+        auto cut = [&](const Json::Value &e) {
+            EXPECT_EQ("output", e["stop"]["phase"].asString());
+            EXPECT_EQ("max_memory", e["stop"]["reason"].asString());
+            EXPECT_EQ("exact", e["counts"]["paths"]["relation"].asString());
+            EXPECT_EQ(1u, e["counts"]["paths"]["value"].asUInt64());
+            EXPECT_EQ("completed", e["counts"]["paths"]["extension"].asString());
+            EXPECT_FALSE(e["retrieval_complete"].asBool());
+            EXPECT_EQ(0u, e["returned"].asUInt64());
+            EXPECT_EQ(0u, e["results"].size());
+            EXPECT_EQ(mode == "partial" ? "max_memory" : "", e["cut"]["reason"].asString());
+            EXPECT_EQ(mode == "partial" ? "" : "output_budget",
+                      e["withheld"]["reason"].asString());
+        };
+        hooks.max_memory_bytes = walk + price - 1;
+        cut(run(idx, body(spec, rest, "none"), hooks)["patterns"][0]);
+
+        hooks.max_memory_bytes = text + walk + price;
+        out = run(idx, body(spec + ", " + spec, rest, "none"), hooks);
+        for (Json::ArrayIndex i = 0; i < 2; ++i) {
+            EXPECT_EQ(full["patterns"][0]["results"], out["patterns"][i]["results"]) << i;
+            EXPECT_TRUE(out["patterns"][i]["retrieval_complete"].asBool()) << i;
+        }
+        EXPECT_EQ(text + walk + price, out["work"]["memory_bytes"].asUInt64());
+        hooks.max_memory_bytes = text + walk + price - 1;
+        out = run(idx, body(spec + ", " + spec, rest, "none"), hooks);
+        EXPECT_EQ(full["patterns"][0]["results"], out["patterns"][0]["results"]);
+        EXPECT_TRUE(out["patterns"][0]["retrieval_complete"].asBool());
+        cut(out["patterns"][1]);
+    }
 }
 
 // The extension's depth-first stack is in the request's memory account in every mode (the
@@ -1444,6 +1579,259 @@ TEST(PatternPaths, TheMemoryAccountHoldsTheExtensionStack) {
     }
 }
 
+// SPEC §12.1 (T7-D2): an answered pattern's result objects stay in the account as their written
+// text, each three copies of its own text and kHeldResultBytes (held_result_bytes, never more
+// than its price), not as their trees, so a later pattern finds the room their trees took.
+// B-M1's case (the review of 2026-11-16): A^5000 then A^700 at 1 MiB on a homopolymer graph (a
+// self-loop). The first path's tree, 974,754 bytes, held whole would leave less than the second
+// pattern's stack: that pattern stopped at its anchor's level (at_least 0). Held as its written
+// text (about 90 KB), the first leaves room for the second's stack, walk and object: exact 1,
+// listed, no stop
+TEST(PatternPaths, EarlierAnswersHoldTheirTextOnly) {
+    const size_t k = 5;
+    Index idx = build<annot::RowDiffColumnAnnotator>(
+            k, { { "poly", "r0", std::string(100, 'A') } }, true);
+    const std::string first = "{\"dna\": \"" + std::string(5000, 'A') + "\"}";
+    const std::string second = "{\"dna\": \"" + std::string(700, 'A') + "\"}";
+    const uint64_t price = path_descriptor_bytes(k, 5000);
+    ASSERT_EQ(974754u, price);
+    ASSERT_LT((uint64_t(1) << 20) - price, (700 - k) * pattern::kExtensionLevelBytes);
+    for (const std::string mode : { "partial", "all_or_count" }) {
+        Held held;
+        Json::Value out = run(idx, body(first + ", " + second, "\"mode\": \"" + mode
+                                        + "\", \"max_memory_mb\": 1", "none"), held.hooks());
+        const Json::Value &p = out["patterns"][0];
+        ASSERT_EQ(1u, p["returned"].asUInt64()) << mode;
+        ASSERT_TRUE(p["stop"].isNull()) << mode << p["stop"];
+        // the path's charge, settled as it was written: its text and the overhead
+        ASSERT_EQ(2u, held.at.size()) << mode;
+        EXPECT_EQ(kWrittenTextCopies * compact(p["results"][0]).size() + kHeldResultBytes,
+                  held.at[0].second) << mode;
+        EXPECT_EQ(held.at[0].first, held.at[0].second) << mode;
+        EXPECT_LT(held.at[0].second, price / 8) << mode;
+        const Json::Value &n = out["patterns"][1];
+        EXPECT_TRUE(n["stop"].isNull()) << mode << n["stop"];
+        EXPECT_EQ("exact", n["counts"]["paths"]["relation"].asString()) << mode;
+        EXPECT_EQ(1u, n["counts"]["paths"]["value"].asUInt64()) << mode;
+        EXPECT_EQ("completed", n["counts"]["paths"]["extension"].asString()) << mode;
+        EXPECT_EQ(1u, n["returned"].asUInt64()) << mode;
+        EXPECT_TRUE(n["retrieval_complete"].asBool()) << mode;
+        EXPECT_EQ(std::string(700, 'A'), n["results"][0]["sequence"].asString()) << mode;
+        // both texts held at the end, the request's peak below what the first tree alone held
+        EXPECT_EQ(held.at[0].second
+                          + held_result_bytes(path_descriptor_bytes(k, 700),
+                                              compact(n["results"][0]).size()),
+                  held.at[1].second) << mode;
+        EXPECT_LE(out["work"]["memory_bytes"].asUInt64(), uint64_t(1) << 20) << mode;
+    }
+}
+
+// The suite's scenario L-memory-0001 (SPEC §30, unchanged by §12.1, which settles result
+// objects only): A^100000 on a self-loop under long_search "paths" at max_memory_mb 1 stops
+// the extension at a level of its depth-first stack, in every mode. The stack and the kept
+// walks are the search's structures, charged as before
+TEST(PatternPaths, LMemory0001StopsAtALevelOfTheStack) {
+    const size_t k = 5;
+    Index idx = build<annot::RowDiffColumnAnnotator>(
+            k, { { "poly", "r0", std::string(100, 'A') } }, true);
+    const std::string spec = "{\"dna\": \"" + std::string(100000, 'A') + "\"}";
+    const uint64_t fit = (uint64_t(1) << 20) / pattern::kExtensionLevelBytes;
+    ASSERT_LT(fit, 100000u - k);
+    for (const std::string mode : { "count", "partial", "all_or_count" }) {
+        Json::Value out = run(idx, body(spec, "\"mode\": \"" + mode + "\", \"max_memory_mb\": 1",
+                                        "none"));
+        const Json::Value &e = out["patterns"][0];
+        EXPECT_EQ("extension", e["stop"]["phase"].asString()) << mode;
+        EXPECT_EQ("max_memory", e["stop"]["reason"].asString()) << mode;
+        EXPECT_EQ("at_least", e["counts"]["paths"]["relation"].asString()) << mode;
+        EXPECT_EQ(0u, e["counts"]["paths"]["value"].asUInt64()) << mode;
+        EXPECT_EQ("stopped", e["counts"]["paths"]["extension"].asString()) << mode;
+        EXPECT_EQ(fit * pattern::kExtensionLevelBytes, e["work"]["memory_bytes"].asUInt64())
+                << mode;
+        if (mode == "partial") {
+            EXPECT_EQ("max_memory", e["cut"]["reason"].asString());
+            EXPECT_EQ(0u, e["returned"].asUInt64());
+        } else if (mode == "all_or_count") {
+            EXPECT_EQ("output_budget", e["withheld"]["reason"].asString());
+        }
+    }
+}
+
+// Each path's result object is charged its price while it is a tree and held_result_bytes (three
+// copies of its own text and kHeldResultBytes) once written (SPEC §12.1): a label-free path one
+// by one in the release (the account settled as each is written, nothing left to settle when
+// the pattern ends), a labelled path when its pattern ends (its labels keep their own
+// charges), byte for byte
+TEST(PatternPaths, HeldPathsAreChargedTheirText) {
+    std::mt19937 rng(17);
+    std::vector<Record> records;
+    for (int i = 0; i < 6; ++i) {
+        std::string seq;
+        for (int j = 0; j < 120; ++j) {
+            seq += "ACGT"[rng() % 4];
+        }
+        records.push_back({ i % 2 ? "odd" : "even", "r" + std::to_string(i), seq });
+    }
+    Index idx = build<annot::RowDiffColumnAnnotator>(5, records, true);
+    const std::string spec = "{\"iupac\": \"ACNNNNNT\"}";
+    const uint64_t price = path_descriptor_bytes(5, 8);
+    for (const std::string mode : { "partial", "all_or_count" }) {
+        Held held;
+        Json::Value out = run(idx, body(spec, "\"mode\": \"" + mode + "\"", "none"), held.hooks());
+        const Json::Value &e = out["patterns"][0];
+        ASSERT_LT(3u, e["returned"].asUInt64()) << mode;
+        uint64_t texts = 0;
+        for (const Json::Value &r : e["results"]) {
+            EXPECT_EQ(compact(r).size(), own_text(r));
+            EXPECT_LT(kWrittenTextCopies * compact(r).size() + kHeldResultBytes, price);
+            texts += held_result_bytes(price, compact(r).size());
+        }
+        ASSERT_EQ(1u, held.at.size());
+        EXPECT_EQ(texts, held.at[0].first) << mode;
+        EXPECT_EQ(texts, held.at[0].second) << mode;
+
+        Held labelled;
+        out = run(idx, body(spec, "\"mode\": \"" + mode + "\""), labelled.hooks());
+        const Json::Value &l = out["patterns"][0];
+        ASSERT_LT(3u, l["returned"].asUInt64()) << mode;
+        uint64_t settled = 0;
+        for (const Json::Value &r : l["results"]) {
+            EXPECT_LT(own_text(r), compact(r).size());
+            settled += price - held_result_bytes(price, own_text(r));
+        }
+        ASSERT_EQ(1u, labelled.at.size());
+        EXPECT_EQ(settled, labelled.at[0].first - labelled.at[0].second) << mode;
+    }
+}
+
+// Every route that holds its result objects as trees until its pattern ends settles their
+// charges there (SPEC §12.1): each falls from its price to held_result_bytes (three copies of
+// its own text and kHeldResultBytes), byte for byte (RetrievalHooks::held_hook, the account's
+// held bytes before and after): the labelled contexts (512 + 2k each), the selected contexts
+// of a predicate without labels (512 + 2k each, the pass's), a predicate's projection (its
+// descriptors), the supported paths (path_descriptor_bytes each). A label-free context without
+// a predicate is charged nothing (an entry's work.memory_bytes never counted it): nothing to
+// settle
+TEST(PatternPaths, HeldResultsAreSettledAtTheirText) {
+    std::mt19937 rng(17);
+    std::vector<Record> records;
+    for (int i = 0; i < 6; ++i) {
+        std::string seq;
+        for (int j = 0; j < 120; ++j) {
+            seq += "ACGT"[rng() % 4];
+        }
+        records.push_back({ i % 2 ? "odd" : "even", "r" + std::to_string(i), seq });
+    }
+    const size_t k = 5;
+    Index idx = build<annot::RowDiffColumnAnnotator>(k, records, true);
+    const uint64_t context = context_descriptor_bytes(k);
+    const uint64_t path = path_descriptor_bytes(k, 8);
+    struct Case {
+        std::string what;
+        std::string body;
+        uint64_t price;
+    };
+    const std::string predicate = "\"predicate\": {\"any\": [\"even\"]}";
+    const std::vector<Case> cases = {
+        { "labelled contexts",
+          "{\"patterns\": [{\"iupac\": \"ACN\"}], \"output\": {\"labels\": \"all\"}", context },
+        { "selected contexts",
+          "{\"patterns\": [{\"iupac\": \"ACN\"}], " + predicate
+                  + ", \"output\": {\"labels\": \"none\"}", context },
+        { "a projection",
+          "{\"patterns\": [{\"iupac\": \"ACN\"}], " + predicate
+                  + ", \"output\": {\"labels\": \"all\"}", context },
+        { "supported paths",
+          "{\"patterns\": [{\"iupac\": \"ACNNNNNT\"}], \"long_search\": \"supported_paths\", "
+          "\"output\": {\"labels\": \"none\"}", path },
+        { "supported paths with labels",
+          "{\"patterns\": [{\"iupac\": \"ACNNNNNT\"}], \"long_search\": \"supported_paths\", "
+          "\"output\": {\"labels\": \"all\"}", path },
+    };
+    for (const std::string mode : { "partial", "all_or_count" }) {
+        for (const Case &c : cases) {
+            SCOPED_TRACE(c.what + " " + mode);
+            Held held;
+            const Json::Value out = run(idx, c.body + ", \"mode\": \"" + mode + "\"}",
+                                        held.hooks());
+            const Json::Value &e = out["patterns"][0];
+            ASSERT_LT(1u, e["returned"].asUInt64()) << e;
+            uint64_t settled = 0;
+            for (const Json::Value &r : e["results"]) {
+                settled += c.price - held_result_bytes(c.price, own_text(r));
+            }
+            ASSERT_EQ(1u, held.at.size());
+            EXPECT_EQ(settled, held.at[0].first - held.at[0].second);
+        }
+        // a label-free context: charged nothing, nothing settled
+        Held held;
+        const Json::Value out = run(idx, "{\"patterns\": [{\"iupac\": \"ACN\"}], \"output\": "
+                                         "{\"labels\": \"none\"}, \"mode\": \"" + mode + "\"}",
+                                    held.hooks());
+        ASSERT_LT(1u, out["patterns"][0]["returned"].asUInt64());
+        ASSERT_EQ(1u, held.at.size());
+        EXPECT_EQ(held.at[0].first, held.at[0].second);
+    }
+}
+
+// A list withheld after its pattern's work gives its result objects' charges back whole (SPEC
+// §31; the review of 66558cb1f, M1): all_or_count, supported paths with their labels, under
+// label names long enough that the labels of the listed paths can fail where their descriptors
+// fit. A sweep of the account's size: where the labels' output does not fit the list is
+// withheld (output_budget) after its paths' descriptors were kept as their result objects, and
+// the pattern's end releases them whole (before - after = the paths listed x the price);
+// where the sink could not keep every path nothing was kept (before = after). Mutation tried:
+// the objects settled to their text before they are dropped: fails
+TEST(PatternPaths, AWithheldListGivesItsObjectsBack) {
+    std::mt19937 rng(17);
+    std::vector<Record> records;
+    for (int i = 0; i < 6; ++i) {
+        std::string seq;
+        for (int j = 0; j < 120; ++j) {
+            seq += "ACGT"[rng() % 4];
+        }
+        records.push_back({ std::string(4096, i % 2 ? 'o' : 'e'), "r" + std::to_string(i), seq });
+    }
+    const size_t k = 5;
+    Index idx = build<annot::RowDiffColumnAnnotator>(k, records, true);
+    const uint64_t price = path_descriptor_bytes(k, 8);
+    const std::string request = "{\"patterns\": [{\"iupac\": \"ACNNNNNT\"}], \"long_search\": "
+                                "\"supported_paths\", \"output\": {\"labels\": \"all\"}, "
+                                "\"mode\": \"all_or_count\"}";
+    // the whole answer's account, for the sweep's end
+    Held whole;
+    const Json::Value full = run(idx, request, whole.hooks());
+    const uint64_t paths = full["patterns"][0]["returned"].asUInt64();
+    ASSERT_LT(1u, paths) << full["patterns"][0];
+    // from the account that holds the list's descriptors in the sink's half up, in steps of a
+    // descriptor, until three lists were given back or the whole answer fits
+    size_t given_back = 0, nothing_kept = 0;
+    for (uint64_t max = 2 * paths * price; given_back < 3; max += price) {
+        ASSERT_LT(max, full["work"]["memory_bytes"].asUInt64());
+        Held held;
+        RetrievalHooks hooks = held.hooks();
+        hooks.max_memory_bytes = max;
+        const Json::Value out = run(idx, request, hooks);
+        const Json::Value &e = out["patterns"][0];
+        SCOPED_TRACE(max);
+        ASSERT_EQ(1u, held.at.size());
+        if (e["withheld"].isNull() || e["withheld"]["reason"].asString() != "output_budget")
+            continue;
+        EXPECT_EQ(0u, e["returned"].asUInt64());
+        EXPECT_EQ(0u, e["results"].size());
+        const uint64_t released = held.at[0].first - held.at[0].second;
+        if (released) {
+            // the list's descriptors were kept: every path the release named, given back
+            EXPECT_EQ("exact", e["counts"]["supported_paths"]["relation"].asString());
+            EXPECT_EQ(paths * price, released);
+            ++given_back;
+        } else {
+            ++nothing_kept;
+        }
+    }
+    EXPECT_LT(0u, given_back);
+}
+
 // Under "paths" a stop at a level of the depth-first stack comes before the pattern's first
 // complete walk (SPEC §30): every walk completes at the full depth L - k, beside the whole
 // stack, and only the kept walks are admitted while the extension runs. A sweep of the account
@@ -1509,8 +1897,10 @@ TEST(PatternPaths, UnderPathsAStackStopPrecedesTheFirstWalk) {
 // (SPEC §7.6, §12.1): stop {output, max_memory}; partial keeps the objects built (cut
 // max_memory), all_or_count withholds output_budget; the time stop shows only as
 // determinism time_limited. Every reading of a counting clock is made the first one past the
-// work time in turn. Mutation tried: the engine's later stop kept: fails (stop {extraction,
-// time}; all_or_count withheld deadline).
+// work time in turn. A cut among more than 64 paths: on this index reached with the objects
+// held at their price (RetrievalHooks::hold_at_price; held at their text they fit beside the
+// walks, TheMemoryAccountBoundsLabelFreePaths). Mutation tried: the engine's later stop kept:
+// fails (stop {extraction, time}; all_or_count withheld deadline).
 TEST(PatternPaths, TheRouteCutPrecedesALaterTimeStopOfTheRelease) {
     std::mt19937 rng(17);
     std::vector<Record> records;
@@ -1534,6 +1924,7 @@ TEST(PatternPaths, TheRouteCutPrecedesALaterTimeStopOfTheRelease) {
     // every walk fits its half; the route builds the objects that fit beside the walks still
     // held, fewer than 64, so a reading of the release's clock follows its refusal
     RetrievalHooks hooks;
+    hooks.hold_at_price = true;
     hooks.max_memory_bytes = 2 * paths * walk + 2 * object;
     uint64_t built = 0;
     while (built < paths

@@ -648,9 +648,8 @@ bool peer_closed(int fd) {
 
 std::string json_text(const Json::Value &value, bool compact, const std::function<void()> &check,
                       double *max_gap_ms, size_t reserve) {
-    Json::StreamWriterBuilder builder;
-    if (compact)
-        builder["indentation"] = "";   // the traversal routes: half the bytes of the indented form
+    // compact: the traversal routes and /pattern, half the bytes of the indented form
+    const Json::StreamWriterBuilder builder = json_writer_builder(compact);
     if (!check && !reserve)
         return Json::writeString(builder, value);
     static const std::function<void()> kNoCheck = []() {};
@@ -681,7 +680,7 @@ void split_object_text(const Json::Value &object, const std::string &key,
     Json::Value after(Json::objectValue);
     for (const std::string &name : object.getMemberNames()) {
         if (name == key) {
-            throw std::logic_error("assemble_traverse_response: the envelope holds " + key
+            throw std::logic_error("json_text_with_array: the object holds " + key
                                    + " already");
         }
         (name < key ? before : after)[name] = object[name];
@@ -697,9 +696,10 @@ void split_object_text(const Json::Value &object, const std::string &key,
 }
 
 /**
- * |prefix|, the texts of |results| separated by commas, then |suffix|: the text of a /traverse
- * response whose results (each seed's, written once built) are an array's elements between
- * the two. The exact size is reserved at once, so the text never grows by doubling, whose last
+ * |prefix|, the texts of |results| separated by commas (|commas|; else pieces written one after
+ * the other), then |suffix|: the text of a /traverse response whose results (each seed's,
+ * written once built) are an array's elements between the two, or of a /pattern answer's
+ * pieces. The exact size is reserved at once, so the text never grows by doubling, whose last
  * step held an old and a new buffer of up to its size beside the texts; and each text is freed
  * once copied: what was copied and what is left to copy are the response once, where texts
  * kept alive beside it until the handler returned would stay through the compression and the
@@ -708,10 +708,10 @@ void split_object_text(const Json::Value &object, const std::string &key,
  */
 std::string splice_results(std::string prefix, std::vector<std::string> results,
                            const std::string &suffix, const std::function<void()> &check,
-                           double *max_gap_ms) {
+                           double *max_gap_ms, bool commas = true) {
     size_t size = prefix.size() + suffix.size();
     for (size_t i = 0; i < results.size(); ++i) {
-        size += results[i].size() + (i > 0);
+        size += results[i].size() + (commas && i > 0);
     }
     std::string out;
     out.reserve(size);
@@ -719,7 +719,7 @@ std::string splice_results(std::string prefix, std::vector<std::string> results,
     std::string().swap(prefix);
     if (!check) {
         for (size_t i = 0; i < results.size(); ++i) {
-            if (i)
+            if (commas && i)
                 out += ',';
             out += results[i];
             std::string().swap(results[i]);
@@ -727,7 +727,7 @@ std::string splice_results(std::string prefix, std::vector<std::string> results,
     } else {
         DeliveryChecks checks(out, check, kDeliveryCheckBytes, max_gap_ms);
         for (size_t i = 0; i < results.size(); ++i) {
-            if (i)
+            if (commas && i)
                 out += ',';
             const std::string &text = results[i];
             for (size_t at = 0; at < text.size(); ) {
@@ -774,16 +774,110 @@ std::string assemble_traverse_envelope(const Json::Value &envelope,
                           ']' + entry_tail + ']' + outer_tail, check, max_gap_ms);
 }
 
+std::string json_text_with_array(const Json::Value &object, const std::string &key,
+                                 std::vector<std::string> elements,
+                                 const std::function<void()> &check, double *max_gap_ms) {
+    // the object's members after |key| are written first (a /traverse response's usage and
+    // timing, a /pattern entry's notes and timing: a few KiB), so that the whole text's size
+    // is known before a byte of the elements is copied
+    std::string head, tail;
+    split_object_text(object, key, check, max_gap_ms, &head, &tail);
+    // {...,"key":[ the texts ]...}
+    return splice_results(head + '[', std::move(elements), ']' + tail, check, max_gap_ms);
+}
+
+namespace {
+
+// The pieces of a text in order, written into one text of their exact size (splice_results
+// with no separators): |object|'s compact text with its array member |key| (which it does not
+// hold) of the elements |elements| appended to |pieces|, the elements moved in
+void push_with_array(std::vector<std::string> *pieces, const Json::Value &object,
+                     const std::string &key, std::vector<std::string> &&elements,
+                     const std::function<void()> &check, double *max_gap_ms) {
+    std::string head, tail;
+    split_object_text(object, key, check, max_gap_ms, &head, &tail);
+    pieces->push_back(head + '[');
+    for (size_t i = 0; i < elements.size(); ++i) {
+        if (i)
+            pieces->emplace_back(",");
+        pieces->push_back(std::move(elements[i]));
+    }
+    std::vector<std::string>().swap(elements);
+    pieces->push_back(']' + tail);
+}
+
+// one /pattern answer's text as pieces: |head| with "patterns" its entries
+void push_pattern_answer(std::vector<std::string> *pieces, const Json::Value &head,
+                         PatternEntries &&patterns, const std::function<void()> &check,
+                         double *max_gap_ms) {
+    if (patterns.entries.size() != patterns.results.size()) {
+        throw std::logic_error("pattern_answer_text: the entries and their results differ in "
+                               "number");
+    }
+    std::string before, after;
+    split_object_text(head, "patterns", check, max_gap_ms, &before, &after);
+    pieces->push_back(before + '[');
+    for (size_t i = 0; i < patterns.entries.size(); ++i) {
+        if (i)
+            pieces->emplace_back(",");
+        if (patterns.results[i].empty()) {
+            pieces->push_back(json_text(patterns.entries[i], true, check, max_gap_ms));
+        } else {
+            push_with_array(pieces, patterns.entries[i], "results",
+                            std::move(patterns.results[i]), check, max_gap_ms);
+        }
+        patterns.entries[i] = Json::Value();
+    }
+    pieces->push_back(']' + after);
+}
+
+} // namespace
+
+std::string pattern_answer_text(const Json::Value &head, PatternEntries patterns,
+                                const std::function<void()> &check, double *max_gap_ms) {
+    std::vector<std::string> pieces;
+    push_pattern_answer(&pieces, head, std::move(patterns), check, max_gap_ms);
+    return splice_results(std::string(), std::move(pieces), std::string(), check, max_gap_ms,
+                          false);
+}
+
+std::string pattern_envelope_text(const Json::Value &envelope,
+                                  std::vector<std::optional<PatternEntries>> answers,
+                                  const std::function<void()> &check, double *max_gap_ms) {
+    const Json::Value &entries = envelope["answers"];
+    if (!entries.isArray() || entries.size() != answers.size()) {
+        throw std::logic_error("pattern_envelope_text: the envelope's answers and their "
+                               "patterns differ in number");
+    }
+    Json::Value outer(Json::objectValue);
+    for (const std::string &name : envelope.getMemberNames()) {
+        if (name != "answers")
+            outer[name] = envelope[name];
+    }
+    std::string before, after;
+    split_object_text(outer, "answers", check, max_gap_ms, &before, &after);
+    std::vector<std::string> pieces;
+    pieces.push_back(before + '[');
+    for (Json::ArrayIndex i = 0; i < answers.size(); ++i) {
+        if (i)
+            pieces.emplace_back(",");
+        if (answers[i]) {
+            push_pattern_answer(&pieces, entries[i], std::move(*answers[i]), check, max_gap_ms);
+            answers[i].reset();
+        } else {
+            pieces.push_back(json_text(entries[i], true, check, max_gap_ms));
+        }
+    }
+    pieces.push_back(']' + after);
+    return splice_results(std::string(), std::move(pieces), std::string(), check, max_gap_ms,
+                          false);
+}
+
 std::string assemble_traverse_response(const Json::Value &envelope,
                                        std::vector<std::string> results,
                                        const std::function<void()> &check,
                                        double *max_gap_ms) {
-    // the envelope's members after "results" are written first (the usage, the timing: a few
-    // KiB), so that the whole response's size is known before a byte of the results is copied
-    std::string head, tail;
-    split_object_text(envelope, "results", check, max_gap_ms, &head, &tail);
-    // {...,"results":[ the texts ]...}
-    return splice_results(head + '[', std::move(results), ']' + tail, check, max_gap_ms);
+    return json_text_with_array(envelope, "results", std::move(results), check, max_gap_ms);
 }
 
 GraphListEntry parse_graph_list_line(const std::string &text, size_t line) {

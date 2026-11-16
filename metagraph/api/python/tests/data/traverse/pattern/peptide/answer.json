@@ -1276,10 +1276,14 @@
     "-"
    ],
    "timing": {
-    "cpu_ms": 0.33925,
-    "elapsed_ms": 0.130916,
-    "label_discovery_ms": 0.101292,
-    "placement_ms": 0.039416
+    "cpu_ms": 0.599084,
+    "elapsed_ms": 0.198834,
+    "label_discovery_ms": 0.103792,
+    "page_faults": {
+     "major": 0,
+     "minor": 1
+    },
+    "placement_ms": 0.053541
    },
    "withheld": null,
    "work": {
@@ -2536,10 +2540,14 @@
     "-"
    ],
    "timing": {
-    "cpu_ms": 0.185417,
-    "elapsed_ms": 0.064834,
-    "label_discovery_ms": 0.03225,
-    "placement_ms": 0.030416
+    "cpu_ms": 0.366625,
+    "elapsed_ms": 0.075791,
+    "label_discovery_ms": 0.052834,
+    "page_faults": {
+     "major": 0,
+     "minor": 0
+    },
+    "placement_ms": 0.044584
    },
    "withheld": null,
    "work": {
@@ -2547,7 +2555,7 @@
     "annotation_rows_distinct": 4,
     "annotation_units": 4396,
     "mask_scans": 0,
-    "memory_bytes": 82360,
+    "memory_bytes": 82238,
     "ranges_visited": 449,
     "steps": 449
    }
@@ -2621,9 +2629,13 @@
     "-"
    ],
    "timing": {
-    "cpu_ms": 0.213,
-    "elapsed_ms": 0.210458,
+    "cpu_ms": 0.209875,
+    "elapsed_ms": 0.206125,
     "label_discovery_ms": 0.0,
+    "page_faults": {
+     "major": 0,
+     "minor": 0
+    },
     "placement_ms": 0.0
    },
    "withheld": {
@@ -2634,17 +2646,21 @@
     "annotation_rows_distinct": 0,
     "annotation_units": 0,
     "mask_scans": 0,
-    "memory_bytes": 82360,
+    "memory_bytes": 82238,
     "ranges_visited": 1478,
     "steps": 1478
    }
   }
  ],
  "timing": {
-  "cpu_ms": 0.778667,
-  "elapsed_ms": 0.752041
+  "cpu_ms": 1.245083,
+  "elapsed_ms": 1.206292,
+  "page_faults": {
+   "major": 0,
+   "minor": 1
+  }
  },
  "work": {
-  "memory_bytes": 82360
+  "memory_bytes": 82238
  }
 }

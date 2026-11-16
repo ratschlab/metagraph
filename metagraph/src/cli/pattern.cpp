@@ -25,6 +25,7 @@
 #include "pattern_predicate.hpp"
 #include "pattern_support.hpp"
 #include "pattern_supported.hpp"
+#include "server_checks.hpp"
 #include "server_fanout.hpp"
 #include "traverse.hpp"
 
@@ -951,11 +952,14 @@ Json::Value supported_paths_json(const AnchorCounts &a, const SupportedCounts &s
 }
 
 /**
- * The answer's entry for one pattern (§7.2). |results| holds the JSON
- * of the contexts enumerate() released (empty after count()); it is published only when the
- * engine withheld nothing, and moved into the entry. |released| is the number of contexts the
- * engine released: results.size(), or more with output.labels "all" when the memory account
- * admitted only the first of them (their objects not built; apply_labels states the cut).
+ * The answer's entry for one pattern (§7.2). |listed| is the number of result objects the route
+ * built for the contexts (paths) enumerate() released (0 after count()); they are published only
+ * when the engine withheld nothing: `returned` states them, and `results` is an empty array
+ * here, the place of their texts (HeldResults), which the entry's text splices in when its
+ * final `returned` is not 0 (§12.1; every later step that withholds the list sets `returned` 0
+ * with `results` empty). |released| is the number of contexts the engine released: |listed|,
+ * or more with output.labels "all" when the memory account admitted only the first of them
+ * (their objects not built; apply_labels states the cut).
  * |supported|: a pattern longer than k searched for its supported paths (the extension's work
  * and time stated as for long_search "paths"). |mismatches|: the request's max_mismatches and,
  * on the slot error mismatches_above_cap, the cap applied (SPEC §21.8).
@@ -966,7 +970,7 @@ struct MismatchEntry {
 };
 
 Json::Value entry_json(const PatternSpec &spec, const Result *result, Mode mode,
-                       bool strand_stated, Json::Value results, uint64_t released,
+                       bool strand_stated, uint64_t listed, uint64_t released,
                        bool long_paths, const DummyFraction *fraction,
                        const MismatchEntry &mismatches,
                        const SupportedCounts *supported = nullptr) {
@@ -1119,8 +1123,8 @@ Json::Value entry_json(const PatternSpec &spec, const Result *result, Mode mode,
             throw std::logic_error("pattern: the engine answered a retrieval without extraction");
         const Extraction &x = *result->extraction;
         if (x.withheld) {
-            results = Json::Value(Json::arrayValue);
-        } else if (released != x.returned || results.size() > released) {
+            listed = 0;
+        } else if (released != x.returned || listed > released) {
             throw std::logic_error("pattern: the engine released "
                                    + std::to_string(released) + " contexts and stated "
                                    + std::to_string(x.returned));
@@ -1129,11 +1133,11 @@ Json::Value entry_json(const PatternSpec &spec, const Result *result, Mode mode,
         // in this scope, never over labels (none were read)
         e["retrieval_complete"] = x.complete && !x.withheld;
         e["withheld"] = x.withheld ? reason_json(to_string(*x.withheld)) : Json::Value();
-        e["returned"] = uint_json(results.size());
+        e["returned"] = uint_json(listed);
         // all_or_count returns all or nothing: it has no cut
         e["cut"] = mode == Mode::PARTIAL && x.cut && !x.withheld && !x.complete
                 ? reason_json(to_string(*x.cut)) : Json::Value();
-        e["results"] = std::move(results);
+        e["results"] = Json::Value(Json::arrayValue);
     }
 
     e["absence_scope"] = absence_scope(result->scope);
@@ -1282,8 +1286,9 @@ void put_selection(Json::Value *entry, const SelectionEntry &s, Mode mode) {
         return;
     }
     // every selected context of the pattern is in results: the engine released every raw
-    // context, the pass decided each, and every selected one was built
-    const uint64_t returned = e["results"].size();
+    // context, the pass decided each, and every selected one was built (`returned`: the
+    // results built, entry_json's; the list's texts are spliced in after, §12.1)
+    const uint64_t returned = e["returned"].asUInt64();
     e["returned"] = uint_json(returned);
     e["retrieval_complete"] = e["retrieval_complete"].asBool()
                                 && sel.pass == SelectionPass::COMPLETED
@@ -1563,6 +1568,30 @@ Json::Value dummy_fraction_json(const DummyFraction &f) {
     return v;
 }
 
+void HeldResults::add(Json::Value tree, CompactJsonWriter &writer) {
+    texts_.push_back(writer.text(tree));
+    if (keep_trees_)
+        trees_.append(std::move(tree));
+    ++built_;
+}
+
+void HeldResults::drop() {
+    std::vector<std::string>().swap(texts_);
+    trees_ = Json::Value(Json::arrayValue);
+}
+
+std::vector<std::string> HeldResults::take_texts() {
+    std::vector<std::string> texts;
+    texts.swap(texts_);
+    return texts;
+}
+
+Json::Value HeldResults::take_trees() {
+    Json::Value trees(Json::arrayValue);
+    trees.swap(trees_);
+    return trees;
+}
+
 Json::Value PatternRefusal::body() const {
     Json::Value b;
     b["error"] = what();
@@ -1625,16 +1654,15 @@ double validate_pattern_request(const Json::Value &json, const PatternLimits &li
     return parse_request(json, limits).time_budget_ms;
 }
 
-Json::Value process_pattern_request(const Json::Value &json,
-                                    const AnnotatedDBG &anno_graph,
-                                    const Config &config,
-                                    const IndexIdentity *identity,
-                                    PatternDelivery *delivery) {
-    return process_pattern_request(json, anno_graph, pattern_limits(config),
-                                   config.index_release, identity, delivery);
-}
+namespace {
 
-Json::Value process_pattern_request(
+/**
+ * One /pattern request answered (process_pattern_answer, process_pattern_request): its result
+ * objects held as text (HeldResults), each pattern's entry written as its text once assembled.
+ * |keep_trees| (the tree API): each result object's tree kept beside its text, and |*trees| the
+ * answer's patterns as a tree (each entry with its results); otherwise |trees| is not read.
+ */
+PatternAnswer answer_pattern(
         const Json::Value &json,
         const AnnotatedDBG &anno_graph,
         const PatternLimits &limits,
@@ -1642,7 +1670,9 @@ Json::Value process_pattern_request(
         const IndexIdentity *identity,
         PatternDelivery *delivery,
         const std::function<Deadline::Clock::time_point()> &clock,
-        const RetrievalHooks *hooks) {
+        const RetrievalHooks *hooks,
+        bool keep_trees,
+        Json::Value *trees) {
     // the request's CPU time and page faults (timing.cpu_ms, timing.page_faults): its work runs
     // on this thread from here to its top-level timing block (the answer's text and compression
     // after it); a multi-graph server runs each pair's request on one thread of its pool
@@ -1740,6 +1770,9 @@ Json::Value process_pattern_request(
     // the admission of a label-free path list's result objects (answer_plain)
     retrieval::Admission plain(account);
     const PatternSearch search(graph);
+    // each result object's compact text, written once nothing changes the object any more
+    // (§12.1): one writer for the request
+    CompactJsonWriter writer;
 
     const size_t k = graph.get_k();
     const bool strand_stated = support.strand_stated;
@@ -1830,7 +1863,7 @@ Json::Value process_pattern_request(
      * LabelOracle::key_of), since the other orientation's row carries no labels.
      */
     auto context_json = [&](const Context &c, const Pattern &pattern,
-                            RetrievalContext *collected = nullptr) {
+                            RetrievalContext *collected = nullptr, uint64_t *own = nullptr) {
         const size_t length = pattern.length();
         Json::Value r;
         std::string kmer = graph.get_node_sequence(c.node);
@@ -1875,8 +1908,12 @@ Json::Value process_pattern_request(
             r["mismatches"] = uint_json(c.mismatches);
             r["substitutions"] = substitutions_json(pattern, c, r["instance"].asString());
         }
-        // in the answer from now on: the work time is read with it counted
-        volume.add(compact_json_bytes(r));
+        // in the answer from now on: the work time is read with it counted; its own text, the
+        // charge it is held at once written (§12.1)
+        const uint64_t text = compact_json_bytes(r);
+        volume.add(text);
+        if (own)
+            *own = text;
         return r;
     };
 
@@ -1888,7 +1925,8 @@ Json::Value process_pattern_request(
      * the strand or orientation as for contexts. The rows are named without reading them, as a
      * context's row (§7.10).
      */
-    auto path_json = [&](const Context &c, size_t length, RetrievalPath *collected = nullptr) {
+    auto path_json = [&](const Context &c, size_t length, RetrievalPath *collected = nullptr,
+                         uint64_t *own = nullptr) {
         const size_t n = length - k + 1;
         if (length <= k || c.path.size() != n || c.sequence.size() != length
                 || c.path.front() != c.node || c.offset != 0) {
@@ -1944,15 +1982,38 @@ Json::Value process_pattern_request(
         }
         r["nodes"] = std::move(nodes);
         r["rows"] = std::move(rows);
-        // in the answer from now on: the work time is read with it counted
-        volume.add(compact_json_bytes(r));
+        // in the answer from now on: the work time is read with it counted; its own text, the
+        // charge it is held at once written (§12.1)
+        const uint64_t text = compact_json_bytes(r);
+        volume.add(text);
+        if (own)
+            *own = text;
         return r;
     };
 
-    Json::Value entries(Json::arrayValue);
+    // what a result object charged |price| while it was a tree is held at once written (§12.1;
+    // tests: at its price, RetrievalHooks::hold_at_price)
+    auto held_bytes = [&](uint64_t price, uint64_t own) {
+        return hooks && hooks->hold_at_price ? price : held_result_bytes(price, own);
+    };
+
     struct Answered {
         std::optional<Result> result;
+        // the result objects held as trees until the pattern ends: those a later step still
+        // adds fields to (their labels, a constant predicate's selection fields), written into
+        // |held| when the pattern ends (hold_results)
         Json::Value results;
+        // the pattern's result objects as their texts (§12.1): those final when built (a
+        // label-free path, a label-free context without a predicate) written in the engine's
+        // callback, the others when the pattern ends
+        HeldResults held;
+        // the objects in |results| as the account holds them when the pattern's work ends:
+        // |charge| bytes, |price| each (512 + 2k, or path_descriptor_bytes), and each object's
+        // own text (|own|, as built); hold_results settles each at held_result_bytes. 0: none
+        // charged (a label-free context, a withheld list, a refused slot)
+        uint64_t charge = 0;
+        uint64_t price = 0;
+        std::vector<uint64_t> own;
         // the contexts the engine released (results.size(), or more when the memory account
         // admitted only the first of them: output.labels "all", or a long pattern's label-free
         // paths; with a predicate's pass, the raw contexts released into it)
@@ -1998,12 +2059,18 @@ Json::Value process_pattern_request(
             plain.begin();
             a.result = search.enumerate(pattern, req.request, budget, [&](const Context &c) {
                 ++a.released;
-                if (!plain.admit(path_descriptor_bytes(k, length))) {
+                const uint64_t price = path_descriptor_bytes(k, length);
+                if (!plain.admit(price)) {
                     return;
                 }
-                a.results.append(path_json(c, length));
+                // final as built (no label, no predicate with long_search "paths"): its text
+                // now, its tree freed, its charge settled to its written text (§12.1), so that
+                // the next objects find the room its tree took
+                uint64_t own = 0;
+                a.held.add(path_json(c, length, nullptr, &own), writer);
+                plain.settle(price, held_bytes(price, own));
             });
-            a.plain_cut = a.results.size() < a.released;
+            a.plain_cut = a.held.built() < a.released;
             // the objects answered stay charged until the request ends (§12.1), as the
             // labelled descriptors do; all or nothing: the objects of a withheld or cut list
             // are discarded, their charge with them
@@ -2011,12 +2078,20 @@ Json::Value process_pattern_request(
             if (mode != Mode::PARTIAL && a.result->extraction
                     && (a.plain_cut || a.result->extraction->withheld)) {
                 account.release(objects);
+                // (the entry withholds the list: entry_json, put_plain_cut)
+                a.held.drop();
             }
         } else if (!labels) {
+            // without a predicate final as built: its text now, its tree freed (§12.1); a
+            // constant predicate's projection adds its fields after (answer_selection)
             a.result = search.enumerate(pattern, req.request, budget, [&](const Context &c) {
-                a.results.append(context_json(c, pattern));
+                if (has_predicate) {
+                    a.results.append(context_json(c, pattern));
+                } else {
+                    a.held.add(context_json(c, pattern), writer);
+                }
             });
-            a.released = a.results.size();
+            a.released = has_predicate ? a.results.size() : a.held.built();
         } else if (paths) {
             const size_t length = pattern.length();
             std::vector<RetrievalPath> collected;
@@ -2029,13 +2104,17 @@ Json::Value process_pattern_request(
                 if (!retrieval->admit_path(length))
                     return;
                 collected.emplace_back();
-                a.results.append(path_json(c, length, &collected.back()));
+                uint64_t own = 0;
+                a.results.append(path_json(c, length, &collected.back(), &own));
+                a.own.push_back(own);
             });
             if (!a.result->refusal && a.result->extraction) {
                 a.labels = retrieval->retrieve_paths(collected, a.released, length, mode,
                                                      *a.result->extraction, graph_name,
                                                      req.require_verified);
                 a.label_paths = true;
+                a.charge = a.labels->descriptors;
+                a.price = path_descriptor_bytes(k, length);
             }
         } else {
             const size_t length = pattern.length();
@@ -2048,13 +2127,17 @@ Json::Value process_pattern_request(
                 if (!retrieval->admit_context())
                     return;
                 collected.emplace_back();
-                a.results.append(context_json(c, pattern, &collected.back()));
+                uint64_t own = 0;
+                a.results.append(context_json(c, pattern, &collected.back(), &own));
+                a.own.push_back(own);
             });
             // the labels of what was released (nothing when it was withheld), work
             // still: the reads end where the deadline's work time does (§5.3)
             if (!a.result->refusal && a.result->extraction) {
                 a.labels = retrieval->retrieve(collected, a.released, length, mode,
                                                *a.result->extraction, graph_name);
+                a.charge = a.labels->descriptors;
+                a.price = context_descriptor_bytes(k);
             }
         }
     };
@@ -2257,7 +2340,9 @@ Json::Value process_pattern_request(
                 c.node = t.node;
                 c.base_node = t.base_node;
                 collected.emplace_back();
-                Json::Value r = context_json(c, pattern, &collected.back());
+                uint64_t own = 0;
+                Json::Value r = context_json(c, pattern, &collected.back(), &own);
+                a.own.push_back(own);
                 if (projection != Projection::NONE) {
                     // why it was selected: the predicate's labels in the set it was evaluated
                     // on, and per label the orientation whose row carries it, their bytes
@@ -2281,15 +2366,21 @@ Json::Value process_pattern_request(
                 s.output_withheld = "output_budget";
             }
         }
-        if (s.output_withheld)
+        if (s.output_withheld) {
             a.results = Json::Value(Json::arrayValue);
+            a.own.clear();
+        }
         if (projection == Projection::NONE) {
             // the result objects the answer keeps stay charged until the request ends (§19.9),
-            // as a projection's descriptors do: the bound is the request's; those of a withheld
-            // list are discarded, their charge with them
+            // as a projection's descriptors do: the bound is the request's, at their text once
+            // the pattern ends (§12.1); those of a withheld list are discarded, their charge
+            // with them
             const uint64_t objects = retrieval->end_release();
             if (s.output_withheld) {
                 account.release(objects);
+            } else {
+                a.charge = objects;
+                a.price = context_descriptor_bytes(k);
             }
         }
 
@@ -2315,6 +2406,8 @@ Json::Value process_pattern_request(
                                                 graph_name)
                     : retrieval->retrieve(collected, released, length, mode, given,
                                           graph_name);
+            a.charge = a.labels->descriptors;
+            a.price = context_descriptor_bytes(k);
         }
         retrieval->end_selection();
         finish();
@@ -2437,11 +2530,13 @@ Json::Value process_pattern_request(
         } else {
             path_sink->begin_pattern(mode, rq.max_paths);
         }
+        // the descriptors the sink leaves with the listed paths' result objects
         auto end = [&](size_t listed) {
             if (selecting)
                 path_selection->end_pattern();
-            path_sink->end_pattern(listed);
+            const uint64_t kept = path_sink->end_pattern(listed);
             path_tracker->end_pattern();
+            return kept;
         };
         a.result = search.count(pattern, rq, budget);
         if (a.result->refusal) {
@@ -2529,13 +2624,17 @@ Json::Value process_pattern_request(
                 }
                 break;
             }
-            Json::Value r = path_json(path_sink->paths()[j], length);
+            uint64_t own = 0;
+            Json::Value r = path_json(path_sink->paths()[j], length, nullptr, &own);
             if (sel && projection != Projection::NONE)
                 path_selection_json(*sel, j, &r);
             a.results.append(std::move(r));
+            a.own.push_back(own);
         }
-        if (s.withheld)
+        if (s.withheld) {
             a.results = Json::Value(Json::arrayValue);
+            a.own.clear();
+        }
         if (x) {
             if (listed < x->returned)
                 x->complete = false;
@@ -2559,7 +2658,13 @@ Json::Value process_pattern_request(
         s.rows_refused = path_tracker->rows_refused();
         if (!s.labels)
             volume.add(compact_json_bytes(s.rows_refused));
-        end(listed);
+        // the sink leaves the listed paths' descriptors with their result objects, to settle
+        // once they are held as text (§12.1); hold_results checks them against the objects
+        const uint64_t kept = end(listed);
+        if (listed) {
+            a.charge = kept;
+            a.price = path_descriptor_bytes(k, length);
+        }
         s.memory_bytes = retrieval->memory_peak();
         a.supported = std::move(s);
         return sel;
@@ -2677,6 +2782,10 @@ Json::Value process_pattern_request(
               "\"none\"), or rename the label in the index";
         a.result->refusal = std::move(refusal);
         a.results = Json::Value(Json::arrayValue);
+        a.held = HeldResults(keep_trees);
+        // (its charges stay as an answered entry's, at their price: nothing is settled)
+        a.charge = 0;
+        a.own.clear();
         a.released = 0;
         a.labels.reset();
         a.label_paths = false;
@@ -2685,12 +2794,69 @@ Json::Value process_pattern_request(
         a.supported.reset();
     };
 
+    /**
+     * The end of a pattern's work: nothing changes its result objects any more (§12.1). Those
+     * still held as trees are merged with their labels (the projection's result fields, which
+     * apply_labels merged at the assembly before) and written as their texts, the trees freed;
+     * an all_or_count list whose labels are withheld is not written (apply_labels empties it),
+     * only counted, and the charges its objects still hold are given back whole (the labelled
+     * retrieval gave its own back already; the supported paths' sink leaves the listed paths'
+     * with them). A refused slot holds none (refuse_unrepresentable). The writing reads the
+     * delivery's check (the respond deadline, a client gone) every kReleaseClockStride objects,
+     * as the finalisation's writing did before §31.
+     */
+    auto hold_results = [&](Answered &a) {
+        const bool withheld = a.labels && a.labels->withheld;
+        if (a.charge) {
+            // each object's charge falls from its price to its written text (held_result_bytes),
+            // or to nothing when the list is withheld
+            if (a.own.size() != a.results.size() || a.charge != a.own.size() * a.price) {
+                throw std::logic_error("pattern: " + std::to_string(a.charge) + " bytes held for "
+                                       + std::to_string(a.results.size()) + " result objects "
+                                       "of " + std::to_string(a.price) + " bytes each");
+            }
+            uint64_t held = 0;
+            if (!withheld) {
+                for (uint64_t own : a.own) {
+                    held += held_bytes(a.price, own);
+                }
+            }
+            account.release(a.charge - held);
+            a.charge = 0;
+        }
+        std::vector<uint64_t>().swap(a.own);
+        if (a.results.empty())
+            return;
+        if (withheld) {
+            a.held.add_dropped(a.results.size());
+        } else {
+            std::vector<Json::Value> *fields = a.labels ? &a.labels->result_fields : nullptr;
+            for (Json::ArrayIndex i = 0; i < a.results.size(); ++i) {
+                if (delivery && i % Budget::kReleaseClockStride == 0)
+                    delivery->check();
+                Json::Value &r = a.results[i];
+                if (fields && i < fields->size()) {
+                    Json::Value &f = (*fields)[i];
+                    for (const std::string &name : f.getMemberNames()) {
+                        r[name] = std::move(f[name]);
+                    }
+                }
+                // (moved into add, which frees it once written)
+                a.held.add(std::move(r), writer);
+            }
+        }
+        a.results = Json::Value(Json::arrayValue);
+        if (a.labels)
+            std::vector<Json::Value>().swap(a.labels->result_fields);
+    };
+
     std::vector<Answered> answered;
     answered.reserve(req.patterns.size());
     for (const PatternSpec &spec : req.patterns) {
         const common::ThreadUsageMeter pattern_usage;
         Answered a;
         a.results = Json::Value(Json::arrayValue);
+        a.held = HeldResults(keep_trees);
         if (spec.pattern && req.request.max_mismatches) {
             // SPEC §21.8: the cap applied to the pattern -- its kind's, or 0 for a pattern
             // longer than k, a later increment -- checked before the floor and before anything
@@ -2743,6 +2909,10 @@ Json::Value process_pattern_request(
             }
             if (a.labels && a.labels->unrepresentable)
                 refuse_unrepresentable(a, *a.labels->unrepresentable);
+            const uint64_t before = account.held();
+            hold_results(a);
+            if (hooks && hooks->held_hook)
+                hooks->held_hook(answered.size(), before, account.held());
         }
         a.usage = pattern_usage.elapsed();
         a.memory_peak = account.peak();
@@ -2753,19 +2923,22 @@ Json::Value process_pattern_request(
     const double elapsed_ms = deadline.elapsed_ms();
 
     // the finalisation: assembling the answer, read against the deadline every
-    // kDeliveryStride objects (the writing and the compression then check it too)
+    // kDeliveryStride objects (the writing and the compression then check it too); each entry
+    // beside its results' texts (§12.1), which the writing splices in
+    PatternEntries body;
+    body.entries.reserve(req.patterns.size());
+    body.results.reserve(req.patterns.size());
+    Json::Value entries(Json::arrayValue);
     uint64_t objects = 0;
     for (size_t i = 0; i < req.patterns.size(); ++i) {
         Answered &a = answered[i];
-        objects += 1 + a.results.size();
-        if (a.labels)
-            objects += a.labels->result_fields.size();
+        objects += 1 + a.held.built();
         if (delivery && objects >= kDeliveryStride) {
             delivery->check();
             objects = 0;
         }
         Json::Value entry = entry_json(req.patterns[i], a.result ? &*a.result : nullptr, mode,
-                                       strand_stated, std::move(a.results), a.released,
+                                       strand_stated, a.held.built(), a.released,
                                        req.long_paths, fraction ? &*fraction : nullptr,
                                        MismatchEntry { req.request.max_mismatches,
                                                        a.mismatch_cap },
@@ -2866,7 +3039,31 @@ Json::Value process_pattern_request(
                 && !entry["work"].isMember("memory_bytes")) {
             entry["work"]["memory_bytes"] = uint_json(a.memory_peak);
         }
-        entries.append(std::move(entry));
+        // the entry's results: their texts written as its "results" where its final
+        // `returned` lists them (a list withheld after the pattern's work, by its labels or a
+        // cut, states 0 with `results` empty: its texts were never written, or are dropped
+        // here)
+        const uint64_t returned = entry.isMember("results") ? entry["returned"].asUInt64() : 0;
+        if (returned) {
+            if (a.held.texts().size() != returned) {
+                throw std::logic_error("pattern: an entry returns " + std::to_string(returned)
+                                       + " results and holds "
+                                       + std::to_string(a.held.texts().size()));
+            }
+            entry.removeMember("results");
+            body.results.push_back(a.held.take_texts());
+            if (keep_trees) {
+                Json::Value tree = entry;
+                tree["results"] = a.held.take_trees();
+                entries.append(std::move(tree));
+            }
+        } else {
+            a.held.drop();
+            body.results.emplace_back();
+            if (keep_trees)
+                entries.append(entry);
+        }
+        body.entries.push_back(std::move(entry));
     }
 
     Json::Value out;
@@ -3002,11 +3199,66 @@ Json::Value process_pattern_request(
     timing["elapsed_ms"] = elapsed_ms;
     put_thread_usage(&timing, request_usage.elapsed());
     out["timing"] = std::move(timing);
-    out["patterns"] = std::move(entries);
+    if (keep_trees)
+        *trees = std::move(entries);
 
     if (delivery)
         delivery->check();
+    return PatternAnswer { std::move(out), std::move(body) };
+}
+
+} // namespace
+
+PatternAnswer process_pattern_answer(
+        const Json::Value &json,
+        const AnnotatedDBG &anno_graph,
+        const PatternLimits &limits,
+        const std::string &release,
+        const IndexIdentity *identity,
+        PatternDelivery *delivery,
+        const std::function<Deadline::Clock::time_point()> &clock,
+        const RetrievalHooks *hooks) {
+    return answer_pattern(json, anno_graph, limits, release, identity, delivery, clock, hooks,
+                          false, nullptr);
+}
+
+PatternAnswer process_pattern_answer(const Json::Value &json,
+                                     const AnnotatedDBG &anno_graph,
+                                     const Config &config,
+                                     const IndexIdentity *identity,
+                                     PatternDelivery *delivery) {
+    return process_pattern_answer(json, anno_graph, pattern_limits(config),
+                                  config.index_release, identity, delivery);
+}
+
+Json::Value process_pattern_request(
+        const Json::Value &json,
+        const AnnotatedDBG &anno_graph,
+        const PatternLimits &limits,
+        const std::string &release,
+        const IndexIdentity *identity,
+        PatternDelivery *delivery,
+        const std::function<Deadline::Clock::time_point()> &clock,
+        const RetrievalHooks *hooks) {
+    Json::Value patterns;
+    PatternAnswer answer = answer_pattern(json, anno_graph, limits, release, identity, delivery,
+                                          clock, hooks, true, &patterns);
+    // the server's text (process_pattern_answer's, as the server writes it) against the tree's
+    const std::string text = pattern_answer_text(answer.head, std::move(answer.patterns));
+    Json::Value out = std::move(answer.head);
+    out["patterns"] = std::move(patterns);
+    if (json_text(out, true) != text)
+        throw std::logic_error("pattern: the text of the answer differs from its tree's");
     return out;
+}
+
+Json::Value process_pattern_request(const Json::Value &json,
+                                    const AnnotatedDBG &anno_graph,
+                                    const Config &config,
+                                    const IndexIdentity *identity,
+                                    PatternDelivery *delivery) {
+    return process_pattern_request(json, anno_graph, pattern_limits(config),
+                                   config.index_release, identity, delivery);
 }
 
 Json::Value pattern_capabilities_json(const AnnotatedDBG *anno_graph,

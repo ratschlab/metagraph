@@ -574,6 +574,60 @@ def untimed(value):
     return value
 
 
+def _jsoncpp_string(s):
+    out = ['"']
+    for ch in s:
+        c = ord(ch)
+        if ch in '"\\':
+            out.append('\\' + ch)
+        elif ch in '\b\f\n\r\t':
+            out.append({'\b': '\\b', '\f': '\\f', '\n': '\\n', '\r': '\\r', '\t': '\\t'}[ch])
+        elif c < 0x20 or 0x80 <= c < 0x10000:
+            out.append('\\u%04x' % c)
+        elif c < 0x80:
+            out.append(ch)
+        else:
+            c -= 0x10000
+            out.append('\\u%04x\\u%04x' % (0xd800 + (c >> 10), 0xdc00 + (c & 0x3ff)))
+    out.append('"')
+    return ''.join(out)
+
+
+def jsoncpp_compact(value):
+    """The text the server's JSON writer (jsoncpp, compact: json_text(value, true)) writes for
+    |value|, a parsed body: members in byte order of their names, no whitespace, its escapes
+    (the two-character ones, \\u00XX for other control characters, every code point above
+    ASCII as \\uXXXX, a surrogate pair above U+FFFF), integers as such and other numbers as
+    %.17g (".0" after an integral one). A body equal to the text of its own parse is what
+    jsoncpp writes for that tree (SPEC-pattern-search.md §31: the server writes /pattern from
+    held texts, not from the tree)."""
+    if value is None:
+        return 'null'
+    if value is True or value is False:
+        return 'true' if value else 'false'
+    if isinstance(value, int):
+        return str(value)
+    if isinstance(value, float):
+        text = '%.17g' % value
+        return text if any(c in text for c in '.en') else text + '.0'
+    if isinstance(value, str):
+        return _jsoncpp_string(value)
+    if isinstance(value, list):
+        return '[' + ','.join(jsoncpp_compact(v) for v in value) + ']'
+    return '{' + ','.join(_jsoncpp_string(k) + ':' + jsoncpp_compact(value[k])
+                          for k in sorted(value, key=lambda k: k.encode('utf-8'))) + '}'
+
+
+def members_once(pairs):
+    """json.loads' object_pairs_hook: an object that names a member twice is an error."""
+    out = {}
+    for key, value in pairs:
+        if key in out:
+            raise ValueError(f'the member {key!r} twice')
+        out[key] = value
+    return out
+
+
 def free_port():
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
         s.bind(('127.0.0.1', 0))
@@ -1284,6 +1338,62 @@ class TestPatternMini(PatternChecks, unittest.TestCase):
             self.assertIn('--pattern-row-cache-mb', (res.stdout + res.stderr).decode(), command)
 
     # ------------------------------------------------------------ the label-free retrieval
+
+    def test_the_servers_bytes_are_the_trees_text(self):
+        """SPEC §31: the server writes /pattern from its result objects' held texts, never from
+        their trees. Its body is, byte for byte, the compact text of the answer's tree as the
+        CLI writes it (`metagraph pattern --json`, the tree API, one process for every request)
+        once the clock's members are masked (the *_ms values and, on Linux only, the
+        page_faults object; timing.load_ms, which only the server states, is removed),
+        with gzip off and on: every fixture request of the masked server (contexts and paths
+        with and without labels, supported paths, predicates and their projections,
+        mismatches, lists withheld, refused slots, count mode) and two of ids with escapes and
+        non-ASCII characters; a time-limited answer is not compared. Each body is also the text
+        jsoncpp writes for the tree it parses to (members in byte order, none twice)."""
+        fx = os.path.join(os.path.dirname(FIXTURE_VALIDATOR), 'data', 'traverse', 'pattern')
+        with open(os.path.join(fx, 'index.json')) as f:
+            index = json.load(f)['fixtures']
+        files = [os.path.join(fx, name, 'request.json') for name, f in sorted(index.items())
+                 if f['server'] == 'masked' and f['method'] == 'POST' and f['status'] == 200
+                 and not f.get('hand_made') and not f.get('headers')]
+        odd = 'q"\\\u00e9\u0001\U0001F600/<\u2028'
+        for i, payload in enumerate((
+                {'patterns': [{'id': odd, 'dna': self.p16}, {'id': '', 'iupac': self.iupac16}],
+                 'mode': 'partial', 'output': {'labels': 'all'}},
+                {'patterns': [{'id': odd, 'dna': self.p40}], 'long_search': 'supported_paths',
+                 'mode': 'all_or_count', 'output': {'labels': 'all'}})):
+            files.append(os.path.join(self.tempdir.name, f'bytes_{i}.json'))
+            with open(files[-1], 'w', encoding='utf-8') as f:
+                json.dump(payload, f, ensure_ascii=False)
+        self.assertGreater(len(files), 100)
+        res = subprocess.run(shlex.split(METAGRAPH) + ['pattern', '--json', '-i', self.graph,
+                                                       '-a', self.anno] + files,
+                             stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=600)
+        self.assertEqual(0, res.returncode, res.stderr.decode()[-2000:])
+        trees = res.stdout.rstrip(b'\n').split(b'\n')
+        self.assertEqual(len(files), len(trees))
+        clock = re.compile(rb'"[a-z_]*_ms":[-0-9.e+]+'
+                           rb'|"page_faults":\{"major":[0-9]+,"minor":[0-9]+\}')
+        compared = 0
+        for path, tree in zip(files, trees):
+            with open(path, 'rb') as f:
+                body = f.read()
+            for encoding in ('identity', 'gzip'):
+                with self.subTest(request=path, encoding=encoding):
+                    ret = requests.post(self.server.url('pattern'), data=body, timeout=120,
+                                        headers={'Accept-Encoding': encoding})
+                    self.assertEqual(200, ret.status_code, ret.text[:2000])
+                    if encoding == 'identity':
+                        self.assertNotIn('Content-Encoding', ret.headers)
+                    text = ret.content
+                    parsed = json.loads(text, object_pairs_hook=members_once)
+                    self.assertEqual(jsoncpp_compact(parsed).encode('ascii'), text)
+                    if b'time_limited' in text or b'time_limited' in tree:
+                        continue
+                    served = re.sub(rb',"load_ms":[-0-9.e+]+', b'', text)
+                    self.assertEqual(clock.sub(b'_', tree), clock.sub(b'_', served))
+                    compared += 1
+        self.assertGreater(compared, 200)
 
     def test_retrieval_all_or_count(self):
         patterns = [self.p16, self.iupac16, self.pal12, self.absent16]

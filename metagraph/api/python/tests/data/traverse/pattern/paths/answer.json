@@ -162,9 +162,13 @@
     "-"
    ],
    "timing": {
-    "cpu_ms": 0.094542,
-    "elapsed_ms": 0.093,
-    "extension_ms": 0.043625
+    "cpu_ms": 1.278042,
+    "elapsed_ms": 1.216833,
+    "extension_ms": 0.797791,
+    "page_faults": {
+     "major": 0,
+     "minor": 5
+    }
    },
    "withheld": null,
    "work": {
@@ -172,7 +176,7 @@
     "extension_branches": 0,
     "extension_edges": 18,
     "mask_scans": 0,
-    "memory_bytes": 5476,
+    "memory_bytes": 4064,
     "ranges_visited": 62,
     "steps": 80
    }
@@ -249,9 +253,13 @@
     "-"
    ],
    "timing": {
-    "cpu_ms": 0.011584,
-    "elapsed_ms": 0.010792,
-    "extension_ms": 0.0
+    "cpu_ms": 0.015209,
+    "elapsed_ms": 0.013416,
+    "extension_ms": 0.0,
+    "page_faults": {
+     "major": 0,
+     "minor": 0
+    }
    },
    "withheld": null,
    "work": {
@@ -259,17 +267,21 @@
     "extension_branches": 0,
     "extension_edges": 0,
     "mask_scans": 0,
-    "memory_bytes": 5476,
+    "memory_bytes": 4064,
     "ranges_visited": 23,
     "steps": 23
    }
   }
  ],
  "timing": {
-  "cpu_ms": 0.134792,
-  "elapsed_ms": 0.115125
+  "cpu_ms": 1.346125,
+  "elapsed_ms": 1.30425,
+  "page_faults": {
+   "major": 0,
+   "minor": 5
+  }
  },
  "work": {
-  "memory_bytes": 5476
+  "memory_bytes": 4064
  }
 }

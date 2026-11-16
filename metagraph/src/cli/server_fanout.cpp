@@ -704,6 +704,8 @@ class FanoutState {
         // the answer's entry is decided (by the worker, or by the handler at the cutoff)
         bool resolved = false;
         Json::Value entry;
+        // the entry's patterns as texts (/pattern, PairResult::patterns)
+        std::optional<PatternEntries> patterns;
         bool aborted = false;
         common::ThreadUsage usage = common::ThreadUsage::zero();
         bool usage_final = false;
@@ -1000,6 +1002,7 @@ class FanoutState {
                 entry->pair_outcome(i, "unfinished");
             } else {
                 slot.entry = std::move(result.entry);
+                slot.patterns = std::move(result.patterns);
                 slot.resolved = true;
                 slot.usage = result.usage;
                 slot.usage_final = true;
@@ -1154,6 +1157,7 @@ FanoutOutcome run_fanout(const FanoutSettings &settings,
         FanoutState::Slot &slot = state->slots[0];
         outcome.client_gone = slot.aborted;
         outcome.entries.push_back(std::move(slot.entry));
+        outcome.patterns.push_back(std::move(slot.patterns));
         return outcome;
     }
     const RequestDeadlines &d = state->settings.deadlines;
@@ -1250,6 +1254,8 @@ FanoutOutcome run_fanout(const FanoutSettings &settings,
             outcome.pairs_usage.add(slot.usage);
         outcome.entries.push_back(std::move(slot.entry));
         slot.entry = Json::Value();
+        outcome.patterns.push_back(std::move(slot.patterns));
+        slot.patterns.reset();
     }
     state->inline_gone = nullptr;
     return outcome;
