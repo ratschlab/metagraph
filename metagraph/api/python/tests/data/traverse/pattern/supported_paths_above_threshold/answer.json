@@ -114,14 +114,14 @@
     "-"
    ],
    "timing": {
-    "cpu_ms": 0.211584,
-    "elapsed_ms": 0.171167,
-    "extension_ms": 0.152792,
+    "cpu_ms": 0.529542,
+    "elapsed_ms": 0.440167,
+    "extension_ms": 0.374583,
     "page_faults": {
      "major": 0,
      "minor": 1
     },
-    "support_ms": 0.13720800000000002
+    "support_ms": 0.32541899999999985
    },
    "withheld": {
     "reason": "count_above_threshold"
@@ -134,7 +134,7 @@
     "extension_branches": 0,
     "extension_edges": 18,
     "mask_scans": 0,
-    "memory_bytes": 67118938,
+    "memory_bytes": 67120540,
     "ranges_visited": 62,
     "row_cache_evictions": 0,
     "row_cache_hits": 0,
@@ -143,14 +143,14 @@
   }
  ],
  "timing": {
-  "cpu_ms": 0.242083,
-  "elapsed_ms": 0.220291,
+  "cpu_ms": 0.60775,
+  "elapsed_ms": 0.566833,
   "page_faults": {
    "major": 0,
    "minor": 1
   }
  },
  "work": {
-  "memory_bytes": 67118938
+  "memory_bytes": 67120540
  }
 }

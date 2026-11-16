@@ -1519,6 +1519,40 @@ struct WindowSpec {
 };
 
 /**
+ * A depth-first stack over the positions of a pattern in its memory account (the request's,
+ * MemoryAccount, for the extension; the segment search's SegmentSink for its arms): each level
+ * admitted before it is pushed, at the model's price (kExtensionLevelBytes, kRightArmLevelBytes,
+ * kLeftArmLevelBytes), and released when it is popped; what a stop leaves held is released
+ * when the search returns (the destructor). Without an account (null) nothing is charged.
+ */
+template <class Account>
+class StackCharge {
+  public:
+    explicit StackCharge(Account *account) : account_(account) {}
+    StackCharge(const StackCharge&) = delete;
+    StackCharge& operator=(const StackCharge&) = delete;
+    ~StackCharge() { release(held_); }
+
+    // false: |bytes| do not fit what the account has left; nothing is held
+    bool admit(uint64_t bytes) {
+        if (account_ && !account_->admit(bytes))
+            return false;
+        held_ += bytes;
+        return true;
+    }
+    void release(uint64_t bytes) {
+        assert(bytes <= held_);
+        held_ -= bytes;
+        if (account_ && bytes)
+            account_->release(bytes);
+    }
+
+  private:
+    Account *account_;
+    uint64_t held_ = 0;
+};
+
+/**
  * Counts, and for enumerate() retains and releases, the contexts of one pattern.
  * One object per call; all state is its own, so calls run concurrently.
  * With |window| (a long pattern only): the anchors of that one window instead of every searched
@@ -3198,7 +3232,11 @@ class PatternRun {
      * tracker (Request::support) one frame per level: opened at the anchor, pushed when a child
      * is entered (before it is expanded or completed), popped when the DFS leaves it; a DEAD
      * verdict prunes the branch (not expanded), a STOPPED one ends the extension. Without one,
-     * the plain DFS of long_search "paths". False when a stop ended it.
+     * the plain DFS of long_search "paths". Every level of the DFS (the anchor's included) is
+     * admitted to the request's memory account (Budget::memory) before its node is expanded,
+     * after the clock, at kExtensionLevelBytes, and released when the DFS backs out of it; one
+     * that does not fit stops the extension ({EXTENSION, MAX_MEMORY}), in every mode. False
+     * when a stop ended it.
      * A template on the Model's type: with a Pattern (final, its Model methods defined in this
      * file) every call is resolved and inlined, so that the plain DFS costs no more than one
      * written for Pattern alone (per extension edge, within the noise of an A/A timing);
@@ -3224,8 +3262,13 @@ class PatternRun {
             uint8_t size = 0;
             uint8_t next = 0;
         };
+        // the price of a level in the request's memory account: twice its bytes in |levels|,
+        // |path| and |spelled|, which grow by doubling with the depth reached (never reserved
+        // for the L - k levels a walk can reach: their storage is allocated as it is charged)
+        static_assert(kExtensionLevelBytes
+                == 2 * (sizeof(Level) + sizeof(node_index) + sizeof(char)));
         std::vector<Level> levels;
-        levels.reserve(L - k_);
+        StackCharge<MemoryAccount> stack(budget_.memory());
 
         // the support tracker's frames open, popped on every way out (SupportTracker's
         // protocol: each ALIVE open() and push() popped exactly once)
@@ -3259,6 +3302,12 @@ class PatternRun {
             // index
             if (!(++expanded_ % Budget::kReleaseClockStride) && !budget_.check_time()) {
                 record_stop(StopPhase::EXTENSION, StopReason::TIME);
+                return false;
+            }
+            // the level in the request's memory account before its node is expanded (§5.3):
+            // the first that does not fit stops the extension, as a kept walk does
+            if (!stack.admit(kExtensionLevelBytes)) {
+                record_stop(StopPhase::EXTENSION, StopReason::MAX_MEMORY);
                 return false;
             }
             const BaseSet allowed = model.bases(state, static_cast<uint32_t>(spelled.size()));
@@ -3314,6 +3363,7 @@ class PatternRun {
             Level &top = levels.back();
             if (top.next == top.size) {
                 levels.pop_back();
+                stack.release(kExtensionLevelBytes);
                 // the anchor itself is never popped (its frame 0 after the loop)
                 if (levels.size()) {
                     path.pop_back();
@@ -4314,7 +4364,9 @@ class SegmentRun {
      * symbol order, until no allowed k-mer follows or L. A state (k-mer, offset) found in |memo|
      * is not expanded again: its greatest end is read. Every other state is memoised with its
      * greatest end when its subtree is done (post-order; the root is not: no later search asks
-     * for it). One step per outgoing edge examined; the clock as tick(). |end|: the root's
+     * for it). One step per outgoing edge examined; the clock as tick(). Each level is admitted
+     * to the sink before it is pushed (kRightArmLevelBytes) and released when it is popped; a
+     * refusal ends the search ({EXTENSION, EXTERNAL}, the sink's max_memory). |end|: the root's
      * greatest end. False when a stop ended it.
      */
     template <class M>
@@ -4337,7 +4389,11 @@ class SegmentRun {
             uint8_t size = 0;
             uint8_t next = 0;
         };
+        // a level's price in the sink: twice its bytes in |levels| and |spelled| (both grow by
+        // doubling with the depth reached), admitted before it is pushed
+        static_assert(kRightArmLevelBytes == 2 * (sizeof(Level) + sizeof(char)));
         std::vector<Level> levels;
+        StackCharge<SegmentSink> stack(&sink_);
 
         // the allowed outgoing k-mers of the deepest level's node at the next position
         auto expand = [&]() {
@@ -4367,6 +4423,10 @@ class SegmentRun {
         };
 
         ++work_.extension_anchors;
+        if (!stack.admit(kRightArmLevelBytes)) {
+            external_stop();
+            return false;
+        }
         levels.push_back(Level { anchor.node, model.start_at(s, spelled),
                                  static_cast<uint32_t>(s + k_) });
         if (!expand())
@@ -4378,6 +4438,7 @@ class SegmentRun {
                 const node_index node = top.node;
                 const uint32_t reach = top.reach;
                 levels.pop_back();
+                stack.release(kRightArmLevelBytes);
                 if (levels.empty()) {
                     *end = reach;
                     return true;
@@ -4399,6 +4460,10 @@ class SegmentRun {
             const Model::State state = model.next(top.state,
                                                   static_cast<uint32_t>(s + spelled.size()),
                                                   child.base);
+            if (!stack.admit(kRightArmLevelBytes)) {
+                external_stop();
+                return false;
+            }
             spelled.push_back(child.base);
             levels.push_back(Level { child.node, state, offset + static_cast<uint32_t>(k_) });
             if (!expand())
@@ -4416,8 +4481,11 @@ class SegmentRun {
      * (bwd, bwd^(K-1)) pair making the one its bwd names cost 2 (first_cost_ for any other, and
      * for the root's own pair); on the wrapper of a PRIMARY graph through
      * CanonicalDBG::incoming_kmers with the node's k-mer as the hint, k - 2 bwd steps per
-     * edge (what DBGSuccinct's own first base costs). |begin|: the root's least start. False
-     * when a stop ended it.
+     * edge (what DBGSuccinct's own first base costs). The arm's spelling (s + k - horizon
+     * bytes, allocated once) and each level (kLeftArmLevelBytes) are admitted to the sink before
+     * they are held, a level released when it is popped and the spelling when the arm returns; a
+     * refusal ends the search ({EXTENSION, EXTERNAL}, the sink's max_memory). |begin|: the root's
+     * least start. False when a stop ended it.
      */
     template <class M>
     bool left_arm(const Context &anchor, uint32_t s, uint32_t horizon, const M &model,
@@ -4428,8 +4496,15 @@ class SegmentRun {
             *begin = 0;
             return true;
         }
+        // the arm's levels and its spelling in the sink, each admitted before it is held
+        StackCharge<SegmentSink> stack(&sink_);
         // the bases of Q[horizon, s + k) the walk spells, indexed by position - horizon: the
-        // anchor's k-mer at its end, a base before it per level (the wrapper's spelling hints)
+        // anchor's k-mer at its end, a base before it per level (the wrapper's spelling hints),
+        // allocated at once and charged at its length
+        if (!stack.admit(s + k_ - horizon)) {
+            external_stop();
+            return false;
+        }
         std::string spelled(s + k_ - horizon, '\0');
         {
             const std::string kmer = graph_.get_node_sequence(anchor.node);
@@ -4452,6 +4527,9 @@ class SegmentRun {
             uint8_t size = 0;
             uint8_t next = 0;
         };
+        // a level's price in the sink: twice its bytes in |levels| (which grows by doubling with
+        // the depth reached), admitted before it is pushed
+        static_assert(kLeftArmLevelBytes == 2 * sizeof(Level));
         std::vector<Level> levels;
 
         // the allowed incoming k-mers of the deepest level's node, whose k-mer starts at |t|
@@ -4509,6 +4587,10 @@ class SegmentRun {
                 return false;
             root.pair = bwd_pair(anchor.node);
         }
+        if (!stack.admit(kLeftArmLevelBytes)) {
+            external_stop();
+            return false;
+        }
         levels.push_back(root);
         if (!expand(s))
             return false;
@@ -4520,6 +4602,7 @@ class SegmentRun {
                 const node_index node = top.node;
                 const uint32_t reach = top.reach;
                 levels.pop_back();
+                stack.release(kLeftArmLevelBytes);
                 if (levels.empty()) {
                     *begin = reach;
                     return true;
@@ -4537,6 +4620,10 @@ class SegmentRun {
                 continue;
             }
             const Model::State state = model.prev(top.state, offset, child.base);
+            if (!stack.admit(kLeftArmLevelBytes)) {
+                external_stop();
+                return false;
+            }
             spelled[offset - horizon] = child.base;
             levels.push_back(Level { child.node, child.pair, state, offset });
             if (!expand(offset))

@@ -83,9 +83,7 @@
    "length": 40,
    "min_anchor_information_bits": 62.0,
    "mode": "count",
-   "notes": [
-    "annotation_not_read"
-   ],
+   "notes": [],
    "palindromic": false,
    "pattern": "ATGGAATTGCCCAATATTATGCACCCGGTCGCGAAGCTGA",
    "retrieval_complete": false,
@@ -96,16 +94,20 @@
     "-"
    ],
    "timing": {
-    "cpu_ms": 0.0245,
-    "elapsed_ms": 0.023583,
-    "extension_ms": 0.01125
+    "cpu_ms": 0.108334,
+    "elapsed_ms": 0.102375,
+    "extension_ms": 0.038959,
+    "page_faults": {
+     "major": 0,
+     "minor": 0
+    }
    },
    "work": {
     "extension_anchors": 2,
     "extension_branches": 0,
     "extension_edges": 18,
     "mask_scans": 0,
-    "memory_bytes": 0,
+    "memory_bytes": 1602,
     "ranges_visited": 62,
     "steps": 80
    }
@@ -229,22 +231,30 @@
     "-"
    ],
    "timing": {
-    "cpu_ms": 0.015875,
-    "elapsed_ms": 0.014917
+    "cpu_ms": 0.049,
+    "elapsed_ms": 0.046167,
+    "page_faults": {
+     "major": 0,
+     "minor": 0
+    }
    },
    "work": {
     "mask_scans": 0,
-    "memory_bytes": 0,
+    "memory_bytes": 1602,
     "ranges_visited": 122,
     "steps": 122
    }
   }
  ],
  "timing": {
-  "cpu_ms": 0.062917,
-  "elapsed_ms": 0.047833
+  "cpu_ms": 0.221292,
+  "elapsed_ms": 0.175292,
+  "page_faults": {
+   "major": 0,
+   "minor": 0
+  }
  },
  "work": {
-  "memory_bytes": 0
+  "memory_bytes": 1602
  }
 }

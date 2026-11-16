@@ -266,14 +266,14 @@
     "reverse"
    ],
    "timing": {
-    "cpu_ms": 4.431624,
-    "elapsed_ms": 2.316208,
-    "extension_ms": 2.244625,
+    "cpu_ms": 5.471125,
+    "elapsed_ms": 3.040958,
+    "extension_ms": 2.932834,
     "page_faults": {
-     "major": 1,
+     "major": 0,
      "minor": 139
     },
-    "support_ms": 1.6490429999999994
+    "support_ms": 1.8389189999999995
    },
    "withheld": null,
    "work": {
@@ -284,7 +284,7 @@
     "extension_branches": 0,
     "extension_edges": 18,
     "mask_scans": 0,
-    "memory_bytes": 67117104,
+    "memory_bytes": 67118706,
     "ranges_visited": 82,
     "row_cache_evictions": 0,
     "row_cache_hits": 12,
@@ -293,14 +293,14 @@
   }
  ],
  "timing": {
-  "cpu_ms": 4.660333,
-  "elapsed_ms": 4.550834,
+  "cpu_ms": 5.861792,
+  "elapsed_ms": 5.579625,
   "page_faults": {
-   "major": 1,
-   "minor": 139
+   "major": 0,
+   "minor": 140
   }
  },
  "work": {
-  "memory_bytes": 67117104
+  "memory_bytes": 67118706
  }
 }

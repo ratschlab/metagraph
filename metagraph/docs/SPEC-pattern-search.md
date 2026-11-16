@@ -657,9 +657,9 @@ labels alone — a row truncated or refused, a stop of the annotation reads or o
 | `deadline` | `all_or_count`, L ≤ k: the work time passed in discovery or a deferred scan, or in the release or while its contexts were handed to the route (all or nothing: a deadline during the hand-over withholds all of them, the counts kept) | as stopped | a larger `time_budget_ms`, or as for `discovery_budget` |
 | `paths_later_increment` | either retrieval mode, L > k without `long_search: "paths"` or `"supported_paths"`, unless the anchors are `exact` 0 (§7.7); whatever stopped the anchors is in `stop` | the anchors' | ask with `long_search: "paths"` (increment 4, §12.1); a request that does not keeps this answer |
 | `anchors_above_threshold` | increment 4, `long_search: "paths"` (or `"supported_paths"`, §20.5), L > k, either retrieval mode (`partial` too): the anchors `exact` and more than `max_anchors` (on a graph without its mask also `bounds` with U > `max_anchors`, the note `threshold_upper_bound` when their `lower` ≤ `max_anchors`), so the extension was not admitted (§12.1) | the anchors' (`exact`, or without the mask `bounds`); `counts.paths` `unknown`, `extension: "not_admitted"` | raise `max_anchors`, or narrow the pattern's anchor window (its first k bases, and its last k with `strands` `both` or `reverse`) |
-| `annotation_budget` | increment 3, `all_or_count`, `labels: "all"`: a row the memory account refused (`rows_refused`), or the reads stopped at `max_annotation_work`; increment 5s, `all_or_count` whatever the projection: the supported-path search's reads stopped (`stop {extension, max_annotation_work \| max_memory}`, §20.5), or a predicate's mirror reads (`stop {selection, …}`, §20.9) | `exact` (5s: `counts.supported_paths` `at_least`) | raise `max_memory_mb` or `max_annotation_work`, narrow the pattern, or `partial` |
+| `annotation_budget` | increment 3, `all_or_count`, `labels: "all"`: a row the memory account refused (`rows_refused`), or the reads stopped at `max_annotation_work`; increment 5s, `all_or_count` whatever the projection: the supported-path search's reads stopped (`stop {extension, max_annotation_work \| max_memory}`, §20.5; `max_memory` also a level of its depth-first stack, §30), or a predicate's mirror reads (`stop {selection, …}`, §20.9) | `exact` (5s: `counts.supported_paths` `at_least`) | raise `max_memory_mb` or `max_annotation_work`, narrow the pattern, or `partial`; after a `max_memory` stop without a `rows_refused` entry (a frame of the search or a level of its depth-first stack, §30) `max_annotation_work` does not help: only `max_memory_mb` or a shorter or narrower pattern does (`partial` lists the supported paths completed before the stop); at the default `max_memory_mb`, which is also its cap (`--pattern-max-memory-mb`, 256 MiB unless the server sets another), the client cannot raise it: a shorter or narrower pattern, a request of its own for a pattern that follows others (their result objects stay in the account until the request ends, §14.4), or `partial` |
 | `anchor_labels_truncated` | increment 3, `all_or_count`, `labels: "all"`: a row carried more labels than `max_labels_per_anchor` (`anchors_truncated` lists each, with its total) | `exact` | raise `max_labels_per_anchor` to the largest total, or `partial` |
-| `output_budget` | increment 3, `all_or_count`, `labels: "all"`: the memory account could not hold the answer (the contexts' descriptors or the labels and occurrences built for them); increment 4, `long_search: "paths"` with any projection: the walks the extension keeps for the release did not fit their half of the account (`stop {extension, max_memory}`, the paths `at_least`), or without labels a path's result object did not fit (`stop {output, max_memory}`; §12.1); increment 5b: also a selected context's result object, with any projection; increment 5s: the supported paths kept did not fit their half of the account (§20.7) | `exact` (increment 4 after a stop of the extension: `at_least`) | raise `max_memory_mb`, narrow the pattern, or `partial` |
+| `output_budget` | increment 3, `all_or_count`, `labels: "all"`: the memory account could not hold the answer (the contexts' descriptors or the labels and occurrences built for them); increment 4, `long_search: "paths"` with any projection: the walks the extension keeps for the release did not fit their half of the account, or a level of its depth-first stack did not fit the account (`stop {extension, max_memory}`, the paths `at_least`; §30), or without labels a path's result object did not fit (`stop {output, max_memory}`; §12.1); increment 5b: also a selected context's result object, with any projection; increment 5s: the supported paths kept did not fit their half of the account (§20.7) | `exact` (increment 4 after a stop of the extension: `at_least`) | raise `max_memory_mb`, narrow the pattern, or `partial` |
 | `predicate_above_threshold` | increment 5b, `all_or_count` with a predicate: the raw count `exact` (without the mask: its upper bound) above `max_predicate_contexts`; nothing was read (§19.6, §19.8). Increment 5s: more supported walks to hold for `"either"` than `max_predicate_contexts` (§20.9) | the raw count's | narrow the pattern, scope or strands, raise `max_predicate_contexts` up to its cap, or `partial` (it tests the first `max_predicate_contexts`) |
 | `selected_above_threshold` | increment 5b, `all_or_count` with a predicate: the selected count `exact` and above `max_contexts` (5s: the selected supported paths above `max_paths`, §20.9) | the raw count's; `selected` `exact` | narrow the predicate or the pattern, raise `max_contexts`, or `partial` |
 | `predicate_budget` | increment 5b, `all_or_count` with a predicate: the selection stopped at `max_predicate_work` (also an earlier pattern's: sticky), or the memory account could not hold it (its descriptors, its rows, a row it had to read: `rows_refused`, phase `selection`), or the predicate itself (§19.9) | the raw count's; `selected` `bounds` or `at_least` | raise `max_predicate_work` or `max_memory_mb`, narrow the pattern |
@@ -681,7 +681,7 @@ server bug (§6).
 | `max_contexts` | discovery completed (or stopped at the threshold) with more contexts than `max_contexts`: the first `max_contexts` in answer order |
 | `max_steps` | discovery or a deferred scan stopped at `max_steps`: the first `max_contexts` of those discovered |
 | `time` | the work time passed: in discovery nothing is released (its membership would depend on the machine, `returned: 0`); in the release, what was released before (the clock is read every 64 contexts handed to the route, §7.6). Also the cut of a pattern already stopped by `max_steps` or the threshold whose release met the work time (§7.6: `stop` keeps the first stop) |
-| `max_memory` | increment 3, `labels: "all"`: the memory account held the descriptors of only the first `returned` contexts (`partial`'s descriptors take at most half of the account, §14.4; the list's length; it replaces the engine's `max_contexts` cut when both cut). Increment 4, `long_search: "paths"` with any projection: the extension stopped at a walk the account could not hold (`stop {extension, max_memory}`: the walks kept before it, in answer order), or without labels the list ended where the next path's result object did not fit (`stop {output, max_memory}`; §12.1). Increment 5s: the supported-path search stopped at a row or frame the account could not hold, or its list ended where the next path did not fit (§20.5) |
+| `max_memory` | increment 3, `labels: "all"`: the memory account held the descriptors of only the first `returned` contexts (`partial`'s descriptors take at most half of the account, §14.4; the list's length; it replaces the engine's `max_contexts` cut when both cut). Increment 4, `long_search: "paths"` with any projection: the extension stopped at a walk or a level of its depth-first stack the account could not hold (`stop {extension, max_memory}`: the walks kept before it, in answer order; §30), or without labels the list ended where the next path's result object did not fit (`stop {output, max_memory}`; §12.1). Increment 5s: the supported-path search stopped at a row, a frame or a level of its depth-first stack the account could not hold, or its list ended where the next path did not fit (§20.5, §30) |
 | `max_paths` | increment 4, `long_search: "paths"`: more paths than `max_paths` (completed, or stopped at the threshold in the extension): the first `max_paths` in answer order (§12.1); increment 5s: more supported paths (with a predicate, selected ones) than `max_paths` (§20.5, §20.9) |
 | `max_annotation_work` | increment 5s, `long_search: "supported_paths"`: the search stopped at the request's annotation work: the supported paths completed before it (§20.5) |
 | `max_predicate_contexts` | increment 5b, with a predicate: the raw release held the first `max_predicate_contexts` contexts in answer order (or stopped at that threshold): the selected among them (§19.8); increment 5s: the first `max_predicate_contexts` supported walks held for `"either"` (§20.9) |
@@ -779,8 +779,10 @@ releases anchors (a path search cut before any extension, by `stop_at_threshold`
 - **Memory.** The label-free path (mode `count`, or `output.labels: "none"`) has no memory account in version
   1 except for a path search (`long_search: "paths"`, §12.1: the walks the extension keeps for the release and,
   without labels, each path's result object are charged to the request's account, `max_memory_mb`, in every
-  projection); what a request holds otherwise is bounded by the caps:
-  - the DFS frontier, O(k × alphabet) per base search;
+  projection; and since §30 the extension's depth-first stack, in every mode, `count` included); what a request
+  holds otherwise is bounded by the caps:
+  - the DFS frontier, O(k × alphabet) per base search (the extension's stack, one level per position past the
+    anchor, up to L − k, is in the account, §30);
   - the ranges whose count awaits a deferred scan, 88 bytes each: none in the common case; on an even-k wrapped
     PRIMARY graph one per range at a palindrome-capable offset, so up to `max_steps` of them for a short or
     degenerate pattern;
@@ -943,7 +945,7 @@ releases anchors (a path search cut before any extension, by `stop_at_threshold`
 <!-- schema: answer_work -->
 | field | type | meaning |
 |---|---|---|
-| `memory_bytes` | integer | the request's memory account at its peak: every pattern's charges (§14.4, §20.7, §20.9, §12.1's label-free paths and result objects), whatever the mode, labelled or not, whether or not the request named `max_memory_mb` (the account exists for every request; a budget that does not bind changes nothing in it); at least every entry's `work.memory_bytes`. A model of what the request held, not its process memory: the engine's ranges, the decoded rows of a read beyond what it charges, the answer's tree and text and the index pages it touched are not in it (`timing.page_faults` counts the pages read). 0 when nothing was charged (a count, a label-free list of anchors). Deterministic (the same request on the same index gives the same value) unless a time stop cut the work |
+| `memory_bytes` | integer | the request's memory account at its peak: every pattern's charges (§14.4, §20.7, §20.9, §12.1's label-free paths and result objects, §30's depth-first stack of the extension of a pattern longer than k), whatever the mode, labelled or not, whether or not the request named `max_memory_mb` (the account exists for every request; a budget that does not bind changes nothing in it); at least every entry's `work.memory_bytes`. A model of what the request held, not its process memory: the engine's ranges, the decoded rows of a read beyond what it charges, the answer's tree and text and the index pages it touched are not in it (`timing.page_faults` counts the pages read). 0 when nothing was charged (a count of patterns of at most k bases or without the extension, a label-free list of anchors; since §30 a pattern longer than k under `long_search` `"paths"` or `"supported_paths"` charges its depth-first stack in every mode, `count` included). Deterministic (the same request on the same index gives the same value) unless a time stop cut the work |
 
 ### 8.2 `index`
 
@@ -1150,7 +1152,7 @@ and the labels count of the paths (with `labels: "all"`) has:
 | `steps` | integer | every step this pattern charged (k − 1 for each candidate the check of §7.4 tested) |
 | `annotation_rows` | integer | increment 3, `labels: "all"`: the rows this pattern's reads returned (both steps); increment 5s, L > k under `"supported_paths"` in every mode: every row its search read (§20.6) |
 | `annotation_units` | integer | likewise: the work units of this pattern's reads, refused ones included (§14.4, §20.7) |
-| `memory_bytes` | integer | every answered entry (2026-10-21; until then the entries that read annotation only): the request's memory account at its peak so far — when the pattern's labels, selection or supported-path search were answered where it has them, otherwise when its work ended (0 where nothing was charged yet: a count, a label-free list of anchors) — the model of §14.4, §20.7 and §20.9; every copy of a label's name the answer holds counted at its length, the listed paths' `selection_labels` included. The request's own is the answer's `work.memory_bytes` (§8.1) |
+| `memory_bytes` | integer | every answered entry (2026-10-21; until then the entries that read annotation only): the request's memory account at its peak so far — when the pattern's labels, selection or supported-path search were answered where it has them, otherwise when its work ended (0 where nothing was charged yet: a count of a pattern of at most k bases or without the extension, a label-free list of anchors) — the model of §14.4, §20.7, §20.9 and §30 (the extension's depth-first stack, in every mode); every copy of a label's name the answer holds counted at its length, the listed paths' `selection_labels` included. The request's own is the answer's `work.memory_bytes` (§8.1) |
 | `anchor_rows` | integer | increment 5s, L > k under `"supported_paths"`: of `annotation_rows`, the anchors' rows read whole for the permitted set (§20.3) |
 | `row_cache_hits` | integer | likewise: the search's steps whose row came from the pattern's row cache (§20.3) |
 | `row_cache_evictions` | integer | likewise: the times the row cache was emptied to make room (a row after it may be read again, counted again) |
@@ -1170,7 +1172,7 @@ and the labels count of the paths (with `labels: "all"`) has:
 | field | type | meaning |
 |---|---|---|
 | `phase` | `"discovery"` \| `"mask_scan"` \| `"extraction"`; increment 3: `"label_discovery"` \| `"placement"` \| `"output"`; increment 4: `"extension"`; increment 5b: `"selection"` | §7.6 |
-| `reason` | `"max_steps"` \| `"time"` \| `"max_contexts"` \| `"max_anchors"`; increment 3: `"max_annotation_work"` \| `"max_memory"`; increment 4: `"max_paths"` (phase `extension` only), and `"max_memory"` in the phases `extension` (a walk kept for the release the account could not hold) and `output` (without labels, a path's result object), §12.1; increment 5b: `"max_predicate_work"` (phase `selection` only), `"max_predicate_contexts"` (phase `discovery`); increment 5s: `"max_annotation_work"` and `"max_memory"` in the phases `extension` and `selection`, `"max_predicate_contexts"` in the phase `extension` (§20.5, §20.9) | §7.6 |
+| `reason` | `"max_steps"` \| `"time"` \| `"max_contexts"` \| `"max_anchors"`; increment 3: `"max_annotation_work"` \| `"max_memory"`; increment 4: `"max_paths"` (phase `extension` only), and `"max_memory"` in the phases `extension` (a walk kept for the release, or a level of the extension's depth-first stack, §30, the account could not hold; in every mode) and `output` (without labels, a path's result object), §12.1; increment 5b: `"max_predicate_work"` (phase `selection` only), `"max_predicate_contexts"` (phase `discovery`); increment 5s: `"max_annotation_work"` and `"max_memory"` in the phases `extension` and `selection`, `"max_predicate_contexts"` in the phase `extension` (§20.5, §20.9) | §7.6 |
 | `mismatch_level` | integer | increment 5m-3 (§21.7), with `max_mismatches` > 0 and a stop of the search's own work (phase `discovery` or `mask_scan`, an earlier pattern's request-wide stop included): the level whose work the stop interrupted, or, at the clock reading that starts it, prevented; the levels below it are complete, the levels above `unknown`. Absent on a stop of a later phase |
 
 <!-- schema: reason -->
@@ -1227,12 +1229,12 @@ It costs no step.
 
 | note | meaning |
 |---|---|
-| `low_complexity_pattern` | an exact pattern that sdust flags over its whole text (T = 20, W = 64, the seeder's parameters): a hint that its counts may be large; for L > k the flag can come from bases outside the anchor windows. Stated in an answer without a stop, beside a threshold stop (`max_contexts`, `max_anchors`, `max_paths`, and on supported paths a predicate's `max_paths` and `max_predicate_contexts`, §20.5) or beside a stop of a later phase (labels, selection, output); never beside a budget stop of the search (`max_steps`, `time`, the supported-path search's own budgets, §20.5; an earlier pattern's request-wide stop included), and left out of a pattern of more than 191 bases whose diagnostic the work time cut (`determinism: "time_limited"`, its `stop` unchanged; §7.8). Its absence is no claim that a pattern is not low-complexity |
+| `low_complexity_pattern` | an exact pattern that sdust flags over its whole text (T = 20, W = 64, the seeder's parameters): a hint that its counts may be large; for L > k the flag can come from bases outside the anchor windows. Stated in an answer without a stop, beside a threshold stop (`max_contexts`, `max_anchors`, `max_paths`, and on supported paths a predicate's `max_paths` and `max_predicate_contexts`, §20.5) or beside a stop of a later phase (labels, selection, output); never beside a budget stop of the search (`max_steps`, `time`, the extension's `max_memory`, a kept walk or a level of its depth-first stack, §12.1, §30, the supported-path search's own budgets, §20.5; an earlier pattern's request-wide stop included), and left out of a pattern of more than 191 bases whose diagnostic the work time cut (`determinism: "time_limited"`, its `stop` unchanged; §7.8). Its absence is no claim that a pattern is not low-complexity |
 | `strand_unknown_canonical` | a CANONICAL or PRIMARY graph: orientations, not strands |
 | `paths_later_increment` | L > k without `long_search: "paths"`: anchors counted, paths neither extended nor extracted (ask with `long_search: "paths"`, §12.1) |
 | `annotation_unbudgeted` | increment 3: the labels were read without the budget-aware decode (`allow_unbudgeted_annotation`): no memory bound on the reads themselves (what they returned is in the account), the deadline checked between chunks of keys. Increment 5b: also an entry whose selection read rows so, without a projection; increment 5s: an entry whose supported-path search read rows so (§20.6) |
 | `record_bounds_unknown` | increment 3: coordinates without a record mapping (`placement: "global"`): occurrences are (`kmer_coord`, `offset`), placed in no record, not deduplicated, not counted (increment 5s: the supported paths' labels, at the `label_intersection` level, §20.8) |
-| `annotation_not_read` | increment 3: the request asked for labels (`output.labels: "all"`) or named an annotation field (`require_support` included), and this answer reads none (mode `count`, or `labels: "none"`): the fields had no effect. `max_memory_mb` acts on a `long_search: "paths"` entry of a pattern longer than k outside mode `count` (its kept walks and result objects, §12.1): named alone, it leaves no note there |
+| `annotation_not_read` | increment 3: the request asked for labels (`output.labels: "all"`) or named an annotation field (`require_support` included), and this answer reads none (mode `count`, or `labels: "none"`): the fields had no effect. `max_memory_mb` acts on a `long_search: "paths"` entry of a pattern longer than k in every mode (its extension's depth-first stack, §30; outside mode `count` also its kept walks and result objects, §12.1): named alone, it leaves no note there (until §30, mode `count` excepted: a count kept nothing in the account) |
 | `label_intersection_only` | increment 4: the labels of paths where no coordinate is read (placement `none`, `none_canonical`, `not_requested`): every label is `label_intersection`, none can be verified (§12.1); increment 5s: the labels of supported paths searched at the `label_intersection` level where no occurrence is listed (§20.6) |
 | `threshold_upper_bound` | the owner's decision #16, a graph without its mask: a threshold was decided on a count's upper bound U against the request while its lower bound was within the threshold — `all_or_count` withheld `count_above_threshold`, `stop_at_threshold` stopped (`threshold_crossed`, or in `partial` `cut: max_contexts` / `max_anchors`), or the extension was not admitted (`anchors_above_threshold`): the true count may be within the threshold (§7.5) |
 | `no_stop_codon` | the owner's decision #19: a peptide holding `*` read in a genetic code without an unconditional stop codon (tables 27, 28, 31): `*` matches nothing there, so the pattern has no instance; its contexts (L ≤ k, `exact` 0, answered without a search, §7.6) or paths (L > k) are 0 for that reason. A long one's anchors are its anchor windows', which may not reach the `*` (§12.2) |
@@ -1538,8 +1540,9 @@ object that fits beside the 20 walks kept released) and `paths_memory_withheld` 
 the third `withheld: output_budget` with `stop {output, max_memory}`, the second's objects freed with it); and
 `paths_memory_named` (`max_memory_mb` named alone: NDM-40's paths answered as without it, the entry of `paths`;
 NDM-F, L ≤ k, which the field does not act on, keeps `annotation_not_read`, §8.10) and `paths_memory_count` (the
-same request in mode `count`, where nothing is kept or built: both entries keep `annotation_not_read`, NDM-40's
-paths counted as in `paths_count`).
+same request in mode `count`, where nothing is kept or built; since §30 the extension's depth-first stack is in the
+account in every mode, so the field acts on NDM-40's entry, which carries no note, its paths counted as in
+`paths_count`, and NDM-F keeps `annotation_not_read`).
 
 After the review of 2026-10-10 (§26): `utf8_label_refused`, `utf8_label_count` and `utf8_label_predicate`, on the
 server `utf8_labels` (a BASIC graph at k = 31 of two records written as bytes, A × 40 under the raw header
@@ -1829,7 +1832,10 @@ labels (the review of 2026-10-12, §28): each costs 128 + 8n + L bytes (its node
 before it is kept, and together they may take at most half of what the account has left when the extension
 begins (the other half is for the result objects built from them while they are held, as §20.7 splits it for
 supported paths); the first that does not fit stops the extension, `stop {extension, max_memory}`, the paths
-`at_least` and `extension: "stopped"`: `partial` releases the walks kept before it (a prefix of the answer order,
+`at_least` and `extension: "stopped"`. The extension's depth-first stack is in the account too, in every mode
+(`count` included): each level, admitted before its node is expanded and released when the search backs out of
+it, from all that the account has left (§30); a level that does not fit stops the extension the same way. After
+either stop, `partial` releases the walks kept before it (a prefix of the answer order,
 `cut: max_memory`), `all_or_count` withholds `output_budget`. Each walk is freed and its charge released as the
 release hands it over, so the result objects find the room the walks took. Without labels (`output.labels:
 "none"`) each path's result object is charged as with labels (512 + 2k + 3L + 192n), before it is built, from
@@ -3426,7 +3432,8 @@ Per pattern longer than k, once its anchors are counted and admitted (§12.1):
 `anchors_above_threshold` (not admitted), `count_above_threshold` (the supported paths `exact` and more than
 `max_paths`), `threshold_crossed` (`stop_at_threshold`: reason `max_paths`, on the anchors `max_anchors`),
 `discovery_budget` (`max_steps` in any phase), `deadline` (the work time), **`annotation_budget`** (the search's
-reads stopped: `stop {extension, max_annotation_work | max_memory}`), `output_budget` (the listed paths did not
+reads stopped: `stop {extension, max_annotation_work | max_memory}`; `max_memory` a row, a frame or a level of the
+depth-first stack, §30), `output_budget` (the listed paths did not
 fit the account: `stop {output, max_memory}`), and with a predicate §20.9's. `partial`: the supported paths
 completed before a stop, a prefix of the answer order, `cut.reason` `max_paths` (more than `max_paths`: the first
 ones), `max_steps`, `time`, `max_anchors` (as §12.1), `max_annotation_work`, `max_memory` (a stop of the search's
@@ -3435,11 +3442,11 @@ completed, every supported path was returned and, with labels, every label of ea
 
 `stop` (§7.6): the phase `extension` with the reasons `max_steps`, `time`, `max_paths` (`stop_at_threshold`),
 `max_annotation_work` (a row read once the units reached it: the work is checked before each read) and
-`max_memory` (a row or a frame the account cannot hold; a row it refused is stated in `rows_refused`, phase
-`extension`); the phase `output` with `time` (the work time read every 64 result objects built) and `max_memory`.
-First stop wins; `max_steps` and `time` are sticky for the later patterns as in §7.6, `max_annotation_work` in
-effect (one budget per request: a later pattern's search stops at its first read), `max_memory` not (a later
-pattern starts with what the account has left).
+`max_memory` (a row, a frame or a level of the depth-first stack, §30, the account cannot hold; a row it refused
+is stated in `rows_refused`, phase `extension`); the phase `output` with `time` (the work time read every 64
+result objects built) and `max_memory`. First stop wins; `max_steps` and `time` are sticky for the later
+patterns as in §7.6, `max_annotation_work` in effect (one budget per request: a later pattern's search stops at
+its first read), `max_memory` not (a later pattern starts with what the account has left).
 
 The note `low_complexity_pattern` (§7.8) is not stated beside a stop of the search's own budgets
 (`max_annotation_work`, `max_memory`, `time`); it is diagnosed beside the threshold stops: the engine's
@@ -3493,15 +3500,21 @@ answered entry of a pattern longer than k has `rows_refused` (§14.4), in every 
   (minus d on the other strand) and its record end never changes — with 16 bytes per label beside its id (its
   anchor index and its chain runs, twice), so a 500-base walk over a k-mer carried by 38,000 record chains
   holds 470 bitmaps of 4.8 KB, not 470 copies of its chain runs. A frame is admitted before it is built and
-  released when the search backs out of it; 64 bytes per anchor while the anchors' whole rows are read; a row in the
-  cache as its `DecodeBudget` models it, inside the allotment of §20.3 (charged when the extension begins,
-  released when the pattern ends); a kept supported path's descriptor (`path_descriptor_bytes`: 512 + 2k + 3L +
+  released when the search backs out of it; its buffers are not: a popped frame keeps them for the next step
+  into its depth (`Frame::step` clears them, which keeps their capacity) until the pattern ends
+  (`PathTracker::end_pattern` frees the frames), so the process can hold more than the account charges the frames,
+  by the buffers of the deepest branch the pattern's search has left, across its anchors (the walk above: about
+  2.3 MB of bitmaps stay allocated after its branch dies); 64 bytes per anchor while the anchors' whole rows are
+  read; a row in the cache as its `DecodeBudget` models it, inside the allotment of §20.3 (charged when the
+  extension begins, released when the pattern ends); a kept supported path's descriptor (`path_descriptor_bytes`: 512 + 2k + 3L +
   192n, §12.1) with its labels and occurrence runs, admitted before it is copied, within half of what the account
-  has left when the pattern's extension begins (the other half for the frames and rows). A frame or a row that
-  does not fit: `stop {extension, max_memory}`. A path that does not fit its half: the list ends before it
-  (`partial`: `cut: max_memory`, `stop {output, max_memory}`; `all_or_count`: `withheld: output_budget`). The
-  returned paths' result objects stay in the account until the request ends, as a released path's (§14.4), so the
-  later patterns of a request have less (fixture `supported_paths_memory`).
+  has left when the pattern's extension begins (the other half for the frames and rows); the extension's
+  depth-first stack, a level per frame, admitted before its node is expanded and released when the search backs
+  out of it (§30). A frame, a row or a level that does not fit: `stop {extension, max_memory}`. A path that does
+  not fit its half: the list ends before it (`partial`: `cut: max_memory`, `stop {output, max_memory}`;
+  `all_or_count`: `withheld: output_budget`). The returned paths' result objects stay in the account until the
+  request ends, as a released path's (§14.4), so the later patterns of a request have less (fixture
+  `supported_paths_memory`).
 - **The deadline**: before every row read (and between its paced pieces), every 4,096 merge rounds, every 4,096
   runs mapped to occurrences, every 64 result objects built; a time stop is `stop {extension, time}` (or
   `{output, time}`), `determinism: "time_limited"`.
@@ -3657,7 +3670,7 @@ Measured with this build's server on the masked copy of the mini (the fixtures o
 | `supported_paths_count` | NDM-40 and NDM-F, `count`, `labels: "all"` | NDM-40's supported paths counted (22 rows read), note `projection_not_read`; NDM-F (L ≤ k) as without the option, `annotation_not_read` |
 | `supported_paths_partial` / `_above_threshold` | NDM-40, `max_paths` 1 | `partial`: the `+` path, `cut: max_paths`; `all_or_count`: `withheld: count_above_threshold` |
 | `supported_paths_work_budget` (`_partial`) | NDM-40, `max_annotation_work` 1 | the first anchor's row read (491 units), `stop {extension, max_annotation_work}`, `supported_paths` `at_least` 0 (`search: "stopped"`), `withheld: annotation_budget` (`cut: max_annotation_work`) |
-| `supported_paths_memory` | six copies of `GCGGCGGCGGCG` + N × 34 (`+`, 47 supported paths each), `partial`, `labels: "all"`, `max_memory_mb` 1 | the first four listed whole; the fifth's list ends at 33 (`stop {output, max_memory}`, `cut: max_memory`, counts `exact`); the sixth stops at a row of 27,312 bytes the account cannot hold (`rows_refused` phase `extension`, `stop {extension, max_memory}`), 15 supported paths `at_least`, all 15 listed |
+| `supported_paths_memory` | six copies of `GCGGCGGCGGCG` + N × 34 (`+`, 47 supported paths each), `partial`, `labels: "all"`, `max_memory_mb` 1 | the first four listed whole; the fifth's list ends at 33 (`stop {output, max_memory}`, `cut: max_memory`, counts `exact`); the sixth stops at a row of 27,376 bytes the account cannot hold (27,312 before §30: the extension's stack takes its share of the account) (`rows_refused` phase `extension`, `stop {extension, max_memory}`), 15 supported paths `at_least`, all 15 listed |
 | `supported_paths_predicate` / `_label` | the chimera, `any(562)` | `best`: no supported walk, `tested` 0, `selected` 0; `label_intersection`: both walks selected |
 | `supported_paths_predicate_context` / `_either` | NDM-40, `none(546)` | `"context"`: the `-` walk (its 7 supporting columns lack 546) selected, 1 of 2; `"either"`: 0 (the `+` walk, which 546 supports, is the `-` walk's mirror, found by the search on the other strand: `mirror_rows` 0) |
 | `supported_paths_predicate_mirror` | NDM-40, `strands: "reverse"`, `any(546)`, `"either"`, `predicate_only` | the mirror walk looked up (`predicate_lookups` 1) and read (`mirror_rows` 11 of `annotation_rows` 22); the `-` walk selected by its mirror's support, `selection_strands: ["reverse_complement"]`, its own `labels` [] |
@@ -5061,9 +5074,113 @@ position admits: up to 22, since no position admits a stored B, J, Z or X. On a 
 Builds before train 6 kept the first four in residue order and dropped the others, while the count stayed `exact`
 (the review of 2026-11-14, P1).
 
+**Memory.** The extension's depth-first stack is in the request's memory account as on a DNA graph (§30), at 754
+bytes a level (its buffer holds 22 children, not four: 178 bytes on a DNA build), in every mode.
+
 Tests: `PatternProtein.*` (`tests/graph/alignment/test_pattern_protein.cpp`: the parser against its own table, the
 bits, one strand, contexts and their levels against a brute-force oracle with and without the mask, long patterns'
-anchors and paths, nodes with more than four allowed children in the paths and in both arms of the segment search),
+anchors and paths, nodes with more than four allowed children in the paths and in both arms of the segment search,
+the extension's stack in the memory account),
 `PatternProteinRoute.*` (`tests/cli/test_pattern_protein_route.cpp`), and
 `integration_tests/test_pattern_protein.py`, all in the Protein build (CI: the development workflow's Protein job,
 `Linux-Protein`, whose filters name them).
+
+## 30. The extension's depth-first stack in the memory account (the owner's decision of 2026-11-15)
+
+The owner's decision of 2026-11-15 ("Protein /pattern memory: DFS should be included"). The extension of a pattern
+longer than k (§12.1, §20) walks depth-first from each anchor, one level per position past the anchor's k-mer, up to
+L − k at once; the level holds the node's allowed children (four on a DNA build, 22 on the Protein build, §29), the
+automaton's state, and the node's id and base in the walk's node path and spelling. Before this section only the walks
+kept for the release were charged: the stack was bounded by L − k, `max_steps` and the work time alone (a homopolymer
+of 4,000,000 bases held 418 MiB on a DNA build, 1,539 MiB on the Protein build, with the account untouched).
+
+**The model.** Each level is admitted to the request's memory account (`max_memory_mb`, §14.4) before its node is
+expanded (after the clock reading of §7.6, before its edges are examined) and released when the search backs out of
+it; what a stop leaves on the stack is released when the anchor's search returns. The price of a level is twice its
+bytes in the stack's containers (`kExtensionLevelBytes`, `src/graph/alignment/pattern_search.hpp`, pinned by a
+`static_assert` on the level's size): **178 bytes** on a DNA build (an 80-byte level, 8 for the node's id, 1 for its
+base) and **754** on the Protein build (368 + 8 + 1). The containers grow by doubling (they are not reserved for the
+L − k levels a walk can reach), so they hold at most twice what their levels fill (for the moment of a growth's
+copy the old buffer stands beside the new one: 1.5 times the charge, the model's slack). Their capacity is not
+shrunk when the search backs out of a level, it is freed when the anchor's search returns, while the account
+releases the level at once. Under `"paths"` nothing but the kept walks is admitted while the extension runs, and a
+walk is kept only at the full depth L − k, where the stack's charge is at its largest: every kept walk is admitted
+beside the whole stack, so the account's peak covers the containers' capacity. Under `"supported_paths"` the
+tracker's frames and rows are admitted at every depth, also on a shallower branch after a deeper one was left: the
+stack's containers can then hold more than the account charges them, by at most the deepest stack charge of the
+current anchor less what its stack holds then (the segment search's arms likewise, with their memoised states).
+This bounds the stack's containers only: the tracker's popped frames keep their buffers until the pattern ends
+(§20.7). The stack of the anchor's own level is charged too; the anchor's k spelled bases are not (O(k), as the
+discovery's frontier). The charge is a model in bytes, as every charge of §14.4: deterministic, the same on every platform that
+builds the level at that size.
+
+**Every mode.** The stack is charged wherever the extension runs: `long_search` `"paths"` and `"supported_paths"`, in
+`count`, `partial` and `all_or_count`, labelled or not, with or without a predicate. It takes from all that the
+account has left (the walks keep their half of §12.1 and §20.7; a level competes with the kept walks' result objects
+only while the extension runs, and the stack is empty when the release begins).
+
+**The stop.** A level that does not fit stops the extension at that level: `stop {extension, max_memory}`, the paths
+(and the supported paths) `at_least` with the walks completed before it, `extension` / `search` `"stopped"`, the
+anchors `exact`; `determinism` stays `full` (the stop depends on the request and the index alone). As for a kept
+walk's stop: `partial` returns the walks completed before it (`cut: max_memory`), `all_or_count` withholds
+`output_budget` under `"paths"`, and `annotation_budget` under `"supported_paths"` (the search's own memory, as a
+frame or a row it could not hold, §20.5); in `count` the counts say it. As after every budget stop of the search,
+the entry does not state `low_complexity_pattern` (§8.10). Under `"paths"` a stop at a level comes before the
+pattern's first complete walk (every walk completes at the full depth, beside the whole stack, and nothing else is
+admitted meanwhile): its paths are `at_least` 0, and a `{extension, max_memory}` stop after a completed walk is a
+kept walk's (§12.1). Under `"supported_paths"` it can come after supported paths completed (the supported paths
+kept, the rows a later anchor reads and its frames, larger when more labels carry its walk, can take more of the
+account than an earlier anchor's search did):
+`partial` lists them, a prefix of the answer order (§20.5), and each strand's count is `at_least` what it found
+until its anchors were all extended (§12.1). Without a `rows_refused` entry such a stop is not a row's: raising
+`max_annotation_work` does not help (§7.5). A memory stop ends only its own pattern (§7.6): the next
+pattern starts with what the account has left.
+
+**Determinism.** A request runs on one thread (a multi-graph server runs each pair's request on one thread of its
+pool, with its own account, §24): its patterns in request order, each pattern's anchors in answer order, each
+anchor's walks in symbol order, every charge on that thread. Where a stop falls is therefore a function of the
+request and the index, not of thread interleaving.
+
+**Client-visible change.**
+- `work.memory_bytes` (the request's and every entry's, §8.1, §8.7) includes the stack: an entry of a pattern longer
+  than k under `"paths"` or `"supported_paths"` states at least its deepest walk's levels at the price above (178 ×
+  the levels on a DNA build), where the account's peak falls during the extension: mode `count` (before: 0 under
+  `"paths"`), an extension that kept no walk, or one whose walks' result objects came to less than the stack; a
+  later entry's peak so far likewise. Where the peak falls in the release (a path's result object is about 190
+  bytes per k-mer of the path, the stack 178 per level), it does not change. Every other member of such an answer
+  is unchanged while the account holds the stack.
+- A pattern whose walk is deeper than the account holds (with the default 256 MiB, 1,508,064 levels on a DNA build
+  and 356,015 on the Protein build; with `max_memory_mb` m, ⌊m × 2^20 / 178⌋ and ⌊m × 2^20 / 754⌋) now stops
+  `{extension, max_memory}` where it went on before, bounded by `max_steps` and the work time alone.
+- The same at the anchor's own level: a pattern with anchors that finds less than a level's price left in the account
+  (an earlier pattern's result objects hold the rest) stops there, `at_least` 0. Before, mode `count` counted its
+  walks `exact`, a retrieval mode stopped at its first kept walk (`at_least` 1), and a pattern without a walk
+  answered `exact` 0.
+- `annotation_not_read` (§8.10): `max_memory_mb` named alone acts on a `"paths"` entry of a pattern longer than k in
+  mode `count` too, so that entry no longer carries the note (fixture `paths_memory_count`).
+- Where a memory stop lands: the stack takes its share of the account, so a pattern the account stopped before
+  may stop a little earlier. Fixture `supported_paths_memory` (1 MiB): the sixth entry's search stops at another
+  row (27,376 bytes needed, 27,283 available, where it was 27,312 and 27,303), 4 candidates earlier
+  (`candidates_examined` and `extension_edges` 235 → 231, `annotation_rows` 297 → 293, `annotation_units`
+  94,879 → 91,755, `steps` 3,223 → 3,219); the stop reason, the paths listed and the counts' values are the same.
+  `paths_memory` and `paths_memory_withheld` are unchanged (their account's peak falls in the release).
+- The segment search's arms (`Request::segments`; no route serves them yet) admit their levels to the search's sink
+  the same way (194 and 352 bytes a level on a DNA build, 770 and 1,504 on the Protein build, and the left arm's
+  spelling at its length), a refusal ending the search with the sink's `max_memory`.
+
+Tests: `PatternSearch.ExtensionMemoryAccount`, `PatternSearch.ExtensionStackBoundsTheDepth`,
+`PatternSearch.ExtensionStackReleasedAfterEveryStop` (`tests/graph/alignment/test_pattern_search.cpp`),
+`PatternSegments.ArmStacksInTheSink` (`test_pattern_segments.cpp`), `PatternProtein.ExtensionStackInTheMemoryAccount`
+(`test_pattern_protein.cpp`, the Protein build), `PatternPaths.TheMemoryAccountHoldsTheExtensionStack` (also: the stop
+ends only its pattern), `PatternPaths.TheMemoryAccountBoundsLabelFreePaths` (also: an earlier pattern's objects leave
+less than a level), `PatternPaths.UnderPathsAStackStopPrecedesTheFirstWalk` (`tests/cli/test_pattern_paths.cpp`),
+`PatternSupport.AStopAtALevelOfTheStackIsTheSearchsOwn` (`test_pattern_support.cpp`: the engine's refused level beside
+the tracker's held frame, released as the tracker's stops),
+`PatternSupportedRoute.AStopAtALevelOfTheStackIsTheSearchsMemoryStop` (`test_pattern_supported_route.cpp`: the answer
+of such a stop after a supported path, with and without a predicate), the fixture `paths_memory_count` and its
+validator (`api/python/tests/test_pattern_fixtures.py`). Fixtures regenerated (§11, the Linux answers):
+`work.memory_bytes` of `paths_count`, `paths_count_above_threshold`, `paths_stop_at_max_paths`, `paths_memory_count`
+(also its note), `peptide_no_stop_codon`, `motif_long_patterns` and the `supported_paths` fixtures (`_count`,
+`_partial`, `_above_threshold`, `_label`, `_primary` and the `_predicate` ones), and `supported_paths_memory`'s stop
+(above); on the Protein build `pattern_protein/entry` (the entries of `long` and `long_class` 3,966 bytes, 1,950 and
+2,888 before).

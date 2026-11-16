@@ -1380,7 +1380,8 @@ void put_supported(Json::Value *entry, const SupportedEntry &s, Mode mode) {
 }
 
 // The withheld reason of the engine's release of supported paths, |external| naming its
-// EXTERNAL stop: the tracker's own budgets (annotation_budget), a predicate's thresholds with
+// EXTERNAL stop: the tracker's own budgets (annotation_budget; also the engine's memory stop at
+// a level of its depth-first stack, supported_release), a predicate's thresholds with
 // stop_at_threshold (threshold_crossed), a time stop (deadline)
 std::string withheld_name(Withheld withheld, const std::string &external) {
     if (withheld != Withheld::EXTERNAL)
@@ -2823,9 +2824,10 @@ Json::Value process_pattern_request(
             }
             entry["rows_refused"] = std::move(refused);
         }
-        // the entry of a pattern answered by its paths: max_memory_mb bounds the walks and
-        // result objects of a label-free one (§12.1), so named alone it leaves no note there
-        const bool paths_entry = mode != Mode::COUNT && req.long_paths
+        // the entry of a pattern answered by its paths: max_memory_mb bounds the extension's
+        // depth-first stack in every mode and, outside mode count, the walks and result objects
+        // of a label-free one (§12.1), so named alone it leaves no note there
+        const bool paths_entry = req.long_paths
                 && req.patterns[i].pattern && req.patterns[i].pattern->length() > k;
         if (!projected && (req.annotation_named || (req.memory_named && !paths_entry))
                 && !read_labels && !has_predicate && !a.supported && entry.isMember("notes")) {

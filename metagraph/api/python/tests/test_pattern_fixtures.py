@@ -2256,8 +2256,9 @@ class Checker:
                     path + '.stop.reason', 'max_paths stops the extension only')
             # SPEC §20.5: the supported-path search's reads stop the extension (and a
             # predicate's mirror reads its selection); SPEC §12.1: the memory account stops a
-            # path search's extension at a walk it cannot hold, with any projection; the
-            # annotation budgets elsewhere are the labels' phases
+            # path search's extension at a walk it cannot hold, with any projection, and at a
+            # level of its depth-first stack in any mode (§30); the annotation budgets elsewhere
+            # are the labels' phases
             self.ok(stop['reason'] not in ('max_annotation_work', 'max_memory')
                     or stop['phase'] not in ('extension', 'selection') or supported
                     or (paths and stop['phase'] == 'extension'
@@ -2344,9 +2345,10 @@ class Checker:
         # (a predicate answer never says annotation_not_read: its selection read rows; it says
         # projection_not_read for a projection named and not built, SPEC §19.10; so does a
         # pattern searched for its supported paths, whose search read rows, SPEC §20.6)
-        # max_memory_mb acts on the kept walks and result objects of a long_search "paths" entry
-        # outside mode count (SPEC §8.10, §12.1): named alone, it leaves no note there
-        memory_acts = paths and mode != 'count'
+        # max_memory_mb acts on a long_search "paths" entry in every mode: the extension's
+        # depth-first stack, and outside mode count the kept walks and result objects (SPEC
+        # §8.10, §12.1): named alone, it leaves no note there
+        memory_acts = paths
         named_unread = (named if not memory_acts else
                         (request.get('output', {}).get('labels') == 'all'
                          or any(f in request for f in [f for f in LIMITS_LABELS if f != 'max_memory_mb']
@@ -4756,8 +4758,9 @@ class TestPatternFixtures(unittest.TestCase):
         self.assertTrue(pruned and mirrors)
         # label-free paths in the memory account (SPEC §12.1): the engine's stop at a kept walk
         # and the route's cut at a result object, partial and all_or_count; max_memory_mb named
-        # alone acts on a paths entry outside mode count (no annotation_not_read), and not on a
-        # pattern of at most k bases beside it nor on any entry in mode count (SPEC §8.10)
+        # alone acts on a paths entry in every mode (no annotation_not_read: the extension's
+        # depth-first stack is in the account, and outside mode count its kept walks and result
+        # objects), and not on a pattern of at most k bases beside it (SPEC §8.10)
         path_memory, path_notes = set(), set()
         for name, f in self.fixtures.items():
             request, answer = self.bodies[name]
@@ -4781,8 +4784,8 @@ class TestPatternFixtures(unittest.TestCase):
         self.assertLessEqual({('partial', 'output', 'max_memory'),
                               ('partial', 'extension', 'max_memory'),
                               ('all_or_count', 'output', 'output_budget')}, path_memory)
-        # (counted, longer than k, noted): the note everywhere but on a paths entry outside count
-        self.assertEqual({(False, True, False), (False, False, True), (True, True, True),
+        # (counted, longer than k, noted): the note on the patterns of at most k bases only
+        self.assertEqual({(False, True, False), (False, False, True), (True, True, False),
                           (True, False, True)}, path_notes)
         self.assertLessEqual({('every_context', None), ('tested_contexts', 'selection'),
                               ('no_instance', None), (None, 'not_started')}, motifs)
@@ -5146,9 +5149,10 @@ class TestPatternFixtures(unittest.TestCase):
         (the engine's in the extension, the route's in the output) and the note of max_memory_mb
         named alone, and each rule refuses an answer that breaks it: a labels phase or an
         annotation budget for the stop, a stopped extension stated exact, annotation_not_read on
-        a paths entry the field acts on, none on a pattern of at most k bases it does not act
-        on, or none on a paths entry in mode count, where it acts on nothing. The paths of a
-        request the account holds are answered as without it, and counted alike in mode count."""
+        a paths entry the field acts on (in every mode: the extension's depth-first stack is in
+        the account, in mode count too), or none on a pattern of at most k bases it does not act
+        on. The paths of a request the account holds are answered as without it, and counted
+        alike in mode count."""
         for name in ('paths_memory', 'paths_memory_withheld', 'paths_memory_named',
                      'paths_memory_count'):
             self.check_stored(name)
@@ -5170,7 +5174,10 @@ class TestPatternFixtures(unittest.TestCase):
              'annotation_not_read exactly where'),
             ('paths_memory_named', lambda a: a['patterns'][1].update(notes=[]),
              'annotation_not_read exactly where'),
-            ('paths_memory_count', lambda a: a['patterns'][0].update(notes=[]),
+            ('paths_memory_count',
+             lambda a: a['patterns'][0]['notes'].append('annotation_not_read'),
+             'annotation_not_read exactly where'),
+            ('paths_memory_count', lambda a: a['patterns'][1].update(notes=[]),
              'annotation_not_read exactly where'),
         ]
         self.assertRefusesMutations(cases)
@@ -5188,14 +5195,15 @@ class TestPatternFixtures(unittest.TestCase):
         self.assertEqual(plain_request['patterns'][0], request['patterns'][0])
         self.assertEqual(plain['limits'], answer['limits'])
         self.assertEqual(untimed(plain['patterns'][0]), untimed(answer['patterns'][0]))
-        # in mode count the field acts on nothing: the paths counted as without it, the note added
+        # in mode count the field acts on the extension's depth-first stack: the paths counted
+        # as without it, no note (the account holds the stack whether or not it is named)
         request, answer = self.bodies['paths_memory_count']
         plain_request, plain = self.bodies['paths_count']
         self.assertNotIn('max_memory_mb', plain_request)
         self.assertEqual(plain_request['patterns'][0]['dna'], request['patterns'][0]['dna'])
         self.assertEqual(plain['limits'], answer['limits'])
-        expected = dict(untimed(plain['patterns'][0]), id=request['patterns'][0]['id'],
-                        notes=['annotation_not_read'])
+        expected = dict(untimed(plain['patterns'][0]), id=request['patterns'][0]['id'])
+        self.assertEqual([], expected['notes'])
         self.assertEqual(expected, untimed(answer['patterns'][0]))
 
     def test_hand_made_bodies_are_the_codes(self):

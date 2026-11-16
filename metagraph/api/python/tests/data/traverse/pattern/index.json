@@ -737,7 +737,7 @@
    "status": 200,
    "hand_made": false,
    "headers": {},
-   "shows": "the same request in mode count: nothing is kept or built, so max_memory_mb acts on no entry (SPEC §8.10): both say note annotation_not_read, NDM-40's paths counted as in `paths_count`"
+   "shows": "the same request in mode count: nothing is kept or built, but the extension's depth-first stack is in the account in every mode (SPEC §30), so max_memory_mb acts on NDM-40's entry (no note; its paths counted as in `paths_count`) and not on NDM-F (L <= k), which says note annotation_not_read (SPEC §8.10)"
   },
   "paths_global": {
    "server": "masked_no_map",

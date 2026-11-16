@@ -1334,6 +1334,66 @@ TEST(PatternSegments, StopSweepClock) {
     }
 }
 
+// The arms' depth-first stacks in the sink (the owner's decision of 2026-11-15: the DFS in the
+// memory account): every level admitted before the arm pushes it (kRightArmLevelBytes,
+// kLeftArmLevelBytes) and the left arm's spelling (s + k - horizon bytes) when it starts, each
+// released as it is popped (the spelling when the arm returns), so that a homopolymer's arm, one
+// level per position, peaks at its deepest level: an account of that peak extends it, one byte
+// less stops the search there ({EXTENSION, EXTERNAL}, the sink's max_memory), all released
+TEST(PatternSegments, ArmStacksInTheSink) {
+    const uint32_t k = 5;
+    const uint32_t L = 40;
+    auto graph = build_graph<DBGSuccinct>(k, { std::string(60, 'A') });
+    EXPECT_EQ(2 * (96u + 1), kRightArmLevelBytes);
+    EXPECT_EQ(2 * 176u, kLeftArmLevelBytes);
+    struct Case {
+        std::string what;
+        std::string text;
+        WindowChoice choice;
+        double floor;
+        uint64_t peak;
+    };
+    const std::vector<Case> cases {
+        // the first window's root at 0: no left arm; its right arm a level per position from k
+        // (the root's) to L
+        { "right", std::string(L, 'A'), WindowChoice::FIRST, 0,
+          (L - k + 1) * kRightArmLevelBytes },
+        // window 0 (N and four A: 8 bits) below a floor of 9, the last (five A: 10 bits) the
+        // root at s = L - k with the horizon 0: its left arm a level per position from s (the
+        // root's) down to 0 beside its spelling of L bases, its right arm one level (at L)
+        { "left", "N" + std::string(L - 1, 'A'), WindowChoice::ENDS, 9,
+          L + (L - k + 1) * kLeftArmLevelBytes },
+    };
+    for (const Case &c : cases) {
+        SCOPED_TRACE(c.what);
+        const Pattern pattern = Pattern::parse(PatternKind::IUPAC, c.text);
+        SegmentPlan plan;
+        plan.choice = c.choice;
+        Request request = segment_request(plan, Strands::FORWARD, 1000);
+        request.min_information_bits = c.floor;
+        Limits limits;
+        limits.max_bytes = c.peak;
+        const SegmentRunResult whole = run_segments(*graph, pattern, request, limits);
+        EXPECT_FALSE(whole.result.stop);
+        EXPECT_EQ(c.peak, whole.peak);
+        EXPECT_EQ(whole.store_size * GraphSegmentStore::kGraphSegmentBytes, whole.held);
+        ASSERT_EQ(1u, whole.segments.size());
+        EXPECT_EQ((OracleSegmentKey { Orientation::FORWARD, 0, L }),
+                  whole.segments.begin()->first);
+
+        limits.max_bytes = c.peak - 1;
+        const SegmentRunResult cut = run_segments(*graph, pattern, request, limits);
+        ASSERT_TRUE(cut.result.stop);
+        EXPECT_EQ(StopPhase::EXTENSION, cut.result.stop->phase);
+        EXPECT_EQ(StopReason::EXTERNAL, cut.result.stop->reason);
+        EXPECT_EQ("max_memory", cut.reason);
+        EXPECT_TRUE(cut.segments.empty());
+        EXPECT_EQ(0u, cut.held);
+        EXPECT_EQ(c.peak - (c.what == "right" ? kRightArmLevelBytes : kLeftArmLevelBytes),
+                  cut.peak);
+    }
+}
+
 TEST(PatternSegments, StopSweepMemoryAndMaxSegments) {
     size_t case_id = 0;
     for (const StopCase &c : stop_cases()) {

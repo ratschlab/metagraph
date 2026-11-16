@@ -1513,8 +1513,10 @@ std::optional<Extraction> supported_release(const Result &result, const Request 
             case StopReason::MAX_STEPS:
                 return Withheld::DISCOVERY_BUDGET;
             case StopReason::MAX_MEMORY:
-                // (the engine keeps no walk when a sink receives them: never its stop here)
-                return Withheld::OUTPUT_BUDGET;
+                // a level of the engine's depth-first stack the account could not hold (it keeps
+                // no walk when a sink receives them): a stop of the search's own memory, as a
+                // frame or a row it could not hold, named as theirs (annotation_budget, §20.5)
+                return Withheld::EXTERNAL;
             case StopReason::EXTERNAL:
                 return Withheld::EXTERNAL;
         }
