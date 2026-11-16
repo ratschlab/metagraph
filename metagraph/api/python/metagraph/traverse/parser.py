@@ -1483,6 +1483,11 @@ GZIP_RATIO_MAX = 64
 GZIP_RATIO_FLOOR = 16 << 20
 _GZIP_MAGIC = b'\x1f\x8b'
 _GZIP_CHUNK = 1 << 16
+# the decompressor's own working buffers, held while a gzip file is read whatever its size
+# (GPT review M4): GzipFile's read buffer and reader, zlib's window and output, the chunk
+# read. Measured (tracemalloc, a 665-byte file): about 155 KB on CPython 3.11 (no
+# gzip.READ_BUFFER_SIZE), about 500 KB on 3.14 (READ_BUFFER_SIZE 128 KiB)
+_GZIP_WORK = 4 * getattr(gzip, 'READ_BUFFER_SIZE', 1 << 15) + 2 * _GZIP_CHUNK
 
 
 def load(path, *, budget=None):
@@ -1491,8 +1496,9 @@ def load(path, *, budget=None):
     decompressed as a stream: without budget= at most GZIP_TEXT_MAX bytes of text, and
     beyond GZIP_RATIO_FLOOR bytes at most GZIP_RATIO_MAX times the file's size (refused,
     GraphletFormatError, at that point; the peak about twice the text inflated, before the
-    parse's own); with budget= every decompressed chunk charged as a plain file's text is,
-    so the stop is the one of a text that size. A corrupt or truncated gzip file raises
+    parse's own); with budget= the decompressor's working buffers (_GZIP_WORK) before it
+    opens, and every decompressed chunk charged as a plain file's text is, so the stop is
+    the one of a text that size. A corrupt or truncated gzip file raises
     GraphletFormatError.
     save() writes plain text. budget= (local limits): the file's text, the parse and the
     view are charged; a stop raises LocalBudgetExceeded and the file is left as it is."""
@@ -1513,8 +1519,11 @@ def load(path, *, budget=None):
     with b.scope('load', ('export_mgt',)):
         n = os.path.getsize(path)
         if gz:
-            b.charge(n >> 10, STR)
+            # the decompressor's working buffers, before it is opened, released once the
+            # text is read (each chunk is charged as it is kept)
+            b.charge(n >> 10, STR + _GZIP_WORK)
             text = _inflate(path, b)
+            b.release(_GZIP_WORK)
         else:
             b.charge(n >> 10, STR + 4 * n)
             with open(path, 'r', encoding='utf-8', newline='') as f:

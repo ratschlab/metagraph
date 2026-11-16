@@ -1460,7 +1460,10 @@ class TestBudgets(unittest.TestCase):
         the same call on other fresh copies, the collector held off (the pattern of
         test_traverse_memory: a collection empties the free lists, and freed tuples parked
         there stay traced; warm, the peak is the library's own). Each charge is the cold
-        price: a second call on the warm union charges the same."""
+        price: a second call on the warm union charges the same. GPT review M4: also on
+        long metadata, charged before it is serialized -- a 100,000-character ASCII tag, one
+        of escaped and astral characters, a 1 MB error and an absent record whose error is
+        100,000 quotes (escaped twice in the digest)."""
         import gc
         import tracemalloc
 
@@ -1471,6 +1474,15 @@ class TestBudgets(unittest.TestCase):
         def comb():
             return [{'pair': 'C', 'graphlet': comb_part(200)},
                     {'pair': 'D', 'graphlet': comb_part(3)}]
+
+        def long_tags():
+            return [{'pair': 'X' * 100000, 'graphlet': T.graphlet('merge')},
+                    {'pair': ',;= \u00e9\U0001F600' * 5000, 'graphlet': T.graphlet('merge_ties')}]
+
+        def long_errors():
+            r = dict(absent_result('not_in_graph'), error='"' * 100000)
+            return [{'pair': 'gM', 'graphlet': T.graphlet('merge')},
+                    {'pair': 'g', 'error': 'X' * 10 ** 6}, {'pair': 'h', 'result': r}]
 
         def peak(fn, warm):
             gc.collect()
@@ -1490,7 +1502,7 @@ class TestBudgets(unittest.TestCase):
                 'segments': lambda u, **k: u.segments('right', **k),
                 'carriers': lambda u, **k: u.carriers('right', 1, **k),
                 'statements': lambda u, **k: u.statements('right', **k),
-                'summary': lambda u, **k: u.summary(**k),
+                'summary': lambda u, **k: u.summary(ceiling[0], **k),
                 'to_fasta': lambda u, **k: u.to_fasta(stubs=True, **k),
                 'to_gfa': lambda u, **k: u.to_gfa(labels='full', **k),
                 'spell': lambda u, **k: u.spell('right', 1, **k),
@@ -1499,8 +1511,12 @@ class TestBudgets(unittest.TestCase):
                 'label': lambda u, **k: u.label(_first_label(u), **k),
                 'shared_names': lambda u, **k: u.shared_names(**k),
                 'evidence': lambda u, **k: u.evidence(**k)}
+        ceiling = [4096]
         for name, make in (('split11', split11), ('r237', lambda: r237_union()[0]),
-                           ('comb', comb)):
+                           ('comb', comb), ('long tags', long_tags),
+                           ('long errors', long_errors)):
+            # the long statements never fit 4096 bytes: summary() is measured whole there
+            ceiling[0] = 1 << 21 if name.startswith('long') else 4096
             b = LocalBudget()
             union_pairs(make(), budget=b)
             parts, other = make(), make()
@@ -1518,6 +1534,40 @@ class TestBudgets(unittest.TestCase):
                 u, w = union_pairs(make()), union_pairs(make())
                 got = peak(lambda: fn(u), lambda: fn(w))
                 self.assertLessEqual(got, b.peak_bytes, (name, op))
+
+    def test_the_account_bounds_a_gzip_load(self):
+        """GPT review M4: load() of a gzip file charges the decompressor's working buffers
+        before it opens (fixed: about 155 KB on CPython 3.11, 500 KB on 3.14), so the account
+        bounds the traced peak for small files as for the r237 parts; warm free lists, as
+        above."""
+        import gc
+        import gzip
+        import tempfile
+        import tracemalloc
+        from metagraph.traverse import load
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        paths = []
+        for name in ('merge', 'annotate'):
+            paths.append(os.path.join(tmp.name, name + '.mgt.gz'))
+            with open(paths[-1], 'wb') as f:
+                f.write(gzip.compress(T.doc_text(name).encode('utf-8')))
+        paths += [os.path.join(R237, p + '.mgt.gz') for p in sorted(R237_BODIES)]
+        for path in paths:
+            b = LocalBudget()
+            load(path, budget=b)
+            gc.collect()
+            gc.disable()
+            try:
+                load(path, budget=LocalBudget())
+                tracemalloc.start()
+                base = tracemalloc.get_traced_memory()[0]
+                load(path, budget=LocalBudget())
+                got = tracemalloc.get_traced_memory()[1] - base
+            finally:
+                tracemalloc.stop()
+                gc.enable()
+            self.assertLessEqual(got, b.peak_bytes, path)
 
     def test_construction_charged(self):
         b = LocalBudget(work_units=10 ** 9)

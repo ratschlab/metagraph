@@ -19,7 +19,10 @@ With a budget, a local call either completes or stops and says so (DESIGN §5.4)
     objects, rows, spelled sequences, output text and derived caches the call builds or
     uses, each charged at a size modelled on CPython (ASCII text at one byte per character
     plus its header, lists, sets, dicts and the slotted records at their measured sizes,
-    a parse at a fit of its traced peak), released inside a call only where a loop drops a
+    a parse at a fit of its traced peak, a gzip load with its decompressor's buffers;
+    caller-sized metadata -- error strings, tags, names -- charged before it is serialized
+    or escaped, at its JSON- or %-escaped length, and text joined with a character beyond
+    ASCII at four bytes a character), released inside a call only where a loop drops a
     temporary before its next step: the account bounds the call's peak. Every call also
     carries a base (CALL_BASE bytes, W_CALL lwu) for its frames, temporaries and setup,
     charged with its first charge. It is a model, not a measurement: Python can

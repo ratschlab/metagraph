@@ -164,6 +164,10 @@ _M_COV_PAIR = 700       # a coverage entry per pair (its dict, note and category
 _M_COV_NOTE = 120       # a coverage note per pair beside its tag (certified to ..., k-mers)
 _M_SENTENCE = 1500      # a sentence's fixed words (coverage, the turn-offs and the scope)
 _M_BLOCK = 2500         # a part's evidence block and identity entry
+_M_META = 6             # copies of the inputs' metadata JSON at once: an absent record's
+#                         detail JSON, the digest's JSON (that detail escaped again, at most
+#                         twice its size), its UTF-8 bytes and the encoder's chunks (fitted:
+#                         a detail of 100,000 quotes peaks at 1.08x five copies on 3.14)
 _M_LABEL_WORK = 260     # what _labels_for() holds per label while it runs
 _M_FIG = 160            # a walk's figures: the record, whole_in and held_in, its slot
 _DERIVATION_CAUSES = {'no_carrier': 'no label carries the whole seed',
@@ -529,6 +533,47 @@ def _classify(results):
     return elems
 
 
+def _joined_bytes(texts):
+    """The bytes |texts| joined into one str hold beyond its header: one a character for
+    ASCII; a single other character widens every character of the result, so then four
+    (CPython's widest form)."""
+    texts = list(texts)
+    n = sum(map(len, texts))
+    return n if all(t.isascii() for t in texts) else 4 * n
+
+
+def _json_bound(x):
+    """An upper bound of len(composite.canonical_json(x)), read without building it: a
+    printable ASCII string its length, quotes and backslashes doubled; any other string 12
+    characters per character (an escape per UTF-16 unit of an astral character)."""
+    if isinstance(x, str):
+        n = len(x)
+        if x.isascii() and x.isprintable():
+            return n + 2 + x.count('"') + x.count('\\')
+        return 12 * n + 2
+    if x is None or isinstance(x, bool):
+        return 5
+    if isinstance(x, (int, float)):
+        return 24 if isinstance(x, float) or -10 ** 20 < x < 10 ** 20 else len(str(x))
+    if isinstance(x, dict):
+        return 2 + sum(_json_bound(k if isinstance(k, str) else str(k)) + _json_bound(v) + 2
+                       for k, v in x.items())
+    if isinstance(x, (list, tuple)):
+        return 2 + sum(_json_bound(v) + 1 for v in x)
+    return _json_bound(str(x))
+
+
+def _elem_meta(e):
+    """The canonical-JSON bound of an input's variable-length metadata."""
+    n = _json_bound(e.error) + _json_bound(e.result) + _json_bound(e.stated)
+    n += len(e.sequence or '') + len(e.sent or '')
+    if e.graphlet is not None and not C.is_view(e.graphlet):
+        n += _json_bound(_root(e.graphlet).envelope)
+    if e.env is not None:
+        n += _json_bound(e.env)
+    return n
+
+
 def _err_text(e):
     return e if isinstance(e, str) else str(e)
 
@@ -795,6 +840,14 @@ class PairUnion:
                     if sq is not None:
                         sq = C.case_mapped(sq, alphabet) if alphabet else sq.upper()
                         _check_seed(useed, ref_tag, sq, 'absent', tag, alphabet)
+        if b is not None:
+            # the inputs' variable-length metadata (error strings, absent results, stated
+            # pairs, envelopes, the seed checks), before the identities, sort keys and the
+            # digest serialize it (GPT review M4): _M_META copies of its canonical JSON at
+            # its bound, and 1 lwu per 8 bytes of it
+            meta = sum(map(_elem_meta, elems)) + _json_bound(exp) + _json_bound(
+                [k for _, _, k in so])
+            b.charge(meta >> 3, _M_META * meta)
         # duplicate_pair (and the no-ops)
         kept = _dedupe(elems, cls_of, tags)
         # not_expected
@@ -1186,7 +1239,7 @@ class PairUnion:
             n = len(self.pairs)
             nl = sum(len(_root(p.graphlet).limitations) for p in self.parts)
             b.charge(W_ROW * n + W_ELEM * nl, n * _M_COV_PAIR + 4 * (
-                STR + _M_SENTENCE + sum(3 * len(t) + _M_COV_NOTE for t in self.pairs)))
+                STR + _M_SENTENCE + 3 * _joined_bytes(self.pairs) + n * _M_COV_NOTE))
         per = collections.OrderedDict()
         for p in self.parts:
             per[p.tag] = _part_category(p, side, depth, self._below_codes(p.tag))
@@ -1297,8 +1350,10 @@ class PairUnion:
     def _labels_sentence(self, b=None):
         n = len(self._shared_names(b))
         if b is not None:
-            # shared_names()' sets and dicts, dropped once counted
+            # shared_names()' sets and dicts, dropped once counted; the sentence, which names
+            # the tags of the parts its mapping warning covers, twice while built
             b.release(sum(len(p.graphlet.labels) for p in self.parts) * _M_NAME + DICT)
+            b.charge(0, 2 * (STR + 600 + _joined_bytes(p.tag for p in self.parts)))
         s = ('labels: each pair\'s own, shown as <tag>/<name>; equal names in two pairs are not '
              'claimed to be one record (%s)' % (
                  'no name occurs in more than one pair' if n == 0 else
@@ -2165,9 +2220,11 @@ def _absent_detail(e):
 # ------------------------------------------------------------------ coverage helpers
 
 def _cut60(text):
-    b = (text or '').encode('utf-8')
+    # 61 characters encode to more than 60 bytes, so a longer text is never encoded whole
+    text = text or ''
+    b = text[:61].encode('utf-8')
     if len(b) <= 60:
-        return text or ''
+        return text
     return b[:57].decode('utf-8', 'ignore') + '...'
 
 
