@@ -694,9 +694,11 @@ whose order allows it (`walks()`, `segments()`, `carriers()`) carry a `Partial` 
 - `spell()` spells a union walk from the parts' bases.
 - No cross-pair label total is offered. Label counts are per pair, as label entries of that pair, and
   marked as lower bounds where the pair's lists are cut.
-- `summary(max_bytes=4096)` puts the statements first and whole; if they alone exceed `max_bytes`, it refuses
-  `summary_too_small` rather than cut them. For r237's 11 pairs and two arms they take about
-  1–2 KB [estimate].
+- `summary(max_bytes=4096)` never answers more than `max_bytes`. It puts the statements first and whole, and it
+  measures every candidate answer as it would be returned, with the notes of what it leaves out: a section is added
+  only where the answer still fits. When even the least answer, the statements with those notes, exceeds
+  `max_bytes`, it refuses `summary_too_small` rather than cut them, naming that answer's size (Appendix A.2's text,
+  unchanged). For r237's 11 pairs and two arms the statements take about 1–2 KB [estimate].
 
 ### 2.9 Exports
 
@@ -2000,8 +2002,9 @@ Stdlib `unittest` with seeded random generation, as in the existing suites; no n
 - **P11 mixed strategies.** Parts in constrain and annotate mode, and parts at two k: the union builds and states
   each pair's mode and k in the sentence, on each span and in `modes=`.
 - **P12 budgets and memory.** Every operation under `budget=` completes or stops with the same row in every run.
-  `memory_bytes()` bounds the traced peak on 11 parts (the pattern of `test_traverse_memory`). `summary()` refuses
-  `summary_too_small` below the statements' size and never cuts them.
+  `memory_bytes()` bounds the traced peak on 11 parts (the pattern of `test_traverse_memory`). `summary()` never
+  answers more than `max_bytes`, refuses `summary_too_small` only below the least answer (the statements with the
+  notes of what is left out) and never cuts the statements.
 
 - **P13 inferred paths (the later inferred phase).** On hand-built parts with a stub of one pair merging into a segment
   another pair continues below: the inferred path is listed with its pieces, cut wherever the set of pairs holding the

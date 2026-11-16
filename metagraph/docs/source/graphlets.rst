@@ -1635,8 +1635,9 @@ cold price whether it is kept or not, so it charges the same, and stops at the s
 whatever earlier calls cached. ``walk()`` charges the walk it builds as ``walks()``
 charges each, and ``summary()`` reads the evidence under its own budget. The accessors
 that return stored fields or measure the object take no budget: ``arms()``,
-``arm_of()``, ``label()``, ``provenance()``, ``memory_bytes()``, ``parts``, ``root``,
-``junctions``, ``labels``, ``identity`` and ``digest``.
+``arm_of()``, ``label()``, ``provenance()``, ``memory_bytes()`` and the stored
+attributes ``parts``, ``root``, ``junctions``, ``labels``, ``identity``, ``digest``,
+``seed``, ``k``, ``regime``, ``alphabet``, ``mode`` and ``support``.
 
 Comparing retrievals
 ^^^^^^^^^^^^^^^^^^^^

@@ -1481,7 +1481,7 @@ class TestBudgets(unittest.TestCase):
             ('.stitch()', comb_one, lambda sg, b: sg.stitch(g3, budget=b)),
             ('walks id', comb, lambda sg, b: sg.walks(arm, by='id', budget=b)),
             ('walks support', comb, lambda sg, b: sg.walks(arm, budget=b)),
-            ('walks labels', comb, lambda sg, b: sg.walks(arm, by='length', min_bp=60,
+            ('walks length', comb, lambda sg, b: sg.walks(arm, by='length', min_bp=60,
                                                           budget=b)),
             ('walk', comb, lambda sg, b: sg.walk(arm, deep, budget=b)),
             ('spell', comb, lambda sg, b: sg.spell(arm, deep, 'walk', True, budget=b)),
