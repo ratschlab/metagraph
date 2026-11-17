@@ -624,8 +624,11 @@ def union_pairs(results, *, seed=None, expected_pairs=None, seqs_order=None, bud
     over the pairs given.
     seqs_order: pair (a graph name, or a (graph, graph_path, annotation_path) tuple) ->
     'verified' | 'count_only' | None, as GET /capabilities states it; a pair not given
-    reads 'unknown'. budget= (local limits): the trie pass is charged; a stop raises with no
-    partial. Refusals (CombineRefused, .code) in the order of Appendix A.2."""
+    reads 'unknown'. budget= (local limits): the inputs' metadata (error strings, absent
+    results, stated pairs, envelopes) and the seed are charged before the seed checks, then
+    the trie pass; a stop raises with no partial. A budget smaller than the metadata and seed
+    therefore stops before the different_seed, duplicate_pair and not_expected refusals.
+    Refusals (CombineRefused, .code) in the order of Appendix A.2."""
     return _B.run_scoped(budget, 'union_pairs', (),
                          lambda b: PairUnion._build(results, seed, expected_pairs, seqs_order, b))
 

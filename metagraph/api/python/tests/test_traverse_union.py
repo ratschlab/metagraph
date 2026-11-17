@@ -4,6 +4,7 @@ documents/union/ (scripts/traversal/graphlet_fixtures.py UNION_FIXTURES) and han
 absent records in the shapes of SPEC-labeled-traversal-core.md §6.1."""
 
 import copy
+import dataclasses
 import json
 import os
 import random
@@ -1613,6 +1614,19 @@ class TestBudgets(unittest.TestCase):
             return [{'pair': 'gM', 'graphlet': T.graphlet('merge')},
                     {'pair': '/:' * 50000, 'error': 'boom'}]
 
+        def long_names():
+            # Opus fix review N4/N11: label names of 100,000 characters and more, equal in
+            # the two parts where the label ids are (shared names), read by shared_names(),
+            # the statements, evidence, summary and the exports, and as a walks(labels=)
+            # selector
+            out = []
+            for tag, name in (('gM', 'merge'), ('gT', 'merge_ties')):
+                g = copy.deepcopy(T.graphlet(name))
+                g.labels = [dataclasses.replace(l, name=('N%d' % i) * 50000)
+                            for i, l in enumerate(g.labels)]
+                out.append({'pair': tag, 'graphlet': g})
+            return out
+
         def peak(fn, warm):
             gc.collect()
             gc.disable()
@@ -1640,10 +1654,13 @@ class TestBudgets(unittest.TestCase):
                 'label': lambda u, **k: u.label(_first_label(u), **k),
                 'shared_names': lambda u, **k: u.shared_names(**k),
                 'evidence': lambda u, **k: u.evidence(**k)}
+        by_name = {'walks(labels=name)': lambda u, **k: u.walks('right', labels=[
+            {'pair': u.parts[0].tag, 'name': u.parts[0].graphlet.labels[0].name}], **k)}
         ceiling = [4096]
         for name, make in (('split11', split11), ('r237', lambda: r237_union()[0]),
                            ('comb', comb), ('long tags', long_tags),
-                           ('long errors', long_errors), ('escaped tag', escaped_tag)):
+                           ('long errors', long_errors), ('escaped tag', escaped_tag),
+                           ('long names', long_names)):
             # the long statements never fit 4096 bytes: summary() is measured whole there
             ceiling[0] = 4096 if name in ('split11', 'r237', 'comb') else 1 << 21
             b = LocalBudget()
@@ -1651,7 +1668,7 @@ class TestBudgets(unittest.TestCase):
             parts, other = make(), make()
             got = peak(lambda: union_pairs(parts), lambda: union_pairs(other))
             self.assertLessEqual(got, b.peak_bytes, (name, 'union_pairs'))
-            for op, fn in ops_.items():
+            for op, fn in dict(ops_, **(by_name if name == 'long names' else {})).items():
                 b = LocalBudget()
                 v = union_pairs(make())
                 fn(v, budget=b)
