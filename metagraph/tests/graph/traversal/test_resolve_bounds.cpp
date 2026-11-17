@@ -2270,13 +2270,25 @@ TEST(ResolveBoundsRoute, AStopInTheSelectionAbandonsTheRequest) {
 }
 
 // The objects |answer| holds as text in the order they were written (graph_runs, the labels,
-// the candidates, the seeds, unknown_labels), each with whether it is one of those read every
-// kResolveCheckLabels (a label, a candidate or a seed) and its text's bytes
+// the candidates, the seeds, unknown_labels' names), each with whether it is one of those read
+// every kResolveCheckLabels (a label, a candidate or a seed) and its text's bytes (a name's with
+// its comma, unknown_labels' brackets not counted, as their writing reads them)
 std::vector<std::pair<bool, uint64_t>> written_objects(const cli::ResolveAnswer &answer) {
     std::vector<std::pair<bool, uint64_t>> objects;
     for (const auto &[name, pieces] : answer.held.members) {
-        if (name == "graph_runs" || name == "unknown_labels") {
+        if (name == "graph_runs") {
             objects.emplace_back(false, pieces.at(0).size());
+            continue;
+        }
+        if (name == "unknown_labels") {
+            Json::Value names;
+            std::istringstream in(pieces.at(0));
+            Json::CharReaderBuilder reader;
+            std::string errors;
+            EXPECT_TRUE(Json::parseFromStream(reader, in, &names, &errors)) << errors;
+            for (Json::ArrayIndex i = 0; i < names.size(); ++i) {
+                objects.emplace_back(false, compact(names[i]).size() + (i ? 1 : 0));
+            }
             continue;
         }
         for (size_t i = 1; i + 1 < pieces.size(); ++i) {
@@ -2417,6 +2429,74 @@ TEST(ResolveBoundsRoute, AnAnswerOfFewObjectsReadsTheStopWhileBuilt) {
     reads = 0;
     const std::function<bool()> late = [&]() { return ++reads >= gone_from; };
     EXPECT_THROW(cli::process_resolve_request(request, *anno, "r1", 0, nullptr, late, limits),
+                 graph::traversal::AttemptAborted);
+    EXPECT_EQ(gone_from, reads);
+}
+
+// The labels a multi-graph server's pair does not hold (unknown_labels) are written name by name
+// by the answer's writer, without a tree of them (the Fable review of 37b70685e, m2): byte for
+// byte their array's text (the tree API's identity check, tree_of, throws otherwise; names that
+// need escaping, one beyond the BMP and a cut UTF-8 sequence among them), read by bytes as the
+// answer's objects are, a stop at the first reading among the names abandoning the request there
+TEST(ResolveBoundsRoute, UnknownLabelsAreWrittenNameByName) {
+    const Records r = make_records<DBGSuccinct, annot::ColumnCompressed<>>(40, 5, 3941);
+    const auto index = with_mapping(r);
+    std::vector<std::string> names { "quote \" and backslash \\", "tab\tline feed\n",
+                                     std::string("nul\0control\x01", 12), "caf\xc3\xa9",
+                                     "\xf0\x9f\x98\x80", "cut \xe2\x82" };
+    for (size_t i = 0; i < 30; ++i) {
+        names.push_back(std::string(10000, static_cast<char>('a' + i % 26)) + std::to_string(i));
+    }
+    Json::Value request;
+    request["sequence"] = r.q;
+    for (const std::string &name : names) {
+        request["labels"].append(name);
+    }
+    const cli::ResolveTimeLimits limits;
+    uint64_t reads = 0;
+    const std::function<bool()> gone = [&]() { ++reads; return false; };
+    const Json::Value out = cli::process_resolve_request(request, *index, "r1", 0, nullptr, gone,
+                                                         limits, nullptr, nullptr, true);
+    ASSERT_EQ(names.size(), out["unknown_labels"].size());
+    for (size_t i = 0; i < names.size(); ++i) {
+        EXPECT_EQ(names[i], out["unknown_labels"][static_cast<Json::ArrayIndex>(i)].asString());
+    }
+    const uint64_t tree_reads = reads;
+    // the server's form: the same readings
+    reads = 0;
+    cli::ResolveAnswer answer = cli::process_resolve_answer(request, *index, "r1", 0, nullptr,
+                                                            gone, limits, nullptr, nullptr, true);
+    EXPECT_EQ(tree_reads, reads);
+    const uint64_t route_reads = reads;
+    const std::vector<std::pair<bool, uint64_t>> objects = written_objects(answer);
+    const std::vector<size_t> readings = build_readings(objects);
+    // the names alone pass 64 KiB four times
+    ASSERT_LE(4u, readings.size());
+    EXPECT_EQ(names.size(), static_cast<size_t>(std::count_if(
+            objects.begin(), objects.end(), [](const auto &o) { return !o.first; })) - 1);
+    const std::string text = cli::json_text_with_members(answer.head, std::move(answer.held));
+    Json::Value written;
+    std::istringstream in(text);
+    Json::CharReaderBuilder reader;
+    std::string errors;
+    ASSERT_TRUE(Json::parseFromStream(reader, in, &written, &errors)) << errors;
+    EXPECT_EQ(compact(out["unknown_labels"]), compact(written["unknown_labels"]));
+    // the work's own readings: resolve_support with the request's options
+    cli::ResolveRequest parsed = cli::parse_resolve_request(request);
+    reads = 0;
+    parsed.options.stop = gone;
+    parsed.options.abandon = []() { throw std::runtime_error("abandoned"); };
+    parsed.options.drop_labels_not_in_graph = true;
+    LabelOracle oracle(*index);
+    resolve_support(oracle, r.q, parsed.options);
+    const uint64_t work_reads = reads;
+    EXPECT_EQ(work_reads + 2 + readings.size(), route_reads);
+    // a stop at the build's first reading (among the names) abandons the request there
+    const uint64_t gone_from = work_reads + 3;
+    reads = 0;
+    const std::function<bool()> late = [&]() { return ++reads >= gone_from; };
+    EXPECT_THROW(cli::process_resolve_answer(request, *index, "r1", 0, nullptr, late, limits,
+                                             nullptr, nullptr, true),
                  graph::traversal::AttemptAborted);
     EXPECT_EQ(gone_from, reads);
 }

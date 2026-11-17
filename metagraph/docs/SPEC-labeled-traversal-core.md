@@ -658,19 +658,22 @@ body; an object of long strings, priced at about twice its text, stays at its pr
 under 64 KiB is written by one writer whose buffer keeps its capacity, so that its writing holds beside its tree
 that buffer (up to twice 64 KiB), the text and, for an element after the first, its copy after the comma: not
 charged, a few hundred KB at most; a larger object is written into a buffer reserved to its exact size, its tree and
-its text as its price counts them. The route writes the body from the held texts in one buffer, byte for byte the
-text of the tree; a multi-graph envelope holds every answered pair's texts until it is written from them. The CLI
-and the C++ API keep the tree and check, in every build type, that its text is the one the route writes (the CLI
-writing both texts under the request's deadline, every 64 KiB). Once every object is held, the body's buffer at its
-size class (reserved to its exact size, so no growth holds an old and a new buffer) and, where the account holds
-less, what writing holds: the held texts (each freed once copied, but a freed text does not give its pages back),
-the body, one copy of it (the compressed body, at most the text for this JSON, or the transport's) and the
-compressor's state, 272 KiB: three copies of the text where four were charged before. Nothing an answered request
-returns changes (`work.memory_bytes` is the pass's, not the answer account's): the account holds at most what it
-held before at every charge, so a request refused before at part `answer` may now be answered, and no request
-answered before is refused. On jsoncpp 1.9.3 an element holds 96 B, and an interval in a run list 336 B with
-libstdc++ (from its sizes) or 320 B with libc++ (measured on macOS), beside 12 B of text. A charge that would pass M
-ends the request with **400**, nothing partial sent:
+its text as its price counts them; a pair's `unknown_labels` are written name by name by the same writer into one
+buffer reserved to their price's text, with no tree of them *(the Fable review of 37b70685e, m2: a pair's 100 MB of
+`unknown_labels`, their tree and their text held while the request's labels and the profile's names were, had put
+the server's peak RSS 88-152 MB above the base's; now 22-85 MB below it)*. The route writes the body from the held
+texts in one buffer, byte for byte the text of the tree; a multi-graph envelope holds every answered pair's texts
+until it is written from them. The CLI and the C++ API keep the tree and check, in every build type, that its text
+is the one the route writes (the CLI writing both texts under the request's deadline, every 64 KiB). Once every
+object is held, the body's buffer at its size class (reserved to its exact size, so no growth holds an old and a new
+buffer) and, where the account holds less, what writing holds: the held texts (each freed once copied, but a freed
+text does not give its pages back), the body, one copy of it (the compressed body, at most the text for this JSON,
+or the transport's) and the compressor's state, 272 KiB: three copies of the text where four were charged before.
+Nothing an answered request returns changes (`work.memory_bytes` is the pass's, not the answer account's): the
+account holds at most what it held before at every charge, so a request refused before at part `answer` may now be
+answered, and no request answered before is refused. On jsoncpp 1.9.3 an element holds 96 B, and an interval in a
+run list 336 B with libstdc++ (from its sizes) or 320 B with libc++ (measured on macOS), beside 12 B of text. A
+charge that would pass M ends the request with **400**, nothing partial sent:
 
 ```json
 {"error": "resolve: the answer would hold more than --resolve-max-discover-memory-mb 1024 MiB (answer): nothing partial is sent; ask for run_format \"rle\", a larger min_block_kmers, fewer labels or seeds, or a shorter sequence",
@@ -4813,8 +4816,10 @@ at most every charge made, and the writing's peak is at most the one before T7-D
 (its request priced past 1 MiB with every object at its price, as before T7-D3, and within it now), and
 `ServerFanout.LateResolvePairsLeaveNoHeldTexts` (m3: two `/resolve` pairs cut at the cutoff that publish their texts
 later; the outcome holds the answered pair's texts only, and the envelope of one answered and two unfinished entries
-is written byte for byte as its tree), `ResolveAnswer.ThePriceCoversTheTexts` with objects of 64 KiB and more (m2),
-`ResolveAnswer.TheSelectionChargesTheClippedPieces` (T4
+is written byte for byte as its tree), `ResolveBoundsRoute.UnknownLabelsAreWrittenNameByName` (m2: a pair's unknown
+labels, names a writer escapes among them, written name by name byte for byte as their array's text, read every
+64 KiB of it, a stop at the first reading among them abandoning the request) and `ResolveAnswer.ThePriceCoversTheTexts`
+with objects of 64 KiB and more (m2), `ResolveAnswer.TheSelectionChargesTheClippedPieces` (T4
 review R1, F1: long runs split by 250 `max_support` picks; at every reading of the selection's check the heap it added
 within what its account holds then, 64 KiB aside; the seeds those made without an account),
 `ResolveAnswer.TheGroupingIsPricedAboveItsPeak` (F2: 2^17 + 1 runs of their own, jemalloc's peak within the price,

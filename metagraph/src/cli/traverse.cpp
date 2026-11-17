@@ -2594,8 +2594,9 @@ static Json::Value labels_capped_json(const SupportProfile &p) {
  * is written at once, its tree freed and its charge settled (settle_json). An array's elements
  * after the first hold their comma, so that an array is held as `[`, its elements' texts and
  * `]`. With |unknown_labels| (a multi-graph server's pair), p.unknown_labels is held the same
- * way, last. With |trees| (the tree API) each held member's tree is kept in *trees (an object
- * of those members), outside the account.
+ * way, last, its text written name by name (no tree of them is built). With |trees| (the tree
+ * API) each held member's tree is kept in *trees (an object of those members), outside the
+ * account.
  */
 static ResolveAnswer answer_of_profile(const SupportProfile &p, const SeedSelection *sel,
                                        const std::string &run_format,
@@ -2613,6 +2614,13 @@ static ResolveAnswer answer_of_profile(const SupportProfile &p, const SeedSelect
             check();
     };
     uint64_t unread = 0;
+    auto read_bytes = [&](uint64_t bytes) {
+        unread += bytes;
+        if (check && unread >= kDeliveryCheckBytes) {
+            unread = 0;
+            check();
+        }
+    };
     // the answer account: each object priced before it is built (§4.6)
     auto charge = [&](const JsonPrice &price) { charge_json(answer, price); };
     const bool rle = run_format == "rle";
@@ -2645,11 +2653,7 @@ static ResolveAnswer answer_of_profile(const SupportProfile &p, const SeedSelect
                 text.insert(text.begin(), ',');
         }
         settle_json(answer, price, text.size());
-        unread += text.size();
-        if (check && unread >= kDeliveryCheckBytes) {
-            unread = 0;
-            check();
-        }
+        read_bytes(text.size());
         return text;
     };
     // a held array of |n| elements, begun
@@ -2816,16 +2820,33 @@ static ResolveAnswer answer_of_profile(const SupportProfile &p, const SeedSelect
     }
     if (unknown_labels) {
         // the labels this pair does not hold (a multi-graph server's), held as the answer's
-        // other objects, written by the same writer
+        // other objects and read by bytes as they are; their text is written name by name by
+        // the same writer (`[`, each name's text, commas between them, `]`, as the writer
+        // writes their array) into one buffer reserved to their price's text, from above, and no
+        // tree of them is built (the Fable review of 37b70685e, m2: their tree beside their text
+        // while the request's labels and the profile's names were held put a pair of 100 MB of
+        // names 88-152 MB above the base's peak RSS, which wrote their tree's text after the
+        // request and the profile were freed)
         const JsonPrice price = member_price("unknown_labels", 0)
                                 + names_price(p.unknown_labels);
         charge(price);
-        Json::Value names = names_json(p.unknown_labels);
+        std::string text;
+        text.reserve(price.text);
+        text += '[';
+        for (size_t i = 0; i < p.unknown_labels.size(); ++i) {
+            if (i)
+                text += ',';
+            const std::string name = writer.text(Json::Value(p.unknown_labels[i]));
+            text += name;
+            read_bytes(name.size() + (i > 0));
+        }
+        text += ']';
+        settle_json(answer, price, text.size());
         std::vector<std::string> value;
-        value.push_back(text_of(names, true, price));
+        value.push_back(std::move(text));
         out.held.members.emplace_back("unknown_labels", std::move(value));
         if (trees)
-            (*trees)["unknown_labels"] = std::move(names);
+            (*trees)["unknown_labels"] = names_json(p.unknown_labels);
     }
     return out;
 }
