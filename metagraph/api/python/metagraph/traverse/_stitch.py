@@ -613,14 +613,16 @@ class StitchedGraphlet:
 
     def _check_pairs(self, cparts):
         """different_pair: a part of either side answered on another pair than a part of the
-        other (only pairs both state)."""
+        other (only pairs both state), compared by Pair.identity: by the n1 id where both
+        state one or have both paths (an old document and its id-form twin are one pair),
+        else by the paths."""
         mine = {answered_pair(p.graphlet.envelope) for p in self._parts} - {None}
         for p in cparts:
             cp = answered_pair(p.graphlet.envelope)
             if cp is None:
                 continue
             for pp in sorted(mine, key=lambda x: tuple('' if v is None else v for v in x)):
-                if pp != cp:
+                if pp.identity != cp.identity:
                     def show(x):
                         return json.dumps({'graph': x[0], 'graph_path': x[1],
                                            'annotation_path': x[2]},

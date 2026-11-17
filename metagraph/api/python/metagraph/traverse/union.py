@@ -432,7 +432,7 @@ def _env_desc(env, g=None):
     d = {}
     ap = answered_pair(env)
     if ap is not None:
-        d['graph'], d['graph_path'], d['annotation_path'] = ap
+        d['graph'], d['graph_path'], d['annotation_path'] = ap[:3]
     d['release'] = env.get('release') or caps.get('release') or None
     if g is not None:
         d['index_ns'], d['index_fp'], d['index_meta_fp'] = g.index_ns, g.index_fp, g.index_meta_fp

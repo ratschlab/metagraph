@@ -56,7 +56,7 @@ _NAMES = {
                  'Suppression', 'TraverseError', 'TraverseResponse', 'classify_409',
                  'release_verdict'),
     'client': ('PairResults', 'ResolveDeadline', 'ResponseFormatError', 'TraverseClient',
-               'UnsupportedFeature', 'configured_pair_id'),
+               'UnsupportedFeature', 'configured_pair_id', 'Pair', 'PairIdError'),
     'store': ('Entry', 'GraphletStore', 'StoreLimitExceeded', 'UnknownHandle'),
     'composite': ('CombineRefused',),
     'union': ('union_pairs', 'PairUnion', 'PairPart', 'PairAbsent', 'PairLabel', 'SpanLabel',
@@ -94,6 +94,7 @@ __all__ = [
     'union_pairs', 'PairUnion', 'PairPart', 'PairAbsent', 'PairLabel', 'SpanLabel',
     'LabelInterval', 'SegmentSupport', 'UnionSegment', 'Route', 'PairSpan', 'SpanJunction',
     'Carriers', 'UnionWalk', 'Coverage', 'Statements', 'PairResults', 'configured_pair_id',
+    'Pair', 'PairIdError',
     'stitch', 'StitchedGraphlet', 'Part', 'Junction', 'StitchedWalk',
 ]
 
