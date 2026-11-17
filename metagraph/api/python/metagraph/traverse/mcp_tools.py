@@ -1463,10 +1463,13 @@ class GraphletTools:
         about to be sent -- the capabilities read are those of the pair it names (a
         continuation with overrides={'graph': ...} is never checked against the client's
         own graph and run on another; one on the pair its parent was answered on reads that
-        pair's, annotation_path included); a request on the client's own graph reads the
-        client's capabilities."""
-        graph, graph_path, annotation_path = requested_pair(req) or (None, None, None)
-        if annotation_path is not None:
+        pair's, annotation_path included, or its pair_id where it names the pair by id); a
+        request on the client's own graph reads the client's capabilities."""
+        graph, graph_path, annotation_path, pair_id = requested_pair(req) or (None,) * 4
+        if pair_id is not None and graph_path is None and annotation_path is None:
+            # a pair named by its id (a document that states no paths): probed by it
+            caps = self._backend(client.capabilities, graph, None, None, pair_id)
+        elif annotation_path is not None:
             caps = self._backend(client.capabilities, graph, graph_path, annotation_path)
         elif graph_path is not None or (graph is not None
                                         and graph != getattr(client, 'graph', None)):
@@ -2558,14 +2561,16 @@ def _admit_paths(call, g, a):
 
 def _with_graph(req, client):
     """|req| on the client's own pair when it names none (a copy: a stored request is not
-    changed in place): its graph, and graph_path and annotation_path where the client has
-    them (pair_members()). A request that names a pair (a continuation on its parent's,
-    a replay of one) keeps it. A NextRequest keeps its attributes (notes, budgets)."""
+    changed in place): its graph, and graph_path and annotation_path, or pair_id, where the
+    client has them (pair_members()). A request that names a pair (a continuation on its
+    parent's, a replay of one) keeps it. A NextRequest keeps its attributes (notes,
+    budgets)."""
     if any(k in req for k in SELECTORS):
         return req
     members = pair_members(getattr(client, 'graph', None),
                            getattr(client, 'graph_path', None),
-                           getattr(client, 'annotation_path', None)) \
+                           getattr(client, 'annotation_path', None),
+                           getattr(client, 'pair_id', None)) \
         if getattr(client, 'graph', None) else {}
     if not members:
         return req
