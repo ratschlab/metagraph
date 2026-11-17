@@ -2122,7 +2122,9 @@ part: ``arms()``, ``provenance()``, ``memory_bytes()`` and the attributes (``par
 included: the statements whole, then the pairs, then per arm the walk counts and the top
 walks while they fit, with a note for each section left out or cut. Where the statements
 and the notes of what is left out do not fit, it is refused ``summary_too_small``, which
-names the size that does.
+names the size that does: in its text, and as an int in the exception's ``least_bytes``
+(``CombineRefused.least_bytes``, None for every other refusal), so a retry passes
+``max_bytes=e.least_bytes`` and is answered.
 
 
 What is not combined

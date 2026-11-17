@@ -46,11 +46,14 @@ __all__ = [
 class CombineRefused(ValueError):
     """A combination refused: .code names the rule (Appendix A.2 for the union, B.1 for
     stitching), the message is its text. MissingEnvelope and BadSelector are raised as
-    today, not as this class."""
+    today, not as this class. .least_bytes: where the text states the size a retry needs
+    (summary_too_small: the least answer's bytes, the number in the text), that size as an
+    int, so a caller passes it as max_bytes without reading the text; None otherwise."""
 
-    def __init__(self, code, message):
+    def __init__(self, code, message, least_bytes=None):
         super().__init__(message)
         self.code = code
+        self.least_bytes = least_bytes
 
 
 class NotCombinable(CombineRefused, TypeError):
