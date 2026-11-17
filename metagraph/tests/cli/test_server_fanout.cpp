@@ -939,6 +939,81 @@ TEST(ServerFanout, ALatePatternPairLeavesNoTexts) {
     EXPECT_EQ(Json::writeString(builder, whole), pattern_envelope_text(envelope, out.patterns));
 }
 
+// /resolve pairs resolved unfinished at the cutoff whose workers publish their answers with
+// their held texts later (SPEC-labeled-traversal-core.md §4.6, PairResult::held; the Fable
+// review of 37b70685e, m3): the late entries and their texts die with their results, the outcome
+// holds the answered pair's texts beside its entry and none beside the two unfinished ones, and
+// the envelope written from the outcome (envelope_text_with_members) holds the answered entry
+// with its texts spliced in (a large one, written in pieces) and the two unfinished entries as
+// they are, byte for byte the envelope's tree
+TEST(ServerFanout, LateResolvePairsLeaveNoHeldTexts) {
+    const RequestDeadlines d = deadlines_now(300);
+    const std::vector<SelectedPair> pairs { kPairs[0], kPairs[1], kPairs[2] };
+    auto entry = entry_of(pairs);
+    // graph_runs as an rle string of 200 kB
+    const std::string runs(200'000, 'M');
+    const std::string large = "\"" + runs + "\"";
+    auto held = [&](const std::string &name) {
+        HeldMembers h;
+        h.members.emplace_back("labels", std::vector<std::string> {
+                "[", "{\"label\":\"" + name + "\"}", ",{\"label\":\"x\"}", "]" });
+        h.members.emplace_back("graph_runs", std::vector<std::string> { large });
+        return h;
+    };
+    Gate gate;
+    std::atomic<int> published { 0 };
+    FanoutOutcome out;
+    {
+        Threads threads;
+        out = run_fanout(settings_of(pairs, d), entry, [&](PairControl &control) {
+            EXPECT_TRUE(control.start_running());
+            PairResult r = answered(control, 11 + control.index());
+            r.held = held(control.index() ? "late" : "early");
+            if (control.index()) {
+                gate.wait();
+                ++published;
+            }
+            return r;
+        }, threads.launch());
+        ASSERT_EQ(0, published.load());
+        ASSERT_EQ(3u, out.entries.size());
+        ASSERT_EQ(3u, out.held.size());
+        EXPECT_EQ("answered", out.entries[0]["outcome"].asString());
+        ASSERT_TRUE(out.held[0]);
+        EXPECT_EQ("{\"label\":\"early\"}", out.held[0]->members[0].second[1]);
+        for (size_t i : { 1, 2 }) {
+            EXPECT_EQ("unfinished", out.entries[i]["refusal"]["code"].asString()) << i;
+            EXPECT_FALSE(out.held[i]) << i;
+        }
+        gate.open();
+    }
+    wait_for_workers();
+    EXPECT_EQ(2, published.load());
+    // what the late pairs published is nowhere in the outcome
+    for (size_t i : { 1, 2 }) {
+        EXPECT_FALSE(out.held[i]) << i;
+        EXPECT_EQ("unfinished", out.entries[i]["refusal"]["code"].asString()) << i;
+    }
+    Json::Value envelope;
+    envelope["route"] = "/resolve";
+    for (const Json::Value &e : out.entries) {
+        envelope["answers"].append(e);
+    }
+    Json::Value whole = envelope;
+    Json::Value &early = whole["answers"][0];
+    early["labels"].append(Json::Value());
+    early["labels"][0]["label"] = "early";
+    early["labels"].append(Json::Value());
+    early["labels"][1]["label"] = "x";
+    early["graph_runs"] = runs;
+    uint64_t checks = 0;
+    const std::string text = envelope_text_with_members(envelope, std::move(out.held),
+                                                        [&]() { ++checks; });
+    EXPECT_EQ(json_text(whole, true), text);
+    // the large text copied in pieces of at most 64 KiB, a check between two
+    EXPECT_LE(large.size() / kDeliveryCheckBytes, checks);
+}
+
 // A pair started and not finished at the cutoff (an uninterruptible piece of work): unfinished
 // with its usage so far and told to stop; its worker ends after the answer, and the registry
 // states the end with its final usage — the entry stays running until then

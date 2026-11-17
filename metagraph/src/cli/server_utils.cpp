@@ -994,11 +994,13 @@ std::string envelope_text_with_members(const Json::Value &envelope,
                                        std::vector<std::optional<HeldMembers>> answers,
                                        const std::function<void()> &check,
                                        double *max_gap_ms) {
-    // the pieces reserved, so that no growth holds an old and a new vector of them
-    size_t count = 2 + answers.size();
+    // the pieces reserved, so that no growth holds an old and a new vector of them: the
+    // envelope's text before and after its entries, a comma between two entries, an answered
+    // entry's pieces (pieces_of), and one piece for each other entry (the Fable review of
+    // 37b70685e: before, one for all of them)
+    size_t count = 2 + (answers.empty() ? 0 : answers.size() - 1);
     for (const std::optional<HeldMembers> &held : answers) {
-        if (held)
-            count += pieces_of(*held);
+        count += held ? pieces_of(*held) : 1;
     }
     return envelope_text_of(envelope, std::move(answers), "envelope_text_with_members",
                             "held members", count,
