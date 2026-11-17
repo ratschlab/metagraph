@@ -61,12 +61,14 @@ other answers (409, 503, 400) are not wrapped and read as before.
 
 import copy
 import gzip
+import hashlib
 import http.client
 import json
 import re
 import urllib.error
 import urllib.parse
 import urllib.request
+import uuid
 import zlib
 from dataclasses import dataclass
 
@@ -84,7 +86,8 @@ __all__ = ['TraverseClient', 'TraverseResponse', 'TraverseError', 'ServerInitial
            'Suppression', 'ReleaseVerdict', 'release_verdict', 'classify_409', 'ACCEPT_ENCODING',
            'SUPPRESSION_LEVEL', 'COORDINATES_LEVEL', 'AUTO_COORDINATES_UNDER_MEMORY_BUDGET',
            'auto_coordinates', 'drop_coordinates_note', 'strip_coordinate_cap',
-           'SELECTORS', 'pair_members', 'answered_pair', 'requested_pair', 'PairResults']
+           'SELECTORS', 'pair_members', 'answered_pair', 'requested_pair', 'PairResults',
+           'PAIR_ID_NAMESPACE', 'configured_pair_id']
 
 ACCEPT_ENCODING = 'gzip, deflate'
 # the feature level of the tombstone's suppression (a cancel with not_after_ms,
@@ -131,6 +134,32 @@ _MAX_CAP = (1 << 64) - 2
 # request-level members, never strategy fields. `annotation_path` is no member of a request:
 # /traverse takes it inside a `pairs` object only (pair_members() writes it there)
 SELECTORS = ('graph', 'graph_path', 'annotation_path', 'graphs', 'pairs')
+
+# The n1 id of a configured pair (docs/DESIGN-pair-identity.md section 3.2): master's
+# src/common/configured_pair_id.hpp (356fe1ee3), which the engine and the service compute too
+# and which must stay byte-identical in all three. Its namespace:
+PAIR_ID_NAMESPACE = uuid.UUID('d3565c73-e7e9-5bca-b6a9-64cb5c4c9f93')
+
+
+def configured_pair_id(graph, graph_path, annotation_path):
+    """The n1 id of the pair the graph list configures as (|graph|, |graph_path|,
+    |annotation_path|): "n1-" and the lowercase UUIDv5 in PAIR_ID_NAMESPACE of the three
+    fields, each as its UTF-8 byte length, ":" and its bytes, an absent one (None) as "-1:"
+    (so None and "" differ). Nothing is normalized: the strings as the graph list spells
+    them. A configured identity, not a content one (index_fp is that): the name is hashed,
+    so a pair listed under two names has two ids. Public metadata, never a credential."""
+    name = bytearray()
+    for v in (graph, graph_path, annotation_path):
+        if v is None:
+            name += b'-1:'
+        elif isinstance(v, str):
+            b = v.encode('utf-8')
+            name += b'%d:' % len(b) + b
+        else:
+            raise TypeError('a pair field is a string or None, not %r' % (v,))
+    # uuid.uuid5() itself, over bytes (3.11's uuid5 takes a str name only)
+    digest = hashlib.sha1(PAIR_ID_NAMESPACE.bytes + bytes(name), usedforsecurity=False).digest()
+    return 'n1-' + str(uuid.UUID(bytes=digest[:16], version=5))
 
 
 def _text(v):
