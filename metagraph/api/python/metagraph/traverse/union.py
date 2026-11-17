@@ -33,6 +33,7 @@ StitchedWalk.labels_full.
 
 import collections
 import hashlib
+import re
 from dataclasses import dataclass
 from typing import Any, Optional
 
@@ -46,7 +47,7 @@ from .budget import (BASE_SHIFT, DICT, DICT_KEY, INT, LIST_ITEM, SET, SET_ITEM, 
                      W_ELEM, W_ROW, W_STEP, LocalBudgetExceeded, Partial)
 from ._stitch import _RANK as _CAUSE_RANK
 from ._stitch import StitchedGraphlet, part_name
-from .client import answered_pair
+from .client import _N1, Pair, PairIdError, _pair, answered_pair, check_pair_id
 from .model import ARM_SIDES, BadSelector, Graphlet, UnknownLabel
 
 __all__ = [
@@ -60,8 +61,8 @@ OP = 'union_pairs()'
 # the refusal texts (Appendix A.2), filled with % by the check that refuses
 TEXTS = {
     'bad_expected': 'expected_pairs= takes a list of the pairs the request was sent to, as '
-                    'graph names or {graph, graph_path, annotation_path} objects; %s is not '
-                    'one',
+                    'graph names, {graph, pair_id} or {graph, graph_path, annotation_path} '
+                    'objects; %s is not one',
     'bad_expected_str': 'expected_pairs= is a string: pass a list of graph names',
     'bad_seqs_order': 'seqs_order= maps pairs (graph names or pair objects) to "verified", '
                       '"count_only" or None, as GET /capabilities states them; %s is not one',
@@ -84,7 +85,8 @@ TEXTS = {
                      'the pair it was answered on, or none',
     'no_pair': 'result %s names no pair (no graph tag, no index_ns): pass it as {pair, '
                'graphlet} or {pair, result}',
-    'ambiguous_pair': 'pair %s matches both %s and %s: state its paths, release or index_ns',
+    'ambiguous_pair': 'pair %s matches both %s and %s: state its pair_id (or its paths), '
+                      'release or index_ns',
     'no_bases': 'part %s carries no bases (output.sequences: false): a union by sequence '
                 'needs every part\'s bases',
     'different_alphabet': 'part %s walks the alphabet %s and part %s the alphabet %s: their '
@@ -137,12 +139,18 @@ _CATEGORY_WORDS = {
 }
 _ABSENT_OF_WALKS = {'not_in_graph': 'seed_not_in_graph',
                     'labels_not_in_graph': 'labels_not_in_graph', 'failed': 'not_walked'}
-_PAIR_FIELDS = ('graph', 'graph_path', 'annotation_path', 'release', 'index_ns', 'index_fp',
-                'index_meta_fp')
-# the pair key's order (Appendix A.4)
-_KEY_FIELDS = ('release', 'index_ns', 'graph', 'graph_path', 'annotation_path', 'index_fp',
-               'index_meta_fp')
+_PAIR_FIELDS = ('graph', 'graph_path', 'annotation_path', 'pair_id', 'release', 'index_ns',
+                'index_fp', 'index_meta_fp')
+# the pair key's order (Appendix A.4). One identity whatever the form a pair is named in
+# (docs/DESIGN-pair-identity.md 3.9): a pair with an n1 id -- stated, or computed from both
+# paths -- is keyed by (graph, pair_id) and no path, so a document stored with paths and its
+# twin stored with the id have one key, one tag and one digest; the paths are key members
+# only of a description that has no id (a caller's {graph, graph_path} without the annotation)
+_KEY_FIELDS = ('release', 'index_ns', 'graph', 'pair_id', 'graph_path', 'annotation_path',
+               'index_fp', 'index_meta_fp')
 _SEQS_ORDER = ('verified', 'count_only', None)
+# a seqs_order key (graph, x) whose x has a p2 id's shape is read as an id, and refused
+_P2_SHAPE = re.compile(r'p2-[0-9a-f]{32}\Z')
 
 # The memory prices of the union's own objects (bytes): fitted to tracemalloc's traced peak
 # of each operation, cold, on CPython 3.11 and 3.14 (the split fixtures' 11 parts, r237's
@@ -415,14 +423,37 @@ def _describe(x):
 
 def _pair_desc(p):
     """A caller's pair (a graph name, or a dict of _PAIR_FIELDS naming a graph or, for a
-    single-graph server, an index_ns) as a description, or None when it is malformed."""
+    single-graph server, an index_ns) as a description (_with_id()), or None when it is
+    malformed; PairIdError for a pair_id the library does not take (a p2 id) or one stated
+    beside paths that are not its."""
     if isinstance(p, str):
         return {'graph': p} if p else None
     if isinstance(p, dict) and p and set(p) <= set(_PAIR_FIELDS) \
             and (p.get('graph') or p.get('index_ns')) \
             and all(v is None or isinstance(v, str) for v in p.values()):
-        return {k: v for k, v in p.items() if v not in (None, '')}
+        return _with_id({k: v for k, v in p.items() if v not in (None, '')})
     return None
+
+
+def _with_id(d):
+    """Description |d| (in place) with its pair_id: as stated (an n1 id), or the n1 id of
+    its graph and both paths (a pair named by its paths: an old document, a caller's full
+    pair object), so that the forms of one pair match and key alike."""
+    if d.get('graph') and (d.get('pair_id') or (d.get('graph_path') and d.get('annotation_path'))):
+        t = _pair(d['graph'], d.get('graph_path'), d.get('annotation_path'), d.get('pair_id'),
+                  'the pair object')
+        d['pair_id'] = t.pair_id
+    elif d.get('pair_id'):
+        check_pair_id(d['pair_id'], 'the pair object\'s pair_id')
+    return d
+
+
+def _stated_desc(p, refuse, where):
+    """_pair_desc(|p|), a PairIdError raised as |refuse|(text naming |where|)."""
+    try:
+        return _pair_desc(p)
+    except PairIdError as e:
+        raise refuse('%s (%s)' % (where, e)) from None
 
 
 def _env_desc(env, g=None):
@@ -432,7 +463,7 @@ def _env_desc(env, g=None):
     d = {}
     ap = answered_pair(env)
     if ap is not None:
-        d['graph'], d['graph_path'], d['annotation_path'] = ap[:3]
+        d['graph'], d['graph_path'], d['annotation_path'], d['pair_id'] = ap
     d['release'] = env.get('release') or caps.get('release') or None
     if g is not None:
         d['index_ns'], d['index_fp'], d['index_meta_fp'] = g.index_ns, g.index_fp, g.index_meta_fp
@@ -446,7 +477,11 @@ def _env_desc(env, g=None):
 def _matches(a, b):
     """The one rule of Appendix A.4: do descriptions |a| and |b| name one pair? It decides
     every match: duplicate_pair, pair_mismatch, not_expected, not_included, an absent record
-    against a part, and seqs_order=. A single-graph server's pair states no graph name: its
+    against a part, and seqs_order=. In this order: a differing index_meta_fp separates, an
+    index_fp both state decides, then the graph names, then the pair ids where both have one
+    (an id computed from both paths included: a pair named by its paths and one named by its
+    id match), else the paths wherever both state them; release, index_ns and index_meta_fp
+    must agree where both state them. A single-graph server's pair states no graph name: its
     tag is its index_ns, and a bare name equal to it names that pair."""
     if a.get('index_meta_fp') and b.get('index_meta_fp') \
             and a['index_meta_fp'] != b['index_meta_fp']:
@@ -455,7 +490,13 @@ def _matches(a, b):
         return a['index_fp'] == b['index_fp']
     if a.get('graph') != b.get('graph'):
         return _names_ns(a, b) or _names_ns(b, a)
-    for k in ('graph_path', 'annotation_path', 'release', 'index_ns', 'index_meta_fp'):
+    if a.get('pair_id') and b.get('pair_id'):
+        if a['pair_id'] != b['pair_id']:
+            return False
+        rest = ('release', 'index_ns', 'index_meta_fp')
+    else:
+        rest = ('graph_path', 'annotation_path', 'release', 'index_ns', 'index_meta_fp')
+    for k in rest:
         if a.get(k) and b.get(k) and a[k] != b[k]:
             return False
     return True
@@ -467,6 +508,10 @@ def _names_ns(bare, d):
 
 
 def _key(d):
+    """The pair key (_KEY_FIELDS) of description |d|: no path where it has a pair_id."""
+    if d.get('pair_id'):
+        return tuple(None if k in ('graph_path', 'annotation_path') else d.get(k)
+                     for k in _KEY_FIELDS)
     return tuple(d.get(k) for k in _KEY_FIELDS)
 
 
@@ -505,7 +550,9 @@ def _classify(results):
                     and isinstance(x['sequence'], str):
                 e = _Elem(i, 'response')
                 e.response, e.sequence = x['response'], x['sequence']
-            elif 'pair' in keys and _pair_desc(x['pair']) is not None:
+            elif 'pair' in keys and _stated_desc(
+                    x['pair'], lambda t: C.NotCombinable(TEXTS['not_combinable'] % t),
+                    'result %d' % i) is not None:
                 rest = keys - {'pair'}
                 if rest == {'graphlet'} and (isinstance(x['graphlet'],
                                                         (Graphlet, StitchedGraphlet))
@@ -642,7 +689,8 @@ def _check_args(results, seed, expected_pairs, seqs_order):
             raise _refuse('bad_expected', None, repr(expected_pairs))
         exp = []
         for i, p in enumerate(expected_pairs):
-            d = _pair_desc(p)
+            d = _stated_desc(p, lambda t: _refuse('bad_expected', None, t),
+                             'expected_pairs[%d]' % i)
             if d is None:
                 raise _refuse('bad_expected', None, 'expected_pairs[%d] (%r)' % (i, p))
             exp.append(d)
@@ -651,10 +699,17 @@ def _check_args(results, seed, expected_pairs, seqs_order):
         if not isinstance(seqs_order, dict):
             raise _refuse('bad_seqs_order', None, repr(seqs_order))
         for k, v in seqs_order.items():
-            if isinstance(k, tuple) and 1 <= len(k) <= 3 and isinstance(k[0], str) and k[0] \
+            if isinstance(k, tuple) and 1 <= len(k) <= 4 and isinstance(k[0], str) and k[0] \
                     and all(x is None or isinstance(x, str) for x in k):
-                d = {kk: vv for kk, vv in zip(('graph', 'graph_path', 'annotation_path'), k)
-                     if vv}
+                # (graph, pair_id) -- an n1 id, or the shape of a p2 id, refused -- else
+                # (graph[, graph_path[, annotation_path]]), or a client.Pair (4 members)
+                if len(k) == 2 and k[1] and (_N1.match(k[1]) or _P2_SHAPE.match(k[1])):
+                    fields = {'graph': k[0], 'pair_id': k[1]}
+                else:
+                    fields = dict(zip(Pair._fields, k))
+                d = _stated_desc({kk: vv for kk, vv in fields.items() if vv},
+                                 lambda t: _refuse('bad_seqs_order', None, t),
+                                 'seqs_order[%r]' % (k,))
             else:
                 d = _pair_desc(k) if isinstance(k, str) else None
             if d is None or v not in _SEQS_ORDER:
@@ -769,7 +824,7 @@ class PairUnion:
                             raise _refuse('pair_mismatch', None, e.pos, _show(env),
                                           _show(e.stated))
                     d = dict(env)
-                    for k in ('graph', 'graph_path', 'annotation_path'):
+                    for k in ('graph', 'graph_path', 'annotation_path', 'pair_id'):
                         d.pop(k, None)
                     d.update(e.stated)
                     e.desc, e.by = d, 'caller'
@@ -930,7 +985,9 @@ class PairUnion:
         self._part_of = {p.tag: p for p in self.parts}
         self._tag_index = {p.tag: i for i, p in enumerate(self.parts)}
         self._exp_given = expected_pairs is not None
-        self._expected_raw = [C.canonical_json(d) for d in (exp or [])]
+        # the expected pairs by their keys: a pair expected by its paths and by its id is
+        # one input of the digest
+        self._expected_raw = [C.canonical_json(list(_key(d))) for d in (exp or [])]
         self._sources(b)
         self._arms = {}
         for side in ARM_SIDES:
@@ -1937,7 +1994,7 @@ class PairUnion:
                      'digest': p.digest,
                      'request': GraphletStore.request_of(
                          g, graph=pair['graph'], graph_path=pair['graph_path'],
-                         annotation_path=pair['annotation_path'])
+                         annotation_path=pair['annotation_path'], pair_id=pair['pair_id'])
                      if p.pair_stated_by == 'caller' and pair['graph'] else
                      GraphletStore.request_of(g)}
             if isinstance(p.graphlet, StitchedGraphlet) and p.graphlet.junctions:
@@ -1995,8 +2052,15 @@ def _classes(descs):
         else:
             hit['members'].append(d)
     for c in classes:
-        c['desc'] = min(c['members'], key=lambda d: (-len(d), _sort_key(_key(d))))
+        c['desc'] = min(c['members'], key=lambda d: (-_fullness(d), _sort_key(_key(d))))
     return classes
+
+
+def _fullness(d):
+    """How fully |d| describes its pair, the same whatever form it names the pair in: its
+    key's members, an id counting as the two paths it stands for."""
+    key = _key(d)
+    return sum(v is not None for v in key) + (1 if d.get('pair_id') else 0)
 
 
 def _tags(classes):
@@ -2072,9 +2136,7 @@ def _dedupe(elems, cls_of, tags):
                 seen[id(c)] = e
             continue
         if not prev.desc.get('index_fp') and not e.desc.get('index_fp') \
-                and all(prev.desc.get(k) == e.desc.get(k)
-                        for k in ('graph', 'graph_path', 'annotation_path', 'release',
-                                  'index_ns', 'index_meta_fp')):
+                and _key(prev.desc) == _key(e.desc):
             raise _refuse('duplicate_pair', 'duplicate_pair_unknown', prev.pos, e.pos, tag)
         raise _refuse('duplicate_pair', None, prev.pos, e.pos, tag)
     by_class = dict(seen)

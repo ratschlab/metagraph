@@ -479,5 +479,190 @@ class TestToolsInBothForms(unittest.TestCase):
             self.assertEqual(out['error'], 'p2_pair_id', out)
 
 
+# ---------------------------------------------------------------- the union of both forms
+
+R237_PARTS = ('bact_other', 'bact_pseudomonadota')
+
+
+def r237_inputs(parts='paths', absent='paths', expected='paths', graph=None):
+    """The r237 union's inputs (test_traverse_union.r237_union()) with each group in the form
+    asked: 'paths' as the service delivered them, 'id' as it stores them after the engine
+    change (graph and pair_id, no path), or a list of forms per part. |graph|: every pair
+    renamed to one name (production RefSeq's shape: one name, several pairs)."""
+    from metagraph.traverse import union_pairs  # noqa: F401
+    forms = [parts] * 2 if isinstance(parts, str) else parts
+    texts = [r237_text(n) for n in R237_PARTS]
+    if graph is not None:
+        texts = [t.replace('"graph":"%s"' % n, '"graph":"%s"' % graph)
+                 for t, n in zip(texts, R237_PARTS)]
+    gs = [parse(id_form(t) if f == 'id' else t) for t, f in zip(texts, forms)]
+    with open(os.path.join(R237, 'absent.json'), encoding='utf-8') as f:
+        recs = json.load(f)
+    with open(os.path.join(R237, 'seed.fa'), encoding='utf-8') as f:
+        seed = ''.join(line.strip() for line in f if not line.startswith('>'))
+    exp = [{k: g0.envelope[k] for k in ('graph', 'graph_path', 'annotation_path')}
+           for g0 in (parse(t) for t in texts)] + [dict(a['pair']) for a in recs]
+    if graph is not None:
+        for r in recs:
+            r['pair']['graph'] = graph
+        for d in exp:
+            d['graph'] = graph
+
+    def to_id(d):
+        d = dict(d)
+        d['pair_id'] = configured_pair_id(d['graph'], d.pop('graph_path'),
+                                          d.pop('annotation_path'))
+        return d
+    if absent == 'id':
+        for r in recs:
+            r['pair'] = to_id(r['pair'])
+    if expected == 'id':
+        exp = [to_id(d) for d in exp]
+    return gs + recs, seed, exp
+
+
+def r237_union(**kw):
+    from metagraph.traverse import union_pairs
+    so = kw.pop('seqs_order', None)
+    results, seed, exp = r237_inputs(**kw)
+    return union_pairs(results, seed=seed, expected_pairs=exp, seqs_order=so)
+
+
+class TestUnionOfBothForms(unittest.TestCase):
+    """One identity, form-independent (the rule of union.py's _KEY_FIELDS): an old document
+    and its id-form twin give one part key, one tag, one union part and the same digest, in
+    a union of one form or of both."""
+
+    def same(self, u, v, what):
+        self.assertEqual(u.digest, v.digest, what)
+        self.assertEqual([(p.tag, p.key) for p in u.parts], [(p.tag, p.key) for p in v.parts],
+                         what)
+        self.assertEqual([(a.tag, a.key) for a in u.absent], [(a.tag, a.key) for a in v.absent],
+                         what)
+        self.assertEqual(u.summary(), v.summary(), what)
+        self.assertEqual(u.to_fasta(), v.to_fasta(), what)
+        self.assertEqual(u.to_gfa(), v.to_gfa(), what)
+        # (the replay requests differ until outputs name pairs without paths)
+        self.assertEqual([{k: x for k, x in e.items() if k != 'request'} for e in u.provenance()],
+                         [{k: x for k, x in e.items() if k != 'request'} for e in v.provenance()],
+                         what)
+
+    def test_old_new_and_mixed_unions_are_one(self):
+        old = r237_union()
+        for kw in ({'parts': 'id'}, {'parts': 'id', 'absent': 'id', 'expected': 'id'},
+                   {'parts': ['paths', 'id']}, {'parts': ['id', 'paths'], 'absent': 'id'},
+                   {'expected': 'id'}):
+            self.same(old, r237_union(**kw), kw)
+        # the key holds the id, never a path
+        for p in old.parts + old.absent:
+            self.assertTrue(p.key[3].startswith('n1-'), p.key)
+            self.assertEqual(p.key[4:6], (None, None))
+
+    def test_one_name_with_several_pairs(self):
+        # production RefSeq's shape: the ~ suffixes come from the keys, so they do not move
+        # with the form either
+        old = r237_union(graph='refseq')
+        self.assertEqual(len(old.parts), 2)
+        self.assertTrue(all(p.tag.startswith('refseq~') for p in old.parts + old.absent))
+        self.assertEqual(len(set(old.pairs)), 11)
+        for kw in ({'parts': 'id', 'absent': 'id', 'expected': 'id'},
+                   {'parts': ['id', 'paths'], 'expected': 'id'}):
+            self.same(old, r237_union(graph='refseq', **kw), kw)
+        # a bare name is ambiguous there, in either form
+        results, seed, exp = r237_inputs(parts='id', graph='refseq')
+        from metagraph.traverse import union_pairs
+        with self.assertRaises(CombineRefused) as cm:
+            union_pairs(results, seed=seed, expected_pairs=exp + ['refseq'])
+        self.assertEqual(cm.exception.code, 'ambiguous_pair')
+
+    def test_an_old_document_and_its_twin_given_together_are_one_part(self):
+        from metagraph.traverse import union_pairs
+        text = r237_text('bact_other')
+        old, new = parse(text), parse(id_form(text))
+        u = union_pairs([old, new])
+        self.assertEqual(len(u.parts), 1)
+        self.assertEqual(u.digest, union_pairs([old]).digest)
+        self.assertEqual(u.digest, union_pairs([new]).digest)
+        self.assertEqual(u.digest, union_pairs([new, old]).digest)
+
+    def test_ids_decide_without_index_fp(self):
+        # the fork fixture has no index_fp: the ids (computed from paths, or stated) decide
+        from metagraph.traverse import union_pairs
+        a_old, a_new = fixture('fork', 'paths'), fixture('fork', 'id')
+        b_new = fixture('fork', 'id', gp=GP2, ap=AP2)
+        u = union_pairs([a_old, a_new])
+        self.assertEqual((len(u.parts), u.digest), (1, union_pairs([a_new]).digest))
+        u = union_pairs([a_old, b_new])
+        self.assertEqual(len(u.parts), 2)
+        self.assertEqual(sorted(p.key[3] for p in u.parts), sorted((ID, ID2)))
+        self.assertEqual(u.digest, union_pairs([fixture('fork', 'paths', gp=GP2, ap=AP2),
+                                                a_new]).digest)
+        # an expected pair by id or by paths
+        digests = {union_pairs([g], expected_pairs=exp).digest
+                   for g in (a_old, a_new)
+                   for exp in ([{'graph': GRAPH, 'pair_id': ID}],
+                               [{'graph': GRAPH, 'graph_path': GP, 'annotation_path': AP}])}
+        self.assertEqual(len(digests), 1)
+        with self.assertRaises(CombineRefused) as cm:
+            union_pairs([a_new], expected_pairs=[{'graph': GRAPH, 'pair_id': ID2}])
+        self.assertEqual(cm.exception.code, 'not_expected')
+        # a caller's partial paths (no annotation) name the pair by name and graph path
+        u = union_pairs([{'pair': {'graph': GRAPH, 'graph_path': GP}, 'graphlet': a_old}])
+        self.assertEqual(u.parts[0].key[3:6], (None, GP, None))
+
+    def test_aliases_with_manifests_are_one_pair(self):
+        # review m2: one pair listed under two names has two ids, and one index_fp, which
+        # decides first
+        from metagraph.traverse import union_pairs
+        text = r237_text('bact_other')
+        alias = parse(id_form(text.replace('"graph":"bact_other"', '"graph":"alias"')))
+        old = parse(text)
+        self.assertNotEqual(answered_pair(alias.envelope).pair_id,
+                            answered_pair(old.envelope).pair_id)
+        self.assertEqual(len(union_pairs([old, alias]).parts), 1)
+
+    def test_seqs_order_by_id_or_by_paths(self):
+        text = r237_text('bact_other')
+        g = parse(text)
+        pid = answered_pair(g.envelope).pair_id
+        gp, ap = g.envelope['graph_path'], g.envelope['annotation_path']
+        a = r237_union(seqs_order={('bact_other', gp, ap): 'verified'})
+        for so in ({('bact_other', pid): 'verified'},
+                   {Pair('bact_other', None, None, pid): 'verified'},
+                   {Pair('bact_other', gp, ap, pid): 'verified'}):
+            b = r237_union(parts='id', seqs_order=so)
+            self.assertEqual(a.digest, b.digest, so)
+            self.assertEqual([p.seqs_order for p in b.parts], ['verified', 'unknown'])
+        from metagraph.traverse import union_pairs
+        with self.assertRaises(CombineRefused) as cm:
+            r237_union(seqs_order={('bact_other', pid): 'verified',
+                                   ('bact_other', gp, ap): 'count_only'})
+        self.assertEqual(cm.exception.code, 'bad_seqs_order')
+        self.assertTrue(union_pairs)
+
+    def test_p2_ids_are_refused(self):
+        from metagraph.traverse import union_pairs
+        g = fixture('fork', 'id')
+        for call, code in (
+                (lambda: union_pairs([g], expected_pairs=[{'graph': GRAPH, 'pair_id': P2}]),
+                 'bad_expected'),
+                (lambda: union_pairs([{'pair': {'graph': GRAPH, 'pair_id': P2}, 'graphlet': g}]),
+                 'not_combinable'),
+                (lambda: union_pairs([g], seqs_order={(GRAPH, P2): 'verified'}),
+                 'bad_seqs_order')):
+            with self.assertRaises(CombineRefused) as cm:
+                call()
+            self.assertEqual(cm.exception.code, code)
+            self.assertIn("service's public pair id (p2)", str(cm.exception))
+        # a document whose J line states a p2 id
+        resp = tagged(T.doc_json('fork', 'graphlet'), 'id')
+        resp['pair_id'] = P2
+        bad = MT.from_response(resp['results'][0], resp)
+        with self.assertRaises(PairIdError):
+            union_pairs([bad])
+        with self.assertRaises(PairIdError):
+            GraphletStore.request_of(bad)
+
+
 if __name__ == '__main__':
     unittest.main()
