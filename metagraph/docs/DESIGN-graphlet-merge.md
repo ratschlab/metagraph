@@ -636,18 +636,18 @@ union_pairs(results, *, seed=None, expected_pairs=None, seqs_order=None, budget=
     # seqs_order: pair -> 'verified' | 'count_only' | None, from GET /capabilities; a pair not given: 'unknown'
     # A new object every time; parts held by reference, never copied or modified.
 
-class PairUnion:                          # every method also takes budget= (keyword-only, see below)
+class PairUnion:                          # budget= (keyword-only) where the work grows with walks or segments (F.1)
     parts -> tuple[PairPart]              # canonical order (§2.10)
     absent -> tuple[PairAbsent]
     pairs -> tuple[str]                   # every tag (unique, Appendix A.4): parts, absent records, missing pairs
     expected -> tuple[str] | None
     seed -> SeedInfo                      # the common oriented seed; each part's own seed record in parts
     alphabet; arms() -> list[str]         # the arms any part walked
-    statements(arm=None, at_bp=None, *, paths='supported') -> Statements   # the five statements (§2.1)
-    coverage(arm, at_bp=None) -> Coverage                 # §2.6
-    labels(pair=None) -> list[PairLabel]
-    label(selector) -> PairLabel          # {'pair', 'ref'} | {'pair', 'name'} | {'name'} when only one pair has it
-    shared_names() -> dict                # name -> tags, for names seen in two or more parts
+    statements(arm=None, at_bp=None, *, paths='supported', budget=None) -> Statements   # the five statements (§2.1)
+    coverage(arm, at_bp=None, *, budget=None) -> Coverage  # §2.6
+    labels(pair=None, *, budget=None) -> list[PairLabel]
+    label(selector, *, budget=None) -> PairLabel   # {'pair', 'ref'} | {'pair', 'name'} | {'name'} when one pair has it
+    shared_names(*, budget=None) -> dict  # name -> tags, for names seen in two or more parts
     segments(arm, *, budget=None, resume=None) -> list[UnionSegment]
     walks(arm, *, paths='supported'|'inferred', max_transitions=1, max_paths=1000, top=None, by='pairs'|'length'|'id',
           pairs=None, labels=None, min_bp=0, spell=False, stubs=False, budget=None, resume=None)
@@ -658,7 +658,7 @@ class PairUnion:                          # every method also takes budget= (key
     to_fasta(arm=None, walks=None, with_seed=True, orientation='natural', width=None, *, paths='supported',
              max_transitions=1, max_paths=1000, at_bp=None, stubs=False, budget=None) -> str
     to_gfa(*, paths='supported', with_seed=True, labels='counts'|'full', at_bp=None, budget=None) -> str
-    evidence(arm=None) -> dict
+    evidence(arm=None, *, budget=None) -> dict
     summary(max_bytes=4096, *, paths='supported', budget=None) -> dict   # the statements first and whole
     __str__() -> str                      # the statements as sentences: print(union)
     provenance() -> list[dict]
@@ -676,10 +676,13 @@ class PairUnion:                          # every method also takes budget= (key
 **Tags.** Every pair is named by its display tag, unique in the union (Appendix A.4); selectors take a tag, and
 `parts[i].key` gives the full pair key.
 
-**Budgets.** Every operation takes `budget=`, keyword-only, with the library's
-semantics (`budget.py`): a stop raises `LocalBudgetExceeded`; the lists whose order allows it (`walks()`,
-`segments()`, `carriers()`) carry a `Partial` of whole rows with a resume token for `resume=`, and the others stop
-without one. `union_pairs()` charges construction (the trie pass) to its `budget=`.
+**Budgets.** Every operation whose work grows with the walks or segments takes `budget=`, keyword-only (the list and
+the exempt accessors: F.1), with the library's semantics (`budget.py`): a stop raises `LocalBudgetExceeded`; the lists
+whose order allows it (`walks()`, `segments()`, `carriers()`) carry a `Partial` of whole rows with a resume token for
+`resume=`, and the others stop without one. `union_pairs()` charges construction to its `budget=`: first, before the
+seed checks, the inputs' variable-length metadata (at a bound of its JSON) and the seed (four copies), then the trie
+pass. A budget smaller than the first charge therefore stops it before the `different_seed`, `duplicate_pair` and
+`not_expected` refusals.
 
 **The queries.**
 
@@ -694,9 +697,11 @@ without one. `union_pairs()` charges construction (the trie pass) to its `budget
 - `spell()` spells a union walk from the parts' bases.
 - No cross-pair label total is offered. Label counts are per pair, as label entries of that pair, and
   marked as lower bounds where the pair's lists are cut.
-- `summary(max_bytes=4096)` puts the statements first and whole; if they alone exceed `max_bytes`, it refuses
-  `summary_too_small` rather than cut them. For r237's 11 pairs and two arms they take about
-  1–2 KB [estimate].
+- `summary(max_bytes=4096)` never answers more than `max_bytes`. It puts the statements first and whole, and it
+  measures every candidate answer as it would be returned, with the notes of what it leaves out: a section is added
+  only where the answer still fits. When even the least answer, the statements with those notes, exceeds
+  `max_bytes`, it refuses `summary_too_small` rather than cut them, naming that answer's size (Appendix A.2's text,
+  unchanged). For r237's 11 pairs and two arms the statements take about 1–2 KB [estimate].
 
 ### 2.9 Exports
 
@@ -1027,7 +1032,9 @@ depends on notes `next_request()` returned: a child made another way is judged b
   events (`evidence.complete_to_bp`), its `coordinates` limitation and its delivery (`spooled`), all listed under its
   key. None is summed or dropped. A local-budget stop follows the library's rule (`budget.py`): `LocalBudgetExceeded`,
   with a `Partial` of whole rows and a resume token bound to the stitched graphlet's digest for the lists whose order
-  allows it, and no partial otherwise.
+  allows it, and no partial otherwise. `completeness()` and `evidence()` run the walk rule (W8) over every walk they
+  read, so both take `budget=` and charge it as `summary()` does, each walk's causes at their cold price whether the
+  stitched graphlet holds them or not (F.1). The prospective hook is uncharged.
 
 ### 3.6 Exports, provenance and replay
 
@@ -1686,8 +1693,8 @@ class StitchedGraphlet:
     next_requests(...)                                            # delegate to the part owning the walk(s)
     to_fasta(arm=None, walks=None, with_seed=True, orientation='natural', width=None, *, coordinates=None,
              budget=None) -> str        # coordinates as Graphlet.to_fasta (model.py:571), per piece (Appendix D.2)
-    completeness() -> dict                # per arm: the root's complete_to_bp and one extension per junction
-    evidence(arm=None, walks=None) -> dict   # §3.5; walks=: only what those walks (keys, on arm) read
+    completeness(*, budget=None) -> dict  # per arm: the root's complete_to_bp and one extension per junction
+    evidence(arm=None, walks=None, *, budget=None) -> dict   # §3.5; walks=: only what those walks (keys, on arm) read
     summary(max_bytes=2048, *, budget=None) -> dict
     provenance() -> list[dict]            # §3.6
     save(path, *, budget=None)            # [1c] the bundle, Appendix D.3; metagraph.traverse.load(path) returns it
@@ -1998,8 +2005,9 @@ Stdlib `unittest` with seeded random generation, as in the existing suites; no n
 - **P11 mixed strategies.** Parts in constrain and annotate mode, and parts at two k: the union builds and states
   each pair's mode and k in the sentence, on each span and in `modes=`.
 - **P12 budgets and memory.** Every operation under `budget=` completes or stops with the same row in every run.
-  `memory_bytes()` bounds the traced peak on 11 parts (the pattern of `test_traverse_memory`). `summary()` refuses
-  `summary_too_small` below the statements' size and never cuts them.
+  `memory_bytes()` bounds the traced peak on 11 parts (the pattern of `test_traverse_memory`). `summary()` never
+  answers more than `max_bytes`, refuses `summary_too_small` only below the least answer (the statements with the
+  notes of what is left out) and never cuts the statements.
 
 - **P13 inferred paths (the later inferred phase).** On hand-built parts with a stub of one pair merging into a segment
   another pair continues below: the inferred path is listed with its pieces, cut wherever the set of pairs holding the
@@ -2145,6 +2153,25 @@ graphlets.rst examples run in `run_examples.py` (CI's fixture-checks job).
   concatenated. Every operation takes `budget=` and charges the parts' cold prices plus the junction work, with prices
   in `budget.py` (the cost model states each one).
 - **Bundle.** The sum of the parts' standalone texts plus about 100 bytes per part.
+
+**Budgets, both classes.** A public method of `PairUnion` or `StitchedGraphlet` whose work grows with the walks or
+segments takes `budget=` (keyword-only; `None` is the ambient `local_budget()`) and charges it. Every derivation a call
+reads is charged at its cold price whether a cache holds it or not, the object's own derivations (a union's walk
+figures and segment labels, a stitched graphlet's rows, rule-check contexts and walk causes) as the parts' are, so
+a call charges the same, and stops at the same row, whatever earlier calls cached; warm calls pay more than they
+spend.
+
+- **`PairUnion`.** `statements()`, `segments()`, `walks()`, `spell()`, `carriers()`, `to_fasta()`, `to_gfa()`,
+  `summary()`, `labels()`, `label()`, `shared_names()`, `coverage()` and `evidence()`; `print(u)` charges the ambient
+  budget. A stitched part inside a union runs under the union call's budget as its ambient budget.
+- **`StitchedGraphlet`.** `stitch()`, `walks()`, `walk()`, `spell()`, `continuation()`, `next_request()`,
+  `next_requests()`, `to_fasta()`, `summary()`, `evidence()` and `completeness()`. `walk()` charges the walk it builds
+  as `walks()` charges each; `summary()` reads the evidence under its own budget.
+- **Exempt.** The accessors that return stored fields or measure the object: on `PairUnion` `arms()`,
+  `provenance()`, `memory_bytes()` and the stored attributes (`parts`, `absent`, `pairs`, `expected`, `digest`,
+  `seed`, `alphabet`); on `StitchedGraphlet` `arms()`, `arm_of()`, `label()`, `provenance()`, `memory_bytes()` and
+  the stored attributes (`parts`, `root`, `junctions`, `labels`, `identity`, `digest`, `seed`, `k`, `regime`,
+  `alphabet`, `mode`, `support`). The prospective test hook (§3.5) is uncharged.
 
 ### F.2 Code plan
 
