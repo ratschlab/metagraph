@@ -1278,6 +1278,28 @@ class TestNoLaundering(unittest.TestCase):
                         'bytes, more than max_bytes=%d: they are never cut; pass max_bytes >= '
                         '%d' % (floor, floor - 1, floor), sg.summary, max_bytes=floor - 1)
 
+    def test_summary_too_small_names_its_least_size(self):
+        """summary_too_small carries the least answer's size as least_bytes, the number its
+        text states: summary(max_bytes=least_bytes) answers, and a byte less is refused with
+        the same size (as the union's refusal)."""
+        for name, arm, sg in every_stitch():
+            with self.subTest(name):
+                with self.assertRaises(CombineRefused) as cm:
+                    sg.summary(max_bytes=10)
+                e = cm.exception
+                self.assertEqual('summary_too_small', e.code)
+                m = re.search(r'take (\d+) bytes, more than max_bytes=10: .*pass max_bytes >= '
+                              r'(\d+)$', str(e))
+                n = e.least_bytes
+                self.assertEqual((n, n), (int(m.group(1)), int(m.group(2))))
+                got = sg.summary(max_bytes=n)
+                self.assertLessEqual(len(json.dumps(got, separators=(',', ':'),
+                                                    ensure_ascii=False).encode()), n)
+                with self.assertRaises(CombineRefused) as cm:
+                    sg.summary(max_bytes=n - 1)
+                self.assertEqual(n, cm.exception.least_bytes)
+                self.assertTrue(str(cm.exception).endswith('pass max_bytes >= %d' % n))
+
     def test_walk_causes_below_a_gated_junction(self):
         """M3: a junction whose rules found nothing says W1-W7 hold there and W8 is judged
         per walk; summary() and completeness() state the walk-scope causes below it."""

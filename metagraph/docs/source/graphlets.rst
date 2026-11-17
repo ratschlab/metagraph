@@ -1639,6 +1639,11 @@ that return stored fields or measure the object take no budget: ``arms()``,
 attributes ``parts``, ``root``, ``junctions``, ``labels``, ``identity``, ``digest``,
 ``seed``, ``k``, ``regime``, ``alphabet``, ``mode`` and ``support``.
 
+``summary(max_bytes=)`` cuts junctions from the end (``junctions_cut``) and nothing else.
+Where the rest does not fit, it is refused ``summary_too_small``, which names the least
+size in its text and, as the union's refusal does, as an int in ``least_bytes``, so a
+retry passes ``max_bytes=e.least_bytes`` and is answered.
+
 Comparing retrievals
 ^^^^^^^^^^^^^^^^^^^^
 
