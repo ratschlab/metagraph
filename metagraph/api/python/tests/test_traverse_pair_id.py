@@ -8,6 +8,7 @@ import gzip
 import json
 import os
 import sys
+import tempfile
 import unittest
 import uuid
 
@@ -291,6 +292,191 @@ class TestDiscoveryInBothForms(unittest.TestCase):
         bad['graph_summary']['pairs'][1]['pair_id'] = P2
         with self.assertRaises(PairIdError):
             _FanOut(bad).traverse_pairs('ACGT', coordinates=None)
+
+
+class _Engine(MT.TraverseClient):
+    """A client whose server is |caps| (GET /capabilities), an empty probe answer and
+    |answer| for every POST /traverse; |log| records what was sent."""
+
+    def __init__(self, caps, answer=None, **kw):
+        super().__init__('localhost', 1, **kw)
+        self.caps, self.answer, self.log = caps, answer, []
+
+    def _request(self, method, path, payload=None, answers=(), with_status=False):
+        self.log.append((method, path, copy.deepcopy(payload)))
+        if path == '/capabilities':
+            out = copy.deepcopy(self.caps)
+        elif path.startswith('/traverse/capabilities'):
+            out = copy.deepcopy((self.answer or {}).get('capabilities') or {'index_ns': 'ns'})
+        else:
+            out = copy.deepcopy(self.answer)
+        return (200, out) if with_status else out
+
+    def posted(self):
+        return [p for m, path, p in self.log if (m, path) == ('POST', '/traverse')]
+
+    def probes(self):
+        return [path for _, path, _ in self.log if path.startswith('/traverse/capabilities')]
+
+
+BEFORE_IDS = TestDiscoveryInBothForms.BY_PATHS             # an engine before M6: paths only
+AFTER_IDS = TestDiscoveryInBothForms.BY_ID                 # after: multigraph.pair_id "n1"
+BY_PATHS = [{'graph': GRAPH, 'graph_path': GP, 'annotation_path': AP}]
+BY_ID = [{'graph': GRAPH, 'pair_id': ID}]
+
+
+class TestTheResolverHook(unittest.TestCase):
+    """A continuation, replay or re-ask of a document that names its pair by id only reaches
+    an engine through TraverseClient.wire_request(): by a resolver (paths sent, n1
+    recomputed), by an engine that states multigraph.pair_id "n1" (the id sent), refused
+    without either; an old document is sent by its paths whatever the engine."""
+
+    def setUp(self):
+        self.old, self.new = fixture('fork', 'paths'), fixture('fork', 'id')
+        self.answer = tagged(T.doc_json('fork', 'graphlet'), 'id')
+        self.leaf = [self.old.walks('right')[0].path_id]
+
+    def engines(self):
+        resolver = MT.client.capabilities_pair_resolver(BEFORE_IDS)
+        return {'resolver': _Engine(BEFORE_IDS, self.answer, pair_resolver=resolver),
+                'resolver_after': _Engine(AFTER_IDS, self.answer, pair_resolver=resolver),
+                'after_ids': _Engine(AFTER_IDS, self.answer),
+                'neither': _Engine(BEFORE_IDS, self.answer)}
+
+    def ask(self, how, c):
+        """One re-ask of the id-form document |how|: deepen(), a replay of request_of()
+        through traverse_raw(), traverse() of its pair, or the probe."""
+        if how == 'deepen':
+            c.deepen(self.new, 'right', self.leaf)
+        elif how == 'replay':
+            c.traverse_raw(GraphletStore.request_of(self.new))
+        elif how == 'traverse':
+            c.traverse(['ACGTACGTACGTACGTACGTACGTACGTACGT'], graph=GRAPH, pair_id=ID,
+                       coordinates=None)
+        else:
+            c.capabilities(GRAPH, pair_id=ID)
+
+    def test_each_reask_by_resolver_engine_or_refused(self):
+        want = {'resolver': BY_PATHS, 'resolver_after': BY_PATHS, 'after_ids': BY_ID}
+        probe = {'resolver': '/traverse/capabilities?graph=refseq&graph_path=%2Fdata%2Frefseq'
+                             '%2Fbact_other.dbg&annotation_path=%2Fdata%2Frefseq%2F'
+                             'bact_other.annodbg',
+                 'after_ids': '/traverse/capabilities?graph=refseq&pair_id=' + ID}
+        probe['resolver_after'] = probe['resolver']
+        for how in ('deepen', 'replay', 'traverse', 'probe'):
+            for name, c in self.engines().items():
+                if name == 'neither':
+                    with self.assertRaises(PairIdError) as cm:
+                        self.ask(how, c)
+                    self.assertEqual(cm.exception.code, 'pair_unresolved', how)
+                    self.assertIsNone(getattr(cm.exception, 'sent', None), how)
+                    self.assertIn('give the client a pair_resolver', str(cm.exception))
+                    self.assertEqual((c.posted(), c.probes()), ([], []), how)
+                    continue
+                self.ask(how, c)
+                if how == 'probe':
+                    self.assertEqual(c.probes(), [probe[name]], (how, name))
+                else:
+                    (req,) = c.posted()
+                    self.assertEqual(req['pairs'], want[name], (how, name))
+                    self.assertNotIn('graph', req)
+
+    def test_an_old_document_is_sent_by_its_paths_on_every_engine(self):
+        for name, c in self.engines().items():
+            c.deepen(self.old, 'right', self.leaf)
+            c.traverse_raw(GraphletStore.request_of(self.old))
+            self.assertEqual([r['pairs'] for r in c.posted()], [BY_PATHS] * 2, name)
+            # nothing about ids is read: no GET /capabilities
+            self.assertNotIn('/capabilities', [path for _, path, _ in c.log], name)
+
+    def test_the_request_kept_names_the_pair_by_id(self):
+        # the request a store keeps (and a NextRequest) is not changed by sending it
+        c = self.engines()['resolver']
+        req = GraphletStore.request_of(self.new)
+        c.traverse_raw(req)
+        self.assertEqual(req['pairs'], BY_ID)
+        self.assertEqual(c.posted()[0]['pairs'], BY_PATHS)
+
+    def test_a_resolver_that_answers_another_pair(self):
+        bad = {ID: (GRAPH, GP2, AP2)}.get                 # spelled for the other pair
+        renamed = {ID: ('other', GP, AP)}.get            # the paths under another name
+        for resolver, code in ((bad, 'pair_id_mismatch'), (renamed, 'pair_id_mismatch'),
+                               ({}.get, 'pair_unresolved'), (lambda pid: 'x', 'pair_unresolved'),
+                               ({ID: (GRAPH, None, AP)}.get, 'pair_unresolved')):
+            c = _Engine(AFTER_IDS, self.answer, pair_resolver=resolver)
+            with self.assertRaises(PairIdError) as cm:
+                c.deepen(self.new, 'right', self.leaf)
+            self.assertEqual(cm.exception.code, code)
+            self.assertEqual(c.posted(), [])
+            for path in (GP, GP2, AP, AP2):
+                self.assertNotIn(path, str(cm.exception))
+
+    def test_selectors_the_wire_refuses(self):
+        c = _Engine(AFTER_IDS, self.answer)
+        for pairs, code in (([{'graph': GRAPH, 'pair_id': ID, 'graph_path': GP}], 'bad_pair_id'),
+                            ([{'graph': GRAPH, 'pair_id': P2}], 'p2_pair_id'),
+                            ([{'pair_id': ID}], 'bad_pair_id'),
+                            ([{'graph': GRAPH, 'pair_id': ID2, 'graph_path': GP,
+                               'annotation_path': AP}], 'pair_id_mismatch')):
+            with self.assertRaises(PairIdError) as cm:
+                c.traverse_raw({'seeds': [], 'pairs': pairs})
+            self.assertEqual(cm.exception.code, code, pairs)
+        self.assertEqual(c.posted(), [])
+        # both paths with their own id: sent by the paths
+        c.traverse_raw({'seeds': [], 'pairs': [dict(BY_PATHS[0], pair_id=ID)]})
+        self.assertEqual(c.posted()[0]['pairs'], BY_PATHS)
+
+    def test_the_capabilities_resolver(self):
+        r = MT.client.capabilities_pair_resolver(BEFORE_IDS)
+        self.assertEqual((r(ID), r(ID2)), ((GRAPH, GP, AP), (GRAPH, GP2, AP2)))
+        self.assertIsNone(r(configured_pair_id(GRAPH, GP, AP2)))
+        # an engine after ids lists no paths: nothing to resolve to
+        self.assertIsNone(MT.client.capabilities_pair_resolver(AFTER_IDS)(ID))
+        self.assertIsNone(MT.client.capabilities_pair_resolver(None)(ID))
+
+
+class TestToolsInBothForms(unittest.TestCase):
+    """GraphletTools: a loaded id-form document is replayed and continued through its
+    client's hook; a refusal is answered with the PairIdError's code."""
+
+    def test_replay_and_continue_an_id_form_entry(self):
+        from metagraph.traverse.mcp_tools import GraphletTools
+        base = TestTheResolverHook('setUp')
+        base.setUp()
+        want = {'resolver': BY_PATHS, 'resolver_after': BY_PATHS, 'after_ids': BY_ID}
+        for name, client in base.engines().items():
+            with tempfile.TemporaryDirectory() as d:
+                store = GraphletStore(d)
+                tools = GraphletTools(store, {'mini': client})
+                path = os.path.join(d, 'new.mgt')
+                base.new.save(path)
+                h = tools.graphlet_load(path)['handle']
+                self.assertEqual(store.get(h).request['pairs'], BY_ID)
+                fetched = tools.traverse_fetch(replay=h, index='mini')
+                cont = tools.traverse_continue(h, 'right', base.leaf[0])
+                if name == 'neither':
+                    for out in (fetched, cont):
+                        self.assertEqual(out['error'], 'pair_unresolved', out)
+                    self.assertEqual((client.posted(), client.probes()), ([], []))
+                    continue
+                self.assertNotIn('error', fetched, (name, fetched))
+                self.assertNotIn('error', cont, (name, cont))
+                self.assertEqual([r['pairs'] for r in client.posted()], [want[name]] * 2, name)
+                # the entries keep the id form; the probe named the same pair
+                self.assertEqual(store.get(fetched['handle']).request['pairs'], BY_ID)
+                self.assertEqual(len(client.probes()), 2)
+
+    def test_a_p2_id_is_its_own_error(self):
+        from metagraph.traverse.mcp_tools import GraphletTools
+        with tempfile.TemporaryDirectory() as d:
+            client = _Engine(AFTER_IDS, tagged(T.doc_json('fork', 'graphlet'), 'id'))
+            tools = GraphletTools(GraphletStore(d), {'mini': client})
+            out = tools.traverse_continue('g_000000000000', 'right', 0)
+            self.assertEqual(out['error'], 'unknown_handle')
+            h = tools.traverse_fetch(seed={'sequence': 'ACGT'}, index='mini')['handle']
+            out = tools.traverse_continue(h, 'right', 0, overrides={'graph': GRAPH,
+                                                                    'pair_id': P2})
+            self.assertEqual(out['error'], 'p2_pair_id', out)
 
 
 if __name__ == '__main__':
