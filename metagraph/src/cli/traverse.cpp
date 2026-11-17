@@ -2600,12 +2600,18 @@ static ResolveAnswer answer_of_profile(const SupportProfile &p, const SeedSelect
                                        const std::string &run_format,
                                        const std::function<void()> &check, AnswerAccount *answer,
                                        Json::Value *trees) {
-    // the answer's deadline, read every kResolveCheckLabels objects (labels, candidates, seeds)
+    // the answer's stop and deadline (|check|), read every kResolveCheckLabels objects (labels,
+    // candidates, seeds) and once the texts written since its last reading by bytes pass
+    // kDeliveryCheckBytes (64 KiB, as the writing reads it), so that an answer of few large
+    // objects is read within one object's tree and text (the Fable review of 37b70685e, M1:
+    // before, an answer of fewer than 4,096 objects was not read until it was complete, a
+    // 212 MB one for 4.7 s)
     size_t objects = 0;
     auto built = [&]() {
         if (check && ++objects % kResolveCheckLabels == 0)
             check();
     };
+    uint64_t unread = 0;
     // the answer account: each object priced before it is built (§4.6)
     auto charge = [&](const JsonPrice &price) { charge_json(answer, price); };
     const bool rle = run_format == "rle";
@@ -2613,7 +2619,7 @@ static ResolveAnswer answer_of_profile(const SupportProfile &p, const SeedSelect
     // each object's compact text, written once it is built: one writer for the answer
     CompactJsonWriter writer;
     // |tree|'s text, after a comma unless it is |first| in its array, and its charge |price|
-    // settled to it (the tree is the caller's to keep or free)
+    // settled to it (the tree is the caller's to keep or free); then the reading by bytes
     auto text_of = [&](const Json::Value &tree, bool first, const JsonPrice &price) {
         std::string text = writer.text(tree);
         if (!first) {
@@ -2624,6 +2630,11 @@ static ResolveAnswer answer_of_profile(const SupportProfile &p, const SeedSelect
             text.swap(element);
         }
         settle_json(answer, price, text.size());
+        unread += text.size();
+        if (check && unread >= kDeliveryCheckBytes) {
+            unread = 0;
+            check();
+        }
         return text;
     };
     // a held array of |n| elements, begun

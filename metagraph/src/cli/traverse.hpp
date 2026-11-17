@@ -293,7 +293,9 @@ struct ResolveAnswer {
 // server's form: each object of graph_runs, labels, candidates and the selection's seeds
 // written as its compact text when it is built (final then: nothing is added to it later) and
 // its tree freed. |check|: read every graph::traversal::kResolveCheckLabels objects built (a
-// /resolve's stop and deadline: it throws to abandon the answer). |answer| (null: none): the
+// /resolve's stop and deadline: it throws to abandon the answer) and once the texts written
+// since its last reading by bytes pass kDeliveryCheckBytes (64 KiB), so that at most 64 KiB of
+// text and one object are built between two readings. |answer| (null: none): the
 // answer account, charged with each object's tree and its text before it is built (the prices
 // in traverse.cpp: its heap and its text's bytes, AnswerAccount::charge_text), throwing
 // graph::traversal::AnswerTooLarge at the object that passes it, and once the object is written

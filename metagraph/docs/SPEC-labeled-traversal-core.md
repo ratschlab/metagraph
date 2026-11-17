@@ -376,9 +376,13 @@ deadline. `src/cli/traverse.cpp` `process_resolve_request`, `src/graph/traversal
   review 7, finding 1: before, only once it was done, after every overlapping pair was listed; train 4, T4-L1: a
   `max_support` round was one reading, and a round of about 3 million runs — 10,000 labels of 300 runs, what a 10 kbp
   query admits — ran about a second between two; the clip of every run by every pick before it, O(runs × picks) a
-  round, is a binary search into the sorted, disjoint picks, the same runs in the same order)*, the JSON every 4,096
-  labels, candidates or seeds, its text every 64 KiB
-  and its compression every block of output and every 4 MiB of text (the server's transport check, as
+  round, is a binary search into the sorted, disjoint picks, the same runs in the same order)*, the answer's
+  objects every 4,096 labels, candidates or seeds and each time their texts pass 64 KiB since the last such reading,
+  so that at most 64 KiB of text and one object (its tree and its text: up to about 7 MB for a label of a 1 Mbp
+  query) are built between two readings *(the Fable review of 37b70685e, M1: with each object written as its text when it is
+  built (§4.6), an answer of fewer than 4,096 objects was read only once complete — a 212 MB answer of 4,000 labels
+  answered its 503 4.7 s past the budget, and noticed a client gone 3.8 s late)*, the body every 64 KiB as it is
+  written and its compression every block of output and every 4 MiB of text (the server's transport check, as
   `/pattern`'s). Past the budget the answer is **503**
   `{"error": "resolve: the answer could not be built and written within bounds.time_budget_ms (… ms, the
   finalisation reserve of 250 ms included): nothing partial is sent", "code": "deadline"}`, never a partial
