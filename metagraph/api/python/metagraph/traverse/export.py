@@ -31,8 +31,8 @@ from . import budget as _B
 from . import coords as _C
 from . import derive
 from ._codec import REASON, UNLIMITED
-from .budget import (DICT_KEY, FLOAT, ID_SHIFT_PY, JSON_ID, LIST, LIST_ITEM, STR, W_ELEM,
-                     W_GFA_LINE, W_NODE, W_PAIR, W_RECORD, W_STEP, LocalBudgetExceeded,
+from .budget import (DICT, DICT_KEY, FLOAT, ID_SHIFT_PY, INT, JSON_ID, LIST, LIST_ITEM, STR,
+                     W_ELEM, W_GFA_LINE, W_NODE, W_PAIR, W_RECORD, W_STEP, LocalBudgetExceeded,
                      dict_bytes, list_bytes)
 from .model import ARM_SIDES, MissingEnvelope
 
@@ -957,18 +957,26 @@ def _to_gfa(g, with_seed, bud, done=None):
 UNION_TOKEN_CHARS = '%,;=@/:>~+|[]$'
 
 
+class _UnionEscapes(dict):
+    """union_escape()'s str.translate() table: every ASCII character preset; any other
+    character its UTF-8 bytes as %XX, made when it is read and not kept."""
+    __slots__ = ()
+
+    def __missing__(self, cp):
+        return ''.join(['%%%02X' % x for x in chr(cp).encode('utf-8')])
+
+
+_UNION_ESCAPES = _UnionEscapes(
+    (c, chr(c) if 0x21 <= c <= 0x7e and chr(c) not in UNION_TOKEN_CHARS else '%%%02X' % c)
+    for c in range(128))
+
+
 def union_escape(text):
     """|text| as a header token or GFA tag value: every byte outside '!'..'~' (the space,
     control characters and the UTF-8 bytes of non-ASCII characters) and '%' and the token
-    characters ,;=@/:>~+|[]$ written as %XX (upper-case hex)."""
-    out = []
-    for byte in str(text).encode('utf-8'):
-        ch = chr(byte)
-        if byte < 0x21 or byte > 0x7e or ch in UNION_TOKEN_CHARS:
-            out.append('%%%02X' % byte)
-        else:
-            out.append(ch)
-    return ''.join(out)
+    characters ,;=@/:>~+|[]$ written as %XX (upper-case hex). Linear, with no object per
+    character (str.translate(): Opus fix review N2): about the output's size beside it."""
+    return str(text).translate(_UNION_ESCAPES)
 
 
 def union_unescape(token):
@@ -985,17 +993,28 @@ def union_unescape(token):
     return raw.decode('utf-8')
 
 
-def _comment(text):
+_COMMENT_BYTES = tuple(chr(c) if 0x20 <= c <= 0x7e and c != 0x25 else '%%%02X' % c
+                       for c in range(256))
+
+
+def _comment(text, bud=None):
     """A GFA comment line's text in printable ASCII: '%' and every byte outside ' '..'~'
-    escaped as %XX (spaces kept)."""
-    out = []
-    for byte in str(text).encode('utf-8'):
-        ch = chr(byte)
-        if byte < 0x20 or byte > 0x7e or ch == '%':
-            out.append('%%%02X' % byte)
-        else:
-            out.append(ch)
-    return '# ' + ''.join(out)
+    escaped as %XX (spaces kept). With |bud| charged before it is built (GPT review M4): the
+    line and its copy in the file's text, kept; the UTF-8 bytes, the list of their escapes
+    and its join, dropped once the line is built."""
+    text = str(text)
+    plain = text.isascii() and text.isprintable() and '%' not in text
+    if bud is not None:
+        n = len(text) if text.isascii() else 4 * len(text)
+        temp = 0 if plain else 2 * STR + LIST + 12 * n
+        bud.charge(n >> 6, 2 * (STR + 2 + (n if plain else 3 * n)) + temp)
+    if plain:
+        line = '# ' + text
+    else:
+        line = '# ' + ''.join([_COMMENT_BYTES[c] for c in text.encode('utf-8')])
+    if bud is not None and temp:
+        bud.release(temp)
+    return line
 
 
 def _end_reason(r):
@@ -1028,9 +1047,11 @@ def _span_token(s, sep='@'):
 
 
 def _held_labels(s):
-    """(labels, cut) of a span held whole: its own (whole, extends) or its route's."""
+    """(labels, cut) of a span held whole: its own (whole, extends) or its route's, with
+    the route's cut flag (GPT review M2)."""
     if s.how == 'merges':
-        return (s.route.labels if s.route is not None else ()), s.labels_cut
+        r = s.route
+        return (r.labels, r.labels_cut) if r is not None else ((), False)
     return s.labels or (), s.labels_cut
 
 
@@ -1075,6 +1096,35 @@ def _union_tokens(u, w, absent_tok, modes_tok, mapping_tok):
     return toks
 
 
+def _esc_len(text):
+    """len(union_escape(text)), read without escaping it: printable ASCII exactly (each
+    token character and space three bytes), any other text at its bound (three bytes per
+    UTF-8 byte, four bytes a character)."""
+    if text.isascii() and text.isprintable():
+        return len(text) + 2 * (text.count(' ') + sum(text.count(c) for c in UNION_TOKEN_CHARS))
+    return 12 * len(text)
+
+
+def _union_tags(u, bud):
+    """tag -> its escaped length (_esc_len()), every tag of the union; with |bud| the scan's
+    work (the tags are read once, 1 lwu per 64 bytes)."""
+    got = {t: _esc_len(t) for t in u.pairs}
+    if bud is not None:
+        bud.charge(sum(map(len, u.pairs)) >> 6, DICT + (DICT_KEY + INT) * len(got))
+    return got
+
+
+def _header_bound(w, tags, fixed):
+    """A bound of a FASTA record header's length (GPT review M4): per span its tag in at
+    most eight tokens with their bp, reasons and trie nodes, per junction its token, and the
+    tokens every record carries (|fixed|: absent=, not_included=, mapping=, modes=)."""
+    n = 200 + fixed
+    for s in w.spans:
+        e = tags.get(s.pair, 12 * len(s.pair))
+        n += 8 * (e + 32) + len(s.junctions) * (e + 64)
+    return n
+
+
 def _modes_token(u):
     modes = [(p.tag, p.graphlet.mode) for p in u.parts]
     if all(m == 'annotate' for _, m in modes) or not modes:
@@ -1097,6 +1147,13 @@ def union_fasta(u, arm, walks, with_seed, orientation, width, at_bp, stubs, bud)
     """PairUnion.to_fasta(): one record per union walk of |arm| (every arm when None),
     '>{arm}.u{id}' and the tokens of Appendix A.5; stub walks only with |stubs|."""
     sides = u.arms() if arm is None else [u._side(arm)]
+    tags = fixed = None
+    if bud is not None:
+        # the tokens every record carries, at their escaped length before they are built
+        tags = _union_tags(u, bud)
+        fixed = sum(tags[a.tag] + 32 for a in u.absent) + sum(
+            tags[t] + 1 for t in u._not_included) + 2 * sum(tags[p.tag] + 16 for p in u.parts)
+        bud.charge(0, 2 * (STR + fixed))
     absent_tok = ['%s:%s' % (union_escape(a.tag), a.category) for a in u.absent]
     modes_tok = _modes_token(u)
     mapping_tok = _mapping_token(u)
@@ -1108,9 +1165,15 @@ def union_fasta(u, arm, walks, with_seed, orientation, width, at_bp, stubs, bud)
         for w in u._walks_full(side, bud, True, walks, stubs, at_bp):
             if bud is not None:
                 n = w.length_bp + len(u._seed_seq)
-                bud.charge(W_RECORD + (n >> 8) + len(w.spans), 3 * (STR + n) + STR + 400)
+                # the header at its bound (GPT review M4): its tokens, their join and the
+                # record (released to the two copies kept: the record and the file's text)
+                h = _header_bound(w, tags, fixed)
+                bud.charge(W_RECORD + (n >> 8) + len(w.spans) + (h >> 6),
+                           3 * (STR + n) + 4 * (STR + h) + (LIST_ITEM + STR) * 12)
             head = '>%s.u%d %s' % (side, w.id, ' '.join(
                 _union_tokens(u, w, absent_tok, modes_tok, mapping_tok)))
+            if bud is not None:
+                bud.release(2 * (STR + h) + (LIST_ITEM + STR) * 12)
             seq = u._spell_nodes(t, t.path_usegs(t.markers[w.id]), orientation, with_seed)
             out.append(head)
             out.append(_wrap(seq, width))
@@ -1124,7 +1187,18 @@ def union_gfa(u, with_seed, labels, at_bp, bud):
     (seed_l, seed_r), a stub's merge a tag (mg, mt) and no link; P per union walk of kind
     walk. Every path the file admits is spelled whole by each pair spelling its last
     segment."""
+    from ._stitch import StitchedGraphlet, walk_name
+    from .union import SCOPE, TURN_OFFS, _core_sentence, _joined_bytes
     e = union_escape
+    tags = None
+    if bud is not None:
+        tags = _union_tags(u, bud)
+        # the head and the stitched notes name the tags unescaped, built before each
+        # comment line (_comment() charges its own)
+        raw = _joined_bytes(u.pairs) + len(u.pairs) + sum(
+            200 * len(p.graphlet.junctions) for p in u.parts
+            if isinstance(p.graphlet, StitchedGraphlet))
+        bud.charge(0, 4 * (STR + 400 + raw))
     lines = ['H\tVN:Z:1.0']
     cats = collections_od()
     for a in u.absent:
@@ -1135,12 +1209,11 @@ def union_gfa(u, with_seed, labels, at_bp, bud):
         head += '; %s %s' % (c.replace('_', ' '), ' '.join(ts))
     if u._not_included:
         head += '; not included %s' % ' '.join(u._not_included)
-    lines.append(_comment(head))
+    lines.append(_comment(head, bud))
     lines.append(_comment('paths: source-supported; seed_l and seed_r are one seed, written '
                           'once per arm, so no path of this file runs from a left flank '
                           'through the seed into a right flank: each part\'s own GFA has '
-                          'those paths'))
-    from ._stitch import StitchedGraphlet, walk_name
+                          'those paths', bud))
     for p in u.parts:
         if isinstance(p.graphlet, StitchedGraphlet) and p.graphlet.junctions:
             below = u._below_codes(p.tag)
@@ -1152,13 +1225,12 @@ def union_gfa(u, with_seed, labels, at_bp, bud):
                         ': ' + ', '.join(c[0] for c in j.causes) if j.causes else '',
                         '; walk causes below: %s' % ', '.join(below[j.part])
                         if below.get(j.part) else '')
-                    for j in p.graphlet.junctions))))
-    from .union import SCOPE, TURN_OFFS, _core_sentence
+                    for j in p.graphlet.junctions)), bud))
     for side in (u.arms() or [None]):
-        lines.append(_comment(_core_sentence(u.coverage(side, at_bp))))
-    lines.append(_comment('turn-offs: ' + TURN_OFFS))
-    lines.append(_comment(u._labels_sentence(bud)))
-    lines.append(_comment('scope: ' + SCOPE))
+        lines.append(_comment(_core_sentence(u._coverage(side, at_bp, bud)), bud))
+    lines.append(_comment('turn-offs: ' + TURN_OFFS, bud))
+    lines.append(_comment(u._labels_sentence(bud), bud))
+    lines.append(_comment('scope: ' + SCOPE, bud))
     segs_out, links, paths = [], [], []
     seed = u._seed_seq
     for side in u.arms():
@@ -1181,15 +1253,19 @@ def union_gfa(u, with_seed, labels, at_bp, bud):
         for idx in t.order:
             us = t.useg[idx]
             if bud is not None:
-                bud.charge(W_GFA_LINE * (2 + len(us.cover)) + ((us.to_bp - us.from_bp) >> 8),
-                           4 * (STR + us.to_bp - us.from_bp) + 200)
+                # its tags at their escaped length (pp and pl per pair, mg per stub), four
+                # copies while the line is built, two kept (GPT review M4)
+                tl = 64 + sum(2 * (tags[u._src[pi].tag] + 16) for pi in us.cover) + sum(
+                    tags.get(x, 0) + 16 for x, _ in stub_tags.get(idx, ()))
+                bud.charge(W_GFA_LINE * (2 + len(us.cover)) + ((us.to_bp - us.from_bp) >> 8)
+                           + (tl >> 6), 4 * (STR + us.to_bp - us.from_bp) + 200 + 4 * tl)
             w = u._spell_nodes(t, [idx], 'walk', False)
             text = w if side == 'right' else w[::-1]
             name = 's%d' % us.id
-            tags = ['LN:i:%d' % len(text)]
+            stags = ['LN:i:%d' % len(text)]
             # sources: a part's are consecutive, at most one of them on a union segment
             pp = [u._src[pi].tag for pi in sorted(us.cover)]
-            tags.append('pp:Z:%s' % ','.join(e(x) for x in pp))
+            stags.append('pp:Z:%s' % ','.join(e(x) for x in pp))
             pl = []
             for pi in sorted(us.cover):
                 part = u._src[pi]
@@ -1213,12 +1289,14 @@ def union_gfa(u, with_seed, labels, at_bp, bud):
                     pl.append('%s=%s' % (e(part.tag), ','.join(names)))
                 else:
                     pl.append('%s=%d%s' % (e(part.tag), len(ids), '+' if cut else ''))
-            tags.append('pl:Z:%s' % ';'.join(pl))
+            stags.append('pl:Z:%s' % ';'.join(pl))
             st = stub_tags.get(idx)
             if st:
-                tags.append('mg:Z:%s' % ','.join(e(x) for x, _ in st))
-                tags.append('mt:Z:%s' % ','.join(x for _, x in st))
-            segs_out.append('S\t%s\t%s\t%s' % (name, text, '\t'.join(tags)))
+                stags.append('mg:Z:%s' % ','.join(e(x) for x, _ in st))
+                stags.append('mt:Z:%s' % ','.join(x for _, x in st))
+            segs_out.append('S\t%s\t%s\t%s' % (name, text, '\t'.join(stags)))
+            if bud is not None:
+                bud.release(2 * tl)
             par = 's%d' % t.useg[us.parent].id if us.parent is not None else (
                 sname if with_seed else None)
             if par is not None:
@@ -1228,16 +1306,20 @@ def union_gfa(u, with_seed, labels, at_bp, bud):
             node = t.markers[w.id]
             if bud is not None:
                 # the P line: a name per union segment (dropped once joined), the line, and
-                # the file's text joined at the end
+                # the file's text joined at the end; its tags at their escaped length (pp,
+                # ph and pe per span), four copies while built, two kept (GPT review M4)
                 d = t.nsegs(node)
-                bud.charge(W_GFA_LINE + W_ELEM * d, 3 * (STR + 12 * (d + 2)) + d * (STR + 12))
-                bud.release(d * (STR + 12))
+                pt = 64 + sum(3 * (tags.get(s.pair, 12 * len(s.pair)) + 32) for s in w.spans)
+                bud.charge(W_GFA_LINE + W_ELEM * d + (pt >> 6),
+                           3 * (STR + 12 * (d + 2)) + d * (STR + 12) + 4 * pt)
             names = ['s%d+' % t.useg[x].id for x in t.path_usegs(node)]
             if side == 'left':
                 names.reverse()
             if with_seed:
                 names = names + [sname + '+'] if side == 'left' else [sname + '+'] + names
             if not names:
+                if bud is not None:
+                    bud.release(d * (STR + 12) + 4 * pt)
                 continue
             pp = [s.pair for s in w.spans if s.how in ('whole', 'extends')]
             pe = [_span_token(s, '=') for s in w.spans if s.pair not in w.held_in
@@ -1251,6 +1333,8 @@ def union_gfa(u, with_seed, labels, at_bp, bud):
                 ptags.append('pe:Z:%s' % ';'.join(pe))
             paths.append('P\t%s.u%d\t%s\t*%s' % (side, w.id, ','.join(names),
                                                  ''.join('\t' + x for x in ptags)))
+            if bud is not None:
+                bud.release(d * (STR + 12) + 2 * pt)
     lines.extend(segs_out)
     lines.extend(links)
     lines.extend(paths)

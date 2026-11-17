@@ -1853,9 +1853,11 @@ is ``not_included``, and without it every statement says that it covers only the
 given. ``seqs_order=`` maps each pair to its record-mapping certificate as ``GET
 /capabilities`` states it (``'verified'``, ``'count_only'`` or ``None``); a pair not in it
 reads ``unknown``. ``TraverseClient.traverse_pairs(seed, strategy, pairs=...)`` sends one
-request per pair and returns all four (``PairResults``); a pair whose request failed
-(``TraverseError`` or ``OSError``) is ``{'pair': ..., 'error': e}``, and any other
-exception propagates:
+request per pair (``pairs=None``: every pair ``GET /capabilities`` lists; ``pairs=[]``: none,
+and nothing is sent) and returns all four (``PairResults``); a pair whose request failed
+(``TraverseError``; ``ResponseFormatError``, a ``TraverseError``, for an answer not shaped
+as a response; ``OSError``; ``GraphletFormatError``) is ``{'pair': ..., 'error': e}``, and
+any other exception propagates:
 
 .. code-block:: python
 
@@ -2097,6 +2099,30 @@ one pair; no path joins one pair's flank to another's.
    P  right.u3  seed_r+,s0+,s5+,s6+  *  pp:Z:A  ph:Z:A  pe:Z:B=25/graph
    P  right.u4  seed_r+,s0+,s5+,s7+  *  pp:Z:A  ph:Z:A  pe:Z:B=25/graph
    P  right.u5  seed_r+,s0+,s8+  *  pp:Z:B  ph:Z:B  pe:Z:A=25/graph
+
+
+Budgets and the summary
+^^^^^^^^^^^^^^^^^^^^^^^
+
+Every query whose work grows with the trie, the walks, the segments or the labels takes
+``budget=`` (keyword-only; without it the ambient one of ``local_budget()``): ``walks()``,
+``segments()``, ``carriers()``, ``spell()``, ``statements()``, ``coverage()``,
+``labels()``, ``label()``, ``shared_names()``, ``evidence()``, ``summary()``,
+``to_fasta()`` and ``to_gfa()``; ``print(u)`` is charged under an ambient budget as
+``statements()`` is. Each charges its cold price: what a cache holds (the walk figures, a
+part segment's label intervals, a part's name index) is charged as if it were built, so a
+call stops at the same row whatever ran before it, and under an ambient budget alone as
+with ``budget=``; a call given ``budget=`` inside ``local_budget()`` charges only its own.
+A stitched part's own ``evidence()`` runs under the union call's budget, and a stop there
+names the union's operation and levers. Exempt, as accessors of what the union stores per
+part: ``arms()``, ``provenance()``, ``memory_bytes()`` and the attributes (``parts``,
+``absent``, ``pairs``, ``expected``, ``digest``, ``seed``, ``alphabet``).
+
+``summary(max_bytes=)`` answers at most ``max_bytes`` bytes of canonical JSON, its notes
+included: the statements whole, then the pairs, then per arm the walk counts and the top
+walks while they fit, with a note for each section left out or cut. Where the statements
+and the notes of what is left out do not fit, it is refused ``summary_too_small``, which
+names the size that does.
 
 
 What is not combined

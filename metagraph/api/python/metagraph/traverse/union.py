@@ -113,6 +113,7 @@ TEXTS = {
                       'to be one record; select by {pair, name} or {pair, ref}',
     'label_id': 'label ids are local to each part of a pair union: select by {pair, ref} or '
                 '{pair, name}',
+    # %d: the least answer, the statements with the notes of what is left out
     'summary_too_small': 'the statements alone take %d bytes, more than max_bytes=%d: they '
                          'are never cut; pass max_bytes >= %d',
     'not_offered_dump': 'a pair union is not an MGT document: each part dumps on its own '
@@ -158,6 +159,15 @@ _M_SPAN = 900           # a PairSpan with its Route, merges and continues tuples
 _M_LABEL = 320          # a span label: its SpanLabel, PairLabel (with its ref) and slot
 _M_INTERVAL = 360       # a LabelInterval with its PairLabel, its ints and slot
 _M_NAME = 300           # shared_names() per label: the name sets, the dict and its lists
+_M_PAIR_LABEL = 260     # a PairLabel: the record and its ref string
+_M_COV_PAIR = 700       # a coverage entry per pair (its dict, note and category lists)
+_M_COV_NOTE = 120       # a coverage note per pair beside its tag (certified to ..., k-mers)
+_M_SENTENCE = 1500      # a sentence's fixed words (coverage, the turn-offs and the scope)
+_M_BLOCK = 2500         # a part's evidence block and identity entry
+_M_META = 6             # copies of the inputs' metadata JSON at once: an absent record's
+#                         detail JSON, the digest's JSON (that detail escaped again, at most
+#                         twice its size), its UTF-8 bytes and the encoder's chunks (fitted:
+#                         a detail of 100,000 quotes peaks at 1.08x five copies on 3.14)
 _M_LABEL_WORK = 260     # what _labels_for() holds per label while it runs
 _M_FIG = 160            # a walk's figures: the record, whole_in and held_in, its slot
 _DERIVATION_CAUSES = {'no_carrier': 'no label carries the whole seed',
@@ -236,6 +246,7 @@ class Route:
     labels: tuple               # SpanLabel (carriers(), labels='full'); () otherwise
     complete: bool
     certified_to_bp: int
+    labels_cut: bool = False    # the route's labels read a cut list (a lower bound)
 
 
 @dataclass(slots=True)
@@ -522,6 +533,47 @@ def _classify(results):
     return elems
 
 
+def _joined_bytes(texts):
+    """The bytes |texts| joined into one str hold beyond its header: one a character for
+    ASCII; a single other character widens every character of the result, so then four
+    (CPython's widest form)."""
+    texts = list(texts)
+    n = sum(map(len, texts))
+    return n if all(t.isascii() for t in texts) else 4 * n
+
+
+def _json_bound(x):
+    """An upper bound of len(composite.canonical_json(x)), read without building it: a
+    printable ASCII string its length, quotes and backslashes doubled; any other string 12
+    characters per character (an escape per UTF-16 unit of an astral character)."""
+    if isinstance(x, str):
+        n = len(x)
+        if x.isascii() and x.isprintable():
+            return n + 2 + x.count('"') + x.count('\\')
+        return 12 * n + 2
+    if x is None or isinstance(x, bool):
+        return 5
+    if isinstance(x, (int, float)):
+        return 24 if isinstance(x, float) or -10 ** 20 < x < 10 ** 20 else len(str(x))
+    if isinstance(x, dict):
+        return 2 + sum(_json_bound(k if isinstance(k, str) else str(k)) + _json_bound(v) + 2
+                       for k, v in x.items())
+    if isinstance(x, (list, tuple)):
+        return 2 + sum(_json_bound(v) + 1 for v in x)
+    return _json_bound(str(x))
+
+
+def _elem_meta(e):
+    """The canonical-JSON bound of an input's variable-length metadata."""
+    n = _json_bound(e.error) + _json_bound(e.result) + _json_bound(e.stated)
+    n += len(e.sequence or '') + len(e.sent or '')
+    if e.graphlet is not None and not C.is_view(e.graphlet):
+        n += _json_bound(_root(e.graphlet).envelope)
+    if e.env is not None:
+        n += _json_bound(e.env)
+    return n
+
+
 def _err_text(e):
     return e if isinstance(e, str) else str(e)
 
@@ -572,8 +624,11 @@ def union_pairs(results, *, seed=None, expected_pairs=None, seqs_order=None, bud
     over the pairs given.
     seqs_order: pair (a graph name, or a (graph, graph_path, annotation_path) tuple) ->
     'verified' | 'count_only' | None, as GET /capabilities states it; a pair not given
-    reads 'unknown'. budget= (local limits): the trie pass is charged; a stop raises with no
-    partial. Refusals (CombineRefused, .code) in the order of Appendix A.2."""
+    reads 'unknown'. budget= (local limits): the inputs' metadata (error strings, absent
+    results, stated pairs, envelopes) and the seed are charged before the seed checks, then
+    the trie pass; a stop raises with no partial. A budget smaller than the metadata and seed
+    therefore stops before the different_seed, duplicate_pair and not_expected refusals.
+    Refusals (CombineRefused, .code) in the order of Appendix A.2."""
     return _B.run_scoped(budget, 'union_pairs', (),
                          lambda b: PairUnion._build(results, seed, expected_pairs, seqs_order, b))
 
@@ -761,6 +816,18 @@ class PairUnion:
                     raise _refuse('different_alphabet', None, tags[id(cls_of[id(e.desc)])],
                                   C.alphabet_key(_root(e.graphlet)), ref_tag,
                                   C.alphabet_key(_root(ref.graphlet)))
+        if b is not None:
+            # the inputs' variable-length metadata (error strings, absent results, stated
+            # pairs, envelopes, the seed checks), before the seed checks case-map it and the
+            # identities, sort keys and the digest serialize it (GPT review M4): _M_META
+            # copies of its canonical JSON at its bound, and 1 lwu per 8 bytes of it; the
+            # seed (seed=, else the first part's): its case-mapped copy, kept, and the
+            # digest's JSON of it (the encoder's chunk and their join) and its UTF-8 bytes
+            # (Opus fix review N2)
+            meta = sum(map(_elem_meta, elems)) + _json_bound(exp) + _json_bound(
+                [k for _, _, k in so])
+            n = len(seed) if seed is not None else len(parts[0].graphlet.seed.sequence)
+            b.charge((meta >> 3) + (n >> 6), _M_META * meta + 4 * (STR + n))
         # different_seed
         alphabet = parts[0].graphlet.alphabet if parts else None
         if parts:
@@ -870,10 +937,13 @@ class PairUnion:
             if any(side in _root(p.graphlet).arms for p in self.parts):
                 self._arms[side] = _Trie(self, side, b)
         self._number_segments()
+        # each pair's record-mapping status (seqs_order) is in it: the warnings, carriers()
+        # and evidence() read it, so a resume token does not cross a change of it
         self.digest = C.combined_digest([
-            [[list(p.key), p.tag, p.pair_stated_by, p.retrieval[1], p.digest] for p in self.parts],
+            [[list(p.key), p.tag, p.pair_stated_by, p.retrieval[1], p.digest, p.seqs_order]
+             for p in self.parts],
             [[list(a.key), a.tag, a.pair_stated_by, a.category, C.canonical_json(a.detail),
-              a.seed_check] for a in self.absent],
+              a.seed_check, a.seqs_order] for a in self.absent],
             [[f['tag'], f['error'], f['kept']] for f in self._failures],
             self._seed_seq, sorted(self._expected_raw) if exp is not None else None])
         self._fig_cache = {}
@@ -1013,9 +1083,12 @@ class PairUnion:
                           depth=sid)
             got = cache.get(sid)
             if got is None:
-                got = cache[sid] = (_ops.label_intervals(g, a.side, sid),
-                                    frozenset(a.segments[sid].end),
-                                    _ops.label_intervals_cut(g, a.side, sid))
+                # built without a budget: its price is charged above, to the union call's
+                # budget, and an ambient one is not charged again (Opus fix review N1)
+                with _B.unbudgeted():
+                    got = cache[sid] = (_ops.label_intervals(g, a.side, sid),
+                                        frozenset(a.segments[sid].end),
+                                        _ops.label_intervals_cut(g, a.side, sid))
             return got
         return info
 
@@ -1032,22 +1105,32 @@ class PairUnion:
 
     # ------------------------------------------------------------ labels
 
-    def labels(self, pair=None):
+    def labels(self, pair=None, *, budget=None):
         """Every label of the parts as PairLabel (canonical pair order, label ids in
-        order), or one pair's (its tag)."""
+        order), or one pair's (its tag). budget=: per label read, and each PairLabel."""
+        if pair is not None and pair not in self._part_of:
+            raise KeyError('no part has the tag %r (parts: %s)'
+                           % (pair, ', '.join(self._part_of) or 'none'))
+        return _B.run_scoped(budget, 'union_labels', (), lambda b: self._labels(pair, b))
+
+    def _labels(self, pair, b):
         out = []
         for p in self.parts:
             if pair is not None and p.tag != pair:
                 continue
+            if b is not None:
+                n = len(p.graphlet.labels)
+                b.charge(W_ROW + W_ELEM * n, n * (_M_PAIR_LABEL + LIST_ITEM))
             out.extend(self._pair_label(p, l.id) for l in p.graphlet.labels)
-        if pair is not None and pair not in self._part_of:
-            raise KeyError('no part has the tag %r (parts: %s)'
-                           % (pair, ', '.join(self._part_of) or 'none'))
         return out
 
-    def label(self, selector):
+    def label(self, selector, *, budget=None):
         """{'pair', 'ref'} | {'pair', 'name'} | {'name'} (when only one pair has it) ->
-        PairLabel. {'id'} is refused: ids are local to each part."""
+        PairLabel. {'id'} is refused: ids are local to each part. budget=: per label of
+        the parts searched (every part's for {'name'})."""
+        return _B.run_scoped(budget, 'union_label', (), lambda b: self._label(selector, b))
+
+    def _label(self, selector, b):
         if isinstance(selector, PairLabel):
             selector = {'pair': selector.pair, 'ref': selector.ref}
         if not isinstance(selector, dict):
@@ -1058,6 +1141,11 @@ class PairUnion:
         keys = set(selector)
         if keys == {'name'}:
             name = selector['name']
+            if b is not None:
+                n = sum(len(p.graphlet.labels) for p in self.parts)
+                b.charge(W_ELEM * n, _M_PAIR_LABEL * len(self.parts))
+                for p in self.parts:
+                    _label_index_price(b, p.graphlet)
             hits = [(p, l) for p in self.parts for l in p.graphlet.labels if l.name == name]
             tags = list(dict.fromkeys(p.tag for p, _ in hits))
             if not hits:
@@ -1071,18 +1159,32 @@ class PairUnion:
             if p is None:
                 raise UnknownLabel('no part has the tag %r' % (selector['pair'],))
             k = 'ref' if 'ref' in keys else 'name'
+            if b is not None:
+                b.charge(W_ELEM * len(p.graphlet.labels), _M_PAIR_LABEL)
+                _label_index_price(b, p.graphlet)
             return self._pair_label(p, _label_in(p.graphlet, {k: selector[k]}).id)
         raise BadSelector('a pair union selects labels by {pair, ref}, {pair, name} or {name}, '
                           'not %r' % (selector,))
 
-    def shared_names(self):
+    def shared_names(self, *, budget=None):
         """name -> the tags of the parts where it occurs, for names seen in two or more
-        parts (names in byte order)."""
+        parts (names in byte order). budget=: per label, its name set and the dicts."""
+        return _B.run_scoped(budget, 'union_shared_names', (),
+                             lambda b: self._shared_names(b))
+
+    def _shared_names(self, b):
+        """shared_names(); with |b| its charge: per label an element, and at its bound a
+        name set entry, a sort key and the dict's lists (_M_NAME)."""
+        if b is not None:
+            n = sum(len(p.graphlet.labels) for p in self.parts)
+            b.charge(W_ELEM * n, n * _M_NAME + DICT)
         seen = collections.defaultdict(list)
         for p in self.parts:
             for n in sorted({l.name for l in p.graphlet.labels}):
                 seen[n].append(p.tag)
-        return {n: tuple(t) for n, t in sorted(seen.items(), key=lambda x: x[0].encode('utf-8'))
+        # UTF-8 byte order is code point order: the names sort as they are, with no copy of
+        # each as its bytes (Opus fix review N4)
+        return {n: tuple(t) for n, t in sorted(seen.items(), key=lambda x: x[0])
                 if len(t) > 1}
 
     def _mapping_warnings(self):
@@ -1124,16 +1226,32 @@ class PairUnion:
                 r = max([r] + [a.complete_to_bp for a in g.arms.values()])
         return r
 
-    def coverage(self, arm=None, at_bp=None):
+    def coverage(self, arm=None, at_bp=None, *, budget=None):
         """Every pair in one category at depth |at_bp| (default: the largest radius among
         the parts), §2.6. arm None: an arm-less union only (no part) -- or both arms' absent
-        categories."""
+        categories. budget=: per pair and limitation read, the entries and the sentence."""
         side = None if arm is None else self._side(arm)
         if side is None and self.parts:
             raise ValueError('name an arm (left or right): the union has parts')
+        self._depth_of(at_bp)
+        return _B.run_scoped(budget, 'union_coverage', (),
+                             lambda b: self._coverage(side, at_bp, b))
+
+    def _depth_of(self, at_bp):
         depth = self._default_depth() if at_bp is None else at_bp
         if not isinstance(depth, int) or isinstance(depth, bool) or depth < 0:
             raise ValueError('at_bp is a depth in bp (an int >= 0), not %r' % (at_bp,))
+        return depth
+
+    def _coverage(self, side, at_bp, b):
+        depth = self._depth_of(at_bp)
+        if b is not None:
+            # per pair its entry and the limitations read; the sentence and the strings it
+            # is joined from, at their bound (every tag at most three times, each note)
+            n = len(self.pairs)
+            nl = sum(len(_root(p.graphlet).limitations) for p in self.parts)
+            b.charge(W_ROW * n + W_ELEM * nl, n * _M_COV_PAIR + 4 * (
+                STR + _M_SENTENCE + 3 * _joined_bytes(self.pairs) + n * _M_COV_NOTE))
         per = collections.OrderedDict()
         for p in self.parts:
             per[p.tag] = _part_category(p, side, depth, self._below_codes(p.tag))
@@ -1217,11 +1335,11 @@ class PairUnion:
     def _statements(self, side, at_bp, paths, b):
         if side is None and self.parts:
             side = self.arms()[0]
-        cov = self.coverage(side, at_bp)
+        cov = self._coverage(side, at_bp, b)
         return Statements(side, cov.at_bp, paths, cov, self._provenance_sentence(side, b),
                           TURN_OFFS, self._labels_sentence(b), SCOPE)
 
-    def _provenance_sentence(self, side, budget=None):
+    def _provenance_sentence(self, side, b=None):
         sides = [side] if side else []
         items = []
         for s in sides:
@@ -1229,7 +1347,7 @@ class PairUnion:
             if t is None:
                 items.append('%s 0' % s)
                 continue
-            ws = self._figures(s, _B.resolve(budget))
+            ws = self._figures(s, b)
             walks = [w for w in ws if w.kind == 'walk']
             stubs = len(ws) - len(walks)
             multi = sum(1 for w in walks if len(w.held_in) > 1)
@@ -1242,14 +1360,12 @@ class PairUnion:
         return 'walks: ' + ', '.join(items)
 
     def _labels_sentence(self, b=None):
+        n = len(self._shared_names(b))
         if b is not None:
-            # shared_names(): a set of names per part and the dict of names seen
-            n = sum(len(p.graphlet.labels) for p in self.parts)
-            nbytes = n * _M_NAME + DICT
-            b.charge(W_ELEM * n, nbytes)
-        n = len(self.shared_names())
-        if b is not None:
-            b.release(nbytes)
+            # shared_names()' sets and dicts, dropped once counted; the sentence, which names
+            # the tags of the parts its mapping warning covers, twice while built
+            b.release(sum(len(p.graphlet.labels) for p in self.parts) * _M_NAME + DICT)
+            b.charge(0, 2 * (STR + 600 + _joined_bytes(p.tag for p in self.parts)))
         s = ('labels: each pair\'s own, shown as <tag>/<name>; equal names in two pairs are not '
              'claimed to be one record (%s)' % (
                  'no name occurs in more than one pair' if n == 0 else
@@ -1261,6 +1377,11 @@ class PairUnion:
         return s
 
     def __str__(self):
+        """The statements as sentences: print(union). Under an ambient budget
+        (local_budget()) it is charged as statements() is."""
+        return _B.run_scoped(None, 'union_str', (), self._text)
+
+    def _text(self, b):
         n_failed = sum(1 for a in self.absent if a.category == 'failed')
         if self.expected is not None:
             head = 'union of one seed (%d bp) over %d expected pairs: ' % (
@@ -1276,13 +1397,13 @@ class PairUnion:
         lines = [head]
         sides = self.arms() or [None]
         for s in sides:
-            lines.append(_core_sentence(self.coverage(s)))
+            lines.append(_core_sentence(self._coverage(s, None, b)))
         if self.parts:
             prov = []
             for s in self.arms():
-                prov.append(self._provenance_sentence(s)[len('walks: '):])
+                prov.append(self._provenance_sentence(s, b)[len('walks: '):])
             lines.append('walks: ' + ', '.join(prov))
-        lines.append(self._labels_sentence())
+        lines.append(self._labels_sentence(b))
         lines.append(TURN_OFFS)
         lines.append(SCOPE)
         return '\n'.join(lines)
@@ -1491,28 +1612,32 @@ class PairUnion:
         if by not in ('pairs', 'length', 'id'):
             raise ValueError("by is 'pairs', 'length' or 'id', not %r" % (by,))
         side = self._side(arm)
+        b = _B.resolve(budget)
+        if b is None:
+            return self._walks(side, by, top, pairs, labels, min_bp, spell, stubs, None,
+                               resume)
+        with b.scope('walks'):
+            return self._walks(side, by, top, pairs, labels, min_bp, spell, stubs, b, resume)
+
+    def _walks(self, side, by, top, pairs, labels, min_bp, spell, stubs, b, resume):
+        if b is not None and (pairs or labels):
+            # the selectors, caller-sized, bound into the arguments a resume token is
+            # checked against: their repr, its JSON and UTF-8 bytes in the token's digest, at
+            # twice their JSON bound (Opus fix review N4)
+            n = 2 * (_json_bound(list(pairs or ())) + _json_bound(list(labels or ())))
+            b.charge(n >> 6, 4 * (STR + n))
         args = [side, by, top, sorted(pairs) if pairs else None,
                 [repr(x) for x in labels] if labels else None, min_bp, spell, stubs]
         start = C.resume_pos(self.digest, 'walks', args, resume, 1)[0]
         if side not in self._arms:
             return []
-        b = _B.resolve(budget)
         out = []
         try:
-            return self._walks(side, by, top, pairs, labels, min_bp, spell, stubs, b, start,
-                               out)
+            return self._walks_body(self._arms[side], by, top, pairs, labels, min_bp, spell,
+                                    stubs, b, start, out)
         except LocalBudgetExceeded as e:
             raise e.restate(partial=Partial(out, C.token(self.digest, 'walks', args,
                                                            start + len(out))))
-
-    def _walks(self, side, by, top, pairs, labels, min_bp, spell, stubs, b, start, out):
-        t = self._arms[side]
-        if b is not None:
-            with b.scope('walks'):
-                return self._walks_body(t, by, top, pairs, labels, min_bp, spell, stubs, b,
-                                        start, out)
-        return self._walks_body(t, by, top, pairs, labels, min_bp, spell, stubs, None, start,
-                                out)
 
     def _walks_body(self, t, by, top, pairs, labels, min_bp, spell, stubs, b, start, out):
         # the walks are selected and ranked on their figures (one trie pass); only the
@@ -1529,7 +1654,7 @@ class PairUnion:
                     raise KeyError('no part has the tag %r' % (p,))
             sel = [wid for wid in sel if all(p in figs[wid].held_in for p in pairs)]
         if labels is not None:
-            want = {self.label(x) for x in labels}
+            want = {self._label(x, b) for x in labels}
             # only a span that holds the walk carries it: its own labels (whole, extends) or
             # its route's (merges, held to the walk's end); a stub's labels before its merge
             # and the labels of a span that ends or turns off carry nothing to the end
@@ -1697,69 +1822,93 @@ class PairUnion:
             st = self._statements(s, None, 'supported', b)
             sts.append({'arm': s, 'coverage': _core_sentence(st.coverage),
                         'provenance': st.provenance})
-        out = {'statements': {'per_arm': sts, 'turn_offs': TURN_OFFS,
-                              'labels': self._labels_sentence(b), 'scope': SCOPE}}
-        size = len(C.canonical_json(out))
-        if size > max_bytes:
-            raise _refuse('summary_too_small', None, size, max_bytes, size)
-        out['notes'] = []
+        base = {'statements': {'per_arm': sts, 'turn_offs': TURN_OFFS,
+                               'labels': self._labels_sentence(b), 'scope': SCOPE}}
 
-        def fits(o):
-            return len(C.canonical_json(o)) <= max_bytes
+        # every fit test is of the answer as it would be returned, its notes included: a
+        # section is added only where the answer still fits with the notes of what may be
+        # left out after it (GPT review M6)
+        def size(o, notes):
+            if notes:
+                o = dict(o, notes=list(notes))
+            return len(C.canonical_json(o))
 
-        cand = dict(out)
-        cand['pairs'] = {p.tag: _summary_part(p, self._below_codes(p.tag)) for p in self.parts}
-        cand['pairs'].update({a.tag: {'absent': a.category, 'seed_check': a.seed_check}
-                              for a in self.absent})
-        cand['pairs'].update({t: {'not_included': True} for t in self._not_included})
-        if fits(cand):
-            out = cand
-        else:
-            out['notes'].append('pairs left out (max_bytes)')
+        pairs = {p.tag: _summary_part(p, self._below_codes(p.tag)) for p in self.parts}
+        pairs.update({a.tag: {'absent': a.category, 'seed_check': a.seed_check}
+                      for a in self.absent})
+        pairs.update({t: {'not_included': True} for t in self._not_included})
         arms = {}
+        ranked = []
         for s in self.arms():
-            ws = self._figures(s, b)
-            walks = [w for w in ws if w.kind == 'walk']
-            arms[s] = {'walks': len(walks), 'stub_walks': len(ws) - len(walks),
+            figs = self._figures(s, b)
+            walks = [w for w in figs if w.kind == 'walk']
+            arms[s] = {'walks': len(walks), 'stub_walks': len(figs) - len(walks),
                        'segments': len(self._arms[s].order), 'top': []}
-        cand = dict(out, arms=arms)
-        if fits(cand):
-            out = cand
-            for s in self.arms():
-                figs = self._figures(s, b)
-                ranked = sorted((i for i, w in enumerate(figs) if w.kind == 'walk'),
-                                key=lambda i: (-len(figs[i].held_in), -len(figs[i].whole_in),
-                                               -figs[i].length_bp, i))
-                for i in ranked[:10]:
-                    arms[s]['top'].append({'id': i, 'length_bp': figs[i].length_bp,
-                                           'held_in': list(figs[i].held_in)})
-                    if not fits(out):
-                        arms[s]['top'].pop()
-                        out['notes'].append('top walks cut (max_bytes)')
-                        break
+            order = sorted((i for i, w in enumerate(figs) if w.kind == 'walk'),
+                           key=lambda i: (-len(figs[i].held_in), -len(figs[i].whole_in),
+                                          -figs[i].length_bp, i))
+            ranked += [(s, {'id': i, 'length_bp': figs[i].length_bp,
+                            'held_in': list(figs[i].held_in)}) for i in order[:10]]
+        no_pairs, no_arms = 'pairs left out (max_bytes)', 'arms left out (max_bytes)'
+        cut = ['top walks cut (max_bytes)'] if ranked else []
+
+        def least_after(o, notes):
+            # the smallest answer that goes on from |o|: the arms with no top walk listed
+            # (and the note of the cut, where a walk is ranked), or the note that they are
+            # left out -- for a union without arms, its empty arms (Opus fix review N7)
+            return min(size(dict(o, arms=arms), notes + cut), size(o, notes + [no_arms]))
+
+        with_pairs = dict(base, pairs=pairs)
+        if least_after(with_pairs, []) <= max_bytes:
+            out, notes = with_pairs, []
+        elif least_after(base, [no_pairs]) <= max_bytes:
+            out, notes = dict(base), [no_pairs]
         else:
-            out['notes'].append('arms left out (max_bytes)')
-        if not out['notes']:
-            del out['notes']
+            # the smallest answer: the statements and the notes of what is left out
+            least = min(least_after(with_pairs, []), least_after(base, [no_pairs]))
+            raise _refuse('summary_too_small', None, least, max_bytes, least)
+        cand = dict(out, arms=arms)
+        if size(cand, notes + cut) <= max_bytes:
+            out = cand
+            for k, (s, row) in enumerate(ranked):
+                arms[s]['top'].append(row)
+                if size(out, notes + (cut if k + 1 < len(ranked) else [])) > max_bytes:
+                    arms[s]['top'].pop()
+                    notes += cut
+                    break
+        else:
+            notes.append(no_arms)
+        if notes:
+            out['notes'] = notes
         return out
 
-    def evidence(self, arm=None):
+    def evidence(self, arm=None, *, budget=None):
         """Each part's own evidence block under its tag, the absent records, the expected
         pairs not included, each part's identity and pair source, the weakest outcome over
         the parts, exact (every part exact and its identity verified) and the five
         statements (without an arm: each arm's coverage sentence, then the provenance over
-        every arm, the turn-offs, the labels and the scope)."""
+        every arm, the turn-offs, the labels and the scope). budget=: the blocks, and the
+        coverage and statements as coverage() and statements() charge them; a stitched
+        part's own evidence() runs under it as the ambient budget."""
         side = None if arm is None else self._side(arm)
-        ev = _combined_evidence(self.parts, side)
+        return _B.run_scoped(budget, 'union_evidence', (), lambda b: self._evidence(side, b))
+
+    def _evidence(self, side, b):
+        if b is not None:
+            # per part its block (and its identity entry), per absent record its entry
+            b.charge(W_ROW * (len(self.parts) + len(self.absent)) + W_ELEM * sum(
+                len(_root(p.graphlet).limitations) for p in self.parts),
+                _M_BLOCK * len(self.parts) + _M_COV_PAIR * len(self.absent))
+        ev = _combined_evidence(self.parts, side, b)
         if side is not None or not self.parts:
-            sentences = self.statements(side).sentences()
+            sentences = self._statements(side, None, 'supported', b).sentences()
         else:
             # every arm: the coverage sentence of each, then the provenance over them all
             sides = self.arms()
-            sentences = [_core_sentence(self.coverage(s)) for s in sides] + [
-                'walks: ' + ', '.join(self._provenance_sentence(s)[len('walks: '):]
+            sentences = [_core_sentence(self._coverage(s, None, b)) for s in sides] + [
+                'walks: ' + ', '.join(self._provenance_sentence(s, b)[len('walks: '):]
                                       for s in sides),
-                TURN_OFFS, self._labels_sentence(), SCOPE]
+                TURN_OFFS, self._labels_sentence(b), SCOPE]
         return {
             'parts': ev['parts'],
             'outcome': ev['outcome'],
@@ -1978,6 +2127,13 @@ def _retrieval_of(g):
         C.retrieval_identity(g)
 
 
+def _label_index_price(b, g):
+    """A lookup by name or ref in part |g| at its cold price: the name/ref index of each of
+    its graphlets (ops.label() scans or builds it; the index's price either way)."""
+    for x in _sub_graphlets(g):
+        _ops._uses_g(b, x, 'label_index')
+
+
 def _label_in(g, selector):
     """A label of a part by {'ref'} or {'name'}: a stitched part's over its parts' labels
     (StitchedGraphlet.label(); ids in its own numbering)."""
@@ -2020,27 +2176,30 @@ def _summary_part(p, below):
     return out
 
 
-def _part_block(p, side):
+def _part_block(p, side, b=None):
     """A part's evidence block: its own (ops.evidence_block()); a stitched part's
-    StitchedGraphlet.evidence() where it has a junction on |side| (every arm: None), its
-    root's otherwise (no junction is read there)."""
+    StitchedGraphlet.evidence() where it has a junction on |side| (every arm: None), run
+    under the union call's budget |b| as the ambient one and stated as the union's call (a
+    stop there names the union's operation and levers: Opus fix review N5), its root's
+    otherwise (no junction is read there)."""
     g = p.graphlet
     if _arm_junctions(g, side):
-        return g.evidence(side)
+        with _B.part_of(b):
+            return g.evidence(side)
     g = _root(g)
     return _ops.evidence_block(g, side if side is None or side in g.arms else None)
 
 
-def _combined_evidence(parts, side):
+def _combined_evidence(parts, side, b=None):
     """composite.combined_evidence() over the parts, a stitched part's block by
-    _part_block()."""
+    _part_block() (|b|: the union call's budget)."""
     if not any(_arm_junctions(p.graphlet, side) for p in parts):
         return C.combined_evidence([(p.tag, _root(p.graphlet), _part_verified(p, side))
                                     for p in parts], side)
     blocks = {}
     exact = True
     for p in parts:
-        blk = _part_block(p, side)
+        blk = _part_block(p, side, b)
         blocks[p.tag] = blk
         exact = exact and bool(blk.get('exact')) and bool(_part_verified(p, side))
     return {'parts': blocks,
@@ -2083,9 +2242,11 @@ def _absent_detail(e):
 # ------------------------------------------------------------------ coverage helpers
 
 def _cut60(text):
-    b = (text or '').encode('utf-8')
+    # 61 characters encode to more than 60 bytes, so a longer text is never encoded whole
+    text = text or ''
+    b = text[:61].encode('utf-8')
     if len(b) <= 60:
-        return text or ''
+        return text
     return b[:57].decode('utf-8', 'ignore') + '...'
 
 
@@ -2185,6 +2346,7 @@ class _Trie:
         self.kids = [{}]                # node -> {char: edge}
         self.depth = [0]
         self.e_from, self.e_to, self.e_len, self.e_ref, self.e_cover = [], [], [], [], []
+        self.bases_read = 0             # bases the insertion compared or indexed (a count)
         self.walk_end = {}              # node -> [(pi, leaf seg, path id)]
         self.stub_end = {}              # node -> [(pi, stub seg, merge seg)]
         self.merge_at = {}              # node -> [(pi, merge seg)]
@@ -2233,6 +2395,12 @@ class _Trie:
         s = self.parts[pi].graphlet.arms[self.side].segments[seg]
         return s.walk[off:off + self.e_len[e]]
 
+    def _ref_walk(self, e):
+        """(the walk edge |e|'s bases are read from, their offset in it): an edge's bases
+        are compared and indexed there, never sliced whole (GPT review M5)."""
+        pi, seg, off = self.e_ref[e]
+        return self.parts[pi].graphlet.arms[self.side].segments[seg].walk, off
+
     def _new_node(self, depth):
         self.kids.append({})
         self.depth.append(depth)
@@ -2253,7 +2421,9 @@ class _Trie:
         pi, seg, off = self.e_ref[e]
         lower_cover = {k: (s, o + m) for k, (s, o) in self.e_cover[e].items()}
         low = self._new_edge(mid, t, n - m, (pi, seg, off + m), lower_cover)
-        first = self._bases(low)[0]
+        src, o = self._ref_walk(low)
+        first = src[o]
+        self.bases_read += 1
         self.kids[mid][first] = low
         self.e_to[e] = mid
         self.e_len[e] = m
@@ -2273,15 +2443,21 @@ class _Trie:
                 e = self._new_edge(node, t, n - i, (pi, s.id, i), {pi: (s.id, i)})
                 self.kids[node][ch] = e
                 return t
-            eb = self._bases(e)
-            m = 1
-            lim = min(len(eb), n - i)
-            if w.startswith(eb[:lim], i):
+            # the edge's bases against w from i, in place in the walk they are read from:
+            # a full match costs the bases it consumes, a mismatch at most the segment's
+            # remaining bases (and it ends the insertion), so a segment costs O(its bases)
+            # however long the edges it meets (GPT review M5)
+            src, o = self._ref_walk(e)
+            el = self.e_len[e]
+            lim = min(el, n - i)
+            self.bases_read += lim
+            if src.startswith(w[i:i + lim], o):
                 m = lim
             else:
-                while m < lim and eb[m] == w[i + m]:
+                m = 1
+                while m < lim and src[o + m] == w[i + m]:
                     m += 1
-            if m < len(eb):
+            if m < el:
                 self._split(e, m)
             self.e_cover[e][pi] = (s.id, i)
             node = self.e_to[e]
@@ -2872,18 +3048,19 @@ def _route(un, t, pi, part, a, stub, m, j, d, below, into, with_labels, at_bp, b
         lpos = pos - off
         here = [segs[x] for x, _ in route if segs[x].from_bp <= lpos <= segs[x].end_bp]
         absence = _absence_at(part, g, a, here, lpos, c, code)
-    labels = ()
+    labels, lcut = (), False
     if with_labels:
         # the labels at the route's end (or |at_bp|) are those of the leg holding that
-        # depth: never joined across a junction (D.1)
+        # depth: never joined across a junction (D.1); their cut flag is the route's (GPT
+        # review M2), not the stub's
         e = pos if at_bp is None else min(pos, at_bp)
         k = len(legs) - 1
         while k > 0 and e <= legs[k][1].offset:
             k -= 1
         _, lsrc, la, lchain, lroute = legs[k]
-        labels, _ = _labels_src(un, lsrc, la, lambda: lchain + lroute, pos, at_bp, b)
+        labels, lcut = _labels_src(un, lsrc, la, lambda: lchain + lroute, pos, at_bp, b)
     return Route(pos, how, goes_on, reasons, absence, tuple(merges), labels, complete,
-                 cert), part
+                 cert, lcut), part
 
 
 def _step(segs, cur, ch):
@@ -2922,9 +3099,14 @@ def _labels_for(un, part, a, chain, end, with_labels, at_bp=None, b=None):
         end = min(end, at_bp)
     g = part.graphlet
     segs = a.segments
-    # trim the chain to the segments at or before |end|
+    # trim the chain to the segments at or before |end|: a segment with bases from |end| on,
+    # and a zero-length one beyond it (a merge node or leaf deeper than the cut: its empty
+    # intervals would hide the labels alive at |end|, GPT review m1)
     k = len(chain)
-    while k > 1 and segs[chain[k - 1][0]].from_bp >= end and segs[chain[k - 1][0]].length_bp:
+    while k > 1:
+        s = segs[chain[k - 1][0]]
+        if not (s.from_bp >= end if s.length_bp else s.from_bp > end):
+            break
         k -= 1
     chain = chain[:k]
     if not chain:
@@ -3009,6 +3191,15 @@ def _carrying_labels(s):
     return ()
 
 
+def _shown_labels(s):
+    """(labels, cut) a span shows: a merges span its route's (the labels where the route
+    ends, with the route's cut flag), any other its own."""
+    if s.how == 'merges':
+        r = s.route
+        return (r.labels, r.labels_cut) if r is not None else ((), False)
+    return s.labels, s.labels_cut
+
+
 def _carrier_line(s):
     if s.how in ('whole', 'extends'):
         mid = 'to %d' % s.to_bp
@@ -3025,12 +3216,12 @@ def _carrier_line(s):
         mid = 'at %d' % s.to_bp
         if s.how == 'ends' and s.end_reasons.get('path_reason'):
             mid += '  %s' % s.end_reasons['path_reason']
-    labs = s.labels if s.how != 'merges' else (s.route.labels if s.route else ())
+    labs, cut = _shown_labels(s)
     lab = ''
     if labs is not None and s.how in ('whole', 'extends', 'merges', 'ends'):
         n = len(labs)
         whole = sum(1 for x in labs if x.from_bp == 0)
-        lab = 'labels %d%s' % (n, '+' if s.labels_cut else '')
+        lab = 'labels %d%s' % (n, '+' if cut else '')
         if n:
             lab += ', %d of them from 0 bp' % whole if whole != n else ', from 0 bp'
     tail = []

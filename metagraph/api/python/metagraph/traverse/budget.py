@@ -19,7 +19,10 @@ With a budget, a local call either completes or stops and says so (DESIGN §5.4)
     objects, rows, spelled sequences, output text and derived caches the call builds or
     uses, each charged at a size modelled on CPython (ASCII text at one byte per character
     plus its header, lists, sets, dicts and the slotted records at their measured sizes,
-    a parse at a fit of its traced peak), released inside a call only where a loop drops a
+    a parse at a fit of its traced peak, a gzip load with its decompressor's buffers;
+    caller-sized metadata -- error strings, tags, names -- charged before it is serialized
+    or escaped, at its JSON- or %-escaped length, and text joined with a character beyond
+    ASCII at four bytes a character), released inside a call only where a loop drops a
     temporary before its next step: the account bounds the call's peak. Every call also
     carries a base (CALL_BASE bytes, W_CALL lwu) for its frames, temporaries and setup,
     charged with its first charge. It is a model, not a measurement: Python can
@@ -147,7 +150,14 @@ __all__ = ['LocalLimits', 'LocalBudget', 'LocalStop', 'LocalBudgetExceeded', 'Pa
 #     labels='full' the names written, and per path line a name per union segment;
 #     spell() W_ROW, W_STEP per union segment and 1 lwu per 256 bases, three copies of the
 #     text; a listed walk W_ROW (and its bases at BASE_SHIFT when spelled), 400 bytes and
-#     its text;
+#     its text; labels() per part W_ROW and per label W_ELEM and a PairLabel; label() per
+#     label of the parts it searches W_ELEM and each part's name/ref index at its cold
+#     price (ops' label_index); shared_names() per label W_ELEM and its name sets and dict;
+#     coverage() per pair W_ROW and per limitation W_ELEM, an entry per pair and its
+#     sentence at its bound (every tag three times and a note, four copies); evidence() a
+#     block per part, an entry per absent record, and its coverage and statements as those
+#     charge (a stitched part's evidence() under the call's budget, ambient); print() as
+#     statements() under an ambient budget (GPT review M3);
 #   * label_intervals() (ops.py): per segment W_ELEM, W_ELEM per entry label and label
 #     change (constrain; the segment's ops, derived once) or per P run and label of a run
 #     (annotate), the sort of its intervals, and their list, tuples and dict; the price
@@ -745,6 +755,40 @@ def unbudgeted():
         yield
     finally:
         _AMBIENT.reset(token)
+
+
+@contextmanager
+def part_of(b):
+    """Run the enclosed code -- a model's own budgeted call, made by an operation that runs
+    under |b| (a pair union reading a stitched part's evidence) -- with |b| as the ambient
+    budget, charged and stated as that operation: a stop raised there names the
+    operation's op, phase, progress and levers, not the inner call's (which has levers the
+    operation does not), and the inner call's nested scope leaves none of them behind.
+    |b| None: the code runs as it is."""
+    if b is None:
+        yield None
+        return
+    saved = (b.sub_op, b.levers, b.phase, b.done)
+    b.done = dict(saved[3])
+    token = _AMBIENT.set(b)
+    try:
+        yield b
+    except LocalBudgetExceeded as e:
+        s = e.stop
+        if any(s is x for x in b.stops):
+            s.op = saved[0] or b.op or 'local'
+            s.phase = saved[2] or 'setup'
+            s.done = dict(saved[3])
+            if s.deterministic:
+                s.actions = list(_ACTIONS_ALWAYS) + [a for a in saved[1] if a not in
+                                                     _ACTIONS_ALWAYS] + list(_ACTIONS_TAIL)
+            # the inner call's rows are not the operation's
+            e.partial = None
+            e.restate()
+        raise
+    finally:
+        _AMBIENT.reset(token)
+        b.sub_op, b.levers, b.phase, b.done = saved
 
 
 @contextmanager
