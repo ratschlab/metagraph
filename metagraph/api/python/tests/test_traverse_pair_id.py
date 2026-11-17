@@ -763,5 +763,37 @@ class TestOutputsWithoutPaths(unittest.TestCase):
             self.assertEqual(entry_without_paths(same), same)
 
 
+class TestToolOutputsWithoutPaths(unittest.TestCase):
+    """GraphletTools' answers name a pair by graph and pair_id, no path."""
+
+    def test_capabilities_and_a_continuation_request(self):
+        from metagraph.traverse.mcp_tools import GraphletTools
+
+        class Before(_Engine):
+            # a probe of one pair on an engine before ids: its entry with the paths
+            def capabilities(self, *a, **kw):
+                return dict(super().capabilities(*a, **kw), graph=GRAPH, graph_path=GP,
+                            annotation_path=AP)
+        old = fixture('fork', 'paths')
+        with tempfile.TemporaryDirectory() as d:
+            client = Before(BEFORE_IDS, tagged(T.doc_json('fork', 'graphlet'), 'paths'))
+            tools = GraphletTools(GraphletStore(d), {'mini': client})
+            caps = tools.traverse_capabilities('mini')['capabilities']
+            self.assertEqual((caps['graph'], caps['pair_id']), (GRAPH, ID))
+            self.assertNotIn('graph_path', caps)
+            path = os.path.join(d, 'old.mgt')
+            old.save(path)
+            h = tools.graphlet_load(path)['handle']
+            out = tools.traverse_continue(h, 'right', old.walks('right')[0].path_id,
+                                          execute=False)
+            self.assertEqual(out['request']['pairs'], BY_ID)
+            text = json.dumps(out)
+            self.assertNotIn(GP, text)
+            # executed, it is sent by the old document's paths
+            done = tools.traverse_continue(h, 'right', old.walks('right')[0].path_id)
+            self.assertNotIn('error', done, done)
+            self.assertEqual(client.posted()[-1]['pairs'], BY_PATHS)
+
+
 if __name__ == '__main__':
     unittest.main()

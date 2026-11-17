@@ -109,7 +109,8 @@ from ._codec import GraphletFormatError
 from .budget import LocalBudget, LocalBudgetExceeded, LocalLimits
 from .client import (SELECTORS, AttemptAtBound, ServerInitializing, TraverseError,
                      PairIdError, _ResponseCut, auto_coordinates, drop_coordinates_note,
-                     pair_members, requested_pair, single_answer)
+                     entry_without_paths, pair_members, request_without_paths,
+                     requested_pair, single_answer)
 from .model import (
     ARM_SIDES, AmbiguousLabel, IncompleteRecording, MissingEnvelope, NextRequest,
     UnknownLabel, UnverifiableLabelName,
@@ -1186,8 +1187,10 @@ class GraphletTools:
 
     @_tool
     def traverse_capabilities(self, index=None, max_bytes=None):
+        # a multi-graph server's probe names its pair: by graph and pair_id, no path
         name, client = self._client(index)
-        return {'index': name, 'capabilities': self._backend(client.capabilities)}
+        return {'index': name,
+                'capabilities': entry_without_paths(self._backend(client.capabilities))}
 
     @_tool
     def traverse_resolve(self, index=None, sequence=None, labels=None, discover=None,
@@ -1548,7 +1551,8 @@ class GraphletTools:
             # how the branch allowance was derived, as essential as the loss budget's
             stated['branch_budget'] = dict(req.branch_budget)
         if not execute:
-            out = dict({'request': dict(req), 'parent': parent,
+            # the request as an answer states it: its pair by graph and pair_id, no path
+            out = dict({'request': request_without_paths(dict(req)), 'parent': parent,
                         'ceiling_bytes': max_bytes or self.sequence_max_bytes}, **stated)
             if per_label is not None:
                 out['loss_budget_labels'] = per_label
