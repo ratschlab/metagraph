@@ -182,9 +182,9 @@ SCOPE = 'A walk that no single graph holds entirely is in no part, so not in thi
 OVER_GIVEN = 'Over the pairs given; expected_pairs= was not passed.'
 
 
-def _refuse(code, key=None, *args):
+def _refuse(code, key=None, *args, least_bytes=None):
     text = TEXTS[key or code]
-    return C.CombineRefused(code, text % args if args else text)
+    return C.CombineRefused(code, text % args if args else text, least_bytes)
 
 
 # ------------------------------------------------------------------ data classes
@@ -1866,7 +1866,8 @@ class PairUnion:
         else:
             # the smallest answer: the statements and the notes of what is left out
             least = min(least_after(with_pairs, []), least_after(base, [no_pairs]))
-            raise _refuse('summary_too_small', None, least, max_bytes, least)
+            raise _refuse('summary_too_small', None, least, max_bytes, least,
+                          least_bytes=least)
         cand = dict(out, arms=arms)
         if size(cand, notes + cut) <= max_bytes:
             out = cand

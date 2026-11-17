@@ -8,6 +8,7 @@ import dataclasses
 import json
 import os
 import random
+import re
 import unittest
 
 from tests import traverse_testlib as T  # noqa: F401  (puts the library on sys.path)
@@ -620,10 +621,20 @@ def with_fields(g, **changes):
 def refused(test, code, fn, text=None):
     with test.assertRaises(CombineRefused) as cm:
         fn()
-    test.assertEqual(cm.exception.code, code, str(cm.exception))
+    e = cm.exception
+    test.assertEqual(e.code, code, str(e))
     if text is not None:
-        test.assertEqual(str(cm.exception), text)
-    return str(cm.exception)
+        test.assertEqual(str(e), text)
+    # .least_bytes: the size a retry needs, where the text states one (summary_too_small:
+    # the number it states twice), else None (the service's min_max_bytes)
+    m = re.fullmatch(r'.* take (\d+) bytes, .* pass max_bytes >= (\d+)', str(e))
+    if code == 'summary_too_small':
+        test.assertEqual((getattr(e, 'least_bytes', None), int(m.group(2))),
+                         (int(m.group(1)), int(m.group(1))))
+    else:
+        test.assertIsNone(m)
+        test.assertIsNone(getattr(e, 'least_bytes', None))
+    return str(e)
 
 
 class TestRefusals(unittest.TestCase):
@@ -834,18 +845,24 @@ class TestSummaryBound(unittest.TestCase):
     result_too_large)."""
 
     def sweep(self, u, caps):
-        got = {}
+        got, least = {}, set()
         for mb in caps:
             try:
                 out = u.summary(max_bytes=mb)
             except CombineRefused as e:
                 self.assertEqual(e.code, 'summary_too_small', mb)
+                self.assertGreater(e.least_bytes, mb)
+                least.add(e.least_bytes)
                 got[mb] = None
                 continue
             n = len(U.C.canonical_json(out).encode('utf-8'))
             self.assertLessEqual(n, mb, (mb, out.get('notes')))
             self.assertIn('statements', out)
             got[mb] = n
+        # every refusal names one least size, and summary(max_bytes=) of it answers
+        self.assertLessEqual(len(least), 1)
+        for n in least:
+            self.assertLessEqual(len(U.C.canonical_json(u.summary(max_bytes=n))), n)
         return got
 
     def boundary(self, u, upto):
@@ -857,6 +874,9 @@ class TestSummaryBound(unittest.TestCase):
         self.assertEqual(got[least], least)
         refused(self, 'summary_too_small', lambda: u.summary(max_bytes=least - 1),
                 U.TEXTS['summary_too_small'] % (least, least - 1, least))
+        with self.assertRaises(CombineRefused) as cm:
+            u.summary(max_bytes=1)
+        self.assertEqual(cm.exception.least_bytes, least)
         return least
 
     def test_every_ceiling_on_the_locus(self):

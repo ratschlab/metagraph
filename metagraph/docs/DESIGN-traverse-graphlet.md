@@ -524,7 +524,8 @@ union_pairs(results, *, seed=None, expected_pairs=None, seqs_order=None, budget=
     # one seed's answers on several pairs (DESIGN-graphlet-merge.md §2), any order: Graphlet, StitchedGraphlet
     # (experimental: its spans past a junction name it, PairSpan.junctions), one-seed TraverseResponse,
     # {response, index}, {response, sequence}, {pair, graphlet}, {pair, result[, error][, sequence]}, {pair, error};
-    # refusals CombineRefused(code) in the order of DESIGN-graphlet-merge.md Appendix A.2; the parts stay unchanged
+    # refusals CombineRefused(code) in the order of DESIGN-graphlet-merge.md Appendix A.2; the parts stay unchanged;
+    # .least_bytes: summary_too_small's least answer in bytes (the number its text states), else None
 PairUnion.parts / .absent / .pairs / .expected / .digest / .seed / .arms()
 PairUnion.coverage(arm=None, at_bp=None, *, budget=None) -> Coverage(per_pair, by_category,
     every_pair_certified_to_bp, sentence)
