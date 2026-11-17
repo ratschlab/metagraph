@@ -309,7 +309,7 @@ ResolveAnswer profile_answer(const graph::traversal::SupportProfile &profile,
 // The same as one tree (the tree API: the tests, the CLI): each object's tree kept beside its
 // text, outside |answer|, which is charged as by profile_answer; the tree's json_text(tree,
 // true) must equal the text the server writes from profile_answer's form, else std::logic_error
-// (in every build type)
+// (in every build type). Both texts are written under |check| as well, every 64 KiB
 Json::Value profile_to_json(const graph::traversal::SupportProfile &profile,
                             const graph::traversal::SeedSelection *selection,
                             const std::string &run_format,
@@ -751,7 +751,9 @@ ResolveAnswer process_resolve_answer(
         const std::function<void()> &admit = nullptr);
 // The same as one tree (the tree API: the CLI, the tests): each held object's tree kept beside
 // its text, outside the answer account; json_text(answer, true) must equal the text the server
-// writes from process_resolve_answer's form, else std::logic_error (in every build type)
+// writes from process_resolve_answer's form, else std::logic_error (in every build type). Both
+// texts are written under the request's deadline (|delivery|'s check), every 64 KiB: past it,
+// ResolveDeadline
 Json::Value process_resolve_request(
         const Json::Value &json,
         const graph::AnnotatedDBG &anno_graph,

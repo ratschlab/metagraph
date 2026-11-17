@@ -2840,7 +2840,8 @@ TEST(ResolveAnswer, AnObjectIsHeldAtItsText) {
 // reading; on small objects one every 64 KiB, and one every 4,096 objects. A check that throws
 // at any of its readings ends the build there: the account then holds exactly the objects
 // written before that reading (64 KiB and three copies of each text and 128 B), so that at most
-// 64 KiB of text and one object are built past a stop or a deadline
+// 64 KiB of text and one object are built past a stop or a deadline. The tree API reads it in
+// its identity check's writing too (the review's nit on the CLI)
 TEST(ResolveAnswer, TheBuildIsReadEvery64KiBOfText) {
     struct Stop {};
     for (auto [labels, runs, candidates] : { std::make_tuple(12, 6000, false),
@@ -2865,6 +2866,18 @@ TEST(ResolveAnswer, TheBuildIsReadEvery64KiBOfText) {
         size_t calls = 0;
         cli::profile_answer(p, nullptr, "intervals", [&]() { ++calls; });
         EXPECT_EQ(readings.size(), calls) << what;
+        // the tree API (profile_to_json; process_resolve_request with the request's deadline,
+        // the CLI's) reads it too while it writes the two texts of its identity check, each
+        // every 64 KiB: a check that throws at its first reading after the build ends it there
+        size_t tree_calls = 0;
+        const std::string tree = compact(cli::profile_to_json(p, nullptr, "intervals",
+                                                              [&]() { ++tree_calls; }));
+        EXPECT_LE(readings.size() + tree.size() / cli::kDeliveryCheckBytes, tree_calls) << what;
+        size_t after = 0;
+        EXPECT_THROW(cli::profile_to_json(p, nullptr, "intervals", [&]() {
+            if (++after > readings.size())
+                throw Stop();
+        }), Stop) << what;
         // a check that throws at its r-th reading: the objects written before it, and no other
         for (size_t r = 0; r < readings.size(); r += labels == 12 ? 1 : 3) {
             AnswerAccount account(uint64_t(1) << 40);
