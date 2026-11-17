@@ -2617,22 +2617,32 @@ static ResolveAnswer answer_of_profile(const SupportProfile &p, const SeedSelect
     auto charge = [&](const JsonPrice &price) { charge_json(answer, price); };
     const bool rle = run_format == "rle";
     const bool trace = p.support == Support::TRACE;
-    // each object's compact text, written once it is built: one writer for the answer. Beside
-    // an object's tree its writing holds the writer's buffer (its capacity kept between objects:
-    // up to twice the largest text so far), the text returned and, for an element after the
-    // first, its copy after the comma; its price counts the text once, so these are bounded by
-    // one object (the largest), within the earlier objects' three copies of their texts
+    // each object's compact text, written once it is built. An object whose text is priced
+    // under kDeliveryCheckBytes by one writer for the answer, whose buffer keeps its capacity
+    // between objects (so its writing holds beside its tree the buffer, up to twice 64 KiB, the
+    // text returned and, for an element after the first, its copy after the comma: not charged,
+    // at most a few hundred KB); a larger one into a buffer reserved to its exact size
+    // (compact_json_size), its comma moved in: its tree and its text, as its price counts them
+    // (the Fable review of 37b70685e, m2: before, an object of 100 MB held beside its tree the
+    // writer's buffer at its last growth, up to twice its text, and the text's copy)
     CompactJsonWriter writer;
     // |tree|'s text, after a comma unless it is |first| in its array, and its charge |price|
     // settled to it (the tree is the caller's to keep or free); then the reading by bytes
     auto text_of = [&](const Json::Value &tree, bool first, const JsonPrice &price) {
-        std::string text = writer.text(tree);
-        if (!first) {
-            std::string element;
-            element.reserve(text.size() + 1);
-            element += ',';
-            element += text;
-            text.swap(element);
+        std::string text;
+        if (price.text < kDeliveryCheckBytes) {
+            text = writer.text(tree);
+            if (!first) {
+                std::string element;
+                element.reserve(text.size() + 1);
+                element += ',';
+                element += text;
+                text.swap(element);
+            }
+        } else {
+            text = json_text(tree, true, nullptr, nullptr, compact_json_size(tree) + !first);
+            if (!first)
+                text.insert(text.begin(), ',');
         }
         settle_json(answer, price, text.size());
         unread += text.size();
@@ -2670,9 +2680,8 @@ static ResolveAnswer answer_of_profile(const SupportProfile &p, const SeedSelect
         return arr;
     };
     {
-        const JsonPrice price = answer ? member_price("graph_runs", 0)
-                                         + runs_price(p.graph_runs, p.num_kmers, rle)
-                                       : JsonPrice();
+        const JsonPrice price = member_price("graph_runs", 0)
+                                + runs_price(p.graph_runs, p.num_kmers, rle);
         charge(price);
         Json::Value runs = runs_json(p.graph_runs);
         std::vector<std::string> value;
@@ -2685,7 +2694,7 @@ static ResolveAnswer answer_of_profile(const SupportProfile &p, const SeedSelect
     Json::Value *kept_labels = kept("labels");
     for (const auto &l : p.labels) {
         built();
-        const JsonPrice price = answer ? label_price(l, p.num_kmers, rle, trace) : JsonPrice();
+        const JsonPrice price = label_price(l, p.num_kmers, rle, trace);
         charge(price);
         Json::Value lj;
         lj["label"] = l.label.name;
@@ -2726,7 +2735,7 @@ static ResolveAnswer answer_of_profile(const SupportProfile &p, const SeedSelect
     Json::Value *kept_cands = kept("candidates");
     for (const auto &c : p.candidates) {
         built();
-        const JsonPrice price = answer ? candidate_price(p, c) : JsonPrice();
+        const JsonPrice price = candidate_price(p, c);
         charge(price);
         Json::Value cj;
         cj["kmer_interval"] = interval_json(c.kmers);
@@ -2766,7 +2775,7 @@ static ResolveAnswer answer_of_profile(const SupportProfile &p, const SeedSelect
         Json::Value kept_seeds(Json::arrayValue);
         for (const auto &seed : sel->seeds) {
             built();
-            const JsonPrice price = answer ? seed_price(seed) : JsonPrice();
+            const JsonPrice price = seed_price(seed);
             charge(price);
             Json::Value sj;
             sj["seed_id"] = seed.seed_id;
@@ -2808,9 +2817,8 @@ static ResolveAnswer answer_of_profile(const SupportProfile &p, const SeedSelect
     if (unknown_labels) {
         // the labels this pair does not hold (a multi-graph server's), held as the answer's
         // other objects, written by the same writer
-        const JsonPrice price = answer ? member_price("unknown_labels", 0)
-                                         + names_price(p.unknown_labels)
-                                       : JsonPrice();
+        const JsonPrice price = member_price("unknown_labels", 0)
+                                + names_price(p.unknown_labels);
         charge(price);
         Json::Value names = names_json(p.unknown_labels);
         std::vector<std::string> value;

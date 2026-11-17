@@ -2955,10 +2955,14 @@ TEST(ResolveAnswer, ThePriceCoversTheTexts) {
     size_t measured = 0;
     for (bool trace : { false, true }) {
         for (const char *format : { "intervals", "rle" }) {
+            // (the last two: objects whose texts pass 64 KiB, each written into a buffer reserved
+            // to its size: labels of 6,000 runs, and a candidate listing 500 names of 4,000 B)
             for (auto [labels, runs, name, seeds] : { std::make_tuple(2000, 3, 12, 2),
                                                        std::make_tuple(20, 2000, 40, 0),
                                                        std::make_tuple(300, 100, 100, 30),
-                                                       std::make_tuple(40, 2, 1100, 4) }) {
+                                                       std::make_tuple(40, 2, 1100, 4),
+                                                       std::make_tuple(6, 6000, 40, 0),
+                                                       std::make_tuple(500, 1, 4000, 0) }) {
                 const auto [p, sel] = priced_profile(labels, runs, name, seeds, trace);
                 const std::string what = std::string(format) + (trace ? " trace " : " kmer ")
                         + std::to_string(labels) + "x" + std::to_string(runs) + " names "
