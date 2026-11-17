@@ -367,7 +367,8 @@ deadline. `src/cli/traverse.cpp` `process_resolve_request`, `src/graph/traversal
 - **The answer is built within the reserve.** After the work, the loops over the labels (a discovery's ranking
   and naming, the profiles, the candidates' grouping) read the whole budget every 4,096 labels, and the grouping
   every 4,096 groups as it makes them candidates *(T5a-X1, Opus review 2026-11-13: before, that pass read
-  nothing, up to about 0.7 s at 3 million groups)*, the selection
+  nothing, up to about 0.7 s at 3 million groups)* and every 65,536 runs it walks *(the Opus review of d398357a9,
+  N2: 4,000 labels of about 3,700 runs, 15 million runs, went unread for about 0.5 s)*, the selection
   (`select_seeds`) every 4,096 steps — an explicit seed and each of its labels; a label and its runs gathered for
   `max_support`, and the runs before their sort; in a `max_support` round a run clipped by the picks before it and
   each pick it meets, a candidate start swept, the round's runs once before each of its sorts, and a label with its

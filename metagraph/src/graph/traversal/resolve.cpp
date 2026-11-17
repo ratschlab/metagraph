@@ -673,15 +673,18 @@ SupportProfile resolve_support(LabelOracle &oracle,
     ResolveStop::Phase stop_phase = ResolveStop::ROWS;
     ResolveStop::Reason stop_reason = ResolveStop::TIME;
     bool cannot_progress = false;
-    // the loops over the labels after the work, every kResolveCheckLabels: the request's stop
-    // first, as poll reads it before the deadline (a client gone, a fan-out's cutoff: without
-    // a deadline nothing else ends these loops, T5a-X1), then the answer's time
+    // the loops over the labels after the work, every kResolveCheckLabels (and the candidates'
+    // grouping every kResolveCheckRuns runs as well): the request's stop first, as poll reads it
+    // before the deadline (a client gone, a fan-out's cutoff: without a deadline nothing else
+    // ends these loops, T5a-X1), then the answer's time
+    auto reading = [&]() {
+        checkpoint();
+        if (options.finish_check)
+            options.finish_check();
+    };
     auto finishing = [&](size_t i) {
-        if (i && i % kResolveCheckLabels == 0) {
-            checkpoint();
-            if (options.finish_check)
-                options.finish_check();
-        }
+        if (i && i % kResolveCheckLabels == 0)
+            reading();
     };
     profile.num_kmers = query.size() - profile.k + 1;
     checkpoint();
@@ -1552,14 +1555,15 @@ SupportProfile resolve_support(LabelOracle &oracle,
     // ---- the answer account (§4.6, T4-L1): the profile as it is held, then its candidates
     if (options.answer)
         options.answer->charge(profile_held_bytes(profile), "profile");
-    group_candidates(&profile, options.min_block_kmers, options.answer, finishing);
+    group_candidates(&profile, options.min_block_kmers, options.answer, finishing, reading);
     // the profile, complete, beside the query
     note_memory(profile_bytes(profile));
     return profile;
 }
 
 void group_candidates(SupportProfile *profile, uint64_t min_block_kmers, AnswerAccount *answer,
-                      const std::function<void(size_t)> &finishing) {
+                      const std::function<void(size_t)> &finishing,
+                      const std::function<void()> &reading) {
     // the grouping charged before it is built (kCandidateRunBytes a run grouped), replaced by
     // what the candidates hold once it is done
     uint64_t grouping = 0;
@@ -1575,10 +1579,15 @@ void group_candidates(SupportProfile *profile, uint64_t min_block_kmers, AnswerA
 
     // ---- seed candidates: identical maximal runs grouped
     std::map<KmerInterval, std::vector<LabelId>> groups;
+    // read by the runs walked as well as by the labels (the Opus review of d398357a9, N2: 4,000
+    // labels of about 3,700 runs each, 15 million map steps, went unread for about 0.5 s)
+    uint64_t runs_walked = 0;
     for (LabelId l = 0; l < profile->labels.size(); ++l) {
         if (finishing)
             finishing(l);
         for (const auto &run : profile->labels[l].runs) {
+            if (reading && ++runs_walked % kResolveCheckRuns == 0)
+                reading();
             if (run.size() >= min_block_kmers)
                 groups[run].push_back(l);
         }
