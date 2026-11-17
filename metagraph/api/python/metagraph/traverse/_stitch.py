@@ -624,9 +624,8 @@ class StitchedGraphlet:
             for pp in sorted(mine, key=lambda x: tuple('' if v is None else v for v in x)):
                 if pp.identity != cp.identity:
                     def show(x):
-                        return json.dumps({'graph': x[0], 'graph_path': x[1],
-                                           'annotation_path': x[2]},
-                                          separators=(',', ':'), ensure_ascii=False)
+                        # the pair by graph and n1 id, no path (Pair.named())
+                        return json.dumps(x.named(), separators=(',', ':'), ensure_ascii=False)
                     raise CombineRefused('different_pair', _T_DIFFERENT_PAIR % (show(cp),
                                                                                 show(pp)))
 
@@ -1858,9 +1857,12 @@ class StitchedGraphlet:
 
     def provenance(self):
         """One entry per part (§3.6): {key, role: root | child, junction: {arm, walk, at_bp,
-        overlap_bp} | None, pair: the pair it was answered on, identity, seed_id, digest,
-        request: the part's replay request as GraphletStore.request_of() builds it}. No
-        single request reproduces a stitched graphlet: replay each part and stitch again."""
+        overlap_bp} | None, pair: the pair it was answered on ({graph, pair_id}, no path;
+        None on a single-graph server), identity, seed_id, digest, request: the part's replay
+        request as GraphletStore.request_of() builds it, its pair named by {graph, pair_id}
+        (client.request_without_paths())}. No single request reproduces a stitched graphlet:
+        replay each part and stitch again."""
+        from .client import request_without_paths
         from .store import GraphletStore
         out = []
         for p in self._parts:
@@ -1871,10 +1873,12 @@ class StitchedGraphlet:
                 j = {'arm': jj.arm, 'walk': jj.walk, 'at_bp': jj.at_bp,
                      'overlap_bp': jj.overlap_bp}
             meta = (g.seed_summary or {}).get('seed') or {}
+            pair = answered_pair(g.envelope)
             out.append({'key': p.key, 'role': 'child' if p.key else 'root', 'junction': j,
-                        'pair': answered_pair(g.envelope), 'identity': _ops.index_identity(g),
+                        'pair': None if pair is None else pair.named(),
+                        'identity': _ops.index_identity(g),
                         'seed_id': meta.get('seed_id'), 'digest': p.digest,
-                        'request': GraphletStore.request_of(g)})
+                        'request': request_without_paths(GraphletStore.request_of(g))})
         return out
 
     def memory_bytes(self):

@@ -89,7 +89,7 @@ __all__ = ['TraverseClient', 'TraverseResponse', 'TraverseError', 'ServerInitial
            'auto_coordinates', 'drop_coordinates_note', 'strip_coordinate_cap',
            'SELECTORS', 'pair_members', 'answered_pair', 'requested_pair', 'PairResults',
            'PAIR_ID_NAMESPACE', 'configured_pair_id', 'check_pair_id', 'Pair', 'PairIdError',
-           'capabilities_pair_resolver']
+           'capabilities_pair_resolver', 'request_without_paths', 'entry_without_paths']
 
 ACCEPT_ENCODING = 'gzip, deflate'
 # the feature level of the tombstone's suppression (a cancel with not_after_ms,
@@ -189,6 +189,15 @@ class Pair(NamedTuple):
         if self.pair_id:
             return self.graph, self.pair_id
         return self.graph, self.graph_path, self.annotation_path
+
+    def named(self):
+        """The pair as an output names it (docs/DESIGN-pair-identity.md section 2: no path in
+        any response): {graph, pair_id} where it has an id -- an old document's computed from
+        its paths -- else {graph} with the paths it was given (a caller's selector without
+        the annotation path, which has no id to compute)."""
+        if self.pair_id:
+            return {'graph': self.graph, 'pair_id': self.pair_id}
+        return {k: v for k, v in zip(('graph', 'graph_path', 'annotation_path'), self) if v}
 
 
 # an n1 id as the engine states it: "n1-" and a lowercase UUID of version 5 (RFC 4122 variant)
@@ -313,6 +322,43 @@ def requested_pair(req):
         return None
     graph = _text(req.get('graph'))
     return None if graph is None else Pair(graph, _text(req.get('graph_path')))
+
+
+def request_without_paths(request):
+    """|request| (a /traverse request, a replay or continuation request) as an output states
+    it: each `pairs` object that names its pair by both paths names it by {graph, pair_id}
+    instead (the n1 id of those paths), in a copy -- a request the library sends keeps the
+    paths of an old document, which every engine takes, and sent again through a client this
+    one goes through wire_request(). A selector without the annotation path (a caller's, with
+    no id to compute) and any other request are returned as they are."""
+    pairs = request.get('pairs') if isinstance(request, dict) else None
+    if not isinstance(pairs, list):
+        return request
+    out = []
+    for i, p in enumerate(pairs):
+        if isinstance(p, dict) and _text(p.get('graph')) and _text(p.get('graph_path')) \
+                and _text(p.get('annotation_path')):
+            t = _pair(p['graph'], p['graph_path'], p['annotation_path'], p.get('pair_id'),
+                      'request.pairs[%d]' % i)
+            rest = {k: v for k, v in p.items() if k not in Pair._fields}
+            out.append(dict(t.named(), **rest))
+        else:
+            out.append(p)
+    return dict(request, pairs=out)
+
+
+def entry_without_paths(entry):
+    """A multi-graph entry's tags (an answer's, a probe's) as an output states them: graph
+    and pair_id, no path -- the pair_id the n1 id of the paths an engine before ids states.
+    Anything else is returned as it is."""
+    if not isinstance(entry, dict) or not (_text(entry.get('graph_path'))
+                                           or _text(entry.get('annotation_path'))):
+        return entry
+    pair = answered_pair(entry)
+    out = {k: v for k, v in entry.items() if k not in ('graph_path', 'annotation_path')}
+    if pair is not None and pair.pair_id:
+        out['pair_id'] = pair.pair_id
+    return out
 
 
 def capabilities_pair_resolver(capabilities):
@@ -1245,9 +1291,11 @@ class TraverseClient:
         -> PairResults(results, seed, expected_pairs, seqs_order): |seed| the oriented
         seed sent, |expected_pairs| the pair objects the requests were sent to, |seqs_order|
         each pair's record-mapping certificate as GET /capabilities states it (keys:
-        (graph, graph_path, annotation_path), (graph, pair_id) for a pair named by its id,
-        or the index namespace on a single-graph server; values 'verified', 'count_only' or
-        None)."""
+        (graph, pair_id), or the index namespace on a single-graph server; values
+        'verified', 'count_only' or None). A pair is stated by its graph and n1 id, no path
+        (Pair.named()): an engine's listed paths, or a caller's, become their id; only a
+        caller's pair without the annotation path, which has no id, keeps what it gave
+        ((graph, graph_path, annotation_path) keys)."""
         seq = seed.get('sequence') if isinstance(seed, dict) else seed
         if not isinstance(seq, str) or not seq:
             raise ValueError('traverse_pairs() takes one seed: a sequence or {sequence, ...}, '
@@ -1360,18 +1408,15 @@ def _names(t, lp):
 
 
 def _seqs_key(t):
-    """traverse_pairs()' seqs_order key of target |t|."""
-    if t.pair_id and not t.graph_path and not t.annotation_path:
+    """traverse_pairs()' seqs_order key of target |t|: (graph, pair_id), no path."""
+    if t.pair_id:
         return t.graph, t.pair_id
     return t.graph, t.graph_path, t.annotation_path
 
 
 def _pair_object(t):
-    """The pair object traverse_pairs() states for target |t|: its graph and the paths or
-    the id it was named by."""
-    if t.graph_path or t.annotation_path or not t.pair_id:
-        return {k: v for k, v in zip(('graph', 'graph_path', 'annotation_path'), t) if v}
-    return {'graph': t.graph, 'pair_id': t.pair_id}
+    """The pair object traverse_pairs() states for target |t| (Pair.named())."""
+    return t.named()
 
 
 @dataclass(frozen=True)

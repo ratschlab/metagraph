@@ -448,6 +448,15 @@ def _with_id(d):
     return d
 
 
+def _key_text(k, d):
+    """seqs_order key |k| (description |d|) in a text: as given, but a key that names its
+    pair by both paths by (graph, pair_id) -- no configured path in a response."""
+    if isinstance(k, tuple) and d is not None and d.get('graph_path') \
+            and d.get('annotation_path'):
+        return repr((d['graph'], d['pair_id']))
+    return repr(k)
+
+
 def _stated_desc(p, refuse, where):
     """_pair_desc(|p|), a PairIdError raised as |refuse|(text naming |where|)."""
     try:
@@ -520,8 +529,12 @@ def _sort_key(key):
 
 
 def _show(d):
-    return C.canonical_json({k: v for k, v in d.items() if v is not None}) \
-        if set(d) != {'graph'} else d['graph']
+    """Description |d| in a text: its members but the paths (no path in any response,
+    docs/DESIGN-pair-identity.md section 2; a pair named by its paths shows the n1 id of
+    them), or the bare name."""
+    d = {k: v for k, v in d.items()
+         if v is not None and k not in ('graph_path', 'annotation_path')}
+    return C.canonical_json(d) if set(d) != {'graph'} else d['graph']
 
 
 def _seed_meta(result):
@@ -692,7 +705,8 @@ def _check_args(results, seed, expected_pairs, seqs_order):
             d = _stated_desc(p, lambda t: _refuse('bad_expected', None, t),
                              'expected_pairs[%d]' % i)
             if d is None:
-                raise _refuse('bad_expected', None, 'expected_pairs[%d] (%r)' % (i, p))
+                raise _refuse('bad_expected', None, 'expected_pairs[%d] (%s)'
+                              % (i, _describe(p) if isinstance(p, dict) else repr(p)))
             exp.append(d)
     so = []
     if seqs_order is not None:
@@ -713,7 +727,8 @@ def _check_args(results, seed, expected_pairs, seqs_order):
             else:
                 d = _pair_desc(k) if isinstance(k, str) else None
             if d is None or v not in _SEQS_ORDER:
-                raise _refuse('bad_seqs_order', None, 'seqs_order[%r] = %r' % (k, v))
+                raise _refuse('bad_seqs_order', None, 'seqs_order[%s] = %r'
+                              % (_key_text(k, d), v))
             so.append((d, 'none' if v is None else v, k))
         # two values for one pair, seen among the keys themselves (an argument error, so
         # before any result is read); a conflict only a result's pair shows is found once
@@ -722,8 +737,9 @@ def _check_args(results, seed, expected_pairs, seqs_order):
             for j in range(i + 1, len(so)):
                 if so[i][1] != so[j][1] and _matches(so[i][0], so[j][0]):
                     raise _refuse('bad_seqs_order', None,
-                                  'seqs_order[%r] and seqs_order[%r] (two values for one pair)'
-                                  % (so[i][2], so[j][2]))
+                                  'seqs_order[%s] and seqs_order[%s] (two values for one pair)'
+                                  % (_key_text(so[i][2], so[i][0]),
+                                     _key_text(so[j][2], so[j][0])))
     if seed is not None and not isinstance(seed, str):
         raise TypeError('seed= is the oriented seed sequence (a string), not %r' % (seed,))
     if not isinstance(results, (list, tuple)):
@@ -1983,27 +1999,29 @@ class PairUnion:
         """One entry per part ({tag, pair, pair_stated_by, identity, seed_id, digest,
         request}: the replay request as GraphletStore.request_of() builds it), per absent
         record, per earlier failed attempt, and the expected pairs."""
+        from .client import request_without_paths
         from .store import GraphletStore
         out = []
         for p in self.parts:
             g = _root(p.graphlet)
             pair = dict(zip(_KEY_FIELDS, p.key))
-            entry = {'tag': p.tag, 'kind': 'part', 'pair': pair,
+            entry = {'tag': p.tag, 'kind': 'part', 'pair': _key_out(pair),
                      'pair_stated_by': p.pair_stated_by, 'identity': p.identity,
                      'seed_id': ((g.seed_summary or {}).get('seed') or {}).get('seed_id'),
                      'digest': p.digest,
-                     'request': GraphletStore.request_of(
+                     'request': request_without_paths(GraphletStore.request_of(
                          g, graph=pair['graph'], graph_path=pair['graph_path'],
                          annotation_path=pair['annotation_path'], pair_id=pair['pair_id'])
-                     if p.pair_stated_by == 'caller' and pair['graph'] else
-                     GraphletStore.request_of(g)}
+                         if p.pair_stated_by == 'caller' and pair['graph'] else
+                         GraphletStore.request_of(g))}
             if isinstance(p.graphlet, StitchedGraphlet) and p.graphlet.junctions:
                 # a stitched part: its root's request above, and each child's entry
                 # (StitchedGraphlet.provenance()): no single request reproduces it
                 entry['stitched'] = p.graphlet.provenance()[1:]
             out.append(entry)
         for a in self.absent:
-            out.append({'tag': a.tag, 'kind': 'absent', 'pair': dict(zip(_KEY_FIELDS, a.key)),
+            out.append({'tag': a.tag, 'kind': 'absent',
+                        'pair': _key_out(dict(zip(_KEY_FIELDS, a.key))),
                         'pair_stated_by': a.pair_stated_by, 'category': a.category,
                         'detail': a.detail, 'seed_check': a.seed_check})
         for f in self._failures:
@@ -2011,6 +2029,12 @@ class PairUnion:
         if self.expected is not None:
             out.append({'kind': 'expected_pairs', 'tags': list(self.expected)})
         return out
+
+
+def _key_out(pair):
+    """A pair key as provenance() states it: the key's members, its paths None (a key holds
+    paths only for a caller's pair without an id; no path in any response)."""
+    return dict(pair, graph_path=None, annotation_path=None)
 
 
 class _SeedStandIn:
@@ -2030,9 +2054,9 @@ def _seqs_of(classes, so, tags):
     for c in classes:
         vals = {v for d, v, _ in so if _matches(d, c['desc'])}
         if len(vals) > 1:
-            k = next(k for d, v, k in so if _matches(d, c['desc']))
-            raise _refuse('bad_seqs_order', None, 'seqs_order[%r] (two values for pair %s)'
-                          % (k, tags[id(c)]))
+            d, k = next((d, k) for d, v, k in so if _matches(d, c['desc']))
+            raise _refuse('bad_seqs_order', None, 'seqs_order[%s] (two values for pair %s)'
+                          % (_key_text(k, d), tags[id(c)]))
         seqs[id(c)] = vals.pop() if vals else 'unknown'
     return seqs
 

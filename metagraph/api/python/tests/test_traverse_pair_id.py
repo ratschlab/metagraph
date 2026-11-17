@@ -542,10 +542,7 @@ class TestUnionOfBothForms(unittest.TestCase):
         self.assertEqual(u.summary(), v.summary(), what)
         self.assertEqual(u.to_fasta(), v.to_fasta(), what)
         self.assertEqual(u.to_gfa(), v.to_gfa(), what)
-        # (the replay requests differ until outputs name pairs without paths)
-        self.assertEqual([{k: x for k, x in e.items() if k != 'request'} for e in u.provenance()],
-                         [{k: x for k, x in e.items() if k != 'request'} for e in v.provenance()],
-                         what)
+        self.assertEqual(u.provenance(), v.provenance(), what)
 
     def test_old_new_and_mixed_unions_are_one(self):
         old = r237_union()
@@ -662,6 +659,108 @@ class TestUnionOfBothForms(unittest.TestCase):
             union_pairs([bad])
         with self.assertRaises(PairIdError):
             GraphletStore.request_of(bad)
+
+
+def configured_paths(*docs):
+    """Every configured path the documents |docs| (texts) state."""
+    out = set()
+    for text in docs:
+        j = json.loads(next(line for line in text.split('\n') if line.startswith('J '))[2:])
+        out.update(v for v in (j.get('graph_path'), j.get('annotation_path')) if v)
+    with open(os.path.join(R237, 'absent.json'), encoding='utf-8') as f:
+        for a in json.load(f):
+            out.update((a['pair']['graph_path'], a['pair']['annotation_path']))
+    return out
+
+
+class TestOutputsWithoutPaths(unittest.TestCase):
+    """The owner's decision (docs/DESIGN-pair-identity.md section 2): no path in any
+    response. What the library answers names a pair by graph and pair_id -- computed for an
+    old document -- in both forms; inputs keep taking paths."""
+
+    def test_the_union_of_old_documents_states_no_path(self):
+        u = r237_union()
+        paths = configured_paths(*(r237_text(n) for n in R237_PARTS))
+        self.assertEqual(len(paths), 22)
+        outs = [u.summary(), u.provenance(), u.evidence(), u.to_fasta(), u.to_gfa(),
+                str(u), [(p.tag, p.key) for p in u.parts + u.absent]]
+        text = json.dumps(outs, default=str)
+        self.assertEqual([p for p in paths if p in text], [])
+        # the replay request names the pair by id
+        (prov,) = [e for e in u.provenance() if e.get('tag') == 'bact_other']
+        self.assertEqual(prov['request']['pairs'], [{'graph': 'bact_other',
+                                                     'pair_id': prov['pair']['pair_id']}])
+        self.assertEqual((prov['pair']['graph_path'], prov['pair']['annotation_path']),
+                         (None, None))
+
+    def test_refusal_texts_state_no_path(self):
+        from metagraph.traverse import union_pairs
+        old = parse(r237_text('bact_other'))
+        paths = configured_paths(r237_text('bact_other'))
+        texts = []
+        for call in (lambda: union_pairs([{'pair': 'other', 'graphlet': old}]),
+                     lambda: union_pairs([old], seqs_order={
+                         ('bact_other', old.envelope['graph_path'],
+                          old.envelope['annotation_path']): 'verified',
+                         ('bact_other', answered_pair(old.envelope).pair_id): 'count_only'})):
+            with self.assertRaises(CombineRefused) as cm:
+                call()
+            texts.append(str(cm.exception))
+        self.assertIn(answered_pair(old.envelope).pair_id, texts[0])
+        self.assertEqual([p for p in paths if p in ' '.join(texts)], [], texts)
+
+    def test_stitch_provenance_and_refusal_state_no_path(self):
+        def load(role, form, **kw):
+            with open(os.path.join(T.STITCH, 'keep_forbid.%s.json' % role),
+                      encoding='utf-8') as f:
+                resp = tagged(json.load(f), form, **kw)
+            return MT.from_response(resp['results'][0], resp)
+        sg = stitch(load('parent', 'paths'), load('child', 'id'))
+        prov = sg.provenance()
+        self.assertEqual([e['pair'] for e in prov], [{'graph': GRAPH, 'pair_id': ID}] * 2)
+        self.assertEqual([e['request']['pairs'] for e in prov], [BY_ID] * 2)
+        text = json.dumps(prov, default=str)
+        self.assertNotIn(GP, text)
+        with self.assertRaises(CombineRefused) as cm:
+            stitch(load('parent', 'paths'), load('child', 'paths', gp=GP2, ap=AP2))
+        self.assertEqual(str(cm.exception),
+                         'the child was answered on pair {"graph":"refseq","pair_id":"%s"}, its '
+                         'parent on pair {"graph":"refseq","pair_id":"%s"}: a continuation runs '
+                         'on its parent\'s pair' % (ID2, ID))
+
+    def test_discovery_states_pairs_by_id(self):
+        c = _FanOut(TestDiscoveryInBothForms.BY_PATHS)
+        r = c.traverse_pairs('ACGT', coordinates=None)
+        # sent by the listed paths, stated by their ids
+        self.assertEqual(c.sent, BY_PATHS + [{'graph': GRAPH, 'graph_path': GP2,
+                                              'annotation_path': AP2}])
+        self.assertEqual(r.expected_pairs, ({'graph': GRAPH, 'pair_id': ID},
+                                            {'graph': GRAPH, 'pair_id': ID2}))
+        self.assertEqual(r.seqs_order, {(GRAPH, ID): 'verified'})
+        # a caller's pair by its paths too; one without the annotation path as given
+        c = _FanOut(TestDiscoveryInBothForms.BY_PATHS)
+        r = c.traverse_pairs('ACGT', pairs=[dict(BY_PATHS[0]), {'graph': GRAPH,
+                                                                'graph_path': GP2}],
+                             coordinates=None)
+        self.assertEqual(r.expected_pairs, ({'graph': GRAPH, 'pair_id': ID},
+                                            {'graph': GRAPH, 'graph_path': GP2}))
+        self.assertEqual(r.seqs_order, {(GRAPH, ID): 'verified'})
+
+    def test_request_and_entry_without_paths(self):
+        from metagraph.traverse.client import entry_without_paths, request_without_paths
+        req = {'seeds': [], 'pairs': [dict(BY_PATHS[0])]}
+        self.assertEqual(request_without_paths(req), {'seeds': [], 'pairs': BY_ID})
+        self.assertEqual(req['pairs'], BY_PATHS)                   # not changed in place
+        for same in ({'seeds': [], 'graph': GRAPH, 'graph_path': GP}, {'seeds': []},
+                     {'seeds': [], 'pairs': BY_ID}, None):
+            self.assertEqual(request_without_paths(same), same)
+        entry = {'graph': GRAPH, 'graph_path': GP, 'annotation_path': AP, 'index_fp': 'f',
+                 'k': 31}
+        self.assertEqual(entry_without_paths(entry), {'graph': GRAPH, 'pair_id': ID,
+                                                      'index_fp': 'f', 'k': 31})
+        for same in ({'k': 31}, {'graph': GRAPH, 'pair_id': ID},
+                     {'graph': None, 'graph_path': None, 'annotation_path': None}):
+            self.assertEqual(entry_without_paths(same), same)
 
 
 if __name__ == '__main__':
