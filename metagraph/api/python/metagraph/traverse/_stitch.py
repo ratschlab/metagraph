@@ -1810,7 +1810,8 @@ class StitchedGraphlet:
         cause codes and the walk-scope cause codes on the walks below each (walk_causes),
         the identity, the outcome and exact of evidence(); marked experimental. Junctions
         beyond the cap are cut from the end (junctions_cut); the rest is never cut:
-        summary_too_small when it alone exceeds max_bytes."""
+        summary_too_small when it alone exceeds max_bytes, with that least size in its text
+        and as .least_bytes (summary(max_bytes=e.least_bytes) answers)."""
         def run(b):
             meta = (self.root.seed_summary or {}).get('seed') or {}
             out = {'stitched': True, 'experimental': True,
@@ -1846,8 +1847,10 @@ class StitchedGraphlet:
                 out['junctions_cut'] = True
             n = size()
             if n > max_bytes:
-                raise CombineRefused('summary_too_small', _T_SUMMARY_TOO_SMALL
-                                     % (n, max_bytes, n))
+                # the least answer's size, as the union's refusal carries it (least_bytes)
+                e = CombineRefused('summary_too_small', _T_SUMMARY_TOO_SMALL % (n, max_bytes, n))
+                e.least_bytes = n
+                raise e
             return out
         return _K.run_scoped(budget, 'summary', run)
 
