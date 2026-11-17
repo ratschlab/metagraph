@@ -217,7 +217,8 @@ The answer keeps its upstream shape (a list of `{seq_description, results, ...}`
     `finish_by_ms`) has no budget to cap and runs as its single-graph answer does (a deadline would change its
     work: the direct path's explicit labels' hits fetched in pieces); with no time-limited answer to give, it is
     `unfinished` at the cutoff and told to stop there. Its work ends at its next reading of the request's stop:
-    between row batches, and after the work every 4,096 labels, groups, selection steps or answer objects; a
+    between row batches, and after the work every 4,096 labels, groups, selection steps or answer objects, every
+    65,536 runs the candidates' grouping walks and every 64 KiB of the answer's text; a
     piece that reads none (SPEC-labeled-traversal-core.md §4.5 lists them under "Not polled", with their times at
     the caps) delays that to its end (T5a-X1, Fable review 2026-11-12: before, nothing after the row pass read
     the stop, so the selection of a pair without a deadline held its pool thread to its end, minutes at the

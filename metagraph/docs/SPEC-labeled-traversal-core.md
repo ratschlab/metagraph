@@ -379,12 +379,13 @@ deadline. `src/cli/traverse.cpp` `process_resolve_request`, `src/graph/traversal
   query admits — ran about a second between two; the clip of every run by every pick before it, O(runs × picks) a
   round, is a binary search into the sorted, disjoint picks, the same runs in the same order)*, the answer's
   objects every 4,096 labels, candidates or seeds and each time their texts pass 64 KiB since the last such reading,
-  so that at most 64 KiB of text and one object (its tree and its text: up to about 7 MB for a label of a 1 Mbp
-  query) are built between two readings *(the Fable review of 37b70685e, M1: with each object written as its text when it is
-  built (§4.6), an answer of fewer than 4,096 objects was read only once complete — a 212 MB answer of 4,000 labels
-  answered its 503 4.7 s past the budget, and noticed a client gone 3.8 s late)*, the body every 64 KiB as it is
-  written (the CLI's identity check of its two texts as well, §4.6) and its compression every block of output and
-  every 4 MiB of text (the server's transport check, as `/pattern`'s). Past the budget the answer is **503**
+  so that at most 64 KiB of text and one object (its tree and its text: the text of a label of a 1 Mbp query up to
+  about 7 MB, its tree about 25 times that) are built between two readings *(the Fable review of 37b70685e, M1: with
+  each object written as its text when it is built (§4.6), an answer of fewer than 4,096 objects was read only once
+  complete — a 212 MB answer of 4,000 labels answered its 503 4.7 s past the budget, and noticed a client gone 3.8 s
+  late)*, the body every 64 KiB as it is written (the CLI's identity check of its two texts as well, §4.6) and its
+  compression every block of output and every 4 MiB of text (the server's transport check, as `/pattern`'s). Past
+  the budget the answer is **503**
   `{"error": "resolve: the answer could not be built and written within bounds.time_budget_ms (… ms, the
   finalisation reserve of 250 ms included): nothing partial is sent", "code": "deadline"}`, never a partial
   answer; the CLI writes that body and exits 1. (A 503 with `Retry-After` and no `code` is still the loading
@@ -406,7 +407,9 @@ deadline. `src/cli/traverse.cpp` `process_resolve_request`, `src/graph/traversal
   name sort of its kept labels' runs of equal support (of the boundary's run only its kept part) and the candidates'
   sort (n log n); in `select_seeds`, the sort of the runs `max_support` gathers and each of a round's three sorts (of
   its runs, its candidate starts and its run ends: n log n of at most twice the runs), a seed's label sort and one row of the seeds' overlaps (as many
-  pairs as seeds, at most `--resolve-max-explicit-seeds`); and the transport. The client's checks
+  pairs as seeds, at most `--resolve-max-explicit-seeds`); in the answer's build, one object (its price, its tree,
+  for an object of 64 KiB or more its size count, and its text) and, for a multi-graph pair, the pricing pass over
+  its `unknown_labels` before the first of them is written; and the transport. The client's checks
   are where they were (§10.3); a reserve that these overrun is not adapted to them (the reserve is fixed). The
   request's stop (a client gone, the fan-out's stop) is read at the same readings, so it waits for these pieces
   too. At the server's caps they take, on one laptop core (T5a-X1, Opus review 2026-11-13): the ranking sort and
