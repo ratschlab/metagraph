@@ -108,8 +108,8 @@ from . import derive, export, ops
 from ._codec import GraphletFormatError
 from .budget import LocalBudget, LocalBudgetExceeded, LocalLimits
 from .client import (SELECTORS, AttemptAtBound, ServerInitializing, TraverseError,
-                     _ResponseCut, auto_coordinates, drop_coordinates_note, pair_members,
-                     requested_pair, single_answer)
+                     PairIdError, _ResponseCut, auto_coordinates, drop_coordinates_note,
+                     pair_members, requested_pair, single_answer)
 from .model import (
     ARM_SIDES, AmbiguousLabel, IncompleteRecording, MissingEnvelope, NextRequest,
     UnknownLabel, UnverifiableLabelName,
@@ -637,6 +637,10 @@ def _tool(fn):
             # the backend's transport errors are mapped where the backend is called;
             # what is left is the local file system
             out = {'error': 'io_error', 'message': e.strerror or type(e).__name__}
+        except PairIdError as e:
+            # before ValueError, its base class: a pair named by an id the library does not
+            # take, or one it cannot send (no resolver, a server without ids): its own code
+            out = {'error': e.code, 'message': str(e)}
         except (IndexError, ValueError) as e:
             out = {'error': 'bad_argument', 'message': str(e)}
         finally:
