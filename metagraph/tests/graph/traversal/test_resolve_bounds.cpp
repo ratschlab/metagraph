@@ -2898,6 +2898,50 @@ TEST(ResolveAnswer, TheBuildIsReadEvery64KiBOfText) {
     }
 }
 
+// What the account holds is never above what it held before T7-D3 (the Fable review of
+// 37b70685e, untested claim 2): before, an object stayed charged at its price (its tree and its
+// text) until the answer was written, so the account held every charge made (charged()); now
+// each object is settled to its text once written, which only releases. At every reading of the
+// build and at its end the account holds at most every charge made; once the writing is charged
+// (charge_answer_text) its peak is at most the one before: every charge then the body's rounding,
+// then a top-up to alloc(T + 1) + 3T + 272 KiB (T the text with the head's 16 KiB) where now 2T
+// -- equal where the head's own peak in the build binds, below it otherwise
+TEST(ResolveAnswer, TheAccountHoldsAtMostWhatItHeldBefore) {
+    for (bool trace : { false, true }) {
+        for (const char *format : { "intervals", "rle" }) {
+            for (auto [labels, runs, name, seeds] : { std::make_tuple(2000, 3, 12, 0),
+                                                       std::make_tuple(20, 2000, 40, 0),
+                                                       std::make_tuple(300, 100, 20, 30),
+                                                       std::make_tuple(40, 2, 1100, 4) }) {
+                const auto [p, sel] = priced_profile(labels, runs, name, seeds, trace);
+                const SeedSelection *selection = seeds ? &sel : nullptr;
+                const std::string what = std::string(format) + (trace ? " trace " : " kmer ")
+                        + std::to_string(labels) + "x" + std::to_string(runs) + " names "
+                        + std::to_string(name);
+                AnswerAccount account(uint64_t(1) << 40);
+                size_t reads = 0;
+                cli::profile_answer(p, selection, format, [&]() {
+                    ++reads;
+                    EXPECT_LE(account.held(), account.charged()) << what;
+                }, &account);
+                EXPECT_LE(1u, reads) << what;
+                EXPECT_LE(account.held(), account.charged()) << what;
+                EXPECT_LE(account.peak(), account.charged()) << what;
+                // the writing: before, every charge (none released), the body's rounding and the
+                // top-up to four copies of the text
+                const uint64_t text = account.text() + (16 << 10);
+                const uint64_t alloc = annot::matrix::alloc_bytes(text + 1);
+                const uint64_t before = std::max(account.charged() + alloc - text,
+                                                 alloc + 3 * text + (272 << 10));
+                cli::charge_answer_text(&account);
+                EXPECT_LE(account.peak(), before) << what;
+                if (name <= 40 && std::string(format) == "intervals")
+                    EXPECT_LT(account.peak(), before) << what;
+            }
+        }
+    }
+}
+
 // The answer as the route holds it after its account priced it (T7-D3; before, the tree: T4
 // review R1, F3): its objects' texts, each written once its tree was built (the tree freed then),
 // then the body written from them into a buffer reserved to its exact size, each text freed once
@@ -3576,6 +3620,23 @@ TEST(ResolveBoundsRoute, AnAnswerThatFitsAsTextIsAnswered) {
     written.removeMember("work");
     // (compared as text: the reader reads a small unsigned integer as a signed one)
     EXPECT_EQ(compact(b), compact(written));
+    // and refused before T7-D3 (the Fable review of 37b70685e, untested claim 3): the pass holds
+    // its profile and candidates within 1 MiB, and with every object of the answer at its price
+    // (its tree and its text: before, none was released until the answer was written) the
+    // account passed 1 MiB, the 400 resolve_answer_too_large (answer). Now each object is held
+    // at its text, and the writing at three copies of the text: its peak within 1 MiB
+    cli::ResolveRequest parsed = cli::parse_resolve_request(request);
+    AnswerAccount account(uint64_t(1) << 40);
+    parsed.options.answer = &account;
+    LabelOracle oracle(*anno);
+    const SupportProfile profile = resolve_support(oracle, q, parsed.options);
+    const uint64_t after_pass = account.held();
+    const uint64_t charged_by_the_pass = account.charged();
+    EXPECT_GE(uint64_t(1) << 20, account.peak());
+    cli::profile_answer(profile, nullptr, "intervals", nullptr, &account);
+    EXPECT_LT(uint64_t(1) << 20, after_pass + account.charged() - charged_by_the_pass);
+    cli::charge_answer_text(&account);
+    EXPECT_GE(uint64_t(1) << 20, account.peak());
 }
 
 // What the server holds of a /resolve answer (process_resolve_answer): its head without the

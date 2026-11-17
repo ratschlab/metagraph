@@ -4799,7 +4799,20 @@ gone check read at least once every 64 KiB, a mismatched count of held answers a
 32 bp and their 40 labels named, which the base refused at part `answer` under a 1 MiB bound, answered as without the
 bound, the server's form written to the same bytes) and `.TheServersAnswerHoldsTextsOnly` (the route's answer holds
 no member it holds as text in its tree, a pair's `unknown_labels` included; `ServerRequest.
-TheResolveRouteWritesUnderItsGoneCheck`: the route's text `json_text`'s bytes at a capacity of its exact size), `ResolveAnswer.TheSelectionChargesTheClippedPieces` (T4
+TheResolveRouteWritesUnderItsGoneCheck`: the route's text `json_text`'s bytes at a capacity of its exact size); the
+fix round after the Fable review of 37b70685e: `ResolveAnswer.TheBuildIsReadEvery64KiBOfText` (M1: 12 labels of
+about 80 KB of text, small objects with candidates, and 5,000 labels: the check read after each 64 KiB of text and
+every 4,096 objects, as often as that rule counts; a check that throws at any reading leaves exactly the objects
+written before it held; the tree API reads it while it writes its identity check's texts too),
+`ResolveBoundsRoute.AnAnswerOfFewObjectsReadsTheStopWhileBuilt` (six labels of about 1,900 runs and about 1,900
+candidates, fewer than 4,096 objects: the route reads the stop while the answer is built, and a stop at the build's
+first reading abandons the request there) and `.TheAnswerBuildReadsTheStop` (its readings by bytes counted),
+`ResolveAnswer.TheAccountHoldsAtMostWhatItHeldBefore` (at every reading and at the end of the build the account holds
+at most every charge made, and the writing's peak is at most the one before T7-D3), `.AnAnswerThatFitsAsTextIsAnswered`
+(its request priced past 1 MiB with every object at its price, as before T7-D3, and within it now), and
+`ServerFanout.LateResolvePairsLeaveNoHeldTexts` (m3: two `/resolve` pairs cut at the cutoff that publish their texts
+later; the outcome holds the answered pair's texts only, and the envelope of one answered and two unfinished entries
+is written byte for byte as its tree), `ResolveAnswer.TheSelectionChargesTheClippedPieces` (T4
 review R1, F1: long runs split by 250 `max_support` picks; at every reading of the selection's check the heap it added
 within what its account holds then, 64 KiB aside; the seeds those made without an account),
 `ResolveAnswer.TheGroupingIsPricedAboveItsPeak` (F2: 2^17 + 1 runs of their own, jemalloc's peak within the price,
