@@ -150,8 +150,8 @@ run), and an attempt stopped at its duration bound while its response was built 
 ``AttemptAtBound`` (a 503 with ``usage``: it ran, so it is not retried under the same
 ``attempt_id`` -- refused while the server holds the id, it would run again after that).
 ``capabilities()`` and ``resolve()`` call the other two routes (on a multi-graph server
-``capabilities(graph=..., graph_path=..., annotation_path=...)`` describes one of its
-pairs),
+``capabilities(graph=..., graph_path=..., annotation_path=...)``, or
+``capabilities(graph=..., pair_id=...)``, describes one of its pairs),
 ``server_capabilities()`` reads the server-wide document (``GET /capabilities``:
 the routes and features, ``feature_level``, the mode and graph names, the attempts),
 ``traverse_raw(request)`` sends a request you built yourself, and ``api_path`` is for a
@@ -164,9 +164,41 @@ picks one graph of a name with several, ``annotation_path`` one annotation of a 
 with several; the request carries ``graph`` and ``graph_path``, or, with an
 ``annotation_path``, one ``pairs`` object, the only place ``/traverse`` takes it. The
 server answers in the envelope of that pair; the client reads its entry, and each
-graphlet keeps the pair's tags (``graph``, ``graph_path``, ``annotation_path``) in its
-envelope. Its continuations and replays run on that pair (below), not on the client's
-own.
+graphlet keeps the pair's tags in its envelope. Its continuations and replays run on that
+pair (below), not on the client's own.
+
+**Pair identity** (``docs/DESIGN-pair-identity.md``). A server before pair ids tags an
+answer with ``graph``, ``graph_path`` and ``annotation_path``; one after, with ``graph``
+and ``pair_id``, the pair's n1 id and no path, and states ``multigraph.pair_id: "n1"``
+in ``GET /capabilities``. The library reads both forms. ``configured_pair_id(graph,
+graph_path, annotation_path)`` computes the n1 id as the engine does (``"n1-"`` and a
+UUIDv5 of the three fields as the graph list spells them), so a document stored with
+paths and its twin stored with the id name one pair: ``answered_pair(envelope)`` returns
+a ``Pair(graph, graph_path, annotation_path, pair_id)`` whose ``pair_id`` is the stated id
+or the id of the paths, and ``Pair.identity`` is ``(graph, pair_id)`` for both. A pair
+can be named by its id wherever paths are taken: ``traverse(..., graph=...,
+pair_id=...)``, ``TraverseClient(..., pair_id=...)``, ``capabilities(graph=...,
+pair_id=...)``, a ``{graph, pair_id}`` object in ``traverse_pairs(pairs=...)`` and
+``union_pairs()``; the request carries ``pairs: [{graph, pair_id}]``. An id is the
+engine's n1 id, never the service's public ``p2-`` id, which is refused
+(``PairIdError``, a ``ValueError`` with ``code`` ``p2_pair_id``; ``bad_pair_id`` for
+anything else that is not an n1 id, ``pair_id_mismatch`` for an id stated beside paths
+that are not its).
+
+A document with paths is continued and replayed by its paths, which every server takes.
+A document with the id only is continued and replayed by its id, and the client decides
+how to send it, in one place (``TraverseClient.wire_request()``, which ``traverse_raw()``,
+``traverse()``, ``deepen()`` and the capabilities probe go through): with a
+``pair_resolver`` -- a function from an n1 id to ``(graph, graph_path,
+annotation_path)``, the caller's binding -- the id is resolved, the n1 id of the answer
+recomputed and compared, and the pair sent by its paths; without one it is sent by its id
+to a server that states ``multigraph.pair_id: "n1"``, and refused before anything is sent
+(``PairIdError`` ``pair_unresolved``) otherwise. ``capabilities_pair_resolver(doc)``
+builds a resolver from a ``GET /capabilities`` document that lists its pairs' paths. What
+the library answers names a pair by ``graph`` and ``pair_id``, never by a path: union
+provenance and refusal texts, a stitched graphlet's provenance, ``traverse_pairs()``'
+``expected_pairs`` and ``seqs_order`` keys, the MCP tools' answers
+(``request_without_paths()``, ``entry_without_paths()``).
 
 .. graphlet-example: client server
 
@@ -1390,10 +1422,11 @@ builds the resubmittable request: one seed per walk (its continuation, with its 
 named explicitly in ``constrain`` mode), the retrieval's normalized strategy with
 ``direction`` set to the arm, ``bounds.max_extension_bp = bp`` when given, and the
 keyword overrides deep-merged into the strategy (``release`` and the pair's selectors
-``graph``, ``graph_path``, ``annotation_path``, ``graphs`` and ``pairs`` go to the request
-level). The request runs on the pair the retrieval was answered on, which a multi-graph
-server's envelope names: ``graph`` and ``graph_path``, or a ``pairs`` object with the
-``annotation_path``. A selector among the overrides replaces that pair whole
+``graph``, ``graph_path``, ``annotation_path``, ``pair_id``, ``graphs`` and ``pairs`` go to
+the request level). The request runs on the pair the retrieval was answered on, which a
+multi-graph server's envelope names: ``graph`` and ``graph_path``, or a ``pairs`` object
+with the ``annotation_path`` (a document with paths) or with the ``pair_id`` (one with the
+id only). A selector among the overrides replaces that pair whole
 (``graph=None`` names none), and ``deepen()`` adds the client's own pair only to a
 graphlet that names none (a single-graph server's). ``labels.change_cost`` is merged as one unit: an
 override that names another ``model`` replaces the retrieval's whole (the server reads only
@@ -1854,9 +1887,10 @@ Inputs
 ``union_pairs(results, *, seed=None, expected_pairs=None, seqs_order=None, budget=None)``
 takes everything one seed's request returned across pairs, in any order:
 
-* a ``Graphlet`` whose envelope names its pair (``graph``, ``graph_path``,
-  ``annotation_path``, ``index_fp``, ...), or ``{'pair': ..., 'graphlet': g}`` for a body
-  without one (a graph name or a pair object, stated by the caller);
+* a ``Graphlet`` whose envelope names its pair (``graph`` with ``graph_path`` and
+  ``annotation_path``, or with ``pair_id``; ``index_fp``, ...), or ``{'pair': ...,
+  'graphlet': g}`` for a body without one (a graph name or a pair object, stated by the
+  caller);
 * a ``StitchedGraphlet`` (experimental, `A stitched graphlet as a part`_), in either form:
   one pair's answer, its root and the continuations stitched to it;
 * a ``TraverseResponse`` of one seed (``{'response': r, 'index': i}`` picks one seed of
@@ -1870,7 +1904,16 @@ takes everything one seed's request returned across pairs, in any order:
 is ``not_included``, and without it every statement says that it covers only the pairs
 given. ``seqs_order=`` maps each pair to its record-mapping certificate as ``GET
 /capabilities`` states it (``'verified'``, ``'count_only'`` or ``None``); a pair not in it
-reads ``unknown``. ``TraverseClient.traverse_pairs(seed, strategy, pairs=...)`` sends one
+reads ``unknown``. A pair is a graph name or a pair object (``{graph, pair_id}`` or
+``{graph, graph_path, annotation_path}``, with ``release``, ``index_ns``, ``index_fp``,
+``index_meta_fp`` where known); a ``seqs_order`` key is a graph name or a tuple
+``(graph, pair_id)`` or ``(graph[, graph_path[, annotation_path]])``. A pair named by its
+paths and the same pair named by its id are one pair: the union keys each pair by its
+n1 id (``configured_pair_id()`` of the paths where no id is stated), so a document stored
+with paths and its twin stored with the id give the same part key, tag and digest, and a
+union of both forms is one. Two descriptions name one pair by this rule, in this order: a
+differing ``index_meta_fp`` separates them, an ``index_fp`` both state decides, then the
+graph names, then the ids where both have one, else the paths where both state them. ``TraverseClient.traverse_pairs(seed, strategy, pairs=...)`` sends one
 request per pair (``pairs=None``: every pair ``GET /capabilities`` lists; ``pairs=[]``: none,
 and nothing is sent) and returns all four (``PairResults``); a pair whose request failed
 (``TraverseError``; ``ResponseFormatError``, a ``TraverseError``, for an answer not shaped
@@ -2595,9 +2638,11 @@ digits):
 * ``save(handle, path)`` / ``load(path)`` move entries through ``.mgt`` files
   (``load_graphlet(path)`` also returns the model it parsed, kept or not), and
   ``list()`` describes the entries. ``request_of(g, graph=..., graph_path=...,
-  annotation_path=...)`` keeps the pair of a multi-graph server in the replay request
-  (else the pair the envelope names, where a multi-graph server answered); a request
-  without one is valid on a single-graph server only;
+  annotation_path=..., pair_id=...)`` keeps the pair of a multi-graph server in the replay
+  request (else the pair the envelope names, where a multi-graph server answered: by its
+  paths, or by ``pairs: [{graph, pair_id}]`` for a document with the id only, which the
+  client sending it resolves); a request without one is valid on a single-graph server
+  only;
 * the disk TTL counts from the last use also across restarts (the entry file is
   rewritten once its recorded use lags by a tenth of the TTL). Processes may share a
   spool: a body is deleted only when no entry file names it any more, a handle another

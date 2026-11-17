@@ -251,9 +251,12 @@ the results as they come back and sorts them into parts and absent records. The 
 - `{'pair', 'error'}`: a pair whose answer was refused or never came;
 - anything else is refused. Appendix A.1 gives the full decision table.
 
-**Pairs and tags.** A pair is `{graph, graph_path, annotation_path}` (with `release` and `index_ns` where the caller
-knows them) or a graph name. One rule decides whether two descriptions name one pair: fingerprints decide where both
-sides state them, otherwise names, paths, release and namespace must agree wherever both state them. A description
+**Pairs and tags.** A pair is `{graph, graph_path, annotation_path}` or `{graph, pair_id}` (with `release` and
+`index_ns` where the caller knows them) or a graph name. `pair_id` is the pair's n1 id (`docs/DESIGN-pair-identity.md`
+3.2), which a document stored after the engine names pairs by id states in place of the paths; a pair named by both
+paths gets their n1 id, so the two forms of one pair are one pair. One rule decides whether two descriptions name one
+pair: fingerprints decide where both sides state them, then names, then ids, otherwise paths, release and namespace
+must agree wherever both state them. A description
 that matches two pairs is refused `ambiguous_pair`. Every pair has a display tag, unique in the union, by which every
 answer, selector, export, evidence block and provenance entry names it; caller-stated pairs are named as such in the
 coverage sentence. Appendix A.4 gives the rule, the tags and the pair key.
@@ -1044,9 +1047,10 @@ depends on notes `next_request()` returned: a child made another way is judged b
   part's own export would be.
 
 `provenance()` returns one entry per part: `{key, role: root | child, junction: {arm, walk, at_bp, overlap_bp} | null,
-pair: answered_pair(envelope), identity: index_identity(g), seed_id, digest, request}`. Here `request` is the part's
-replay request as `GraphletStore.request_of()` (`store.py:1277`) builds it: the child's request names the
-continuation seed and the parent's pair. No single request reproduces a stitched graphlet. Replaying one means
+pair: {graph, pair_id}, identity: index_identity(g), seed_id, digest, request}`. Here `request` is the part's
+replay request as `GraphletStore.request_of()` (`store.py:1277`) builds it, its pair named by `{graph, pair_id}` (no
+path in any response, `docs/DESIGN-pair-identity.md` section 2): the child's request names the continuation seed and
+the parent's pair. No single request reproduces a stitched graphlet. Replaying one means
 replaying each part (the identity rules apply as for `traverse_fetch(replay=)`) and stitching the results again.
 Each child is then checked again against its replayed parent, so a changed index or walk numbering is refused rather
 than joined.
@@ -1183,8 +1187,10 @@ TraverseClient.traverse_pairs(seed, strategy=None, *, pairs=None, detail='graphl
                               coordinates='auto', not_after_ms=None) -> PairResults
 ```
 
-- *Dispatch.* One `/traverse` request per pair: `pairs` as graph names or `{graph, graph_path, annotation_path}`
-  objects, by default every graph `GET /capabilities` lists.
+- *Dispatch.* One `/traverse` request per pair: `pairs` as graph names, `{graph, graph_path, annotation_path}` or
+  `{graph, pair_id}` objects, by default every pair `GET /capabilities` lists (by its paths or by its id). A pair named
+  by its id that the server lists with paths is sent by those paths; `expected_pairs` and the `seqs_order` keys state
+  each pair by `(graph, pair_id)`.
 - *Failures.* Every answer is kept as returned; a refused or failed request becomes `{pair, error}`.
 - *Expected pairs.* `PairResults.expected_pairs` holds the full pair objects the requests were sent to, so two
   annotations of one graph name stay two pairs.
@@ -1439,9 +1445,15 @@ The sorting is total: every element becomes a part, an absent record, or a refus
 
 ### A.4 Pairs, tags and retrieval identity
 
-**The pair key** is (release, `index_ns`, graph, graph_path, annotation_path, `index_fp`, `index_meta_fp`), the stated
-pair taking the place of the envelope's tags where the caller states one, `None` first. It orders parts and absent
-records (byte order). A pair described both by a bare name and in full keeps the fuller description.
+**The pair key** is (release, `index_ns`, graph, `pair_id`, graph_path, annotation_path, `index_fp`,
+`index_meta_fp`), the stated pair taking the place of the envelope's tags where the caller states one, `None` first.
+A pair with an n1 id -- stated, or computed from both paths -- is keyed by the id and no path (graph_path and
+annotation_path `None`): one identity whatever the form, so a document stored with paths and its twin stored with the
+id have one key, one tag and one digest, and the service's rewrite of a stored document from paths to id moves none of
+them. The paths are key members only of a description without an id (a caller's `{graph, graph_path}`). The key orders
+parts and absent records (byte order). A pair described both by a bare name and in full keeps the fuller description,
+counted on its key (an id stands for the two paths), so the choice does not depend on the form either. This key is
+`pair_id`'s since the library read both forms (T7-L1): every union digest and resume token moved once with it.
 
 **When two descriptions name one pair.** One rule decides `duplicate_pair`, `pair_mismatch`, `not_expected`,
 `not_included` and whether an absent record and a part are one pair:
@@ -1449,8 +1461,9 @@ records (byte order). A pair described both by a bare name and in full keeps the
 1. where both state an `index_meta_fp` and they differ, they are two pairs: a different graph or annotation build is
    proof, as `_identity` treats it (`ops.py:3593`);
 2. where both state an `index_fp`, the `index_fp` decides;
-3. otherwise the graph names must be equal, and `graph_path`, `annotation_path`, `release`, `index_ns` and
-   `index_meta_fp` must be equal wherever both state them (a bare name states only the name).
+3. otherwise the graph names must be equal; where both have a `pair_id` (an id computed from both paths included)
+   the ids must be equal, else `graph_path` and `annotation_path` wherever both state them; and `release`,
+   `index_ns` and `index_meta_fp` must be equal wherever both state them (a bare name states only the name).
 
 Because a bare name can match two different pairs, a description that matches two distinct pairs of the union is
 refused `ambiguous_pair`, so the outcome never depends on which comparison runs first.
@@ -1536,7 +1549,7 @@ notes do.
 | MissingEnvelope | today's `require_envelope('stitch()')` text: `stitch() needs the response envelope (seed_id, the normalized strategy, annotation counters): build the graphlet with Graphlet.from_response() or load a saved .mgt file with its J line; a parsed body alone does not carry it` |
 | `different_index` | `the child was retrieved from another index than its parent (%s): a continuation runs on its parent's index, so a child of another index continues none of its walks; union_pairs() combines one seed's graphlets across pairs`, `%s` one of `index_meta_fp differs`, `index_fp differs`, `index namespace %r vs %r`, `release %r vs %r`, `label %s is %r in one and %r in the other` |
 | `index_unverifiable` | `the child states %s index manifest digest (index_fp) and its parent %s: whether they are the same index cannot be verified (not proven different), so the child is not stitched automatically; pass allow_unverified_index=True to stitch it anyway (the result then states the identity unverified)` (`an`/`no`, `one`/`none`, as `_same_index`, `mcp_tools.py:2578`); where a side's parts state it unevenly: `the parts state an index manifest digest (index_fp) unevenly (the parent's on %d of %d parts, the child's on %d of %d): whether they are the same index cannot be verified (not proven different), so the child is not stitched automatically; pass allow_unverified_index=True to stitch it anyway (the result then states the identity unverified)`. Both, and `different_index` and `different_pair`, are checked against every part on both sides |
-| `different_pair` | `the child was answered on pair %s, its parent on pair %s: a continuation runs on its parent's pair` (each `{graph, graph_path, annotation_path}` as compact JSON) |
+| `different_pair` | `the child was answered on pair %s, its parent on pair %s: a continuation runs on its parent's pair` (each `{graph, pair_id}` as compact JSON; the pairs compared by `(graph, pair_id)`, an id computed from both paths included) |
 | `different_graph` | `the child's graph is not its parent's (%s %r vs %r): its walks cannot continue the parent's` (`k`, `regime` or `alphabet`) |
 | `different_mode` | `the child was walked in %s mode with %s support, its parent in %s mode with %s support: its walks answer another question` |
 | `not_one_arm` | `the child walked both arms: a continuation walks only the arm it continues (next_request() sets direction to it)` |
@@ -1744,8 +1757,9 @@ class CombineRefused(ValueError):  code: str     # every refusal of §2.3 and §
   pair is refused (§2.3).
 - **Digest.** The sha256 of the canonical list of (pair key, tag, `pair_stated_by`, retrieval identity,
   part digest), the absent
-  records as canonical JSON (an error as its text), `seed` and `expected_pairs`. With the no-op rule above it does
-  not depend on the order of the results.
+  records as canonical JSON (an error as its text), `seed` and the keys of `expected_pairs`. With the no-op rule
+  above it does not depend on the order of the results, and with the pair key (A.4) not on the form a pair is named
+  in (paths or id). `pair_stated_by` (envelope or caller) is the same in both forms.
 - **Evidence.** `evidence(arm)` lists each part's own `evidence_block` (`ops.py:6006`) under its tag, the absent
   records, the expected pairs not included, each part's identity and pair source, and the five statements. An
   answer that reads several parts states, as `outcome`, the weakest value per dimension over the parts it reads,
