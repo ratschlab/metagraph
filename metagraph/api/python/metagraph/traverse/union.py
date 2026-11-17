@@ -723,7 +723,7 @@ def _check_args(results, seed, expected_pairs, seqs_order):
                     fields = dict(zip(Pair._fields, k))
                 d = _stated_desc({kk: vv for kk, vv in fields.items() if vv},
                                  lambda t: _refuse('bad_seqs_order', None, t),
-                                 'seqs_order[%r]' % (k,))
+                                 'a seqs_order key of %r' % (k[0],))
             else:
                 d = _pair_desc(k) if isinstance(k, str) else None
             if d is None or v not in _SEQS_ORDER:
