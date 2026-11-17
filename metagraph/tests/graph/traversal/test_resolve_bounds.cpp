@@ -2941,8 +2941,9 @@ TEST(ResolveAnswer, TheBuildIsReadEvery64KiBOfText) {
         } else {
             EXPECT_LE(3u, readings.size()) << what;
         }
-        if (labels == 5000)
+        if (labels == 5000) {
             EXPECT_NE(readings.end(), std::find(readings.begin(), readings.end(), 4096u)) << what;
+        }
         size_t calls = 0;
         cli::profile_answer(p, nullptr, "intervals", [&]() { ++calls; });
         EXPECT_EQ(readings.size(), calls) << what;
@@ -3015,8 +3016,9 @@ TEST(ResolveAnswer, TheAccountHoldsAtMostWhatItHeldBefore) {
                                                  alloc + 3 * text + (272 << 10));
                 cli::charge_answer_text(&account);
                 EXPECT_LE(account.peak(), before) << what;
-                if (name <= 40 && std::string(format) == "intervals")
+                if (name <= 40 && std::string(format) == "intervals") {
                     EXPECT_LT(account.peak(), before) << what;
+                }
             }
         }
     }
