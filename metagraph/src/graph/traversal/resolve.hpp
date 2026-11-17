@@ -85,6 +85,7 @@ class AnswerAccount {
         if (bytes > max_ - held_)
             throw AnswerTooLarge(part, max_);
         held_ += bytes;
+        charged_ += bytes;
         peak_ = std::max(peak_, held_);
     }
     // a part of the answer's JSON: |bytes| of its tree and |text| bytes of its text, both
@@ -103,12 +104,17 @@ class AnswerAccount {
     uint64_t peak() const { return peak_; }
     // the answer's text bytes charged so far (charge_text)
     uint64_t text() const { return text_; }
+    // every byte charged so far, none released: what the account would hold had nothing been
+    // released or settled (the tests: before T7-D3 an answer's objects stayed charged at
+    // their price until the answer was written)
+    uint64_t charged() const { return charged_; }
 
   private:
     uint64_t max_;
     uint64_t held_ = 0;
     uint64_t peak_ = 0;
     uint64_t text_ = 0;
+    uint64_t charged_ = 0;
 };
 
 // The answer account's price of a run grouped into candidates: at most a node of the grouping's

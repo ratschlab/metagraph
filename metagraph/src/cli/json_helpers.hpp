@@ -770,8 +770,12 @@ inline Json::StreamWriterBuilder json_writer_builder(bool compact) {
 /**
  * The fixed overhead of a result object held as its text (SPEC-pattern-search.md §12.1, §31;
  * SPEC-labeled-traversal-core.md §4.6): the std::string (24 to 32 bytes), its heap block's
- * header and rounding (up to 32), and its slot in its vector of texts at up to twice its 32
- * bytes while the vector doubles
+ * rounding, and its slot in its vector of texts at up to twice its 32 bytes while the vector
+ * doubles. The rounding is at most 32 bytes only for a text of up to 256 bytes (jemalloc's
+ * classes 16 bytes apart up to 128, 32 up to 256); a larger text's class, four to a doubling,
+ * rounds it up by less than a quarter of its size (half a class step on average: a 3.7 KB text
+ * by about 256 bytes), which this does not count: the account's margin over the allocator's
+ * measured peak covers it (/resolve: ResolveAnswer.ThePriceCoversTheTexts)
  */
 constexpr uint64_t kHeldResultBytes = 128;
 

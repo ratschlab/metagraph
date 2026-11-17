@@ -2269,10 +2269,72 @@ TEST(ResolveBoundsRoute, AStopInTheSelectionAbandonsTheRequest) {
     EXPECT_EQ(gone_from, reads);
 }
 
+// The objects |answer| holds as text in the order they were written (graph_runs, the labels,
+// the candidates, the seeds, unknown_labels' names), each with whether it is one of those read
+// every kResolveCheckLabels (a label, a candidate or a seed) and its text's bytes (a name's with
+// its comma, unknown_labels' brackets not counted, as their writing reads them)
+std::vector<std::pair<bool, uint64_t>> written_objects(const cli::ResolveAnswer &answer) {
+    std::vector<std::pair<bool, uint64_t>> objects;
+    for (const auto &[name, pieces] : answer.held.members) {
+        if (name == "graph_runs") {
+            objects.emplace_back(false, pieces.at(0).size());
+            continue;
+        }
+        if (name == "unknown_labels") {
+            Json::Value names;
+            std::istringstream in(pieces.at(0));
+            Json::CharReaderBuilder reader;
+            std::string errors;
+            EXPECT_TRUE(Json::parseFromStream(reader, in, &names, &errors)) << errors;
+            for (Json::ArrayIndex i = 0; i < names.size(); ++i) {
+                objects.emplace_back(false, compact(names[i]).size() + (i ? 1 : 0));
+            }
+            continue;
+        }
+        for (size_t i = 1; i + 1 < pieces.size(); ++i) {
+            objects.emplace_back(true, pieces[i].size());
+        }
+    }
+    return objects;
+}
+
+// The readings of the check of an answer's build (the stop and the deadline; the Fable review of
+// 37b70685e, M1) for |objects| written in that order: before every kResolveCheckLabels-th label,
+// candidate or seed, and after an object once the texts written since the last reading by
+// bytes pass kDeliveryCheckBytes. Each reading as the number of objects written before it
+std::vector<size_t> build_readings(const std::vector<std::pair<bool, uint64_t>> &objects) {
+    std::vector<size_t> readings;
+    size_t counted = 0;
+    uint64_t unread = 0;
+    for (size_t i = 0; i < objects.size(); ++i) {
+        if (objects[i].first && ++counted % kResolveCheckLabels == 0)
+            readings.push_back(i);
+        unread += objects[i].second;
+        if (unread >= cli::kDeliveryCheckBytes) {
+            unread = 0;
+            readings.push_back(i + 1);
+        }
+    }
+    return readings;
+}
+
+// The same for the tree of an answer (the tree API's: byte for byte the held texts), without a
+// selection or unknown_labels
+std::vector<std::pair<bool, uint64_t>> written_objects(const Json::Value &answer) {
+    std::vector<std::pair<bool, uint64_t>> objects;
+    objects.emplace_back(false, compact(answer["graph_runs"]).size());
+    for (const char *key : { "labels", "candidates" }) {
+        for (Json::ArrayIndex i = 0; i < answer[key].size(); ++i) {
+            objects.emplace_back(true, compact(answer[key][i]).size() + (i ? 1 : 0));
+        }
+    }
+    return objects;
+}
+
 // The answer's build (profile_to_json) reads the request's stop every kResolveCheckLabels
-// objects (labels, candidates, seeds), after the reading once the selection is done: a request
-// without a deadline reads it there as many times more than its work does (T5a-X1: before,
-// once after the work and never in the build)
+// objects (labels, candidates, seeds) and every 64 KiB of their texts (build_readings), after the
+// reading once the selection is done: a request without a deadline reads it there as many times
+// more than its work does (T5a-X1: before, once after the work and never in the build)
 TEST(ResolveBoundsRoute, TheAnswerBuildReadsTheStop) {
     const std::string q = random_seq(200, 51);
     const size_t n = 2 * kResolveCheckLabels + 10;
@@ -2300,16 +2362,141 @@ TEST(ResolveBoundsRoute, TheAnswerBuildReadsTheStop) {
     LabelOracle oracle(*anno);
     resolve_support(oracle, q, parsed.options);
     const uint64_t work_reads = reads;
-    // once after the work, once where the selection is done, and one per kResolveCheckLabels
-    // objects of the answer
+    // once after the work, once where the selection is done, and the answer's build: one per
+    // kResolveCheckLabels objects and one each time its texts pass 64 KiB since the last
+    // reading by bytes (the Fable review of 37b70685e, M1)
     const uint64_t objects = out["labels"].size() + out["candidates"].size();
-    EXPECT_EQ(work_reads + 2 + objects / kResolveCheckLabels, route_reads);
+    const std::vector<size_t> readings = build_readings(written_objects(out));
+    EXPECT_EQ(work_reads + 2 + readings.size(), route_reads);
     EXPECT_GE(objects / kResolveCheckLabels, 2u);
+    EXPECT_LT(objects / kResolveCheckLabels, readings.size());
     // a stop at the build's last reading abandons the request there
     uint64_t gone_from = route_reads;
     reads = 0;
     const std::function<bool()> late = [&]() { return ++reads >= gone_from; };
     EXPECT_THROW(cli::process_resolve_request(request, *anno, "r1", 0, nullptr, late, limits),
+                 graph::traversal::AttemptAborted);
+    EXPECT_EQ(gone_from, reads);
+}
+
+// An answer of fewer than kResolveCheckLabels objects reads the stop while it is built, each time
+// its texts pass 64 KiB (the Fable review of 37b70685e, M1: before, not until it was complete; a
+// client gone 1 s into a 212 MB answer of 4,000 labels was noticed 3.8 s later). Six records of a
+// 60 kbp query with a SNP every 32 bp, named explicitly: six labels of about 1,900 runs and about
+// 1,900 candidates, some 330 KB of text. A stop at the build's first reading abandons the request
+// there
+TEST(ResolveBoundsRoute, AnAnswerOfFewObjectsReadsTheStopWhileBuilt) {
+    const std::string q = random_seq(60000, 5151);
+    std::vector<std::string> seqs, names;
+    std::mt19937 gen(5152);
+    for (size_t l = 0; l < 6; ++l) {
+        std::string record = q;
+        for (size_t i = 16; i < record.size(); i += 32) {
+            record[i] = "ACGT"[(std::string("ACGT").find(record[i]) + 1 + gen() % 3) % 4];
+        }
+        seqs.push_back(record);
+        names.push_back("rec" + std::to_string(l));
+    }
+    auto anno = build_anno_graph<DBGSuccinct, annot::ColumnCompressed<>>(kK, seqs, names);
+    Json::Value request;
+    request["sequence"] = q;
+    for (const std::string &name : names) {
+        request["labels"].append(name);
+    }
+    const cli::ResolveTimeLimits limits;
+    uint64_t reads = 0;
+    const std::function<bool()> gone = [&]() { ++reads; return false; };
+    const Json::Value out = cli::process_resolve_request(request, *anno, "r1", 0, nullptr, gone,
+                                                         limits);
+    ASSERT_EQ(6u, out["labels"].size());
+    ASSERT_LE(1800u, out["labels"][0]["runs"].size());
+    const uint64_t objects = out["labels"].size() + out["candidates"].size();
+    ASSERT_LT(objects, kResolveCheckLabels);
+    const std::vector<size_t> readings = build_readings(written_objects(out));
+    ASSERT_LE(3u, readings.size());
+    const uint64_t route_reads = reads;
+    // the work's own readings: resolve_support with the request's options
+    cli::ResolveRequest parsed = cli::parse_resolve_request(request);
+    reads = 0;
+    parsed.options.stop = gone;
+    parsed.options.abandon = []() { throw std::runtime_error("abandoned"); };
+    LabelOracle oracle(*anno);
+    resolve_support(oracle, q, parsed.options);
+    const uint64_t work_reads = reads;
+    EXPECT_EQ(work_reads + 2 + readings.size(), route_reads);
+    // a stop at the build's first reading abandons the request there
+    const uint64_t gone_from = work_reads + 3;
+    reads = 0;
+    const std::function<bool()> late = [&]() { return ++reads >= gone_from; };
+    EXPECT_THROW(cli::process_resolve_request(request, *anno, "r1", 0, nullptr, late, limits),
+                 graph::traversal::AttemptAborted);
+    EXPECT_EQ(gone_from, reads);
+}
+
+// The labels a multi-graph server's pair does not hold (unknown_labels) are written name by name
+// by the answer's writer, without a tree of them (the Fable review of 37b70685e, m2): byte for
+// byte their array's text (the tree API's identity check, tree_of, throws otherwise; names that
+// need escaping, one beyond the BMP and a cut UTF-8 sequence among them), read by bytes as the
+// answer's objects are, a stop at the first reading among the names abandoning the request there
+TEST(ResolveBoundsRoute, UnknownLabelsAreWrittenNameByName) {
+    const Records r = make_records<DBGSuccinct, annot::ColumnCompressed<>>(40, 5, 3941);
+    const auto index = with_mapping(r);
+    std::vector<std::string> names { "quote \" and backslash \\", "tab\tline feed\n",
+                                     std::string("nul\0control\x01", 12), "caf\xc3\xa9",
+                                     "\xf0\x9f\x98\x80", "cut \xe2\x82" };
+    for (size_t i = 0; i < 30; ++i) {
+        names.push_back(std::string(10000, static_cast<char>('a' + i % 26)) + std::to_string(i));
+    }
+    Json::Value request;
+    request["sequence"] = r.q;
+    for (const std::string &name : names) {
+        request["labels"].append(name);
+    }
+    const cli::ResolveTimeLimits limits;
+    uint64_t reads = 0;
+    const std::function<bool()> gone = [&]() { ++reads; return false; };
+    const Json::Value out = cli::process_resolve_request(request, *index, "r1", 0, nullptr, gone,
+                                                         limits, nullptr, nullptr, true);
+    ASSERT_EQ(names.size(), out["unknown_labels"].size());
+    for (size_t i = 0; i < names.size(); ++i) {
+        EXPECT_EQ(names[i], out["unknown_labels"][static_cast<Json::ArrayIndex>(i)].asString());
+    }
+    const uint64_t tree_reads = reads;
+    // the server's form: the same readings
+    reads = 0;
+    cli::ResolveAnswer answer = cli::process_resolve_answer(request, *index, "r1", 0, nullptr,
+                                                            gone, limits, nullptr, nullptr, true);
+    EXPECT_EQ(tree_reads, reads);
+    const uint64_t route_reads = reads;
+    const std::vector<std::pair<bool, uint64_t>> objects = written_objects(answer);
+    const std::vector<size_t> readings = build_readings(objects);
+    // the names alone pass 64 KiB four times
+    ASSERT_LE(4u, readings.size());
+    EXPECT_EQ(names.size(), static_cast<size_t>(std::count_if(
+            objects.begin(), objects.end(), [](const auto &o) { return !o.first; })) - 1);
+    const std::string text = cli::json_text_with_members(answer.head, std::move(answer.held));
+    Json::Value written;
+    std::istringstream in(text);
+    Json::CharReaderBuilder reader;
+    std::string errors;
+    ASSERT_TRUE(Json::parseFromStream(reader, in, &written, &errors)) << errors;
+    EXPECT_EQ(compact(out["unknown_labels"]), compact(written["unknown_labels"]));
+    // the work's own readings: resolve_support with the request's options
+    cli::ResolveRequest parsed = cli::parse_resolve_request(request);
+    reads = 0;
+    parsed.options.stop = gone;
+    parsed.options.abandon = []() { throw std::runtime_error("abandoned"); };
+    parsed.options.drop_labels_not_in_graph = true;
+    LabelOracle oracle(*index);
+    resolve_support(oracle, r.q, parsed.options);
+    const uint64_t work_reads = reads;
+    EXPECT_EQ(work_reads + 2 + readings.size(), route_reads);
+    // a stop at the build's first reading (among the names) abandons the request there
+    const uint64_t gone_from = work_reads + 3;
+    reads = 0;
+    const std::function<bool()> late = [&]() { return ++reads >= gone_from; };
+    EXPECT_THROW(cli::process_resolve_answer(request, *index, "r1", 0, nullptr, late, limits,
+                                             nullptr, nullptr, true),
                  graph::traversal::AttemptAborted);
     EXPECT_EQ(gone_from, reads);
 }
@@ -2725,6 +2912,118 @@ TEST(ResolveAnswer, AnObjectIsHeldAtItsText) {
     }
 }
 
+// The build of an answer reads its check (the request's stop and deadline) every
+// kResolveCheckLabels objects and once the texts written since its last reading pass 64 KiB
+// (the Fable review of 37b70685e, M1: an answer of fewer than 4,096 objects was not read until it
+// was complete; a 212 MB answer of 4,000 labels answered its 503 4.7 s late). On 12 labels of
+// 6,000 runs each (about 80 KB of text a label, no candidates) every label is followed by a
+// reading; on small objects one every 64 KiB, and one every 4,096 objects. A check that throws
+// at any of its readings ends the build there: the account then holds exactly the objects
+// written before that reading (64 KiB and three copies of each text and 128 B), so that at most
+// 64 KiB of text and one object are built past a stop or a deadline. The tree API reads it in
+// its identity check's writing too (the review's nit on the CLI)
+TEST(ResolveAnswer, TheBuildIsReadEvery64KiBOfText) {
+    struct Stop {};
+    for (auto [labels, runs, candidates] : { std::make_tuple(12, 6000, false),
+                                             std::make_tuple(2000, 3, true),
+                                             std::make_tuple(5000, 1, false) }) {
+        auto [p, sel] = priced_profile(labels, runs, 12, 0, false);
+        if (!candidates)
+            p.candidates.clear();
+        const std::string what = std::to_string(labels) + "x" + std::to_string(runs)
+                + (candidates ? " with candidates" : "");
+        const auto objects = written_objects(cli::profile_answer(p, nullptr, "intervals"));
+        const std::vector<size_t> readings = build_readings(objects);
+        if (labels == 12) {
+            ASSERT_EQ(13u, objects.size()) << what;
+            EXPECT_EQ((std::vector<size_t> { 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13 }), readings)
+                    << what;
+        } else {
+            EXPECT_LE(3u, readings.size()) << what;
+        }
+        if (labels == 5000) {
+            EXPECT_NE(readings.end(), std::find(readings.begin(), readings.end(), 4096u)) << what;
+        }
+        size_t calls = 0;
+        cli::profile_answer(p, nullptr, "intervals", [&]() { ++calls; });
+        EXPECT_EQ(readings.size(), calls) << what;
+        // the tree API (profile_to_json; process_resolve_request with the request's deadline,
+        // the CLI's) reads it too while it writes the two texts of its identity check, each
+        // every 64 KiB: a check that throws at its first reading after the build ends it there
+        size_t tree_calls = 0;
+        const std::string tree = compact(cli::profile_to_json(p, nullptr, "intervals",
+                                                              [&]() { ++tree_calls; }));
+        EXPECT_LE(readings.size() + tree.size() / cli::kDeliveryCheckBytes, tree_calls) << what;
+        size_t after = 0;
+        EXPECT_THROW(cli::profile_to_json(p, nullptr, "intervals", [&]() {
+            if (++after > readings.size())
+                throw Stop();
+        }), Stop) << what;
+        // a check that throws at its r-th reading: the objects written before it, and no other
+        for (size_t r = 0; r < readings.size(); r += labels == 12 ? 1 : 3) {
+            AnswerAccount account(uint64_t(1) << 40);
+            size_t reads = 0;
+            uint64_t held = 0;
+            EXPECT_THROW(cli::profile_answer(p, nullptr, "intervals", [&]() {
+                if (reads++ == r) {
+                    held = account.held();
+                    throw Stop();
+                }
+            }, &account), Stop) << what << " " << r;
+            uint64_t written = 64 << 10;
+            for (size_t i = 0; i < readings[r]; ++i) {
+                written += 3 * objects[i].second + 128;
+            }
+            EXPECT_EQ(written, held) << what << " reading " << r;
+        }
+    }
+}
+
+// What the account holds is never above what it held before T7-D3 (the Fable review of
+// 37b70685e, untested claim 2): before, an object stayed charged at its price (its tree and its
+// text) until the answer was written, so the account held every charge made (charged()); now
+// each object is settled to its text once written, which only releases. At every reading of the
+// build and at its end the account holds at most every charge made; once the writing is charged
+// (charge_answer_text) its peak is at most the one before: every charge then the body's rounding,
+// then a top-up to alloc(T + 1) + 3T + 272 KiB (T the text with the head's 16 KiB) where now 2T
+// -- equal where the head's own peak in the build binds, below it otherwise
+TEST(ResolveAnswer, TheAccountHoldsAtMostWhatItHeldBefore) {
+    for (bool trace : { false, true }) {
+        for (const char *format : { "intervals", "rle" }) {
+            for (auto [labels, runs, name, seeds] : { std::make_tuple(2000, 3, 12, 0),
+                                                       std::make_tuple(20, 2000, 40, 0),
+                                                       std::make_tuple(300, 100, 20, 30),
+                                                       std::make_tuple(40, 2, 1100, 4) }) {
+                const auto [p, sel] = priced_profile(labels, runs, name, seeds, trace);
+                const SeedSelection *selection = seeds ? &sel : nullptr;
+                const std::string what = std::string(format) + (trace ? " trace " : " kmer ")
+                        + std::to_string(labels) + "x" + std::to_string(runs) + " names "
+                        + std::to_string(name);
+                AnswerAccount account(uint64_t(1) << 40);
+                size_t reads = 0;
+                cli::profile_answer(p, selection, format, [&]() {
+                    ++reads;
+                    EXPECT_LE(account.held(), account.charged()) << what;
+                }, &account);
+                EXPECT_LE(1u, reads) << what;
+                EXPECT_LE(account.held(), account.charged()) << what;
+                EXPECT_LE(account.peak(), account.charged()) << what;
+                // the writing: before, every charge (none released), the body's rounding and the
+                // top-up to four copies of the text
+                const uint64_t text = account.text() + (16 << 10);
+                const uint64_t alloc = annot::matrix::alloc_bytes(text + 1);
+                const uint64_t before = std::max(account.charged() + alloc - text,
+                                                 alloc + 3 * text + (272 << 10));
+                cli::charge_answer_text(&account);
+                EXPECT_LE(account.peak(), before) << what;
+                if (name <= 40 && std::string(format) == "intervals") {
+                    EXPECT_LT(account.peak(), before) << what;
+                }
+            }
+        }
+    }
+}
+
 // The answer as the route holds it after its account priced it (T7-D3; before, the tree: T4
 // review R1, F3): its objects' texts, each written once its tree was built (the tree freed then),
 // then the body written from them into a buffer reserved to its exact size, each text freed once
@@ -2738,10 +3037,14 @@ TEST(ResolveAnswer, ThePriceCoversTheTexts) {
     size_t measured = 0;
     for (bool trace : { false, true }) {
         for (const char *format : { "intervals", "rle" }) {
+            // (the last two: objects whose texts pass 64 KiB, each written into a buffer reserved
+            // to its size: labels of 6,000 runs, and a candidate listing 500 names of 4,000 B)
             for (auto [labels, runs, name, seeds] : { std::make_tuple(2000, 3, 12, 2),
                                                        std::make_tuple(20, 2000, 40, 0),
                                                        std::make_tuple(300, 100, 100, 30),
-                                                       std::make_tuple(40, 2, 1100, 4) }) {
+                                                       std::make_tuple(40, 2, 1100, 4),
+                                                       std::make_tuple(6, 6000, 40, 0),
+                                                       std::make_tuple(500, 1, 4000, 0) }) {
                 const auto [p, sel] = priced_profile(labels, runs, name, seeds, trace);
                 const std::string what = std::string(format) + (trace ? " trace " : " kmer ")
                         + std::to_string(labels) + "x" + std::to_string(runs) + " names "
@@ -3403,6 +3706,23 @@ TEST(ResolveBoundsRoute, AnAnswerThatFitsAsTextIsAnswered) {
     written.removeMember("work");
     // (compared as text: the reader reads a small unsigned integer as a signed one)
     EXPECT_EQ(compact(b), compact(written));
+    // and refused before T7-D3 (the Fable review of 37b70685e, untested claim 3): the pass holds
+    // its profile and candidates within 1 MiB, and with every object of the answer at its price
+    // (its tree and its text: before, none was released until the answer was written) the
+    // account passed 1 MiB, the 400 resolve_answer_too_large (answer). Now each object is held
+    // at its text, and the writing at three copies of the text: its peak within 1 MiB
+    cli::ResolveRequest parsed = cli::parse_resolve_request(request);
+    AnswerAccount account(uint64_t(1) << 40);
+    parsed.options.answer = &account;
+    LabelOracle oracle(*anno);
+    const SupportProfile profile = resolve_support(oracle, q, parsed.options);
+    const uint64_t after_pass = account.held();
+    const uint64_t charged_by_the_pass = account.charged();
+    EXPECT_GE(uint64_t(1) << 20, account.peak());
+    cli::profile_answer(profile, nullptr, "intervals", nullptr, &account);
+    EXPECT_LT(uint64_t(1) << 20, after_pass + account.charged() - charged_by_the_pass);
+    cli::charge_answer_text(&account);
+    EXPECT_GE(uint64_t(1) << 20, account.peak());
 }
 
 // What the server holds of a /resolve answer (process_resolve_answer): its head without the

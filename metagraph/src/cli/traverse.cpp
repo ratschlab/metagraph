@@ -2593,37 +2593,67 @@ static Json::Value labels_capped_json(const SupportProfile &p) {
  * from a finished profile, candidate or seed; nothing is added to it later), so its compact text
  * is written at once, its tree freed and its charge settled (settle_json). An array's elements
  * after the first hold their comma, so that an array is held as `[`, its elements' texts and
- * `]`. With |trees| (the tree API) each held member's tree is kept in *trees (an object of those
- * members), outside the account.
+ * `]`. With |unknown_labels| (a multi-graph server's pair), p.unknown_labels is held the same
+ * way, last, its text written name by name (no tree of them is built). With |trees| (the tree
+ * API) each held member's tree is kept in *trees (an object of those members), outside the
+ * account.
  */
 static ResolveAnswer answer_of_profile(const SupportProfile &p, const SeedSelection *sel,
                                        const std::string &run_format,
                                        const std::function<void()> &check, AnswerAccount *answer,
-                                       Json::Value *trees) {
-    // the answer's deadline, read every kResolveCheckLabels objects (labels, candidates, seeds)
+                                       Json::Value *trees, bool unknown_labels = false) {
+    // the answer's stop and deadline (|check|), read every kResolveCheckLabels objects (labels,
+    // candidates, seeds) and once the texts written since its last reading by bytes pass
+    // kDeliveryCheckBytes (64 KiB, as the writing reads it), so that an answer of few large
+    // objects is read within one object's tree and text (the Fable review of 37b70685e, M1:
+    // before, an answer of fewer than 4,096 objects was not read until it was complete, a
+    // 212 MB one for 4.7 s)
     size_t objects = 0;
     auto built = [&]() {
         if (check && ++objects % kResolveCheckLabels == 0)
             check();
     };
+    uint64_t unread = 0;
+    auto read_bytes = [&](uint64_t bytes) {
+        unread += bytes;
+        if (check && unread >= kDeliveryCheckBytes) {
+            unread = 0;
+            check();
+        }
+    };
     // the answer account: each object priced before it is built (§4.6)
     auto charge = [&](const JsonPrice &price) { charge_json(answer, price); };
     const bool rle = run_format == "rle";
     const bool trace = p.support == Support::TRACE;
-    // each object's compact text, written once it is built: one writer for the answer
+    // each object's compact text, written once it is built. An object whose text is priced
+    // under kDeliveryCheckBytes by one writer for the answer, whose buffer keeps its capacity
+    // between objects (so its writing holds beside its tree the buffer, up to twice 64 KiB, the
+    // text returned and, for an element after the first, its copy after the comma: not charged,
+    // at most a few hundred KB); a larger one into a buffer reserved to its exact size
+    // (compact_json_size), its comma moved in: its tree and its text, as its price counts them
+    // (the Fable review of 37b70685e, m2: before, an object of 100 MB held beside its tree the
+    // writer's buffer at its last growth, up to twice its text, and the text's copy)
     CompactJsonWriter writer;
     // |tree|'s text, after a comma unless it is |first| in its array, and its charge |price|
-    // settled to it (the tree is the caller's to keep or free)
+    // settled to it (the tree is the caller's to keep or free); then the reading by bytes
     auto text_of = [&](const Json::Value &tree, bool first, const JsonPrice &price) {
-        std::string text = writer.text(tree);
-        if (!first) {
-            std::string element;
-            element.reserve(text.size() + 1);
-            element += ',';
-            element += text;
-            text.swap(element);
+        std::string text;
+        if (price.text < kDeliveryCheckBytes) {
+            text = writer.text(tree);
+            if (!first) {
+                std::string element;
+                element.reserve(text.size() + 1);
+                element += ',';
+                element += text;
+                text.swap(element);
+            }
+        } else {
+            text = json_text(tree, true, nullptr, nullptr, compact_json_size(tree) + !first);
+            if (!first)
+                text.insert(text.begin(), ',');
         }
         settle_json(answer, price, text.size());
+        read_bytes(text.size());
         return text;
     };
     // a held array of |n| elements, begun
@@ -2654,9 +2684,8 @@ static ResolveAnswer answer_of_profile(const SupportProfile &p, const SeedSelect
         return arr;
     };
     {
-        const JsonPrice price = answer ? member_price("graph_runs", 0)
-                                         + runs_price(p.graph_runs, p.num_kmers, rle)
-                                       : JsonPrice();
+        const JsonPrice price = member_price("graph_runs", 0)
+                                + runs_price(p.graph_runs, p.num_kmers, rle);
         charge(price);
         Json::Value runs = runs_json(p.graph_runs);
         std::vector<std::string> value;
@@ -2669,7 +2698,7 @@ static ResolveAnswer answer_of_profile(const SupportProfile &p, const SeedSelect
     Json::Value *kept_labels = kept("labels");
     for (const auto &l : p.labels) {
         built();
-        const JsonPrice price = answer ? label_price(l, p.num_kmers, rle, trace) : JsonPrice();
+        const JsonPrice price = label_price(l, p.num_kmers, rle, trace);
         charge(price);
         Json::Value lj;
         lj["label"] = l.label.name;
@@ -2710,7 +2739,7 @@ static ResolveAnswer answer_of_profile(const SupportProfile &p, const SeedSelect
     Json::Value *kept_cands = kept("candidates");
     for (const auto &c : p.candidates) {
         built();
-        const JsonPrice price = answer ? candidate_price(p, c) : JsonPrice();
+        const JsonPrice price = candidate_price(p, c);
         charge(price);
         Json::Value cj;
         cj["kmer_interval"] = interval_json(c.kmers);
@@ -2750,7 +2779,7 @@ static ResolveAnswer answer_of_profile(const SupportProfile &p, const SeedSelect
         Json::Value kept_seeds(Json::arrayValue);
         for (const auto &seed : sel->seeds) {
             built();
-            const JsonPrice price = answer ? seed_price(seed) : JsonPrice();
+            const JsonPrice price = seed_price(seed);
             charge(price);
             Json::Value sj;
             sj["seed_id"] = seed.seed_id;
@@ -2789,19 +2818,53 @@ static ResolveAnswer answer_of_profile(const SupportProfile &p, const SeedSelect
             (*trees)["selection"] = std::move(s);
         }
     }
+    if (unknown_labels) {
+        // the labels this pair does not hold (a multi-graph server's), held as the answer's
+        // other objects and read by bytes as they are; their text is written name by name by
+        // the same writer (`[`, each name's text, commas between them, `]`, as the writer
+        // writes their array) into one buffer reserved to their price's text, from above, and no
+        // tree of them is built (the Fable review of 37b70685e, m2: their tree beside their text
+        // while the request's labels and the profile's names were held put a pair of 100 MB of
+        // names 88-152 MB above the base's peak RSS, which wrote their tree's text after the
+        // request and the profile were freed)
+        const JsonPrice price = member_price("unknown_labels", 0)
+                                + names_price(p.unknown_labels);
+        charge(price);
+        std::string text;
+        text.reserve(price.text);
+        text += '[';
+        for (size_t i = 0; i < p.unknown_labels.size(); ++i) {
+            if (i)
+                text += ',';
+            const std::string name = writer.text(Json::Value(p.unknown_labels[i]));
+            text += name;
+            read_bytes(name.size() + (i > 0));
+        }
+        text += ']';
+        settle_json(answer, price, text.size());
+        std::vector<std::string> value;
+        value.push_back(std::move(text));
+        out.held.members.emplace_back("unknown_labels", std::move(value));
+        if (trees)
+            (*trees)["unknown_labels"] = names_json(p.unknown_labels);
+    }
     return out;
 }
 
 // The tree of |answer| with its held members' trees |trees| (the tree API), checked against the
 // text the server writes from |answer| (json_text_with_members) in every build type: CI's and the
-// deployed builds are Release, where an assert would never run (T7-D3, as /pattern's, T7-D2)
-static Json::Value tree_of(ResolveAnswer answer, Json::Value trees, const char *what) {
-    const std::string text = json_text_with_members(answer.head, std::move(answer.held));
+// deployed builds are Release, where an assert would never run (T7-D3, as /pattern's, T7-D2).
+// Both texts are written under |check| (the request's deadline, as the server writes its
+// answer under it: the CLI's 503 body, exit 1), every 64 KiB; the tree API holds the tree,
+// the texts, the text written from them and the tree's text, outside the answer account
+static Json::Value tree_of(ResolveAnswer answer, Json::Value trees, const char *what,
+                           const std::function<void()> &check = nullptr) {
+    const std::string text = json_text_with_members(answer.head, std::move(answer.held), check);
     Json::Value out = std::move(answer.head);
     for (const std::string &name : trees.getMemberNames()) {
         out[name] = std::move(trees[name]);
     }
-    if (json_text(out, true) != text) {
+    if (json_text(out, true, check) != text) {
         throw std::logic_error(std::string(what)
                                + ": the text of the answer differs from its tree's");
     }
@@ -2818,7 +2881,7 @@ Json::Value profile_to_json(const SupportProfile &p, const SeedSelection *sel, c
                             const std::function<void()> &check, AnswerAccount *answer) {
     Json::Value trees(Json::objectValue);
     ResolveAnswer out = answer_of_profile(p, sel, run_format, check, answer, &trees);
-    return tree_of(std::move(out), std::move(trees), "resolve");
+    return tree_of(std::move(out), std::move(trees), "resolve", check);
 }
 
 static IndexIdentity identity_or_default(const IndexIdentity *given, const LabelOracle &oracle);
@@ -6574,11 +6637,12 @@ static ResolveAnswer answer_resolve(
     // and once the selection is done (or none was made)
     if (after_work)
         after_work();
-    // the answer: its objects held as text, each written once built (§4.6; T7-D3); what follows
-    // adds to its head only
+    // the answer: its objects held as text, each written once built (§4.6; T7-D3), and the
+    // labels this pair does not hold (a multi-graph server's: its answer is that of the others,
+    // and none of these is in it) held the same way, last; what follows adds to its head only
     ResolveAnswer result = answer_of_profile(profile, selection ? &*selection : nullptr,
                                              req.run_format, after_work, req.options.answer,
-                                             trees);
+                                             trees, labels_not_in_graph_dropped);
     Json::Value &out = result.head;
     if (!not_made.empty()) {
         out["selection"] = Json::Value();
@@ -6587,23 +6651,6 @@ static ResolveAnswer answer_resolve(
             out["labels_capped"]["message"] = out["labels_capped"]["message"].asString()
                 + "; the explicit selection was not made (selection null): " + not_made;
         }
-    }
-    // the labels this pair does not hold (a multi-graph server's): its answer is that of the
-    // others, and none of these is in it
-    if (labels_not_in_graph_dropped) {
-        // held as text as the answer's other objects (§4.6; T7-D3)
-        const JsonPrice price = answer ? member_price("unknown_labels", 0)
-                                         + names_price(profile.unknown_labels)
-                                       : JsonPrice();
-        if (answer)
-            charge_json(&*answer, price);
-        Json::Value names = names_json(profile.unknown_labels);
-        std::vector<std::string> value;
-        value.push_back(json_text(names, true));
-        settle_json(answer ? &*answer : nullptr, price, value.back().size());
-        result.held.members.emplace_back("unknown_labels", std::move(value));
-        if (trees)
-            (*trees)["unknown_labels"] = std::move(names);
     }
     out["release"] = release;
     out["capabilities"] = capabilities_to_json(oracle, release, identity);
@@ -6691,7 +6738,12 @@ Json::Value process_resolve_request(
     ResolveAnswer out = answer_resolve(json, anno_graph, release, max_query_bp, identity,
                                        client_gone, time, delivery, clock,
                                        labels_not_in_graph_dropped, admit, &trees);
-    return tree_of(std::move(out), std::move(trees), "resolve");
+    // the identity check's texts under the request's deadline (|delivery|'s check: set by
+    // answer_resolve with the deadline, nothing without one)
+    std::function<void()> check;
+    if (delivery)
+        check = [delivery]() { delivery->check(); };
+    return tree_of(std::move(out), std::move(trees), "resolve", check);
 }
 
 

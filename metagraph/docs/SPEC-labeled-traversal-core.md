@@ -376,10 +376,14 @@ deadline. `src/cli/traverse.cpp` `process_resolve_request`, `src/graph/traversal
   review 7, finding 1: before, only once it was done, after every overlapping pair was listed; train 4, T4-L1: a
   `max_support` round was one reading, and a round of about 3 million runs — 10,000 labels of 300 runs, what a 10 kbp
   query admits — ran about a second between two; the clip of every run by every pick before it, O(runs × picks) a
-  round, is a binary search into the sorted, disjoint picks, the same runs in the same order)*, the JSON every 4,096
-  labels, candidates or seeds, its text every 64 KiB
-  and its compression every block of output and every 4 MiB of text (the server's transport check, as
-  `/pattern`'s). Past the budget the answer is **503**
+  round, is a binary search into the sorted, disjoint picks, the same runs in the same order)*, the answer's
+  objects every 4,096 labels, candidates or seeds and each time their texts pass 64 KiB since the last such reading,
+  so that at most 64 KiB of text and one object (its tree and its text: up to about 7 MB for a label of a 1 Mbp
+  query) are built between two readings *(the Fable review of 37b70685e, M1: with each object written as its text when it is
+  built (§4.6), an answer of fewer than 4,096 objects was read only once complete — a 212 MB answer of 4,000 labels
+  answered its 503 4.7 s past the budget, and noticed a client gone 3.8 s late)*, the body every 64 KiB as it is
+  written (the CLI's identity check of its two texts as well, §4.6) and its compression every block of output and
+  every 4 MiB of text (the server's transport check, as `/pattern`'s). Past the budget the answer is **503**
   `{"error": "resolve: the answer could not be built and written within bounds.time_budget_ms (… ms, the
   finalisation reserve of 250 ms included): nothing partial is sent", "code": "deadline"}`, never a partial
   answer; the CLI writes that body and exits 1. (A 503 with `Retry-After` and no `code` is still the loading
@@ -646,23 +650,30 @@ jemalloc's size classes, so that a price is the same on every platform): a value
 object member's name its bytes and a terminator, a container 48 B, a string its bytes and 5; and its compact text's
 bytes; 64 KiB for the members beside them. **The answer is held as text** *(T7-D3, 2026-11-16; before, as one JSON
 tree until it was written, then the tree, its text and a copy of the text at once)*: an object of the answer
-(`graph_runs`, a label, a candidate, a frozen seed) is final once it is built, made from a finished profile,
-candidate or seed with nothing added to it later, so its compact text is written at once, its tree freed, and its
-charge settled to three copies of that text and 128 B, never more than its price (the rule of
-SPEC-pattern-search.md §31: the text held, its copy in the body and the transport's copy of the body; an object of
-long strings, priced at about twice its text, stays at its price). The route writes the body from the held texts in
-one buffer, byte for byte the text of the tree; a multi-graph envelope holds every answered pair's texts until it is
-written from them. The CLI and the C++ API keep the tree and check, in every build type, that its text is the one
-the route writes. Once every object is held, the body's buffer at its size class (reserved to its exact size, so no
-growth holds an old and a new buffer) and, where the account holds less, what writing holds: the held texts (each
-freed once copied, but a freed text does not give its pages back), the body, one copy of it (the compressed body,
-at most the text for this JSON, or the transport's) and the compressor's state, 272 KiB: three copies of the text
-where four were charged before. Nothing an answered request returns changes (`work.memory_bytes` is the pass's, not
-the answer account's): the account holds at most what it held before at every charge, so a request refused before
-at part `answer` may now be answered, and no request answered before is refused. On jsoncpp 1.9.3
-an element holds 96 B, and an interval in a run list 336 B with libstdc++ (from its sizes) or 320 B with libc++
-(measured on macOS), beside 12 B of text. A charge that would pass M ends the request with **400**, nothing partial
-sent:
+(`graph_runs`, a label, a candidate, a frozen seed, and a multi-graph pair's `unknown_labels`) is final once it is
+built, made from a finished profile, candidate or seed with nothing added to it later, so its compact text is
+written at once, its tree freed, and its charge settled to three copies of that text and 128 B, never more than its
+price (the rule of SPEC-pattern-search.md §31: the text held, its copy in the body and the transport's copy of the
+body; an object of long strings, priced at about twice its text, stays at its price). An object whose text is priced
+under 64 KiB is written by one writer whose buffer keeps its capacity, so that its writing holds beside its tree
+that buffer (up to twice 64 KiB), the text and, for an element after the first, its copy after the comma: not
+charged, a few hundred KB at most; a larger object is written into a buffer reserved to its exact size, its tree and
+its text as its price counts them; a pair's `unknown_labels` are written name by name by the same writer into one
+buffer reserved to their price's text, with no tree of them *(the Fable review of 37b70685e, m2: a pair's 100 MB of
+`unknown_labels`, their tree and their text held while the request's labels and the profile's names were, had put
+the server's peak RSS 88-152 MB above the base's; now 22-85 MB below it)*. The route writes the body from the held
+texts in one buffer, byte for byte the text of the tree; a multi-graph envelope holds every answered pair's texts
+until it is written from them. The CLI and the C++ API keep the tree and check, in every build type, that its text
+is the one the route writes (the CLI writing both texts under the request's deadline, every 64 KiB). Once every
+object is held, the body's buffer at its size class (reserved to its exact size, so no growth holds an old and a new
+buffer) and, where the account holds less, what writing holds: the held texts (each freed once copied, but a freed
+text does not give its pages back), the body, one copy of it (the compressed body, at most the text for this JSON,
+or the transport's) and the compressor's state, 272 KiB: three copies of the text where four were charged before.
+Nothing an answered request returns changes (`work.memory_bytes` is the pass's, not the answer account's): the
+account holds at most what it held before at every charge, so a request refused before at part `answer` may now be
+answered, and no request answered before is refused. On jsoncpp 1.9.3 an element holds 96 B, and an interval in a
+run list 336 B with libstdc++ (from its sizes) or 320 B with libc++ (measured on macOS), beside 12 B of text. A
+charge that would pass M ends the request with **400**, nothing partial sent:
 
 ```json
 {"error": "resolve: the answer would hold more than --resolve-max-discover-memory-mb 1024 MiB (answer): nothing partial is sent; ask for run_format \"rle\", a larger min_block_kmers, fewer labels or seeds, or a shorter sequence",
@@ -4795,7 +4806,23 @@ gone check read at least once every 64 KiB, a mismatched count of held answers a
 32 bp and their 40 labels named, which the base refused at part `answer` under a 1 MiB bound, answered as without the
 bound, the server's form written to the same bytes) and `.TheServersAnswerHoldsTextsOnly` (the route's answer holds
 no member it holds as text in its tree, a pair's `unknown_labels` included; `ServerRequest.
-TheResolveRouteWritesUnderItsGoneCheck`: the route's text `json_text`'s bytes at a capacity of its exact size), `ResolveAnswer.TheSelectionChargesTheClippedPieces` (T4
+TheResolveRouteWritesUnderItsGoneCheck`: the route's text `json_text`'s bytes at a capacity of its exact size); the
+fix round after the Fable review of 37b70685e: `ResolveAnswer.TheBuildIsReadEvery64KiBOfText` (M1: 12 labels of
+about 80 KB of text, small objects with candidates, and 5,000 labels: the check read after each 64 KiB of text and
+every 4,096 objects, as often as that rule counts; a check that throws at any reading leaves exactly the objects
+written before it held; the tree API reads it while it writes its identity check's texts too),
+`ResolveBoundsRoute.AnAnswerOfFewObjectsReadsTheStopWhileBuilt` (six labels of about 1,900 runs and about 1,900
+candidates, fewer than 4,096 objects: the route reads the stop while the answer is built, and a stop at the build's
+first reading abandons the request there) and `.TheAnswerBuildReadsTheStop` (its readings by bytes counted),
+`ResolveAnswer.TheAccountHoldsAtMostWhatItHeldBefore` (at every reading and at the end of the build the account holds
+at most every charge made, and the writing's peak is at most the one before T7-D3), `.AnAnswerThatFitsAsTextIsAnswered`
+(its request priced past 1 MiB with every object at its price, as before T7-D3, and within it now), and
+`ServerFanout.LateResolvePairsLeaveNoHeldTexts` (m3: two `/resolve` pairs cut at the cutoff that publish their texts
+later; the outcome holds the answered pair's texts only, and the envelope of one answered and two unfinished entries
+is written byte for byte as its tree), `ResolveBoundsRoute.UnknownLabelsAreWrittenNameByName` (m2: a pair's unknown
+labels, names a writer escapes among them, written name by name byte for byte as their array's text, read every
+64 KiB of it, a stop at the first reading among them abandoning the request) and `ResolveAnswer.ThePriceCoversTheTexts`
+with objects of 64 KiB and more (m2), `ResolveAnswer.TheSelectionChargesTheClippedPieces` (T4
 review R1, F1: long runs split by 250 `max_support` picks; at every reading of the selection's check the heap it added
 within what its account holds then, 64 KiB aside; the seeds those made without an account),
 `ResolveAnswer.TheGroupingIsPricedAboveItsPeak` (F2: 2^17 + 1 runs of their own, jemalloc's peak within the price,
