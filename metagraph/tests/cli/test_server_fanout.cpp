@@ -1014,6 +1014,78 @@ TEST(ServerFanout, LateResolvePairsLeaveNoHeldTexts) {
     EXPECT_LE(large.size() / kDeliveryCheckBytes, checks);
 }
 
+// A pooled pair that publishes a refusal at or after the work cutoff, before the handler wakes
+// there, is unfinished, as the handler would decide it (section 4; the Opus review of d398357a9,
+// N1: a /resolve pair's own 503 deadline, capped at the cutoff, raced the handler's unfinished in
+// 4 of 8 runs once the answer's build read its deadline every 64 KiB). A refusal published before
+// the cutoff stays the pair's, and an answer published at the cutoff is kept. Both routes. The
+// order is fixed: the workers run inside the handler's client check, where the handler has read
+// the clock (before the cutoff) and holds no lock; each pair starts before the cutoff (the clock
+// is set back for each task: they run one after the other here, side by side in a server)
+TEST(ServerFanout, ARefusalPublishedAtTheCutoffIsUnfinished) {
+    for (const std::string route : { "/resolve", "/pattern" }) {
+        SCOPED_TRACE(route);
+        const std::vector<SelectedPair> pairs { kPairs[0], kPairs[1], kPairs[2] };
+        auto entry = std::make_shared<RequestEntry>(std::nullopt, route, "inst",
+                                                    std::chrono::system_clock::now(),
+                                                    refs_of(pairs));
+        const RequestDeadlines d = deadlines_now(60'000);
+        // (the request's arrival: the handler's waits end at once, its clock read before the
+        // cutoff)
+        const SteadyClock::rep before = d.arrival.time_since_epoch().count();
+        auto time = std::make_shared<std::atomic<SteadyClock::rep>>(before);
+        std::vector<std::function<void()>> tasks;
+        size_t asked = 0;
+        FanoutSettings settings = settings_of(pairs, d, route);
+        settings.poll_ms = 1;
+        settings.clock = [time]() {
+            return SteadyClock::time_point(SteadyClock::duration(time->load()));
+        };
+        settings.gone = [&]() {
+            if (++asked == 2) {
+                EXPECT_EQ(3u, tasks.size());
+                for (auto &task : tasks) {
+                    time->store(before);
+                    task();
+                }
+            }
+            return false;
+        };
+        // pair 0 refuses before the cutoff, pair 1 at it, pair 2 answers at it
+        FanoutOutcome out = run_fanout(settings, entry, [&](PairControl &control) {
+            EXPECT_TRUE(control.start_running());
+            if (control.index())
+                time->store(d.cutoff.time_since_epoch().count());
+            if (control.index() == 2)
+                return answered(control);
+            Json::Value body;
+            body["error"] = "the pair's own deadline";
+            body["code"] = "deadline";
+            PairResult r;
+            r.entry = envelope_entry_refused(control.pair(), "", 503, body);
+            r.memory_bytes = 5;
+            return r;
+        }, [&](std::function<void()> task, SteadyClock::time_point) {
+            tasks.push_back(std::move(task));
+            return true;
+        });
+        ASSERT_EQ(3u, out.entries.size());
+        const Json::Value registry = entry->json(0);
+        EXPECT_EQ("refused", out.entries[0]["outcome"].asString());
+        EXPECT_EQ("deadline", out.entries[0]["refusal"]["code"].asString());
+        EXPECT_EQ("refused", registry["pairs"][0]["outcome"].asString());
+        const Json::Value &cut = out.entries[1]["refusal"];
+        EXPECT_EQ("unfinished", cut["code"].asString()) << json_text(out.entries[1], true);
+        EXPECT_EQ("cutoff", cut["reason"].asString());
+        EXPECT_EQ(kUnfinishedMembers, members(cut));
+        EXPECT_EQ("unfinished", registry["pairs"][1]["outcome"].asString());
+        EXPECT_EQ("ended", registry["pairs"][1]["state"].asString());
+        EXPECT_EQ("answered", out.entries[2]["outcome"].asString());
+        EXPECT_EQ("answered", registry["pairs"][2]["outcome"].asString());
+    }
+    wait_for_workers();
+}
+
 // A pair started and not finished at the cutoff (an uninterruptible piece of work): unfinished
 // with its usage so far and told to stop; its worker ends after the answer, and the registry
 // states the end with its final usage — the entry stays running until then
