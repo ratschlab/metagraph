@@ -194,12 +194,14 @@ _M_DESC = 1536          # union_pairs()' preparation per input and expected pair
 _M_KEY = 256            # a seqs_order key's description and entry (fitted: at most 153 B)
 _W_MATCH = 4 * W_ELEM   # two pair descriptions matched (Appendix A.4's rule: up to seven
 #                         fields of each read)
-# A matching pass's own work per description, beside its comparisons, at the worst stage
-# timings per description (Opus review m1: grouping 1.9 us, indexing 3.7 us, a count or a
-# query 2.5 us, at 2,000 descriptions)
-_W_GROUP = 10 * W_ELEM  # grouped by content: its signature, a lookup, its slot
-_W_INDEX = 20 * W_ELEM  # indexed: its facets, the lists it joins
-_W_QUERY = 13 * W_ELEM  # a query of the index (charged twice: the count and the scan): its
+# A matching pass's own work per description, beside its comparisons (Opus review m1), fitted
+# to each stage's worst time per description over every seqs_order key form and eleven
+# description shapes, 2,000 each, best of 9 on 3.11: grouping 2.6 us, indexing 4.1 us, a count
+# 2.7 us, a query 2.9 us (distinct names stating all seven fields); each pass whole is then
+# charged at least 1.17x its time beside the class descriptions (1.11x on 3.14)
+_W_GROUP = 13 * W_ELEM  # grouped by content: its signature, a lookup, its slot
+_W_INDEX = 21 * W_ELEM  # indexed: its facets, the lists it joins
+_W_QUERY = 15 * W_ELEM  # a query of the index (charged twice: the count and the scan): its
 #                         facets and a dozen lookups
 _M_MATCH = 2048         # a matching pass per description, while it runs: its signature,
 #                         group, facets and the index's lists, entries and paths, released

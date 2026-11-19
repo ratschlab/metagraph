@@ -2153,7 +2153,7 @@ graphlets.rst examples run in `run_examples.py` (CI's fixture-checks job).
   A.4's rule says can match it (an index_fp both state; else the graph name, or a bare name against an index_ns; then
   the pair_id; then the paths, an unstated one matching any, an id's paths taken from the call). Descriptions with one
   content are compared once. With distinct pairs the work is linear in the inputs: the service's largest seed (2,000
-  pairs, each an input and an expected pair with a `seqs_order=` key) is charged about 890,000 lwu for the whole
+  pairs, each an input and an expected pair with a `seqs_order=` key) is charged about 980,000 lwu for the whole
   construction, where comparing every pair was priced at about 272 million. Many descriptions of one name that differ
   only in release, index_ns or index_meta_fp (not indexed), or many distinct descriptions that all match one another,
   are still compared pairwise. An input refused `ambiguous_pair` has its refusal searched group by group, each group's
