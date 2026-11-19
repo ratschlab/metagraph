@@ -1030,6 +1030,18 @@ class TestPartialDescriptions(unittest.TestCase):
         u = union_pairs([{'pair': {'graph': GRAPH}, 'graphlet': self.old}])
         self.assertNotIn(GP, json.dumps(u.provenance()))
 
+    def test_the_class_description_does_not_follow_the_order(self):
+        # fix review N5: of twins equally full (one key), the class description is the one
+        # with paths, whatever the order -- defensive: with the call's known paths the
+        # outputs are the same either way, so it is pinned on _classes() itself
+        from metagraph.traverse import union as U
+        old = U._env_desc(self.old.envelope, self.old)
+        new = U._env_desc(self.new.envelope, self.new)
+        known = U._known_paths([old, new])
+        for order in ([old, new], [new, old]):
+            (c,) = U._classes(list(order), known)
+            self.assertIs(c['desc'], old)
+
     def test_a_fan_out_pair_by_path_takes_the_answering_pair_id(self):
         from metagraph.traverse import union_pairs
         seed = 'ACGTACGTACGTACGTACGTACGTACGTACGTAC'
