@@ -218,11 +218,13 @@ _W_GROUP = 13 * W_ELEM  # grouped by content: its signature, a lookup, its slot
 _W_INDEX = 21 * W_ELEM  # indexed: its facets, the lists it joins
 _W_QUERY = 15 * W_ELEM  # a query of the index (charged twice: the count and the scan): its
 #                         facets and a dozen lookups
-_M_MATCH = 2048         # a matching pass per description, while it runs: its signature,
+_M_MATCH = 2304         # a matching pass per description, while it runs: its signature,
 #                         group, facets and the index's lists, entries and paths, released
 #                         after the pass (fitted on every seqs_order key form and eleven
-#                         description shapes, 200 and 2,000 each, on 3.11 and 3.14: at most
-#                         1,741 B, distinct names that state all seven fields; Opus review M1)
+#                         description shapes, 400 to 174,763 each, on 3.11 and 3.14: it grows
+#                         with the index's tables, 1,741 B at 2,000, 1,862 at 2,731 and at
+#                         most 2,059 at 174,763 on 3.14, distinct names that state all seven
+#                         fields; Opus review M1, Opus check of dada7f430 N2)
 _M_FIG = 160            # a walk's figures: the record, whole_in and held_in, its slot
 _DERIVATION_CAUSES = {'no_carrier': 'no label carries the whole seed',
                       'no_trace_carrier': 'no label carries the whole seed by trace',
@@ -2518,7 +2520,8 @@ def _ambiguous(descs, pos, rep, idx, known, b, cls, members, covers, across):
     exist: the first group in input order whose matches include two that do not match.
     A group that matches its class's groups only and all of them fails exactly when its
     class is no clique (one of its groups does not match all of the class); any other
-    group's matches are compared among themselves, charged as they are."""
+    group's matches are found again (its count and its scan of the index, _W_QUERY each)
+    and compared among themselves, each charged before it runs."""
     clique = [all(covers[t] for t in m) for m in members]
     for s in range(len(rep)):
         if covers[s] and not across[s]:
@@ -2528,6 +2531,9 @@ def _ambiguous(descs, pos, rep, idx, known, b, cls, members, covers, across):
         else:
             r = rep[s]
             if b is not None:
+                # the group's count and scan of the index, then its comparisons with its
+                # candidates (Opus check of dada7f430, N3)
+                b.charge(2 * _W_QUERY)
                 b.charge(_W_MATCH * (idx.count(r) - 1))
             hits = [t for lst in idx.query(r) for t in lst
                     if t != s and _matches(r, rep[t], known)]

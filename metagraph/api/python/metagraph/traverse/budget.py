@@ -131,8 +131,9 @@ __all__ = ['LocalLimits', 'LocalBudget', 'LocalStop', 'LocalBudgetExceeded', 'Pa
 #     indexed and _W_QUERY twice per one queried (its count and its scan), fitted as these
 #     weights are, and _M_MATCH per description of the pass (released when the pass ends),
 #     then before it compares 4 W_ELEM per comparison, counted from the index; an input
-#     refused ambiguous_pair has its first refusal searched by comparing a group's
-#     matches among themselves, charged row by row before each row; the trie is one
+#     refused ambiguous_pair has its first refusal searched by comparing a group's matches
+#     among themselves, charged row by row before each row (a group whose matches are found
+#     again: its count and scan, _W_QUERY each, and its comparisons first); the trie is one
 #     pass over each part's first-parent tree, charged per part and arm before the pass:
 #     4 W_ELEM per part segment (its element, the compare of its bases, at most two trie
 #     nodes and edges, the cover entry of the first edge it walks) and 1 lwu per 16 of its
@@ -143,9 +144,9 @@ __all__ = ['LocalLimits', 'LocalBudget', 'LocalStop', 'LocalBudgetExceeded', 'Pa
 #     entry of the cover a split copies (parts that share a spelling and branch off it at
 #     different depths cover each other's edges, an entry per part and edge); before the
 #     union segments are made, one per raw edge and per cover entry a piece and _W_PIECE
-#     (the merge reads it); a record per part and absent or
-#     failed record; the parts' leaves, paths and path_of_leaf (derive.uses); the parts'
-#     own parses are the caller's (a union takes parsed models);
+#     (the merge reads it); a record per part and absent or failed record; the parts'
+#     leaves, paths and path_of_leaf (derive.uses); the parts' own parses are the caller's
+#     (a union takes parsed models);
 #   * PairUnion's queries charge the parts' cold prices plus the trie work: an arm's walk
 #     figures (kind, length, whole_in, held_in: walks(), statements(), print(), summary(),
 #     the exports) at their cold price on every call, per union segment W_ELEM per pair (the
@@ -189,9 +190,10 @@ DEADLINE_POLL = 65536
 
 # ------------------------------------------------------------------ the weights
 # lwu per element; 1 lwu ~ 0.1 us of CPython 3.11 on the reference machine (Apple M5 Max).
-# Changing a weight moves stop points, and no unbudgeted answer: by itself it does not need
-# a new WORK_MODEL (the golden gate pins the unbudgeted outputs; union_pairs()' and stitch()'s
-# prices moved within model 2). A new WORK_MODEL is for a change in what is charged for.
+# WORK_MODEL changes only when a charge a golden test pins moves. A weight or a price
+# changed otherwise moves stop points and no unbudgeted answer (the golden gate pins the
+# unbudgeted outputs), and stays within the model: union_pairs()' and stitch()'s prices moved
+# within model 2.
 W_LINE = 48            # an MGT record line parsed (+ 1 lwu per 8 bytes of it)
 W_DUMP_LINE = 24       # an MGT record line written
 W_CALL = 200           # what any call costs beside its elements (its setup in Python)

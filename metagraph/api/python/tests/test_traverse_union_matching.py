@@ -471,13 +471,15 @@ class TestWholeUnions(unittest.TestCase):
 # ---------------------------------------------------------------- the charges
 
 class _Recorder:
-    """A stand-in budget: the work charged so far."""
+    """A stand-in budget: the work charged so far, and each charge in |events|."""
 
-    def __init__(self):
+    def __init__(self, events=None):
         self.work = 0
+        self.events = events if events is not None else []
 
     def charge(self, work, nbytes=0):
         self.work += work
+        self.events.append(('charge', work))
 
     def release(self, nbytes):
         pass
@@ -488,10 +490,27 @@ class TestCharges(unittest.TestCase):
     def test_each_pass_is_charged_before_it_runs(self):
         """Admitted before it runs (budget.py), read from what each pass did, in order:
         before it groups, its groups are charged; before it builds an index, that index and
-        its queries are charged; at every comparison it has charged _W_MATCH for at least as
+        its queries are charged: one query per description the pass then counts, and no
+        more scans than that (Opus check of dada7f430, N1: a pass charging no queries
+        passed); in the refusal search (_ambiguous()) each group's count follows its own
+        query charge (N3); at every comparison it has charged _W_MATCH for at least as
         many; a pass that refuses nothing charges exactly the comparisons it makes (the
         keys' pairs with equal values are charged and not compared)."""
-        real, Index, groups = U._matches, U._Candidates, U._groups
+        real, Index, groups, ambiguous = U._matches, U._Candidates, U._groups, U._ambiguous
+
+        class Spy:
+            """The index, its counts and scans recorded."""
+
+            def __init__(self, ix, events):
+                self.ix, self.events = ix, events
+
+            def count(self, d):
+                self.events.append(('count',))
+                return self.ix.count(d)
+
+            def query(self, d):
+                self.events.append(('scan',))
+                return self.ix.query(d)
         for seed in range(3000):
             rng = random.Random(seed)
             descs, so = case(rng)
@@ -502,11 +521,11 @@ class TestCharges(unittest.TestCase):
                     ('keys', lambda b: U._check_keys(so, known, b)),
                     ('classes', lambda b: U._pair_classes(descs, known, b)),
                     ('seqs', lambda b: U._seqs_of(classes, so, tags, known, b))):
-                b = _Recorder()
                 events = []
+                b = _Recorder(events)
 
                 def index_price(b_, grouped, indexed, queried, held):
-                    events.append(('price', grouped, indexed))
+                    events.append(('price', grouped, indexed, queried))
                     return 0
 
                 def compare_price(b_, compared, longest):
@@ -519,16 +538,22 @@ class TestCharges(unittest.TestCase):
 
                 def index(ds, k):
                     events.append(('index', len(ds)))
-                    return Index(ds, k)
+                    return Spy(Index(ds, k), events)
+
+                def searched(*a):
+                    events.append(('ambiguous',))
+                    return ambiguous(*a)
 
                 def counted(x, y, k=None):
                     events.append(('match', b.work))
                     return real(x, y, k)
                 with mock.patch.multiple(U, _matches=counted, _compare_price=compare_price,
                                          _index_price=index_price, _Candidates=index,
-                                         _groups=grouping):
+                                         _groups=grouping, _ambiguous=searched):
                     r = outcome(run, b)
-                calls, priced = 0, []
+                calls, priced, queried = 0, [], None
+                counts = scans = 0
+                search, last = False, None
                 for e in events:
                     if e[0] == 'price':
                         priced.append(e)
@@ -538,10 +563,26 @@ class TestCharges(unittest.TestCase):
                         priced = []
                     elif e[0] == 'index':
                         self.assertIn(e[1], [p[2] for p in priced], (seed, name, events))
+                        # its queries, priced with it
+                        queried = sum(p[3] for p in priced)
                         priced = []
-                    else:
+                    elif e[0] == 'ambiguous':
+                        search = True
+                    elif e[0] in ('count', 'scan') and search:
+                        if e[0] == 'count':
+                            self.assertEqual(last, ('charge', 2 * U._W_QUERY), (seed, name))
+                    elif e[0] == 'count':
+                        counts += 1
+                    elif e[0] == 'scan':
+                        scans += 1
+                    elif e[0] == 'match':
                         calls += 1
                         self.assertLessEqual(U._W_MATCH * calls, e[1], (seed, name))
+                    last = e
+                if queried is not None:
+                    # every description the pass queries was charged a count and a scan
+                    self.assertEqual(counts, queried, (seed, name))
+                    self.assertLessEqual(scans, queried, (seed, name))
                 if r[0] == 'ok' and name != 'keys':
                     self.assertEqual(U._W_MATCH * calls, b.work, (seed, name))
 
@@ -580,7 +621,6 @@ class TestCharges(unittest.TestCase):
             gc.disable()
             try:
                 tracemalloc.start()
-                base = tracemalloc.get_traced_memory()[0]
                 out = fn()
                 cur, peak = tracemalloc.get_traced_memory()
             finally:
@@ -594,7 +634,9 @@ class TestCharges(unittest.TestCase):
             fn(b)
             return b.peak_bytes
 
-        n = 400
+        # n = 2,731: past a resize of the index's tables, where a pass holds 1,834-1,867 B a
+        # description (1,741 at 2,000)
+        n = 2731
         for f in range(len(key_forms(0))):
             so = U._check_args([], None, None,
                                {key_forms(i)[f]: 'verified' for i in range(n)})[1]

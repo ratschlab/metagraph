@@ -2158,18 +2158,18 @@ graphlets.rst examples run in `run_examples.py` (CI's fixture-checks job).
   cover, the merge into union segments), so the account follows them and bounds the peak, and the service's union
   limits (256 MiB, 200 million lwu) stop such a union in the trie.
 - **Matching.** The passes that compare pair descriptions (the `seqs_order=` keys among themselves, `ambiguous_pair`
-  with the pair classes, the classes against the keys) compare a description only with its candidates: those an index of
-  A.4's rule says can match it (an index_fp both state; else the graph name, or a bare name against an index_ns; then
-  the pair_id; then the paths, an unstated one matching any, an id's paths taken from the call). Descriptions with one
-  content are compared once. With distinct pairs the work is linear in the inputs: the service's largest seed (2,000
-  pairs, each an input and an expected pair with a `seqs_order=` key) is charged about 980,000 lwu for the whole
-  construction, where comparing every pair was priced at about 272 million. Many descriptions of one name that differ
-  only in release, index_ns or index_meta_fp (not indexed), or many distinct descriptions that all match one another,
-  are still compared pairwise. An input refused `ambiguous_pair` has its refusal searched group by group, each group's
-  matches compared among themselves (the square of their number), so the groups before the refused one can take up to
-  the cube of the inputs together, as comparing every pair did (600 names on one index_fp, refused at the last input:
-  about 868 million lwu before and after). Every comparison is charged before it is made (§2.8), so a budget stops the
-  search.
+  with the pair classes, the classes against the keys) compare a description only with its candidates: those an index
+  of A.4's rule says can match it (an index_fp both state; else the graph name, or a bare name against an index_ns;
+  then the pair_id; then the paths, an unstated one matching any, an id's paths taken from the call). Descriptions
+  with one content are compared once. With distinct pairs the work is linear in the inputs: the service's largest seed
+  (2,000 pairs, each an input and an expected pair with a `seqs_order=` key) is charged about 1,000,000 lwu for the
+  whole construction (976,117 with failed records, 1,001,117 with absent ones), where comparing every pair was priced
+  at about 272 million. Many descriptions of one name that differ only in release, index_ns or index_meta_fp (not
+  indexed), or many distinct descriptions that all match one another, are still compared pairwise. An input refused
+  `ambiguous_pair` has its refusal searched group by group, each group's matches compared among themselves (the square
+  of their number), so the groups before the refused one can take up to the cube of the inputs together, as comparing
+  every pair did (600 names on one index_fp, refused at the last input: about 868 million lwu before and after). Every
+  comparison and query is charged before it is made (§2.8), so a budget stops the search.
 - **Labels.** Per (union segment, pair), the labels alive on the part segments it covers, as intervals. A part
   segment lies on one path, so its intervals do not depend on which walk passes it. In constrain mode they are built
   from the segment's entry set and its label changes (`derive.label_changes()`, `derive.py:72`), each change opening
