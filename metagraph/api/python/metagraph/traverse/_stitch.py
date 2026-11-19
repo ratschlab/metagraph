@@ -42,7 +42,7 @@ from . import ops as _ops
 from ._codec import REASON
 from .budget import (STR, TUPLE, W_ELEM, W_ROW, W_STEP, LocalBudgetExceeded, Partial,
                      dict_bytes, list_bytes, record_bytes, set_bytes)
-from .client import answered_pair
+from .client import PairIdError, answered_pair
 from .composite import CombineRefused, NotCombinable
 from .model import (ARM_SIDES, AmbiguousLabel, BadSelector, Continuation, Graphlet, Label,
                     UnknownLabel)
@@ -74,6 +74,9 @@ _T_NO_WALK = ('walk= names no walk of the %s arm (%s): a stitched child is seede
               'walk\'s continuation (continuation(), next_request())')
 _T_DIFFERENT_PAIR = ('the child was answered on pair %s, its parent on pair %s: a '
                      'continuation runs on its parent\'s pair')
+# p2_pair_id, bad_pair_id, pair_id_mismatch: the parent's or the child's pair statement the
+# library does not take, with the words of client.PairIdError
+_T_BAD_PAIR_STATEMENT = '%s: %s'
 _T_DIFFERENT_GRAPH = ('the child\'s graph is not its parent\'s (%s %r vs %r): its walks '
                       'cannot continue the parent\'s')
 _T_DIFFERENT_MODE = ('the child was walked in %s mode with %s support, its parent in %s mode '
@@ -429,7 +432,9 @@ def stitch(parent, child=None, *, arm=None, walk=None, allow_unverified_index=Fa
     child's seed (several: ambiguous_walk). One junction per call.
 
     Refusals (CombineRefused with .code, in the order checked; Appendix B.1 has the texts):
-    not_combinable (also a TypeError), view_unsupported, MissingEnvelope, different_index,
+    not_combinable (also a TypeError), view_unsupported, MissingEnvelope, p2_pair_id,
+    bad_pair_id and pair_id_mismatch (a pair statement the library does not take, with the
+    PairIdError's words: client._pair()), different_index,
     index_unverifiable (a manifest digest on some parts only; allow_unverified_index=True
     stitches it and states the identity unverified), different_pair (the identity checks
     run against every part on both sides), different_graph, different_mode, not_one_arm,
@@ -451,6 +456,15 @@ def stitch(parent, child=None, *, arm=None, walk=None, allow_unverified_index=Fa
     for x in (parent,) if child is None else (parent, child):
         if isinstance(x, Graphlet):
             _K.require_envelope(x, 'stitch()')
+    # the pair each states, read by the one rule (client._pair()): a p2 or malformed
+    # pair_id, an id beside one path or beside paths that are not its is refused with the
+    # PairIdError's code and words (a StitchedGraphlet's parts were read when it was built)
+    for x, who in ((parent, 'the parent'), (child, 'the child')):
+        if isinstance(x, Graphlet):
+            try:
+                answered_pair(x.envelope)
+            except PairIdError as e:
+                raise CombineRefused(e.code, _T_BAD_PAIR_STATEMENT % (who, e)) from None
     if child is None and isinstance(parent, StitchedGraphlet):
         return parent
 
@@ -635,18 +649,19 @@ class StitchedGraphlet:
 
     def _check_pairs(self, cparts):
         """different_pair: a part of either side answered on another pair than a part of the
-        other (only pairs both state)."""
+        other (only pairs both state), compared by Pair.identity: by the n1 id where both
+        state one or have both paths (an old document and its id-form twin are one pair),
+        else by the paths."""
         mine = {answered_pair(p.graphlet.envelope) for p in self._parts} - {None}
         for p in cparts:
             cp = answered_pair(p.graphlet.envelope)
             if cp is None:
                 continue
             for pp in sorted(mine, key=lambda x: tuple('' if v is None else v for v in x)):
-                if pp != cp:
+                if pp.identity != cp.identity:
                     def show(x):
-                        return json.dumps({'graph': x[0], 'graph_path': x[1],
-                                           'annotation_path': x[2]},
-                                          separators=(',', ':'), ensure_ascii=False)
+                        # the pair by graph and n1 id, no path (Pair.named())
+                        return json.dumps(x.named(), separators=(',', ':'), ensure_ascii=False)
                     raise CombineRefused('different_pair', _T_DIFFERENT_PAIR % (show(cp),
                                                                                 show(pp)))
 
@@ -1884,9 +1899,12 @@ class StitchedGraphlet:
 
     def provenance(self):
         """One entry per part (§3.6): {key, role: root | child, junction: {arm, walk, at_bp,
-        overlap_bp} | None, pair: the pair it was answered on, identity, seed_id, digest,
-        request: the part's replay request as GraphletStore.request_of() builds it}. No
-        single request reproduces a stitched graphlet: replay each part and stitch again."""
+        overlap_bp} | None, pair: the pair it was answered on ({graph, pair_id}, no path;
+        None on a single-graph server), identity, seed_id, digest, request: the part's replay
+        request as GraphletStore.request_of() builds it, its pair named by {graph, pair_id}
+        (client.request_without_paths())}. No single request reproduces a stitched graphlet:
+        replay each part and stitch again."""
+        from .client import request_without_paths
         from .store import GraphletStore
         out = []
         for p in self._parts:
@@ -1897,10 +1915,12 @@ class StitchedGraphlet:
                 j = {'arm': jj.arm, 'walk': jj.walk, 'at_bp': jj.at_bp,
                      'overlap_bp': jj.overlap_bp}
             meta = (g.seed_summary or {}).get('seed') or {}
+            pair = answered_pair(g.envelope)
             out.append({'key': p.key, 'role': 'child' if p.key else 'root', 'junction': j,
-                        'pair': answered_pair(g.envelope), 'identity': _ops.index_identity(g),
+                        'pair': None if pair is None else pair.named(),
+                        'identity': _ops.index_identity(g),
                         'seed_id': meta.get('seed_id'), 'digest': p.digest,
-                        'request': GraphletStore.request_of(g)})
+                        'request': request_without_paths(GraphletStore.request_of(g))})
         return out
 
     def memory_bytes(self):

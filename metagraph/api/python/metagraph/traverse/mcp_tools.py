@@ -108,8 +108,9 @@ from . import derive, export, ops
 from ._codec import GraphletFormatError
 from .budget import LocalBudget, LocalBudgetExceeded, LocalLimits
 from .client import (SELECTORS, AttemptAtBound, ServerInitializing, TraverseError,
-                     _ResponseCut, auto_coordinates, drop_coordinates_note, pair_members,
-                     requested_pair, single_answer)
+                     PairIdError, _ResponseCut, auto_coordinates, document_without_paths,
+                     drop_coordinates_note, entry_without_paths, pair_members,
+                     request_without_paths, requested_pair, single_answer)
 from .model import (
     ARM_SIDES, AmbiguousLabel, IncompleteRecording, MissingEnvelope, NextRequest,
     UnknownLabel, UnverifiableLabelName,
@@ -637,6 +638,10 @@ def _tool(fn):
             # the backend's transport errors are mapped where the backend is called;
             # what is left is the local file system
             out = {'error': 'io_error', 'message': e.strerror or type(e).__name__}
+        except PairIdError as e:
+            # before ValueError, its base class: a pair named by an id the library does not
+            # take, or one it cannot send (no resolver, a server without ids): its own code
+            out = {'error': e.code, 'message': str(e)}
         except (IndexError, ValueError) as e:
             out = {'error': 'bad_argument', 'message': str(e)}
         finally:
@@ -1182,8 +1187,10 @@ class GraphletTools:
 
     @_tool
     def traverse_capabilities(self, index=None, max_bytes=None):
+        # a multi-graph server's probe names its pair: by graph and pair_id, no path
         name, client = self._client(index)
-        return {'index': name, 'capabilities': self._backend(client.capabilities)}
+        return {'index': name,
+                'capabilities': entry_without_paths(self._backend(client.capabilities))}
 
     @_tool
     def traverse_resolve(self, index=None, sequence=None, labels=None, discover=None,
@@ -1463,10 +1470,14 @@ class GraphletTools:
         about to be sent -- the capabilities read are those of the pair it names (a
         continuation with overrides={'graph': ...} is never checked against the client's
         own graph and run on another; one on the pair its parent was answered on reads that
-        pair's, annotation_path included); a request on the client's own graph reads the
-        client's capabilities."""
-        graph, graph_path, annotation_path = requested_pair(req) or (None, None, None)
-        if annotation_path is not None:
+        pair's, annotation_path included, or its pair_id where it names the pair by id); a
+        request on the client's own graph reads the client's capabilities."""
+        graph, graph_path, annotation_path, pair_id = requested_pair(req) or (None,) * 4
+        if pair_id is not None and graph_path is None and annotation_path is None:
+            # a pair named by its id (a document that states no paths): probed by it, by
+            # keyword (a subclass's capabilities() may take fewer, as supports_coordinates())
+            caps = self._backend(lambda: client.capabilities(graph, pair_id=pair_id))
+        elif annotation_path is not None:
             caps = self._backend(client.capabilities, graph, graph_path, annotation_path)
         elif graph_path is not None or (graph is not None
                                         and graph != getattr(client, 'graph', None)):
@@ -1541,7 +1552,8 @@ class GraphletTools:
             # how the branch allowance was derived, as essential as the loss budget's
             stated['branch_budget'] = dict(req.branch_budget)
         if not execute:
-            out = dict({'request': dict(req), 'parent': parent,
+            # the request as an answer states it: its pair by graph and pair_id, no path
+            out = dict({'request': request_without_paths(dict(req)), 'parent': parent,
                         'ceiling_bytes': max_bytes or self.sequence_max_bytes}, **stated)
             if per_label is not None:
                 out['loss_budget_labels'] = per_label
@@ -2210,7 +2222,8 @@ class GraphletTools:
         """Write a complete export to a file in the export directory -> {path, bytes,
         records}: fasta, gfa, json (the full results[i]; what=compare with other=<handle>
         writes the complete comparison lists; what=walk with arm and walks writes the
-        complete segment chains of those walks), mgt (the standalone file). |path| is a
+        complete segment chains of those walks), mgt (the standalone file, its pair by
+        {graph, pair_id} in the J line, no path, as graphlet_save). |path| is a
         file name (default: <handle>.<ext>). The receipt is always returned: records,
         then bytes, are cut first (fields_cut). Without local limits the export has no
         work or allocation budget: the file is as large as the graphlet makes it. Under
@@ -2304,8 +2317,8 @@ class GraphletTools:
         else:
             from .parser import dump
             # a derived handle's graphlet carries its view: the file is the unchanged
-            # backing body with the view in J (§5)
-            text = dump(g, envelope=True)
+            # backing body with the view in J (§5); its pair by {graph, pair_id}, no path
+            text = document_without_paths(dump(g, envelope=True))
             records = text.count('\n')
         if call is not None:
             if format == 'json':
@@ -2333,7 +2346,7 @@ class GraphletTools:
         _check_receipt(_Receipt(dict({'path': path}, **_unvalidated(e)),
                                 _UNVALIDATED_OPTIONAL + ('records', 'bytes')),
                        self.max_bytes, 'use a shorter file name')
-        text = self.store.standalone_text(handle, budget=call.budget)
+        text = self.store.standalone_text(handle, budget=call.budget, paths=False)
         n = _write_text_charged(path, text, call.budget)
         return _Receipt(dict({'path': path, 'bytes': n, 'records': text.count('\n')},
                              **_unvalidated(e)),
@@ -2449,8 +2462,10 @@ class GraphletTools:
 
     @_tool
     def graphlet_save(self, handle, path, budget=None):
-        """The standalone .mgt file of an entry, written to the export directory. Under
-        local limits it is copied from the stored body without a parse."""
+        """The standalone .mgt file of an entry, written to the export directory, its J line
+        naming the pair by {graph, pair_id}, no path (an old document too: only the J line
+        differs from the stored one). Under local limits it is copied from the stored body
+        without a parse."""
         path = self._confined(path, [self._export_root()])
         _check_receipt(_Receipt({'path': path}, ('bytes',)), self.max_bytes,
                        'use a shorter file name')
@@ -2460,11 +2475,11 @@ class GraphletTools:
             _check_receipt(_Receipt(dict({'path': path}, **_unvalidated(e)),
                                     _UNVALIDATED_OPTIONAL + ('bytes',)),
                            self.max_bytes, 'use a shorter file name')
-            n = self.store.save_body(handle, path, budget=call.budget)
+            n = self.store.save_body(handle, path, budget=call.budget, paths=False)
             return _Receipt(dict({'path': path, 'bytes': n}, **_unvalidated(e)),
                             _UNVALIDATED_OPTIONAL + ('bytes',))
         try:
-            n = self.store.save(_handle(handle), path)
+            n = self.store.save(_handle(handle), path, paths=False)
         except LocalBudgetExceeded as e:
             # the save parses the stored body on demand: a stop on the store's parse
             # limits offered raise_local_budget, which no call's budget does
@@ -2558,14 +2573,16 @@ def _admit_paths(call, g, a):
 
 def _with_graph(req, client):
     """|req| on the client's own pair when it names none (a copy: a stored request is not
-    changed in place): its graph, and graph_path and annotation_path where the client has
-    them (pair_members()). A request that names a pair (a continuation on its parent's,
-    a replay of one) keeps it. A NextRequest keeps its attributes (notes, budgets)."""
+    changed in place): its graph, and graph_path and annotation_path, or pair_id, where the
+    client has them (pair_members()). A request that names a pair (a continuation on its
+    parent's, a replay of one) keeps it. A NextRequest keeps its attributes (notes,
+    budgets)."""
     if any(k in req for k in SELECTORS):
         return req
     members = pair_members(getattr(client, 'graph', None),
                            getattr(client, 'graph_path', None),
-                           getattr(client, 'annotation_path', None)) \
+                           getattr(client, 'annotation_path', None),
+                           getattr(client, 'pair_id', None)) \
         if getattr(client, 'graph', None) else {}
     if not members:
         return req

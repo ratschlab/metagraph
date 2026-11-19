@@ -358,9 +358,11 @@ class TestRefusals(unittest.TestCase):
     def test_different_pair(self):
         p = load('keep_forbid', 'parent', with_pair('g1', '/p/g1.dbg'))
         c = load('keep_forbid', 'child', with_pair('g2', '/p/g2.dbg'))
+        # (a pair stated without its annotation path has no n1 id: it is shown as stated;
+        # an engine states both paths or the id, test_traverse_pair_id)
         refused(self, 'different_pair', 'the child was answered on pair '
-                '{"graph":"g2","graph_path":"/p/g2.dbg","annotation_path":null}, its parent on '
-                'pair {"graph":"g1","graph_path":"/p/g1.dbg","annotation_path":null}: a '
+                '{"graph":"g2","graph_path":"/p/g2.dbg"}, its parent on '
+                'pair {"graph":"g1","graph_path":"/p/g1.dbg"}: a '
                 'continuation runs on its parent\'s pair', stitch, p, c)
         # one pair stated, or the same pair: not refused
         stitch(p, self.C)
