@@ -1919,9 +1919,11 @@ TEST(ResolveBounds, TheSelectionReadsTheDeadline) {
     size_t calls = 0;
     const SeedSelection checked = select_seeds(profile, query, policy, false,
                                                [&]() { ++calls; });
-    // n (n - 1) pairs, n seeds frozen and n named: about n^2 / 4096 readings
+    // n (n - 1) pairs, and ten steps a seed: the seed, its graph run, its name and the name's run
+    // checked; its pick sized; the seed frozen and its label at each of four passes (GPT final
+    // review of trains 5a-7, m1: before, four) -- about n^2 / 4096 readings
     EXPECT_GE(calls, n * n / kResolveCheckLabels);
-    EXPECT_LE(calls, (n * n + 4 * n) / kResolveCheckLabels + 1);
+    EXPECT_LE(calls, (n * n + 10 * n) / kResolveCheckLabels + 1);
     ASSERT_EQ(n, checked.seeds.size());
     for (size_t i = 0; i < n; ++i) {
         EXPECT_EQ(plain.seeds[i].seed_id, checked.seeds[i].seed_id);
@@ -1937,8 +1939,8 @@ TEST(ResolveBounds, TheSelectionReadsTheDeadline) {
     EXPECT_EQ(3u, calls);
 
     // each max_support round sweeps every run (here 5,000 runs of one label), and reads the
-    // deadline inside it: a step a run clipped, a candidate start swept (about 10,000), the runs
-    // before each of its sorts, a label and its runs for the winner -- about 25,000 steps, six
+    // deadline inside it: a step a run clipped, a candidate start swept and each run it adds, the
+    // runs before each of its sorts, a label and each run checked for the winner -- five or six
     // readings a round
     LabelProfile gapped;
     gapped.label.kind = LabelKind::COLUMN;
@@ -2146,6 +2148,81 @@ TEST(ResolveBounds, AManyRunMaxSupportSelectionStopsInTime) {
             throw Late();
     });
     EXPECT_EQ(before_rounds + 1, calls);
+}
+
+// The selection reads its deadline inside a label's runs and over the candidates, a step a label,
+// a run or a candidate (GPT final review of trains 5a-7, m1: max_support's count of the runs read
+// nothing, a label's runs gathered or checked were read only before them, and longest_first's
+// candidates not at all). Two labels of 3 kResolveCheckLabels fragmented runs each: max_support
+// without a round reads once every kResolveCheckLabels runs counted and gathered, and a stop at
+// its first reading ends the count inside the first label's runs, before the gathered runs'
+// scratch is charged; an explicit seed that neither label covers reads as their runs are
+// checked; longest_first reads as it walks its candidates; the seeds are the same with readings
+TEST(ResolveBounds, TheSelectionReadsInsideALabelsRuns) {
+    const uint64_t per_label = 3 * kResolveCheckLabels;
+    SupportProfile profile;
+    profile.k = kK;
+    profile.num_kmers = 2 * per_label + 2;
+    profile.graph_runs = { { 0, profile.num_kmers } };
+    for (uint64_t l = 0; l < 2; ++l) {
+        LabelProfile lp;
+        lp.label.kind = LabelKind::COLUMN;
+        lp.label.name = "L" + std::to_string(l);
+        for (uint64_t i = 0; i < per_label; ++i) {
+            lp.runs.push_back({ 2 * i + l, 2 * i + l + 1 });
+        }
+        lp.kmers_supported = per_label;
+        profile.labels.push_back(std::move(lp));
+    }
+    const std::string query(profile.num_kmers + kK - 1, 'A');
+    struct Late {};
+    auto same_seeds = [](const SeedSelection &a, const SeedSelection &b) {
+        ASSERT_EQ(a.seeds.size(), b.seeds.size());
+        for (size_t i = 0; i < a.seeds.size(); ++i) {
+            EXPECT_EQ(a.seeds[i].seed_id, b.seeds[i].seed_id) << i;
+            EXPECT_EQ(a.seeds[i].labels, b.seeds[i].labels) << i;
+        }
+    };
+
+    SelectionPolicy support;
+    support.policy = SelectionPolicy::MAX_SUPPORT;
+    support.min_block_bp = kK;
+    support.max_seeds = 0;
+    size_t calls = 0;
+    select_seeds(profile, query, support, false, [&]() { ++calls; });
+    EXPECT_LE(4 * per_label / kResolveCheckLabels, calls);
+    AnswerAccount account(uint64_t(1) << 40);
+    calls = 0;
+    EXPECT_THROW(select_seeds(profile, query, support, false, [&]() {
+        ++calls;
+        throw Late();
+    }, &account), Late);
+    EXPECT_EQ(1u, calls);
+    EXPECT_EQ(0u, account.held());
+    support.max_seeds = 2;
+    const SeedSelection supported = select_seeds(profile, query, support, false);
+    ASSERT_EQ(2u, supported.seeds.size());
+    same_seeds(supported, select_seeds(profile, query, support, false, [&]() {}));
+
+    SelectionPolicy named;
+    named.policy = SelectionPolicy::EXPLICIT;
+    named.explicit_seeds.push_back({ { profile.num_kmers - 1, profile.num_kmers }, { "L0", "L1" } });
+    calls = 0;
+    const SeedSelection uncovered = select_seeds(profile, query, named, false, [&]() { ++calls; });
+    EXPECT_TRUE(uncovered.seeds.empty());
+    EXPECT_LE(2 * per_label / kResolveCheckLabels, calls);
+
+    SupportProfile candidates = profile;
+    for (uint64_t i = 0; i < per_label; ++i) {
+        candidates.candidates.push_back({ { 2 * i, 2 * i + 1 }, { 0 } });
+    }
+    SelectionPolicy longest;
+    longest.policy = SelectionPolicy::LONGEST_FIRST;
+    longest.max_seeds = 1;
+    calls = 0;
+    const SeedSelection first = select_seeds(candidates, query, longest, false, [&]() { ++calls; });
+    EXPECT_LE(per_label / kResolveCheckLabels, calls);
+    same_seeds(select_seeds(candidates, query, longest, false), first);
 }
 
 // The route (process_resolve_request): under bounds.time_budget_ms the selection of as many

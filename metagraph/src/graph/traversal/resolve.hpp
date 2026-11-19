@@ -463,14 +463,20 @@ constexpr char kSeedOrder[] = "rank";
 // |check| (unset: none): the request's stop and the answer's deadline (the server's: the
 // request's ResolveOptions::stop, abandoning it, then its finish_check; T5a-X1: before, the
 // deadline alone, so that nothing ended the selection of a request without one), read every
-// kResolveCheckLabels steps of the selection -- an explicit seed and each of its labels; a label
-// (with its runs) gathered for max_support and the runs before their sort; in a max_support
-// round a run clipped and each pick it meets, a candidate start swept, the round's runs once
-// before each of its sorts, a label (with its runs) checked for the winner; a merged
-// pick and the labels checked for it; a frozen seed and each of its labels, a pair of seeds
-// compared for overlaps -- and throwing to abandon it (GPT review 7, finding 1: the selection
-// was read only once it was done, after every overlapping pair was listed; T4-L1: once per
-// max_support round, whose clip of every run by every pick was O(runs x picks))
+// kResolveCheckLabels steps of the selection, each counted as it is taken -- a longest_first
+// candidate (and a pick's labels before they are copied); for explicit seeds each label put
+// into the name lookups, a seed, each graph run and each name checked for it and each run of a
+// named label checked; a label and each of its runs counted, then gathered, for max_support and
+// the runs before their sort; in a max_support round a run clipped and each pick it meets, a
+// candidate start swept and each run it adds, the round's runs once before each of its sorts, a
+// label and each of its runs checked for the winner; a merged pick and each label and run
+// checked for it; a pick and each of its names not covering sized, a frozen seed and each of
+// its labels and names at each pass over them, a pair of seeds compared for overlaps -- and
+// throwing to abandon it (GPT review 7, finding 1: the selection was read only once it was
+// done, after every overlapping pair was listed; T4-L1: once per max_support round, whose clip
+// of every run by every pick was O(runs x picks); GPT final review of trains 5a-7, m1: the
+// count of max_support's runs read nothing, and a label's runs, a seed's labels and
+// longest_first's candidates were read only before them)
 //
 // |answer| (null: none): the answer account (AnswerAccount), charged with the selection's
 // scratch before it is allocated (a max_support selection's gathered runs, twice; the round's
