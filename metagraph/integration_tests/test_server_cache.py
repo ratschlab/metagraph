@@ -167,7 +167,7 @@ class TestServerCache(TestingBase):
             return {'graph': name, 'pair_id': configured_pair_id(name, str(graph), str(annotation))}
 
         def cut(name):
-            return dict(tags(name), index_fp=None, returned=1, complete=True,
+            return dict(tags(name), index_fp=None, matched=1, returned=1, complete=True,
                         nth_score=None, tied=0, tied_returned=0)
 
         with self.running_server(indexes, '--cache-size', '0.01') as (client, url, log):
@@ -194,8 +194,8 @@ class TestServerCache(TestingBase):
 
         def cut(index_fp, returned):
             return {'graph': None, 'pair_id': None,
-                    'index_fp': index_fp, 'returned': returned, 'complete': True,
-                    'nth_score': None, 'tied': 0, 'tied_returned': 0}
+                    'index_fp': index_fp, 'matched': returned, 'returned': returned,
+                    'complete': True, 'nth_score': None, 'tied': 0, 'tied_returned': 0}
 
         # the bundle's manifest, as scripts/traversal/build_mini_refseq.sh writes it
         files = []

@@ -1239,6 +1239,35 @@ class TestCoordToHeader(TestingBase):
                 self.assertNotIn('kmers_in_target', result,
                                  "kmers_in_target must only appear when CoordToHeader is loaded")
 
+        # Each record states its cut as a single-graph server's /search does (train 8,
+        # SPEC-multigraph-envelope.md section 3): the pair tags null, `matched` the labels above
+        # the thresholds before the cut; every match returned here
+        cut_keys = {'graph', 'pair_id', 'index_fp', 'matched', 'returned', 'complete',
+                    'nth_score', 'tied', 'tied_returned'}
+        for record in records:
+            [cut] = record['cuts']
+            self.assertEqual(cut_keys, set(cut))
+            self.assertEqual((None, None, None), (cut['graph'], cut['pair_id'], cut['index_fp']))
+            n = len(record['results'])
+            self.assertEqual((n, n, True, None), (cut['matched'], cut['returned'],
+                                                  cut['complete'], cut['nth_score']))
+        # one label of query1's two: matched 2, returned 1; query2's one label complete
+        res = subprocess.run([query_command + ' --num-top-labels 1'],
+                             shell=True, stdout=PIPE, stderr=PIPE)
+        self.assertEqual(res.returncode, 0, res.stderr.decode())
+        cuts = {r['seq_description']: r['cuts'][0] for r in parse_records(res.stdout.decode())}
+        self.assertEqual((2, 1, False), (cuts['query1']['matched'], cuts['query1']['returned'],
+                                         cuts['query1']['complete']))
+        self.assertEqual((1, 1, True), (cuts['query2']['matched'], cuts['query2']['returned'],
+                                        cuts['query2']['complete']))
+        # the labels mode takes no cut: no `cuts` (as master's CLI)
+        labels_command = query_command.replace('--query-mode coords', '--query-mode labels')
+        res = subprocess.run([labels_command], shell=True, stdout=PIPE, stderr=PIPE)
+        self.assertEqual(res.returncode, 0, res.stderr.decode())
+        labelled = parse_records(res.stdout.decode())
+        self.assertEqual(2, len(labelled))
+        self.assertFalse(any('cuts' in r for r in labelled), labelled)
+
     @parameterized.expand(['', '-p 4', '--separately', '-p 4 --separately'])
     def test_multiple_files(self, extra_flags):
         # Create multiple test FASTA files (simulating different annotation columns)

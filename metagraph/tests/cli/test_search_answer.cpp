@@ -178,6 +178,9 @@ SeqSearchResult record(std::mt19937 &rng, int mode, size_t rows, size_t size, si
         }
     }
     graph::SearchCut cut;
+    // a cut that kept |rows| of more matches (master's `matched`: the labels above the
+    // thresholds before the cut)
+    cut.matched = rows + 7;
     cut.returned = rows;
     cut.complete = false;
     cut.nth_score = 3;
@@ -431,14 +434,15 @@ TEST(SearchAnswer, ARefusedUnitsCutEntry) {
             SeqSearchResult values = std::move(result);
             values.refuse(graph::SearchCut::Refused::VALUES, 4096);
             std::visit([](const auto &rows) { EXPECT_TRUE(rows.empty()); }, values.get_result());
+            // (|matched| the computed cut's: the 40 rows and the 7 it cut)
             EXPECT_EQ(abundances
-                          ? "{\"complete\":false,\"nth_median\":null,\"nth_score\":null,"
-                            "\"refused\":{\"account\":\"values\",\"code\":"
+                          ? "{\"complete\":false,\"matched\":47,\"nth_median\":null,"
+                            "\"nth_score\":null,\"refused\":{\"account\":\"values\",\"code\":"
                             "\"search_answer_too_large\",\"max_memory_mb\":4096},\"returned\":0,"
                             "\"tied\":0,\"tied_returned\":0,\"tied_same_median\":0}"
-                          : "{\"complete\":false,\"nth_score\":null,\"refused\":{\"account\":"
-                            "\"values\",\"code\":\"search_answer_too_large\",\"max_memory_mb\":"
-                            "4096},\"returned\":0,\"tied\":0,\"tied_returned\":0}",
+                          : "{\"complete\":false,\"matched\":47,\"nth_score\":null,\"refused\":"
+                            "{\"account\":\"values\",\"code\":\"search_answer_too_large\","
+                            "\"max_memory_mb\":4096},\"returned\":0,\"tied\":0,\"tied_returned\":0}",
                       compact(values.cut_to_json()));
             // the object: the record's members as before, no row
             Json::Value expected = object;
@@ -449,14 +453,15 @@ TEST(SearchAnswer, ARefusedUnitsCutEntry) {
             SeqSearchResult answer = record(rng, abundances ? 2 : 3, 4, 30, 12, false, 0.5);
             answer.refuse(graph::SearchCut::Refused::ANSWER, 1, 7);
             EXPECT_EQ(abundances
-                          ? "{\"complete\":false,\"nth_median\":null,\"nth_score\":null,"
-                            "\"refused\":{\"account\":\"answer\",\"code\":"
+                          ? "{\"complete\":false,\"matched\":11,\"nth_median\":null,"
+                            "\"nth_score\":null,\"refused\":{\"account\":\"answer\",\"code\":"
                             "\"search_answer_too_large\",\"max_memory_mb\":1,\"priced_mb\":7},"
                             "\"returned\":0,\"tied\":0,\"tied_returned\":0,"
                             "\"tied_same_median\":0}"
-                          : "{\"complete\":false,\"nth_score\":null,\"refused\":{\"account\":"
-                            "\"answer\",\"code\":\"search_answer_too_large\",\"max_memory_mb\":1,"
-                            "\"priced_mb\":7},\"returned\":0,\"tied\":0,\"tied_returned\":0}",
+                          : "{\"complete\":false,\"matched\":11,\"nth_score\":null,\"refused\":"
+                            "{\"account\":\"answer\",\"code\":\"search_answer_too_large\","
+                            "\"max_memory_mb\":1,\"priced_mb\":7},\"returned\":0,\"tied\":0,"
+                            "\"tied_returned\":0}",
                       compact(answer.cut_to_json()));
         }
     }

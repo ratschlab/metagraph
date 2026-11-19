@@ -120,9 +120,39 @@ def styled(value):
     return ''.join(out)
 
 
+def without_matched(content):
+    """this build's /search answer (bytes) parsed, without its cuts' matched: train 8 adds the
+    member (master's), which a base binary does not state"""
+    def drop(v):
+        if isinstance(v, list):
+            return [drop(x) for x in v]
+        if isinstance(v, dict):
+            return {k: drop(x) for k, x in v.items() if not (k == 'matched' and 'returned' in v)}
+        return v
+    return drop(json.loads(content))
+
+
+def in_train8_form(content):
+    """a base binary's /search answer (bytes) parsed, as train 8 tags it: each row's and cut's
+    graph_path and annotation_path as the pair's pair_id, null on a single-graph server
+    (docs/DESIGN-pair-identity.md section 4)"""
+    def retag(v):
+        if isinstance(v, list):
+            return [retag(x) for x in v]
+        if not isinstance(v, dict):
+            return v
+        if 'graph' in v and 'graph_path' in v:
+            v = dict(v, pair_id=None if v['graph'] is None else configured_pair_id(
+                v['graph'], v['graph_path'], v['annotation_path']))
+            del v['graph_path'], v['annotation_path']
+        return {k: retag(x) for k, x in v.items()}
+    return retag(json.loads(content))
+
+
 def refused_entry(entry, account, max_mb, priced_mb=None):
     """the cut entry of a refused unit whose entry without a budget is |entry|: its tags and
     member set, no row"""
+    # (matched, the computed cut's, is kept)
     out = dict(entry, returned=0, complete=False, nth_score=None, tied=0, tied_returned=0)
     if 'nth_median' in entry:
         out.update(nth_median=None, tied_same_median=0)
@@ -424,8 +454,8 @@ class TestSearchAnswerBudget(TestingBase):
 
     def test_each_mode_just_under_and_over(self):
         """every mode: answered at the bound its charge needs, byte for byte as without a
-        budget (and as the base binary, where one is given), with the field or without; refused
-        one MiB below, on the account the larger charge is on"""
+        budget (and as the base binary, where one is given, in train 8's form), with the field or
+        without; refused one MiB below, on the account the larger charge is on"""
         # 30 query records of every record's first k-mer: 30 x 1,000 rows
         body_records = [self.first_kmers('pa')] * 30
         unbounded = self.server(['--search-max-answer-memory-mb', '0'])
@@ -447,10 +477,12 @@ class TestSearchAnswerBudget(TestingBase):
             print(f'[ {mode} ] values {values} B a unit, answer {answer} B, text {len(got)} B',
                   flush=True)
         if BASE_BINARY:
+            # (the base's answer in train 8's form: its pair tags as pair_id, ours without matched)
             base = self.server(binary=BASE_BINARY)
             for mode in MODES:
                 r = base.post('search', self.body(mode, body_records))
-                self.assertEqual(plain_answers[mode], r.content, mode)
+                self.assertEqual(without_matched(plain_answers[mode]), in_train8_form(r.content),
+                                 mode)
             self.stop(base)
         self.stop(unbounded)
         self.stop(default)
@@ -846,8 +878,8 @@ class TestSearchAnswerBudget(TestingBase):
 
     def test_in_ram_bound_0_and_the_base_binary(self):
         """test 20: in_ram gives the bytes and the charge of mmap; the bound 0 refuses nothing
-        and gives the base binary's bytes (METAGRAPH_BASE_BINARY), with the field or without;
-        the default bound the same"""
+        and gives the base binary's answer (METAGRAPH_BASE_BINARY; in train 8's form), with the
+        field or without; the default bound the same"""
         records = [(f'r{i}', self.whole(name, 2)) for i, name in enumerate(('pa', 'pb', 'pc'))]
         body = self.body('query_coords', records, graphs=['pa', 'pb', 'pc'], partial_refusal=True)
         server = self.bounded(1, multi=True, extra=['--mmap', '--mem-cap-gb', '1', '--cache-size', '0'])
@@ -855,7 +887,7 @@ class TestSearchAnswerBudget(TestingBase):
         in_ram, units_in_ram, charge_in_ram = self.partial(server, dict(body, in_ram=True))
         self.assertEqual((mapped, units, charge), (in_ram, units_in_ram, charge_in_ram))
         self.stop(server)
-        answers = set()
+        answers, base_answers = set(), set()
         for extra, binary in ((['--search-max-answer-memory-mb', '0'], None), ([], None),
                               (['--search-max-answer-memory-mb', '0'], BASE_BINARY or None),
                               ([], BASE_BINARY or None)):
@@ -863,10 +895,14 @@ class TestSearchAnswerBudget(TestingBase):
             for request in (body, {k: v for k, v in body.items() if k != 'partial_refusal'}):
                 r = server.post('search', request)
                 self.assertEqual(200, r.status_code)
-                answers.add(r.content)
+                (base_answers if binary else answers).add(r.content)
             self.assertNotIn('unit refused', server.text())
             self.stop(server)
         self.assertEqual(1, len(answers))
+        # the base's answers in train 8's form (pair tags as pair_id), ours without matched
+        (answer,) = answers
+        for content in base_answers:
+            self.assertEqual(without_matched(answer), in_train8_form(content))
 
     def test_peak_memory(self):
         """test 21: a pair's records whose values each fit (20 repeats of 300 bp on the

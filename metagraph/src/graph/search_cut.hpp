@@ -8,7 +8,8 @@ namespace mtg::graph {
 
 /**
  * What the top-N cut of one query sequence's search took (SPEC-multigraph-envelope.md section
- * 3): the rows returned; whether every match above the request's thresholds was returned (no
+ * 3): the labels above the request's thresholds before the cut (|matched|, master's member:
+ * every candidate of the cut; a unit refused alone keeps it); the rows returned; whether every match above the request's thresholds was returned (no
  * cut, |complete|); otherwise the score of the N-th returned row, the labels with that score,
  * returned or not, and how many of them were returned. On an annotation with k-mer counts
  * (|abundances|) also the N-th returned row's median abundance and the labels with the N-th
@@ -24,6 +25,7 @@ struct SearchCut {
     // /search's field `partial_refusal` (SPEC-multigraph-envelope.md section 3, lane T7-P1)
     enum class Refused : uint8_t { NO, VALUES, ANSWER };
 
+    size_t matched = 0;
     size_t returned = 0;
     size_t nth_score = 0;
     size_t tied = 0;

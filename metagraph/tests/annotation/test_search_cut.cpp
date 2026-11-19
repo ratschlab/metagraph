@@ -117,6 +117,8 @@ TEST(SearchCut, Complete) {
     // fewer matches than N: every one returned, in the C5 order, no N-th row
     auto top = top_n({ "c", "a", "b" }, { 3, 5, 3 }, 10);
     EXPECT_EQ((std::vector<std::string>{ "a", "b", "c" }), labels_of(top));
+    // every candidate matched (master's `matched`), every one returned
+    EXPECT_EQ(3u, top.cut.matched);
     EXPECT_EQ(3u, top.cut.returned);
     EXPECT_TRUE(top.cut.complete);
     EXPECT_EQ(0u, top.cut.tied);
@@ -133,6 +135,7 @@ TEST(SearchCut, Complete) {
 TEST(SearchCut, Empty) {
     auto top = top_n({}, {}, 10);
     EXPECT_TRUE(top.rows.empty());
+    EXPECT_EQ(0u, top.cut.matched);
     EXPECT_EQ(0u, top.cut.returned);
     EXPECT_TRUE(top.cut.complete);
     EXPECT_EQ(0u, top.cut.nth_score);
@@ -148,6 +151,8 @@ TEST(SearchCut, TiesStraddleTheCut) {
     std::vector<size_t> scores {       5,   1,    5,    9,    5,   5  };
     auto top = top_n(labels, scores, 3);
     EXPECT_EQ((std::vector<std::string>{ "top", "b", "c" }), labels_of(top));
+    // the six labels above the thresholds before the cut, three returned
+    EXPECT_EQ(6u, top.cut.matched);
     EXPECT_EQ(3u, top.cut.returned);
     EXPECT_FALSE(top.cut.complete);
     EXPECT_EQ(5u, top.cut.nth_score);
@@ -170,6 +175,12 @@ TEST(SearchCut, TiesStraddleTheCut) {
     EXPECT_EQ(4u, top.cut.tied);
     EXPECT_EQ(4u, top.cut.tied_returned);
     EXPECT_EQ((std::vector<size_t>{ 0, 2, 3, 4, 5 }), top.decoded);
+
+    // N = 0: nothing returned, every match counted
+    top = top_n(labels, scores, 0);
+    EXPECT_EQ((std::pair<size_t, size_t>(6, 0)), std::make_pair(top.cut.matched,
+                                                                 top.cut.returned));
+    EXPECT_FALSE(top.cut.complete);
 
     // N = 1: the single top row, no tie
     top = top_n(labels, scores, 1);

@@ -23,7 +23,7 @@ GRAPH_MODES = ['basic'] if PROTEIN_MODE else ['basic', 'canonical', 'primary']
 
 # what a /search cut states beside the pair's tags (SPEC-multigraph-envelope.md section 3)
 CUT_TAGS = ('graph', 'pair_id', 'index_fp')
-CUT_FIELDS = ('returned', 'complete', 'nth_score', 'tied', 'tied_returned')
+CUT_FIELDS = ('matched', 'returned', 'complete', 'nth_score', 'tied', 'tied_returned')
 CUT_MEDIAN_FIELDS = ('nth_median', 'tied_same_median')
 
 
@@ -57,8 +57,9 @@ def c5_top_n(rows, n, counts=False):
         return lower_median(abundances_of(row['kmer_abundances'])) if counts else 0
     ranked = sorted(rows, key=lambda r: (-r['kmer_count'], -median(r), r['sample'].encode()))
     top = ranked[:n]
-    cut = {'returned': len(top), 'complete': len(ranked) <= n, 'nth_score': None, 'tied': 0,
-           'tied_returned': 0}
+    # matched (train 8, master's member): every row of the complete answer
+    cut = {'matched': len(ranked), 'returned': len(top), 'complete': len(ranked) <= n,
+           'nth_score': None, 'tied': 0, 'tied_returned': 0}
     if counts:
         cut.update(nth_median=None, tied_same_median=0)
     if not cut['complete'] and top:
@@ -717,8 +718,9 @@ class TestAPIClientMultiple(TestingBase):
             rows_of[pair].append({k: v for k, v in row.items() if k not in pair_tags})
         self.assertEqual(pairs, order)
         for cut, pair in zip(cuts, pairs):
-            self.assertEqual(dict(zip(pair_tags, pair), index_fp=None, returned=len(rows_of[pair]),
-                                  complete=True, nth_score=None, tied=0, tied_returned=0), cut)
+            self.assertEqual(dict(zip(pair_tags, pair), index_fp=None, matched=len(rows_of[pair]),
+                                  returned=len(rows_of[pair]), complete=True, nth_score=None,
+                                  tied=0, tied_returned=0), cut)
             # G2 lists G1's pairs: under each name a pair answers alike
             if pair[0] == 'G2':
                 self.assertEqual(rows_of[('G1', self.g1_pair_of[pair[1]])], rows_of[pair])
@@ -826,8 +828,8 @@ class TestAPIJson(TestAPIBase):
         for row in rows:
             self.assertFalse(set(CUT_TAGS) & set(row), row)
         self.assertEqual(c5_top_n(rows, len(rows))[0], rows)
-        self.assertEqual([dict({t: None for t in CUT_TAGS}, returned=len(rows), complete=True,
-                               nth_score=None, tied=0, tied_returned=0)],
+        self.assertEqual([dict({t: None for t in CUT_TAGS}, matched=len(rows), returned=len(rows),
+                               complete=True, nth_score=None, tied=0, tied_returned=0)],
                          everything['cuts'])
 
         # cuts within and between the scores of the complete answer

@@ -278,7 +278,7 @@ SearchRecordPrice search_record_price(const SeqSearchResult &result, bool verbos
     // the cut (cut_to_json), its pair tags and index_fp (null: no heap), and on a multi-graph
     // server its node in the merged answer (the pair's own left until the merge ends)
     price.tree += kJsonValueBytes + kJsonContainerBytes
-            + member("returned") + member("complete") + member("nth_score")
+            + member("matched") + member("returned") + member("complete") + member("nth_score")
             + member("tied") + member("tied_returned")
             + member("graph") + member("pair_id") + member("index_fp");
     if (result.get_cut().abundances)

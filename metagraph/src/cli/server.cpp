@@ -185,12 +185,10 @@ Json::Value process_search_request(const SearchRequest &request,
                     row["pair_id"] = source.pair_id;
                 }
             }
-            Json::Value cut = seq_result.cut_to_json();
-            cut["graph"] = string_or_null(source.tagged, source.graph);
-            cut["pair_id"] = string_or_null(source.tagged, source.pair_id);
-            cut["index_fp"] = string_or_null(!source.index_fp.empty(), source.index_fp);
-            json["cuts"] = Json::Value(Json::arrayValue);
-            json["cuts"].append(std::move(cut));
+            json["cuts"] = seq_result.cuts_json(
+                    string_or_null(source.tagged, source.graph),
+                    string_or_null(source.tagged, source.pair_id),
+                    string_or_null(!source.index_fp.empty(), source.index_fp));
             objects.emplace_back(seq_result.get_sequence().id, std::move(json));
         },
         config, anno_graph, aligner_config.get(), budget, pair, source.index, stop

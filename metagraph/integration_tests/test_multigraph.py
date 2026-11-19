@@ -1488,8 +1488,9 @@ class TestMultiGraphServer(TestingBase):
                 # others may as well)
                 self.assertTrue({p for p in order if p[1] == chunk} <= set(seen), seen)
                 # one cut per pair, the empty ones included
-                self.assertEqual([dict(tags(*pair), index_fp=None, returned=returned.get(pair, 0),
-                                       complete=True, nth_score=None, tied=0, tied_returned=0)
+                self.assertEqual([dict(tags(*pair), index_fp=None, matched=returned.get(pair, 0),
+                                       returned=returned.get(pair, 0), complete=True,
+                                       nth_score=None, tied=0, tied_returned=0)
                                   for pair in order],
                                  query['cuts'])
                 empty += sum(1 for cut in query['cuts'] if cut['returned'] == 0)
@@ -1524,7 +1525,7 @@ class TestMultiGraphServer(TestingBase):
                          complete['results'])
         [top] = self.post('search', dict(q, top_labels=1))
         self.assertEqual(complete['results'][:1], top['results'])
-        self.assertEqual([dict(tags('pseudo', 'pseudo'), index_fp=None, returned=1,
+        self.assertEqual([dict(tags('pseudo', 'pseudo'), index_fp=None, matched=2, returned=1,
                                complete=False, nth_score=scores[0], tied=2, tied_returned=1)],
                          top['cuts'])
 
@@ -4821,6 +4822,7 @@ class TestRecordMappingAtLoad(TestingBase):
                                      [r['sample'] for r in expected[0]['results']])
                     expected[0]['results'] = expected[0]['results'][:1]
                     expected[0]['cuts'][0]['returned'] = 1
+                    expected[0]['cuts'][0]['matched'] = 1
                     self.assertEqual(expected, ret.json())
             # a query of s1 alone matches no record
             ret = server.post('search', {'FASTA': f'>q\n{s1}', 'discovery_fraction': 0.0})
