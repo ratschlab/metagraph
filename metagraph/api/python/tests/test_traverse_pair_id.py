@@ -330,15 +330,19 @@ class _Engine(MT.TraverseClient):
 
 BEFORE_IDS = TestDiscoveryInBothForms.BY_PATHS             # an engine before M6: paths only
 AFTER_IDS = TestDiscoveryInBothForms.BY_ID                 # after: multigraph.pair_id "n1"
+# an engine before M6 that does not serve the pair (graph, GP, AP): it lists GP2's only
+UNLISTED = {'graph_summary': {'pairs': [BEFORE_IDS['graph_summary']['pairs'][1]]}}
 BY_PATHS = [{'graph': GRAPH, 'graph_path': GP, 'annotation_path': AP}]
 BY_ID = [{'graph': GRAPH, 'pair_id': ID}]
 
 
 class TestTheResolverHook(unittest.TestCase):
     """A continuation, replay or re-ask of a document that names its pair by id only reaches
-    an engine through TraverseClient.wire_request(): by a resolver (paths sent, n1
-    recomputed), by an engine that states multigraph.pair_id "n1" (the id sent), refused
-    without either; an old document is sent by its paths whatever the engine."""
+    an engine through TraverseClient.wire_request(): by the caller's resolver (paths sent,
+    n1 recomputed); where it knows no such id, by an engine that states
+    multigraph.pair_id "n1" (the id sent); else by the paths that engine's own GET
+    /capabilities lists (n1 recomputed); refused where none of these names it. An old
+    document is sent by its paths whatever the engine."""
 
     def setUp(self):
         self.old, self.new = fixture('fork', 'paths'), fixture('fork', 'id')
@@ -347,10 +351,16 @@ class TestTheResolverHook(unittest.TestCase):
 
     def engines(self):
         resolver = MT.client.capabilities_pair_resolver(BEFORE_IDS)
+        # the service's case once engines run M6: its resolver built from the engine's own
+        # listing, which names pairs by id (review M1)
+        m6 = MT.client.capabilities_pair_resolver(AFTER_IDS)
         return {'resolver': _Engine(BEFORE_IDS, self.answer, pair_resolver=resolver),
                 'resolver_after': _Engine(AFTER_IDS, self.answer, pair_resolver=resolver),
+                'm6_resolver': _Engine(AFTER_IDS, self.answer, pair_resolver=m6),
                 'after_ids': _Engine(AFTER_IDS, self.answer),
-                'neither': _Engine(BEFORE_IDS, self.answer)}
+                'listing': _Engine(BEFORE_IDS, self.answer),
+                'neither': _Engine(UNLISTED, self.answer),
+                'neither_resolver': _Engine(UNLISTED, self.answer, pair_resolver={}.get)}
 
     def ask(self, how, c):
         """One re-ask of the id-form document |how|: deepen(), a replay of request_of()
@@ -366,15 +376,17 @@ class TestTheResolverHook(unittest.TestCase):
             c.capabilities(GRAPH, pair_id=ID)
 
     def test_each_reask_by_resolver_engine_or_refused(self):
-        want = {'resolver': BY_PATHS, 'resolver_after': BY_PATHS, 'after_ids': BY_ID}
+        want = {'resolver': BY_PATHS, 'resolver_after': BY_PATHS, 'm6_resolver': BY_ID,
+                'after_ids': BY_ID, 'listing': BY_PATHS}
         probe = {'resolver': '/traverse/capabilities?graph=refseq&graph_path=%2Fdata%2Frefseq'
                              '%2Fbact_other.dbg&annotation_path=%2Fdata%2Frefseq%2F'
                              'bact_other.annodbg',
                  'after_ids': '/traverse/capabilities?graph=refseq&pair_id=' + ID}
-        probe['resolver_after'] = probe['resolver']
+        probe['resolver_after'] = probe['listing'] = probe['resolver']
+        probe['m6_resolver'] = probe['after_ids']
         for how in ('deepen', 'replay', 'traverse', 'probe'):
             for name, c in self.engines().items():
-                if name == 'neither':
+                if name.startswith('neither'):
                     with self.assertRaises(PairIdError) as cm:
                         self.ask(how, c)
                     self.assertEqual(cm.exception.code, 'pair_unresolved', how)
@@ -410,15 +422,42 @@ class TestTheResolverHook(unittest.TestCase):
         bad = {ID: (GRAPH, GP2, AP2)}.get                 # spelled for the other pair
         renamed = {ID: ('other', GP, AP)}.get            # the paths under another name
         for resolver, code in ((bad, 'pair_id_mismatch'), (renamed, 'pair_id_mismatch'),
-                               ({}.get, 'pair_unresolved'), (lambda pid: 'x', 'pair_unresolved'),
+                               (lambda pid: 'x', 'pair_unresolved'),
                                ({ID: (GRAPH, None, AP)}.get, 'pair_unresolved')):
-            c = _Engine(AFTER_IDS, self.answer, pair_resolver=resolver)
-            with self.assertRaises(PairIdError) as cm:
-                c.deepen(self.new, 'right', self.leaf)
-            self.assertEqual(cm.exception.code, code)
-            self.assertEqual(c.posted(), [])
-            for path in (GP, GP2, AP, AP2):
-                self.assertNotIn(path, str(cm.exception))
+            for caps in (AFTER_IDS, BEFORE_IDS):
+                c = _Engine(caps, self.answer, pair_resolver=resolver)
+                with self.assertRaises(PairIdError) as cm:
+                    c.deepen(self.new, 'right', self.leaf)
+                self.assertEqual(cm.exception.code, code)
+                self.assertEqual(c.posted(), [])
+                for path in (GP, GP2, AP, AP2):
+                    self.assertNotIn(path, str(cm.exception))
+        # a resolver that does not know the id is not the last word (review M1): the engine
+        # that states ids takes the id, one before ids is asked by the paths it lists
+        for caps, sent in ((AFTER_IDS, BY_ID), (BEFORE_IDS, BY_PATHS)):
+            c = _Engine(caps, self.answer, pair_resolver={}.get)
+            c.deepen(self.new, 'right', self.leaf)
+            self.assertEqual(c.posted()[0]['pairs'], sent)
+
+    def test_the_listing_is_read_once_and_goes_back_to_its_engine(self):
+        # the default fallback: the paths of an engine's own GET /capabilities, read once per
+        # server process (with states_pair_ids()), sent only to that engine
+        c = _Engine(BEFORE_IDS, self.answer)
+        for _ in range(3):
+            c.deepen(self.new, 'right', self.leaf)
+        self.assertEqual([r['pairs'] for r in c.posted()], [BY_PATHS] * 3)
+        self.assertEqual([path for _, path, _ in c.log].count('/capabilities'), 1)
+        other = _Engine(UNLISTED, self.answer)
+        with self.assertRaises(PairIdError) as cm:
+            other.deepen(self.new, 'right', self.leaf)
+        self.assertEqual((cm.exception.code, other.posted()), ('pair_unresolved', []))
+        # a listing whose entry states an id that is not its paths' is refused, not sent
+        lying = copy.deepcopy(BEFORE_IDS)
+        lying['graph_summary']['pairs'][0]['pair_id'] = ID2
+        c = _Engine(lying, self.answer)
+        with self.assertRaises(PairIdError) as cm:
+            c.deepen(self.new, 'right', self.leaf)
+        self.assertEqual((cm.exception.code, c.posted()), ('pair_id_mismatch', []))
 
     def test_selectors_the_wire_refuses(self):
         c = _Engine(AFTER_IDS, self.answer)
@@ -452,7 +491,8 @@ class TestToolsInBothForms(unittest.TestCase):
         from metagraph.traverse.mcp_tools import GraphletTools
         base = TestTheResolverHook('setUp')
         base.setUp()
-        want = {'resolver': BY_PATHS, 'resolver_after': BY_PATHS, 'after_ids': BY_ID}
+        want = {'resolver': BY_PATHS, 'resolver_after': BY_PATHS, 'm6_resolver': BY_ID,
+                'after_ids': BY_ID, 'listing': BY_PATHS}
         for name, client in base.engines().items():
             with tempfile.TemporaryDirectory() as d:
                 store = GraphletStore(d)
@@ -463,7 +503,7 @@ class TestToolsInBothForms(unittest.TestCase):
                 self.assertEqual(store.get(h).request['pairs'], BY_ID)
                 fetched = tools.traverse_fetch(replay=h, index='mini')
                 cont = tools.traverse_continue(h, 'right', base.leaf[0])
-                if name == 'neither':
+                if name.startswith('neither'):
                     for out in (fetched, cont):
                         self.assertEqual(out['error'], 'pair_unresolved', out)
                     self.assertEqual((client.posted(), client.probes()), ([], []))

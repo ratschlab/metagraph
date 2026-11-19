@@ -210,9 +210,10 @@ class PairIdError(ValueError):
     document and a selector carry n1, never p2), 'bad_pair_id' (not an n1 id; an id beside
     paths in one selector), 'pair_id_mismatch' (paths stated with an id that is not theirs,
     or a resolver's answer whose id is not the one it resolved), 'pair_unresolved' (a pair
-    named by its id only, to a server that does not state multigraph.pair_id "n1", with no
-    resolver: TraverseClient(pair_resolver=)). Raised before anything is sent. A
-    ValueError, so that a caller mapping ValueErrors to bad arguments still refuses it."""
+    named by its id only that the client's resolver does not know, to a server that neither
+    states multigraph.pair_id "n1" nor lists the id with paths: TraverseClient.wire_pair()).
+    Raised before any /traverse request or probe is sent. A ValueError, so that a caller
+    mapping ValueErrors to bad arguments still refuses it."""
 
     def __init__(self, code, message):
         self.code = code
@@ -365,8 +366,10 @@ def capabilities_pair_resolver(capabilities):
     """A pair_resolver (TraverseClient(pair_resolver=)) from a GET /capabilities document
     that lists its pairs with their paths (graph_summary.pairs[], a server before ids): n1
     id -> (graph, graph_path, annotation_path) as that server spells them, None for an id it
-    does not list. A pair listed by its id only (a server after ids) is not in it: such a
-    server takes the id itself."""
+    does not list. A pair listed by its id only (a server after ids) is not in it; for such
+    an id the client sends {graph, pair_id} where its server states multigraph.pair_id "n1"
+    (TraverseClient.wire_pair(), which also falls back to this over its own server's
+    document)."""
     summary = (capabilities or {}).get('graph_summary') if isinstance(capabilities, dict) \
         else None
     table = {}
@@ -376,7 +379,7 @@ def capabilities_pair_resolver(capabilities):
             continue
         t = _pair(p['graph'], p.get('graph_path'), p.get('annotation_path'), p.get('pair_id'),
                   'GET /capabilities graph_summary.pairs[%d]' % i)
-        if t.graph_path and t.annotation_path:
+        if t.graph_path is not None and t.annotation_path is not None:
             table[t.pair_id] = (t.graph, t.graph_path, t.annotation_path)
     return table.get
 
@@ -603,15 +606,16 @@ class TraverseClient:
 
         |pair_resolver|: n1 id -> (graph, graph_path, annotation_path) of that pair as the
         server's graph list spells it, or None for an id it does not know -- the caller's
-        binding (the service builds it from the engine's GET /capabilities;
-        capabilities_pair_resolver() does that for a server that lists paths). Every request
-        and probe this client sends that names a pair by its id only (the continuation,
-        replay or re-ask of a document stored with a pair_id and no paths) passes
-        wire_request() / wire_pair(): with a resolver the id is resolved, the n1 id of the
-        answer recomputed and compared (PairIdError pair_id_mismatch otherwise), and the pair
-        sent by its paths, which every server takes; without one it is sent by its id where
-        the server states multigraph.pair_id "n1" in GET /capabilities, and refused
-        (PairIdError pair_unresolved) where it does not. Nothing is sent before that.
+        binding (the service installs its own; capabilities_pair_resolver() builds one from a
+        GET /capabilities document that lists paths). Every request and probe this client
+        sends that names a pair by its id only (the continuation, replay or re-ask of a
+        document stored with a pair_id and no paths) passes wire_request() / wire_pair(): the
+        resolver's answer first (its n1 id recomputed and compared, PairIdError
+        pair_id_mismatch otherwise; the pair sent by its paths, which every server takes);
+        where it knows no such id, or there is none, the id itself where the server states
+        multigraph.pair_id "n1" in GET /capabilities; else the paths that server's own GET
+        /capabilities lists for the id (a server before ids, n1 recomputed); else
+        PairIdError pair_unresolved. No /traverse request or probe is sent before that.
 
         |feature_level|: the server's, when the caller knows it; else it is read from GET
         /capabilities the first time a feature-level-5 field is to be sent (and never for a
@@ -967,40 +971,70 @@ class TraverseClient:
 
     def wire_pair(self, graph, pair_id):
         """The selector members that name the pair (|graph|, |pair_id|) on the wire -- the one
-        place a pair named by its id only is resolved (TraverseClient(pair_resolver=)):
-        {graph, graph_path, annotation_path} by the resolver, after its answer's n1 id was
-        recomputed and found equal; else {graph, pair_id} where the server states
-        multigraph.pair_id "n1" (states_pair_ids()); else PairIdError pair_unresolved.
-        Never a selector without the pair: the path form would have named it."""
+        place a pair named by its id only is resolved. In this order: (a) the caller's
+        TraverseClient(pair_resolver=): {graph, graph_path, annotation_path} after the n1 id
+        of its answer was recomputed and found equal (PairIdError pair_id_mismatch
+        otherwise); (b) where it knows no such id (or there is none) and the server states
+        multigraph.pair_id "n1" (states_pair_ids()): {graph, pair_id}; (c) else the paths the
+        same server lists for that id in its own GET /capabilities (_listed_pair(): a server
+        before ids, read once per server process, n1 recomputed): paths go back only to the
+        engine that stated them; (d) else PairIdError pair_unresolved. Never a selector
+        without the pair: the path form would have named it."""
         pid = check_pair_id(pair_id)
         if self.pair_resolver is not None:
             got = self.pair_resolver(pid)
-            if got is None:
-                raise PairIdError('pair_unresolved', 'pair %s of %s: the pair_resolver knows '
-                                  'no pair with this id; nothing was sent' % (pid, _shown(graph)))
-            try:
-                g, gp, ap = got
-            except (TypeError, ValueError):
-                raise PairIdError('pair_unresolved', 'pair %s of %s: the pair_resolver answered '
-                                  'a %s, not (graph, graph_path, annotation_path); nothing was '
-                                  'sent' % (pid, _shown(graph), type(got).__name__)) from None
-            if not all(isinstance(v, str) and v for v in (g, gp, ap)):
-                raise PairIdError('pair_unresolved', 'pair %s of %s: the pair_resolver answered '
-                                  'no graph name, graph path or annotation path to send; '
-                                  'nothing was sent' % (pid, _shown(graph)))
-            own = configured_pair_id(g, gp, ap)
-            if own != pid or g != graph:
-                raise PairIdError('pair_id_mismatch', 'pair %s of %s: the pair_resolver resolved '
-                                  'it to a pair of %s whose n1 id is %s; nothing was sent'
-                                  % (pid, _shown(graph), _shown(g), own))
-            return {'graph': g, 'graph_path': gp, 'annotation_path': ap}
+            if got is not None:
+                return self._resolved(graph, pid, got, 'the pair_resolver')
         if self.states_pair_ids():
             return {'graph': graph, 'pair_id': pid}
-        raise PairIdError('pair_unresolved', 'pair %s of %s is named by its n1 id only, and the '
+        got = self._listed_pair(pid)
+        if got is not None:
+            return self._resolved(graph, pid, got, 'GET /capabilities')
+        raise PairIdError('pair_unresolved', 'pair %s of %s is named by its n1 id only; %sthe '
                           'server does not state multigraph.pair_id "n1" in GET /capabilities '
-                          '(it takes path selectors only): give the client a pair_resolver (n1 '
+                          'and lists no pair with this id: give the client a pair_resolver (n1 '
                           'id -> graph, graph_path, annotation_path), or send it to a server '
-                          'that names pairs by id; nothing was sent' % (pid, _shown(graph)))
+                          'that names pairs by id; nothing was sent'
+                          % (pid, _shown(graph), 'the pair_resolver knows no pair with this '
+                             'id, ' if self.pair_resolver is not None else ''))
+
+    @staticmethod
+    def _resolved(graph, pid, got, by):
+        """The path selector of (|graph|, |pid|) that |by| (a resolver, or the server's own
+        listing) answered |got| for, checked: three strings whose n1 id is |pid|, under
+        |graph|."""
+        try:
+            g, gp, ap = got
+        except (TypeError, ValueError):
+            raise PairIdError('pair_unresolved', 'pair %s of %s: %s answered a %s, not (graph, '
+                              'graph_path, annotation_path); nothing was sent'
+                              % (pid, _shown(graph), by, type(got).__name__)) from None
+        if not (isinstance(g, str) and g and isinstance(gp, str) and isinstance(ap, str)):
+            raise PairIdError('pair_unresolved', 'pair %s of %s: %s answered no graph name, '
+                              'graph path or annotation path to send; nothing was sent'
+                              % (pid, _shown(graph), by))
+        own = configured_pair_id(g, gp, ap)
+        if own != pid or g != graph:
+            raise PairIdError('pair_id_mismatch', 'pair %s of %s: %s resolved it to a pair of '
+                              '%s whose n1 id is %s; nothing was sent'
+                              % (pid, _shown(graph), by, _shown(g), own))
+        return {'graph': g, 'graph_path': gp, 'annotation_path': ap}
+
+    def _listed_pair(self, pid):
+        """(graph, graph_path, annotation_path) the server this client sends to lists for n1
+        id |pid| in its own GET /capabilities (capabilities_pair_resolver() over the document
+        states_pair_ids() read, kept with it: once per server process), or None -- also for
+        a server without the route."""
+        try:
+            doc = self._server()
+        except TraverseError as e:
+            if e.status != 404:
+                raise
+            return None
+        cached = getattr(self, '_listing', None)
+        if cached is None or cached[0] is not doc:
+            cached = self._listing = (doc, capabilities_pair_resolver(doc))
+        return cached[1](pid)
 
     def wire_request(self, request):
         """|request| as it is sent: each `pairs` object that names its pair by its id only
