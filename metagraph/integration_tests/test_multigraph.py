@@ -29,6 +29,7 @@ files, the k-mers of the chunk's records (the contexts of a pattern, a seed's k-
 and the server's answers without the new fields.
 """
 
+import copy
 import json
 import os
 import random
@@ -314,8 +315,11 @@ class TestNoPathSweep(unittest.TestCase):
     assert_no_configured_path; SPEC-multigraph-envelope.md section 1.2) finds a configured path
     in each form a response could state it: whole, as its real path, JSON-escaped (a non-ASCII
     directory), URL-encoded, as a file's basename, the graph list's own path and the temporary
-    directory of --disk-swap (a /search temp file's text). A single-graph GET /stats is exempt
-    for its two basenames only."""
+    directory of --disk-swap (a /search temp file's text), a configured file's directory or the
+    file without its suffixes where either ends a path (not an input file beside them). A
+    single-graph GET /stats is exempt for its two basenames only. The sweep runs on every
+    response the requests package reads from a server of this build (base.sweep_every_response),
+    whichever helper started it."""
 
     def test_each_spelling_is_found(self):
         with tempfile.TemporaryDirectory() as d:
@@ -340,11 +344,22 @@ class TestNoPathSweep(unittest.TestCase):
                 'the graph list': f'cannot read {csv}',
                 'the temporary directory': json.dumps(
                     {'error': f'Error: temp file {swap}/tmp.lesyea creation failed'}),
+                'a directory alone': json.dumps({'error': f'cannot list {ref}'}),
+                'a directory, URL-encoded': urllib.parse.quote(ref, safe='') + '&x=1',
+                'a file without its suffixes': f'cannot load {os.path.join(ref, "g")}: missing',
+                'an annotation without its suffixes': json.dumps(
+                    {'error': f'{os.path.join(ref, "g.column")} not loaded'}),
             }
             for kind, text in leaks.items():
                 with self.subTest(kind):
                     with self.assertRaises(AssertionError):
                         assert_no_configured_path(text, paths, 'POST /search')
+            # an input file beside the configured ones is not one of them
+            for text in (json.dumps({'labels': [os.path.join(ref, 'g.fa'),
+                                                os.path.join(ref, 'input.fa')]}),
+                         urllib.parse.quote(os.path.join(ref, 'g.fa'), safe='')):
+                with self.subTest(beside=text):
+                    assert_no_configured_path(text, paths, 'POST /search')
             stats = {'annotation': {'filename': 'g.column.annodbg', 'labels': 1},
                      'graph': {'filename': 'g.dbg', 'k': 31}}
             assert_no_configured_path(json.dumps(stats), paths, 'GET /stats')
@@ -3713,14 +3728,25 @@ class TestMultiGraphServer(TestingBase):
         deepen, the tools' continue) on the pair that answered it. The documents the library
         hands out name the pair by {graph, pair_id} (L1's review m5): an old document's too,
         by the id this engine states; an old document is re-asked by its paths and answered by
-        that id. No answer the library read states a configured path."""
+        that id. Every request the library sends is recorded (what goes on the wire) and every
+        answer it reads is swept for configured paths (Client below)."""
         def swept(where, *bodies):
             for body in bodies:
                 assert_no_configured_path(body if isinstance(body, str) else
                                           json.dumps(body, default=str), self.server.paths,
                                           where)
 
-        client = graphlet_lib.TraverseClient('127.0.0.1', self.server.port)
+        sent = []
+
+        class Client(graphlet_lib.TraverseClient):
+            """The library's client, its transport recorded and swept"""
+            def _request(self, method, path, payload=None, *args, **kw):
+                sent.append((method, path, copy.deepcopy(payload)))
+                out = super()._request(method, path, payload, *args, **kw)
+                swept(f'{method} {path.split("?")[0]}', out)
+                return out
+
+        client = Client('127.0.0.1', self.server.port)
         name, (ce, ck) = SPLIT
         e_id, k_id = self.pid(name, ce), self.pid(name, ck)
         with self.subTest('GET /capabilities: an id-only listing'):
@@ -3747,16 +3773,18 @@ class TestMultiGraphServer(TestingBase):
             by_id = {'graph': name, 'pair_id': k_id}
             by_paths = dict(zip(('graph', 'graph_path', 'annotation_path'), knows(k_id)))
             for resolver, wire in ((None, by_id), ({}.get, by_id), (knows, by_paths)):
-                c = graphlet_lib.TraverseClient('127.0.0.1', self.server.port,
-                                                pair_resolver=resolver)
+                c = Client('127.0.0.1', self.server.port, pair_resolver=resolver)
                 self.assertEqual(wire, c.wire_pair(name, k_id))
-                # the probe of the id goes out so (the hook), and this engine answers that
-                # pair, by its id
+                # the probe of the id goes out so on the wire (the hook), and this engine
+                # answers that pair, by its id
                 probe = c.capabilities(graph=name, pair_id=k_id)
+                self.assertEqual(('GET', '/traverse/capabilities?' + '&'.join(
+                    f'{k}={urllib.parse.quote(v, safe="")}' for k, v in wire.items()), None),
+                                 sent[-1])
                 self.assertEqual((name, k_id), (probe['graph'], probe['pair_id']))
             # a resolver whose answer is not the id's pair: refused, nothing sent
-            lying = graphlet_lib.TraverseClient('127.0.0.1', self.server.port,
-                                                pair_resolver={k_id: (name,) + self.pairs[ce]}.get)
+            lying = Client('127.0.0.1', self.server.port,
+                           pair_resolver={k_id: (name,) + self.pairs[ce]}.get)
             with self.assertRaises(graphlet_lib.client.PairIdError) as cm:
                 lying.wire_pair(name, k_id)
             self.assertEqual('pair_id_mismatch', cm.exception.code)
@@ -3801,18 +3829,23 @@ class TestMultiGraphServer(TestingBase):
             self.assertEqual([{'graph': name, 'pair_id': e_id}], req['pairs'])
             self.assertEqual(req['pairs'], client.wire_request(req)['pairs'])
             out = client.deepen(g, 'right', [walk], bp=30)
+            last = [x for x in sent if x[0] == 'POST'][-1]
+            self.assertEqual(('POST', '/traverse', [{'graph': name, 'pair_id': e_id}]),
+                             last[:2] + (last[2]['pairs'],))
             swept('POST /traverse', out.raw)
             self.assertEqual(graphlet_lib.client.Pair(name, None, None, e_id),
                              graphlet_lib.client.answered_pair(out.envelope))
             self.assertIsNotNone(out.graphlets[0])
             # a caller's resolver sends it by the paths; the same pair answers
-            knows = graphlet_lib.TraverseClient(
+            knows = Client(
                 '127.0.0.1', self.server.port,
                 pair_resolver={e_id: (name,) + self.pairs[ce]}.get)
             self.assertEqual([dict(zip(('graph', 'graph_path', 'annotation_path'),
                                        (name,) + self.pairs[ce]))],
                              knows.wire_request(req)['pairs'])
             again = knows.deepen(g, 'right', [walk], bp=30)
+            self.assertEqual(knows.wire_request(req)['pairs'],
+                             [x for x in sent if x[0] == 'POST'][-1][2]['pairs'])
             self.assertEqual(graphlet_lib.client.answered_pair(out.envelope),
                              graphlet_lib.client.answered_pair(again.envelope))
             self.assertEqual(out.graphlets[0].body_digest, again.graphlets[0].body_digest)
@@ -3821,8 +3854,7 @@ class TestMultiGraphServer(TestingBase):
             d = tempfile.mkdtemp(dir=self.tempdir.name)
             ex = os.path.join(d, 'exports')
             os.makedirs(ex)
-            pinned = graphlet_lib.TraverseClient('127.0.0.1', self.server.port, graph=name,
-                                                 pair_id=e_id)
+            pinned = Client('127.0.0.1', self.server.port, graph=name, pair_id=e_id)
             tools = GraphletTools(graphlet_lib.GraphletStore(os.path.join(d, 'store')),
                                   {'e': pinned}, export_dir=ex)
             caps = tools.traverse_capabilities('e')['capabilities']
@@ -3852,12 +3884,16 @@ class TestMultiGraphServer(TestingBase):
                 # re-asked: the new one by its id, the old one by its paths; this engine
                 # answers both on the pair of that id
                 stored = tools.store.graphlet(h)
-                sent = graphlet_lib.GraphletStore.request_of(stored)['pairs']
+                sent_pairs = graphlet_lib.GraphletStore.request_of(stored)['pairs']
                 self.assertEqual([{'graph': name, 'pair_id': e_id}] if form == 'new' else
                                  [dict(zip(('graph', 'graph_path', 'annotation_path'),
-                                           (name,) + self.pairs[ce]))], sent, form)
+                                           (name,) + self.pairs[ce]))], sent_pairs, form)
                 done = tools.traverse_continue(h, 'right', walk)
                 self.assertNotIn('error', done, done)
+                # and so it goes on the wire
+                last = [x for x in sent if x[0] == 'POST'][-1]
+                self.assertEqual(('POST', '/traverse', sent_pairs),
+                                 last[:2] + (last[2]['pairs'],), form)
                 swept('a continuation through the tools', done)
                 child = tools.store.graphlet(done['handle'])
                 self.assertEqual(graphlet_lib.client.Pair(name, None, None, e_id),
