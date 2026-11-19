@@ -322,12 +322,15 @@ deadline. `src/cli/traverse.cpp` `process_resolve_request`, `src/graph/traversal
   the reserve would leave no time to work: every budgeted request would stop before its first row.
 - **The work stops at the budget less the reserve.** The deadline is read where the client's connection is
   checked during the work, after it: before the first row is read; between two batches of rows (a discovery's
-  pass and the explicit labels' on the row paths: 64 rows, then up to 4,096 rows or about 64 MiB of rows, §4.2); and,
+  pass and the explicit labels' on the row paths: 64 rows, then up to 4,096 rows or about 64 MiB of rows, §4.2), and
+  within a batch once the rows its k-mers used since the last reading pass 1 MiB (`row_copy_bytes`, before the next
+  k-mer's use) *(lane T8-RL: before, only between batches; a batch of 4,000-label rows took about 0.8 s to use, and
+  the 503 of a budget of 700 to 1,000 ms came up to 0.43 s late, D3's open question)*; and,
   on a direct-access annotation, before every 4,096 k-mers of the explicit labels' hits, which under a deadline
   are fetched in pieces of 4,096 k-mers (one fetch of the whole query, the path without a deadline, is a piece
   no clock read can end: it reads every k-mer's cell of every label). On the row paths the k-mers' hits are
-  accumulated as their rows are used, before the deadline is read, so a stop between batches keeps every row read
-  (review of 2026-10-07, T3-01/V1-01: a separate pass read the deadline again and cut such answers to about 4,096
+  accumulated as their rows are used, before the deadline is read, so a stop keeps every row used (one within a
+  batch drops the batch's rows not yet used) (review of 2026-10-07, T3-01/V1-01: a separate pass read the deadline again and cut such answers to about 4,096
   k-mers; train 4: the explicit labels' pass is the discovery's, §4.6). A key's hits do not depend on the piece they are fetched in, so the profile is the one fetch's.
 - **A stop answers the resolve of a query prefix** (`DESIGN-traverse-graphlet.md` §13), status
   200: exactly the profile of the sequence's first x k-mers — `num_kmers` = x, `graph_runs` cut at x, the
@@ -343,7 +346,7 @@ deadline. `src/cli/traverse.cpp` `process_resolve_request`, `src/graph/traversal
   ```
 
   x (`resolved_kmers`, the member that carries it; `num_kmers` = x) is the first k-mer in the graph whose labels
-  were not read (the k-mers before it that are absent from the graph are resolved: the mapping told);
+  were not read (whose row was not used) (the k-mers before it that are absent from the graph are resolved: the mapping told);
   `resolved_bp` = x + k − 1 (0 for x = 0);
   `remainder_from_bp` = x: the sequence from that base holds exactly the k-mers not resolved, so a client
   resolves the rest with it. A run ending at x may continue past it (in the remainder's answer it starts at
@@ -365,10 +368,22 @@ deadline. `src/cli/traverse.cpp` `process_resolve_request`, `src/graph/traversal
   profiled whatever the stop), a seed label that is not one of them. A request whose work completes answers
   `stop: null`; `limits` (the effective budget, the reserve, the clamps) is stated either way.
 - **The answer is built within the reserve.** After the work, the loops over the labels (a discovery's ranking
-  and naming, the profiles, the candidates' grouping) read the whole budget every 4,096 labels, and the grouping
-  every 4,096 groups as it makes them candidates *(T5a-X1, Opus review 2026-11-13: before, that pass read
-  nothing, up to about 0.7 s at 3 million groups)* and every 65,536 runs it walks *(the Opus review of d398357a9,
-  N2: 4,000 labels of about 3,700 runs, 15 million runs, went unread for about 0.5 s)*, the selection
+  and naming, the profiles, the candidates' grouping) read the whole budget every 4,096 labels; a discovery's
+  ranking sort and its name sorts every 65,536 elements of their passes; the grouping every 4,096 groups as it
+  makes them candidates, each group's map node freed as it is *(T5a-X1, Opus review 2026-11-13: before, that pass
+  read nothing, up to about 0.7 s at 3 million groups; lane T8-RL: the map was freed after it, about 0.2 s)*,
+  every 4,096 runs it walks *(the Opus review of d398357a9, N2: 4,000 labels of about 3,700 runs, 15 million runs,
+  went unread for about 0.5 s; lane T8-RL: every 65,536 before, about 70 ms at 3 million groups)* and every 65,536
+  runs counted for its price and elements of the candidates' sort *(lane T8-RL: before, those two passes read
+  nothing, the sort about 0.3 s at 3 million groups)*. These sorts, and those of the selection below, are taken in
+  steps (`stepped_sort.hpp`): a range of more than 16,384 elements is partitioned, its pieces told every 4,096
+  elements, a range of at most 16,384 sorted by `std::sort` and told at once; the order is `std::sort`'s by the
+  same comparison, which is total where the answer depends on the order of equal elements, so the answer is the
+  same bytes (lane T8-RL; at 10 million elements about as fast as `std::sort`). Under a stop (or a discovery's
+  label cap), the check of the explicit seeds that decides whether the selection is made reads every 4,096 steps
+  as the selection does: a step each label put into its lookups of the profiled and the absent labels, each seed,
+  each graph run checked for it and each of its names looked up, at both passes *(lane T8-RL: before, nothing,
+  about 0.4 s at 1,024 seeds of 10,000 profiled names, 0.7 to 1 s where the names are absent labels)*. The selection
   (`select_seeds`) every 4,096 steps, a step each item it takes — a `longest_first` candidate (and the labels of a
   pick, before they are copied); for explicit seeds each label put into the lookups of the profiled labels and of
   the pair's absent ones, a seed, each of its names priced and copied, each graph run and each name checked for it,
@@ -422,44 +437,35 @@ deadline. `src/cli/traverse.cpp` `process_resolve_request`, `src/graph/traversal
   (one call, linear in the query, which `bounds.max_query_bp` and `--resolve-max-query-bp` bound); the
   explicit labels' resolution and their query's setup (linear in their bytes; at most
   `--resolve-max-explicit-labels` labels, 10,000 by default, 0 lifting the cap; an unknown label is refused before
-  the deadline is first read, so a stop never hides one); one row
-  batch's decode (a row-diff row's whole path) and its accumulation (every label of its rows); a pass's setup (the
-  next occurrence of every present k-mer, one hash pass); one piece of hits and its accumulation; the ranking sort of a discovery's labels, the
-  name sort of its kept labels' runs of equal support (of the boundary's run only its kept part) and the candidates'
-  sort (n log n); the model of the profile's memory once it is complete (linear in its labels, candidates and
-  absent labels: up to 3 million candidates at the caps); under a stop or a discovery's label cap, the check of the
-  explicit seeds that decides whether the selection is made (each seed's interval against the graph runs and each
-  of its names looked up, twice, and the lookups of the profiled and absent labels: at most
-  `--resolve-max-explicit-seeds` × `--resolve-max-explicit-labels` names, 1,024 × 10,000); in `select_seeds`, the
-  sort of the runs `max_support` gathers (and their sorted copy), each of a round's three sorts (of its runs, its
-  candidate starts and its run ends: n log n of at most twice the runs), the de-duplication of its candidate starts
-  and of its run ends and the zeroing of its Fenwick counts (linear in them), its vector of pieces each time it
-  grows past them (the pieces copied into a buffer of twice the size and the old one freed: fewer than the round's
-  pieces), and its sort of the picks (at most `max_seeds`, which `--resolve-max-explicit-seeds` caps), a
-  `longest_first` pick's copy of its candidate's labels, a seed's two label sorts (the order of its labels, then of
-  the names it keeps), its sequence's copy and its id (linear in its length and in the names it keeps, at most
-  `max_labels_per_seed`), one row of the seeds' overlaps (as many pairs as seeds, at most
-  `--resolve-max-explicit-seeds`) and the picks' free once the seeds are frozen (every name an explicit pick lists
-  as not covering, at most 1,024 × 9,999 names); in the answer's build, one object (its
-  price, its tree, for an object of 64 KiB or more its size count, and its text), for a multi-graph pair the pricing
-  pass over its `unknown_labels` before the first of them is written, and the model of the request's memory
-  (`work.memory_bytes`: the profile's, as above, and the selection's, linear in its seeds' names); and the
-  transport. The client's checks
-  are where they were (§10.3); a reserve that these overrun is not adapted to them (the reserve is fixed). The
-  request's stop (a client gone, the fan-out's stop) is read at the same readings, so it waits for these pieces
-  too. At the server's caps they take, on one laptop core (T5a-X1, Opus review 2026-11-13): the ranking sort and
-  the name sort about 0.1 s each at 1,000,000 tracked labels (10,000 kept, one run of equal support); the
-  candidates' sort about 0.3 s at 3 million groups (10,000 labels of 300 runs of their own); the gathered runs'
-  sort about 0.15 s at 3 million runs; a round's three sorts about 0.5, 0.3 and 0.15 s at 10 million pieces
-  (10,000 labels of one run over the query, each clipped by 1,024 picks). A slower or loaded host takes a few
-  times that, up to about 1.5 s for a round's runs. Replicas of the other loops, on this laptop at load 55 to 60,
-  the least of three runs (the Opus review of 0666c9815, m-1 and n-F): the picks' free about 0.2 s at 1,024 picks
-  of 9,999 names of 32 characters (0.5 s in the slowest run); a round's vector grown about 15 to 30 ms at 5 to 10
-  million pieces (up to 0.1 s); the check of the explicit seeds under a stop about 0.5 s at 1,024 seeds of 10,000
-  profiled names, 1.2 s where the names are absent labels (each then looked up twice a pass; up to 2 s); the model
-  of the profile's memory about 2 ms at 3 million candidates. The list names the pieces the reviews found that can
-  take long at the caps; it does not prove that there are no others (freeing or copying a container is such a
-  piece, linear in what it holds).
+  the deadline is first read, so a stop never hides one); one row batch's decode (a row-diff row's whole path), and
+  within its uses one row's (every label of it, read before the next once 1 MiB of rows were used); a pass's setup
+  (the next occurrence of every present k-mer, one hash pass); one piece of hits and its accumulation; a piece of a
+  sort in steps (`stepped_sort.hpp`: at most 16,384 elements sorted by `std::sort`, a partition's 4,096 elements by
+  copies, or, for the grouping's candidates, Hoare's scan between two swaps, linear in the range at most); the model
+  of the profile's memory once it is complete (linear in its labels, candidates and absent labels: up to 3 million
+  candidates at the caps); in `select_seeds`, its sort of the picks and of the merged ones (at most `max_seeds`,
+  which `--resolve-max-explicit-seeds` caps), a `longest_first` pick's copy of its candidate's labels, a seed's two
+  label sorts (the order of its labels, then of the names it keeps), its sequence's copy and its id (linear in its
+  length and in the names it keeps, at most `max_labels_per_seed`) and one row of the seeds' overlaps (as many pairs
+  as seeds, at most `--resolve-max-explicit-seeds`); in the answer's build, one object (its price, its tree, for an
+  object of 64 KiB or more its size count, and its text), for a multi-graph pair the pricing pass over its
+  `unknown_labels` before the first of them is written, and the model of the request's memory (`work.memory_bytes`:
+  the profile's, as above, and the selection's, linear in its seeds' names); the free of what the request holds once
+  it ends or a reading's throw unwinds it (the profile's candidates, a discovery's tracked labels: linear in them);
+  and the transport. The client's checks are where they were (§10.3); a reserve that these overrun is not adapted
+  to them (the reserve is fixed). The request's stop (a client gone, the fan-out's stop) is read at the same
+  readings, so it waits for these pieces too. At the server's caps, replicas of the loops on one laptop core at a
+  load of {LOAD} (lane T8-RL; the real loops where a route drives them): the longest
+  stretch between two readings of the pieces now read inside — a discovery's ranking and name sorts at 1,000,000
+  tracked labels {DISC}, the grouping at 3 million groups (10,000 labels of 300 runs of their own) {GROUP}, a
+  `max_support` round at 10 million pieces (10,000 labels of one run over the query, each clipped by 1,024 picks)
+  {ROUND}, the picks' free at 1,024 picks of 9,999 names {PICKS}, the check of 1,024 explicit seeds of 10,000
+  names under a stop {CHECK}; and of those left unread, the profile's candidates freed at 3 million {CFREE}, a
+  discovery's tracked labels freed at 1,000,000 {FFREE}, the model of the profile's memory about 2 ms at 3 million
+  candidates. On D3's shape (4,000 explicit labels over a 6.5 kbp query 12 times, a 212 MB answer) the 503 of a
+  budget of 700 to 1,400 ms comes {DL} after it and a client gone is noticed {GONE} after it left. The list names
+  the pieces the reviews found that can take long at the caps; it does not prove that there are no others (freeing
+  or copying a container is such a piece, linear in what it holds).
 - **Capabilities.** Both GET routes carry the `resolve` block (§10.3). The field is not a `feature_level`: every
   `/resolve` and `/traverse` response states the level, so a bump would change every answer; a client gates
   on the block. An older server refuses the field (400 naming it).

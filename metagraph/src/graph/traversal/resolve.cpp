@@ -299,7 +299,7 @@ uint64_t budget_left(const DecodeBudget &budget) {
 // How a pass over the rows (for_each_row) ended
 enum class PassEnd {
     COMPLETE,       // every key used
-    CHECKPOINT,     // the checkpoint ended it between two batches (a deadline)
+    CHECKPOINT,     // the checkpoint ended it between two batches or within one (a deadline)
     MEMORY,         // the budget: a k-mer's row read alone, or its use, did not fit
 };
 
@@ -374,8 +374,10 @@ uint64_t rows_bytes(const std::vector<RowT> &rows) {
  * next rows to decode, not its k-mers). A key's row is decoded once per batch, and a row whose
  * key occurs again after its batch is kept for that occurrence while the rows kept take at
  * most |kept_max| bytes (row_copy_bytes), dropped at its last occurrence; beyond that bound a
- * repeated row is decoded again. |checkpoint| runs between batches; true from it ends the pass
- * there (a deadline). What the request holds is one batch of rows and the rows kept.
+ * repeated row is decoded again. |checkpoint| runs between batches and within a batch's uses once
+ * the rows used since it last ran pass kResolveUseCheckBytes; true from it ends the pass there (a
+ * deadline), before the batch or the k-mer it ran at. What the request holds is one batch of rows
+ * and the rows kept.
  *
  * Every byte the pass holds is charged to |budget| (SPEC-labeled-traversal-core.md §4.6): its
  * setup (the next occurrence of each key, and the transient table that finds them: its model,
@@ -394,9 +396,9 @@ uint64_t rows_bytes(const std::vector<RowT> &rows) {
  * the uses of the k-mers before it hold: that k-mer does not depend on the batches, the rows
  * kept or the time. With an unbounded budget nothing is refused and the pass is the one it was.
  *
- * Returns how many of |keys| were used: all of them, or those before the batch the pass ended
- * at (a checkpoint) or the k-mer it stopped at (the budget) — a prefix, since the keys are used
- * in order —, and sets |*end| to why. |rows_held_peak|, when given, is raised to the most row
+ * Returns how many of |keys| were used: all of them, or those before the batch or the k-mer the
+ * pass ended at (a checkpoint) or the k-mer it stopped at (the budget) — a prefix, since the keys
+ * are used in order —, and sets |*end| to why. |rows_held_peak|, when given, is raised to the most row
  * bytes held at once (a batch and the rows kept, row_copy_bytes each:
  * SupportProfile::memory_peak)
  */
@@ -432,7 +434,10 @@ size_t for_each_row(const std::vector<node_index> &keys, BatchSizer sizer, uint6
     std::vector<RowT> batch;
     std::vector<uint64_t> held;
     std::vector<bool> moved;
+    // the row bytes used since the checkpoint last ran within a batch
+    uint64_t used_unread = 0;
     for (size_t begin = 0; begin < keys.size(); ) {
+        used_unread = 0;
         // the k-mers whose rows are kept or among the next |sizer.next| rows to decode
         in_batch.clear();
         batch_keys.clear();
@@ -486,11 +491,22 @@ size_t for_each_row(const std::vector<node_index> &keys, BatchSizer sizer, uint6
             budget.release(containers);
         };
         size_t j = begin;
+        // the checkpoint ended the pass inside the batch, before k-mer j
+        bool checked_out = false;
         for ( ; j < end; ++j) {
+            // (lane T8-RL: before, a batch's uses read nothing, about 0.8 s at 4,000-label rows)
+            if (used_unread >= kResolveUseCheckBytes) {
+                used_unread = 0;
+                if (checkpoint()) {
+                    checked_out = true;
+                    break;
+                }
+            }
             auto kit = kept.find(keys[j]);
             if (kit != kept.end()) {
                 if (!use(j, kit->second.row))
                     break;
+                used_unread += annot::matrix::row_copy_bytes(kit->second.row);
                 if (next_use[j] == kNever)
                     kept.last_use(kit);
                 continue;
@@ -499,6 +515,7 @@ size_t for_each_row(const std::vector<node_index> &keys, BatchSizer sizer, uint6
             RowT &row = batch[r];
             if (!use(j, row))
                 break;
+            used_unread += annot::matrix::row_copy_bytes(row);
             // occurring again after this batch (none of its k-mers after j has the key)
             if (next_use[j] != kNever && next_use[j] >= end) {
                 const uint64_t bytes = annot::matrix::row_copy_bytes(row);
@@ -509,6 +526,10 @@ size_t for_each_row(const std::vector<node_index> &keys, BatchSizer sizer, uint6
             }
         }
         release_batch();
+        if (checked_out) {
+            finish(PassEnd::CHECKPOINT);
+            return j;
+        }
         if (j < end) {
             // the use of k-mer j did not fit: again from it without the rows kept, then with
             // its row alone; if neither leaves room, the pass ends before it
@@ -1590,13 +1611,35 @@ SupportProfile resolve_support(LabelOracle &oracle,
 void group_candidates(SupportProfile *profile, uint64_t min_block_kmers, AnswerAccount *answer,
                       const std::function<void(size_t)> &finishing,
                       const std::function<void()> &reading) {
+    // Every pass of the grouping reads |reading| once kResolveCheckRuns of its steps passed since
+    // the last one: a run counted for its price, a run walked into the map (the Opus review of
+    // d398357a9, N2: 4,000 labels of about 3,700 runs each, 15 million map steps, went unread for
+    // about 0.5 s; a run walked is 16 steps, below) and an element of the candidates' sort
+    // (stepped_sort.hpp); the groups are
+    // read every 4,096 as they are made candidates (finishing), each one's map node freed as it
+    // is (lane T8-RL, the follow-ups of T7-D3: before, the count pass, the map's release and the
+    // sort read nothing, about 0.3 s for the sort alone at 3 million groups)
+    uint64_t unread = 0;
+    auto step = [&](uint64_t n) {
+        unread += n;
+        if (unread >= kResolveCheckRuns) {
+            unread = 0;
+            if (reading)
+                reading();
+        }
+    };
     // the grouping charged before it is built (kCandidateRunBytes a run grouped), replaced by
     // what the candidates hold once it is done
     uint64_t grouping = 0;
     if (answer) {
         for (const LabelProfile &lp : profile->labels) {
-            for (const auto &run : lp.runs) {
-                grouping += run.size() >= min_block_kmers;
+            const std::vector<KmerInterval> &runs = lp.runs;
+            for (size_t begin = 0; begin < runs.size(); begin += kResolveCheckLabels) {
+                const size_t end = std::min(runs.size(), begin + kResolveCheckLabels);
+                for (size_t r = begin; r < end; ++r) {
+                    grouping += runs[r].size() >= min_block_kmers;
+                }
+                step(end - begin);
             }
         }
         grouping *= kCandidateRunBytes;
@@ -1605,15 +1648,14 @@ void group_candidates(SupportProfile *profile, uint64_t min_block_kmers, AnswerA
 
     // ---- seed candidates: identical maximal runs grouped
     std::map<KmerInterval, std::vector<LabelId>> groups;
-    // read by the runs walked as well as by the labels (the Opus review of d398357a9, N2: 4,000
-    // labels of about 3,700 runs each, 15 million map steps, went unread for about 0.5 s)
-    uint64_t runs_walked = 0;
     for (LabelId l = 0; l < profile->labels.size(); ++l) {
         if (finishing)
             finishing(l);
         for (const auto &run : profile->labels[l].runs) {
-            if (reading && ++runs_walked % kResolveCheckRuns == 0)
-                reading();
+            // (a run walked kResolveCheckRuns / kResolveCheckLabels steps: a reading every
+            // kResolveCheckLabels runs, as a map step costs about a microsecond at millions of
+            // groups, lane T8-RL; before, every kResolveCheckRuns runs, about 70 ms there)
+            step(kResolveCheckRuns / kResolveCheckLabels);
             if (run.size() >= min_block_kmers)
                 groups[run].push_back(l);
         }
@@ -1628,25 +1670,29 @@ void group_candidates(SupportProfile *profile, uint64_t min_block_kmers, AnswerA
     uint64_t held = annot::matrix::buffer_bytes(profile->candidates.capacity(),
                                                 sizeof(SeedCandidate));
     size_t group = 0;
-    for (auto &[iv, labels] : groups) {
+    // each group's node freed once its labels are moved into its candidate, so that the map is
+    // released in the loop that reads (the order of the groups and the candidates as before)
+    for (auto it = groups.begin(); it != groups.end(); it = groups.erase(it)) {
         // read every 4,096 groups as the labels above (T5a-X1, Opus review 2026-11-13: at the
         // caps, 10,000 labels of 300 runs of their own, this pass over 3 million groups read
         // nothing for about 0.7 s)
         if (finishing)
             finishing(group++);
+        std::vector<LabelId> &labels = it->second;
         std::sort(labels.begin(), labels.end());
         held += annot::matrix::buffer_bytes(labels.capacity(), sizeof(LabelId));
-        profile->candidates.push_back({ iv, std::move(labels) });
+        profile->candidates.push_back({ it->first, std::move(labels) });
     }
-    std::map<KmerInterval, std::vector<LabelId>>().swap(groups);
-    std::sort(profile->candidates.begin(), profile->candidates.end(),
-              [](const SeedCandidate &a, const SeedCandidate &b) {
-                  if (a.kmers.size() != b.kmers.size())
-                      return a.kmers.size() > b.kmers.size();
-                  if (a.labels.size() != b.labels.size())
-                      return a.labels.size() > b.labels.size();
-                  return a.kmers.begin < b.kmers.begin;
-              });
+    // (in steps; the order is total: two candidates of the same length, label count and begin
+    // are the same interval, which one group holds)
+    sort_in_steps(profile->candidates.begin(), profile->candidates.end(),
+                  [](const SeedCandidate &a, const SeedCandidate &b) {
+                      if (a.kmers.size() != b.kmers.size())
+                          return a.kmers.size() > b.kmers.size();
+                      if (a.labels.size() != b.labels.size())
+                          return a.labels.size() > b.labels.size();
+                      return a.kmers.begin < b.kmers.begin;
+                  }, step);
     if (answer) {
         answer->release(grouping);
         // (within the grouping's price: a candidate and its label ids per run at most)

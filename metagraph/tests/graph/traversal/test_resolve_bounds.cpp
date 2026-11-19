@@ -28,6 +28,7 @@
 #include "graph/traversal/kept_rows.hpp"
 #include "graph/traversal/seeded_hash.hpp"
 #include "annotation/binary_matrix/base/hopscotch_layout.hpp"
+#include "annotation/binary_matrix/row_diff/row_diff_cache.hpp"
 #include "graph/annotated_dbg.hpp"
 #include "annotation/coord_to_header.hpp"
 #include "annotation/representation/column_compressed/annotate_column_compressed.hpp"
@@ -2685,8 +2686,8 @@ TEST(ResolveBoundsRoute, AnAnswerOfFewObjectsReadsTheStopWhileBuilt) {
 // The route's pass after the work reads its deadline in the candidates' grouping by runs (the
 // Opus review of d398357a9, N2): 40 records of a 60 kbp query with a SNP every 32 bp, named
 // explicitly, about 75,000 runs in 40 labels and some 1,900 groups, too few labels and groups
-// for a reading by count: resolve_support reads finish_check once every kResolveCheckRuns runs,
-// and a deadline passed there ends the request
+// for a reading by count: resolve_support reads finish_check once every kResolveCheckLabels runs
+// (before lane T8-RL, every kResolveCheckRuns), and a deadline passed there ends the request
 TEST(ResolveBoundsRoute, TheGroupingReadsTheDeadlineByRuns) {
     const std::string q = random_seq(60000, 6161);
     std::vector<std::string> seqs, names;
@@ -2717,10 +2718,67 @@ TEST(ResolveBoundsRoute, TheGroupingReadsTheDeadlineByRuns) {
     }
     ASSERT_LE(kResolveCheckRuns, runs);
     ASSERT_GT(kResolveCheckLabels, profile.candidates.size());
-    EXPECT_EQ(runs / kResolveCheckRuns, readings);
+    // once every kResolveCheckLabels runs walked (lane T8-RL: before, every kResolveCheckRuns),
+    // and at most once in the candidates' sort (fewer than kResolveCheckLabels of them, sorted
+    // as one piece)
+    EXPECT_LE(runs / kResolveCheckLabels, readings);
+    EXPECT_GE(runs / kResolveCheckLabels + 1, readings);
     // a deadline passed by then ends the request there
     parsed.options.finish_check = []() { throw std::runtime_error("deadline"); };
     EXPECT_THROW(resolve_support(oracle, q, parsed.options), std::runtime_error);
+}
+
+// The row pass reads its deadline within a batch's uses, once kResolveUseCheckBytes of rows were
+// used since its last reading (lane T8-RL, the follow-ups of T7-D3: before, only between
+// batches, and a batch of 4,000-label rows took about 0.8 s to use, the 503 of a small budget up
+// to 0.45 s late). 6,000 labels over the whole query: a row of 6,000 labels, the first batch's
+// 64 rows about 1.5 MiB. The deadline seen at the pass's first reading after its start ends the
+// work inside the first batch, at a k-mer, the profile that of the prefix before it (before: at
+// the first batch's end)
+TEST(ResolveBoundsRoute, TheRowPassReadsTheDeadlineWithinABatch) {
+    const std::string q = random_seq(300, 7171);
+    const size_t n = 6000;
+    std::vector<std::string> seqs(n, q);
+    std::vector<std::string> names;
+    for (size_t l = 0; l < n; ++l) {
+        names.push_back("L" + std::to_string(l));
+    }
+    auto anno = build_anno_graph<DBGSuccinct, annot::ColumnCompressed<>>(kK, seqs, names);
+    Json::Value request;
+    request["sequence"] = q;
+    for (const std::string &name : names) {
+        request["labels"].append(name);
+    }
+    cli::ResolveRequest parsed = cli::parse_resolve_request(request);
+    LabelOracle oracle(*anno);
+    const uint64_t num_kmers = q.size() - kK + 1;
+    ASSERT_LT(kResolveFirstBatchRows, num_kmers);
+    // the first batch's rows past the bytes between two readings
+    ASSERT_LT(kResolveUseCheckBytes, kResolveFirstBatchRows * annot::matrix::row_copy_bytes(
+            annot::matrix::BinaryMatrix::SetBitPositions(n)));
+    const SupportProfile whole = resolve_support(oracle, q, parsed.options);
+    ASSERT_EQ(n, whole.labels.size());
+    ASSERT_FALSE(whole.stop);
+    // the deadline true from the (skip + 1)-th reading on: the first that stops the work past
+    // the query's first k-mer
+    std::optional<uint64_t> resolved;
+    for (size_t skip = 0; skip < 8 && !resolved; ++skip) {
+        size_t calls = 0;
+        parsed.options.time_up = [&]() { return ++calls > skip; };
+        const SupportProfile cut = resolve_support(oracle, q, parsed.options);
+        ASSERT_TRUE(cut.stop) << skip;
+        if (cut.stop->resolved_kmers) {
+            resolved = cut.stop->resolved_kmers;
+            EXPECT_EQ(ResolveStop::ROWS, cut.stop->phase);
+            EXPECT_EQ(ResolveStop::TIME, cut.stop->reason);
+            ASSERT_EQ(n, cut.labels.size());
+            for (const LabelProfile &lp : cut.labels) {
+                ASSERT_EQ(*resolved, lp.kmers_supported) << lp.label.name;
+            }
+        }
+    }
+    ASSERT_TRUE(resolved);
+    EXPECT_LT(*resolved, kResolveFirstBatchRows);
 }
 
 // Under a stop, an explicit selection is checked before it is made (explicit_selection_blocked:
@@ -3861,9 +3919,14 @@ TEST(ResolveBoundsRoute, ASelectionThatFitsIsAnswered) {
 // The candidates' grouping reads by the runs it walks as well as by its labels and groups (the
 // Opus review of d398357a9, N2: before, few labels of many runs read nothing there, 4,000 labels
 // of about 3,700 runs for about 0.5 s): four labels of 3/4 kResolveCheckRuns runs each, read
-// once every kResolveCheckRuns runs walked (beside |finishing|'s calls by label and by group);
-// the candidates the same as without the readings; a reading that throws ends the grouping
-// there, inside the second label's runs
+// once every kResolveCheckLabels runs walked (a run 16 of the kResolveCheckRuns steps between two
+// readings; lane T8-RL: before, every kResolveCheckRuns runs, about 70 ms at millions of groups),
+// beside |finishing|'s calls by label and by group; read in the candidates' sort too, after the
+// last group is made (stepped_sort.hpp; before, the sort read nothing, about 0.3 s at 3 million
+// groups), and the map's nodes freed as the groups are made, in the loop that reads by group
+// (before, all of them after it, about 0.2 s at 3 million groups); the candidates the same as
+// without the readings; a reading that throws ends the grouping there, inside the first label's
+// runs
 TEST(ResolveAnswer, TheGroupingReadsByRuns) {
     SupportProfile profile;
     profile.k = kK;
@@ -3882,27 +3945,50 @@ TEST(ResolveAnswer, TheGroupingReadsByRuns) {
     }
     SupportProfile plain = profile;
     group_candidates(&plain, 1);
-    ASSERT_EQ(2 * per_label, plain.candidates.size());
+    const size_t groups = plain.candidates.size();
+    ASSERT_EQ(2 * per_label, groups);
     std::vector<size_t> finished;
-    size_t readings = 0;
-    group_candidates(&profile, 1, nullptr, [&](size_t i) { finished.push_back(i); },
-                     [&]() { ++readings; });
-    EXPECT_EQ(4 * per_label / kResolveCheckRuns, readings);
-    EXPECT_EQ(3u, readings);
-    EXPECT_EQ(4 + plain.candidates.size(), finished.size());
-    ASSERT_EQ(plain.candidates.size(), profile.candidates.size());
-    for (size_t i = 0; i < plain.candidates.size(); ++i) {
+    // at each reading, how many |finishing| calls came before it
+    std::vector<size_t> finished_at;
+    // the heap's live bytes at the first group's |finishing| call and at the last one's
+    std::optional<int64_t> first_group_heap;
+    std::optional<int64_t> last_group_heap;
+    group_candidates(&profile, 1, nullptr, [&](size_t i) {
+        finished.push_back(i);
+        if (finished.size() == 5)
+            first_group_heap = live_heap_bytes();
+        if (finished.size() == 4 + groups)
+            last_group_heap = live_heap_bytes();
+    }, [&]() { finished_at.push_back(finished.size()); });
+    EXPECT_EQ(4 + groups, finished.size());
+    // the walk: once every kResolveCheckLabels runs
+    const size_t in_walk = std::count_if(finished_at.begin(), finished_at.end(),
+                                         [](size_t f) { return f <= 4; });
+    EXPECT_EQ(4 * per_label / kResolveCheckLabels, in_walk);
+    // the sort, after every group was made a candidate: the candidates' passes, at least
+    // kResolveCheckRuns steps (each candidate at least once)
+    const size_t in_sort = std::count(finished_at.begin(), finished_at.end(), 4 + groups);
+    EXPECT_LE(1u, in_sort);
+    EXPECT_EQ(in_walk + in_sort, finished_at.size());
+    // the map's nodes freed while the groups are made: each a key, a vector and a tree node's
+    // pointers at least, all but the last's before its call
+    ASSERT_TRUE(first_group_heap && last_group_heap);
+    EXPECT_GE(*first_group_heap - *last_group_heap,
+              static_cast<int64_t>((groups - 1) * (sizeof(KmerInterval)
+                                                   + sizeof(std::vector<LabelId>))));
+    ASSERT_EQ(groups, profile.candidates.size());
+    for (size_t i = 0; i < groups; ++i) {
         ASSERT_EQ(plain.candidates[i].kmers, profile.candidates[i].kmers) << i;
         ASSERT_EQ(plain.candidates[i].labels, profile.candidates[i].labels) << i;
     }
-    // a stop at the first reading: within the second label's runs
+    // a stop at the first reading: within the first label's runs
     SupportProfile stopped = plain;
     stopped.candidates.clear();
     size_t labels_begun = 0;
     EXPECT_THROW(group_candidates(&stopped, 1, nullptr, [&](size_t) { ++labels_begun; },
                                   []() { throw std::runtime_error("stop"); }),
                  std::runtime_error);
-    EXPECT_EQ(2u, labels_begun);
+    EXPECT_EQ(1u, labels_begun);
     EXPECT_TRUE(stopped.candidates.empty());
 }
 

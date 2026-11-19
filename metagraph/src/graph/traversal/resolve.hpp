@@ -41,6 +41,11 @@ constexpr size_t kResolveFirstBatchRows = 64;
 constexpr size_t kResolveBatchRows = 4096;
 constexpr uint64_t kResolveBatchBytes = uint64_t(64) << 20;
 constexpr uint64_t kResolveKeptBytes = uint64_t(256) << 20;
+// Within a batch, the uses of its k-mers' rows read the checkpoint (the request's stop, the
+// deadline) once the rows used since the last reading pass kResolveUseCheckBytes (row_copy_bytes;
+// a row's use is the scatter of its hits, about its size: lane T8-RL, a batch of 4,000-label
+// rows took about 0.8 s to use, the work's deadline and a gone client read only after it)
+constexpr uint64_t kResolveUseCheckBytes = uint64_t(1) << 20;
 
 // A /resolve answer priced past its account (AnswerAccount): nothing partial is sent (the
 // server: 400 resolve_answer_too_large). |part| is what passed it: "profile", "candidates",
@@ -159,8 +164,9 @@ struct ResolveOptions {
     // field.
     std::function<bool()> time_up;
     // Read every kResolveCheckLabels labels of the loops after the work (a discovery's ranking
-    // and naming, the profiles, the candidates' grouping, which reads every kResolveCheckRuns
-    // runs as well), after |stop|: throws to abandon a
+    // and naming, the profiles, the candidates' grouping, which reads every kResolveCheckLabels
+    // runs walked as well; their sorts, the grouping's count pass every kResolveCheckRuns
+    // elements), after |stop|: throws to abandon a
     // request whose answer can no longer be built and written in time (the server: 503
     // deadline). Not a request field.
     std::function<void()> finish_check;
@@ -283,10 +289,12 @@ constexpr uint64_t kResolveCheckKmers = 4096;
 // the answer's time (and a stop) is read within a few milliseconds of it
 constexpr size_t kResolveCheckLabels = 4096;
 
-// The candidates' grouping (group_candidates) reads them once in this many runs walked as well:
-// a run's step there is a map lookup and insertion (about 33 ns measured: 4,000 labels of about
-// 3,700 runs took about 0.5 s), so that few labels of many runs are read within a few
-// milliseconds too (the Opus review of d398357a9, N2)
+// The passes after the work that are not by labels read them once in this many steps: the
+// candidates' grouping (group_candidates) a run counted for its price, an element of its sort,
+// and a run walked into its map 16 steps (a reading every kResolveCheckLabels runs walked: a
+// map step is about 33 ns at few groups, about a microsecond at millions; 4,000 labels of about
+// 3,700 runs took about 0.5 s, the Opus review of d398357a9, N2; lane T8-RL), and a discovery's
+// ranking and name sorts an element of their passes (stepped_sort.hpp)
 constexpr uint64_t kResolveCheckRuns = uint64_t(1) << 16;
 
 // Where a deadline (ResolveOptions::time_up) ended a /resolve's work, and how far it got: the
@@ -446,8 +454,10 @@ bool next_key_uses(const std::vector<node_index> &keys, annot::matrix::DecodeBud
 // replaced by what the candidates hold (part "candidates"); the candidates are reserved, so
 // that no growth holds an old and a new buffer beside the grouping's map. |finishing| (unset:
 // none) is called with each label's index before its runs are grouped, then with each group's
-// index before it becomes a candidate; |reading| (unset: none) after every kResolveCheckRuns
-// runs walked (resolve_support: the request's stop, then its deadline)
+// index before it becomes a candidate, each group's map node freed as it is; |reading| (unset:
+// none) once kResolveCheckRuns steps passed since the last reading, a run counted for the price
+// a step, a run walked 16 and an element of the candidates' sort (stepped_sort.hpp) one
+// (resolve_support: the request's stop, then its deadline)
 void group_candidates(SupportProfile *profile, uint64_t min_block_kmers,
                       AnswerAccount *answer = nullptr,
                       const std::function<void(size_t)> &finishing = {},
