@@ -971,6 +971,18 @@ class TestMalformedPairStatements(unittest.TestCase):
         c.deepen(single, 'right', leaf)
         self.assertEqual((c.posted()[0].get('graph'), 'pairs' in c.posted()[0]), (GRAPH, False))
 
+    def test_a_refused_key_with_an_empty_path_is_named_by_its_id(self):
+        # re-check (cosmetic): a seqs_order key naming both paths, one of them '', is named
+        # in a refusal by (graph, pair_id), as one with two non-empty paths
+        from metagraph.traverse import union_pairs
+        with self.assertRaises(CombineRefused) as cm:
+            union_pairs([fixture('fork', 'paths')],
+                        seqs_order={(GRAPH, GP, ''): 'verified',
+                                    Pair(GRAPH, GP, '', None): 'count_only'})
+        self.assertEqual(cm.exception.code, 'bad_seqs_order')
+        self.assertIn(configured_pair_id(GRAPH, GP, ''), str(cm.exception))
+        self.assertNotIn(GP, str(cm.exception))
+
 
 class TestPartialDescriptions(unittest.TestCase):
     """A description that names its pair by a path and no id (a caller's {graph,

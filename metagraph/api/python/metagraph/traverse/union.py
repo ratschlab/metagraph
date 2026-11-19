@@ -474,8 +474,8 @@ def _with_id(d):
 def _key_text(k, d):
     """seqs_order key |k| (description |d|) in a text: as given, but a key that names its
     pair by both paths by (graph, pair_id) -- no configured path in a response."""
-    if isinstance(k, tuple) and d is not None and d.get('graph_path') \
-            and d.get('annotation_path'):
+    if isinstance(k, tuple) and d is not None and d.get('graph_path') is not None \
+            and d.get('annotation_path') is not None:
         return repr((d['graph'], d['pair_id']))
     return repr(k)
 
