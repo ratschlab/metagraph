@@ -263,7 +263,12 @@ The answer keeps its upstream shape (a list of `{seq_description, results, ...}`
     section 10);
   - a pair started and not finished is `unfinished`: refusal `{http_status: 503, code: "unfinished", reason:
     "cutoff" | "loading", error, usage: {state, started_at, elapsed_ms, cpu_ms, memory_bytes}}`; it is told to stop;
-    a load in progress may run past every deadline;
+    a load in progress may run past every deadline. Whichever thread decides first decides by this rule: a pooled
+    pair whose worker publishes anything but an answer at or after the cutoff, before the handler has decided it,
+    is `unfinished` as well, so that its own refusal (a `503 deadline` at its capped budget, below, which falls at
+    the cutoff) never races the handler's `unfinished`; an answer published then is kept *(the Opus review of
+    d398357a9, N1: once a `/resolve` pair's answer read its deadline every 64 KiB of text, a build past the cutoff
+    was its own 503 `deadline` or `unfinished` at random, 4 of 8 runs each way)*;
   - the completed pairs are written beside them. Each pair keeps its own per-pair budget, which starts when it
     starts and, when the pair runs pooled (two or more pairs), is capped at the work cutoff (the owner's decision
     of 2026-11-01): a pair whose budget would end later stops by time before the cutoff and answers what it found,
@@ -277,7 +282,8 @@ The answer keeps its upstream shape (a list of `{seq_description, results, ...}`
     `finish_by_ms`) has no budget to cap and runs as its single-graph answer does (a deadline would change its
     work: the direct path's explicit labels' hits fetched in pieces); with no time-limited answer to give, it is
     `unfinished` at the cutoff and told to stop there. Its work ends at its next reading of the request's stop:
-    between row batches, and after the work every 4,096 labels, groups, selection steps or answer objects; a
+    between row batches, and after the work every 4,096 labels, groups, selection steps or answer objects, every
+    65,536 runs the candidates' grouping walks and every 64 KiB of the answer's text; a
     piece that reads none (SPEC-labeled-traversal-core.md §4.5 lists them under "Not polled", with their times at
     the caps) delays that to its end (T5a-X1, Fable review 2026-11-12: before, nothing after the row pass read
     the stop, so the selection of a pair without a deadline held its pool thread to its end, minutes at the

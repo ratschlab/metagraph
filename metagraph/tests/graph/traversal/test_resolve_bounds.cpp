@@ -2433,6 +2433,47 @@ TEST(ResolveBoundsRoute, AnAnswerOfFewObjectsReadsTheStopWhileBuilt) {
     EXPECT_EQ(gone_from, reads);
 }
 
+// The route's pass after the work reads its deadline in the candidates' grouping by runs (the
+// Opus review of d398357a9, N2): 40 records of a 60 kbp query with a SNP every 32 bp, named
+// explicitly, about 75,000 runs in 40 labels and some 1,900 groups, too few labels and groups
+// for a reading by count: resolve_support reads finish_check once every kResolveCheckRuns runs,
+// and a deadline passed there ends the request
+TEST(ResolveBoundsRoute, TheGroupingReadsTheDeadlineByRuns) {
+    const std::string q = random_seq(60000, 6161);
+    std::vector<std::string> seqs, names;
+    std::mt19937 gen(6162);
+    for (size_t l = 0; l < 40; ++l) {
+        std::string record = q;
+        for (size_t i = 16; i < record.size(); i += 32) {
+            record[i] = "ACGT"[(std::string("ACGT").find(record[i]) + 1 + gen() % 3) % 4];
+        }
+        seqs.push_back(record);
+        names.push_back("rec" + std::to_string(l));
+    }
+    auto anno = build_anno_graph<DBGSuccinct, annot::ColumnCompressed<>>(kK, seqs, names);
+    Json::Value request;
+    request["sequence"] = q;
+    for (const std::string &name : names) {
+        request["labels"].append(name);
+    }
+    cli::ResolveRequest parsed = cli::parse_resolve_request(request);
+    size_t readings = 0;
+    parsed.options.finish_check = [&]() { ++readings; };
+    LabelOracle oracle(*anno);
+    const SupportProfile profile = resolve_support(oracle, q, parsed.options);
+    ASSERT_EQ(40u, profile.labels.size());
+    uint64_t runs = 0;
+    for (const LabelProfile &lp : profile.labels) {
+        runs += lp.runs.size();
+    }
+    ASSERT_LE(kResolveCheckRuns, runs);
+    ASSERT_GT(kResolveCheckLabels, profile.candidates.size());
+    EXPECT_EQ(runs / kResolveCheckRuns, readings);
+    // a deadline passed by then ends the request there
+    parsed.options.finish_check = []() { throw std::runtime_error("deadline"); };
+    EXPECT_THROW(resolve_support(oracle, q, parsed.options), std::runtime_error);
+}
+
 // The labels a multi-graph server's pair does not hold (unknown_labels) are written name by name
 // by the answer's writer, without a tree of them (the Fable review of 37b70685e, m2): byte for
 // byte their array's text (the tree API's identity check, tree_of, throws otherwise; names that
@@ -3489,6 +3530,54 @@ TEST(ResolveBoundsRoute, ASelectionThatFitsIsAnswered) {
                                                          nullptr, six_mib);
     EXPECT_FALSE(got.isMember("stop"));
     EXPECT_EQ(compact(untimed(plain)), compact(untimed(got)));
+}
+
+// The candidates' grouping reads by the runs it walks as well as by its labels and groups (the
+// Opus review of d398357a9, N2: before, few labels of many runs read nothing there, 4,000 labels
+// of about 3,700 runs for about 0.5 s): four labels of 3/4 kResolveCheckRuns runs each, read
+// once every kResolveCheckRuns runs walked (beside |finishing|'s calls by label and by group);
+// the candidates the same as without the readings; a reading that throws ends the grouping
+// there, inside the second label's runs
+TEST(ResolveAnswer, TheGroupingReadsByRuns) {
+    SupportProfile profile;
+    profile.k = kK;
+    const size_t per_label = 3 * kResolveCheckRuns / 4 + 5;
+    profile.num_kmers = 2 * per_label + 10;
+    profile.graph_runs = { { 0, profile.num_kmers } };
+    for (size_t l = 0; l < 4; ++l) {
+        LabelProfile lp;
+        lp.label.kind = LabelKind::HEADER;
+        lp.label.name = "r" + std::to_string(l);
+        for (size_t i = 0; i < per_label; ++i) {
+            lp.runs.push_back({ 2 * i + (l % 2), 2 * i + (l % 2) + 1 });
+        }
+        lp.kmers_supported = per_label;
+        profile.labels.push_back(std::move(lp));
+    }
+    SupportProfile plain = profile;
+    group_candidates(&plain, 1);
+    ASSERT_EQ(2 * per_label, plain.candidates.size());
+    std::vector<size_t> finished;
+    size_t readings = 0;
+    group_candidates(&profile, 1, nullptr, [&](size_t i) { finished.push_back(i); },
+                     [&]() { ++readings; });
+    EXPECT_EQ(4 * per_label / kResolveCheckRuns, readings);
+    EXPECT_EQ(3u, readings);
+    EXPECT_EQ(4 + plain.candidates.size(), finished.size());
+    ASSERT_EQ(plain.candidates.size(), profile.candidates.size());
+    for (size_t i = 0; i < plain.candidates.size(); ++i) {
+        ASSERT_EQ(plain.candidates[i].kmers, profile.candidates[i].kmers) << i;
+        ASSERT_EQ(plain.candidates[i].labels, profile.candidates[i].labels) << i;
+    }
+    // a stop at the first reading: within the second label's runs
+    SupportProfile stopped = plain;
+    stopped.candidates.clear();
+    size_t labels_begun = 0;
+    EXPECT_THROW(group_candidates(&stopped, 1, nullptr, [&](size_t) { ++labels_begun; },
+                                  []() { throw std::runtime_error("stop"); }),
+                 std::runtime_error);
+    EXPECT_EQ(2u, labels_begun);
+    EXPECT_TRUE(stopped.candidates.empty());
 }
 
 // The candidates' grouping holds at most its price (T4 review R1, F2): kCandidateRunBytes a run

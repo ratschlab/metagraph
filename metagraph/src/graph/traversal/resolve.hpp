@@ -159,7 +159,8 @@ struct ResolveOptions {
     // field.
     std::function<bool()> time_up;
     // Read every kResolveCheckLabels labels of the loops after the work (a discovery's ranking
-    // and naming, the profiles, the candidates' grouping), after |stop|: throws to abandon a
+    // and naming, the profiles, the candidates' grouping, which reads every kResolveCheckRuns
+    // runs as well), after |stop|: throws to abandon a
     // request whose answer can no longer be built and written in time (the server: 503
     // deadline). Not a request field.
     std::function<void()> finish_check;
@@ -281,6 +282,12 @@ constexpr uint64_t kResolveCheckKmers = 4096;
 // once in this many labels: a label's step there is a few allocations (its name, its runs), so
 // the answer's time (and a stop) is read within a few milliseconds of it
 constexpr size_t kResolveCheckLabels = 4096;
+
+// The candidates' grouping (group_candidates) reads them once in this many runs walked as well:
+// a run's step there is a map lookup and insertion (about 33 ns measured: 4,000 labels of about
+// 3,700 runs took about 0.5 s), so that few labels of many runs are read within a few
+// milliseconds too (the Opus review of d398357a9, N2)
+constexpr uint64_t kResolveCheckRuns = uint64_t(1) << 16;
 
 // Where a deadline (ResolveOptions::time_up) ended a /resolve's work, and how far it got: the
 // profile is that of the query's first |resolved_kmers| k-mers (SupportProfile::num_kmers),
@@ -439,10 +446,12 @@ bool next_key_uses(const std::vector<node_index> &keys, annot::matrix::DecodeBud
 // replaced by what the candidates hold (part "candidates"); the candidates are reserved, so
 // that no growth holds an old and a new buffer beside the grouping's map. |finishing| (unset:
 // none) is called with each label's index before its runs are grouped, then with each group's
-// index before it becomes a candidate
+// index before it becomes a candidate; |reading| (unset: none) after every kResolveCheckRuns
+// runs walked (resolve_support: the request's stop, then its deadline)
 void group_candidates(SupportProfile *profile, uint64_t min_block_kmers,
                       AnswerAccount *answer = nullptr,
-                      const std::function<void(size_t)> &finishing = {});
+                      const std::function<void(size_t)> &finishing = {},
+                      const std::function<void()> &reading = {});
 
 // The order select_seeds lists the seeds in, as the capabilities state it (the `resolve`
 // block's seed_order, the multigraph block's resolve_seed_order; SPEC-labeled-traversal-core.md

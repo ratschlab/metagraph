@@ -998,6 +998,17 @@ class FanoutState {
                 // as a pooled pair still working at the cutoff (SPEC-multigraph-envelope.md
                 // section 4), its envelope written
                 unfinished_locked(i);
+            } else if (!inline_run && started && !result.answered && !result.aborted
+                       && now() >= settings.deadlines.cutoff) {
+                // a pooled pair that had not answered by the request's work cutoff is unfinished
+                // (section 4), whichever thread decides it first: its worker, publishing a
+                // refusal at or after the cutoff, decides as the handler waking at the cutoff
+                // does (close_locked). Its own deadline is capped at the cutoff (cutoff_cap), so
+                // a build or selection past it ends in the pair's 503 deadline about when the
+                // handler wakes; without this rule the entry was that 503 or unfinished, as the
+                // two threads raced (the Opus review of d398357a9, N1). An answer published
+                // before the handler wakes is kept
+                unfinished_locked(i);
             } else if (result.aborted) {
                 slot.aborted = true;
                 slot.resolved = true;
