@@ -167,9 +167,12 @@ The answer keeps its upstream shape (a list of `{seq_description, results, ...}`
     million labels on a hash table, charged at each of its allocations before it is made, a doubling with its
     old buckets beside the new ones and a node of its overflow list included *(GPT final review of trains 5a–7,
     M1: label ids colliding in its hash grew it past its reserve before it was charged, 1.75 MiB held and 2.6 MiB
-    at its doubling under a bound of 1 MiB)*), and its rows (labels, entries, its name and sequence) as its
-    result is handed over. A unit's values are freed once its object is built: no unit's values wait for the
-    pair's other records;
+    at its doubling under a bound of 1 MiB)*; a doubling's old buckets, once freed, are used again by the
+    unit's later charges, its values and its rows' handover, so that the unit holds the most it held at once
+    *(the Opus review of cf77380a0, MA-1: they stayed charged beside those, and a unit whose table never
+    reached the bound was refused, 2,800 rows under a bound of 3 MiB)*; the table its keys are in stays charged
+    until the unit ends), and its rows (labels, entries, its name and sequence) as its result is handed over. A
+    unit's values are freed once its object is built: no unit's values wait for the pair's other records;
   - the object check of each unit: its own JSON object (its rows, the pair tags, its cut, and the most building
     one of its rows holds beside it) priced alone against the bound, before it is built;
   - the answer of the request: each unit's object (or a refused unit's entry) before it is built, beside them
