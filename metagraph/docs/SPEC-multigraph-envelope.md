@@ -50,8 +50,8 @@ An entry is either the pair's single-graph answer with the tags merged in, or a 
 The capabilities routes (`GET /traverse/capabilities`, `GET /pattern/capabilities`) answer without a pair
 selection with the envelope over every pair (up to `max_graphs_without_selection`): `envelope_version`, `route`,
 `graphs`, `answered`, `refused`, `server_instance`, `answers` (each entry the pair's capabilities block, tagged).
-With a pair selection (section 6) they answer a one-entry envelope. Beyond the cap a probe without `?graph=` keeps
-its 400 text of before release 10, byte for byte (section 6).
+With a pair selection (section 6) they answer a one-entry envelope. Beyond the cap a probe without `?graph=` is
+refused in section 6's words (train 8's).
 
 ### 1.1 `/traverse` (E10)
 
@@ -100,7 +100,9 @@ configured identity, not a content one (`index_fp` is that): a pair listed under
 spelled another way gives another id. A single-graph server states `pair_id: null` where it tags its pair (a
 `/search` cut, `pair_summary`, the registry, the certificates' examples). `GET /capabilities` states
 `multigraph.pair_id: "n1"` (section 8), so a client knows the form before it reads an answer. Paths stay valid
-selectors, and `pair_id` is one too (section 6); no response echoes a path a request sent.
+selectors, and `pair_id` is one too (section 6); no response echoes a path a request sent. One exception, master's
+form: a single-graph server's `GET /stats` keeps `graph.filename` and `annotation.filename`, the basenames of its
+two files (no directory).
 
 Log lines keep the paths, for the operator. At start-up a multi-graph server logs each pair's binding once, in the
 answers' pair order: `[Server] Pair <name> <pair_id>: graph '<graph path>', annotation '<annotation path>'`. Before
@@ -179,7 +181,9 @@ The answer keeps its upstream shape (a list of `{seq_description, results, ...}`
   mode but labels, which takes no cut and states none.
 - `/search` takes `graphs` only (no `pairs`; it has no re-ask): `pairs` is refused 400 `pairs_unsupported` on every
   server, single-graph included, before any cached answer is looked up. On a single-graph server the field used to
-  be ignored (a request it refused for `graphs` keeps that refusal).
+  be ignored (a request it refused for `graphs` keeps that refusal). `pair_id` is no `/search` selector either: as
+  every field `/search` does not read (master's parser), a top-level `pair_id` is ignored and the request searches
+  every pair of its `graphs`. A client tells the pairs apart by each row's and each cut's `pair_id`.
 - `/search` writes a request's sequences to a file in the server's temporary directory (`--disk-swap`, else the
   system's) before it searches them. A file that cannot be made or written (the directory missing, full or out of
   inodes) fails the request 400 `{"error": "search: the request's sequences could not be written to the server's
@@ -449,7 +453,7 @@ The answer keeps its upstream shape (a list of `{seq_description, results, ...}`
 
 | Route | `graphs` | `pairs` | Note |
 | --- | --- | --- | --- |
-| `/search` | yes | refused (`pairs_unsupported`) | also on a single-graph server |
+| `/search` | yes | refused (`pairs_unsupported`) | also on a single-graph server; a `pair_id` is ignored (section 3) |
 | `/resolve`, `/pattern` | yes | yes | any number of pairs |
 | `/traverse` | `graph`, or `graphs` resolving to ONE pair | exactly one pair | several pairs: `traverse_single_pair` |
 | `GET /traverse/capabilities`, `GET /pattern/capabilities` | `?graph=` | `?graph=&pair_id=`, or `?graph=&graph_path=&annotation_path=` | one pair per probe |
@@ -489,7 +493,11 @@ names cap's three texts, `{N}` the cap and `{M}` the names listed:
 
 A probe's unknown parameter is refused `Bad request: unknown parameter '<key>' of GET <route> (graph, pair_id,
 graph_path, annotation_path)`, its list the parameters a probe takes (fix round 1 of train 8; before, the release-9
-words `... (graph, graph_path)`, the two that server took).
+words `... (graph, graph_path)`, the two that server took). A single-graph server's probes refuse `graph` and
+`graph_path` (`Bad request: this server hosts a single graph; remove the 'graph' / 'graph_path' parameter`) and
+ignore every other parameter, `pair_id` and `annotation_path` included, as before train 8: it hosts one pair, and a
+client sends a `pair_id` only where `multigraph.pair_id` is stated (a single-graph server states no `multigraph`
+block).
 The other texts kept: an unknown name on `/resolve`, `/traverse` and a probe `Bad request: unknown graph '<name>'`
 (on `/search` `Request with an uninitialized graph <name>`, on `/pattern` `request.graphs: unknown graph '<name>'
 (GET /capabilities lists the graphs)`), each now with `graph_unknown`; on `/search` an empty `graphs`, which the

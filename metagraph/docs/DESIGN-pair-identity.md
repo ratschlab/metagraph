@@ -87,9 +87,11 @@ it stated null paths. Each pair's `index_fp` stays, as content identity. `GET /c
 
 ### 3.2 The id
 
-The engine computes the n1 id as master does, once per configured pair at start-up, from the graph list's first
-three columns as spelled. The header and its test vectors come from master unchanged. The id is a **configured
-identity**: it names a name and two files. A pair listed under two names has two ids, since the id hashes the name.
+The engine computes the n1 id as master does, from the graph list's first three columns as spelled, where it names
+a pair (`pair_id_of`: once per pair and answer or selector, never per row). It is not cached at start-up: one SHA-1
+over about a hundred bytes per pair and answer is negligible beside the answer's own work, and a cache would add
+state to every pair (fix round 1 corrected this note to the code). The header and its test vectors come from master
+unchanged. The id is a **configured identity**: it names a name and two files. A pair listed under two names has two ids, since the id hashes the name.
 A union's **pair identity** is content first (section 3.9): two aliases of one pair with manifests are one pair there.
 
 ### 3.3 Requests

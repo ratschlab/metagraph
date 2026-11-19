@@ -985,8 +985,11 @@ fingerprint.
 
 The ID is deterministic public metadata. Treat it as an identifier, never as a credential.
 A request can also name a pair by it: a ``pairs`` object or a capabilities probe
-(``?pair_id=``) takes ``pair_id`` in place of the pair's paths, never beside them. No response
-states a configured path. The server's start-up log names each pair's ID with its two paths.
+(``?pair_id=``) takes ``pair_id`` in place of the pair's paths, never beside them.
+``POST /search`` selects by ``graphs`` only: it ignores a ``pair_id`` and searches every pair of
+the names, so read each row's ``pair_id``. No response states a configured path, apart from
+master's ``graph.filename`` and ``annotation.filename`` in a single-graph server's ``GET /stats``,
+the two files' basenames. The server's start-up log names each pair's ID with its two paths.
 
 .. _search_cut_statements:
 
