@@ -42,8 +42,8 @@ from . import derive
 from . import ops as _ops
 from ._codec import REASON, GraphletFormatError
 from .attempts import TraverseResponse
-from .budget import (BASE_SHIFT, DICT, DICT_KEY, INT, LIST_ITEM, SET, SET_ITEM, STR, TUPLE,
-                     W_ELEM, W_ROW, W_STEP, LocalBudgetExceeded, Partial)
+from .budget import (DICT, DICT_KEY, INT, LIST_ITEM, SET, SET_ITEM, STR, TUPLE, W_ELEM, W_ROW,
+                     W_STEP, LocalBudgetExceeded, Partial)
 from ._stitch import _RANK as _CAUSE_RANK
 from ._stitch import StitchedGraphlet, part_name
 from .client import answered_pair
