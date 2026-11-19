@@ -1764,7 +1764,9 @@ class TestBudgets(unittest.TestCase):
         1,000 seqs_order keys and 120 failed records of one pair (whose ambiguous_pair check
         is cubic) stop with nothing charged and a traced peak below 64 KB (it was 1.26 MB and
         2.33 s for the first); unbudgeted and budgeted answers agree, and the account bounds
-        the traced peak of the whole call (warm free lists, as above)."""
+        the traced peak of the whole call (warm free lists, as above), also for the Opus
+        review's 2,000 seqs_order keys stated by paths on distinct names (M1: 3.66 MB traced
+        against 2.7 MB charged), whose matching passes index a path per key."""
         import gc
         import tracemalloc
         forms = {
@@ -1776,6 +1778,8 @@ class TestBudgets(unittest.TestCase):
                                    {'expected_pairs': ['g%d' % i for i in range(n)]}),
             'seqs_order': lambda n: ([{'pair': 'g0', 'error': 'x'}],
                                      {'seqs_order': {'g%d' % i: 'verified' for i in range(n)}}),
+            'seqs_order paths': lambda n: ([{'pair': 'g0', 'error': 'x'}], {'seqs_order': {
+                ('g%d' % i, '/g%d' % i, '/a%d' % i): 'verified' for i in range(n)}}),
             'parts': lambda n: ([{'pair': 'g%d' % i, 'graphlet': T.graphlet('merge')}
                                  for i in range(n)], {})}
 
@@ -1810,7 +1814,7 @@ class TestBudgets(unittest.TestCase):
                 self.assertEqual(zero[-1].call_usage(), {'work_units': 0, 'memory_bytes': 0})
                 self.assertEqual(zero[-1].stops[-1].resource, 'work')
                 # the whole call: the same union, its account above its traced peak
-                n = {'one pair': 40, 'parts': 20}.get(name, 200)
+                n = {'one pair': 40, 'parts': 20, 'seqs_order paths': 2000}.get(name, 200)
                 r, kw = make(n)
                 seed = 'ACGT' if name != 'parts' else None
                 b = LocalBudget()

@@ -194,13 +194,17 @@ _M_DESC = 1536          # union_pairs()' preparation per input and expected pair
 _M_KEY = 256            # a seqs_order key's description and entry (fitted: at most 153 B)
 _W_MATCH = 4 * W_ELEM   # two pair descriptions matched (Appendix A.4's rule: up to seven
 #                         fields of each read)
-_W_INDEX = 6 * W_ELEM   # a matching pass per description it indexes or queries: its
-#                         signature, its facets, its lists, a count and a scan (a dozen
-#                         lookups each)
-_M_MATCH = 1024         # a matching pass per description, while it runs: its signature,
-#                         group, facets and the index's lists and entries, released after
-#                         the pass (fitted: at most 941 B on CPython 3.11 and 3.14, six
-#                         shapes of 200 and 2,000 descriptions)
+# A matching pass's own work per description, beside its comparisons (Opus review m1: the
+# stage timings, to be re-fitted on the reference machine)
+_W_GROUP = 4 * W_ELEM   # grouped by content: its signature, a lookup, its slot
+_W_INDEX = 16 * W_ELEM  # indexed: its facets, the lists it joins
+_W_QUERY = 12 * W_ELEM  # a query of the index (charged twice: the count and the scan): its
+#                         facets and a dozen lookups
+_M_MATCH = 2048         # a matching pass per description, while it runs: its signature,
+#                         group, facets and the index's lists, entries and paths, released
+#                         after the pass (fitted on every seqs_order key form and eleven
+#                         description shapes, 200 and 2,000 each, on 3.11 and 3.14: at most
+#                         1,741 B, distinct names that state all seven fields; Opus review M1)
 _M_FIG = 160            # a walk's figures: the record, whole_in and held_in, its slot
 _DERIVATION_CAUSES = {'no_carrier': 'no label carries the whole seed',
                       'no_trace_carrier': 'no label carries the whole seed by trace',
@@ -798,11 +802,13 @@ def union_pairs(results, *, seed=None, expected_pairs=None, seqs_order=None, bud
     descriptions: linear); then each matching pass right before it runs (the seqs_order keys
     among themselves, ambiguous_pair with the pair classes, the classes against the keys):
     its index, then the comparisons its candidates need, counted from the index (linear
-    where the pairs are distinct); then the inputs' metadata (error strings, absent results,
-    stated pairs, envelopes) and the seed, before the seed checks; then the trie pass. A
-    stop raises with no partial. A budget too small for a charge stops there, before the
-    refusals checked after it: ambiguous_pair after its pass's charge, different_seed,
-    duplicate_pair, not_expected and the rest after the metadata's.
+    where the pairs are distinct); then, after no_bases and different_alphabet (which charge
+    nothing), the inputs' metadata (error strings, absent results, stated pairs, envelopes)
+    and the seed, before the seed checks; then the trie pass. A stop raises with no partial.
+    A budget too small for a charge stops there, before the refusals checked after it:
+    ambiguous_pair after its pass's charge, no_bases and different_alphabet after the
+    classes against the keys, different_seed, duplicate_pair, not_expected and the rest
+    after the metadata's.
     Refusals (CombineRefused, .code) in the order of Appendix A.2."""
     return _B.run_scoped(budget, 'union_pairs', (),
                          lambda b: PairUnion._build(results, seed, expected_pairs, seqs_order, b))
@@ -2336,12 +2342,14 @@ class _Candidates:
         return sum(map(len, self.query(d)))
 
 
-def _index_price(b, entries, indexed):
-    """Charge |b| before a matching pass groups and indexes its descriptions, and return the
-    bytes it holds until it ends: _W_INDEX per description indexed or queried (|entries|),
-    _M_MATCH per description indexed (|indexed|)."""
-    b.charge(_W_INDEX * entries, _M_MATCH * indexed)
-    return _M_MATCH * indexed
+def _index_price(b, grouped, indexed, queried, held):
+    """Charge |b| before a matching pass groups, indexes or queries, and return the bytes it
+    holds until it ends: _W_GROUP per description grouped, _W_INDEX per description indexed,
+    _W_QUERY twice per description queried (its count and its scan) and its count's slot,
+    and |held| bytes (_M_MATCH per description of the pass)."""
+    b.charge(_W_GROUP * grouped + _W_INDEX * indexed + 2 * _W_QUERY * queried,
+             held + LIST_ITEM * queried)
+    return held + LIST_ITEM * queried
 
 
 def _compare_price(b, compared, longest):
@@ -2360,7 +2368,7 @@ def _check_keys(so, known, b=None):
     if len(so) < 2:
         return
     keys = [d for d, _, _ in so]
-    held = 0 if b is None else _index_price(b, len(keys), len(keys))
+    held = 0 if b is None else _index_price(b, 0, len(keys), len(keys), _M_MATCH * len(keys))
     idx = _Candidates(keys, known)
     if b is not None:
         counts = [idx.count(d) for d in keys]
@@ -2385,7 +2393,7 @@ def _seqs_of(classes, so, tags, known=None, b=None):
     seqs = {}
     if not so:
         return {id(c): 'unknown' for c in classes}
-    held = 0 if b is None else _index_price(b, len(so) + len(classes), len(so))
+    held = 0 if b is None else _index_price(b, 0, len(so), len(classes), _M_MATCH * len(so))
     idx = _Candidates([d for d, _, _ in so], known)
     if b is not None:
         counts = [idx.count(c['desc']) for c in classes]
@@ -2445,12 +2453,14 @@ def _pair_classes(descs, known=None, b=None, check=True):
     two groups of one class and every group matches all of its class. Only then do the
     classes stand; otherwise _ambiguous() finds the refusal the all-pairs loop raised.
 
-    Charged before it runs: the groups and index, then each group against each of its
+    Charged before it runs: the groups, then the index, then each group against each of its
     candidates (the matches are read from both ends of a pair, so the scan keeps no list of
     them); _ambiguous() charges its comparisons as it makes them."""
-    held = 0 if b is None else _index_price(b, len(descs), len(descs))
+    held = 0 if b is None else _index_price(b, len(descs), 0, 0, _M_MATCH * len(descs))
     pos, rep, of = _groups(descs)
     n = len(rep)
+    if b is not None:
+        held += _index_price(b, 0, n, n, 0)
     idx = _Candidates(rep, known)
     if b is not None:
         counts = [idx.count(r) for r in rep]
@@ -2481,6 +2491,7 @@ def _pair_classes(descs, known=None, b=None, check=True):
         covers = [inside[s] == len(members[cls[s]]) - 1 for s in range(n)]
         if not all(covers[s] and not across[s] for s in range(n)):
             _ambiguous(descs, pos, rep, idx, known, b, cls, members, covers, across)
+            raise AssertionError('ambiguous_pair not found')   # cannot happen (_ambiguous())
     classes = [{'members': []} for _ in founder]
     for i, d in enumerate(descs):
         classes[cls[of[i]]]['members'].append(d)

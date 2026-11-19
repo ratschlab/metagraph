@@ -126,10 +126,12 @@ __all__ = ['LocalLimits', 'LocalBudget', 'LocalStop', 'LocalBudgetExceeded', 'Pa
 #     its descriptions at union.py's _M_DESC / _M_KEY, twice its stated pair's JSON bound;
 #     then each matching pass (the keys among themselves, ambiguous_pair with the pair
 #     classes, the classes against the keys), which compares a description only with its
-#     candidates (union.py's _Candidates): before it builds its index 6 W_ELEM per
-#     description it indexes or queries and _M_MATCH per one it indexes (released when the
-#     pass ends), then before it compares 4 W_ELEM per comparison, counted from the index;
-#     an input refused ambiguous_pair has its first refusal searched by comparing a group's
+#     candidates (union.py's _Candidates): before it groups descriptions by content or
+#     builds its index, union.py's _W_GROUP per description grouped, _W_INDEX per one
+#     indexed and _W_QUERY twice per one queried (its count and its scan), fitted as these
+#     weights are, and _M_MATCH per description of the pass (released when the pass ends),
+#     then before it compares 4 W_ELEM per comparison, counted from the index; an input
+#     refused ambiguous_pair has its first refusal searched by comparing a group's
 #     matches among themselves, charged row by row before each row; the trie is one
 #     pass over each part's first-parent tree, charged per part and arm before the pass:
 #     4 W_ELEM per part segment (its element, the compare of its bases, at most two trie
@@ -183,7 +185,9 @@ DEADLINE_POLL = 65536
 
 # ------------------------------------------------------------------ the weights
 # lwu per element; 1 lwu ~ 0.1 us of CPython 3.11 on the reference machine (Apple M5 Max).
-# Changing a weight moves stop points: it needs a new WORK_MODEL.
+# Changing a weight moves stop points, and no unbudgeted answer: by itself it does not need
+# a new WORK_MODEL (the golden gate pins the unbudgeted outputs; union_pairs()' and stitch()'s
+# prices moved within model 2). A new WORK_MODEL is for a change in what is charged for.
 W_LINE = 48            # an MGT record line parsed (+ 1 lwu per 8 bytes of it)
 W_DUMP_LINE = 24       # an MGT record line written
 W_CALL = 200           # what any call costs beside its elements (its setup in Python)

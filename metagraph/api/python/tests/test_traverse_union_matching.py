@@ -86,10 +86,11 @@ def with_reference():
 
 
 def outcome(fn, *args, **kw):
-    """('ok', value) or ('raised', type, code, text)."""
+    """('ok', value) or ('raised', type, code, text); a stop and a failed assertion (a
+    test's own, inside a mock) are raised."""
     try:
         return ('ok', fn(*args, **kw))
-    except LocalBudgetExceeded:
+    except (LocalBudgetExceeded, AssertionError):
         raise
     except Exception as e:  # noqa: BLE001 -- every refusal and error is compared
         return ('raised', type(e).__name__, getattr(e, 'code', None), str(e))
@@ -124,8 +125,9 @@ def universe(rng):
         p = {'graph': g, 'graph_path': rng.choice(GPS), 'annotation_path': rng.choice(APS),
              'release': rng.choice(RELEASES), 'index_ns': rng.choice(NS),
              'index_fp': rng.choice(FPS), 'index_meta_fp': rng.choice(MFPS)}
-        if g is not None:
-            p['pair_id'] = configured_pair_id(g, p['graph_path'], p['annotation_path'])
+        # a single-graph pair's id too: a caller may state one beside its index_ns
+        p['pair_id'] = configured_pair_id(g or p['index_ns'], p['graph_path'],
+                                          p['annotation_path'])
         out.append(p)
     return out
 
@@ -142,8 +144,8 @@ def view(rng, p, wild=True):
                 'release': RELEASES, 'index_ns': NS, 'index_fp': FPS,
                 'index_meta_fp': MFPS}[k]
         p[k] = rng.choice(pool)
-        if p.get('graph'):
-            p['pair_id'] = configured_pair_id(p['graph'], p['graph_path'], p['annotation_path'])
+        p['pair_id'] = configured_pair_id(p.get('graph') or p['index_ns'], p['graph_path'],
+                                          p['annotation_path'])
     form = rng.random()
     d = {}
     if p.get('graph'):
@@ -161,6 +163,14 @@ def view(rng, p, wild=True):
             d['pair_id'] = LONE_ID                             # an id no path is known for
     elif rng.random() < 0.2 and p.get('index_ns') in GRAPHS:
         return {'graph': p['index_ns']}                        # a bare name for its index_ns
+    else:                                                      # no graph: by index_ns, and
+        r = rng.random()
+        if r < 0.25:
+            d['pair_id'] = p['pair_id']                        # an id
+        elif r < 0.4:
+            d[rng.choice(U._PATHS)] = p[rng.choice(U._PATHS)]  # a path
+        elif r < 0.5:
+            d['pair_id'], d['graph_path'] = p['pair_id'], p['graph_path']  # an id and a path
     for k, q in (('release', 0.35), ('index_ns', 0.35), ('index_fp', 0.3),
                  ('index_meta_fp', 0.3)):
         if rng.random() < q:
@@ -173,7 +183,8 @@ def view(rng, p, wild=True):
         return None
     if wild and out is not None and rng.random() < 0.04:   # not a string: compared with all
         out = dict(out, **{rng.choice(('release', 'index_fp', 'index_meta_fp',
-                                       'index_ns')): rng.choice((5, 0.5, ['x'], True))})
+                                       'index_ns')): rng.choice((5, 0.5, ['x'], True,
+                                                                 float('nan')))})
     return out
 
 
@@ -249,7 +260,8 @@ class TestPasses(unittest.TestCase):
     def _compare(self, seed):
         rng = random.Random(seed)
         descs, so = case(rng)
-        known = U._known_paths([d for d in descs if U._plain(d)] + [d for d, _, _ in so])
+        # as _build() reads them: every description of the call
+        known = U._known_paths(descs + [d for d, _, _ in so])
         # the keys among themselves
         self.assertEqual(outcome(U._check_keys, so, known),
                          outcome(old_check_keys, so, known), seed)
@@ -292,7 +304,7 @@ class TestPasses(unittest.TestCase):
             rng = random.Random(seed)
             descs, so = case(rng)
             ds = descs + [d for d, _, _ in so]
-            known = U._known_paths([d for d in ds if U._plain(d)])
+            known = U._known_paths(ds)
             for a in ds:
                 for b in ds:
                     self.assertEqual(U._matches(a, b, known), U._matches(b, a, known), seed)
@@ -303,7 +315,7 @@ class TestPasses(unittest.TestCase):
             rng = random.Random(seed)
             descs, so = case(rng)
             ds = descs + [d for d, _, _ in so]
-            known = U._known_paths([d for d in ds if U._plain(d)])
+            known = U._known_paths(ds)
             idx = U._Candidates(ds, known)
             for a in ds:
                 cand = [i for lst in idx.query(a) for i in lst]
@@ -470,15 +482,16 @@ class _Recorder:
 class TestCharges(unittest.TestCase):
 
     def test_each_pass_is_charged_before_it_runs(self):
-        """Admitted before it runs (budget.py): each pass charges its index before it builds
-        it, and at every comparison it makes it has charged _W_MATCH for at least as many;
-        a pass that finds no refusal charges exactly the comparisons it makes (the keys'
-        pairs with equal values are charged and not compared)."""
-        real, Index = U._matches, U._Candidates
+        """Admitted before it runs (budget.py), read from what each pass did, in order:
+        before it groups, its groups are charged; before it builds an index, that index and
+        its queries are charged; at every comparison it has charged _W_MATCH for at least as
+        many; a pass that refuses nothing charges exactly the comparisons it makes (the
+        keys' pairs with equal values are charged and not compared)."""
+        real, Index, groups = U._matches, U._Candidates, U._groups
         for seed in range(3000):
             rng = random.Random(seed)
             descs, so = case(rng)
-            known = U._known_paths([d for d in descs if U._plain(d)] + [d for d, _, _ in so])
+            known = U._known_paths(descs + [d for d, _, _ in so])
             classes = U._classes(descs, known)
             tags = {id(c): 't%d' % i for i, c in enumerate(classes)}
             for name, run in (
@@ -486,30 +499,115 @@ class TestCharges(unittest.TestCase):
                     ('classes', lambda b: U._pair_classes(descs, known, b)),
                     ('seqs', lambda b: U._seqs_of(classes, so, tags, known, b))):
                 b = _Recorder()
-                calls, indexed, built = [0], [0], [0]
+                events = []
 
-                def index_price(b_, entries, n):
-                    indexed[0] += 1
+                def index_price(b_, grouped, indexed, queried, held):
+                    events.append(('price', grouped, indexed))
                     return 0
 
                 def compare_price(b_, compared, longest):
                     b_.charge(U._W_MATCH * compared)
                     return 0
 
-                def index(*a):
-                    built[0] += 1
-                    self.assertLessEqual(built[0], indexed[0], (seed, name))
-                    return Index(*a)
+                def grouping(ds):
+                    events.append(('groups', len(ds)))
+                    return groups(ds)
+
+                def index(ds, k):
+                    events.append(('index', len(ds)))
+                    return Index(ds, k)
 
                 def counted(x, y, k=None):
-                    calls[0] += 1
-                    self.assertLessEqual(U._W_MATCH * calls[0], b.work, (seed, name))
+                    events.append(('match', b.work))
                     return real(x, y, k)
                 with mock.patch.multiple(U, _matches=counted, _compare_price=compare_price,
-                                         _index_price=index_price, _Candidates=index):
+                                         _index_price=index_price, _Candidates=index,
+                                         _groups=grouping):
                     r = outcome(run, b)
+                calls, priced = 0, []
+                for e in events:
+                    if e[0] == 'price':
+                        priced.append(e)
+                    elif e[0] == 'groups':
+                        # charged since the last structure was built
+                        self.assertIn(e[1], [p[1] for p in priced], (seed, name, events))
+                        priced = []
+                    elif e[0] == 'index':
+                        self.assertIn(e[1], [p[2] for p in priced], (seed, name, events))
+                        priced = []
+                    else:
+                        calls += 1
+                        self.assertLessEqual(U._W_MATCH * calls, e[1], (seed, name))
                 if r[0] == 'ok' and name != 'keys':
-                    self.assertEqual(U._W_MATCH * calls[0], b.work, (seed, name))
+                    self.assertEqual(U._W_MATCH * calls, b.work, (seed, name))
+
+    def test_each_pass_holds_what_it_is_charged(self):
+        """A pass's own account (a budget outside any call: its charges only) bounds the
+        memory it holds while it runs beyond what it returns (review M1: a _Paths per
+        description where each names its own graph), warm free lists as above; every
+        seqs_order key form, by name or by path, distinct names and one name, and the
+        description shapes that index most (all fields stated, each its own name)."""
+        import gc
+        import tracemalloc
+        from metagraph.traverse.client import Pair
+
+        def key_forms(i):
+            g, gp, ap = 'g%d' % i, '/p%d' % i, '/a%d' % i
+            return [g, (g,), (g, configured_pair_id(g, gp, ap)), (g, gp), (g, gp, ap),
+                    (g, None, ap), Pair(g, gp, ap, None),
+                    Pair(g, None, None, configured_pair_id(g, gp, ap)),
+                    ('g', configured_pair_id('g', gp, ap)), ('g', gp), ('g', gp, ap)]
+
+        def desc_forms(i):
+            g, gp, ap = 'g%d' % i, '/p%d' % i, '/a%d' % i
+            return [{'graph': g, 'pair_id': configured_pair_id(g, '/p', '/a'),
+                     'index_fp': 'f%d' % i, 'release': 'r'},
+                    {'graph': g, 'graph_path': gp, 'annotation_path': ap, 'index_fp': 'f%d' % i,
+                     'index_meta_fp': 'm%d' % i, 'release': 'r', 'index_ns': 'n%d' % i},
+                    {'graph': g, 'graph_path': gp, 'annotation_path': ap, 'release': 'r',
+                     'index_meta_fp': 'm%d' % i, 'index_ns': 'n%d' % i},
+                    {'graph': g, 'graph_path': gp}, {'graph': g},
+                    {'index_ns': 'n%d' % i, 'pair_id': configured_pair_id(g, gp, ap)},
+                    {'index_ns': 'n%d' % i, 'graph_path': gp}]
+
+        def held(fn):
+            fn()
+            gc.collect()
+            gc.disable()
+            try:
+                tracemalloc.start()
+                base = tracemalloc.get_traced_memory()[0]
+                out = fn()
+                cur, peak = tracemalloc.get_traced_memory()
+            finally:
+                tracemalloc.stop()
+                gc.enable()
+            del out
+            return peak - cur
+
+        def account(fn):
+            b = LocalBudget()
+            fn(b)
+            return b.peak_bytes
+
+        n = 400
+        for f in range(len(key_forms(0))):
+            so = U._check_args([], None, None,
+                               {key_forms(i)[f]: 'verified' for i in range(n)})[1]
+            ks = [d for d, _, _ in so]
+            known = U._known_paths(ks)
+            classes = U._classes(ks, known)
+            tags = {id(c): 't' for c in classes}
+            for name, fn in (('keys', lambda b=None: U._check_keys(so, known, b)),
+                             ('seqs', lambda b=None: U._seqs_of(classes, so, tags, known, b))):
+                with self.subTest(form=repr(key_forms(0)[f]), op=name):
+                    self.assertLessEqual(held(fn), account(fn))
+        for f in range(len(desc_forms(0))):
+            ds = [U._pair_desc(desc_forms(i)[f]) for i in range(n)]
+            known = U._known_paths(ds)
+            with self.subTest(form=desc_forms(0)[f], op='classes'):
+                fn = (lambda b=None: U._pair_classes(ds, known, b))
+                self.assertLessEqual(held(fn), account(fn))
 
     def test_the_service_ceiling_is_admitted(self):
         """The service's 2,000-entry seed (each entry an input and an expected pair, one

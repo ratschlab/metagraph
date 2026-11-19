@@ -686,11 +686,12 @@ whose order allows it (`walks()`, `segments()`, `carriers()`) carry a `Partial` 
 what it pays for runs: first, before any input is classified, its preparation, read from the inputs' counts and stated
 pairs (their descriptions, linear in the number of inputs); then each matching pass right before it runs (the
 `seqs_order=` keys among themselves, `ambiguous_pair` with the pair classes, the classes against the keys), at its
-index and at the comparisons its candidates need (F.1); then, before the seed checks, the inputs' variable-length
-metadata (at a bound of its JSON) and the seed (four copies, and four more per part, whose retrieval identity holds it);
-then the trie pass. A budget too small for one of these charges stops there, before the refusals checked after it:
-`ambiguous_pair` after its pass's charge, and `different_seed`, `duplicate_pair` and `not_expected` after the
-metadata's.
+index and at the comparisons its candidates need (F.1); then, after `no_bases` and `different_alphabet` (which charge
+nothing) and before the seed checks, the inputs' variable-length metadata (at a bound of its JSON) and the seed (four
+copies, and four more per part, whose retrieval identity holds it); then the trie pass. A budget too small for one of
+these charges stops there, before the refusals checked after it: `ambiguous_pair` after its pass's charge, `no_bases`
+and `different_alphabet` after the classes against the keys, and `different_seed`, `duplicate_pair` and
+`not_expected` after the metadata's.
 
 **The queries.**
 
@@ -2152,11 +2153,14 @@ graphlets.rst examples run in `run_examples.py` (CI's fixture-checks job).
   A.4's rule says can match it (an index_fp both state; else the graph name, or a bare name against an index_ns; then
   the pair_id; then the paths, an unstated one matching any, an id's paths taken from the call). Descriptions with one
   content are compared once. With distinct pairs the work is linear in the inputs: the service's largest seed (2,000
-  pairs, each an input and an expected pair with a `seqs_order=` key) is charged about 380,000 lwu for the whole
+  pairs, each an input and an expected pair with a `seqs_order=` key) is charged about 770,000 lwu for the whole
   construction, where comparing every pair was priced at about 272 million. Many descriptions of one name that differ
   only in release, index_ns or index_meta_fp (not indexed), or many distinct descriptions that all match one another,
-  are still compared pairwise, and finding the first `ambiguous_pair` among a description's matches can take the square
-  of their number. Every comparison is charged before it is made (§2.8).
+  are still compared pairwise. An input refused `ambiguous_pair` has its refusal searched group by group, each group's
+  matches compared among themselves (the square of their number), so the groups before the refused one can take up to
+  the cube of the inputs together, as comparing every pair did (600 names on one index_fp, refused at the last input:
+  about 868 million lwu before and after). Every comparison is charged before it is made (§2.8), so a budget stops the
+  search.
 - **Labels.** Per (union segment, pair), the labels alive on the part segments it covers, as intervals. A part
   segment lies on one path, so its intervals do not depend on which walk passes it. In constrain mode they are built
   from the segment's entry set and its label changes (`derive.label_changes()`, `derive.py:72`), each change opening
