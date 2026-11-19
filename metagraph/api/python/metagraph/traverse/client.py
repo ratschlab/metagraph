@@ -1353,7 +1353,8 @@ class TraverseClient:
         pair and sends nothing. A pair named by its id that GET /capabilities lists with its
         paths (an engine before ids) is sent by those paths, the engine's own spelling (their
         id is the one given); any other is sent as wire_pair() sends it, and one this client
-        cannot send (PairIdError) is raised before any pair's request is sent. Every answer is
+        cannot send (PairIdError) is raised before any pair's request is sent (a failed read
+        of GET /capabilities for it is that pair's {pair, error}). Every answer is
         kept as returned (a TraverseResponse of one seed, which keeps the seed it sent); a
         refused request (TraverseError, ResponseFormatError for an answer not shaped as a
         response), a transport failure (OSError) or a body that does not parse
@@ -1387,6 +1388,10 @@ class TraverseClient:
                 return PairResults([], seq, (), {})
         caps = self.server_capabilities()
         caps = caps if isinstance(caps, dict) else {}
+        if self._server_doc is None and caps:
+            # kept as _server() keeps it, so that the ids' checks below (states_pair_ids(),
+            # the listing) read no second copy of what was just read
+            self._server_doc = caps
         summary = caps.get('graph_summary') if isinstance(caps.get('graph_summary'), dict) \
             else {}
         # each listed pair with its Pair: its id stated (an engine after ids) or computed from
@@ -1454,12 +1459,21 @@ class TraverseClient:
         # a pair named by its id that this client cannot send (wire_pair(): no resolver and a
         # server without ids, or a resolver that refuses it) is refused before any pair's
         # request is sent, not after the pairs before it
-        for w in sent:
+        # (a transport failure or a refused read of GET /capabilities there sent nothing for
+        # that pair: it is the pair's {pair, error}, as a failed request would be)
+        unsent = {}
+        for i, w in enumerate(sent):
             if w.pair_id and (w.graph_path is None or w.annotation_path is None):
-                self.wire_pair(w.graph, w.pair_id)
+                try:
+                    self.wire_pair(w.graph, w.pair_id)
+                except (TraverseError, OSError) as e:
+                    unsent[i] = e
         results = []
         expected = list(expected)
         for i, (t, w) in enumerate(zip(targets, sent)):
+            if i in unsent:
+                results.append({'pair': _pair_object(t), 'error': unsent[i]})
+                continue
             # the keywords given only (a subclass's traverse() may take fewer)
             kw = {} if w.pair_id is None or (w.graph_path is not None
                                              and w.annotation_path is not None) \

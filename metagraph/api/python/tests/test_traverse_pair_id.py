@@ -292,6 +292,35 @@ class TestDiscoveryInBothForms(unittest.TestCase):
                              coordinates=None)
         self.assertEqual((cm.exception.code, c.sent), ('pair_unresolved', []))
 
+    def test_the_fan_out_reads_capabilities_once(self):
+        # fix review N4: the ids' checks reuse the fan-out's own read of GET /capabilities;
+        # a failed read for one pair is that pair's {pair, error}, the others still run
+        seed = 'ACGTACGTACGTACGTACGTACGTACGTACGTAC'
+        c = _Engine(AFTER_IDS, tagged(T.doc_json('fork', 'graphlet'), 'id'))
+        c.traverse_pairs(seed, pairs=[{'graph': GRAPH, 'pair_id': ID},
+                                      {'graph': GRAPH, 'pair_id': ID2}], coordinates=None)
+        self.assertEqual([path for _, path, _ in c.log].count('/capabilities'), 1)
+        self.assertEqual(len(c.posted()), 2)
+
+        class Flaky(_Engine):
+            # lists nothing on the fan-out's read, then the connection is refused
+            reads = 0
+
+            def _request(self, method, path, payload=None, answers=(), with_status=False):
+                if path == '/capabilities':
+                    self.reads += 1
+                    if self.reads > 1:
+                        raise ConnectionRefusedError('refused')
+                    return (200, {}) if with_status else {}
+                return super()._request(method, path, payload, answers, with_status)
+        c = Flaky({}, tagged(T.doc_json('fork', 'graphlet'), 'paths'))
+        r = c.traverse_pairs(seed, pairs=[{'graph': GRAPH, 'pair_id': ID}, GRAPH],
+                             coordinates=None)
+        self.assertEqual(r.results[0]['pair'], {'graph': GRAPH, 'pair_id': ID})
+        self.assertIsInstance(r.results[0]['error'], ConnectionRefusedError)
+        self.assertNotIsInstance(r.results[1], dict)
+        self.assertEqual([p.get('graph') for p in c.posted()], [GRAPH])
+
     def test_a_p2_id_is_refused_before_anything_is_sent(self):
         c = _FanOut(self.BY_ID)
         with self.assertRaises(PairIdError) as cm:
