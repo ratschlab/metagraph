@@ -720,6 +720,41 @@ class TestRefusals(unittest.TestCase):
         nameless = with_fields(T.graphlet('merge'), index_ns=None)
         refused(self, 'no_pair', lambda: union_pairs([nameless]), U.TEXTS['no_pair'] % 0)
 
+    def test_a_tag_that_is_not_a_string(self):
+        """G4Q's open question 3 (and the Opus review's answer): an envelope whose release or
+        index tag (its own, or its capabilities') is not a string is refused bad_pair_tag,
+        naming the result and the tag, where a document's pair statement is checked: a
+        list as a release raised TypeError in _tags(), a number was taken as a release. A
+        caller's pair statement with such a value was refused already (not a pair)."""
+        def caps(g, **kw):
+            return with_env(g, capabilities=dict(g.envelope.get('capabilities') or {}, **kw))
+        a, b = T.graphlet('merge'), T.graphlet('merge_ties')
+        cases = [
+            ([with_env(a, release=['r1', 'r2']), with_env(b, release='r3')], 0, 'release', 'list'),
+            ([b, with_env(a, release=5)], 1, 'release', 'int'),
+            ([caps(a, release={'id': 'r1'})], 0, 'capabilities.release', 'dict'),
+            ([{'pair': 'gM', 'graphlet': with_env(a, release=True)}], 0, 'release', 'bool')]
+        for results, pos, tag, kind in cases:
+            with self.subTest(tag=tag, kind=kind):
+                refused(self, 'bad_pair_tag', lambda: union_pairs(results),
+                        U.TEXTS['bad_pair_tag'] % ('result %d' % pos, tag, kind))
+        # a response's seed result without a graphlet: its envelope states the index tags
+        for k in ('index_ns', 'index_fp', 'index_meta_fp'):
+            r = response_of(extra_results=[absent_result('not_in_graph', seed_len=30)])
+            r.envelope = dict(r.envelope, capabilities=dict(
+                r.envelope.get('capabilities') or {}, **{k: 7}))
+            with self.subTest(tag=k):
+                refused(self, 'bad_pair_tag', lambda: union_pairs(
+                    [{'response': r, 'index': 0}], seed='A' * 30),
+                    U.TEXTS['bad_pair_tag'] % ('result 0', 'capabilities.' + k, 'int'))
+        # a part's index tags are its H line's: its envelope's are not read
+        union_pairs([{'pair': 'gM', 'graphlet': caps(a, index_fp=7)},
+                     {'pair': 'gT', 'graphlet': b}])
+        # None and strings ('' included) are taken as before
+        u = union_pairs([{'pair': 'gM', 'graphlet': with_env(a, release=None)},
+                         {'pair': 'gT', 'graphlet': with_env(b, release='')}])
+        self.assertEqual(len(u.parts), 2)
+
     def test_ambiguous_pair(self):
         a = with_fields(with_env(T.graphlet('merge'), graph='g2'), index_fp='f1')
         b = with_fields(with_env(T.graphlet('merge_ties'), graph='g2'), index_fp='f2')

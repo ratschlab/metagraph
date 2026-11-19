@@ -1981,10 +1981,10 @@ retrievals of one pair). A refusal is a ``CombineRefused`` (a ``ValueError``) wi
 ``code``, checked in this order: the arguments (``bad_expected``, ``bad_seqs_order``),
 then ``not_combinable`` (also a ``TypeError``), ``view_unsupported``, ``not_one_seed``,
 ``result_has_graphlet``, ``no_graphlet``, ``no_seed``, a document's pair statement the
-library does not take (``p2_pair_id``, ``bad_pair_id``, ``pair_id_mismatch``),
-``pair_mismatch``, ``no_pair``,
-``ambiguous_pair``, ``no_bases``, ``different_alphabet``, ``different_seed``,
-``duplicate_pair`` and ``not_expected``; two ``seqs_order`` keys that give one pair two
+library does not take (``p2_pair_id``, ``bad_pair_id``, ``pair_id_mismatch``, and
+``bad_pair_tag`` for a release or index tag that is not a string), ``pair_mismatch``,
+``no_pair``, ``ambiguous_pair``, ``no_bases``, ``different_alphabet``,
+``different_seed``, ``duplicate_pair`` and ``not_expected``; two ``seqs_order`` keys that give one pair two
 values are ``bad_seqs_order``, found among the keys first and otherwise right after
 ``ambiguous_pair``, once the results name the pairs. A refusal names the first failing
 result in the order given. A part without its envelope raises ``MissingEnvelope``.

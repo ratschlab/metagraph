@@ -84,6 +84,9 @@ TEXTS = {
     # p2_pair_id, bad_pair_id, pair_id_mismatch: a document's pair statement the library does
     # not take, with the words of client.PairIdError
     'bad_pair_statement': '%s: %s',
+    # a release or index tag of an envelope that is not a string (its type named)
+    'bad_pair_tag': '%s: the envelope\'s %s is not a string (%s): a pair\'s release and index '
+                    'tags are strings',
     'pair_mismatch': 'result %s was answered on pair %s, and the caller states pair %s: state '
                      'the pair it was answered on, or none',
     'pair_mismatch_unverifiable': 'result %s was answered on pair %s, named by its pair_id '
@@ -522,19 +525,33 @@ def _stated_desc(p, refuse, where):
 
 
 def _env_of(env, g, where):
-    """_env_desc(|env|, |g|), a pair statement the library does not take (client._pair():
-    a p2 or malformed pair_id, an id beside one path, an id that is not its paths') refused
-    as a CombineRefused with the PairIdError's code and words, naming |where|."""
+    """_env_desc(|env|, |g|, |where|), a pair statement the library does not take
+    (client._pair(): a p2 or malformed pair_id, an id beside one path, an id that is not its
+    paths') refused as a CombineRefused with the PairIdError's code and words, naming
+    |where|."""
     try:
-        return _env_desc(env, g)
+        return _env_desc(env, g, where)
     except PairIdError as e:
         raise C.CombineRefused(e.code, TEXTS['bad_pair_statement'] % (where, e)) from None
 
 
-def _env_desc(env, g=None):
-    """The pair an envelope (and a body's H line) states."""
+_ENV_TAGS = ('release', 'index_ns', 'index_fp', 'index_meta_fp')
+
+
+def _env_desc(env, g=None, where='the result'):
+    """The pair an envelope (and a body's H line) states. Its release and index tags (the
+    envelope's or its capabilities'; a graphlet's index tags are its H line's) are strings
+    or absent: one that is anything else is refused bad_pair_tag, naming |where| and the
+    tag, so that every description the matching passes compare, index (_Candidates) and tag
+    (_tags()) holds strings only, as a caller's (_pair_desc())."""
     env = env if isinstance(env, dict) else {}
     caps = env.get('capabilities') if isinstance(env.get('capabilities'), dict) else {}
+    for k in _ENV_TAGS if g is None else _ENV_TAGS[:1]:
+        for src, name in ((env, k), (caps, 'capabilities.' + k)):
+            v = src.get(k)
+            if v is not None and not isinstance(v, str):
+                raise C.CombineRefused('bad_pair_tag', TEXTS['bad_pair_tag']
+                                       % (where, name, type(v).__name__))
     d = {}
     ap = answered_pair(env)
     if ap is not None:
@@ -2213,27 +2230,15 @@ class _SeedStandIn:
 _NO_PATH = (None, None)
 
 
-def _plain(d):
-    """Whether description |d| can be indexed: its keys strings, its values strings or None,
-    its graph not ''. Any other description (a value that is not a string, which only an
-    envelope's release or index tags can bring) is compared with every description."""
-    if d.get('graph') == '':
-        return False
-    return all(isinstance(k, str) and (v is None or isinstance(v, str)) for k, v in d.items())
-
-
 def _facets(d, known):
-    """What _matches() reads of description |d| to find its matches, or None where it cannot
-    be indexed (_plain()): (index_fp, graph, pair_id, paths, bare, index_ns), the index_fp
-    and pair_id where they are truthy, the paths (graph_path, annotation_path) with those
-    |known| holds for an id stated without any (_with_paths()), |bare| whether |d| is a bare
-    name (_names_ns())."""
-    if not _plain(d):
-        return None
+    """What _matches() reads of description |d| to find its matches: (index_fp, graph,
+    pair_id, paths, bare, index_ns), the index_fp and pair_id where they are truthy, the
+    paths (graph_path, annotation_path) with those |known| holds for an id stated without
+    any (_with_paths()), |bare| whether |d| is a bare name (_names_ns()). Every value of a
+    description is a string or None: a caller's pair statement is refused otherwise
+    (_pair_desc()), and so is an envelope's (_env_desc(), bad_pair_tag)."""
     e = _with_paths(d, known)
     p = (e.get('graph_path'), e.get('annotation_path'))
-    if not all(x is None or isinstance(x, str) for x in p):
-        return None
     return (d.get('index_fp') or None, d.get('graph'), d.get('pair_id') or None, p,
             set(d) == {'graph'}, d.get('index_ns'))
 
@@ -2281,23 +2286,17 @@ class _Candidates:
           without a pair_id only if that states no path either (_unverifiable()):
           ('idonly', ...) and ('nopath', ...) hold the descriptions without a path, a
           _Paths per (graph, has_fp, 'id' | 'noid') the others.
-      * A description that cannot be indexed (_facets()) is a candidate of every
-        description, and every description is one of its candidates.
 
     release, index_ns and index_meta_fp are left out: _matches() reads them last, where both
     state one, only to separate. Descriptions of one name and pair that differ only in them
     are therefore candidates of one another (and compared)."""
-    __slots__ = ('n', 'known', 'wild', 'lists', 'paths')
+    __slots__ = ('known', 'lists', 'paths')
 
     def __init__(self, descs, known):
-        self.n, self.known, self.wild, self.lists, self.paths = len(descs), known, [], {}, {}
+        self.known, self.lists, self.paths = known, {}, {}
         add = self._add
         for i, d in enumerate(descs):
-            f = _facets(d, known)
-            if f is None:
-                self.wild.append(i)
-                continue
-            fp, g, pid, p, bare, ns = f
+            fp, g, pid, p, bare, ns = _facets(d, known)
             hf = fp is not None
             if hf:
                 add(('fp', fp), i)
@@ -2313,7 +2312,7 @@ class _Candidates:
                 self._paths(g, hf, 'noid').add(p, i)
             if bare:
                 add(('bare', g), i)
-            if g is None and isinstance(ns, str):
+            if g is None and ns is not None:
                 add(('ns', ns), i)
 
     def _add(self, key, i):
@@ -2326,12 +2325,9 @@ class _Candidates:
         return t
 
     def query(self, d):
-        f = _facets(d, self.known)
-        if f is None:
-            return [range(self.n)]
-        fp, g, pid, p, bare, ns = f
+        fp, g, pid, p, bare, ns = _facets(d, self.known)
         get, paths = self.lists.get, self.paths.get
-        out = [self.wild]
+        out = []
         if fp is not None:
             out.append(get(('fp', fp), ()))
         for hf in (False,) if fp is not None else (False, True):
@@ -2351,7 +2347,7 @@ class _Candidates:
                     out += withid.query(p)
         if bare:
             out.append(get(('ns', g), ()))
-        if g is None and isinstance(ns, str):
+        if g is None and ns is not None:
             out.append(get(('bare', ns), ()))
         return out
 
@@ -2430,26 +2426,23 @@ def _seqs_of(classes, so, tags, known=None, b=None):
 
 
 def _sig(d):
-    """Description |d|'s content as a key, or None where it cannot be indexed (_plain()).
+    """Description |d|'s content as a key (its values are strings or None, _facets()).
     _matches() reads only a description's content, and two of one content match: they
     match the same descriptions and each other."""
-    return tuple(sorted(d.items())) if _plain(d) else None
+    return tuple(sorted(d.items()))
 
 
 def _groups(descs):
     """|descs| grouped by content (_sig()): (pos, rep, of) -- pos[g] the positions of group g
     in input order, the groups in the order of their first positions; rep[g] its first
-    description; of[i] the group of position i. A description that cannot be indexed is a
-    group of its own."""
+    description; of[i] the group of position i."""
     pos, of, first = [], [], {}
     for i, d in enumerate(descs):
         s = _sig(d)
-        g = first.get(s) if s is not None else None
+        g = first.get(s)
         if g is None:
-            g = len(pos)
+            g = first[s] = len(pos)
             pos.append([i])
-            if s is not None:
-                first[s] = g
         else:
             pos[g].append(i)
         of.append(g)

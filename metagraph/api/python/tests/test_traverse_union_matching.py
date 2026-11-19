@@ -4,10 +4,12 @@ verbatim as the reference): the same matches, classes and class descriptions in 
 order, the same seqs_order values, and the same refusal -- code, the descriptions it names,
 its text -- for every input. Randomized with fixed seeds over descriptions that mix names,
 several pairs of one name, ids, both paths, one path, '' paths, known paths, index_fp,
-index_meta_fp, index_ns, release, single-graph pairs, values that are not strings, and
-seqs_order keys of every form; then whole union_pairs() calls (failed and absent records,
-parts in both document forms, expected pairs, keys) against union_pairs() run with the
-reference code; then the charges: each pass is charged before it runs, for what it runs."""
+index_meta_fp, index_ns, release, single-graph pairs, and seqs_order keys of every form
+(every value a string or None: a description holds no other, union.py's _facets()); then
+whole union_pairs() calls (failed and absent records, caller statements with a value that is
+not a string, parts in both document forms, expected pairs, keys) against union_pairs() run
+with the reference code; then the charges: each pass is charged before it runs, for what it
+runs."""
 
 import copy
 import random
@@ -132,10 +134,12 @@ def universe(rng):
     return out
 
 
-def view(rng, p, wild=True):
+def view(rng, p, wild=False):
     """A description of pair |p| in one of the forms a union reads, or of a nearby pair (a
     field changed), through the library's own constructors (_pair_desc(), _with_id());
-    with |wild|, now and then one with a value that is not a string."""
+    with |wild|, now and then one with a value that is not a string: a caller's pair
+    statement, which union_pairs() refuses before any pass reads it (no description holds
+    such a value: _pair_desc(), and an envelope's bad_pair_tag)."""
     p = dict(p)
     if rng.random() < 0.25:     # a nearby pair: one field differs
         k = rng.choice(('graph', 'graph_path', 'annotation_path', 'release', 'index_ns',
@@ -181,7 +185,7 @@ def view(rng, p, wild=True):
         out = U._pair_desc(d)
     except PairIdError:
         return None
-    if wild and out is not None and rng.random() < 0.04:   # not a string: compared with all
+    if wild and out is not None and rng.random() < 0.04:   # not a string: refused
         out = dict(out, **{rng.choice(('release', 'index_fp', 'index_meta_fp',
                                        'index_ns')): rng.choice((5, 0.5, ['x'], True,
                                                                  float('nan')))})
