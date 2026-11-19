@@ -1337,9 +1337,11 @@ class TraverseClient:
         each pair's record-mapping certificate as GET /capabilities states it (keys:
         (graph, pair_id), or the index namespace on a single-graph server; values
         'verified', 'count_only' or None). A pair is stated by its graph and n1 id, no path
-        (Pair.named()): an engine's listed paths, or a caller's, become their id; only a
-        caller's pair without the annotation path, which has no id, keeps what it gave
-        ((graph, graph_path, annotation_path) keys)."""
+        (Pair.named()): an engine's listed paths, or a caller's, become their id; a caller's
+        pair without the annotation path, which has no id, becomes the id of the pair the
+        engine answered on (the paths that answer states, if any, being the ones given), and
+        keeps what it gave only where it got no such answer ((graph, graph_path,
+        annotation_path) keys)."""
         seq = seed.get('sequence') if isinstance(seed, dict) else seed
         if not isinstance(seq, str) or not seq:
             raise ValueError('traverse_pairs() takes one seed: a sequence or {sequence, ...}, '
@@ -1390,8 +1392,9 @@ class TraverseClient:
                 vals = {p.get('seqs_order') for p, _ in hit if 'seqs_order' in p}
                 if len(vals) == 1:
                     seqs_order[_seqs_key(t)] = vals.pop()
-                if t.pair_id and not t.graph_path and not t.annotation_path and len(hit) == 1 \
-                        and hit[0][1].graph_path and hit[0][1].annotation_path:
+                if t.pair_id and t.graph_path is None and t.annotation_path is None \
+                        and len(hit) == 1 and hit[0][1].graph_path is not None \
+                        and hit[0][1].annotation_path is not None:
                     # named by its id, listed with its paths: sent by the listed paths (the
                     # engine's own spelling; their id is t's, _names())
                     sent.append(hit[0][1])
@@ -1422,12 +1425,14 @@ class TraverseClient:
         # server without ids, or a resolver that refuses it) is refused before any pair's
         # request is sent, not after the pairs before it
         for w in sent:
-            if w.pair_id and not (w.graph_path and w.annotation_path):
+            if w.pair_id and (w.graph_path is None or w.annotation_path is None):
                 self.wire_pair(w.graph, w.pair_id)
         results = []
-        for t, w in zip(targets, sent):
+        expected = list(expected)
+        for i, (t, w) in enumerate(zip(targets, sent)):
             # the keywords given only (a subclass's traverse() may take fewer)
-            kw = {} if w.pair_id is None or (w.graph_path and w.annotation_path) \
+            kw = {} if w.pair_id is None or (w.graph_path is not None
+                                             and w.annotation_path is not None) \
                 else {'pair_id': w.pair_id}
             try:
                 results.append(self.traverse([seed], strategy, detail=detail, timing=timing,
@@ -1443,7 +1448,21 @@ class TraverseClient:
                 # failing
                 pair = _pair_object(t) or (expected[0] if expected else {})
                 results.append({'pair': pair, 'error': e})
-        return PairResults(results, seq, expected, seqs_order)
+                continue
+            got = _answered_target(t, results[-1])
+            if got is not None:
+                # a caller's pair named by a path without its id (no annotation path): the
+                # engine chose the pair it answered on by that path, so the expected pair and
+                # its certificate are that pair's, by its id -- what union_pairs() can match
+                # against an answer that names its pair by id only (review M2)
+                expected[i] = _pair_object(got)
+                seqs_order.pop(_seqs_key(t), None)
+                vals = {p.get('seqs_order') for p, lp in listed
+                        if lp.graph == got.graph and lp.pair_id == got.pair_id
+                        and 'seqs_order' in p}
+                if len(vals) == 1:
+                    seqs_order[_seqs_key(got)] = vals.pop()
+        return PairResults(results, seq, tuple(expected), seqs_order)
 
 
 def _names(t, lp):
@@ -1455,6 +1474,26 @@ def _names(t, lp):
         return False
     return (t.graph_path is None or lp.graph_path == t.graph_path) \
         and (t.annotation_path is None or lp.annotation_path == t.annotation_path)
+
+
+def _answered_target(t, resp):
+    """The Pair |resp| (one target's answer) was answered on, where target |t| named its pair
+    by a path and no id: the envelope's pair (its id stated, or computed from its paths)
+    when it is a pair of |t|'s graph whose paths, where it states them, are the ones |t|
+    gave; else None (|t| is kept as given)."""
+    if t.pair_id or not t.graph or (t.graph_path is None and t.annotation_path is None):
+        return None
+    try:
+        got = answered_pair(getattr(resp, 'envelope', None))
+    except PairIdError:
+        return None
+    if got is None or not got.pair_id or got.graph != t.graph:
+        return None
+    for k in ('graph_path', 'annotation_path'):
+        mine, theirs = getattr(t, k), getattr(got, k)
+        if mine is not None and theirs is not None and mine != theirs:
+            return None
+    return got
 
 
 def _seqs_key(t):

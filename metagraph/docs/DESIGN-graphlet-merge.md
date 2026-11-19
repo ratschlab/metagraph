@@ -1422,7 +1422,7 @@ The sorting is total: every element becomes a part, an absent record, or a refus
 | `no_seed` | `no result carries a graphlet, so the union has no seed sequence: pass seed= (the oriented seed the request sent)` |
 | MissingEnvelope | today's `require_envelope('union_pairs()')` text, as for `stitch()` (§3.1) |
 | `p2_pair_id`, `bad_pair_id`, `pair_id_mismatch` | `result %s: %s`, the second `%s` the words of `client.PairIdError` for the pair its envelope (the `J` line) states: a `pair_id` that is no n1 id (a p2 id; `''`, a non-string, anything else), an id beside one path only, or an id beside paths that are not its. One rule (`client._pair()`) with the same codes and words wherever a document's pair is read: `answered_pair()` and `GraphletStore.request_of()` raise the PairIdError, `stitch()` refuses it (B.1), the MCP tools answer its code (`graphlet_load`, replays) |
-| `pair_mismatch` | `result %s was answered on pair %s, and the caller states pair %s: state the pair it was answered on, or none` |
+| `pair_mismatch` | `result %s was answered on pair %s, and the caller states pair %s: state the pair it was answered on, or none`; where the envelope names its pair by `pair_id` only and the caller by a path without one, and the call states no paths for that id (A.4, rule 3): `result %s was answered on pair %s, named by its pair_id only, and the caller states pair %s by a path without its pair_id: the two cannot be compared; state the pair_id it was answered on, or none` |
 | `no_pair` | `result %s names no pair (no graph tag, no index_ns): pass it as {pair, graphlet} or {pair, result}` |
 | `ambiguous_pair` | `pair %s matches both %s and %s: state its paths, release or index_ns` |
 | `no_bases` | `part %s carries no bases (output.sequences: false): a union by sequence needs every part's bases` |
@@ -1452,8 +1452,11 @@ A pair with an n1 id -- stated, or computed from both paths -- is keyed by the i
 annotation_path `None`): one identity whatever the form, so a document stored with paths and its twin stored with the
 id have one key, one tag and one digest, and the service's rewrite of a stored document from paths to id moves none of
 them. The paths are key members only of a description without an id (a caller's `{graph, graph_path}`). The key orders
-parts and absent records (byte order). A pair described both by a bare name and in full keeps the fuller description,
-counted on its key (an id stands for the two paths), so the choice does not depend on the form either. This key is
+parts and absent records (byte order): for one name's pairs, by `pair_id` since T7-L1 (it was the graph path; the
+order of `parts`, `absent`, `pairs`, `expected`, `provenance()` and the FASTA records moved once with it). A pair
+described both by a bare name and in full keeps the fuller description, counted on its key (an id stands for the two
+paths); of descriptions equally full, the one with paths, then the first in canonical JSON, so the choice depends
+neither on the form nor on the order the results were given in. This key is
 `pair_id`'s since the library read both forms (T7-L1): every union digest and resume token moved once with it.
 
 **When two descriptions name one pair.** One rule decides `duplicate_pair`, `pair_mismatch`, `not_expected`,
@@ -1464,7 +1467,16 @@ counted on its key (an id stands for the two paths), so the choice does not depe
 2. where both state an `index_fp`, the `index_fp` decides;
 3. otherwise the graph names must be equal; where both have a `pair_id` (an id computed from both paths included)
    the ids must be equal, else `graph_path` and `annotation_path` wherever both state them; and `release`,
-   `index_ns` and `index_meta_fp` must be equal wherever both state them (a bare name states only the name).
+   `index_ns` and `index_meta_fp` must be equal wherever both state them (a bare name states only the name). A
+   description that names its pair by a path and no id (a caller's `{graph, graph_path}`, a `(graph, graph_path)`
+   seqs_order key) is compared with one that has an id by that id's paths: its own (an old document), or those
+   another description in the same call states for the id (its old twin, a full pair object); with none, the two
+   cannot be compared and do not match -- a caller's statement is then refused `pair_mismatch`, an expected pair
+   `not_expected`, and a seqs_order key certifies no pair. So a certificate attaches only to the pair it was stated
+   for, and an id-form document alone is refused where its old twin would be checked (T7-L1 review M2: no rule
+   compares a path with an id without the paths, so it refuses rather than guesses). A seqs_order key `(graph, x)`
+   whose `x` has the shape of a pair id of any scheme or case (`N1-...`, `n2-...`, `P2-...`) is read as an id and
+   refused `bad_seqs_order` unless it is an n1 id.
 
 Because a bare name can match two different pairs, a description that matches two distinct pairs of the union is
 refused `ambiguous_pair`, so the outcome never depends on which comparison runs first.

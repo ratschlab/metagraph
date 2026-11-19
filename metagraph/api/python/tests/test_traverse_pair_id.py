@@ -804,6 +804,105 @@ class TestMalformedPairStatements(unittest.TestCase):
         self.assertEqual(MT.client.capabilities_pair_resolver(caps)(want), (GRAPH, GP, ''))
 
 
+class TestPartialDescriptions(unittest.TestCase):
+    """A description that names its pair by a path and no id (a caller's {graph,
+    graph_path}, a (graph, graph_path[, None]) seqs_order key) is compared with a pair named
+    by its id by the paths the call knows for that id; with none it does not match (review
+    M2). One set of inputs gives one union in every order."""
+
+    def setUp(self):
+        self.old, self.new = fixture('fork', 'paths'), fixture('fork', 'id')
+
+    def test_a_caller_pair_by_path_is_compared_or_refused(self):
+        from metagraph.traverse import union_pairs
+        # another pair's path: refused in both forms
+        for g in (self.old, self.new):
+            with self.assertRaises(CombineRefused) as cm:
+                union_pairs([{'pair': {'graph': GRAPH, 'graph_path': GP2}, 'graphlet': g}])
+            self.assertEqual(cm.exception.code, 'pair_mismatch')
+        # its own path: compared with the old document's paths; the id-form document alone
+        # cannot be compared with it, and is refused, never accepted unchecked
+        u = union_pairs([{'pair': {'graph': GRAPH, 'graph_path': GP}, 'graphlet': self.old}])
+        self.assertEqual(u.parts[0].pair_stated_by, 'caller')
+        with self.assertRaises(CombineRefused) as cm:
+            union_pairs([{'pair': {'graph': GRAPH, 'graph_path': GP}, 'graphlet': self.new}])
+        self.assertEqual(cm.exception.code, 'pair_mismatch')
+        self.assertIn('the two cannot be compared', str(cm.exception))
+        # an expected pair by path: matched against the id-form answer by the paths its old
+        # twin states in the same call, else not matched (not_expected)
+        exp = [{'graph': GRAPH, 'graph_path': GP}]
+        self.assertEqual(union_pairs([self.old], expected_pairs=exp).expected, (GRAPH,))
+        with self.assertRaises(CombineRefused) as cm:
+            union_pairs([self.new], expected_pairs=exp)
+        self.assertEqual(cm.exception.code, 'not_expected')
+
+    def test_one_union_in_every_order(self):
+        import itertools
+        from metagraph.traverse import union_pairs
+        exp = [{'graph': GRAPH, 'graph_path': GP}, {'graph': GRAPH, 'pair_id': ID}]
+        for so in ({(GRAPH, GP): 'verified'}, {(GRAPH, GP2): 'verified'},
+                   {(GRAPH, GP, None): 'count_only'}, {(GRAPH, ID): 'verified'}):
+            got = set()
+            for order in itertools.permutations([self.old, self.new]):
+                u = union_pairs(list(order), expected_pairs=exp, seqs_order=so)
+                got.add((u.digest, u.parts[0].seqs_order, u.parts[0].key))
+            self.assertEqual(len(got), 1, so)
+            # GP is this pair's path, GP2 another's
+            self.assertEqual(got.pop()[1], 'unknown' if GP2 in next(iter(so)) else so[
+                next(iter(so))], so)
+
+    def test_a_certificate_attaches_to_its_own_pair_only(self):
+        from metagraph.traverse import union_pairs
+        so = {(GRAPH, GP2, None): 'verified'}
+        old = [fixture('fork', 'paths'), fixture('fork', 'paths', gp=GP2, ap=AP2)]
+        new = [fixture('fork', 'id'), fixture('fork', 'id', gp=GP2, ap=AP2)]
+        u = union_pairs(old, seqs_order=so)
+        self.assertEqual({p.key[3]: p.seqs_order for p in u.parts},
+                         {ID: 'unknown', ID2: 'verified'})
+        # by id only, the path key cannot be compared: no pair gets it, never the other one
+        u = union_pairs(new, seqs_order=so)
+        self.assertEqual({p.key[3]: p.seqs_order for p in u.parts},
+                         {ID: 'unknown', ID2: 'unknown'})
+        # with the old documents given too, the paths are known: as for the old form
+        u = union_pairs(new + old, seqs_order=so)
+        self.assertEqual({p.key[3]: p.seqs_order for p in u.parts},
+                         {ID: 'unknown', ID2: 'verified'})
+
+    def test_a_malformed_id_in_a_seqs_order_key_is_refused(self):
+        from metagraph.traverse import union_pairs
+        for bad in (ID.replace('n1-', 'N1-'), 'n2-' + ID[3:], ID.upper(),
+                    'P2-0123456789ABCDEF0123456789ABCDEF', P2):
+            for key in ((GRAPH, bad), (GRAPH, bad, None)):
+                for g in (self.old, self.new):
+                    with self.assertRaises(CombineRefused) as cm:
+                        union_pairs([g], seqs_order={key: 'verified'})
+                    self.assertEqual(cm.exception.code, 'bad_seqs_order', key)
+                    self.assertIn('pair id', str(cm.exception))
+        # a relative graph path with a dash is a path
+        u = union_pairs([self.old], seqs_order={(GRAPH, 'graph-1.dbg'): 'verified'})
+        self.assertEqual(u.parts[0].seqs_order, 'unknown')
+
+    def test_a_fan_out_pair_by_path_takes_the_answering_pair_id(self):
+        from metagraph.traverse import union_pairs
+        seed = 'ACGTACGTACGTACGTACGTACGTACGTACGTAC'
+        for caps, form in ((AFTER_IDS, 'id'), (BEFORE_IDS, 'paths')):
+            c = _Engine(caps, tagged(T.doc_json('fork', 'graphlet'), form))
+            r = c.traverse_pairs(seed, pairs=[{'graph': GRAPH, 'graph_path': GP}],
+                                 coordinates=None)
+            self.assertEqual(c.posted()[0]['graph_path'], GP)
+            self.assertEqual(r.expected_pairs, ({'graph': GRAPH, 'pair_id': ID},), form)
+            self.assertEqual(r.seqs_order, {(GRAPH, ID): 'verified'}, form)
+            u = union_pairs(r.results, expected_pairs=r.expected_pairs,
+                            seqs_order=r.seqs_order)
+            self.assertEqual((u.expected, u.parts[0].seqs_order), ((GRAPH,), 'verified'))
+        # an answer on another pair than the path given: kept as given
+        c = _Engine(BEFORE_IDS, tagged(T.doc_json('fork', 'graphlet'), 'paths', gp=GP2,
+                                       ap=AP2))
+        r = c.traverse_pairs(seed, pairs=[{'graph': GRAPH, 'graph_path': GP}],
+                             coordinates=None)
+        self.assertEqual(r.expected_pairs, ({'graph': GRAPH, 'graph_path': GP},))
+
+
 def configured_paths(*docs):
     """Every configured path the documents |docs| (texts) state."""
     out = set()
