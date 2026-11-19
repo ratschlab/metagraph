@@ -11,7 +11,7 @@ import time
 
 import requests
 
-from base import METAGRAPH, TEST_DATA_DIR, TestingBase
+from base import METAGRAPH, TEST_DATA_DIR, TestingBase, configured_pair_id
 
 
 class TestServerCache(TestingBase):
@@ -162,10 +162,12 @@ class TestServerCache(TestingBase):
         indexes.write_text(f'right,{graph},{annotation}\nleft,{graph},{annotation}\n'
                            f'left,{graph},{annotation}\n')
         payload = {'FASTA': '>q\nACGTACGTACGT\n', 'top_labels': 1}
-        tags = {'graph_path': str(graph), 'annotation_path': str(annotation)}
+        def tags(name):
+            # the pair's n1 id names its name too: one pair under two names has two ids
+            return {'graph': name, 'pair_id': configured_pair_id(name, str(graph), str(annotation))}
 
         def cut(name):
-            return dict(tags, graph=name, index_fp=None, returned=1, complete=True,
+            return dict(tags(name), index_fp=None, returned=1, complete=True,
                         nth_score=None, tied=0, tied_returned=0)
 
         with self.running_server(indexes, '--cache-size', '0.01') as (client, url, log):
@@ -176,7 +178,7 @@ class TestServerCache(TestingBase):
                     [answer] = response.json()
                     # in the index's pair order: the names in byte order, a pair listed twice
                     # under one name once
-                    self.assertEqual([dict(tags, sample='sample', kmer_count=7, graph=name)
+                    self.assertEqual([dict(tags(name), sample='sample', kmer_count=7)
                                       for name in sorted(names)], answer['results'])
                     self.assertEqual([cut(name) for name in sorted(names)], answer['cuts'])
             text = log.read_text()
@@ -191,7 +193,7 @@ class TestServerCache(TestingBase):
         payload = {'FASTA': '>q\nACGTACGTACGT\n>none\nTTTTTTTTTTTT\n', 'top_labels': 1}
 
         def cut(index_fp, returned):
-            return {'graph': None, 'graph_path': None, 'annotation_path': None,
+            return {'graph': None, 'pair_id': None,
                     'index_fp': index_fp, 'returned': returned, 'complete': True,
                     'nth_score': None, 'tied': 0, 'tied_returned': 0}
 

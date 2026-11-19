@@ -2843,9 +2843,12 @@ TEST(ServerFanout, TraverseRequestFromTheAttempt) {
     const uint64_t retention_s
             = sample("12_capabilities_multigraph.json")["body"]["attempts"]["retention_s"].asUInt64();
     EXPECT_EQ(3600u, retention_s);
-    const Json::Value pair = parse(R"({"graph": "bact_other",
-        "graph_path": "/scratch/nvme8/refseq_r237/bact_other/graph.dbg",
-        "annotation_path": "/scratch/nvme8/refseq_r237/bact_other/annotation.row_diff_brwt_coord.annodbg"})");
+    // the pair as the server names it (pair_ref_json): its graph and pair_id, no path
+    const Json::Value pair = pair_ref_json({ "bact_other",
+        { "/scratch/nvme8/refseq_r237/bact_other/graph.dbg",
+          "/scratch/nvme8/refseq_r237/bact_other/annotation.row_diff_brwt_coord.annodbg" } });
+    EXPECT_EQ(parse(R"({"graph": "bact_other",
+                        "pair_id": "n1-13a94733-667c-51eb-b3a9-aa435eacfdcd"})"), pair);
     const Json::Value j = traverse_request_json(s21["attempt"], pair, retention_s);
     EXPECT_EQ(members(s21), members(j));
     EXPECT_EQ(compact(s21), compact(j));
@@ -2864,6 +2867,8 @@ TEST(ServerFanout, TraverseRequestFromTheAttempt) {
     EXPECT_TRUE(r["response"].isNull());
     EXPECT_TRUE(r["retained_until"].isNull());
     EXPECT_TRUE(r["pairs"][0]["graph"].isNull());
+    EXPECT_TRUE(r["pairs"][0]["pair_id"].isNull());
+    EXPECT_FALSE(r["pairs"][0].isMember("graph_path"));
     EXPECT_TRUE(r["pairs"][0]["outcome"].isNull());
 }
 

@@ -328,8 +328,7 @@ TEST(GraphletAttempt, ThePairLivesAsLongAsTheAttempt) {
     auto a = attempt_of(registry, "with-pair");
     Json::Value ref;
     ref["graph"] = "A";
-    ref["graph_path"] = "a.dbg";
-    ref["annotation_path"] = "a.anno";
+    ref["pair_id"] = "n1-1c7c6c07-47b5-53aa-86b6-1e622dacfddc";
     a->set_pair_ref(ref);
     a->set_bound(1, 1000);
     ASSERT_FALSE(registry.start(a));
@@ -346,7 +345,7 @@ TEST(GraphletAttempt, ThePairLivesAsLongAsTheAttempt) {
     const Json::Value request = traverse_request_json(registry.state("with-pair").second,
                                                       pair, 3600);
     EXPECT_EQ("A", request["pairs"][0]["graph"].asString());
-    EXPECT_EQ("a.anno", request["pairs"][0]["annotation_path"].asString());
+    EXPECT_EQ(ref["pair_id"], request["pairs"][0]["pair_id"]);
     // the attempt expires, and the pair with it
     clock.ms += 700'000;
     EXPECT_EQ(404, registry.state("with-pair", &pair).first);
@@ -363,8 +362,7 @@ TEST(GraphletAttempt, ThePairOutlivesEvictionWhileTheAttemptRuns) {
         auto running = attempt_of(registry, "running");
         Json::Value ref;
         ref["graph"] = "A";
-        ref["graph_path"] = "a.dbg";
-        ref["annotation_path"] = "a.anno";
+        ref["pair_id"] = "n1-1c7c6c07-47b5-53aa-86b6-1e622dacfddc";
         running->set_pair_ref(ref);
         running->set_bound(1, 1000);
         ASSERT_FALSE(registry.start(running));
@@ -387,7 +385,7 @@ TEST(GraphletAttempt, ThePairOutlivesEvictionWhileTheAttemptRuns) {
             const Json::Value request = traverse_request_json(registry.state("running").second,
                                                               pair, retention_s);
             EXPECT_EQ("A", request["pairs"][0]["graph"].asString());
-            EXPECT_EQ("a.dbg", request["pairs"][0]["graph_path"].asString());
+            EXPECT_EQ(ref["pair_id"], request["pairs"][0]["pair_id"]);
         }
         // finished: kept as its retention says, its pair with it
         registry.finish(running, "completed", 200, 10);

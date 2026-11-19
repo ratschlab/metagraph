@@ -17,11 +17,12 @@ from parameterized import parameterized, parameterized_class
 from itertools import product
 
 from base import PROTEIN_MODE, TestingBase, METAGRAPH, TEST_DATA_DIR, requests_time_out
+from base import configured_pair_id
 
 GRAPH_MODES = ['basic'] if PROTEIN_MODE else ['basic', 'canonical', 'primary']
 
 # what a /search cut states beside the pair's tags (SPEC-multigraph-envelope.md section 3)
-CUT_TAGS = ('graph', 'graph_path', 'annotation_path', 'index_fp')
+CUT_TAGS = ('graph', 'pair_id', 'index_fp')
 CUT_FIELDS = ('returned', 'complete', 'nth_score', 'tied', 'tied_returned')
 CUT_MEDIAN_FIELDS = ('nth_median', 'tied_same_median')
 
@@ -568,10 +569,14 @@ class TestAPIClientMultiple(TestingBase):
             return alias
 
         graphs_file = cls.tempdir.name + '/graphs.txt'
+        # G2's pair_id of each pair -> G1's (the id names the name too)
+        cls.g1_pair_of = {}
         with open(graphs_file, 'w') as f:
             lines = []
             for copy in range(cls.mult):
                 first, second = annotation(0, copy), annotation(1, copy)
+                cls.g1_pair_of[configured_pair_id('G2', graph_paths[0], first)] = \
+                    configured_pair_id('G1', graph_paths[0], first)
                 lines += [f'G1,{graph_paths[0]},{first}',
                           f'G2,{graph_paths[0]},{first}',
                           f'G2,{graph_paths[0]},{first}',
@@ -634,28 +639,28 @@ class TestAPIClientMultiple(TestingBase):
         ret = self.graph_client.search(self.sample_query, parallel=False,
                                        discovery_threshold=0.01, graphs=['G1'])
         df = ret[self.graph_name]
-        self.assertEqual((self.expected_rows_1, 6), df.shape)
+        self.assertEqual((self.expected_rows_1, 5), df.shape)
         self.assertEqual(df['kmer_count'].sum(), self.expected_matches_1)
 
     def test_api_query_df_multiple_2(self):
         ret = self.graph_client.search(self.sample_query, parallel=False,
                                        discovery_threshold=0.01, graphs=['G2'])
         df = ret[self.graph_name]
-        self.assertEqual((self.expected_rows_2, 6), df.shape)
+        self.assertEqual((self.expected_rows_2, 5), df.shape)
         self.assertEqual(df['kmer_count'].sum(), self.expected_matches_2)
 
     def test_api_query_df_multiple_3(self):
         ret = self.graph_client.search(self.sample_query, parallel=False,
                                        discovery_threshold=0.01, graphs=['G3'])
         df = ret[self.graph_name]
-        self.assertEqual((self.expected_rows_3, 6), df.shape)
+        self.assertEqual((self.expected_rows_3, 5), df.shape)
         self.assertEqual(df['kmer_count'].sum(), self.expected_matches_3)
 
     def test_api_query_df_multiple_12(self):
         ret = self.graph_client.search(self.sample_query, parallel=False,
                                        discovery_threshold=0.01, graphs=['G1', 'G2'])
         df = ret[self.graph_name]
-        self.assertEqual((self.expected_rows_1 + self.expected_rows_2, 6), df.shape)
+        self.assertEqual((self.expected_rows_1 + self.expected_rows_2, 5), df.shape)
         self.assertEqual(df['kmer_count'].sum(),
                          self.expected_matches_1 + self.expected_matches_2)
 
@@ -663,7 +668,7 @@ class TestAPIClientMultiple(TestingBase):
         ret = self.graph_client.search(self.sample_query, parallel=False,
                                        discovery_threshold=0.01, graphs=['G1', 'G2', 'G3'])
         df = ret[self.graph_name]
-        self.assertEqual((self.expected_rows_1 + self.expected_rows_2 + self.expected_rows_3, 6), df.shape)
+        self.assertEqual((self.expected_rows_1 + self.expected_rows_2 + self.expected_rows_3, 5), df.shape)
         self.assertEqual(df['kmer_count'].sum(),
                          self.expected_matches_1 + self.expected_matches_2 + self.expected_matches_3)
 
@@ -671,18 +676,21 @@ class TestAPIClientMultiple(TestingBase):
         ret = self.graph_client.search(self.sample_query, parallel=False,
                                        discovery_threshold=0.01)
         df = ret[self.graph_name]
-        self.assertEqual((self.expected_rows_1 + self.expected_rows_2 + self.expected_rows_3, 6), df.shape)
+        self.assertEqual((self.expected_rows_1 + self.expected_rows_2 + self.expected_rows_3, 5), df.shape)
+        # a row's pair: its graph and pair_id, no path (train 8)
+        self.assertEqual(['graph', 'kmer_count', 'pair_id', 'sample', 'seq_description'],
+                         sorted(df.columns))
         self.assertEqual(df['kmer_count'].sum(),
                          self.expected_matches_1 + self.expected_matches_2 + self.expected_matches_3)
 
     def test_api_search_tags_rows_in_pair_order(self):
         """SPEC-multigraph-envelope.md section 3 (E1) on a multi-graph server: every row carries
-        its pair (graph, graph_path, annotation_path); the rows come in the index's pair order
+        its pair (graph, pair_id); the rows come in the index's pair order
         (the names in byte order, each name's pairs in the list's order, a pair listed twice
         under one name once), not in the order the pairs finish; each query sequence states one
         cut per pair searched, in that order, each pair's top N taken in the C5 order."""
         url = f'http://{self.host}:{self.port}/search'
-        pair_tags = ('graph', 'graph_path', 'annotation_path')
+        pair_tags = ('graph', 'pair_id')
 
         def search(top_labels):
             ret = requests.post(url, json={'FASTA': f'>q\n{self.sample_query}\n',
@@ -713,7 +721,7 @@ class TestAPIClientMultiple(TestingBase):
                                   complete=True, nth_score=None, tied=0, tied_returned=0), cut)
             # G2 lists G1's pairs: under each name a pair answers alike
             if pair[0] == 'G2':
-                self.assertEqual(rows_of[('G1',) + pair[1:]], rows_of[pair])
+                self.assertEqual(rows_of[('G1', self.g1_pair_of[pair[1]])], rows_of[pair])
 
         # each pair's own top N, cut per pair
         answer = search(3)

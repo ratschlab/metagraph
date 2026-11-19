@@ -12,10 +12,10 @@ class SearchRefusedWarning(RuntimeWarning):
 def refused_units(json_res):
     """The units (a query sequence on a graph) a /search answer refused alone: one dict per
     refused `cuts` entry, {"record": the query sequence's index in the answer,
-    "seq_description", "graph", "graph_path", "annotation_path", and the entry's `refused`
-    members: "account", "code", "max_memory_mb", and with the answer account "priced_mb"}, in
-    the answer's order. A refused unit never means that nothing matched: its rows were not
-    sent."""
+    "seq_description", "graph", "pair_id" (the entry's pair: its name and its opaque id,
+    null on a single-graph server), and the entry's `refused` members: "account", "code",
+    "max_memory_mb", and with the answer account "priced_mb"}, in the answer's order. A
+    refused unit never means that nothing matched: its rows were not sent."""
     refused = []
     for i, result in enumerate(json_res or []):
         for cut in result.get('cuts') or []:
@@ -23,8 +23,7 @@ def refused_units(json_res):
                 refused.append({'record': i,
                                 'seq_description': result.get('seq_description'),
                                 'graph': cut.get('graph'),
-                                'graph_path': cut.get('graph_path'),
-                                'annotation_path': cut.get('annotation_path'),
+                                'pair_id': cut.get('pair_id'),
                                 **cut['refused']})
     return refused
 

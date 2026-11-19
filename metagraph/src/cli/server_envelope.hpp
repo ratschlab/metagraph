@@ -22,13 +22,12 @@ namespace cli {
 // The envelope's version (envelope_version)
 constexpr int kEnvelopeVersion = 1;
 
-// The pair as an entry and the lists not_reached and unfinished name it: {graph, graph_path,
-// annotation_path}
+// The pair as an entry and the lists not_reached and unfinished name it: {graph, pair_id}
 Json::Value envelope_pair_ref(const SelectedPair &pair);
 
 /**
  * The entry of a pair that answered: its single-graph answer |answer| with the tags merged
- * in, graph (the name it was selected by), graph_path, annotation_path, index_fp (null when
+ * in, graph (the name it was selected by), pair_id (pair_id_of), index_fp (null when
  * |index_fp| is empty: no manifest in the graph list) and outcome "answered"
  */
 Json::Value envelope_entry_answered(const SelectedPair &pair, const std::string &index_fp,
@@ -112,7 +111,8 @@ Json::Value composite_fp_json(std::vector<std::string> index_fps);
  * GET /capabilities' `multigraph` block on a multi-graph server (section 8): what this
  * release's multi-graph routes do, for clients to switch on (never on dates):
  * envelope_version, the routes that answer in the envelope (envelope_routes), the selectors
- * of each route (section 6), traverse_pairs_per_request, the routes that read not_after_ms,
+ * of each route (section 6), pair_id ("n1": how the answers name a pair),
+ * traverse_pairs_per_request, the routes that read not_after_ms,
  * finish_by_ms, request_id and expect_server_instance, the registry's route (requests_route),
  * the flags
  * unknown_labels (section 2), search_cuts (section 3) and resolve_boundary_ties (section 7),

@@ -2001,8 +2001,7 @@ Json::Value headers_unique_json(const std::vector<HeaderPair> &pairs, size_t num
                     const HeaderPair &pair = pairs[o.index];
                     Json::Value p;
                     p["graph"] = pair.graph;
-                    p["graph_path"] = pair.graph_path;
-                    p["annotation_path"] = pair.annotation_path;
+                    p["pair_id"] = pair.pair_id;
                     p["column"] = pair.columns && o.column < pair.columns->size()
                             ? Json::Value((*pair.columns)[o.column])
                             : Json::Value();
@@ -2067,8 +2066,7 @@ Json::Value labels_disjoint_json(const std::vector<HeaderPair> &pairs, size_t nu
     auto tags = [&](size_t p) {
         Json::Value t;
         t["graph"] = pairs[p].graph;
-        t["graph_path"] = pairs[p].graph_path;
-        t["annotation_path"] = pairs[p].annotation_path;
+        t["pair_id"] = pairs[p].pair_id;
         return t;
     };
     uint64_t collisions = 0;

@@ -38,11 +38,22 @@ struct SelectedPair {
 bool operator==(const SelectedPair &a, const SelectedPair &b);
 inline bool operator!=(const SelectedPair &a, const SelectedPair &b) { return !(a == b); }
 
-// The pair as a request or an answer names it: {graph, graph_path, annotation_path}
+/**
+ * The pair's id, as every answer names a pair (docs/DESIGN-pair-identity.md section 3.2;
+ * SPEC-multigraph-envelope.md section 1): master's n1 id, common::configured_pair_id over the
+ * name and the two paths as the graph list spells them ("n1-" and a lowercase UUIDv5). A
+ * configured identity, not a content one (index_fp is that): a pair listed under two names
+ * has two ids. Computed where a pair is named, once per pair and request, never per row
+ */
+std::string pair_id_of(const std::string &name, const GraphPair &pair);
+inline std::string pair_id_of(const SelectedPair &pair) { return pair_id_of(pair.name, pair.pair); }
+
+// The pair as an answer names it: {graph, pair_id}; no path (a request may name it by its
+// paths too)
 Json::Value pair_ref_json(const SelectedPair &pair);
 
 // The pairs |name| holds, each once, in the graph list's order, as the candidates of a
-// refusal: [{graph, graph_path, annotation_path}]; an empty array for an unknown name
+// refusal: [{graph, pair_id}]; an empty array for an unknown name
 Json::Value selection_candidates(const std::string &name, const GraphIndexes &indexes);
 
 /**
@@ -146,11 +157,12 @@ extern const char kSearchGraphsEmpty[];
  * envelope's order (ordered_pairs: the names in byte order, each name's pairs in the graph
  * list's order, a pair once), before any pair starts: the selectors of
  * SPEC-multigraph-envelope.md section 6.
- *  - `pairs` ([{graph, graph_path?, annotation_path?}], RESOLVE, PATTERN, TRAVERSE): each
- *    object names exactly one pair of its name (graph_path may be omitted when the name has
- *    one graph; annotation_path is needed where the name's pairs share a graph), none
- *    (pair_not_found) or several (pair_ambiguous) refuse the request with the candidates; a
- *    pair named twice is selected once. `pairs` beside `graphs` (or, on RESOLVE and TRAVERSE,
+ *  - `pairs` ([{graph, pair_id?, graph_path?, annotation_path?}], RESOLVE, PATTERN,
+ *    TRAVERSE): each object names exactly one pair of its name, by its pair_id (pair_id_of)
+ *    or by its paths, not both (a plain InvalidRequest; graph_path may be omitted when the
+ *    name has one graph; annotation_path is needed where the name's pairs share a graph),
+ *    none (pair_not_found) or several (pair_ambiguous) refuse the request with the
+ *    candidates; a pair named twice is selected once. `pairs` beside `graphs` (or, on RESOLVE and TRAVERSE,
  *    beside `graph` or `graph_path`) is a selection_conflict. SEARCH refuses it
  *    (pairs_unsupported), CAPABILITIES too (a probe selects by graph, graph_path and
  *    annotation_path).
@@ -174,7 +186,7 @@ extern const char kSearchGraphsEmpty[];
  *    that is no array selects nothing, every name is then read), an unknown name refused
  *    with its message and graph_unknown, and an empty list (which selects no pair; answered
  *    200 with the body null before) with kSearchGraphsEmpty and pair_not_found.
- *  - CAPABILITIES reads the members `graph`, `graph_path` and `annotation_path` as
+ *  - CAPABILITIES reads the members `graph`, `pair_id`, `graph_path` and `annotation_path` as
  *    select_pairs_from_parameters reads the GET probes' parameters.
  * Throws SelectionRefusal (HTTP 400 {error, code, candidates?}), InvalidRequest for a
  * malformed selector, std::invalid_argument for the names cap.
@@ -202,13 +214,14 @@ void check_selection_shape(SelectionRoute route,
 
 /**
  * The pairs a GET capabilities probe selects on a multi-graph server, from its query
- * parameters (section 6): ?graph=<name>[&graph_path=<path>][&annotation_path=<path>] names
- * exactly one pair of the name, as an object of `pairs` does (graph_unknown, pair_not_found,
- * pair_ambiguous, with the candidates; without annotation_path in the words of
- * choose_traverse_pair, as before release 10); without parameters, every pair in the
+ * parameters (section 6): ?graph=<name>&pair_id=<id>, or
+ * ?graph=<name>[&graph_path=<path>][&annotation_path=<path>], names exactly one pair of the
+ * name, as an object of `pairs` does (graph_unknown, pair_not_found, pair_ambiguous, with the
+ * candidates; by paths without annotation_path in the words of choose_traverse_pair, as
+ * before release 10); pair_id beside graph_path or annotation_path is an InvalidRequest; without parameters, every pair in the
  * envelope's order, when the server hosts at most |max_names_without_selection| names: the
  * envelope over every pair answers such a probe (section 1); beyond the cap, and with
- * graph_path or annotation_path but no ?graph=, the probe is refused in the words a probe
+ * pair_id, graph_path or annotation_path but no ?graph=, the probe is refused in the words a probe
  * without ?graph= always had, byte for byte ("Bad request: in multi-graph mode GET <route>
  * needs ?graph=<name> (and graph_path=<path> when the name spans several graphs); GET
  * /capabilities lists the graphs"). |route| names the route in the messages: TRAVERSE for GET

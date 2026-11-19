@@ -40,6 +40,7 @@ import unittest
 from tempfile import TemporaryDirectory
 
 from base import PROTEIN_MODE, TestingBase, METAGRAPH, graph_file_extension
+from base import configured_pair_id
 from test_multigraph import Server
 
 BASE_BINARY = os.environ.get('METAGRAPH_BASE_BINARY', '')
@@ -1084,8 +1085,8 @@ class TestSearchAnswerBudget(TestingBase):
         _, reference = self.reference(unbounded, body)
         self.stop(unbounded)
         order = (('p', 'pb'), ('p', 'pa'), ('p+', 'pc'))
-        self.assertEqual([(name, self.pairs[pair][0]) for name, pair in order],
-                         [(cut['graph'], cut['graph_path']) for cut in reference[0]['cuts']])
+        self.assertEqual([(name, configured_pair_id(name, *self.pairs[pair])) for name, pair in order],
+                         [(cut['graph'], cut['pair_id']) for cut in reference[0]['cuts']])
         wheres = [f'pair ({name}, {self.pairs[pair][0]}, {self.pairs[pair][1]})'
                   for name, pair in order]
         self.assertEqual(wheres[::-1], sorted(wheres))

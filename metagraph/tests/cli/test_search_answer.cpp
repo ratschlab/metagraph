@@ -15,6 +15,7 @@
 #include "cli/query.hpp"
 #include "cli/search_answer.hpp"
 #include "cli/server_checks.hpp"
+#include "cli/server_selection.hpp"
 #include "graph/search_budget.hpp"
 
 #if defined(__APPLE__)
@@ -46,6 +47,9 @@ using graph::SearchAccount;
 using graph::SearchAnswerTooLarge;
 using graph::SearchBudget;
 using annot::matrix::alloc_bytes;
+
+// a pair "g,g.dbg,g.annodbg" as the rows and cuts of a multi-graph server name it
+const std::string kPairG = cli::pair_id_of("g", { "g.dbg", "g.annodbg" });
 
 constexpr uint64_t kLarge = uint64_t(1) << 40;
 
@@ -188,20 +192,18 @@ SeqSearchResult record(std::mt19937 &rng, int mode, size_t rows, size_t size, si
 // The record's object as the server builds it (process_search_request): to_json, the pair's
 // tags on every row and on its cut, the cut appended
 Json::Value server_object(const SeqSearchResult &result, bool verbose, bool tagged,
-                          const std::string &graph, const std::string &graph_path,
-                          const std::string &annotation_path, const std::string &index_fp) {
+                          const std::string &graph, const std::string &pair_id,
+                          const std::string &index_fp) {
     Json::Value json = result.to_json(verbose, 31);
     if (tagged) {
         for (Json::Value &row : json["results"]) {
             row["graph"] = graph;
-            row["graph_path"] = graph_path;
-            row["annotation_path"] = annotation_path;
+            row["pair_id"] = pair_id;
         }
     }
     Json::Value cut = result.cut_to_json();
     cut["graph"] = tagged ? Json::Value(graph) : Json::Value();
-    cut["graph_path"] = tagged ? Json::Value(graph_path) : Json::Value();
-    cut["annotation_path"] = tagged ? Json::Value(annotation_path) : Json::Value();
+    cut["pair_id"] = tagged ? Json::Value(pair_id) : Json::Value();
     cut["index_fp"] = index_fp.empty() ? Json::Value() : Json::Value(index_fp);
     json["cuts"] = Json::Value(Json::arrayValue);
     json["cuts"].append(std::move(cut));
@@ -268,6 +270,8 @@ TEST(SearchAnswer, ThePriceCoversTheTree) {
     const std::string graph_path = "/scratch/nvme8/refseq_r237/bact_pseudomonadota/graph_k31.dbg";
     const std::string annotation_path
             = "/scratch/nvme8/refseq_r237/bact_pseudomonadota/annotation.row_diff_brwt_coord.annodbg";
+    // the pair as the rows and the cut name it (M6: no path)
+    const std::string pair_id = cli::pair_id_of(graph, { graph_path, annotation_path });
     const std::string index_fp = "0123456789abcdef";
     for (int mode : { 0, 1, 2, 3 }) {
         for (auto [rows, size, label, fill] : { std::make_tuple(2000, 40, 12, 0.9),
@@ -283,12 +287,11 @@ TEST(SearchAnswer, ThePriceCoversTheTree) {
                             + std::to_string(rows) + " size " + std::to_string(size)
                             + (tagged ? " tagged" : "") + (verbose ? " verbose" : "");
                     const cli::SearchRecordPrice price = cli::search_record_price(
-                            result, verbose, tagged, graph, graph_path, annotation_path,
+                            result, verbose, tagged, graph, pair_id,
                             tagged ? index_fp : "");
                     Json::Value answer(Json::arrayValue);
                     const std::optional<int64_t> before = live_heap_bytes();
-                    answer.append(server_object(result, verbose, tagged, graph, graph_path,
-                                                annotation_path, tagged ? index_fp : ""));
+                    answer.append(server_object(result, verbose, tagged, graph, pair_id, tagged ? index_fp : ""));
                     const std::optional<int64_t> after = live_heap_bytes();
                     if (before && after && *after > *before) {
                         ++measured;
@@ -320,7 +323,7 @@ TEST(SearchAnswer, TheTextIsJsonWriteStrings) {
         for (size_t r = 0; r < 1 + round % 4; ++r) {
             answer.append(server_object(record(rng, round % 4, 1 + rng() % 30, 1 + rng() % 500,
                                                10, round % 3 == 0, 0.5, round % 5 == 0),
-                                        round % 2, round % 2, "g\"\\é", "p\n", "a\t", ""));
+                                        round % 2, round % 2, "g\"\\é", "p\n\ta", ""));
         }
         answer[0]["double"] = 0.1 + round;
         answer[0]["control"] = std::string("\x01\x1f", 2);
@@ -470,6 +473,7 @@ TEST(SearchAnswer, TheStubsPriceCoversItsTree) {
     const std::string graph_path = "/scratch/nvme9/refseq_r237/vo_sauropsida/graph_k31.dbg";
     const std::string annotation_path
             = "/scratch/nvme9/refseq_r237/vo_sauropsida/annotation.row_diff_brwt_coord.annodbg";
+    const std::string pair_id = cli::pair_id_of(graph, { graph_path, annotation_path });
     for (int mode : { 0, 1, 2, 3 }) {
         for (bool tagged : { false, true }) {
             for (bool alignment : { false, true }) {
@@ -477,11 +481,11 @@ TEST(SearchAnswer, TheStubsPriceCoversItsTree) {
                                       graph::SearchCut::Refused::ANSWER }) {
                     SeqSearchResult stub = record(rng, mode, 30, 300, 20, true, 0.5, alignment);
                     const cli::SearchRecordPrice full = cli::search_record_price(
-                            stub, false, tagged, graph, graph_path, annotation_path,
+                            stub, false, tagged, graph, pair_id,
                             "0123456789abcdef");
                     stub.refuse(account, 4096, 123456);
                     const cli::SearchRecordPrice price = cli::search_record_price(
-                            stub, false, tagged, graph, graph_path, annotation_path,
+                            stub, false, tagged, graph, pair_id,
                             "0123456789abcdef");
                     // no row: a fraction of the unit's, nothing transient, no scratch
                     EXPECT_LT(price.tree, full.tree);
@@ -498,8 +502,7 @@ TEST(SearchAnswer, TheStubsPriceCoversItsTree) {
                                                              + 1) : 0));
                     Json::Value answer(Json::arrayValue);
                     const std::optional<int64_t> before = live_heap_bytes();
-                    answer.append(server_object(stub, false, tagged, graph, graph_path,
-                                                annotation_path, "0123456789abcdef"));
+                    answer.append(server_object(stub, false, tagged, graph, pair_id, "0123456789abcdef"));
                     const std::optional<int64_t> after = live_heap_bytes();
                     if (before && after && *after > *before) {
                         ++measured;
@@ -522,8 +525,8 @@ TEST(SearchAnswer, TheStubsPriceCoversItsTree) {
 TEST(SearchAnswer, TheObjectCheckOfAUnit) {
     std::mt19937 rng(61);
     const SeqSearchResult unit = record(rng, 3, 200, 400, 30, false, 0.6);
-    const cli::SearchRecordPrice price = cli::search_record_price(unit, false, true, "g", "g.dbg",
-                                                                  "g.annodbg", "");
+    const cli::SearchRecordPrice price = cli::search_record_price(unit, false, true, "g", kPairG,
+                                                                  "");
     const uint64_t own = price.tree + price.transient;
     const uint64_t scratch = cli::search_record_scratch(unit, false);
     for (bool partial : { false, true }) {
@@ -534,7 +537,7 @@ TEST(SearchAnswer, TheObjectCheckOfAUnit) {
             SeqSearchResult copy = unit;
             uint64_t transient_charged = 0;
             EXPECT_TRUE(cli::charge_search_unit(budget, &transient_charged, &copy, false, true,
-                                                "g", "g.dbg", "g.annodbg", "", "pair (g)"));
+                                                "g", kPairG, "", "pair (g)"));
             EXPECT_EQ(graph::SearchCut::Refused::NO, copy.get_cut().refused);
             EXPECT_EQ(own, budget.answer().held());
             EXPECT_EQ(1u, budget.units());
@@ -545,7 +548,7 @@ TEST(SearchAnswer, TheObjectCheckOfAUnit) {
         SeqSearchResult copy = unit;
         uint64_t transient_charged = 0;
         const bool built = cli::charge_search_unit(budget, &transient_charged, &copy, false, true,
-                                                   "g", "g.dbg", "g.annodbg", "", "pair (g)");
+                                                   "g", kPairG, "", "pair (g)");
         if (!partial) {
             EXPECT_FALSE(built);
             EXPECT_TRUE(budget.passed());
@@ -570,7 +573,7 @@ TEST(SearchAnswer, TheObjectCheckOfAUnit) {
         EXPECT_EQ(own, budget.unit_refusals()[0].charge);
         // charged: the scratch of the measurement (the pair's transient), then the stub's tree
         const cli::SearchRecordPrice stub = cli::search_record_price(copy, false, true, "g",
-                                                                     "g.dbg", "g.annodbg", "");
+                                                                     kPairG, "");
         EXPECT_EQ(scratch + stub.tree, budget.answer().held());
         EXPECT_EQ(scratch, transient_charged);
         EXPECT_EQ(1u, budget.units());
@@ -580,7 +583,7 @@ TEST(SearchAnswer, TheObjectCheckOfAUnit) {
         SearchBudget tiny(stub.tree + 1000, true);
         transient_charged = 0;
         EXPECT_TRUE(cli::charge_search_unit(tiny, &transient_charged, &values, false, true, "g",
-                                            "g.dbg", "g.annodbg", "", "pair (g)"));
+                                            kPairG, "", "pair (g)"));
         EXPECT_EQ(graph::SearchCut::Refused::VALUES, values.get_cut().refused);
         EXPECT_TRUE(tiny.unit_refusals().empty());
     }
@@ -717,7 +720,7 @@ TEST(SearchAnswer, TheScratchOfThePriceIsChargedBeforeItIsMeasured) {
 
     uint64_t transient_charged = 0;
     EXPECT_THROW(cli::charge_search_record(budget.answer(), &transient_charged, first, false,
-                                           false, "", "", "", ""),
+                                           false, "", "", ""),
                  SearchAnswerTooLarge);
     EXPECT_EQ(0u, budget.answer().held());
     EXPECT_EQ(0u, transient_charged);
@@ -728,24 +731,23 @@ TEST(SearchAnswer, TheScratchOfThePriceIsChargedBeforeItIsMeasured) {
     SearchBudget large(kLarge);
     transient_charged = 0;
     const cli::SearchRecordPrice price = cli::charge_search_record(
-            large.answer(), &transient_charged, first, false, false, "", "", "", "");
+            large.answer(), &transient_charged, first, false, false, "", "", "");
     EXPECT_LE(scratch, price.transient);
     EXPECT_EQ(price.transient, transient_charged);
     EXPECT_EQ(price.tree + price.transient, large.answer().held());
     const SeqSearchResult second = record(true);
     const cli::SearchRecordPrice price2 = cli::charge_search_record(
-            large.answer(), &transient_charged, second, false, false, "", "", "", "");
+            large.answer(), &transient_charged, second, false, false, "", "", "");
     EXPECT_EQ(price.tree + price2.tree + std::max(price.transient, price2.transient),
               large.answer().held());
     // a bound of exactly that admits it, one byte less refuses it before its scratch
     SearchBudget exact(price.tree + price.transient);
     transient_charged = 0;
-    cli::charge_search_record(exact.answer(), &transient_charged, first, false, false, "", "",
-                              "", "");
+    cli::charge_search_record(exact.answer(), &transient_charged, first, false, false, "", "", "");
     SearchBudget less(scratch - 1);
     transient_charged = 0;
     EXPECT_THROW(cli::charge_search_record(less.answer(), &transient_charged, first, false,
-                                           false, "", "", "", ""),
+                                           false, "", "", ""),
                  SearchAnswerTooLarge);
     EXPECT_EQ(0u, less.answer().held());
 }
@@ -778,7 +780,7 @@ TEST(SearchAnswer, AUnitWhoseMeasuringAlonePassesIsRefusedBeforeItIsMeasured) {
         SeqSearchResult copy = unit;
         uint64_t transient_charged = 0;
         const bool built = cli::charge_search_unit(budget, &transient_charged, &copy, false,
-                                                   true, "g", "g.dbg", "g.annodbg", "", pair,
+                                                   true, "g", kPairG, "", pair,
                                                    3);
         EXPECT_EQ(0u, transient_charged);
         if (!partial) {
@@ -809,7 +811,7 @@ TEST(SearchAnswer, AUnitWhoseMeasuringAlonePassesIsRefusedBeforeItIsMeasured) {
         EXPECT_EQ(scratch, refusal.charge);
         // charged: the stub's tree alone (the record's scratch never was)
         const cli::SearchRecordPrice stub = cli::search_record_price(copy, false, true, "g",
-                                                                     "g.dbg", "g.annodbg", "");
+                                                                     kPairG, "");
         EXPECT_EQ(0u, stub.transient);
         EXPECT_EQ(stub.tree, budget.answer().held());
         EXPECT_EQ(1u, budget.units());
@@ -821,9 +823,9 @@ TEST(SearchAnswer, AUnitWhoseMeasuringAlonePassesIsRefusedBeforeItIsMeasured) {
         SeqSearchResult next(QuerySequence { 5, "r", std::string(31, 'C') },
                              std::move(small_rows));
         const cli::SearchRecordPrice price = cli::search_record_price(next, false, true, "g",
-                                                                      "g.dbg", "g.annodbg", "");
+                                                                      kPairG, "");
         EXPECT_TRUE(cli::charge_search_unit(budget, &transient_charged, &next, false, true, "g",
-                                            "g.dbg", "g.annodbg", "", pair, 3));
+                                            kPairG, "", pair, 3));
         EXPECT_EQ(graph::SearchCut::Refused::NO, next.get_cut().refused);
         EXPECT_EQ(stub.tree + price.tree + price.transient, budget.answer().held());
     }

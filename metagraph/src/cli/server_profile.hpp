@@ -46,7 +46,7 @@ std::string support_fingerprint(const Json::Value &pair);
 
 /**
  * The profile of the pair |index| (SPEC-pattern-search.md §24.4, graph_summary_pair): its tags
- * (|graph|, |graph_path|, |annotation_path|: null on a single-graph server), its identity
+ * (|graph| and |pair_id|, pair_id_of: null on a single-graph server; no path), its identity
  * (index_ns, index_fp, index_meta_fp from |identity|, whose meta fingerprint is set), k,
  * alphabet, graph_representation, annotation_form and decode_charged; seqs_order, what its load
  * verified of its record mapping's column order ("verified", "count_only", null without a
@@ -57,8 +57,7 @@ std::string support_fingerprint(const Json::Value &pair);
  * /traverse response states them); and support_fp over the capability fields
  */
 Json::Value pair_summary_json(const graph::AnnotatedDBG &index, const IndexIdentity &identity,
-                              const Json::Value &graph, const Json::Value &graph_path,
-                              const Json::Value &annotation_path);
+                              const Json::Value &graph, const Json::Value &pair_id);
 
 } // namespace cli
 } // namespace mtg

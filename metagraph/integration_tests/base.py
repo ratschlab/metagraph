@@ -7,6 +7,7 @@ from tempfile import TemporaryDirectory
 import psutil
 import shutil
 import time
+import uuid
 
 script_path = os.path.dirname(os.path.realpath(__file__))
 
@@ -39,6 +40,18 @@ NUM_THREADS = 4
 
 MEMORY_MAPPING = True
 MMAP_FLAG = ' --mmap' if MEMORY_MAPPING else ''
+
+# master's n1 pair id (src/common/configured_pair_id.hpp; docs/DESIGN-pair-identity.md section
+# 3.2), computed apart from the server: "n1-" and the UUIDv5 in this namespace of the name, the
+# graph path and the annotation path as the graph list spells them, each "<UTF-8 bytes>:<text>"
+# ("-1:" for an absent one). A multi-graph server's answers name a pair by graph and this id
+PAIR_ID_NAMESPACE = uuid.UUID('d3565c73-e7e9-5bca-b6a9-64cb5c4c9f93')
+
+
+def configured_pair_id(graph, graph_path, annotation_path):
+    name = ''.join('-1:' if f is None else f'{len(f.encode())}:{f}'
+                   for f in (graph, graph_path, annotation_path))
+    return 'n1-' + str(uuid.uuid5(PAIR_ID_NAMESPACE, name))
 
 
 def start_server(graph, annotation, host, port, extra_args=''):

@@ -30,6 +30,7 @@
 #include "cli/config/config.hpp"
 #include "cli/pattern.hpp"
 #include "cli/server_checks.hpp"
+#include "cli/server_selection.hpp"
 #include "cli/traverse.hpp"
 #include "cli/traverse_attempts.hpp"
 #include "cli/load/load_annotated_graph.hpp"
@@ -314,11 +315,13 @@ TEST(MultiGraphEnvelope, AnAnsweredEntryIsTheAnswerTagged) {
         EXPECT_EQ(answer[key], entry[key]) << key;
     }
     EXPECT_EQ("name", entry["graph"].asString());
-    EXPECT_EQ("/g.dbg", entry["graph_path"].asString());
-    EXPECT_EQ("/a.annodbg", entry["annotation_path"].asString());
+    // the pair by its id, no path
+    EXPECT_EQ(pair_id_of("name", { "/g.dbg", "/a.annodbg" }), entry["pair_id"].asString());
+    EXPECT_FALSE(entry.isMember("graph_path"));
+    EXPECT_FALSE(entry.isMember("annotation_path"));
     EXPECT_TRUE(entry["index_fp"].isNull());
     EXPECT_EQ("answered", entry["outcome"].asString());
-    EXPECT_EQ(answer.size() + 5, entry.size());
+    EXPECT_EQ(answer.size() + 4, entry.size());
     EXPECT_FALSE(entry.isMember("refusal"));
     EXPECT_EQ("fp", pattern_pair_answered("n", "g", "a", "fp", answer)["index_fp"].asString());
 }
@@ -330,8 +333,8 @@ TEST(MultiGraphEnvelope, ARefusedEntryCarriesThePairsOwnBody) {
     const PatternRefusal e(400, "mask_invalid", "pattern: the mask marks a dummy edge valid");
     const Json::Value entry = pattern_pair_refused("name", "/g.dbg", "/a.annodbg", "fp", e.status(),
                                                    e.body());
-    EXPECT_EQ(std::set<std::string>({ "graph", "graph_path", "annotation_path", "index_fp",
-                                      "outcome", "refusal" }), members(entry));
+    EXPECT_EQ(std::set<std::string>({ "graph", "pair_id", "index_fp", "outcome", "refusal" }),
+              members(entry));
     EXPECT_EQ("name", entry["graph"].asString());
     EXPECT_EQ("fp", entry["index_fp"].asString());
     EXPECT_EQ("refused", entry["outcome"].asString());
@@ -386,8 +389,8 @@ TEST(MultiGraphEnvelope, EntriesInOrderWithTheirCounts) {
 }
 
 // the identity panel: an envelope without a refused pair is the envelope of the build before
-// (every pair's answer with its four tags, graphs, timing) plus `answered`, `refused` and each
-// entry's `outcome`, byte for byte
+// (every pair's answer with its tags, graphs, timing; since M6 the tags name the pair by
+// graph and pair_id) plus `answered`, `refused` and each entry's `outcome`, byte for byte
 TEST(MultiGraphEnvelope, WithoutARefusalOnlyTheCountsAndOutcomeAreNew) {
     const Json::Value answer = parse(R"({"pattern_contract_version": 1, "patterns": [{"id": "p"}],
                                          "index": {"index_fp": "fp"}, "timing": {"elapsed_ms": 2}})");
@@ -398,8 +401,8 @@ TEST(MultiGraphEnvelope, WithoutARefusalOnlyTheCountsAndOutcomeAreNew) {
     for (const char *name : { "a", "b" }) {
         Json::Value tagged = answer;
         tagged["graph"] = name;
-        tagged["graph_path"] = std::string("/") + name + ".dbg";
-        tagged["annotation_path"] = std::string("/") + name + ".anno";
+        tagged["pair_id"] = pair_id_of(name, { std::string("/") + name + ".dbg",
+                                               std::string("/") + name + ".anno" });
         tagged["index_fp"] = "fp";
         before["answers"].append(tagged);
     }
@@ -649,9 +652,14 @@ record_mapping(const std::vector<std::vector<std::string>> &headers) {
             std::vector<std::vector<std::string>>(headers), std::move(num_kmers));
 }
 
+// the pair's id, as the server tags a pair of the graph list "name,/name.dbg,/name.annodbg"
+std::string id_of(const std::string &name) {
+    return pair_id_of(name, { "/" + name + ".dbg", "/" + name + ".annodbg" });
+}
+
 HeaderPair header_pair(const std::string &name, const annot::CoordToHeader *coord_to_header,
                        const std::vector<std::string> *columns) {
-    return { name, "/" + name + ".dbg", "/" + name + ".annodbg", coord_to_header, columns };
+    return { name, id_of(name), coord_to_header, columns };
 }
 
 // |value| as a client reads it: written and parsed again, so that its numbers compare with
@@ -665,8 +673,7 @@ Json::Value as_read(const Json::Value &value) {
 Json::Value occurrence(const std::string &name, const std::string &column) {
     Json::Value o;
     o["graph"] = name;
-    o["graph_path"] = "/" + name + ".dbg";
-    o["annotation_path"] = "/" + name + ".annodbg";
+    o["pair_id"] = id_of(name);
     o["column"] = column;
     return o;
 }
@@ -718,13 +725,12 @@ TEST(HeadersUnique, RepeatsAcrossPairsAndColumnsAreCollisions) {
     EXPECT_EQ("NC_2", alone["examples"][0]["header"].asString());
 
     // a single-graph server's one pair: null tags, the column named
-    HeaderPair single { Json::Value(), Json::Value(), Json::Value(), b.get(), &b_columns };
+    HeaderPair single { Json::Value(), Json::Value(), b.get(), &b_columns };
     const Json::Value one = headers_unique_json({ single });
     ASSERT_EQ(1u, one["examples"].size()) << one;
     Json::Value untagged;
     untagged["graph"] = Json::Value();
-    untagged["graph_path"] = Json::Value();
-    untagged["annotation_path"] = Json::Value();
+    untagged["pair_id"] = Json::Value();
     untagged["column"] = "c.fa";
     EXPECT_EQ(untagged, one["examples"][0]["pairs"][0]) << one;
 }
@@ -804,8 +810,7 @@ namespace {
 Json::Value pair_tags(const std::string &name) {
     Json::Value t;
     t["graph"] = name;
-    t["graph_path"] = "/" + name + ".dbg";
-    t["annotation_path"] = "/" + name + ".annodbg";
+    t["pair_id"] = id_of(name);
     return t;
 }
 
@@ -879,14 +884,12 @@ TEST(MultiGraphLabelsDisjoint, AHeaderEqualToAColumnNameIsACollision) {
     EXPECT_FALSE(labels_disjoint_json(own)["value"].asBool());
 
     // a single-graph server's one pair: null tags, the record's column named
-    HeaderPair single { Json::Value(), Json::Value(), Json::Value(), unique_a.get(),
-                        &one_column };
+    HeaderPair single { Json::Value(), Json::Value(), unique_a.get(), &one_column };
     const Json::Value one = labels_disjoint_json({ single });
     ASSERT_EQ(1u, one["examples"].size()) << one;
     Json::Value untagged;
     untagged["graph"] = Json::Value();
-    untagged["graph_path"] = Json::Value();
-    untagged["annotation_path"] = Json::Value();
+    untagged["pair_id"] = Json::Value();
     EXPECT_EQ(untagged, one["examples"][0]["columns"][0]) << one;
     untagged["column"] = "b.fa";
     EXPECT_EQ(untagged, one["examples"][0]["records"][0]) << one;

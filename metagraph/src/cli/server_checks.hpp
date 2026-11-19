@@ -766,8 +766,9 @@ Json::Value column_labels_capabilities_json(uint64_t max_bytes, std::optional<ui
  * The envelope POST /pattern answers on a multi-graph server (SPEC §24.1): one entry per
  * selected (name, pair) in the answers' order, each the outcome of that pair alone.
  *  - pattern_pair_answered: the pair's single-graph answer |answer| (SPEC §8) tagged with its
- *    pair -- graph (the name it was selected by), graph_path, annotation_path, index_fp (null
- *    when |index_fp| is empty: no manifest in the graph list) -- and outcome "answered";
+ *    pair -- graph (the name it was selected by), pair_id (of the name and the pair's
+ *    |graph_path| and |annotation_path|, pair_id_of), index_fp (null when |index_fp| is empty:
+ *    no manifest in the graph list) -- and outcome "answered";
  *  - pattern_pair_refused: the same tags, outcome "refused", and `refusal`: |http_status| and
  *    the members of |body|, the body a single-graph server would have answered for the pair
  *    ({error, code} for a refusal, {error} for an unexpected failure);
@@ -814,8 +815,7 @@ ColumnOverlap column_overlap(const std::vector<std::vector<std::string>> &column
 // its column names
 struct HeaderPair {
     Json::Value graph;
-    Json::Value graph_path;
-    Json::Value annotation_path;
+    Json::Value pair_id;
     const annot::CoordToHeader *coord_to_header = nullptr;
     const std::vector<std::string> *columns = nullptr;
 };
@@ -830,7 +830,7 @@ struct HeaderPair {
  * (CoordToHeader::find_repeated_headers, which builds each pair's header index if not built
  * yet, on |num_threads| threads).
  *   {"value": true | false | null, "collisions": n, "examples": [{"header", "occurrences",
- *    "pairs": [{graph, graph_path, annotation_path, column}...]}...]}
+ *    "pairs": [{graph, pair_id, column}...]}...]}
  * value is null when a pair has no .seqs (collisions and examples then count the pairs that
  * have one); examples are the |max_examples| byte-smallest repeated headers, each listing its
  * first |max_listed| occurrences in pair, column and record order, its column by name.
@@ -848,8 +848,8 @@ Json::Value headers_unique_json(const std::vector<HeaderPair> &pairs, size_t num
  * of every pair with a .seqs (CoordToHeader::find_header, built if not built yet), on
  * |num_threads| threads (0: get_num_threads()); no lookup when no pair has a .seqs.
  *   {"value": true | false | null, "collisions": n, "examples": [{"header",
- *    "records": [{graph, graph_path, annotation_path, column}...],
- *    "columns": [{graph, graph_path, annotation_path}...]}...]}
+ *    "records": [{graph, pair_id, column}...],
+ *    "columns": [{graph, pair_id}...]}...]}
  * value is null when a pair has no .seqs (as headers_unique's; collisions and examples then
  * count every pair's columns against the headers of the pairs that have one); collisions is the
  * number of distinct names that are both; examples are the |max_examples| byte-smallest, each

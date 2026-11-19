@@ -73,8 +73,7 @@ std::optional<WallClock::time_point> parse_iso_utc(const Json::Value &iso) {
 Json::Value null_pair_ref() {
     Json::Value ref(Json::objectValue);
     ref["graph"] = Json::Value();
-    ref["graph_path"] = Json::Value();
-    ref["annotation_path"] = Json::Value();
+    ref["pair_id"] = Json::Value();
     return ref;
 }
 

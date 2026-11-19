@@ -47,9 +47,9 @@ def test_df_from_align_result(file_name, expected_shape):
 # warning names each refused unit and the frame's attrs["refused"] lists them; an answer
 # without one warns nothing
 def _cut(graph, returned, refused=None):
-    cut = {'annotation_path': f'/idx/{graph}.annodbg', 'complete': refused is None,
-           'graph': graph, 'graph_path': f'/idx/{graph}.dbg', 'index_fp': None,
-           'nth_score': None, 'returned': returned, 'tied': 0, 'tied_returned': 0}
+    cut = {'graph': graph, 'pair_id': f'n1-id-of-{graph}', 'index_fp': None,
+           'matched': returned, 'returned': returned, 'complete': refused is None,
+           'nth_score': None, 'tied': 0, 'tied_returned': 0}
     if refused is not None:
         cut['refused'] = refused
     return cut
@@ -61,11 +61,11 @@ def test_df_from_search_result_lists_the_refused_units():
     answer = [
         {'seq_description': 'fwd',
          'results': [{'sample': 'a1', 'kmer_count': 3, 'graph': 'a',
-                      'graph_path': '/idx/a.dbg', 'annotation_path': '/idx/a.annodbg'}],
+                      'pair_id': 'n1-id-of-a'}],
          'cuts': [_cut('a', 1), _cut('b', 0, refused)]},
         {'seq_description': 'rc',
          'results': [{'sample': 'b1', 'kmer_count': 2, 'graph': 'b',
-                      'graph_path': '/idx/b.dbg', 'annotation_path': '/idx/b.annodbg'}],
+                      'pair_id': 'n1-id-of-b'}],
          'cuts': [_cut('a', 0, dict(refused, account='answer', priced_mb=5000)), _cut('b', 1)]},
     ]
     with pytest.warns(helpers.SearchRefusedWarning) as caught:
@@ -73,22 +73,22 @@ def test_df_from_search_result_lists_the_refused_units():
     assert df.shape[0] == 2
     assert list(df['sample']) == ['a1', 'b1']
     assert df.attrs['refused'] == [
-        {'record': 0, 'seq_description': 'fwd', 'graph': 'b', 'graph_path': '/idx/b.dbg',
-         'annotation_path': '/idx/b.annodbg', 'account': 'values',
+        {'record': 0, 'seq_description': 'fwd', 'graph': 'b', 'pair_id': 'n1-id-of-b',
+         'account': 'values',
          'code': 'search_answer_too_large', 'max_memory_mb': 4096},
-        {'record': 1, 'seq_description': 'rc', 'graph': 'a', 'graph_path': '/idx/a.dbg',
-         'annotation_path': '/idx/a.annodbg', 'account': 'answer',
+        {'record': 1, 'seq_description': 'rc', 'graph': 'a', 'pair_id': 'n1-id-of-a',
+         'account': 'answer',
          'code': 'search_answer_too_large', 'max_memory_mb': 4096, 'priced_mb': 5000}]
     message = str(caught[0].message)
     assert "record 0 ('fwd') on graph 'b' (values account)" in message
     assert "record 1 ('rc') on graph 'a' (answer account)" in message
     # a single-graph server's entry has null tags
     single = [{'seq_description': 'q', 'results': [],
-               'cuts': [dict(_cut('x', 0, refused), graph=None, graph_path=None,
-                             annotation_path=None)]}]
+               'cuts': [dict(_cut('x', 0, refused), graph=None, pair_id=None)]}]
     with pytest.warns(helpers.SearchRefusedWarning, match=r"record 0 \('q'\) on the graph"):
         df = helpers.df_from_search_result(single)
-    assert df.shape[0] == 0 and df.attrs['refused'][0]['graph'] is None
+    assert df.shape[0] == 0
+    assert (None, None) == (df.attrs['refused'][0]['graph'], df.attrs['refused'][0]['pair_id'])
     # nothing refused: no warning, no attrs
     answer[0]['cuts'][1] = _cut('b', 0)
     answer[1]['cuts'][0] = _cut('a', 0)

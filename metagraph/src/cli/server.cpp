@@ -78,13 +78,15 @@ constexpr char kDecodeCacheRule[]
 /**
  * The pair a /search answer is computed on, as the answer states it
  * (SPEC-multigraph-envelope.md section 3): on a multi-graph server (|tagged|) its name and
- * paths, written on every row and on each query sequence's cut; on a single-graph server none,
- * the rows untagged and the cut's tags null. |index_fp|: the pair's identity (the server's on a
+ * |pair_id| (pair_id_of, computed once per pair and request), written on every row and on each
+ * query sequence's cut; on a single-graph server none, the rows untagged and the cut's tags
+ * null. Its paths only name it in the log. |index_fp|: the pair's identity (the server's on a
  * single-graph server), "" for none, stated null.
  */
 struct SearchSource {
     bool tagged = false;
     std::string graph;
+    std::string pair_id;
     std::string graph_path;
     std::string annotation_path;
     std::string index_fp;
@@ -171,8 +173,8 @@ Json::Value process_search_request(const SearchRequest &request,
                     return;
                 if (!charge_search_unit(*budget, &transient_charged, &seq_result,
                                         config.verbose_output, source.tagged, source.graph,
-                                        source.graph_path, source.annotation_path,
-                                        source.index_fp, pair, source.index)) {
+                                        source.pair_id, source.index_fp, pair,
+                                        source.index)) {
                     return;
                 }
             }
@@ -180,14 +182,12 @@ Json::Value process_search_request(const SearchRequest &request,
             if (source.tagged) {
                 for (Json::Value &row : json["results"]) {
                     row["graph"] = source.graph;
-                    row["graph_path"] = source.graph_path;
-                    row["annotation_path"] = source.annotation_path;
+                    row["pair_id"] = source.pair_id;
                 }
             }
             Json::Value cut = seq_result.cut_to_json();
             cut["graph"] = string_or_null(source.tagged, source.graph);
-            cut["graph_path"] = string_or_null(source.tagged, source.graph_path);
-            cut["annotation_path"] = string_or_null(source.tagged, source.annotation_path);
+            cut["pair_id"] = string_or_null(source.tagged, source.pair_id);
             cut["index_fp"] = string_or_null(!source.index_fp.empty(), source.index_fp);
             json["cuts"] = Json::Value(Json::arrayValue);
             json["cuts"].append(std::move(cut));
@@ -763,7 +763,7 @@ static Json::Value multi_graph_summary(
     std::set<std::string> profiles;
     for (const auto &[name, pair] : ordered_pairs(indexes, sorted_names(indexes))) {
         Json::Value p = pair_summary_json(*graphs_cache.at(pair), identities.at(pair),
-                                          name, pair.first, pair.second);
+                                          name, pair_id_of(name, pair));
         masked += p["mask"].isString() && p["mask"].asString() != "absent";
         profiles.insert(p["support_fp"].asString());
         pairs.append(std::move(p));
@@ -805,7 +805,7 @@ static std::vector<HeaderPair> multi_graph_header_pairs(
         if (!seen.insert(pair).second)
             continue;
         const AnnotatedDBG &index = *graphs_cache.at(pair);
-        pairs.push_back({ name, pair.first, pair.second, index.get_coord_to_header(),
+        pairs.push_back({ name, pair_id_of(name, pair), index.get_coord_to_header(),
                           &index.get_annotator().get_label_encoder().get_labels() });
     }
     return pairs;
@@ -1007,7 +1007,7 @@ int run_server(Config *config) {
             build_header_index(*anno_graph, get_num_threads() * num_server_threads);
             // the one pair, with null tags as a single-graph server's /search cuts
             const std::vector<HeaderPair> header_pair { { Json::Value(), Json::Value(),
-                    Json::Value(), anno_graph->get_coord_to_header(),
+                    anno_graph->get_coord_to_header(),
                     &anno_graph->get_annotator().get_label_encoder().get_labels() } };
             single_headers_unique = headers_unique(header_pair,
                                                    get_num_threads() * num_server_threads);
@@ -1015,7 +1015,7 @@ int run_server(Config *config) {
                                                      get_num_threads() * num_server_threads);
             // its profile, with null tags as its headers_unique
             single_pair_summary = pair_summary_json(*anno_graph, single_identity, Json::Value(),
-                                                    Json::Value(), Json::Value());
+                                                    Json::Value());
             logger->info("[Server] Capability profile: {} {} annotation, support_fp {}, "
                          "index_meta_fp {}", single_pair_summary["graph_representation"].asString(),
                          single_pair_summary["annotation_form"].asString(),
@@ -1389,6 +1389,7 @@ int run_server(Config *config) {
                             const auto &[name, pair] = targets[t];
                             sources[t].tagged = true;
                             sources[t].graph = name;
+                            sources[t].pair_id = pair_id_of(name, pair);
                             sources[t].graph_path = pair.first;
                             sources[t].annotation_path = pair.second;
                             sources[t].index_fp = fp_of_pair(pair);
@@ -1872,7 +1873,7 @@ int run_server(Config *config) {
         }
         if (refs.empty()) {
             Json::Value ref(Json::objectValue);
-            for (const char *key : { "graph", "graph_path", "annotation_path" }) {
+            for (const char *key : { "graph", "pair_id" }) {
                 ref[key] = Json::Value();
             }
             refs.push_back(std::move(ref));
