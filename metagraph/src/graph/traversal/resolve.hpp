@@ -463,33 +463,43 @@ constexpr char kSeedOrder[] = "rank";
 // |check| (unset: none): the request's stop and the answer's deadline (the server's: the
 // request's ResolveOptions::stop, abandoning it, then its finish_check; T5a-X1: before, the
 // deadline alone, so that nothing ended the selection of a request without one), read every
-// kResolveCheckLabels steps of the selection, each counted as it is taken -- a longest_first
+// kResolveCheckLabels steps of the selection, a step each item taken -- a longest_first
 // candidate (and a pick's labels before they are copied); for explicit seeds each label put
-// into the name lookups, a seed, each graph run and each name checked for it and each run of a
-// named label checked; a label and each of its runs counted, then gathered, for max_support and
-// the runs before their sort; in a max_support round a run clipped and each pick it meets, a
-// candidate start swept and each run it adds, the round's runs once before each of its sorts, a
-// label and each of its runs checked for the winner; a merged pick and each label and run
-// checked for it; a pick and each of its names not covering sized, a frozen seed and each of
-// its labels and names at each pass over them, a pair of seeds compared for overlaps -- and
-// throwing to abandon it (GPT review 7, finding 1: the selection was read only once it was
-// done, after every overlapping pair was listed; T4-L1: once per max_support round, whose clip
-// of every run by every pick was O(runs x picks); GPT final review of trains 5a-7, m1: the
-// count of max_support's runs read nothing, and a label's runs, a seed's labels and
-// longest_first's candidates were read only before them)
+// into the name lookups, a seed, each of its names priced and copied, each graph run and each
+// name checked for it and each run of a named label checked; a label and each of its runs
+// counted, then gathered, for max_support and the runs before their sort; in a max_support
+// round a run clipped and each pick it meets, each of its pieces as its candidate starts are
+// built and as its run ends are, a candidate start swept and each run it adds, a label and each
+// of its runs checked for the winner; a merged pick and each label and run checked for it; a
+// pick and each of its names not covering sized, a frozen seed and each of its labels and names
+// at each pass over them, a pair of seeds compared for overlaps -- and throwing to abandon it
+// (GPT review 7, finding 1: the selection was read only once it was done, after every
+// overlapping pair was listed; T4-L1: once per max_support round, whose clip of every run by
+// every pick was O(runs x picks); GPT final review of trains 5a-7, m1: the count of
+// max_support's runs read nothing, and a label's runs, a seed's labels and longest_first's
+// candidates were read only before them; the Opus review of cf77380a0, mi-2: an explicit seed's
+// names priced and copied and a round's pieces built took no step). A loop that does nothing
+// else with its items takes them in pieces that end where the next reading falls: the readings
+// fall at the same steps, and the loop is tight between them (mi-3). What is not read inside
+// is listed in SPEC-labeled-traversal-core.md §4.5 (Not polled): the sorts, a round's
+// de-duplications and the zeroing of its Fenwick counts, a longest_first pick's copy of its
+// labels, a seed's sequence and id, one row of the overlaps
 //
 // |answer| (null: none): the answer account (AnswerAccount), charged with the selection's
 // scratch before it is allocated (a max_support selection's gathered runs, twice; the round's
 // vector of clipped pieces each time it grows past them; a round's candidate starts, run ends
 // and Fenwick counts for its pieces, released with them), each pick before it is made (an explicit
 // seed at every name it lists, before its checks: that stays charged, the price of the selection's
-// copy of the explicit seeds in its policy; the explicit picks' own lists as the freeze
-// starts), the picks released once the seeds are frozen and the picks freed, and each frozen seed
-// before it is built: its id, sequence and names not covering, until it is built the label
-// order's copy of all its labels' names with the temporaries of its order and id, and the names
-// it keeps (max_labels_per_seed) and lists as dropped; then the overlaps. What stays charged is
-// what the selection holds (T5b-Y1, Fable review 2026-11-12: before, every covering label's name
-// and every pick). A selection passing it throws AnswerTooLarge
+// copy of the seed in its policy, made once it is charged, after the copy's vector of seeds;
+// the explicit picks' own lists as the freeze starts), the picks released once the seeds are
+// frozen and the picks freed, and each frozen seed before it is built: its id, sequence and
+// names not covering, until it is built the label order's copy of all its labels' names with
+// the temporaries of its order and id, and the names it keeps (max_labels_per_seed) and lists as
+// dropped; then the overlaps. What stays charged is what the selection holds (T5b-Y1, Fable
+// review 2026-11-12: before, every covering label's name and every pick; the Opus review of
+// cf77380a0, mi-4: the copy of the explicit seeds was made whole before any of it was charged).
+// A selection passing it throws AnswerTooLarge. The selection's policy is |policy| without its
+// explicit seeds unless it is EXPLICIT
 SeedSelection select_seeds(const SupportProfile &profile,
                            std::string_view query,
                            const SelectionPolicy &policy,

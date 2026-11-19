@@ -1919,11 +1919,12 @@ TEST(ResolveBounds, TheSelectionReadsTheDeadline) {
     size_t calls = 0;
     const SeedSelection checked = select_seeds(profile, query, policy, false,
                                                [&]() { ++calls; });
-    // n (n - 1) pairs, and ten steps a seed: the seed, its graph run, its name and the name's run
-    // checked; its pick sized; the seed frozen and its label at each of four passes (GPT final
-    // review of trains 5a-7, m1: before, four) -- about n^2 / 4096 readings
+    // n (n - 1) pairs, and twelve steps a seed: the seed, its name priced and copied, its graph
+    // run, its name and the name's run checked; its pick sized; the seed frozen and its label at
+    // each of four passes (GPT final review of trains 5a-7, m1, and the Opus review of
+    // cf77380a0, mi-2: before, four) -- about n^2 / 4096 readings
     EXPECT_GE(calls, n * n / kResolveCheckLabels);
-    EXPECT_LE(calls, (n * n + 10 * n) / kResolveCheckLabels + 1);
+    EXPECT_LE(calls, (n * n + 12 * n) / kResolveCheckLabels + 1);
     ASSERT_EQ(n, checked.seeds.size());
     for (size_t i = 0; i < n; ++i) {
         EXPECT_EQ(plain.seeds[i].seed_id, checked.seeds[i].seed_id);
@@ -2210,7 +2211,9 @@ TEST(ResolveBounds, TheSelectionReadsInsideALabelsRuns) {
     calls = 0;
     const SeedSelection uncovered = select_seeds(profile, query, named, false, [&]() { ++calls; });
     EXPECT_TRUE(uncovered.seeds.empty());
-    EXPECT_LE(2 * per_label / kResolveCheckLabels, calls);
+    // (6 readings: the runs alone are 6 kResolveCheckLabels steps; a margin of one, the Opus
+    // review of cf77380a0, n-5)
+    EXPECT_LE(2 * per_label / kResolveCheckLabels - 1, calls);
 
     SupportProfile candidates = profile;
     for (uint64_t i = 0; i < per_label; ++i) {
@@ -2223,6 +2226,166 @@ TEST(ResolveBounds, TheSelectionReadsInsideALabelsRuns) {
     const SeedSelection first = select_seeds(candidates, query, longest, false, [&]() { ++calls; });
     EXPECT_LE(per_label / kResolveCheckLabels, calls);
     same_seeds(select_seeds(candidates, query, longest, false), first);
+}
+
+// The selection's steps one by one (the Opus review of cf77380a0, n-5): a selection whose every
+// step is one item, or a piece of a scan that ends at a reading, reads exactly once every
+// kResolveCheckLabels steps, so that its readings are its steps / kResolveCheckLabels. One
+// explicit seed [S, S + 1), each source of steps in turn made a multiple of kResolveCheckLabels:
+// the profiled labels and the absent ones put into the lookups; the seed; each of its names
+// priced, copied and looked up; each graph run; each run checked of a label it names (up to the
+// covering one); the freeze: the pick and each name it lists as not covering sized, the frozen
+// seed, each of its labels at three passes (their names sized, their order's copy, the names
+// kept or dropped), each name not covering at two (sized, copied), each name kept or listed as
+// dropped sized; one row of overlaps. Then max_support over X labels of one run over the query
+// (one seed): its runs counted and gathered, a step a label and a run; the gathered runs before
+// their sort (one poll of X steps, which reads once); a round's step, each run clipped, each
+// piece as the candidate starts are built and as the run ends are, each candidate start swept
+// and each run it adds, each label and run checked for the winner; the freeze as above:
+// 13 X / kResolveCheckLabels + 1 readings
+TEST(ResolveBounds, TheSelectionTakesEachStepOnce) {
+    const uint64_t K = kResolveCheckLabels;
+    struct Shape {
+        size_t others = 0;             // profiled labels the seed does not name, one run each
+        size_t absent = 0;             // the pair's absent labels (unknown_labels)
+        size_t graph_runs = 1;         // the last one holds the seed
+        size_t covering = 1;           // named labels covering the seed
+        size_t covering_runs = 1;      // the runs of each, the last one covering
+        size_t not_covering = 0;       // named profiled labels covering nothing of it
+        size_t not_covering_runs = 1;  // the runs of each
+        size_t named_absent = 0;       // absent labels the seed names (at most |absent|)
+        size_t max_labels = 1000;
+    };
+    auto steps_of = [](const Shape &x) {
+        const uint64_t named = x.covering + x.not_covering + x.named_absent;
+        const uint64_t not_covering = x.not_covering + x.named_absent;
+        const uint64_t kept = std::min(x.covering, x.max_labels);
+        const uint64_t dropped = x.covering - kept;
+        const uint64_t listed = dropped <= 1000 ? dropped : 0;
+        return (x.covering + x.not_covering + x.others) + x.absent       // the lookups
+                + 1 + 3 * named + x.graph_runs                           // the seed
+                + x.covering * x.covering_runs + x.not_covering * x.not_covering_runs
+                + 1 + not_covering                                       // the pick sized
+                + 1 + 3 * x.covering + 2 * not_covering + kept + listed  // the seed frozen
+                + 1;                                                     // the overlaps
+    };
+    auto readings_of = [&](const Shape &x) {
+        const uint64_t longest
+                = std::max<uint64_t>({ x.graph_runs, x.covering_runs, x.not_covering_runs });
+        SupportProfile profile;
+        profile.k = kK;
+        profile.num_kmers = 2 * longest + 4;
+        const uint64_t S = profile.num_kmers - 1;
+        for (uint64_t i = 0; i + 1 < x.graph_runs; ++i) {
+            profile.graph_runs.push_back({ 2 * i, 2 * i + 1 });
+        }
+        profile.graph_runs.push_back({ S, S + 1 });
+        ExplicitSeed seed;
+        seed.kmers = { S, S + 1 };
+        auto add = [&](const std::string &name, uint64_t num_runs, bool covering) {
+            LabelProfile lp;
+            lp.label.kind = LabelKind::COLUMN;
+            lp.label.name = name;
+            for (uint64_t i = 0; i + covering < num_runs; ++i) {
+                lp.runs.push_back({ 2 * i, 2 * i + 1 });
+            }
+            if (covering)
+                lp.runs.push_back({ S, S + 1 });
+            lp.kmers_supported = num_runs;
+            profile.labels.push_back(std::move(lp));
+        };
+        for (size_t i = 0; i < x.covering; ++i) {
+            add("C" + std::to_string(i), x.covering_runs, true);
+            seed.labels.push_back("C" + std::to_string(i));
+        }
+        for (size_t i = 0; i < x.not_covering; ++i) {
+            add("N" + std::to_string(i), x.not_covering_runs, false);
+            seed.labels.push_back("N" + std::to_string(i));
+        }
+        for (size_t i = 0; i < x.others; ++i) {
+            add("O" + std::to_string(i), 1, false);
+        }
+        for (size_t i = 0; i < x.absent; ++i) {
+            profile.unknown_labels.push_back("A" + std::to_string(i));
+            if (i < x.named_absent)
+                seed.labels.push_back("A" + std::to_string(i));
+        }
+        SelectionPolicy policy;
+        policy.policy = SelectionPolicy::EXPLICIT;
+        policy.max_labels_per_seed = x.max_labels;
+        policy.explicit_seeds.push_back(seed);
+        const std::string query(profile.num_kmers + kK - 1, 'A');
+        size_t calls = 0;
+        const SeedSelection got = select_seeds(profile, query, policy, false, [&]() { ++calls; });
+        EXPECT_EQ(1u, got.seeds.size());
+        EXPECT_EQ(x.not_covering + x.named_absent, got.seeds.at(0).labels_not_covering.size());
+        return calls;
+    };
+    auto shape = [](const auto &set) {
+        Shape x;
+        set(x);
+        return x;
+    };
+    std::vector<std::pair<std::string, Shape>> shapes;
+    shapes.emplace_back("one seed, one label", Shape());
+    shapes.emplace_back("profiled labels", shape([&](Shape &x) { x.others = 3 * K; }));
+    shapes.emplace_back("absent labels", shape([&](Shape &x) { x.absent = 2 * K; }));
+    shapes.emplace_back("graph runs", shape([&](Shape &x) { x.graph_runs = 2 * K + 1; }));
+    shapes.emplace_back("runs to the covering one",
+                        shape([&](Shape &x) { x.covering_runs = 2 * K + 1; }));
+    shapes.emplace_back("a label covering nothing", shape([&](Shape &x) {
+        x.not_covering = 1;
+        x.not_covering_runs = 2 * K;
+    }));
+    shapes.emplace_back("absent names", shape([&](Shape &x) {
+        x.absent = K;
+        x.named_absent = K;
+    }));
+    shapes.emplace_back("covering names, none listed",
+                        shape([&](Shape &x) { x.covering = K; }));
+    shapes.emplace_back("covering names, 500 listed", shape([&](Shape &x) {
+        x.covering = 2000;
+        x.max_labels = 1500;
+    }));
+    // the sources of steps add up as stated: a shape of them all
+    shapes.emplace_back("all of them", shape([&](Shape &x) {
+        x.others = K;
+        x.absent = 2 * K;
+        x.graph_runs = K + 1;
+        x.covering = 3000;
+        x.covering_runs = 3;
+        x.not_covering = 2;
+        x.not_covering_runs = K;
+        x.named_absent = K;
+        x.max_labels = 2500;
+    }));
+    for (const auto &[what, x] : shapes) {
+        EXPECT_EQ(steps_of(x) / K, readings_of(x)) << what;
+    }
+
+    const uint64_t X = 2 * K;
+    SupportProfile profile;
+    profile.k = kK;
+    profile.num_kmers = 1000;
+    profile.graph_runs = { { 0, profile.num_kmers } };
+    for (uint64_t l = 0; l < X; ++l) {
+        LabelProfile lp;
+        lp.label.kind = LabelKind::COLUMN;
+        lp.label.name = "L" + std::to_string(l);
+        lp.runs = { { 0, profile.num_kmers } };
+        lp.kmers_supported = profile.num_kmers;
+        profile.labels.push_back(std::move(lp));
+    }
+    SelectionPolicy support;
+    support.policy = SelectionPolicy::MAX_SUPPORT;
+    support.min_block_bp = kK;
+    support.max_seeds = 1;
+    const std::string query(profile.num_kmers + kK - 1, 'A');
+    size_t calls = 0;
+    const SeedSelection got = select_seeds(profile, query, support, false, [&]() { ++calls; });
+    ASSERT_EQ(1u, got.seeds.size());
+    EXPECT_EQ(X, got.seeds[0].population.supporting_total);
+    EXPECT_EQ(13 * X / K + 1, calls);
 }
 
 // The route (process_resolve_request): under bounds.time_budget_ms the selection of as many

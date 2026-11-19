@@ -1604,6 +1604,12 @@ void group_candidates(SupportProfile *profile, uint64_t min_block_kmers, AnswerA
     // reserved, so that the candidates never hold an old and a new buffer beside the map (T4
     // review R1, F2: at their last growth 3 x 40 B a run of its own, beyond its price)
     profile->candidates.reserve(groups.size());
+    // what the candidates hold as the answer account prices it (candidates_held_bytes), summed
+    // as they are made: the sort below moves them, their label ids' buffers with them (the Opus
+    // review of cf77380a0, mi-2: a pass of its own after the sort, over up to 3 million
+    // candidates at the caps, read nothing)
+    uint64_t held = annot::matrix::buffer_bytes(profile->candidates.capacity(),
+                                                sizeof(SeedCandidate));
     size_t group = 0;
     for (auto &[iv, labels] : groups) {
         // read every 4,096 groups as the labels above (T5a-X1, Opus review 2026-11-13: at the
@@ -1612,6 +1618,7 @@ void group_candidates(SupportProfile *profile, uint64_t min_block_kmers, AnswerA
         if (finishing)
             finishing(group++);
         std::sort(labels.begin(), labels.end());
+        held += annot::matrix::buffer_bytes(labels.capacity(), sizeof(LabelId));
         profile->candidates.push_back({ iv, std::move(labels) });
     }
     std::map<KmerInterval, std::vector<LabelId>>().swap(groups);
@@ -1626,7 +1633,8 @@ void group_candidates(SupportProfile *profile, uint64_t min_block_kmers, AnswerA
     if (answer) {
         answer->release(grouping);
         // (within the grouping's price: a candidate and its label ids per run at most)
-        answer->charge(candidates_held_bytes(*profile), "candidates");
+        assert(held == candidates_held_bytes(*profile));
+        answer->charge(held, "candidates");
     }
 }
 
@@ -1737,18 +1745,6 @@ struct Fenwick {
     }
 };
 
-// does label l have a run containing [begin, end)? |step|() before each run is checked (the
-// selection's reading: a label's runs are no unread piece, GPT final review of trains 5a-7, m1)
-template <class Step>
-bool covers(const LabelProfile &lp, const KmerInterval &iv, const Step &step) {
-    for (const auto &run : lp.runs) {
-        step();
-        if (run.begin <= iv.begin && run.end >= iv.end)
-            return true;
-    }
-    return false;
-}
-
 struct Picked {
     KmerInterval kmers;
     std::vector<LabelId> labels;
@@ -1773,14 +1769,53 @@ SeedSelection select_seeds(const SupportProfile &profile,
         if (answer)
             answer->release(bytes);
     };
+    // the answer's deadline, read once the steps since the last reading reach
+    // kResolveCheckLabels (resolve.hpp): a candidate, a seed, a label, a name or a run visited, a
+    // pair compared, each a step, so that no label's runs, no seed's labels or names and no pass
+    // over the candidates is a piece read only before it (GPT final review of trains 5a-7, m1:
+    // the count of max_support's runs read nothing, and a label's runs were gathered or checked
+    // after one reading for all of them). A loop whose items do nothing else takes them in pieces
+    // that end where the next reading falls (scan): the readings fall at the same steps, and
+    // between two of them the loop is as tight as one without readings (the Opus review of
+    // cf77380a0, mi-3: a step taken item by item made those loops about three times slower)
+    uint64_t steps = 0;
+    uint64_t next_check = kResolveCheckLabels;
+    auto poll = [&](uint64_t units) {
+        steps += units;
+        if (steps >= next_check) {
+            next_check = steps + kResolveCheckLabels;
+            if (check)
+                check();
+        }
+    };
+    // |item|(i) for the items [begin, end), a step each, until one returns false: the index of
+    // that one (|end| if none did). A piece's steps are taken once its items are done, and a
+    // piece ends where the next reading falls, so each reading falls at the step a step before
+    // each item would read at, after its item rather than before it. (|item| takes no step)
+    auto scan = [&](size_t begin, size_t end, const auto &item) {
+        while (begin < end) {
+            const size_t stop = begin + static_cast<size_t>(
+                    std::min<uint64_t>(next_check - steps, end - begin));
+            for (size_t i = begin; i < stop; ++i) {
+                if (!item(i)) {
+                    poll(i + 1 - begin);
+                    return i;
+                }
+            }
+            poll(stop - begin);
+            begin = stop;
+        }
+        return end;
+    };
     // a pick as the account prices it: the object, its label ids (at twice their number) and
-    // the names it lists as not covering
-    auto pick_bytes = [](size_t labels, const std::vector<std::string> *names) {
+    // the names it lists as not covering (a step a name)
+    auto pick_bytes = [&](size_t labels, const std::vector<std::string> *names) {
         uint64_t bytes = sizeof(Picked) + 2 * labels * sizeof(LabelId);
         if (names) {
-            for (const std::string &name : *names) {
-                bytes += kStringBytes + string_heap_bytes(name);
-            }
+            scan(0, names->size(), [&](size_t i) {
+                bytes += kStringBytes + string_heap_bytes((*names)[i]);
+                return true;
+            });
         }
         return bytes;
     };
@@ -1795,45 +1830,48 @@ SeedSelection select_seeds(const SupportProfile &profile,
     };
     // an explicit pick at what it holds once its lists are made: the object, its label ids and
     // the names it lists as not covering, at their vectors' capacities, and those names' heaps
-    // (|step|() before each name)
-    auto held_pick_bytes = [](const Picked &p, const auto &step) {
+    // (a step a name)
+    auto held_pick_bytes = [&](const Picked &p) {
         uint64_t bytes = sizeof(Picked)
                 + annot::matrix::buffer_bytes(p.labels.capacity(), sizeof(LabelId))
                 + annot::matrix::buffer_bytes(p.labels_not_covering.capacity(), kStringBytes);
-        for (const std::string &name : p.labels_not_covering) {
-            step();
-            bytes += string_heap_bytes(name);
-        }
+        scan(0, p.labels_not_covering.size(), [&](size_t i) {
+            bytes += string_heap_bytes(p.labels_not_covering[i]);
+            return true;
+        });
         return bytes;
     };
-    // the answer's deadline, read once the steps since the last reading reach
-    // kResolveCheckLabels (resolve.hpp): a candidate, a seed, a label or a run visited, a pair
-    // compared, each counted as it is taken, so that no label's runs, no seed's labels and no
-    // pass over the candidates is a piece read only before it (GPT final review of trains 5a-7,
-    // m1: the count of max_support's runs read nothing, and a label's runs were gathered or
-    // checked after one reading for all of them)
-    uint64_t steps = 0;
-    uint64_t next_check = kResolveCheckLabels;
-    auto poll = [&](uint64_t units) {
-        steps += units;
-        if (check && steps >= next_check) {
-            next_check = steps + kResolveCheckLabels;
-            check();
-        }
+    // does |lp| have a run containing |iv|? a step each run checked
+    auto covers = [&](const LabelProfile &lp, const KmerInterval &iv) {
+        const std::vector<KmerInterval> &runs = lp.runs;
+        return scan(0, runs.size(), [&](size_t r) {
+            return !(runs[r].begin <= iv.begin && runs[r].end >= iv.end);
+        }) < runs.size();
     };
-    auto step = [&]() { poll(1); };
     // the labels with a run containing |iv|, a step a label and a step each run checked
     auto covering = [&](const KmerInterval &iv) {
         std::vector<LabelId> out;
         for (LabelId l = 0; l < profile.labels.size(); ++l) {
             poll(1);
-            if (covers(profile.labels[l], iv, step))
+            if (covers(profile.labels[l], iv))
                 out.push_back(l);
         }
         return out;
     };
     SeedSelection selection;
-    selection.policy = policy_in;
+    // the policy, its explicit seeds apart: an explicit selection copies each seed once it is
+    // charged (below), and a selection of another policy, which does not read them, keeps none
+    // (the Opus review of cf77380a0, mi-4: up to 1,024 seeds of 10,000 names each were copied
+    // here at once, before the charge that prices them). Every field is named, so that one added
+    // to SelectionPolicy does not compile here until it is copied
+    {
+        const auto &[kind, max_seeds, min_block_bp, max_labels_per_seed, label_order,
+                     sample_seed, merge_overlapping, explicit_seeds, release_id] = policy_in;
+        (void)explicit_seeds;
+        selection.policy = SelectionPolicy{ kind, max_seeds, min_block_bp, max_labels_per_seed,
+                                            label_order, sample_seed, merge_overlapping, {},
+                                            release_id };
+    }
     SelectionPolicy &policy = selection.policy;
     if (policy.min_block_bp < profile.k)
         policy.min_block_bp = profile.k;
@@ -1844,17 +1882,23 @@ SeedSelection select_seeds(const SupportProfile &profile,
 
     switch (policy.policy) {
         case SelectionPolicy::LONGEST_FIRST: {
-            // a step a candidate, and a pick's labels before they are copied
-            for (const auto &cand : profile.candidates) {
-                poll(1);
-                if (cand.kmers.size() < min_kmers)
-                    continue;
-                selection.num_eligible++;
-                if (picked.size() < policy.max_seeds) {
-                    poll(cand.labels.size());
-                    charge_pick(pick_bytes(cand.labels.size(), nullptr));
-                    picked.push_back({ cand.kmers, cand.labels, {} });
-                }
+            // a step a candidate, and a pick's labels before they are copied (the candidates
+            // scanned up to each pick)
+            const std::vector<SeedCandidate> &candidates = profile.candidates;
+            size_t c = 0;
+            while (c < candidates.size()) {
+                c = scan(c, candidates.size(), [&](size_t i) {
+                    if (candidates[i].kmers.size() < min_kmers)
+                        return true;
+                    selection.num_eligible++;
+                    return picked.size() >= policy.max_seeds;
+                });
+                if (c == candidates.size())
+                    break;
+                const SeedCandidate &cand = candidates[c++];
+                poll(cand.labels.size());
+                charge_pick(pick_bytes(cand.labels.size(), nullptr));
+                picked.push_back({ cand.kmers, cand.labels, {} });
             }
             break;
         }
@@ -1881,10 +1925,10 @@ SeedSelection select_seeds(const SupportProfile &profile,
             uint64_t gathered = 0;
             for (const auto &lp : profile.labels) {
                 poll(1);
-                for (const auto &run : lp.runs) {
-                    poll(1);
-                    gathered += run.size() >= min_kmers;
-                }
+                scan(0, lp.runs.size(), [&](size_t r) {
+                    gathered += lp.runs[r].size() >= min_kmers;
+                    return true;
+                });
             }
             uint64_t scratch = 2 * annot::matrix::buffer_bytes(gathered, sizeof(Run));
             charge(scratch);
@@ -1892,11 +1936,11 @@ SeedSelection select_seeds(const SupportProfile &profile,
             runs.reserve(gathered);
             for (const auto &lp : profile.labels) {
                 poll(1);
-                for (const auto &run : lp.runs) {
-                    poll(1);
-                    if (run.size() >= min_kmers)
-                        runs.push_back({ run.begin, run.end });
-                }
+                scan(0, lp.runs.size(), [&](size_t r) {
+                    if (lp.runs[r].size() >= min_kmers)
+                        runs.push_back({ lp.runs[r].begin, lp.runs[r].end });
+                    return true;
+                });
             }
             // a piece of a round, the round's vector doubled first where it is full
             auto push_piece = [&](uint64_t begin, uint64_t end) {
@@ -1968,12 +2012,12 @@ SeedSelection select_seeds(const SupportProfile &profile,
                 charge(round_bytes);
                 std::vector<uint64_t> candidate_a;
                 candidate_a.reserve(2 * runs.size());
-                for (const auto &run : runs) {
-                    candidate_a.push_back(run.begin);
-                    if (run.end >= min_kmers)
-                        candidate_a.push_back(run.end - min_kmers);
-                }
-                poll(runs.size());
+                scan(0, runs.size(), [&](size_t r) {
+                    candidate_a.push_back(runs[r].begin);
+                    if (runs[r].end >= min_kmers)
+                        candidate_a.push_back(runs[r].end - min_kmers);
+                    return true;
+                });
                 std::sort(candidate_a.begin(), candidate_a.end());
                 candidate_a.erase(std::unique(candidate_a.begin(), candidate_a.end()),
                                   candidate_a.end());
@@ -1986,12 +2030,13 @@ SeedSelection select_seeds(const SupportProfile &profile,
                 // cost O(log r) (keeping them in a sorted vector made the sweep O(r^2))
                 std::vector<uint64_t> coords;
                 coords.reserve(runs.size());
-                for (const Run &run : runs) {
-                    coords.push_back(run.end);
-                }
-                // (each of the round's three sorts, n log n of at most twice its runs, is a
-                // piece the deadline is read around, not inside)
-                poll(runs.size());
+                scan(0, runs.size(), [&](size_t r) {
+                    coords.push_back(runs[r].end);
+                    return true;
+                });
+                // (each of the round's three sorts, n log n of at most twice its runs, the
+                // de-duplication after two of them and the zeroing of its Fenwick counts, linear
+                // in them, are pieces the deadline is read around, not inside)
                 std::sort(coords.begin(), coords.end());
                 coords.erase(std::unique(coords.begin(), coords.end()), coords.end());
                 auto index_of = [&](uint64_t x) {
@@ -2037,6 +2082,7 @@ SeedSelection select_seeds(const SupportProfile &profile,
                 best->labels = covering(best->kmers);
                 assert(best->labels.size() == best_count);
                 taken.push_back(best->kmers);
+                // (a piece the deadline is read around: at most max_seeds picks)
                 std::sort(taken.begin(), taken.end());
                 // moved, not copied: the pick's price is one label id vector (a copy beside it
                 // held its ids twice until the round ended)
@@ -2055,31 +2101,43 @@ SeedSelection select_seeds(const SupportProfile &profile,
             // graph run and each name looked up for it, and each run checked
             std::unordered_map<std::string_view, size_t> profiled;
             profiled.reserve(profile.labels.size());
-            for (size_t l = 0; l < profile.labels.size(); ++l) {
-                poll(1);
+            scan(0, profile.labels.size(), [&](size_t l) {
                 profiled.emplace(profile.labels[l].label.name, l);
-            }
+                return true;
+            });
             std::unordered_set<std::string_view> absent;
             absent.reserve(profile.unknown_labels.size());
-            for (const auto &name : profile.unknown_labels) {
+            scan(0, profile.unknown_labels.size(), [&](size_t i) {
+                absent.insert(profile.unknown_labels[i]);
+                return true;
+            });
+            // the selection's copy of the seeds (selection.policy), kept until the answer is
+            // written: their vector, then each seed once it is charged
+            charge(annot::matrix::buffer_bytes(policy_in.explicit_seeds.size(),
+                                               sizeof(ExplicitSeed)));
+            policy.explicit_seeds.reserve(policy_in.explicit_seeds.size());
+            for (const ExplicitSeed &seed : policy_in.explicit_seeds) {
                 poll(1);
-                absent.insert(name);
-            }
-            for (const auto &ex : policy.explicit_seeds) {
-                poll(1);
-                // (its names: the most it can list as not covering). It stays charged: the
-                // selection keeps its copy of the explicit seeds (selection.policy) until the
-                // answer is written, and this prices it (T5b-Y1); the pick's own lists are
-                // charged as the freeze starts (below)
-                charge(pick_bytes(ex.labels.size(), &ex.labels));
+                // (its names: the most it can list as not covering). It stays charged with the
+                // seed's copy, which this prices (T5b-Y1), made now, a step a name; the pick's
+                // own lists are charged as the freeze starts (below)
+                charge(pick_bytes(seed.labels.size(), &seed.labels));
+                ExplicitSeed &ex = policy.explicit_seeds.emplace_back();
+                ex.kmers = seed.kmers;
+                ex.labels.reserve(seed.labels.size());
+                scan(0, seed.labels.size(), [&](size_t i) {
+                    ex.labels.push_back(seed.labels[i]);
+                    return true;
+                });
                 if (ex.kmers.end > profile.num_kmers || ex.kmers.begin >= ex.kmers.end)
                     throw std::invalid_argument("Explicit seed interval out of range");
                 bool in_one_run = false;
-                for (const auto &run : profile.graph_runs) {
-                    poll(1);
+                scan(0, profile.graph_runs.size(), [&](size_t r) {
+                    const KmerInterval &run = profile.graph_runs[r];
                     if (run.begin <= ex.kmers.begin && run.end >= ex.kmers.end)
                         in_one_run = true;
-                }
+                    return true;
+                });
                 if (!in_one_run)
                     throw std::invalid_argument("Explicit seed interval is not fully present in the graph");
                 Picked p;
@@ -2097,7 +2155,7 @@ SeedSelection select_seeds(const SupportProfile &profile,
                         throw std::invalid_argument(kSeedLabelNotProfiled
                                                     + ::utils::clip_for_message(name) + "'");
                     }
-                    if (covers(profile.labels[it->second], ex.kmers, step)) {
+                    if (covers(profile.labels[it->second], ex.kmers)) {
                         p.labels.push_back(it->second);
                     } else {
                         p.labels_not_covering.push_back(name);
@@ -2159,7 +2217,7 @@ SeedSelection select_seeds(const SupportProfile &profile,
         uint64_t explicit_picks = 0;
         for (const Picked &p : picked) {
             poll(1);
-            explicit_picks += held_pick_bytes(p, step);
+            explicit_picks += held_pick_bytes(p);
         }
         charge_pick(explicit_picks);
     }
@@ -2173,19 +2231,19 @@ SeedSelection select_seeds(const SupportProfile &profile,
         const uint64_t length = p.kmers.size() + profile.k - 1;
         uint64_t heaps = 0;
         size_t longest = 0;
-        for (LabelId l : p.labels) {
-            poll(1);
-            const std::string &name = profile.labels[l].label.name;
+        scan(0, p.labels.size(), [&](size_t i) {
+            const std::string &name = profile.labels[p.labels[i]].label.name;
             heaps += string_heap_bytes(name);
             longest = std::max(longest, name.size());
-        }
+            return true;
+        });
         // (its id and dropped digest, 16 hex digits each)
         uint64_t frozen = 2 * 32 + annot::matrix::alloc_bytes(length + 1)
                 + annot::matrix::buffer_bytes(p.labels_not_covering.size(), kStringBytes);
-        for (const std::string &name : p.labels_not_covering) {
-            poll(1);
-            frozen += string_heap_bytes(name);
-        }
+        scan(0, p.labels_not_covering.size(), [&](size_t i) {
+            frozen += string_heap_bytes(p.labels_not_covering[i]);
+            return true;
+        });
         // the order's copy (40 B a pair); three temporary strings of at most twice a name, a
         // separator and 20 digits (the hash order's keys, the digest's line); the seed id's
         // views of the names kept, and its case-mapped and reverse-complemented sequences
@@ -2201,17 +2259,17 @@ SeedSelection select_seeds(const SupportProfile &profile,
         seed.sequence = std::string(query.substr(p.kmers.begin, p.kmers.size() + profile.k - 1));
         // (copied at their number, as a copy of the vector)
         seed.labels_not_covering.reserve(p.labels_not_covering.size());
-        for (const std::string &name : p.labels_not_covering) {
-            poll(1);
-            seed.labels_not_covering.push_back(name);
-        }
+        scan(0, p.labels_not_covering.size(), [&](size_t i) {
+            seed.labels_not_covering.push_back(p.labels_not_covering[i]);
+            return true;
+        });
 
         std::vector<std::pair<std::string, LabelId>> ordered;
         ordered.reserve(p.labels.size());
-        for (LabelId l : p.labels) {
-            poll(1);
-            ordered.emplace_back(profile.labels[l].label.name, l);
-        }
+        scan(0, p.labels.size(), [&](size_t i) {
+            ordered.emplace_back(profile.labels[p.labels[i]].label.name, p.labels[i]);
+            return true;
+        });
         switch (policy.label_order) {
             case SelectionPolicy::HASH:
                 std::sort(ordered.begin(), ordered.end(), [&](const auto &a, const auto &b) {
@@ -2239,10 +2297,10 @@ SeedSelection select_seeds(const SupportProfile &profile,
         // (32 B each, reserved, and each name's heap): what stays charged with the seed
         uint64_t names = annot::matrix::buffer_bytes(kept, kStringBytes)
                        + annot::matrix::buffer_bytes(listed, kStringBytes);
-        for (size_t i = 0; i < kept + listed; ++i) {
-            poll(1);
+        scan(0, kept + listed, [&](size_t i) {
             names += string_heap_bytes(ordered[i].first);
-        }
+            return true;
+        });
         charge(names);
         seed.labels.reserve(kept);
         seed.population.dropped.reserve(listed);
@@ -2250,8 +2308,7 @@ SeedSelection select_seeds(const SupportProfile &profile,
         seed.population.order = policy.label_order;
         seed.population.sample_seed = policy.sample_seed;
         uint64_t digest = 0xcbf29ce484222325ULL;
-        for (size_t i = 0; i < ordered.size(); ++i) {
-            poll(1);
+        scan(0, ordered.size(), [&](size_t i) {
             if (i < policy.max_labels_per_seed) {
                 seed.labels.push_back(ordered[i].first);
             } else {
@@ -2260,7 +2317,8 @@ SeedSelection select_seeds(const SupportProfile &profile,
                 if (ordered.size() - policy.max_labels_per_seed <= 1000)
                     seed.population.dropped.push_back(ordered[i].first);
             }
-        }
+            return true;
+        });
         seed.population.included = seed.labels.size();
         if (seed.population.dropped_count)
             seed.population.dropped_digest = hex64(digest);
