@@ -149,8 +149,9 @@ __all__ = ['LocalLimits', 'LocalBudget', 'LocalStop', 'LocalBudgetExceeded', 'Pa
 #     summary() its answer and fit tests, 8 bytes per byte of max_bytes; to_gfa() with
 #     labels='full' the names written, and per path line a name per union segment;
 #     spell() W_ROW, W_STEP per union segment and 1 lwu per 256 bases, three copies of the
-#     text; a listed walk W_ROW (and its bases at BASE_SHIFT when spelled), 400 bytes and
-#     its text; labels() per part W_ROW and per label W_ELEM and a PairLabel; label() per
+#     text; a listed walk W_ROW and 400 bytes, and when spelled (walks(spell=True): the
+#     seed and the flank) its spelling at spell()'s price, two of the three copies released
+#     once the walk is built; labels() per part W_ROW and per label W_ELEM and a PairLabel; label() per
 #     label of the parts it searches W_ELEM and each part's name/ref index at its cold
 #     price (ops' label_index); shared_names() per label W_ELEM and its name sets and dict;
 #     coverage() per pair W_ROW and per limitation W_ELEM, an entry per pair and its

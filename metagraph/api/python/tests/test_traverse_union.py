@@ -48,6 +48,16 @@ def locus(**kw):
     return union_pairs(stated(gA='annotate', gM='merge', gT='merge_ties'), **kw)
 
 
+def long_seed(g, n):
+    """A copy of graphlet |g| whose seed is |n| more bases long (A's before it): the arms and
+    their bases unchanged, as an engine answer for a long seed with short flanks."""
+    g = copy.deepcopy(g)
+    s = 'A' * n + g.seed.sequence
+    g.seed = dataclasses.replace(g.seed, sequence=s, length_bp=len(s),
+                                 num_kmers=len(s) - g.k + 1)
+    return g
+
+
 def absent_result(kind, seed_len=30, **extra):
     """A seed result without a graphlet in the shapes of SPEC §6.1 steps 2-4."""
     base = {'seed': {'seed_id': 'x', 'length_bp': seed_len, 'labels_from_seed': True},
@@ -1662,6 +1672,7 @@ class TestBudgets(unittest.TestCase):
 
         ops_ = {'walks': lambda u, **k: u.walks('right', stubs=True, **k),
                 'walks(top=3)': lambda u, **k: u.walks('right', top=3, **k),
+                'walks(spell)': lambda u, **k: u.walks('right', stubs=True, spell=True, **k),
                 'segments': lambda u, **k: u.segments('right', **k),
                 'carriers': lambda u, **k: u.carriers('right', 1, **k),
                 'statements': lambda u, **k: u.statements('right', **k),
@@ -1736,6 +1747,59 @@ class TestBudgets(unittest.TestCase):
             b = LocalBudget()
             fn(budget=b)
             self.assertLessEqual(peak(fn), b.peak_bytes, name)
+
+    def test_a_spelled_walk_charges_its_seed(self):
+        """GPT final review M2: walks(spell=True) returns the seed with each flank (a
+        100,000-base seed, 40-base flanks), and charges the seed, the flank and the
+        temporary copies before it spells them: the account bounds the traced peak on both
+        arms (warm free lists, as above), the same walks come back with and without a
+        budget, and under the reviewer's 26,214-byte budget the call stops before it
+        allocates the seed's copy (the traced peak before the stop stays below it)."""
+        import gc
+        import tracemalloc
+        g = long_seed(T.graphlet('fork'), 100000)
+        n = g.seed.length_bp
+
+        def peak(fn):
+            gc.collect()
+            gc.disable()
+            try:
+                try:
+                    fn()
+                except LocalBudgetExceeded:
+                    pass
+                tracemalloc.start()
+                base = tracemalloc.get_traced_memory()[0]
+                try:
+                    fn()
+                except LocalBudgetExceeded:
+                    pass
+                return tracemalloc.get_traced_memory()[1] - base
+            finally:
+                tracemalloc.stop()
+                gc.enable()
+        for side in ('left', 'right'):
+            u = union_pairs([{'pair': 'F', 'graphlet': g}])
+            plain = u.walks(side, spell=True, stubs=True)
+            self.assertTrue(plain)
+            for w in plain:
+                self.assertEqual(len(w.sequence), n + w.length_bp)
+                self.assertEqual(w.sequence, u.spell(side, w.id, with_seed=True))
+            b = LocalBudget()
+            got = u.walks(side, spell=True, stubs=True, budget=b)
+            self.assertEqual([(w.id, w.sequence) for w in got],
+                             [(w.id, w.sequence) for w in plain])
+            self.assertLessEqual(peak(lambda: u.walks(side, spell=True, stubs=True)),
+                                 b.peak_bytes, side)
+            self.assertGreaterEqual(b.peak_bytes, 3 * n)
+            tight = LocalBudget(memory_mb=0.025)
+            with self.assertRaises(LocalBudgetExceeded) as cm:
+                u.walks(side, spell=True, stubs=True, budget=tight)
+            self.assertEqual(cm.exception.stop.resource, 'memory')
+            self.assertGreater(cm.exception.stop.needed_at_least, 3 * n)
+            self.assertLess(peak(lambda: u.walks(side, spell=True, stubs=True,
+                                                 budget=LocalBudget(memory_mb=0.025))), n,
+                            side)
 
     def test_the_account_bounds_a_gzip_load(self):
         """GPT review M4: load() of a gzip file charges the decompressor's working buffers

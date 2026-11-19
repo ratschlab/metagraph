@@ -1694,9 +1694,17 @@ class PairUnion:
             length = figs[wid].length_bp
             if b is not None:
                 self._charge_walk(b, t, node, False)
-                b.charge(W_ROW + (length >> BASE_SHIFT if spell else 0),
-                         400 + (STR + length if spell else 0))
+                if spell:
+                    # the walk's text is the seed and its flank, spelled at spell()'s price:
+                    # three copies (the joined pieces, the reversed flank, the joined text),
+                    # two of them dropped once the walk is built (GPT final review M2)
+                    n = length + len(self._seed_seq)
+                    b.charge(W_ROW + W_STEP * t.nsegs(node) + (n >> 8), 400 + 3 * (STR + n))
+                else:
+                    b.charge(W_ROW, 400)
             out.append(self._walk(t, wid, node, False, spell, b=b))
+            if b is not None and spell:
+                b.release(2 * (STR + n))
         return out
 
     def _walk_by_id(self, side, walk):
