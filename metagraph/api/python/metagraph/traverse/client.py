@@ -403,7 +403,8 @@ def capabilities_pair_resolver(capabilities):
     does not list. A pair listed by its id only (a server after ids) is not in it; for such
     an id the client sends {graph, pair_id} where its server states multigraph.pair_id "n1"
     (TraverseClient.wire_pair(), which also falls back to this over its own server's
-    document)."""
+    document). An entry the library does not take (a p2 or malformed pair_id, an id that is
+    not its paths') is left out, so it resolves no id and the others still resolve."""
     summary = (capabilities or {}).get('graph_summary') if isinstance(capabilities, dict) \
         else None
     table = {}
@@ -411,8 +412,11 @@ def capabilities_pair_resolver(capabilities):
                           if isinstance(summary, dict) else []):
         if not isinstance(p, dict) or not _text(p.get('graph')):
             continue
-        t = _pair(p['graph'], p.get('graph_path'), p.get('annotation_path'), p.get('pair_id'),
-                  'GET /capabilities graph_summary.pairs[%d]' % i)
+        try:
+            t = _pair(p['graph'], p.get('graph_path'), p.get('annotation_path'),
+                      p.get('pair_id'), 'GET /capabilities graph_summary.pairs[%d]' % i)
+        except PairIdError:
+            continue
         if t.graph_path is not None and t.annotation_path is not None:
             table[t.pair_id] = (t.graph, t.graph_path, t.annotation_path)
     return table.get

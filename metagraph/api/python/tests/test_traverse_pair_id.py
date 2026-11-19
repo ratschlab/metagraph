@@ -457,7 +457,21 @@ class TestTheResolverHook(unittest.TestCase):
         c = _Engine(lying, self.answer)
         with self.assertRaises(PairIdError) as cm:
             c.deepen(self.new, 'right', self.leaf)
-        self.assertEqual((cm.exception.code, c.posted()), ('pair_id_mismatch', []))
+        # the entry the library does not take resolves nothing (fix review N3)
+        self.assertEqual((cm.exception.code, c.posted()), ('pair_unresolved', []))
+
+    def test_a_bad_listing_entry_leaves_the_others(self):
+        # fix review N3: one malformed entry (a p2 id, an id that is not its paths') is
+        # left out of the listing's resolver; the others still resolve, also as fallback
+        caps = copy.deepcopy(BEFORE_IDS)
+        caps['graph_summary']['pairs'] += [
+            {'graph': 'other', 'graph_path': '/x.dbg', 'pair_id': P2},
+            {'graph': GRAPH, 'graph_path': GP2, 'annotation_path': AP2, 'pair_id': ID}]
+        r = MT.client.capabilities_pair_resolver(caps)
+        self.assertEqual(r(ID), (GRAPH, GP, AP))
+        c = _Engine(caps, self.answer)
+        c.deepen(self.new, 'right', self.leaf)
+        self.assertEqual(c.posted()[0]['pairs'], BY_PATHS)
 
     def test_selectors_the_wire_refuses(self):
         c = _Engine(AFTER_IDS, self.answer)
