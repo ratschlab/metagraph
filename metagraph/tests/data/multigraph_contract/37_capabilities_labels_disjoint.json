@@ -1,7 +1,7 @@
 {
  "route": "GET /capabilities",
  "status": 200,
- "note": "H4 (SPEC sections 9 and 9.1): labels_disjoint, whether no sequence header equals a column name of any pair. A label is resolved as a column name first, so a header equal to a column name selects that column where a pair has one, never the record: headers_unique (headers against headers) does not see it, and a header label selects one record of one pair only when both certificates are true. Here a multi-graph server of two pairs, left (columns x1.fa, x2.fa; records acc1, acc2, acc3) and right (columns y1.fa, y2.fa; records acc4 and x1.fa in y1.fa, y1.fa in y2.fa): headers_unique true (every header distinct), labels_disjoint false with 2 collisions: x1.fa, a record of right (its column y1.fa) and a column of left (labels [\"x1.fa\"] selects left's column and right's record), and y1.fa, a record and a column of right itself (the column shadows the record). Each example lists the pairs with a record of that header (the column of its first record) and the pairs with a column of that name, in pair order, at most 10 each; at most 10 examples, the byte-smallest. A single-graph server states it at the top level, with null pair tags; null where a pair has no .seqs (as headers_unique). Each pair states seqs_order \"verified\": its .seqs, written by annotate --index-header-coords since H4, states its column labels, which matched the annotation's at load (section 10). A real run: the body is the server's answer, its paths relative as the graph list spells them, its server named SERVER_INSTANCE as every sample's. T5b-Y4 and T7-P1: the multigraph block states search, the /search answer budget at its default, the T7-P1 run's at staging's -p 2 --threads-each 2 --http-threads 2 (sample 12).",
+ "note": "H4 (SPEC sections 9 and 9.1): labels_disjoint, whether no sequence header equals a column name of any pair. A label is resolved as a column name first, so a header equal to a column name selects that column where a pair has one, never the record: headers_unique (headers against headers) does not see it, and a header label selects one record of one pair only when both certificates are true. Here a multi-graph server of two pairs, left (columns x1.fa, x2.fa; records acc1, acc2, acc3) and right (columns y1.fa, y2.fa; records acc4 and x1.fa in y1.fa, y1.fa in y2.fa): headers_unique true (every header distinct), labels_disjoint false with 2 collisions: x1.fa, a record of right (its column y1.fa) and a column of left (labels [\"x1.fa\"] selects left's column and right's record), and y1.fa, a record and a column of right itself (the column shadows the record). Each example lists the pairs with a record of that header (the column of its first record) and the pairs with a column of that name, in pair order, at most 10 each; at most 10 examples, the byte-smallest. A single-graph server states it at the top level, with null pair tags; null where a pair has no .seqs (as headers_unique). Each pair states seqs_order \"verified\": its .seqs, written by annotate --index-header-coords since H4, states its column labels, which matched the annotation's at load (section 10). A real run: the body is the server's answer, its pair_ids those of the paths as the graph list spells them (relative), its server named SERVER_INSTANCE as every sample's. T5b-Y4 and T7-P1: the multigraph block states search, the /search answer budget at its default, the T7-P1 run's at staging's -p 2 --threads-each 2 --http-threads 2 (sample 12). T8-M6 (train 8, pair identity; SPEC-multigraph-envelope.md section 1.2): each pair is named by graph and pair_id, master's n1 id of the name and the two paths as the graph list spells them (the paths this sample stated before), and no configured path is stated; the multigraph block states pair_id \"n1\", the form, and the capabilities probes' selectors list pair_id.",
  "body": {
   "algorithm_version": "traverse-0.2",
   "attempts": {
@@ -97,36 +97,32 @@
      {
       "columns": [
        {
-        "annotation_path": "left/anno.column_coord.annodbg",
         "graph": "left",
-        "graph_path": "left/graph.dbg"
+        "pair_id": "n1-5324c568-3bce-56a9-b7b9-3f4f5fae9624"
        }
       ],
       "header": "x1.fa",
       "records": [
        {
-        "annotation_path": "right/anno.column_coord.annodbg",
         "column": "y1.fa",
         "graph": "right",
-        "graph_path": "right/graph.dbg"
+        "pair_id": "n1-6c58ad81-d8e5-5c93-8970-6daf3ef55b23"
        }
       ]
      },
      {
       "columns": [
        {
-        "annotation_path": "right/anno.column_coord.annodbg",
         "graph": "right",
-        "graph_path": "right/graph.dbg"
+        "pair_id": "n1-6c58ad81-d8e5-5c93-8970-6daf3ef55b23"
        }
       ],
       "header": "y1.fa",
       "records": [
        {
-        "annotation_path": "right/anno.column_coord.annodbg",
         "column": "y2.fa",
         "graph": "right",
-        "graph_path": "right/graph.dbg"
+        "pair_id": "n1-6c58ad81-d8e5-5c93-8970-6daf3ef55b23"
        }
       ]
      }
@@ -137,19 +133,18 @@
     {
      "alphabet": "$ACGT",
      "annotation_form": "column_coord",
-     "annotation_path": "left/anno.column_coord.annodbg",
      "available": true,
      "counting": "upper_bound",
      "decode_charged": false,
      "graph": "left",
      "graph_mode": "basic",
-     "graph_path": "left/graph.dbg",
      "graph_representation": "succinct",
      "index_fp": null,
      "index_meta_fp": "a06ca11f03970eb9",
      "index_ns": null,
      "k": 31,
      "mask": "absent",
+     "pair_id": "n1-5324c568-3bce-56a9-b7b9-3f4f5fae9624",
      "seqs_order": "verified",
      "support_fp": "22f84b63a850cd81",
      "traversal": {
@@ -165,19 +160,18 @@
     {
      "alphabet": "$ACGT",
      "annotation_form": "column_coord",
-     "annotation_path": "right/anno.column_coord.annodbg",
      "available": true,
      "counting": "upper_bound",
      "decode_charged": false,
      "graph": "right",
      "graph_mode": "basic",
-     "graph_path": "right/graph.dbg",
      "graph_representation": "succinct",
      "index_fp": null,
      "index_meta_fp": "715b16dff75e45f1",
      "index_ns": null,
      "k": 31,
      "mask": "absent",
+     "pair_id": "n1-6c58ad81-d8e5-5c93-8970-6daf3ef55b23",
      "seqs_order": "verified",
      "support_fp": "22f84b63a850cd81",
      "traversal": {
@@ -260,6 +254,7 @@
     "/resolve",
     "/pattern"
    ],
+   "pair_id": "n1",
    "request_id": [
     "/resolve",
     "/pattern"
@@ -348,7 +343,8 @@
     "/pattern/capabilities": [
      "graph",
      "graph_path",
-     "annotation_path"
+     "annotation_path",
+     "pair_id"
     ],
     "/resolve": [
      "graphs",
@@ -365,7 +361,8 @@
     "/traverse/capabilities": [
      "graph",
      "graph_path",
-     "annotation_path"
+     "annotation_path",
+     "pair_id"
     ]
    },
    "traverse_pairs_per_request": 1,

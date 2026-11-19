@@ -721,11 +721,15 @@ TEST(ServerEnvelope, Sample25SearchCoordinateRowsAreTheWriters) {
         }
         ASSERT_EQ(stated.size(), cut["returned"].asUInt64()) << cut["graph"];
         mtg::graph::SearchCut c;
+        c.matched = cut["matched"].asUInt64();
         c.returned = cut["returned"].asUInt64();
         c.complete = cut["complete"].asBool();
         c.nth_score = cut["nth_score"].isNull() ? 0 : cut["nth_score"].asUInt64();
         c.tied = cut["tied"].asUInt64();
         c.tied_returned = cut["tied_returned"].asUInt64();
+        // matched: every row where complete, else at least the rows above the cut and its tie
+        EXPECT_EQ(c.complete, c.matched == c.returned) << cut["graph"];
+        EXPECT_LE(c.returned + c.tied - c.tied_returned, c.matched) << cut["graph"];
         const SeqSearchResult written(QuerySequence { 0, query["seq_description"].asString(), "" },
                                       std::move(result), {}, c);
         const Json::Value json = written.to_json(false, 31);
@@ -911,6 +915,8 @@ TEST(ServerEnvelope, Samples71To75PartialRefusal) {
                 EXPECT_EQ(answer, r.isMember("priced_mb"));
                 mtg::graph::SearchCut cut;
                 cut.abundances = entry.isMember("nth_median");
+                // the computed cut's matched, which the refused entry keeps
+                cut.matched = entry["matched"].asUInt64();
                 SeqSearchResult stub(QuerySequence { i, description, "" },
                                      SeqSearchResult::LabelVec(), std::nullopt, cut);
                 stub.refuse(answer ? mtg::graph::SearchCut::Refused::ANSWER

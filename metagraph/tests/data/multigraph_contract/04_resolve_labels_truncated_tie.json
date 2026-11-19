@@ -1,7 +1,7 @@
 {
  "route": "POST /resolve",
  "status": 200,
- "note": "E18: discovery ranked by k-mers supported, ties by label name; labels_truncated gains tied_at_boundary (labels with the kept boundary support, kept or dropped) and tied_kept (how many of them were kept).",
+ "note": "E18: discovery ranked by k-mers supported, ties by label name; labels_truncated gains tied_at_boundary (labels with the kept boundary support, kept or dropped) and tied_kept (how many of them were kept). T8-M6 (train 8, pair identity; SPEC-multigraph-envelope.md section 1.2): each pair is named by graph and pair_id, master's n1 id of the name and the two paths as the graph list spells them (the paths this sample stated before), and no configured path is stated.",
  "body": {
   "envelope_version": 1,
   "route": "/resolve",
@@ -23,8 +23,7 @@
   "answers": [
    {
     "graph": "bact_other",
-    "graph_path": "/scratch/nvme8/refseq_r237/bact_other/graph.dbg",
-    "annotation_path": "/scratch/nvme8/refseq_r237/bact_other/annotation.row_diff_brwt_coord.annodbg",
+    "pair_id": "n1-13a94733-667c-51eb-b3a9-aa435eacfdcd",
     "index_fp": "7bab0c8c0ce6d061cf5787419f9219e698cbb084f5de3935254bcd503149be7a",
     "outcome": "answered",
     "candidates": [

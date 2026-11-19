@@ -1,7 +1,7 @@
 {
  "route": "POST /traverse",
  "status": 200,
- "note": "E5b: the request-wide memory bound (--traverse-max-request-memory-mb 2, with --traverse-max-memory-mb 1). Before seed i >= 1 starts, the results of seeds 0 to i-1 (usage.per_seed final_bytes: a walked result its account without the budget's cache allotments, which end with its walk) and the seed's memory budget are compared with the bound: here seeds 0 and 1 hold 1288636 bytes, which with the third seed's 1 MiB budget pass 2 MiB, so the third is not started: a failed result in the shape of an attempt's unstarted seed with resource_stop scope \"request\", resource \"memory\", phase \"not_started\", actions [\"split_request\"], a walk_domain with knob max_request_memory_mb (limit the bound, observed what the results before it hold, MiB rounded up), memory_bound_soft and unknown_labels; usage.per_seed states it not_started, stopped_by \"request_memory\", and seeds.started does not count it. The response is 200, the one-entry envelope of a named /traverse. The answer is a real run of the release binary on the integration fixture (three records acc1-acc3) served as bact_other, tagged with that pair and identity: its labels, columns and sequences are the fixture's, so the request does not replay on the real pair.",
+ "note": "E5b: the request-wide memory bound (--traverse-max-request-memory-mb 2, with --traverse-max-memory-mb 1). Before seed i >= 1 starts, the results of seeds 0 to i-1 (usage.per_seed final_bytes: a walked result its account without the budget's cache allotments, which end with its walk) and the seed's memory budget are compared with the bound: here seeds 0 and 1 hold 1288636 bytes, which with the third seed's 1 MiB budget pass 2 MiB, so the third is not started: a failed result in the shape of an attempt's unstarted seed with resource_stop scope \"request\", resource \"memory\", phase \"not_started\", actions [\"split_request\"], a walk_domain with knob max_request_memory_mb (limit the bound, observed what the results before it hold, MiB rounded up), memory_bound_soft and unknown_labels; usage.per_seed states it not_started, stopped_by \"request_memory\", and seeds.started does not count it. The response is 200, the one-entry envelope of a named /traverse. The answer is a real run of the release binary on the integration fixture (three records acc1-acc3) served as bact_other, tagged with that pair and identity: its labels, columns and sequences are the fixture's, so the request does not replay on the real pair. T8-M6 (train 8, pair identity; SPEC-multigraph-envelope.md section 1.2): each pair is named by graph and pair_id, master's n1 id of the name and the two paths as the graph list spells them (the paths this sample stated before), and no configured path is stated.",
  "request": {
   "graph": "bact_other",
   "attempt_id": "svc-trv-91aa07-2",
@@ -127,8 +127,7 @@
   "answers": [
    {
     "graph": "bact_other",
-    "graph_path": "/scratch/nvme8/refseq_r237/bact_other/graph.dbg",
-    "annotation_path": "/scratch/nvme8/refseq_r237/bact_other/annotation.row_diff_brwt_coord.annodbg",
+    "pair_id": "n1-13a94733-667c-51eb-b3a9-aa435eacfdcd",
     "index_fp": "7bab0c8c0ce6d061cf5787419f9219e698cbb084f5de3935254bcd503149be7a",
     "outcome": "answered",
     "algorithm_version": "traverse-0.2",

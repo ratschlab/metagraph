@@ -451,8 +451,8 @@ TEST(ServerFanout, OnePairRunsInline) {
 }
 
 // Samples 03 and 16 name a not_reached or unfinished pair as the code does (contract F6 of
-// the release-10 review): "(name, graph_path, annotation_path)", the entry's own tags, since a
-// name may hold several pairs
+// the release-10 review): "(name, pair_id)", the entry's own tags, since a name may hold
+// several pairs (train 8: no path, before "(name, graph_path, annotation_path)")
 TEST(ServerFanout, SamplesNameThePairAsTheFanOutDoes) {
     size_t checked = 0;
     for (const char *name : { "03_resolve_envelope_cutoff.json",
@@ -466,8 +466,7 @@ TEST(ServerFanout, SamplesNameThePairAsTheFanOutDoes) {
             if (code != "not_reached" && code != "unfinished")
                 continue;
             const std::string label = "(" + entry["graph"].asString() + ", "
-                    + entry["graph_path"].asString() + ", "
-                    + entry["annotation_path"].asString() + ")";
+                    + entry["pair_id"].asString() + ")";
             EXPECT_EQ(0u, entry["refusal"]["error"].asString().find(route + ": pair " + label + " "))
                 << name << ": " << entry["refusal"]["error"].asString();
             ++checked;

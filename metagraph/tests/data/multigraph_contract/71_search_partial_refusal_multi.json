@@ -1,7 +1,7 @@
 {
  "route": "POST /search",
  "status": 200,
- "note": "T7-P1 (/search partial refusal per (record, pair), the owner's decision of 2026-11-14; SPEC-multigraph-envelope.md section 3). With the request field partial_refusal (a boolean, false when absent, read as with_signature; it joins the result cache's key), a unit, one FASTA record on one pair, whose values (its rows and their per-position values) or whose own JSON object would pass --search-max-answer-memory-mb is answered alone, as a refused cut entry: the record's object keeps its seq_description (and, with align, the first pair's alignment), the unit's rows are missing, and its entry in cuts (one a pair searched, in pair order, as every entry) states the pair's tags, returned 0, complete false, nth_score null, tied and tied_returned 0 (nth_median null and tied_same_median 0 where the cut has abundances) and refused: {account, code: \"search_answer_too_large\", max_memory_mb}, plus priced_mb with account \"answer\". An answered entry has no refused member. Every other unit is answered byte for byte as without a budget, and the status is 200; the request's answer account passing still refuses the whole request, 400 \"answer\" (sample 75). A refused entry never means that nothing matched: the caller did not get this unit's rows, and may retry the record alone on the pair, with fewer top_labels, a larger discovery_fraction or no per-position values; the same request on the same server and index is refused in the same units. A client counts the refused entries in cuts; GET /capabilities states search.unit_refused (sample 12), and an engine before it ignores the field. Here query_coords on bact_other (2,000 columns sharing one 100 bp stretch) and inv_insecta (the first 10 of them), the bound 1 MiB: q1, the stretch, is refused on bact_other (\"values\": its 2,000 rows of coordinates) and answered on inv_insecta (10 rows); q2 (w0000's first flank and the stretch's first 30 bp: w0000 alone) is answered on both. Without the field the same request is refused whole, 400 \"values\" (as sample 60). A real run, the bound 1 MiB so that the sample stays short; at the default bound the same request answered every unit (462,073 bytes of text).",
+ "note": "T7-P1 (/search partial refusal per (record, pair), the owner's decision of 2026-11-14; SPEC-multigraph-envelope.md section 3). With the request field partial_refusal (a boolean, false when absent, read as with_signature; it joins the result cache's key), a unit, one FASTA record on one pair, whose values (its rows and their per-position values) or whose own JSON object would pass --search-max-answer-memory-mb is answered alone, as a refused cut entry: the record's object keeps its seq_description (and, with align, the first pair's alignment), the unit's rows are missing, and its entry in cuts (one a pair searched, in pair order, as every entry) states the pair's tags, returned 0, complete false, nth_score null, tied and tied_returned 0 (nth_median null and tied_same_median 0 where the cut has abundances) and refused: {account, code: \"search_answer_too_large\", max_memory_mb}, plus priced_mb with account \"answer\". An answered entry has no refused member. Every other unit is answered byte for byte as without a budget, and the status is 200; the request's answer account passing still refuses the whole request, 400 \"answer\" (sample 75). A refused entry never means that nothing matched: the caller did not get this unit's rows, and may retry the record alone on the pair, with fewer top_labels, a larger discovery_fraction or no per-position values; the same request on the same server and index is refused in the same units. A client counts the refused entries in cuts; GET /capabilities states search.unit_refused (sample 12), and an engine before it ignores the field. Here query_coords on bact_other (2,000 columns sharing one 100 bp stretch) and inv_insecta (the first 10 of them), the bound 1 MiB: q1, the stretch, is refused on bact_other (\"values\": its 2,000 rows of coordinates) and answered on inv_insecta (10 rows); q2 (w0000's first flank and the stretch's first 30 bp: w0000 alone) is answered on both. Without the field the same request is refused whole, 400 \"values\" (as sample 60). A real run, the bound 1 MiB so that the sample stays short; at the default bound the same request answered every unit (462,073 bytes of text). T8-M6 (train 8, pair identity; SPEC-multigraph-envelope.md section 1.2): each pair is named by graph and pair_id, master's n1 id of the name and the two paths as the graph list spells them (the paths this sample stated before), and no configured path is stated; each cut states matched, the labels above the request's thresholds before the cut (master's member; returned where the cut is complete, the count the unit's search computed where it is refused).",
  "request": {
   "FASTA": ">q1\nCACGATACAATAAGAGTAGTGATTGGCCAGTTGTGATTGTAGGAACCCATGCCTGCCTGAACCTACAACTCCTGAGACTGGAGATCCCGCACAGCCTCGA\n>q2\nTCAGACGGTGCCTAGTCCAACACGATACAATAAGAGTAGTGATTGGCCAG\n",
   "top_labels": 10000,
@@ -16,12 +16,12 @@
   {
    "cuts": [
     {
-     "annotation_path": "bact_other/annotation.column_coord.annodbg",
      "complete": false,
      "graph": "bact_other",
-     "graph_path": "bact_other/graph.dbg",
      "index_fp": null,
+     "matched": 2000,
      "nth_score": null,
+     "pair_id": "n1-640e8153-17cd-56cc-bf77-39950dd84010",
      "refused": {
       "account": "values",
       "code": "search_answer_too_large",
@@ -32,12 +32,12 @@
      "tied_returned": 0
     },
     {
-     "annotation_path": "inv_insecta/annotation.column_coord.annodbg",
      "complete": true,
      "graph": "inv_insecta",
-     "graph_path": "inv_insecta/graph.dbg",
      "index_fp": null,
+     "matched": 10,
      "nth_score": null,
+     "pair_id": "n1-9931dd24-cbab-589a-b98b-e03df6847803",
      "returned": 10,
      "tied": 0,
      "tied_returned": 0
@@ -45,83 +45,73 @@
    ],
    "results": [
     {
-     "annotation_path": "inv_insecta/annotation.column_coord.annodbg",
      "graph": "inv_insecta",
-     "graph_path": "inv_insecta/graph.dbg",
      "kmer_coords": "0-20-89",
      "kmer_count": 70,
+     "pair_id": "n1-9931dd24-cbab-589a-b98b-e03df6847803",
      "sample": "w0000"
     },
     {
-     "annotation_path": "inv_insecta/annotation.column_coord.annodbg",
      "graph": "inv_insecta",
-     "graph_path": "inv_insecta/graph.dbg",
      "kmer_coords": "0-20-89",
      "kmer_count": 70,
+     "pair_id": "n1-9931dd24-cbab-589a-b98b-e03df6847803",
      "sample": "w0001"
     },
     {
-     "annotation_path": "inv_insecta/annotation.column_coord.annodbg",
      "graph": "inv_insecta",
-     "graph_path": "inv_insecta/graph.dbg",
      "kmer_coords": "0-20-89",
      "kmer_count": 70,
+     "pair_id": "n1-9931dd24-cbab-589a-b98b-e03df6847803",
      "sample": "w0002"
     },
     {
-     "annotation_path": "inv_insecta/annotation.column_coord.annodbg",
      "graph": "inv_insecta",
-     "graph_path": "inv_insecta/graph.dbg",
      "kmer_coords": "0-20-89",
      "kmer_count": 70,
+     "pair_id": "n1-9931dd24-cbab-589a-b98b-e03df6847803",
      "sample": "w0003"
     },
     {
-     "annotation_path": "inv_insecta/annotation.column_coord.annodbg",
      "graph": "inv_insecta",
-     "graph_path": "inv_insecta/graph.dbg",
      "kmer_coords": "0-20-89",
      "kmer_count": 70,
+     "pair_id": "n1-9931dd24-cbab-589a-b98b-e03df6847803",
      "sample": "w0004"
     },
     {
-     "annotation_path": "inv_insecta/annotation.column_coord.annodbg",
      "graph": "inv_insecta",
-     "graph_path": "inv_insecta/graph.dbg",
      "kmer_coords": "0-20-89",
      "kmer_count": 70,
+     "pair_id": "n1-9931dd24-cbab-589a-b98b-e03df6847803",
      "sample": "w0005"
     },
     {
-     "annotation_path": "inv_insecta/annotation.column_coord.annodbg",
      "graph": "inv_insecta",
-     "graph_path": "inv_insecta/graph.dbg",
      "kmer_coords": "0-20-89",
      "kmer_count": 70,
+     "pair_id": "n1-9931dd24-cbab-589a-b98b-e03df6847803",
      "sample": "w0006"
     },
     {
-     "annotation_path": "inv_insecta/annotation.column_coord.annodbg",
      "graph": "inv_insecta",
-     "graph_path": "inv_insecta/graph.dbg",
      "kmer_coords": "0-20-89",
      "kmer_count": 70,
+     "pair_id": "n1-9931dd24-cbab-589a-b98b-e03df6847803",
      "sample": "w0007"
     },
     {
-     "annotation_path": "inv_insecta/annotation.column_coord.annodbg",
      "graph": "inv_insecta",
-     "graph_path": "inv_insecta/graph.dbg",
      "kmer_coords": "0-20-89",
      "kmer_count": 70,
+     "pair_id": "n1-9931dd24-cbab-589a-b98b-e03df6847803",
      "sample": "w0008"
     },
     {
-     "annotation_path": "inv_insecta/annotation.column_coord.annodbg",
      "graph": "inv_insecta",
-     "graph_path": "inv_insecta/graph.dbg",
      "kmer_coords": "0-20-89",
      "kmer_count": 70,
+     "pair_id": "n1-9931dd24-cbab-589a-b98b-e03df6847803",
      "sample": "w0009"
     }
    ],
@@ -130,23 +120,23 @@
   {
    "cuts": [
     {
-     "annotation_path": "bact_other/annotation.column_coord.annodbg",
      "complete": true,
      "graph": "bact_other",
-     "graph_path": "bact_other/graph.dbg",
      "index_fp": null,
+     "matched": 1,
      "nth_score": null,
+     "pair_id": "n1-640e8153-17cd-56cc-bf77-39950dd84010",
      "returned": 1,
      "tied": 0,
      "tied_returned": 0
     },
     {
-     "annotation_path": "inv_insecta/annotation.column_coord.annodbg",
      "complete": true,
      "graph": "inv_insecta",
-     "graph_path": "inv_insecta/graph.dbg",
      "index_fp": null,
+     "matched": 1,
      "nth_score": null,
+     "pair_id": "n1-9931dd24-cbab-589a-b98b-e03df6847803",
      "returned": 1,
      "tied": 0,
      "tied_returned": 0
@@ -154,19 +144,17 @@
    ],
    "results": [
     {
-     "annotation_path": "bact_other/annotation.column_coord.annodbg",
      "graph": "bact_other",
-     "graph_path": "bact_other/graph.dbg",
      "kmer_coords": "0-0-19",
      "kmer_count": 20,
+     "pair_id": "n1-640e8153-17cd-56cc-bf77-39950dd84010",
      "sample": "w0000"
     },
     {
-     "annotation_path": "inv_insecta/annotation.column_coord.annodbg",
      "graph": "inv_insecta",
-     "graph_path": "inv_insecta/graph.dbg",
      "kmer_coords": "0-0-19",
      "kmer_count": 20,
+     "pair_id": "n1-9931dd24-cbab-589a-b98b-e03df6847803",
      "sample": "w0000"
     }
    ],

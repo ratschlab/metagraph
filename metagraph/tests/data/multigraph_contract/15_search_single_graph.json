@@ -1,7 +1,7 @@
 {
  "route": "POST /search",
  "status": 200,
- "note": "E1 on a single-graph server: rows as today (no tags), plus one cut per query sequence whose pair tags are null and whose index_fp is the server's (null without a manifest).",
+ "note": "E1 on a single-graph server: rows as today (no tags), plus one cut per query sequence whose pair tags are null and whose index_fp is the server's (null without a manifest). T8-M6 (train 8, pair identity; SPEC-multigraph-envelope.md section 1.2): each pair is named by graph and pair_id, master's n1 id of the name and the two paths as the graph list spells them (the paths this sample stated before), and no configured path is stated; each cut states matched, the labels above the request's thresholds before the cut (master's member; returned where the cut is complete).",
  "body": [
   {
    "seq_description": "q3",
@@ -14,9 +14,9 @@
    "cuts": [
     {
      "graph": null,
-     "graph_path": null,
-     "annotation_path": null,
+     "pair_id": null,
      "index_fp": "907ec986e19ecb04c9702478eac098a832a2cd4a3d7d7c8febbf8a71f42af5de",
+     "matched": 1,
      "returned": 1,
      "complete": true,
      "nth_score": null,

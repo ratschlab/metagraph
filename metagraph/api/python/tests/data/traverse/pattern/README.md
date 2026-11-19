@@ -15,7 +15,8 @@ alone states page faults), `server_instance`, and the counts and work of
 the first `determinism: time_limited` pattern of an answer (and, when the clock cut its
 release, its `returned` and `results`; the later ones, stopped by the same budget, are
 compared as they are).
-Paths under the generator's work directory read `{work}/...`. Three fixtures are
+Paths under the generator's work directory read `{work}/...`, a multi-graph
+server's `pair_id` the id of its name and those paths. Three fixtures are
 HAND-MADE (no server produces them on demand); their text is the code's. No fixture
 holds `primary_unwrapped` (server_query and the CLI always wrap a PRIMARY graph),
 `alphabet_unsupported` (a graph of another alphabet does not load in this build),
@@ -42,7 +43,7 @@ and its counts exact (`unmasked_checked`, `unmasked_checked_dummies`); the serve
 - `pattern_capabilities_built_at_load` (GET /pattern/capabilities, 200, built_at_load): the same server on the route of the full block
 - `capabilities_multi_graph` (GET /capabilities, 200, multi): a multi-graph server: the `pattern` feature, its routes per pair (?graph=), the block with the contract and the caps and no graph (available: a pair is served), graph_summary (each pair: available, mask, counting, k, graph_mode, index_fp, traversal, and its capability profile, E17: index_meta_fp, alphabet, graph_representation, annotation_form, decode_charged, traversal.counts, support_fp, seqs_order, SPEC-multigraph-envelope.md section 8.1; columns_disjoint; headers_unique, section 9; labels_disjoint, section 9.1) and max_graphs_without_selection (the threshold of the selection rule: a request without `graphs` queries every name of a list of at most that many, the server flag, 10 by default)
 - `traverse_capabilities_multi_graph` (GET /traverse/capabilities, 200, multi): the multi-graph server probed for one pair: the envelope of one entry (SPEC-multigraph-envelope.md section 1), the pair's probe with its gate block and `details`, tagged with the pair
-- `pattern_capabilities_multi_graph` (GET /pattern/capabilities, 200, multi): the multi-graph server on the route of the full block: the envelope of one entry, the block of the pair ?graph= selects, tagged with the pair (graph, graph_path as version 1 names it, annotation_path, index_fp, outcome)
+- `pattern_capabilities_multi_graph` (GET /pattern/capabilities, 200, multi): the multi-graph server on the route of the full block: the envelope of one entry, the block of the pair ?graph= selects, tagged with the pair (graph and pair_id as version 1 names it, index_fp, outcome)
 - `pattern_capabilities_multi_graph_no_graph` (GET /pattern/capabilities, 200, multi): the same route without ?graph=: the envelope over every pair (here its one), up to max_graphs_without_selection names (SPEC-multigraph-envelope.md section 1; a 400 before release 10)
 - `traverse_capabilities_utf8_labels` (GET /traverse/capabilities, 200, utf8_labels): GET /traverse/capabilities of the utf8_labels server (a BASIC graph with its mask file, counting exact, an unbudgeted column annotation by header): the block of a server one of whose labels the answers can never name (SPEC §8.9), nothing of it in the document
 - `pattern_capabilities_utf8_labels` (GET /pattern/capabilities, 200, utf8_labels): the same server on the route of the full block (the block the server's answers are validated against)
@@ -184,7 +185,7 @@ and its counts exact (`unmasked_checked`, `unmasked_checked_dummies`); the serve
 - `later_increment_budget_split` (POST /pattern, 400, masked): 400 later_increment: budget_split (how a multi-graph request would split its budgets) is refused by name, whatever its value; graphs is served (multi_graph_count)
 - `graphs_single_graph` (POST /pattern, 400, masked): 400 invalid_request: graphs (a multi-graph server's selection) on a single-graph server, which hosts one graph
 - `in_ram_single_graph` (POST /pattern, 200, masked): in_ram accepted, as /search's: a single-graph server answers from the index it holds, timing.load_ms 0
-- `multi_graph_count` (POST /pattern, 200, multi): a multi-graph server answers the graphs a request names (graphs, as /search): one answer per pair, each the single-graph answer tagged with graph, graph_path, annotation_path and index_fp
+- `multi_graph_count` (POST /pattern, 200, multi): a multi-graph server answers the graphs a request names (graphs, as /search): one answer per pair, each the single-graph answer tagged with graph, pair_id and index_fp
 - `multi_graph_in_ram` (POST /pattern, 200, multi): in_ram on a multi-graph server that loaded its graphs into RAM (no --mmap): served from them, timing.load_ms 0; on mmap the pair is loaded for the request and its budget starts after the load
 - `multi_graph_unknown` (POST /pattern, 400, multi): 400 graph_unknown (SPEC-multigraph-envelope.md section 6): a name the graph list does not have
 - `multi_graph_refused_pair` (POST /pattern, 200, multi_mixed): a pair the route does not serve (a hash graph) beside one it does: 200, the envelope with the hash pair a refused entry (outcome refused, `refusal` the body it alone would have been answered with its http_status: representation_unsupported) and the mini pair answered (outcome answered), answered 1 and refused 1; a refusal that no pair decides (the request's fields, graphs) stays the whole request's 400

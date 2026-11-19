@@ -1,7 +1,7 @@
 {
  "route": "POST /search",
  "status": 200,
- "note": "E1 on a counts annotation (single-graph server: rows untagged as today, one cut with null pair tags). Order: score desc, then the LOWER median of the label's abundances over the query positions where it is present (abundance >= 1, zeros excluded; sorted ascending, index floor((n-1)/2)) desc, then label asc. With N = 1, SRR1001 (median 7) beats SRR0999 (12 k-mers, median 1). nth_median and tied_same_median appear on counts annotations only.",
+ "note": "E1 on a counts annotation (single-graph server: rows untagged as today, one cut with null pair tags). Order: score desc, then the LOWER median of the label's abundances over the query positions where it is present (abundance >= 1, zeros excluded; sorted ascending, index floor((n-1)/2)) desc, then label asc. With N = 1, SRR1001 (median 7) beats SRR0999 (12 k-mers, median 1). nth_median and tied_same_median appear on counts annotations only. T8-M6 (train 8, pair identity; SPEC-multigraph-envelope.md section 1.2): each pair is named by graph and pair_id, master's n1 id of the name and the two paths as the graph list spells them (the paths this sample stated before), and no configured path is stated; each cut states matched, the labels above the request's thresholds before the cut (master's member; returned where the cut is complete, the least the tie admits in this illustration).",
  "request": {
   "FASTA": ">q2\nACGT...",
   "top_labels": 1,
@@ -20,9 +20,9 @@
    "cuts": [
     {
      "graph": null,
-     "graph_path": null,
-     "annotation_path": null,
+     "pair_id": null,
      "index_fp": null,
+     "matched": 2,
      "returned": 1,
      "complete": false,
      "nth_score": 12,

@@ -4348,7 +4348,7 @@ how the search service uses it; the route serves any number.
 | `timing` | object | `elapsed_ms`: the whole request, the loads and the pairs' work included; `cpu_ms` (and `page_faults` on Linux, §8.4): the request's own thread (the parse, the checks, the envelope) plus every pair's work on its pool thread, from its index lease to its entry — an answered pair's top-level `cpu_ms` and the work of a pair refused after its lease (the loads' own threads not counted). Varies between runs |
 | `envelope_version` | integer | 1: the multi-graph envelope of `SPEC-multigraph-envelope.md` section 1 |
 | `route` | string | `/pattern` |
-| `not_reached` | list of objects | the pairs never started (refusal `code: "not_reached"`), each `{graph, graph_path, annotation_path}`, in the order of `answers` |
+| `not_reached` | list of objects | the pairs never started (refusal `code: "not_reached"`), each `{graph, pair_id}`, in the order of `answers` |
 | `unfinished` | list of objects | the pairs started and cut at the work cutoff (refusal `code: "unfinished"`), likewise |
 | `request_id` | string \| null | the request's `request_id` (`SPEC-multigraph-envelope.md` section 5); `null` without one |
 | `server_instance` | string | this server process (the attempt ledger's value). Varies between runs |
@@ -4358,8 +4358,7 @@ how the search service uses it; the route serves any number.
 | field | type | meaning |
 |---|---|---|
 | `graph` | string | the name the pair was selected by |
-| `graph_path` | string | the pair's graph, as the list spells it |
-| `annotation_path` | string | the pair's annotation, likewise |
+| `pair_id` | string | the pair's id: master's n1 id of the name and the pair's two paths as the list spells them (`SPEC-multigraph-envelope.md` section 1.2); no answer states a configured path |
 | `index_fp` | string \| null | the pair's index identity (its `index.index_fp`): what a requester merging the answers of several pairs, or of several requests, joins on; `null` without a manifest in the list (joins unverifiable). A refused entry states it from the graph list's manifest alone |
 | `outcome` | string | `answered`: the entry is the pair's answer (§8) with these tags; `refused`: the pair alone would have been refused, the entry is these tags and `refusal`, nothing of an answer |
 | `refusal` | object | refused entries only: `pair_refusal` |
@@ -4473,7 +4472,7 @@ the other pairs.
 | field | type | meaning |
 |---|---|---|
 | `graph` | string | the name `?graph=` gave |
-| `graph_path` | string | the pair's graph, as the list spells it |
+| `pair_id` | string | the pair's id (`answer_pair`) |
 
 ### 24.4 `graph_summary` and `columns_disjoint` (`GET /capabilities`)
 
@@ -4496,8 +4495,7 @@ two thousand chunks (a name over many chunks repeats each chunk's entry); a clie
 | field | type | meaning |
 |---|---|---|
 | `graph` | string | the name |
-| `graph_path` | string | the pair's graph |
-| `annotation_path` | string | the pair's annotation |
+| `pair_id` | string | the pair's id (`answer_pair`), by which `?pair_id=` and a `pairs` object select it |
 | `index_ns` | string \| null | the list's `index_ns` column |
 | `index_fp` | string \| null | the pair's manifest digest (its `index_fp`) |
 | `k` | integer | the graph's k |

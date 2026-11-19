@@ -1,7 +1,7 @@
 {
  "route": "GET /traverse/capabilities",
  "status": 200,
- "note": "E3: without ?graph= every pair of the index (up to max_graphs_without_selection) in the envelope; ?graph=&graph_path=&annotation_path= (E12) select one pair, which answers in a one-entry envelope. Each probe states the server's maxima, max_request_memory_mb (E5b) and max_concurrent (E19: the caps on the requests of each long route run at once, 0 = none) among them, and (H1, train 3) the caps on a request's counts, max_explicit_labels, max_extra_labels and max_cost_entries (10,000 each by default; 0 = unlimited); (H2, train 3) the resolve block's discovery (the bounds of a /resolve discovery per pair, SPEC-labeled-traversal-core.md section 4.6), max_explicit_labels (sample 32) and seed_order (\"rank\": a selection's seeds best first, section 4.3); and (H3, train 3) attempts.tombstone_hold_s, the longest a tombstone (a cancel of an id the server does not know) is held, 900 s by default (sample 35), and (round 3) attempts.not_after_horizon_ms, how far ahead of the server's clock a not_after_ms may lie, hard_cap_ms + clock_skew_allowance_ms = 901,000 ms (further ahead: 400 not_after_beyond_horizon, sample 36). Every train-3 member is a real run's of the assembled train-3 binary. G7-F1 (GPT review 7, finding 1): the resolve block's max_explicit_seeds, the cap on a /resolve's explicit seeds (--resolve-max-explicit-seeds, 1,024 by default, 0 = unlimited; more are a 400 too_many_explicit_seeds, sample 38) and the maximum of its select.max_seeds (a larger one is lowered to it, stated in limits.clamped), a real run's of the G7-F1 binary.",
+ "note": "E3: without ?graph= every pair of the index (up to max_graphs_without_selection) in the envelope; ?graph=&graph_path=&annotation_path= (E12), or ?graph=&pair_id= (train 8), select one pair, which answers in a one-entry envelope. Each probe states the server's maxima, max_request_memory_mb (E5b) and max_concurrent (E19: the caps on the requests of each long route run at once, 0 = none) among them, and (H1, train 3) the caps on a request's counts, max_explicit_labels, max_extra_labels and max_cost_entries (10,000 each by default; 0 = unlimited); (H2, train 3) the resolve block's discovery (the bounds of a /resolve discovery per pair, SPEC-labeled-traversal-core.md section 4.6), max_explicit_labels (sample 32) and seed_order (\"rank\": a selection's seeds best first, section 4.3); and (H3, train 3) attempts.tombstone_hold_s, the longest a tombstone (a cancel of an id the server does not know) is held, 900 s by default (sample 35), and (round 3) attempts.not_after_horizon_ms, how far ahead of the server's clock a not_after_ms may lie, hard_cap_ms + clock_skew_allowance_ms = 901,000 ms (further ahead: 400 not_after_beyond_horizon, sample 36). Every train-3 member is a real run's of the assembled train-3 binary. G7-F1 (GPT review 7, finding 1): the resolve block's max_explicit_seeds, the cap on a /resolve's explicit seeds (--resolve-max-explicit-seeds, 1,024 by default, 0 = unlimited; more are a 400 too_many_explicit_seeds, sample 38) and the maximum of its select.max_seeds (a larger one is lowered to it, stated in limits.clamped), a real run's of the G7-F1 binary. T8-M6 (train 8, pair identity; SPEC-multigraph-envelope.md section 1.2): each pair is named by graph and pair_id, master's n1 id of the name and the two paths as the graph list spells them (the paths this sample stated before), and no configured path is stated.",
  "body": {
   "envelope_version": 1,
   "route": "/traverse/capabilities",
@@ -15,8 +15,7 @@
   "answers": [
    {
     "graph": "bact_other",
-    "graph_path": "/scratch/nvme8/refseq_r237/bact_other/graph.dbg",
-    "annotation_path": "/scratch/nvme8/refseq_r237/bact_other/annotation.row_diff_brwt_coord.annodbg",
+    "pair_id": "n1-13a94733-667c-51eb-b3a9-aa435eacfdcd",
     "index_fp": "7bab0c8c0ce6d061cf5787419f9219e698cbb084f5de3935254bcd503149be7a",
     "outcome": "answered",
     "algorithm_version": "traverse-0.2",
@@ -334,8 +333,7 @@
    },
    {
     "graph": "bact_pseudomonadota",
-    "graph_path": "/scratch/nvme10/refseq_r237/bact_pseudomonadota/graph.dbg",
-    "annotation_path": "/scratch/nvme10/refseq_r237/bact_pseudomonadota/annotation.row_diff_brwt_coord.annodbg",
+    "pair_id": "n1-f52c7f73-ec85-5d74-9e27-7ba198879d0b",
     "index_fp": "c9a9c34fa17d947caa08350e41652ee3506ff27f4141ff1717eb959bbb5064dc",
     "outcome": "answered",
     "algorithm_version": "traverse-0.2",

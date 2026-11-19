@@ -1,7 +1,7 @@
 {
  "route": "several",
  "status": 400,
- "note": "E12: the selector refusals, before any pair starts. Every one is 400 with code and, where a choice exists, the candidate pairs. A request the release-9 server already refused keeps that refusal's error text byte for byte (the code is an added member). The names cap (max_graphs_without_selection) keeps its existing 400. An empty graphs on a multi-graph /search (train 4) was answered 200 with the body null before; it selects no pair and is refused with pair_not_found, before any cached answer.",
+ "note": "E12: the selector refusals, before any pair starts. Every one is 400 with code and, where a choice exists, the candidate pairs. A request the release-9 server already refused keeps that refusal's error text byte for byte (the code is an added member), apart from the texts that named a configured path, which train 8 words without one (SPEC-multigraph-envelope.md section 6). The names cap (max_graphs_without_selection) keeps its existing 400. An empty graphs on a multi-graph /search (train 4) was answered 200 with the body null before; it selects no pair and is refused with pair_not_found, before any cached answer. T8-M6 (train 8, pair identity; SPEC-multigraph-envelope.md section 1.2): each pair is named by graph and pair_id, master's n1 id of the name and the two paths as the graph list spells them (the paths this sample stated before), and no configured path is stated; the texts that named configured paths name the pair by its name and pair_id (section 6).",
  "body": [
   {
    "case": "graphs and pairs together",
@@ -17,18 +17,16 @@
    "route": "POST /pattern",
    "status": 400,
    "body": {
-    "error": "request.pairs[1]: no pair of 'refseq' has graph_path '/scratch/x/graph.dbg'",
+    "error": "request.pairs[1]: no pair of 'refseq' has the graph_path given",
     "code": "pair_not_found",
     "candidates": [
      {
       "graph": "refseq",
-      "graph_path": "/scratch/nvme8/refseq_r237/bact_other/graph.dbg",
-      "annotation_path": "/scratch/nvme8/refseq_r237/bact_other/annotation.row_diff_brwt_coord.annodbg"
+      "pair_id": "n1-7c04f7cf-4135-58aa-af2f-45edec809544"
      },
      {
       "graph": "refseq",
-      "graph_path": "/scratch/nvme10/refseq_r237/bact_pseudomonadota/graph.dbg",
-      "annotation_path": "/scratch/nvme10/refseq_r237/bact_pseudomonadota/annotation.row_diff_brwt_coord.annodbg"
+      "pair_id": "n1-b4236391-61de-5398-b0f2-145523b555b3"
      }
     ]
    }
@@ -38,23 +36,20 @@
    "route": "POST /resolve",
    "status": 400,
    "body": {
-    "error": "request.pairs[0]: 'sra-human-1/3' has 3 pairs on graph_path '/scratch/nvme0/human/graph_merged_complete_k31.primary.small.indexed.dbg': add annotation_path",
+    "error": "request.pairs[0]: 'sra-human-1/3' has 3 pairs on the graph_path given: add annotation_path, or name the pair by pair_id",
     "code": "pair_ambiguous",
     "candidates": [
      {
       "graph": "sra-human-1/3",
-      "graph_path": "/scratch/nvme0/human/graph_merged_complete_k31.primary.small.indexed.dbg",
-      "annotation_path": "/scratch/nvme0/human/annotation_0.relaxed.renamed.row_diff_brwt.annodbg"
+      "pair_id": "n1-70514b5d-74a1-5c43-8f40-b5a7ea70bd32"
      },
      {
       "graph": "sra-human-1/3",
-      "graph_path": "/scratch/nvme0/human/graph_merged_complete_k31.primary.small.indexed.dbg",
-      "annotation_path": "/scratch/nvme3/human/annotation_4.relaxed.renamed.row_diff_brwt.annodbg"
+      "pair_id": "n1-4645b805-a168-574c-be14-cec47316af76"
      },
      {
       "graph": "sra-human-1/3",
-      "graph_path": "/scratch/nvme0/human/graph_merged_complete_k31.primary.small.indexed.dbg",
-      "annotation_path": "/scratch/nvme4/human/annotation_8.relaxed.renamed.row_diff_brwt.annodbg"
+      "pair_id": "n1-a43ec3cc-97db-522f-ab15-d80cc4b2d461"
      }
     ]
    }
@@ -64,18 +59,16 @@
    "route": "POST /traverse",
    "status": 400,
    "body": {
-    "error": "Bad request: index 'refseq' spans several graphs (/scratch/nvme8/refseq_r237/bact_other/graph.dbg, /scratch/nvme10/refseq_r237/bact_pseudomonadota/graph.dbg); pass 'graph_path' to pick one",
+    "error": "Bad request: index 'refseq' holds several pairs (n1-7c04f7cf-4135-58aa-af2f-45edec809544, n1-b4236391-61de-5398-b0f2-145523b555b3); name one by its pair_id (GET /capabilities lists them)",
     "code": "traverse_single_pair",
     "candidates": [
      {
       "graph": "refseq",
-      "graph_path": "/scratch/nvme8/refseq_r237/bact_other/graph.dbg",
-      "annotation_path": "/scratch/nvme8/refseq_r237/bact_other/annotation.row_diff_brwt_coord.annodbg"
+      "pair_id": "n1-7c04f7cf-4135-58aa-af2f-45edec809544"
      },
      {
       "graph": "refseq",
-      "graph_path": "/scratch/nvme10/refseq_r237/bact_pseudomonadota/graph.dbg",
-      "annotation_path": "/scratch/nvme10/refseq_r237/bact_pseudomonadota/annotation.row_diff_brwt_coord.annodbg"
+      "pair_id": "n1-b4236391-61de-5398-b0f2-145523b555b3"
      }
     ]
    }
@@ -112,23 +105,20 @@
    "route": "GET /traverse/capabilities",
    "status": 400,
    "body": {
-    "error": "Bad request: index 'sra-human-1/3' lists one graph (/scratch/nvme0/human/graph_merged_complete_k31.primary.small.indexed.dbg) with several annotations (/scratch/nvme0/human/annotation_0.relaxed.renamed.row_diff_brwt.annodbg, /scratch/nvme3/human/annotation_4.relaxed.renamed.row_diff_brwt.annodbg, /scratch/nvme4/human/annotation_8.relaxed.renamed.row_diff_brwt.annodbg): a traversal reads one annotation, which graph_path cannot choose; list each annotation under a name of its own",
+    "error": "Bad request: index 'sra-human-1/3' holds several pairs (n1-70514b5d-74a1-5c43-8f40-b5a7ea70bd32, n1-4645b805-a168-574c-be14-cec47316af76, n1-a43ec3cc-97db-522f-ab15-d80cc4b2d461); name one by its pair_id (GET /capabilities lists them)",
     "code": "pair_ambiguous",
     "candidates": [
      {
       "graph": "sra-human-1/3",
-      "graph_path": "/scratch/nvme0/human/graph_merged_complete_k31.primary.small.indexed.dbg",
-      "annotation_path": "/scratch/nvme0/human/annotation_0.relaxed.renamed.row_diff_brwt.annodbg"
+      "pair_id": "n1-70514b5d-74a1-5c43-8f40-b5a7ea70bd32"
      },
      {
       "graph": "sra-human-1/3",
-      "graph_path": "/scratch/nvme0/human/graph_merged_complete_k31.primary.small.indexed.dbg",
-      "annotation_path": "/scratch/nvme3/human/annotation_4.relaxed.renamed.row_diff_brwt.annodbg"
+      "pair_id": "n1-4645b805-a168-574c-be14-cec47316af76"
      },
      {
       "graph": "sra-human-1/3",
-      "graph_path": "/scratch/nvme0/human/graph_merged_complete_k31.primary.small.indexed.dbg",
-      "annotation_path": "/scratch/nvme4/human/annotation_8.relaxed.renamed.row_diff_brwt.annodbg"
+      "pair_id": "n1-a43ec3cc-97db-522f-ab15-d80cc4b2d461"
      }
     ]
    }

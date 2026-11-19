@@ -152,7 +152,7 @@
    "status": 200,
    "hand_made": false,
    "headers": {},
-   "shows": "the multi-graph server on the route of the full block: the envelope of one entry, the block of the pair ?graph= selects, tagged with the pair (graph, graph_path as version 1 names it, annotation_path, index_fp, outcome)"
+   "shows": "the multi-graph server on the route of the full block: the envelope of one entry, the block of the pair ?graph= selects, tagged with the pair (graph and pair_id as version 1 names it, index_fp, outcome)"
   },
   "pattern_capabilities_multi_graph_no_graph": {
    "server": "multi",
@@ -1430,7 +1430,7 @@
    "status": 200,
    "hand_made": false,
    "headers": {},
-   "shows": "a multi-graph server answers the graphs a request names (graphs, as /search): one answer per pair, each the single-graph answer tagged with graph, graph_path, annotation_path and index_fp"
+   "shows": "a multi-graph server answers the graphs a request names (graphs, as /search): one answer per pair, each the single-graph answer tagged with graph, pair_id and index_fp"
   },
   "multi_graph_in_ram": {
    "server": "multi",

@@ -1,7 +1,7 @@
 {
  "route": "GET /requests/svc-trv-91aa07-1",
  "status": 200,
- "note": "E4: for /traverse the attempt_id is the request handle; GET /requests answers from the attempt registry (attempt = the object GET /traverse/attempt/{id} returns; its usage is the final usage). The attempt is the one sample 05 records (05's run: its state as GET /traverse/attempt answered right after it, on the same server); retained_until is its finished_at plus the attempts' retention (retention_s, 3600 s).",
+ "note": "E4: for /traverse the attempt_id is the request handle; GET /requests answers from the attempt registry (attempt = the object GET /traverse/attempt/{id} returns; its usage is the final usage). The attempt is the one sample 05 records (05's run: its state as GET /traverse/attempt answered right after it, on the same server); retained_until is its finished_at plus the attempts' retention (retention_s, 3600 s). T8-M6 (train 8, pair identity; SPEC-multigraph-envelope.md section 1.2): each pair is named by graph and pair_id, master's n1 id of the name and the two paths as the graph list spells them (the paths this sample stated before), and no configured path is stated.",
  "body": {
   "request_id": "svc-trv-91aa07-1",
   "server_instance": "7c1e0f3a9b24d6e8",
@@ -19,8 +19,7 @@
   "pairs": [
    {
     "graph": "bact_other",
-    "graph_path": "/scratch/nvme8/refseq_r237/bact_other/graph.dbg",
-    "annotation_path": "/scratch/nvme8/refseq_r237/bact_other/annotation.row_diff_brwt_coord.annodbg",
+    "pair_id": "n1-13a94733-667c-51eb-b3a9-aa435eacfdcd",
     "state": "ended",
     "outcome": "answered",
     "usage": null

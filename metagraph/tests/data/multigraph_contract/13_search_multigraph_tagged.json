@@ -1,7 +1,7 @@
 {
  "route": "POST /search",
  "status": 200,
- "note": "E1 on a multi-graph server: the flat list as today, every row tagged with its pair, rows in the index pair order, and one cut per pair and query sequence, empty pairs included. Within a pair: score descending, then label ascending (coordinate and column indexes). complete = every match above the thresholds returned (no cut: nth_score null, tied 0); else nth_score is the N-th returned score, tied the labels with that score (returned or not), tied_returned how many of them were returned.",
+ "note": "E1 on a multi-graph server: the flat list as today, every row tagged with its pair, rows in the index pair order, and one cut per pair and query sequence, empty pairs included. Within a pair: score descending, then label ascending (coordinate and column indexes). complete = every match above the thresholds returned (no cut: nth_score null, tied 0); else nth_score is the N-th returned score, tied the labels with that score (returned or not), tied_returned how many of them were returned. T8-M6 (train 8, pair identity; SPEC-multigraph-envelope.md section 1.2): each pair is named by graph and pair_id, master's n1 id of the name and the two paths as the graph list spells them (the paths this sample stated before), and no configured path is stated; each cut states matched, the labels above the request's thresholds before the cut (master's member; returned where the cut is complete, the least the tie admits in this illustration).",
  "request": {
   "FASTA": ">q1_fwd\nACGT...",
   "top_labels": 2,
@@ -19,37 +19,33 @@
      "sample": "NC_003279.8",
      "kmer_count": 170,
      "graph": "bact_other",
-     "graph_path": "/scratch/nvme8/refseq_r237/bact_other/graph.dbg",
-     "annotation_path": "/scratch/nvme8/refseq_r237/bact_other/annotation.row_diff_brwt_coord.annodbg"
+     "pair_id": "n1-13a94733-667c-51eb-b3a9-aa435eacfdcd"
     },
     {
      "sample": "NZ_CP009072.1",
      "kmer_count": 139,
      "graph": "bact_other",
-     "graph_path": "/scratch/nvme8/refseq_r237/bact_other/graph.dbg",
-     "annotation_path": "/scratch/nvme8/refseq_r237/bact_other/annotation.row_diff_brwt_coord.annodbg"
+     "pair_id": "n1-13a94733-667c-51eb-b3a9-aa435eacfdcd"
     },
     {
      "sample": "NC_000913.3",
      "kmer_count": 170,
      "graph": "bact_pseudomonadota",
-     "graph_path": "/scratch/nvme10/refseq_r237/bact_pseudomonadota/graph.dbg",
-     "annotation_path": "/scratch/nvme10/refseq_r237/bact_pseudomonadota/annotation.row_diff_brwt_coord.annodbg"
+     "pair_id": "n1-f52c7f73-ec85-5d74-9e27-7ba198879d0b"
     },
     {
      "sample": "NZ_CP011113.1",
      "kmer_count": 141,
      "graph": "bact_pseudomonadota",
-     "graph_path": "/scratch/nvme10/refseq_r237/bact_pseudomonadota/graph.dbg",
-     "annotation_path": "/scratch/nvme10/refseq_r237/bact_pseudomonadota/annotation.row_diff_brwt_coord.annodbg"
+     "pair_id": "n1-f52c7f73-ec85-5d74-9e27-7ba198879d0b"
     }
    ],
    "cuts": [
     {
      "graph": "bact_other",
-     "graph_path": "/scratch/nvme8/refseq_r237/bact_other/graph.dbg",
-     "annotation_path": "/scratch/nvme8/refseq_r237/bact_other/annotation.row_diff_brwt_coord.annodbg",
+     "pair_id": "n1-13a94733-667c-51eb-b3a9-aa435eacfdcd",
      "index_fp": "7bab0c8c0ce6d061cf5787419f9219e698cbb084f5de3935254bcd503149be7a",
+     "matched": 4,
      "returned": 2,
      "complete": false,
      "nth_score": 139,
@@ -58,9 +54,9 @@
     },
     {
      "graph": "bact_pseudomonadota",
-     "graph_path": "/scratch/nvme10/refseq_r237/bact_pseudomonadota/graph.dbg",
-     "annotation_path": "/scratch/nvme10/refseq_r237/bact_pseudomonadota/annotation.row_diff_brwt_coord.annodbg",
+     "pair_id": "n1-f52c7f73-ec85-5d74-9e27-7ba198879d0b",
      "index_fp": "c9a9c34fa17d947caa08350e41652ee3506ff27f4141ff1717eb959bbb5064dc",
+     "matched": 2,
      "returned": 2,
      "complete": true,
      "nth_score": null,
@@ -69,9 +65,9 @@
     },
     {
      "graph": "inv_insecta",
-     "graph_path": "/scratch/nvme8/refseq_r237/inv_insecta/graph.dbg",
-     "annotation_path": "/scratch/nvme8/refseq_r237/inv_insecta/annotation.row_diff_brwt_coord.annodbg",
+     "pair_id": "n1-1233e3c2-c3aa-5462-9ed4-a9e665735227",
      "index_fp": "890518352bcdca6d1d691017e500f006fcbeb96f9b3cda2c1ea9caf09c6e6530",
+     "matched": 0,
      "returned": 0,
      "complete": true,
      "nth_score": null,
