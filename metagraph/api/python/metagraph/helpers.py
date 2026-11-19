@@ -1,3 +1,4 @@
+import uuid
 import warnings
 
 import pandas as pd
@@ -9,13 +10,39 @@ class SearchRefusedWarning(RuntimeWarning):
     from the data frame, which lists them in its attrs["refused"]."""
 
 
+# master's n1 pair id (SPEC-multigraph-envelope.md section 1.2; src/common/configured_pair_id.hpp):
+# "n1-" and the UUIDv5 in this namespace of the graph name and the two paths as the graph list
+# spells them, each "<UTF-8 byte length>:<text>". A copy of the traverse library's
+# configured_pair_id (train 7), until that library is merged here
+_PAIR_ID_NAMESPACE = uuid.UUID('d3565c73-e7e9-5bca-b6a9-64cb5c4c9f93')
+
+
+def _configured_pair_id(graph, graph_path, annotation_path):
+    name = ''.join(f'{len(f.encode())}:{f}' for f in (graph, graph_path, annotation_path))
+    return 'n1-' + str(uuid.uuid5(_PAIR_ID_NAMESPACE, name))
+
+
+def _pair_id_of(cut):
+    """A cut's pair_id: the one it states (a server of train 8), else the n1 id of the
+    graph_path and annotation_path an older server states, None where it names no pair (a
+    single-graph server)"""
+    if cut.get('pair_id') is not None:
+        return cut['pair_id']
+    graph, graph_path, annotation_path = (cut.get(k) for k in
+                                          ('graph', 'graph_path', 'annotation_path'))
+    if all(isinstance(v, str) for v in (graph, graph_path, annotation_path)):
+        return _configured_pair_id(graph, graph_path, annotation_path)
+    return None
+
+
 def refused_units(json_res):
     """The units (a query sequence on a graph) a /search answer refused alone: one dict per
     refused `cuts` entry, {"record": the query sequence's index in the answer,
     "seq_description", "graph", "pair_id" (the entry's pair: its name and its opaque id,
-    null on a single-graph server), and the entry's `refused` members: "account", "code",
-    "max_memory_mb", and with the answer account "priced_mb"}, in the answer's order. A
-    refused unit never means that nothing matched: its rows were not sent."""
+    null on a single-graph server; an older server's cut, which states the pair's paths in
+    its place, gets the id of its paths), and the entry's `refused` members: "account",
+    "code", "max_memory_mb", and with the answer account "priced_mb"}, in the answer's order.
+    A refused unit never means that nothing matched: its rows were not sent."""
     refused = []
     for i, result in enumerate(json_res or []):
         for cut in result.get('cuts') or []:
@@ -23,7 +50,7 @@ def refused_units(json_res):
                 refused.append({'record': i,
                                 'seq_description': result.get('seq_description'),
                                 'graph': cut.get('graph'),
-                                'pair_id': cut.get('pair_id'),
+                                'pair_id': _pair_id_of(cut),
                                 **cut['refused']})
     return refused
 
@@ -54,6 +81,7 @@ def df_from_search_result(json_res):
         named = '; '.join(
             f"record {u['record']} ({u['seq_description']!r}) on "
             + (f"graph {u['graph']!r}" if u['graph'] is not None else 'the graph')
+            + (f" (pair {u['pair_id']})" if u['pair_id'] is not None else '')
             + f" ({u['account']} account)" for u in refused)
         warnings.warn(f"the server refused {len(refused)} query sequence(s) on a graph alone, "
                       f"past its answer budget ({refused[0]['code']}; their rows are absent, "

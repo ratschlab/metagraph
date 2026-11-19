@@ -80,8 +80,8 @@ def test_df_from_search_result_lists_the_refused_units():
          'account': 'answer',
          'code': 'search_answer_too_large', 'max_memory_mb': 4096, 'priced_mb': 5000}]
     message = str(caught[0].message)
-    assert "record 0 ('fwd') on graph 'b' (values account)" in message
-    assert "record 1 ('rc') on graph 'a' (answer account)" in message
+    assert "record 0 ('fwd') on graph 'b' (pair n1-id-of-b) (values account)" in message
+    assert "record 1 ('rc') on graph 'a' (pair n1-id-of-a) (answer account)" in message
     # a single-graph server's entry has null tags
     single = [{'seq_description': 'q', 'results': [],
                'cuts': [dict(_cut('x', 0, refused), graph=None, pair_id=None)]}]
@@ -89,6 +89,22 @@ def test_df_from_search_result_lists_the_refused_units():
         df = helpers.df_from_search_result(single)
     assert df.shape[0] == 0
     assert (None, None) == (df.attrs['refused'][0]['graph'], df.attrs['refused'][0]['pair_id'])
+    # an older server's cut states the pair's paths in place of its pair_id: the unit gets
+    # the n1 id of the paths (two pairs of one name told apart), as the traverse library reads
+    # such answers (the ids as the train-7 library's configured_pair_id computes them)
+    old = []
+    for annotation in ('/a/e1.annodbg', '/a/e2.annodbg'):
+        cut = {k: v for k, v in _cut('enterics', 0, refused).items() if k != 'pair_id'}
+        old.append(dict(cut, graph_path='/g/e.dbg', annotation_path=annotation))
+    units = helpers.refused_units([{'seq_description': 'q', 'results': [], 'cuts': old}])
+    assert [u['pair_id'] for u in units] == ['n1-9246209a-f207-5d65-bffa-ecf7813c0949',
+                                             'n1-156ddbc9-9156-596b-8841-47331f2fb401']
+    assert all('graph_path' not in u and 'annotation_path' not in u for u in units)
+    # one path only, or a single-graph server's null paths: no id
+    for paths in ({'graph_path': '/g/e.dbg'}, {'graph_path': None, 'annotation_path': None}):
+        cut = dict({k: v for k, v in _cut('enterics', 0, refused).items() if k != 'pair_id'},
+                   **paths)
+        assert helpers.refused_units([{'cuts': [cut]}])[0]['pair_id'] is None
     # nothing refused: no warning, no attrs
     answer[0]['cuts'][1] = _cut('b', 0)
     answer[1]['cuts'][0] = _cut('a', 0)
