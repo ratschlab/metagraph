@@ -1,25 +1,15 @@
-import uuid
 import warnings
 
 import pandas as pd
+
+# master's n1 pair id (SPEC-multigraph-envelope.md section 1.2), as the traverse library computes it
+from metagraph.traverse.client import configured_pair_id as _configured_pair_id
 
 
 class SearchRefusedWarning(RuntimeWarning):
     """A /search answer in which the server refused some query sequences on some graphs (the
     request's `partial_refusal`, SPEC-multigraph-envelope.md section 3): their rows are absent
     from the data frame, which lists them in its attrs["refused"]."""
-
-
-# master's n1 pair id (SPEC-multigraph-envelope.md section 1.2; src/common/configured_pair_id.hpp):
-# "n1-" and the UUIDv5 in this namespace of the graph name and the two paths as the graph list
-# spells them, each "<UTF-8 byte length>:<text>". A copy of the traverse library's
-# configured_pair_id (train 7), until that library is merged here
-_PAIR_ID_NAMESPACE = uuid.UUID('d3565c73-e7e9-5bca-b6a9-64cb5c4c9f93')
-
-
-def _configured_pair_id(graph, graph_path, annotation_path):
-    name = ''.join(f'{len(f.encode())}:{f}' for f in (graph, graph_path, annotation_path))
-    return 'n1-' + str(uuid.uuid5(_PAIR_ID_NAMESPACE, name))
 
 
 def _pair_id_of(cut):

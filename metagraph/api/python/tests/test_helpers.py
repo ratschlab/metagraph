@@ -91,7 +91,7 @@ def test_df_from_search_result_lists_the_refused_units():
     assert (None, None) == (df.attrs['refused'][0]['graph'], df.attrs['refused'][0]['pair_id'])
     # an older server's cut states the pair's paths in place of its pair_id: the unit gets
     # the n1 id of the paths (two pairs of one name told apart), as the traverse library reads
-    # such answers (the ids as the train-7 library's configured_pair_id computes them)
+    # such answers (the ids as its configured_pair_id computes them, the function helpers uses)
     old = []
     for annotation in ('/a/e1.annodbg', '/a/e2.annodbg'):
         cut = {k: v for k, v in _cut('enterics', 0, refused).items() if k != 'pair_id'}
