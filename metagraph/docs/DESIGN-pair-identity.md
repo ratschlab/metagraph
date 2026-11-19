@@ -153,14 +153,18 @@ These points are the service's own view, as its maintainers stated it.
   The service never writes a p2 id into a stored document. The join is one documented rule: **p2 = `p2-` followed by
   the first 32 hex digits of SHA-256 over the compact UTF-8 JSON `[database, n1]`**. A p2 id scopes an n1 id to one
   database. If a field turns out to be needed anyway, the traversal records of the client that holds the request's
-  access token gain `native_pair_id` (n1) beside `pair_id` (p2), never anonymous search rows (section 9).
+  access token gain `native_pair_id` (n1) beside `pair_id` (p2), never anonymous search rows (section 9, the
+  owner's answer).
 - **Binding.** The service computes the n1 id of every pair of its manifest itself (its `app/native_pairs.py`, written by
   Kulkov, which must stay byte-identical to `configured_pair_id.hpp`). On every capabilities probe and on the admin refresh it
   compares each name's set of `(graph, pair_id)` with the engine's. On a mismatch that database's capabilities become
   `unknown`: no new dispatch until the configuration is fixed, logged loudly. An answer that names an unknown id is
   refused, with or without paths.
 - **Documents.** The service stores the engine's document as it comes and writes no paths into it (decision 3).
-- **Selection.** The service selects by the paths of its manifest until every engine node behind an address is new.
+- **Selection.** The service selects by the paths of its manifest until an address states `multigraph.pair_id:
+  "n1"`. Each production address reaches exactly one engine process (section 9), so an address switches from the
+  path form to the id form at once, at its restart. The check of the answering instance (`server_instance`) stays
+  as cheap insurance.
 
 ### 3.9 The library
 
@@ -270,11 +274,12 @@ capability profile's `support_fp` (it excludes identity).
 3. **The suite**, accepting both forms in its pins.
 4. **The engines**, on staging and then in production.
 
-Path selectors stay in use until every node behind an address is new: a current engine refuses `pair_id` in a
-`pairs` object as an unknown member. The service believes each production path reaches one engine process; section 9
-asks for that to be confirmed. As a second guard, `expect_server_instance` and `usage.server_instance` let the
-service refuse an answer from an unexpected instance. A rollback to a current engine brings the paths back, and the
-adapter reads that form too.
+Path selectors stay in use at an address until it states `multigraph.pair_id: "n1"`: a current engine refuses
+`pair_id` in a `pairs` object as an unknown member. Each production address reaches exactly one engine process
+(section 9), so an address switches at its restart, all at once. As a second guard, `expect_server_instance` and
+`usage.server_instance` let the service refuse an answer from an unexpected instance. A rollback to a current engine
+brings the paths back, and the adapter reads that form too. Production RefSeq (mex:42008) already runs master's
+82137bee7 and so states master's form; where master defines a member, the staging form is byte-compatible with it.
 
 ### 5.2 Old stored documents and caches
 
@@ -331,7 +336,8 @@ result cache lives in the process, and the restart that deploys it clears it.
   stitch. Check it with documents of both forms.
 - **Ids are public, not secret.** An id is deterministic from a name and two paths, so it confirms a guessed path
   offline. Check that this is acceptable where answers leave the service.
-- **The old engine and the new selector.** Check that the service stays on path selectors until every node is new.
+- **The old engine and the new selector.** Check that the service stays on path selectors at an address until that
+  address states `multigraph.pair_id: "n1"`.
 - **Answer prices.** The `/search` answer budget prices tags by their length. Check that the price model and its
   tests follow the new member set.
 - **Divergence from master.** The staging server adds a `pair_id` selector, keeps its own `cuts` members, rewords its
@@ -375,13 +381,19 @@ parallel with train 7's last fixes, on top of train 7 with its change to how `/r
 lands in train 8. Train 7 deploys first, with the library's part and the outside review's fixes. The service's
 adapter goes before the engines (section 5.1).
 
-## 9. Open points
+## 9. Points that were open, and their answers (2026-11-19)
 
-Both points gate the rollout of the engines, not their implementation.
+1. **May the service's search rows state the n1 id?** The owner: no. The search rows keep the service's p2 id with
+   the join rule of section 3.8; `native_pair_id` (n1) goes into the token holder's traversal records only if a
+   client ever needs it.
+2. **Does each production address reach one engine process?** Yes, by a read-only look at the production hosts and
+   the deployment repository. Every upstream of the front proxy has one server, without load balancing. Every
+   index runs as one container per host on its own port, with no replicas. The SRA chunks are split over three
+   hosts, each its own address, and no chunk is mapped to two hosts. One exception concerns the service's manifest
+   only: a RefSeq canary started by hand on mex:42012 runs beside production RefSeq on 42008. It has its own port,
+   so it is a second address, not a pool; it matters only if the manifest lists both addresses under one database.
+   Consequence: an address switches from the path form to the id form at its restart, all at once (sections 3.8
+   and 5.1).
 
-1. **Kulkov** (the service's pair identity is his): may the service's search rows state the n1 id? Recommended: no;
-   they keep the p2 id with the join rule of section 3.8, and `native_pair_id` goes into the token holder's traversal
-   records (section 3.8) only if a client needs the field.
-2. **Kulkov or the operator of the production proxy:** does each production path reach one engine process?
-   Recommended: confirm before the engines roll out; until every node behind an address is new, the service keeps
-   path selectors and checks the answering instance.
+The research also found that production RefSeq (mex:42008) already runs master's 82137bee7: it states master's
+`pair_id` form today.
