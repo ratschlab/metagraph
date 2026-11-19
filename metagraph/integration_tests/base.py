@@ -122,9 +122,15 @@ _PATH_CHAR = re.compile(r'[A-Za-z0-9._/~%+-]')
 
 def _states(text, spelling, bounded):
     """The index of the first occurrence of |spelling| in |text| that states it (with
-    |bounded|, one not followed by a path character), or -1"""
+    |bounded|, one not followed by a path character), or -1. (An input file's label beside a
+    configured file repeats a bounded spelling once per row: where every occurrence is followed
+    by '/', '.', '_' or '-', counted in C, the occurrences are not walked one by one.)"""
     at = text.find(spelling)
-    while bounded and at >= 0 and at + len(spelling) < len(text) \
+    if not bounded or at < 0:
+        return at
+    if text.count(spelling) == sum(text.count(spelling + c) for c in '/._-'):
+        return -1
+    while at >= 0 and at + len(spelling) < len(text) \
             and _PATH_CHAR.match(text[at + len(spelling)]):
         at = text.find(spelling, at + 1)
     return at
@@ -156,10 +162,33 @@ def assert_no_configured_path(text, paths, where):
                                                   if k != field}})
             texts = [json.dumps(body)]
         texts.append(json.dumps(body, ensure_ascii=False))
+    def spellings(p):
+        return {str(p), urllib.parse.quote(p), urllib.parse.quote(p, safe='')}
+
+    # a path's spellings each start with its directory's (quote() maps characters one by one):
+    # a path whose directory the text does not state is skipped, so that a large answer is
+    # scanned for the few directories, not for every path
+    # Likewise every spelling holds its file name's last suffix ('.annodbg'), or the whole file
+    # name where it has none, which quote() leaves as it is: a path whose tail the text does
+    # not hold is skipped (a graph list of many pairs gives thousands of basenames)
+    def tail(p):
+        name = os.path.basename(p) or p
+        return name[name.rindex('.'):] if '.' in name.lstrip('.') else name
+
+    parents = {os.path.dirname(p) for p in paths if os.path.isabs(p)}
     for t in texts:
+        stated = {d for d in parents if any(x in t for x in spellings(d))}
+        tails = {}
         for p in paths:
+            if os.path.isabs(p) and os.path.dirname(p) not in stated:
+                continue
+            k = tail(p)
+            if k not in tails:
+                tails[k] = any(x in t for x in spellings(k))
+            if not tails[k]:
+                continue
             bounded = isinstance(p, BoundaryPath)
-            for spelling in {str(p), urllib.parse.quote(p), urllib.parse.quote(p, safe='')}:
+            for spelling in spellings(p):
                 at = _states(t, spelling, bounded)
                 if at >= 0:
                     raise AssertionError(
