@@ -1279,7 +1279,8 @@ class TraverseClient:
         n1 ids), or the client's own pair on a single-graph server; an empty list selects no
         pair and sends nothing. A pair named by its id that GET /capabilities lists with its
         paths (an engine before ids) is sent by those paths, the engine's own spelling (their
-        id is the one given); one listed by its id only is sent by its id. Every answer is
+        id is the one given); any other is sent as wire_pair() sends it, and one this client
+        cannot send (PairIdError) is raised before any pair's request is sent. Every answer is
         kept as returned (a TraverseResponse of one seed, which keeps the seed it sent); a
         refused request (TraverseError, ResponseFormatError for an answer not shaped as a
         response), a transport failure (OSError) or a body that does not parse
@@ -1374,6 +1375,12 @@ class TraverseClient:
         # traverse() parses each pair's graphlets (the parser loads _codec): imported here, so
         # that importing the client stays light
         from ._codec import GraphletFormatError
+        # a pair named by its id that this client cannot send (wire_pair(): no resolver and a
+        # server without ids, or a resolver that refuses it) is refused before any pair's
+        # request is sent, not after the pairs before it
+        for w in sent:
+            if w.pair_id and not (w.graph_path and w.annotation_path):
+                self.wire_pair(w.graph, w.pair_id)
         results = []
         for t, w in zip(targets, sent):
             # the keywords given only (a subclass's traverse() may take fewer)

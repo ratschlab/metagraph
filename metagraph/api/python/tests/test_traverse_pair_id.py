@@ -276,12 +276,21 @@ class TestDiscoveryInBothForms(unittest.TestCase):
         self.assertEqual(c.sent, [{'graph': GRAPH, 'graph_path': GP, 'annotation_path': AP}])
         self.assertEqual(r.expected_pairs, ({'graph': GRAPH, 'pair_id': ID},))
         self.assertEqual(r.seqs_order, {(GRAPH, ID): 'verified'})
-        # an id the listing does not have is sent as it is (the client decides, below)
+        # an id the listing does not have: sent by id where the client's resolver knows it
+        # (traverse() resolves it), else refused before any pair's request is sent -- also
+        # the listed pair before it
         other = configured_pair_id(GRAPH, '/elsewhere.dbg', AP)
-        c = _FanOut(self.BY_PATHS)
+        c = _FanOut(self.BY_PATHS,
+                    pair_resolver={other: (GRAPH, '/elsewhere.dbg', AP)}.get)
         r = c.traverse_pairs('ACGT', pairs=[{'graph': GRAPH, 'pair_id': other}],
                              coordinates=None)
         self.assertEqual((c.sent, r.seqs_order), ([{'graph': GRAPH, 'pair_id': other}], {}))
+        c = _FanOut(self.BY_PATHS)
+        with self.assertRaises(PairIdError) as cm:
+            c.traverse_pairs('ACGT', pairs=[{'graph': GRAPH, 'pair_id': ID},
+                                            {'graph': GRAPH, 'pair_id': other}],
+                             coordinates=None)
+        self.assertEqual((cm.exception.code, c.sent), ('pair_unresolved', []))
 
     def test_a_p2_id_is_refused_before_anything_is_sent(self):
         c = _FanOut(self.BY_ID)
