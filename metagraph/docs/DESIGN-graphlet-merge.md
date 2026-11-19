@@ -679,10 +679,12 @@ class PairUnion:                          # budget= (keyword-only) where the wor
 **Budgets.** Every operation whose work grows with the walks or segments takes `budget=`, keyword-only (the list and
 the exempt accessors: F.1), with the library's semantics (`budget.py`): a stop raises `LocalBudgetExceeded`; the lists
 whose order allows it (`walks()`, `segments()`, `carriers()`) carry a `Partial` of whole rows with a resume token for
-`resume=`, and the others stop without one. `union_pairs()` charges construction to its `budget=`: first, before the
-seed checks, the inputs' variable-length metadata (at a bound of its JSON) and the seed (four copies), then the trie
-pass. A budget smaller than the first charge therefore stops it before the `different_seed`, `duplicate_pair` and
-`not_expected` refusals.
+`resume=`, and the others stop without one. `union_pairs()` charges construction to its `budget=`: first, before any
+input is classified, its preparation, read from the inputs' counts and stated pairs (their descriptions, and each
+comparison of the matching passes, quadratic in the number of inputs; a description's hits are compared among
+themselves once that is charged); then, before the seed checks, the inputs' variable-length metadata (at a bound of its
+JSON) and the seed (four copies); then the trie pass. A budget smaller than the first charges therefore stops it before
+the refusals checked after them, such as `ambiguous_pair`, `different_seed`, `duplicate_pair` and `not_expected`.
 
 **The queries.**
 

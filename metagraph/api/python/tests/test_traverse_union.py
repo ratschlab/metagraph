@@ -1748,6 +1748,73 @@ class TestBudgets(unittest.TestCase):
             fn(budget=b)
             self.assertLessEqual(peak(fn), b.peak_bytes, name)
 
+    def test_the_preparation_is_admitted_first(self):
+        """GPT final review M4: union_pairs() admits its preparation -- classifying the
+        inputs, their descriptions, the matching passes quadratic in their number -- before
+        it runs. Allocation is measured before the refusal, not only the refusal: under the
+        reviewer's zero work and 1 KB budget, 1,000 failed records, 1,000 expected pairs,
+        1,000 seqs_order keys and 120 failed records of one pair (whose ambiguous_pair check
+        is cubic) stop with nothing charged and a traced peak below 64 KB (it was 1.26 MB and
+        2.33 s for the first); unbudgeted and budgeted answers agree, and the account bounds
+        the traced peak of the whole call (warm free lists, as above)."""
+        import gc
+        import tracemalloc
+        forms = {
+            'failed': lambda n: ([{'pair': 'g%d' % i, 'error': 'request failed'}
+                                  for i in range(n)], {}),
+            'one pair': lambda n: ([{'pair': 'g', 'error': 'request failed %d' % i}
+                                    for i in range(n)], {}),
+            'expected': lambda n: ([{'pair': 'g0', 'error': 'x'}],
+                                   {'expected_pairs': ['g%d' % i for i in range(n)]}),
+            'seqs_order': lambda n: ([{'pair': 'g0', 'error': 'x'}],
+                                     {'seqs_order': {'g%d' % i: 'verified' for i in range(n)}}),
+            'parts': lambda n: ([{'pair': 'g%d' % i, 'graphlet': T.graphlet('merge')}
+                                 for i in range(n)], {})}
+
+        def peak(fn):
+            gc.collect()
+            gc.disable()
+            try:
+                for i in range(2):
+                    if i:
+                        tracemalloc.start()
+                        base = tracemalloc.get_traced_memory()[0]
+                    try:
+                        fn()
+                    except LocalBudgetExceeded:
+                        pass
+                return tracemalloc.get_traced_memory()[1] - base
+            finally:
+                tracemalloc.stop()
+                gc.enable()
+        for name, make in forms.items():
+            with self.subTest(name):
+                n = {'one pair': 120, 'parts': 100}.get(name, 1000)
+                args = [make(n), make(n)]
+                zero = []
+
+                def refused():
+                    r, kw = args.pop()
+                    b = LocalBudget(work_units=0, memory_mb=0.001)
+                    zero.append(b)
+                    union_pairs(r, seed='ACGT' if name != 'parts' else None, budget=b, **kw)
+                self.assertLess(peak(refused), 64 * 1024)
+                self.assertEqual(zero[-1].call_usage(), {'work_units': 0, 'memory_bytes': 0})
+                self.assertEqual(zero[-1].stops[-1].resource, 'work')
+                # the whole call: the same union, its account above its traced peak
+                n = {'one pair': 40, 'parts': 20}.get(name, 200)
+                r, kw = make(n)
+                seed = 'ACGT' if name != 'parts' else None
+                b = LocalBudget()
+                self.assertEqual(union_pairs(r, seed=seed, budget=b, **kw).digest,
+                                 union_pairs(r, seed=seed, **kw).digest)
+                args = [make(n), make(n)]
+
+                def whole():
+                    r, kw = args.pop()
+                    union_pairs(r, seed=seed, **kw)
+                self.assertLessEqual(peak(whole), b.peak_bytes)
+
     def test_a_spelled_walk_charges_its_seed(self):
         """GPT final review M2: walks(spell=True) returns the seed with each flank (a
         100,000-base seed, 40-base flanks), and charges the seed, the flank and the

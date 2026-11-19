@@ -32,8 +32,9 @@ With a budget, a local call either completes or stops and says so (DESIGN §5.4)
     accumulates across the calls that share it (an analysis allowance).
   * Every charge is admitted before the work or allocation it pays for, with one stated
     exception: what has a size known only once it is built -- the lines of dump(), up
-    to 64 at a time, a label set decoded during a parse, and the walks a one-shot iterator
-    passes to to_fasta(leaves=) (a generator: copied into a list as it is read, per arm)
+    to 64 at a time, a label set decoded during a parse, the walks a one-shot iterator
+    passes to to_fasta(leaves=) (a generator: copied into a list as it is read, per arm),
+    and the text of an exception given to union_pairs() as an input's error (str() of it)
     -- is charged as soon as it is built, so the account may run that far ahead of the
     check. The account itself
     never exceeds the limit. Cheap loops are admitted in blocks of rows (64) at their
@@ -118,7 +119,13 @@ __all__ = ['LocalLimits', 'LocalBudget', 'LocalStop', 'LocalBudgetExceeded', 'Pa
 #     cut's bytes count its label set and its {label: j} at their bound (in constrain mode
 #     the root's entry and the first piece's labels);
 #   * to_fasta(leaves=<one-shot iterator>): the copy of the walks it gives.
-#   * union_pairs() (union.py, docs/DESIGN-graphlet-merge.md Appendix F.1): the trie is one
+#   * union_pairs() (union.py, docs/DESIGN-graphlet-merge.md Appendix F.1): first its
+#     preparation, read from the inputs' counts and stated pairs before any input is
+#     classified (GPT final review M4): per input, expected pair and seqs_order key W_ROW and
+#     its descriptions at union.py's _M_DESC / _M_KEY, twice its stated pair's JSON bound,
+#     and 4 W_ELEM per comparison of the matching passes quadratic in their number (the
+#     check of a description's hits among themselves, cubic where many inputs name one
+#     pair, charged where it runs, once their count is known); the trie is one
 #     pass over each part's first-parent tree, charged per part and arm before the pass:
 #     4 W_ELEM per part segment (its element, the compare of its bases, at most two trie
 #     nodes, an edge and a cover entry) and 1 lwu per 16 of its bases; its memory at its
