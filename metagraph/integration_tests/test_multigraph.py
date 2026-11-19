@@ -3654,14 +3654,13 @@ class TestMultiGraphServer(TestingBase):
         self.assertEqual(u.digest, again.digest)
         # pairs=None: one request per pair GET /capabilities lists, every one expected and
         # included; ecoli's answer the same part, kleb and pseudo absent records whose seed
-        # this client sent. This branch's library discovers the pairs by their paths, which
-        # GET /capabilities no longer states (train 8), so it cannot tell the two pairs of
-        # 'enterics' apart; the train-7 library discovers them by pair_id (check_pair_id is
-        # one of its names): run once train 7 is merged (docs/DESIGN-pair-identity.md
-        # section 8, step 7)
+        # this client sent. The library discovers the pairs by graph and pair_id, as
+        # GET /capabilities lists them, so the two pairs of 'enterics' are two requests
+        # (docs/DESIGN-pair-identity.md section 8, step 7). A library without check_pair_id
+        # discovers by paths and cannot tell them apart: that fails here, never skips.
         with self.subTest('pairs=None discovery'):
-            if not hasattr(graphlet_lib.client, 'check_pair_id'):
-                self.skipTest('discovery by pair_id: the train-7 library (design step 7)')
+            self.assertTrue(hasattr(graphlet_lib.client, 'check_pair_id'),
+                            'discovery by pair_id needs the train-7 library (design step 7)')
             every = client.traverse_pairs(seed, strategy, timing=False)
             listed_pairs = client.server_capabilities()['graph_summary']['pairs']
             self.assertEqual(len({(p['graph'], p['pair_id']) for p in listed_pairs}),
