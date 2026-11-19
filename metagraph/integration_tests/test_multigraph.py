@@ -973,6 +973,34 @@ class TestMultiGraphServer(TestingBase):
         finally:
             single.stop()
 
+    def test_a_search_temp_file_that_fails_states_no_path(self):
+        """/search writes a request's sequences to a file in the server's temporary directory
+        (--disk-swap) before it queries them: one it cannot make fails the request 400 in a text
+        without the directory, on a multi-graph and a single-graph server alike, and the log
+        names the file (fix round 1, M1). Before, the 400 stated the file's path, which
+        Server.post's sweep finds (the directory lies under the test's)."""
+        missing = os.path.join(self.tempdir.name, 'no', 'such', 'swap')
+        q = {'FASTA': f'>q\n{self.records["kleb"][0][1000:1100]}\n'}
+        kleb_g, kleb_a = self.pairs['kleb']
+        text = ("search: the request's sequences could not be written to the server's temporary "
+                "directory (the server's log names the directory and the reason)")
+        for kind, args, body in (
+                ('multi', [self.csv, '--mmap', '--mem-cap-gb', '1'], dict(q, graphs=['enterics'])),
+                ('single', ['-i', kleb_g, '-a', kleb_a, '--mmap'], q)):
+            with self.subTest(kind):
+                server = Server(args + ['--disk-swap', missing],
+                                os.path.join(self.tempdir.name, f'server_tmpfile_{kind}.log'))
+                try:
+                    ret = server.post('search', body)
+                    self.assertEqual(400, ret.status_code, ret.text[:2000])
+                    self.assertEqual({'error': text}, ret.json())
+                    self.assertIn("[Server] /search: the temporary file of the request's "
+                                  f"sequences: Error: temp file {missing}/tmp.", server.text())
+                    # the request failed alone
+                    self.assertEqual(200, server.get('stats').status_code)
+                finally:
+                    server.stop()
+
     def _names_cap_server(self, name, binary=None):
         return Server([self.csv, '--mmap', '--mem-cap-gb', '1', '--max-graphs-without-selection',
                        '1'], os.path.join(self.tempdir.name, f'server_cap_{name}.log'),

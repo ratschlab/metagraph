@@ -1929,3 +1929,33 @@ TEST(MultiGraphInRam, AChangedPairIsRefusedWithTheCodeIndexChanged) {
     const HttpError &as_http = refusal;
     EXPECT_EQ(refusal.text(), as_http.text());
 }
+
+// /search writes a request's sequences to a temporary file before it queries them: written
+// whole into the directory given; one that cannot be made (a --disk-swap directory missing,
+// full or out of inodes) fails the request in a text without the directory, which the log names
+// (fix round 1, M1; SPEC-multigraph-envelope.md section 1.2: no response states a server path)
+TEST(MultiGraphSearch, ATempFileThatFailsStatesNoPath) {
+    const std::string dir = test_dump_dir() + "/search_tmp";
+    std::filesystem::create_directories(dir);
+    const std::string fasta = ">q\nACGTACGTACGT\n>r\nTTTT\n";
+    {
+        const auto file = write_search_query_file(dir, fasta);
+        ASSERT_TRUE(file);
+        EXPECT_EQ(0u, file->name().rfind(dir + "/", 0)) << file->name();
+        std::ifstream in(file->name(), std::ios::binary);
+        const std::string read { std::istreambuf_iterator<char>(in),
+                                 std::istreambuf_iterator<char>() };
+        EXPECT_EQ(fasta, read);
+    }
+    const std::string missing = dir + "/no/such/dir";
+    try {
+        write_search_query_file(missing, fasta);
+        FAIL() << "a temporary file in a missing directory was made";
+    } catch (const std::runtime_error &e) {
+        EXPECT_EQ("search: the request's sequences could not be written to the server's "
+                  "temporary directory (the server's log names the directory and the reason)",
+                  std::string(e.what()));
+        EXPECT_EQ(std::string(kSearchTempFileText), e.what());
+        EXPECT_EQ(std::string::npos, std::string(e.what()).find('/'));
+    }
+}

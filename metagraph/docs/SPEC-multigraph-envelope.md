@@ -91,7 +91,7 @@ Every response names a configured pair by `graph` (its name) and `pair_id`, neve
 `not_reached` and `unfinished`, `/search` rows and cuts (section 3), the request registry (section 5), selection
 `candidates` (section 6), `GET /capabilities` (`graph_summary.pairs`, the examples of `headers_unique` and
 `labels_disjoint`; sections 8 and 9) and every text a client receives (refusals and errors, a file changed on disk,
-a failed load). `pair_id` is master's n1 id (`src/common/configured_pair_id.hpp`; `docs/DESIGN-pair-identity.md`
+a failed load, a `/search` temporary file that cannot be written, section 3). `pair_id` is master's n1 id (`src/common/configured_pair_id.hpp`; `docs/DESIGN-pair-identity.md`
 section 3.2): `n1-` and a lowercase UUIDv5 in the namespace `d3565c73-e7e9-5bca-b6a9-64cb5c4c9f93`, its name the
 graph list's name, graph path and annotation path as the list spells them, each written as its UTF-8 byte length,
 `:` and its bytes (an absent one `-1:`), nothing normalized. For example the line
@@ -180,6 +180,12 @@ The answer keeps its upstream shape (a list of `{seq_description, results, ...}`
 - `/search` takes `graphs` only (no `pairs`; it has no re-ask): `pairs` is refused 400 `pairs_unsupported` on every
   server, single-graph included, before any cached answer is looked up. On a single-graph server the field used to
   be ignored (a request it refused for `graphs` keeps that refusal).
+- `/search` writes a request's sequences to a file in the server's temporary directory (`--disk-swap`, else the
+  system's) before it searches them. A file that cannot be made or written (the directory missing, full or out of
+  inodes) fails the request 400 `{"error": "search: the request's sequences could not be written to the server's
+  temporary directory (the server's log names the directory and the reason)"}` on every server, the file's path and
+  the reason in the log only (fix round 1 of train 8; before, the 400 stated the file's path, `Error: temp file
+  <path> creation failed`, and a write that failed was not noticed).
 - On a multi-graph server an empty `graphs` (`[]`) selects no pair: it is refused 400 `pair_not_found` (section 6),
   before any cached answer is looked up and before any pair is searched (train 4; it was answered 200 with the
   body `null`, nothing searched). A `graphs` that is not a list is still read as no field, and an unknown name

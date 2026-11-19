@@ -145,10 +145,10 @@ Json::Value process_search_request(const SearchRequest &request,
     // writing to temporary file in order to reuse query code. This is not optimal and
     // may turn out to be an issue in production. However, adapting FastaParser to
     // work on strings seems non-trivial. An alternative would be to use
-    // read_fasta_from_string.
-    utils::TempFile tf(config.tmp_dir);
-    tf.ofstream() << request.fasta;
-    tf.ofstream().close();
+    // read_fasta_from_string. A file that cannot be made or written fails the request in a
+    // text without its path, which goes to the log (write_search_query_file)
+    const std::unique_ptr<utils::TempFile> tf
+            = write_search_query_file(config.tmp_dir, request.fasta);
 
     // Each record's object (its rows, tagged with their pair on a multi-graph server, and the
     // cut its top N was taken with: one entry, for this pair), built as its unit completes and
@@ -164,7 +164,7 @@ Json::Value process_search_request(const SearchRequest &request,
     // the most one record's object held while it was built and measured (charged as it grows)
     uint64_t transient_charged = 0;
     const size_t k = anno_graph.get_graph().get_k();
-    query_fasta(tf.name(),
+    query_fasta(tf->name(),
         [&](SeqSearchResult &&seq_result) {
             std::lock_guard<std::mutex> lock(result_mutex);
             if (budget) {

@@ -33,6 +33,7 @@
 #include "common/logger.hpp"
 #include "common/threads/threading.hpp"
 #include "common/unix_tools.hpp"
+#include "common/utils/file_utils.hpp"
 #include "common/utils/string_utils.hpp"
 #include "graph/alignment/pattern_search.hpp"
 #include "server_envelope.hpp"
@@ -2197,6 +2198,27 @@ std::string pair_load_failure_text(const std::string &route, const std::string &
     return fmt::format("{}: pair {} could not be loaded: the load into RAM for the request "
                        "failed (the server's log names the file and the reason); send the "
                        "request without in_ram", route, pair);
+}
+
+const char kSearchTempFileText[] = "search: the request's sequences could not be written to "
+                                   "the server's temporary directory (the server's log names "
+                                   "the directory and the reason)";
+
+std::unique_ptr<::utils::TempFile> write_search_query_file(const std::string &tmp_dir,
+                                                           const std::string &fasta) {
+    try {
+        auto file = std::make_unique<::utils::TempFile>(tmp_dir);
+        file->ofstream() << fasta;
+        file->ofstream().close();
+        if (!file->ofstream())
+            throw std::runtime_error("Error: temp file " + file->name() + " write failed");
+        return file;
+    } catch (const std::exception &e) {
+        // TempFile's own text names the file
+        logger->error("[Server] /search: the temporary file of the request's sequences: {}",
+                      ::utils::escape_for_log(e.what()));
+        throw std::runtime_error(kSearchTempFileText);
+    }
 }
 
 Json::Value index_changed_json(const std::string &message) {

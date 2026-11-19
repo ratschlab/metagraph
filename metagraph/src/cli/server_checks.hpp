@@ -7,6 +7,7 @@
 #include <cstdint>
 #include <functional>
 #include <map>
+#include <memory>
 #include <mutex>
 #include <optional>
 #include <stdexcept>
@@ -16,6 +17,9 @@
 
 #include <json/json.h>
 
+namespace utils {
+class TempFile;
+} // namespace utils
 
 namespace mtg {
 namespace annot {
@@ -941,6 +945,19 @@ std::string other_labels_text(const std::string &pair);
 // the reason); send the request without in_ram". The loader's own text names the file: it goes
 // to the log only
 std::string pair_load_failure_text(const std::string &route, const std::string &pair);
+
+// The text a client receives when /search cannot write a request's sequences to its temporary
+// file (write_search_query_file): it names no directory, which the log does
+extern const char kSearchTempFileText[];
+// The temporary file /search writes a request's sequences (|fasta|) to before it queries them,
+// in |tmp_dir| (the server's --disk-swap; empty: the system's temporary directory): made,
+// written and closed. One that cannot be made or written (the directory missing, full or out
+// of inodes) fails the request with std::runtime_error(kSearchTempFileText), the route's 400,
+// which names no path (SPEC-multigraph-envelope.md section 1.2); the reason, with the file's
+// path, goes to the log. Before (fix round 1, M1) the 400 stated the file's path, and a write
+// that failed went unnoticed (the query read what had been written)
+std::unique_ptr<::utils::TempFile> write_search_query_file(const std::string &tmp_dir,
+                                                           const std::string &fasta);
 
 // {"error": |message|, "code": "index_changed"}: the refusal of a load of a pair into RAM for a
 // request once a file of the pair changed on disk since the server started (pair_files_changed's
