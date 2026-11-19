@@ -321,6 +321,27 @@ class TestDiscoveryInBothForms(unittest.TestCase):
         self.assertNotIsInstance(r.results[1], dict)
         self.assertEqual([p.get('graph') for p in c.posted()], [GRAPH])
 
+    def test_the_fan_out_leaves_a_bad_entry_beside_given_pairs(self):
+        # re-check R2: the fan-out's own listing leaves out an entry the pair rule refuses
+        # beside the caller's pairs, as the listing's resolver does; with pairs=None every
+        # listed pair is a target, and the entry is refused before anything is sent
+        seed = 'ACGTACGTACGTACGTACGTACGTACGTACGTAC'
+        caps = copy.deepcopy(BEFORE_IDS)
+        caps['graph_summary']['pairs'].append({'graph': 'other', 'graph_path': '/x.dbg',
+                                               'pair_id': P2})
+        c = _Engine(caps, tagged(T.doc_json('fork', 'graphlet'), 'paths'))
+        r = c.traverse_pairs(seed, pairs=[{'graph': GRAPH, 'graph_path': GP,
+                                           'annotation_path': AP}, {'graph': GRAPH,
+                                                                    'pair_id': ID}],
+                             coordinates=None)
+        self.assertEqual([p['pairs'] for p in c.posted()],
+                         [[{'graph': GRAPH, 'graph_path': GP, 'annotation_path': AP}]] * 2)
+        self.assertEqual(r.expected_pairs, ({'graph': GRAPH, 'pair_id': ID},) * 2)
+        c = _Engine(caps, tagged(T.doc_json('fork', 'graphlet'), 'paths'))
+        with self.assertRaises(PairIdError) as cm:
+            c.traverse_pairs(seed, coordinates=None)
+        self.assertEqual((cm.exception.code, c.posted()), ('p2_pair_id', []))
+
     def test_a_p2_id_is_refused_before_anything_is_sent(self):
         c = _FanOut(self.BY_ID)
         with self.assertRaises(PairIdError) as cm:

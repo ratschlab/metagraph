@@ -1395,11 +1395,20 @@ class TraverseClient:
         summary = caps.get('graph_summary') if isinstance(caps.get('graph_summary'), dict) \
             else {}
         # each listed pair with its Pair: its id stated (an engine after ids) or computed from
-        # its paths (one before)
-        listed = [(p, _pair(p['graph'], p.get('graph_path'), p.get('annotation_path'),
-                            p.get('pair_id'), 'GET /capabilities graph_summary.pairs[%d]' % i))
-                  for i, p in enumerate(summary.get('pairs') or [])
-                  if isinstance(p, dict) and _text(p.get('graph'))]
+        # its paths (one before). An entry the pair rule refuses is refused where every listed
+        # pair is a target (pairs=None); beside the caller's own pairs it is left out, as the
+        # listing's resolver leaves it out (capabilities_pair_resolver()): it names no target
+        listed = []
+        for i, p in enumerate(summary.get('pairs') or []):
+            if not (isinstance(p, dict) and _text(p.get('graph'))):
+                continue
+            try:
+                listed.append((p, _pair(p['graph'], p.get('graph_path'),
+                                        p.get('annotation_path'), p.get('pair_id'),
+                                        'GET /capabilities graph_summary.pairs[%d]' % i)))
+            except PairIdError:
+                if pairs is None:
+                    raise
         targets = []
         if pairs is None:
             seen = set()
