@@ -184,8 +184,9 @@ engine's n1 id, never the service's public ``p2-`` id, which is refused
 (``PairIdError``, a ``ValueError`` with ``code`` ``p2_pair_id``; ``bad_pair_id`` for
 anything else that is not an n1 id -- ``''``, ``0`` and ``False`` included -- or an id
 beside one path only, ``pair_id_mismatch`` for an id stated beside paths that are not
-its). One rule reads every pair statement, in a document's ``J`` line, a listing or a
-selector, and an empty path is a path (the engine hashes it too): ``answered_pair()`` and
+its). One rule reads every pair statement, in a document's ``J`` line, a listing, a
+selector or a pair object, and an empty path is a path wherever a pair is read or written
+(the engine hashes ``''`` too, apart from an absent path): ``answered_pair()`` and
 ``GraphletStore.request_of()`` raise the ``PairIdError``, ``union_pairs()`` and
 ``stitch()`` refuse the document with a ``CombineRefused`` of the same code and words,
 and the MCP tools answer that code.
@@ -204,11 +205,14 @@ how to send it, in one place (``TraverseClient.wire_pair()``, through
    that states ``multigraph.pair_id: "n1"`` in ``GET /capabilities``;
 3. else the paths that same server lists for the id in its own ``GET /capabilities``
    (``capabilities_pair_resolver()`` over it, read once per server process, the n1 id
-   recomputed): paths go back only to the engine that stated them;
+   recomputed; a listed entry the rule above refuses is left out and resolves nothing):
+   paths go back only to the engine that stated them;
 4. else ``PairIdError`` ``pair_unresolved``, before any ``/traverse`` request or probe
    is sent (the client has read ``GET /capabilities``; a server it cannot reach raises
-   its transport error instead). ``traverse_pairs()`` checks every pair this way before
-   it sends the first request, so a refusal loses no answer.
+   its transport error instead, which ``traverse_pairs()`` returns as that pair's
+   ``{pair, error}``). ``traverse_pairs()`` checks every pair this way, on its own read
+   of ``GET /capabilities``, before it sends the first request, so a refusal loses no
+   answer.
 
 So a client holding a document with the id only, and no resolver of its own, can read,
 union and stitch it with no server at all, and can re-ask a server for it when the server
