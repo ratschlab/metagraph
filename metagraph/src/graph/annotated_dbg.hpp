@@ -143,12 +143,14 @@ search_top_n(const std::vector<size_t> &scores,
 /**
  * The heap of the store a column-label search gathers its rows' values in (each record's
  * scratch: freed when its rows are returned), utils::ValueStore<Column, |Values|> over
- * |num_labels| labels with |num_rows| rows kept, once their keys are in: below ValueStore's
+ * |num_labels| labels with |num_rows| rows kept, as it is built: below ValueStore's
  * threshold its dense index (a size_t per label) and the values' buffer, otherwise the hash
  * table tsl reserves for |num_rows| (its buckets at the maximum load and its padding), each
- * buffer at its size class. Keys that collide in the table's hash can make it hold more
- * (hopscotch_held_bytes of the store's table). |Values|: PresenceRuns, CountRuns or
- * PositionCoords (REVIEW 9726cb420 [P2], lane T6-W2)
+ * buffer at its size class. Keys that collide in the table's hash can make it grow past that
+ * as they are put in (a doubling, an overflow node): the search charges each of those
+ * allocations before it is made, through the table's allocator (GPT final review of trains
+ * 5a-7, M1). |Values|: PresenceRuns, CountRuns or PositionCoords (REVIEW 9726cb420 [P2], lane
+ * T6-W2)
  */
 template <class Values>
 uint64_t search_store_bytes(size_t num_labels, size_t num_rows);

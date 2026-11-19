@@ -525,16 +525,20 @@ namespace utils {
         return item_counts;
     }
 
-    template <typename T, typename ValueType>
+    // |Allocator|: the hash table's, which a /search's values account charges through
+    template <typename T, typename ValueType,
+              class Allocator = std::allocator<std::pair<T, ValueType>>>
     class ValueStore {
       public:
-        using SparseMap = tsl::hopscotch_map<T, ValueType>;
+        using SparseMap = tsl::hopscotch_map<T, ValueType, std::hash<T>, std::equal_to<T>,
+                                             Allocator>;
 
         // whether a store over |universe_size| ids is dense (an index per id) or a hash table
         static bool dense(size_t universe_size) { return universe_size < kMaxDenseSize; }
 
-        ValueStore(size_t universe_size, size_t reserve_size = 0)
-              : use_dense_(dense(universe_size)) {
+        ValueStore(size_t universe_size, size_t reserve_size = 0,
+                   const Allocator &alloc = Allocator())
+              : use_dense_(dense(universe_size)), sparse_values_(alloc) {
             if (use_dense_) {
                 // For a small universe size, using a dense vector is faster than a hash table.
                 ids_.resize(universe_size);

@@ -878,6 +878,170 @@ TEST(SearchBudget, AColumnSearchChargesTheStoreItBuilds) {
     }
 }
 
+// An annotation of |num_labels| labels named with seven digits (so that their names sort as their
+// ids, the order a column-label search puts rows of one count into its store) on which each
+// label of |ids| covers every k-mer of |sequence|, and no other label any
+std::unique_ptr<graph::AnnotatedDBG> labels_at(const std::string &sequence, size_t k,
+                                               size_t num_labels,
+                                               const std::vector<uint64_t> &ids) {
+    auto graph = std::make_shared<graph::DBGHashOrdered>(k);
+    graph->add_sequence(sequence);
+    Vector<annot::matrix::BinaryMatrix::SetBitPositions> rows(graph->max_index());
+    graph->call_nodes([&](auto node) {
+        for (uint64_t id : ids) {
+            rows[node - 1].push_back(id);
+        }
+    });
+    std::vector<std::string> labels;
+    labels.reserve(num_labels);
+    for (size_t j = 0; j < num_labels; ++j) {
+        std::string digits = std::to_string(j);
+        labels.push_back("L" + std::string(7 - std::min<size_t>(7, digits.size()), '0') + digits);
+    }
+    return std::make_unique<graph::AnnotatedDBG>(
+            graph, std::make_unique<annot::RowCompressed<>>(std::move(rows), labels));
+}
+
+// What a hash table's allocations hold as it is used (each at its size class, as the values
+// account counts it): at their most, and, under |bound| (0: none), the first allocation that
+// takes them past it and what they held before it
+struct TableHeap {
+    uint64_t bound = 0;
+    uint64_t held = 0;
+    uint64_t most = 0;
+    uint64_t before_passing = 0;
+    uint64_t passing = 0;
+};
+
+template <class T>
+class TableHeapAllocator {
+  public:
+    using value_type = T;
+    using propagate_on_container_copy_assignment = std::true_type;
+    using propagate_on_container_move_assignment = std::true_type;
+    using propagate_on_container_swap = std::true_type;
+    using is_always_equal = std::false_type;
+
+    explicit TableHeapAllocator(TableHeap *heap) noexcept : heap_(heap) {}
+    template <class U>
+    TableHeapAllocator(const TableHeapAllocator<U> &other) noexcept : heap_(other.heap()) {}
+
+    T* allocate(size_t n) {
+        const uint64_t bytes = alloc_bytes(n * sizeof(T));
+        if (heap_->bound && !heap_->passing && heap_->held + bytes > heap_->bound) {
+            heap_->before_passing = heap_->held;
+            heap_->passing = bytes;
+        }
+        heap_->held += bytes;
+        heap_->most = std::max(heap_->most, heap_->held);
+        return std::allocator<T>().allocate(n);
+    }
+    void deallocate(T *p, size_t n) noexcept {
+        heap_->held -= alloc_bytes(n * sizeof(T));
+        std::allocator<T>().deallocate(p, n);
+    }
+
+    TableHeap* heap() const noexcept { return heap_; }
+    template <class U>
+    bool operator==(const TableHeapAllocator<U> &other) const noexcept {
+        return heap_ == other.heap();
+    }
+    template <class U>
+    bool operator!=(const TableHeapAllocator<U> &other) const noexcept {
+        return heap_ != other.heap();
+    }
+
+  private:
+    TableHeap *heap_;
+};
+
+// The heap of a column-label search's table (a store of one million labels or more) as the ids
+// |ids| are put into it in their order, reserved for them, each with a value of |Values| over
+// |num_kmers| positions: tsl's own table of the store's key and value
+template <class Values>
+TableHeap store_table_heap(const std::vector<uint64_t> &ids, size_t num_kmers,
+                           uint64_t bound = 0) {
+    using Column = annot::matrix::BinaryMatrix::Column;
+    using Allocator = TableHeapAllocator<std::pair<Column, Values>>;
+    TableHeap heap;
+    heap.bound = bound;
+    {
+        Allocator allocator(&heap);
+        tsl::hopscotch_map<Column, Values, std::hash<Column>, std::equal_to<Column>, Allocator>
+                table(allocator);
+        table.reserve(ids.size());
+        for (uint64_t id : ids) {
+            table.emplace(id, Values(num_kmers));
+        }
+    }
+    return heap;
+}
+
+// GPT final review of trains 5a-7, M1: a column-label search's table (from one million labels on)
+// whose label ids collide in its hash grows past its reserve as its keys are put in. Ids 256
+// apart double its 4,096 buckets twice, 1.75 MiB, and 2.6 MiB at the second doubling, the old
+// buckets beside the new; ids 2,048 apart leave it at its 512 buckets and add an overflow node an
+// id. Each allocation is charged before it is made: the values account holds the most the table
+// held at once, and a bound the growth passes refuses the search at the allocation that passes
+// it, charged what the table held then and that allocation; the rows are those without an
+// account. Before, the table was charged once its keys were in, after it had grown (a unit
+// refused there had held 1.75 MiB under a bound of 1 MiB), and its doubling's peak never
+TEST(SearchBudget, AColumnSearchChargesItsTableBeforeItGrows) {
+    std::mt19937 rng(37);
+    const std::string sequence = random_sequence(rng, 40);
+    const size_t k = 11;
+    const size_t num_kmers = sequence.size() - k + 1;
+    for (const auto &[stride, num_rows] : { std::pair<uint64_t, size_t>{ 256, 3500 },
+                                            std::pair<uint64_t, size_t>{ 2048, 400 } }) {
+        SCOPED_TRACE(::testing::Message() << "ids " << stride << " apart, " << num_rows << " rows");
+        std::vector<uint64_t> ids;
+        for (size_t r = 0; r < num_rows; ++r) {
+            ids.push_back(stride * r);
+        }
+        auto index = labels_at(sequence, k, 1'000'000, ids);
+        const uint64_t reserve = graph::search_store_bytes<PresenceRuns>(1'000'000, num_rows);
+        const TableHeap table = store_table_heap<PresenceRuns>(ids, num_kmers);
+        // the table grows past its reserve
+        ASSERT_LT(reserve, table.most);
+
+        SearchBudget budget(kLarge);
+        SearchAccount account(&budget, "values");
+        const auto rows = index->get_top_label_signatures(sequence, num_rows, 0, 0, nullptr,
+                                                          &account);
+        ASSERT_EQ(num_rows, rows.size());
+        EXPECT_EQ(index->get_top_label_signatures(sequence, num_rows, 0, 0), rows);
+        // the store's scratch: the most the table held at once
+        EXPECT_EQ(table.most, account.scratch());
+
+        // a bound halfway from the reserve to that: refused at the allocation that passes it
+        const uint64_t bound = (reserve + table.most) / 2;
+        const TableHeap passing = store_table_heap<PresenceRuns>(ids, num_kmers, bound);
+        ASSERT_LT(0u, passing.passing);
+        SearchBudget small(bound);
+        SearchAccount refused(&small, "values");
+        EXPECT_THROW(index->get_top_label_signatures(sequence, num_rows, 0, 0, nullptr, &refused),
+                     SearchAnswerTooLarge);
+        ASSERT_TRUE(small.passed());
+        EXPECT_LE(small.first_held(), bound);
+        EXPECT_EQ(passing.before_passing + passing.passing,
+                  small.first_held() + small.first_charge());
+
+        if (stride == 256) {
+            // a bound the grown table and the rows' values fit, but not the second doubling (the
+            // old buckets beside the new): refused (before, answered)
+            using Layout = annot::matrix::HopscotchLayout<utils::ValueStore<
+                    annot::matrix::BinaryMatrix::Column, PresenceRuns>::SparseMap>;
+            const uint64_t grown = Layout::array_bytes(16'384);
+            ASSERT_LT(grown + num_rows * alloc_bytes(2 * sizeof(PresenceRuns::Run)), table.most);
+            SearchBudget peak(table.most - 1);
+            SearchAccount at_peak(&peak, "values");
+            EXPECT_THROW(index->get_top_label_signatures(sequence, num_rows, 0, 0, nullptr,
+                                                         &at_peak),
+                         SearchAnswerTooLarge);
+        }
+    }
+}
+
 // ---------------------------------------------------------------------------------------------
 // Lane T7-P1: the /search partial refusal per unit (a FASTA record on a pair;
 // DESIGN-search-partial-refusal.md sections 3 and 4). Each unit has its own values account; with

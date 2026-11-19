@@ -946,6 +946,67 @@ class CutScratch {
     uint64_t held_ = 0;
 };
 
+/**
+ * The allocator of a column-label search's store when it is a hash table (utils::ValueStore
+ * from one million labels on): each allocation of the table (its bucket array at its reserve
+ * and at each doubling, the new array beside the old one while the entries move; a node of its
+ * overflow list) is charged to |scratch| BEFORE it is made, at what the table holds with it
+ * (CutScratch::grow: the unit's values account holds the most its scratch took), and released
+ * when it is freed. Its keys are label ids under the identity hash: ids a multiple of a power
+ * of two apart collide, and so, rarely, do any at the reserve's 0.9 load, and the table grows
+ * past its reserve as they are put in (GPT final review of trains 5a-7, M1: the table was
+ * charged once its keys were in, after it had grown, and its doubling's old and new arrays
+ * together never; 1,835,008 B and 2,752,512 B for the 458,752 B charged, under a bound of
+ * 1 MiB). Propagated with its table, as ChargedAllocator (graph/traversal/charged_table.hpp)
+ */
+template <class T>
+class StoreAllocator {
+  public:
+    using value_type = T;
+    using propagate_on_container_copy_assignment = std::true_type;
+    using propagate_on_container_move_assignment = std::true_type;
+    using propagate_on_container_swap = std::true_type;
+    using is_always_equal = std::false_type;
+
+    StoreAllocator() noexcept = default;
+    explicit StoreAllocator(CutScratch *scratch) noexcept : scratch_(scratch) {}
+    template <class U>
+    StoreAllocator(const StoreAllocator<U> &other) noexcept : scratch_(other.scratch()) {}
+
+    T* allocate(size_t n) {
+        const uint64_t bytes = alloc_bytes(n * sizeof(T));
+        // (throws past the bound: nothing allocated, and tsl leaves the table as it was)
+        if (scratch_)
+            scratch_->grow(bytes);
+        try {
+            return std::allocator<T>().allocate(n);
+        } catch (...) {
+            if (scratch_)
+                scratch_->release(bytes);
+            throw;
+        }
+    }
+    void deallocate(T *p, size_t n) noexcept {
+        std::allocator<T>().deallocate(p, n);
+        if (scratch_)
+            scratch_->release(alloc_bytes(n * sizeof(T)));
+    }
+
+    CutScratch* scratch() const noexcept { return scratch_; }
+
+    template <class U>
+    bool operator==(const StoreAllocator<U> &other) const noexcept {
+        return scratch_ == other.scratch();
+    }
+    template <class U>
+    bool operator!=(const StoreAllocator<U> &other) const noexcept {
+        return scratch_ != other.scratch();
+    }
+
+  private:
+    CutScratch *scratch_ = nullptr;
+};
+
 // Append the rows of |rows| not seen yet to |distinct|, in the order of their first
 // occurrence, and the index in |distinct| of each row to |index|
 void index_distinct_rows(std::span<const AnnotatedDBG::row_index> rows,
@@ -1889,18 +1950,18 @@ Result filter_and_aggregate(const RowEnumerator &enumerate_rows,
     // (if any) as what it allocates before it is built: the dense index over the labels and the
     // values' buffer, or the hash table reserved for the labels kept (REVIEW 9726cb420 [P2],
     // lane T6-W2: the smaller of the two was charged, but the store picks its form by the
-    // labels alone)
+    // labels alone); a table that grows past its reserve as its keys are put in, at each of its
+    // allocations before it is made, through its allocator (StoreAllocator: GPT final review of
+    // trains 5a-7, M1)
     charge_search_scratch(values_account,
                           search_store_bytes<ValueType>(label_encoder.size(), counts.size()));
-    utils::ValueStore<Column, ValueType> value_store(label_encoder.size(), counts.size());
+    using Allocator = StoreAllocator<std::pair<Column, ValueType>>;
+    CutScratch store_scratch(values_account);
+    utils::ValueStore<Column, ValueType, Allocator> value_store(
+            label_encoder.size(), counts.size(), Allocator(&store_scratch));
     for (const auto &[j, count] : counts) {
         value_store.emplace(j, ValueType(num_kmers, values_account));
     }
-    // keys that collide in the table's hash (label ids chosen for it) can make it grow past its
-    // reserve: what it holds then, charged once its keys are in, before any value is added
-    if (values_account && !value_store.is_dense())
-        values_account->charge_scratch(
-                annot::matrix::hopscotch_held_bytes(value_store.sparse_values()));
 
     size_t i = 0;
     enumerate_rows([&](const auto &row) {

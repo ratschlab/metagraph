@@ -216,7 +216,8 @@ before what it prices is built (the model of the deployed build's heap, as today
 
 1. **A unit's values account**, one per (record, pair). It is charged what today's pair account is charged, for
    that one record: its per-position values as their buffers grow, the store its column-label search gathers its
-   rows in (W2's `charge_scratch`; a unit is one task, `threads` 1), and its rows as its result is handed over
+   rows in (W2's `charge_scratch`; a unit is one task, `threads` 1; from one million labels on, a hash table charged
+   at each of its allocations before it is made, lane T7-G4E), and its rows as its result is handed over
    (`search_record_rows_bytes`, now made in `query_sequence`, 3.2). If it would pass B, the unit is refused with
    `account: "values"`. With `partial_refusal` the request is not marked and the other units go on; without it,
    see 2.4.
@@ -368,6 +369,13 @@ These are totals of the model, not bounds on memory (review finding 6). What the
   `SearchRequest.fasta`, and on disk a temp file per pair;
 - **gzip's output** is appended without a reserve (`compress_string`, server_utils.cpp:53-112), so incompressible
   text can take more than the charged copy;
+- **small allocations no account sees** (lane T7-G4E's sweep after the GPT final review of trains 5a-7, M1):
+  each `with_signature` value's empty mask (an sdsl word, 16 B at its size class), and its copy beside it while
+  a column-label search's table doubles (tsl copies the values, which are not nothrow-movable); after the cut, a
+  column-label search's list of the rows kept (16 B a row), and the coordinate path's table of the returned
+  records and its list of their hits (24 B a record); a value's `shrink()`, which allocates the shrunk buffer
+  beside the charged one, one value at a time. In the per-position modes too, the rows' labels and the result's
+  vector are built before the handover charge;
 - allocator slack. Y4 measured refused requests peaking slightly above the bound.
 
 ### 5.2 Staging (refseq-experimental, r237, 128 GiB container, about 18 GiB anonymous at rest)
