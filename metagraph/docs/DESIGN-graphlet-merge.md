@@ -688,7 +688,9 @@ pairs (their descriptions, linear in the number of inputs); then each matching p
 `seqs_order=` keys among themselves, `ambiguous_pair` with the pair classes, the classes against the keys), at its
 index and at the comparisons its candidates need (F.1); then, after `no_bases` and `different_alphabet` (which charge
 nothing) and before the seed checks, the inputs' variable-length metadata (at a bound of its JSON) and the seed (four
-copies, and four more per part, whose retrieval identity holds it); then the trie pass. A budget too small for one of
+copies, and four more per part, whose retrieval identity holds it); then the trie pass: each part before it is
+inserted, and each cover entry its segments add past their first (an edge walked, a split's copy of a cover) where it
+is made (F.1). A budget too small for one of
 these charges stops there, before the refusals checked after it: `ambiguous_pair` after its pass's charge, `no_bases`
 and `different_alphabet` after the classes against the keys, and `different_seed`, `duplicate_pair` and
 `not_expected` after the metadata's.
@@ -2142,12 +2144,18 @@ graphlets.rst examples run in `run_examples.py` (CI's fixture-checks job).
   (DESIGN §7). r237's 11 parts with two arms each hold about 110 MB constrained, or 440–660 MB label-free.
   `memory_bytes()` is their sum plus the trie.
 - **The trie.** Built once, arm by arm, by one depth-first pass over each part's first-parent tree (walks and stubs,
-  §2.4). Bases are read from the part's segments, not copied, so the work is O(sum of the parts' bases), linear on a
-  comb too. A union segment costs about 200 bytes plus about 120 bytes per pair spelling it, and its bases are a
-  reference into a part [estimate]; a support holds its pieces and two counts, never a list of walks. The trie
-  has at most as many segments as the parts together, plus one per point where a pair's spelling ends, merges or
-  turns off and one per merge segment's start: for 11 parts of about 2,000 segments each, about 22,000 union
-  segments, 5–10 MB [estimate].
+  §2.4). Bases are read from the part's segments, not copied, so the comparisons are O(sum of the parts' bases),
+  linear on a comb too. Each raw edge holds a cover entry per pair spelling it (at most 120 bytes) and its union
+  segment a piece per such entry (at most 280 bytes), and its bases are a reference into a part (CPython 3.11 and
+  3.14, measured); a support holds its pieces and two counts, never a list of walks. The trie has at most as many
+  segments as the parts together, plus one per point where a pair's spelling ends, merges or turns off and one per
+  merge segment's start: for 11 parts of about 2,000 segments each, about 22,000 union segments, 5–10 MB
+  [estimate]. Parts that split nothing add a cover entry per segment: 2,000 answers of one fixture hold 23 MB.
+  Parts that share a locus and branch off it at different depths cut each other's spellings, so each part walks an
+  edge per depth the others branch at: P such parts hold about P² cover entries and pieces (P = 400: 66 MB; P =
+  2,000: 1.6 GB). The trie charges each cover entry where it is made (an edge a segment walks, a split's copy of a
+  cover, the merge into union segments), so the account follows them and bounds the peak, and the service's union
+  limits (256 MiB, 200 million lwu) stop such a union in the trie.
 - **Matching.** The passes that compare pair descriptions (the `seqs_order=` keys among themselves, `ambiguous_pair`
   with the pair classes, the classes against the keys) compare a description only with its candidates: those an index of
   A.4's rule says can match it (an index_fp both state; else the graph name, or a bare name against an index_ns; then

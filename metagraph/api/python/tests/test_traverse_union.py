@@ -2260,6 +2260,105 @@ def spine_part(n):
     return g
 
 
+def branch_part(n, d):
+    """The comb's spine 'A' + 'G' * n (n + 1 bp) split after |d| bases (1 <= d <= n) into a
+    1-bp leaf 'C' and the rest of the spine, three segments: parts of different |d| share
+    the spine and branch off it at different depths, so each part's segments walk an edge
+    per depth the others branch at (the Opus review of c8a0d5af2, Q5: the trie's covers
+    are quadratic in such parts)."""
+    from metagraph.traverse import parse
+    from tests.test_traverse_scale import COUNTERS
+    steps = n + 2
+    lines = ['H mgt 1 5 basic $ACGT a k k 1000 10 0 walk * * 0123456789abcdef',
+             'S aaaaaaaaaaaaaaaa 10 6 0 ACGTACGTAC',
+             'L c 0 * 0 left_samples', 'L c 1 * 5 right_samples', 'O c c c i',
+             'A r c %d p 0 0 1 2 0 %s * 0 * 3 0 2 1 0 %d'
+             % (n + 1, COUNTERS % (steps, steps, steps), steps),
+             'B 0 2 2 3 1 %d 1 0 1 0 0 0 0 .' % steps,
+             'G * 0 %d 0-1 * * * 0 * %s' % (d, 'A' + 'G' * (d - 1)), 'P 0 %d 2 !' % d,
+             'G 0 %d 1 0 * * * * * C' % d, 'P %d %d 1 0' % (d, d + 1), 'T D .',
+             'G 0 %d %d ! * * * * * %s' % (d, n + 1 - d, 'G' * (n + 1 - d)),
+             'P %d %d 2 !' % (d, n + 1), 'T D .']
+    lines.append('Z %d' % (len(lines) + 1))
+    g = parse('\n'.join(lines) + '\n')
+    ref = T.graphlet('merge')
+    g.envelope = copy.deepcopy(ref.envelope)
+    g.seed_summary = copy.deepcopy(ref.seed_summary)
+    return g
+
+
+class TestTrieCharges(unittest.TestCase):
+    """The Opus review of c8a0d5af2, Q5: the trie charges each cover entry where it is made
+    -- an edge a part's segment walks past its first, a split's copy of the edge's cover --
+    and the union segments' merge per cover entry, not a bound of every part before it per
+    segment (union.py's _Trie)."""
+
+    @staticmethod
+    def peak(make):
+        """tracemalloc's peak of union_pairs(make()) unbudgeted, warm (the same call first on
+        other fresh models, the collector held off: test_the_account_bounds_the_peak)."""
+        import gc
+        import tracemalloc
+        parts, other = make(), make()
+        gc.collect()
+        gc.disable()
+        try:
+            union_pairs(other)
+            tracemalloc.start()
+            base = tracemalloc.get_traced_memory()[0]
+            union_pairs(parts)
+            return tracemalloc.get_traced_memory()[1] - base
+        finally:
+            tracemalloc.stop()
+            gc.enable()
+
+    def charged(self, make):
+        """(lwu, account) of union_pairs(make()) under an unlimited budget, its digest the
+        unbudgeted one's."""
+        b = LocalBudget()
+        self.assertEqual(union_pairs(make(), budget=b).digest, union_pairs(make()).digest)
+        return b.used_work, b.peak_bytes
+
+    def test_identical_parts_split_nothing(self):
+        """2,000 answers of one fixture split nothing and walk one edge per segment: admitted
+        under the service's union limits (256 MiB, 200M lwu) and charged within a few times
+        their traced peak (the bound of every part before it per segment charged them 1.6 GB
+        against a 23 MB peak, and the service stopped them)."""
+        g = T.graphlet('merge')
+
+        def make():
+            return [{'pair': 'g%d' % i, 'graphlet': g} for i in range(2000)]
+        b = LocalBudget(work_units=200_000_000, memory_mb=256)
+        u = union_pairs(make(), budget=b)
+        self.assertEqual(u.digest, union_pairs(make()).digest)
+        got = self.peak(make)
+        self.assertLessEqual(got, b.peak_bytes)
+        self.assertLess(b.peak_bytes, 6 * got)
+
+    def test_shared_spellings_are_charged_as_they_grow(self):
+        """Parts that branch off one spine at as many depths (each split copying a cover:
+        branching deeper or shallower in turn), and one-segment spines over a comb of as many
+        splits, cover each other's edges, a cover entry per part and edge: twice the parts
+        charge at least three times the work and account (the bound per segment charged them
+        twice the work), and the account bounds the traced peak (the bound fell short of it on
+        the spines: 0.98 at 300 on CPython 3.14, 0.71 at 1,000)."""
+        shapes = {
+            'deeper': lambda n: lambda: [{'pair': 'b%d' % i, 'graphlet': branch_part(n + 1, i + 1)}
+                                        for i in range(n)],
+            'shallower': lambda n: lambda: [{'pair': 'b%d' % i,
+                                             'graphlet': branch_part(n + 1, n - i)}
+                                            for i in range(n)],
+            'spines': lambda n: lambda: [{'pair': 'C', 'graphlet': comb_part(n)}] + [
+                {'pair': 's%d' % i, 'graphlet': spine_part(n)} for i in range(n - 1)]}
+        for name, shape in shapes.items():
+            with self.subTest(name):
+                n = 300 if name == 'spines' else 200
+                small, big = self.charged(shape(n // 2)), self.charged(shape(n))
+                self.assertGreater(big[0], 3 * small[0], (small, big))
+                self.assertGreater(big[1], 3 * small[1], (small, big))
+                self.assertLessEqual(self.peak(shape(n)), big[1])
+
+
 class TestScale(unittest.TestCase):
     """P5: construction, walks(top=3) and print() linear on a comb, n = 250, 1000 and 2000,
     checked as ratios to n = 250, never as seconds: a linear cost grows 4 and 8 times, a

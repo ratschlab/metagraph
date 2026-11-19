@@ -167,10 +167,22 @@ _ID_LIKE = re.compile(r'[A-Za-z][A-Za-z0-9]{0,7}-[0-9A-Fa-f]{8}-?[0-9A-Fa-f]{4}-
 # export, a comb), so that the budget's account bounds the call's peak (budget.py).
 _M_NODE = 300           # a raw trie node: its children dict, its depth
 _M_EDGE = 420           # a raw edge: its five list slots, its reference, its cover dict
-_M_COVER = 110          # a cover entry of an edge (part -> (segment, offset))
+_M_COVER = 144          # a cover entry of an edge (part -> (segment, offset)), walked or
+#                         copied by a split (measured: at most 120 B per entry, parts that
+#                         branch off one spine at 400 depths, CPython 3.14; 112 on 3.11)
 _M_SEG = 200            # a part segment's entries: its nodes, the walks and stubs below it
 _M_USEG = 1280          # a union segment: the object, its dicts and lists, node_in/out
-_M_PIECE = 200          # a piece of a union segment (part, segment, from, to)
+_M_PIECE = 320          # a raw edge's cover entry in its union segment: the segment's cover
+#                         and pieces entries, the piece (part, segment, from, to) and its list
+#                         (measured: at most 279 B, the same 400 depths on 3.14; 271 on 3.11)
+# The trie's work beside its 4 W_ELEM per part segment, fitted to its insertion and
+# compression (best of 5, parts branching off one spine at 400 depths, a comb walked by 300
+# one-segment spines; 3.11 and 3.14): an edge a segment walks past its first 0.42 us, a
+# cover entry a split copies 0.12 us, a raw edge's cover entry merged into a union segment
+# 0.32 us
+_W_EDGE = 3 * W_ELEM    # an edge a segment walks past its first: the compare, the cover entry
+_W_COPY = W_ELEM        # a cover entry a split copies to the edge's lower half
+_W_PIECE = 2 * W_ELEM   # a raw edge's cover entry merged: its piece, the segment's cover check
 _M_PART = 4096          # a part's record: its identity, retrieval identity, digests
 _M_RECORD = 1024        # an absent or failed record
 _M_SPAN = 900           # a PairSpan with its Route, merges and continues tuples
@@ -807,7 +819,9 @@ def union_pairs(results, *, seed=None, expected_pairs=None, seqs_order=None, bud
     its index, then the comparisons its candidates need, counted from the index (linear
     where the pairs are distinct); then, after no_bases and different_alphabet (which charge
     nothing), the inputs' metadata (error strings, absent results, stated pairs, envelopes)
-    and the seed, before the seed checks; then the trie pass. A stop raises with no partial.
+    and the seed, before the seed checks; then the trie pass: each part before it is
+    inserted, and each cover entry a part's segments add past their first (an edge walked, a
+    split's copy of a cover) where it is made. A stop raises with no partial.
     A budget too small for a charge stops there, before the refusals checked after it:
     ambiguous_pair after its pass's charge, no_bases and different_alphabet after the
     classes against the keys, different_seed, duplicate_pair, not_expected and the rest
@@ -2938,9 +2952,12 @@ class _Trie:
             if fp_kids_of[pi] is not None:
                 self._below(pi, self.parts[pi].graphlet.arms[side], fp_kids_of[pi])
         if b is not None:
-            # the union segments at their bound: one per raw edge, a piece per cover entry
-            b.charge(W_ELEM * len(self.e_from),
-                     _M_USEG * len(self.e_from) + _M_PIECE * sum(map(len, self.e_cover)))
+            # the union segments at their bound: one per raw edge, a piece per cover entry;
+            # the merge reads each raw edge's cover (its pieces, the check that the next
+            # edge has the same pairs), so its work is charged per cover entry too
+            cov = sum(map(len, self.e_cover))
+            b.charge(W_ELEM * len(self.e_from) + _W_PIECE * cov,
+                     _M_USEG * len(self.e_from) + _M_PIECE * cov)
         self._compress(order)
 
     # ---------------------------------------------------------- insertion
@@ -2969,12 +2986,18 @@ class _Trie:
         self.e_cover.append(cover)
         return len(self.e_from) - 1
 
-    def _split(self, e, m):
-        """Split edge |e| after |m| bases -> the new middle node."""
+    def _split(self, e, m, b=None):
+        """Split edge |e| after |m| bases -> the new middle node. The copy of the edge's
+        cover for its lower half (an entry per part that walked it) is charged to |b|
+        before it is made: the node and the edge are in the segment's price
+        (_insert_part())."""
         f, t, n = self.e_from[e], self.e_to[e], self.e_len[e]
+        cover = self.e_cover[e]
+        if b is not None:
+            b.charge(_W_COPY * len(cover), _M_COVER * len(cover))
         mid = self._new_node(self.depth[f] + m)
         pi, seg, off = self.e_ref[e]
-        lower_cover = {k: (s, o + m) for k, (s, o) in self.e_cover[e].items()}
+        lower_cover = {k: (s, o + m) for k, (s, o) in cover.items()}
         low = self._new_edge(mid, t, n - m, (pi, seg, off + m), lower_cover)
         src, o = self._ref_walk(low)
         first = src[o]
@@ -2984,13 +3007,20 @@ class _Trie:
         self.e_len[e] = m
         return mid
 
-    def _insert_seg(self, pi, s, start):
-        """Insert part |pi|'s segment |s| at trie node |start| -> its end node."""
+    def _insert_seg(self, pi, s, start, b=None):
+        """Insert part |pi|'s segment |s| at trie node |start| -> its end node. Each edge it
+        walks gets the part's cover entry: the first is in the segment's price
+        (_insert_part()), each later one is charged to |b| before it is made, and so is a
+        split's copy of a cover (_split()). A segment walks as many edges as earlier parts
+        cut its spelling into: parts that share a locus and branch off it at different
+        depths cover each other's edges, a cover entry per part and edge."""
         w = s.walk
         n = len(w)
         node = start
         i = 0
         while i < n:
+            if i and b is not None:
+                b.charge(_W_EDGE, _M_COVER)
             ch = w[i]
             e = self.kids[node].get(ch)
             if e is None:
@@ -3013,7 +3043,7 @@ class _Trie:
                 while m < lim and src[o + m] == w[i + m]:
                     m += 1
             if m < el:
-                self._split(e, m)
+                self._split(e, m, b)
             self.e_cover[e][pi] = (s.id, i)
             node = self.e_to[e]
             i += m
@@ -3025,14 +3055,16 @@ class _Trie:
         segs = a.segments
         if b is not None:
             # one pass over the part's first-parent tree: an element per segment, its bases
-            # compared, and at most two trie nodes, an edge and a cover entry per segment.
-            # Memory at its bound: the first part's segments each add one node and one edge
-            # (siblings start with distinct bases); a later part's segment at most two of
-            # each (a split) and a copy of the split edge's cover (one entry per part before
-            # it)
+            # compared, and at most two trie nodes, two edges and the cover entry of the
+            # first edge it walks. Memory at its bound: the first part's segments each add
+            # one node, edge and cover entry (siblings start with distinct bases); a later
+            # part's segment at most two nodes and edges (a split, then a new edge) and that
+            # cover entry. Each further edge a segment walks, and a split's copy of a
+            # cover, are charged where they happen (_insert_seg(), _split()): their number
+            # depends on how the parts before it cut the spelling
             n = sum(s.length_bp for s in segs)
             per = (_M_NODE + _M_EDGE + _M_COVER) if pi == 0 else \
-                2 * (_M_NODE + _M_EDGE) + _M_COVER * (pi + 1)
+                2 * (_M_NODE + _M_EDGE) + _M_COVER
             b.charge(W_ELEM * 4 * len(segs) + (n >> 4),
                      3 * DICT + len(segs) * (per + _M_SEG))
             derive.uses(b, g, a, 'leaves', 'paths', 'path_of_leaf')
@@ -3060,7 +3092,7 @@ class _Trie:
                         0, 'part %s: segments %d and %d of the %s arm both start with %r at %d '
                         'bp (sibling segments start with distinct bases)'
                         % (part.tag, other, sid, self.side, s.walk[0], s.from_bp))
-            end = self._insert_seg(pi, s, start)
+            end = self._insert_seg(pi, s, start, b)
             nodes[sid] = (start, end)
             if s.length_bp == 0:
                 self.zero_at.setdefault(end, []).append((pi, sid))

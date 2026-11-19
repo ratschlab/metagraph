@@ -135,11 +135,15 @@ __all__ = ['LocalLimits', 'LocalBudget', 'LocalStop', 'LocalBudgetExceeded', 'Pa
 #     matches among themselves, charged row by row before each row; the trie is one
 #     pass over each part's first-parent tree, charged per part and arm before the pass:
 #     4 W_ELEM per part segment (its element, the compare of its bases, at most two trie
-#     nodes, an edge and a cover entry) and 1 lwu per 16 of its bases; its memory at its
-#     bound (union.py's _M_* prices, fitted to the traced peak on CPython 3.11 and 3.14):
-#     a first part's segment one node, edge and cover entry, a later part's at most two
-#     nodes and edges and a copy of the split edge's cover; before the union segments are
-#     made, one per raw edge and a piece per cover entry; a record per part and absent or
+#     nodes and edges, the cover entry of the first edge it walks) and 1 lwu per 16 of its
+#     bases, its memory at its bound (union.py's _M_* prices, fitted to the traced peak on
+#     CPython 3.11 and 3.14: a first part's segment one node, edge and cover entry, a later
+#     part's at most two nodes and edges and one cover entry); then, where it is made, each
+#     further cover entry: union.py's _W_EDGE per further edge a segment walks, _W_COPY per
+#     entry of the cover a split copies (parts that share a spelling and branch off it at
+#     different depths cover each other's edges, an entry per part and edge); before the
+#     union segments are made, one per raw edge and per cover entry a piece and _W_PIECE
+#     (the merge reads it); a record per part and absent or
 #     failed record; the parts' leaves, paths and path_of_leaf (derive.uses); the parts'
 #     own parses are the caller's (a union takes parsed models);
 #   * PairUnion's queries charge the parts' cold prices plus the trie work: an arm's walk
