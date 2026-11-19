@@ -182,23 +182,55 @@ pair_id=...)``, a ``{graph, pair_id}`` object in ``traverse_pairs(pairs=...)`` a
 ``union_pairs()``; the request carries ``pairs: [{graph, pair_id}]``. An id is the
 engine's n1 id, never the service's public ``p2-`` id, which is refused
 (``PairIdError``, a ``ValueError`` with ``code`` ``p2_pair_id``; ``bad_pair_id`` for
-anything else that is not an n1 id, ``pair_id_mismatch`` for an id stated beside paths
-that are not its).
+anything else that is not an n1 id -- ``''``, ``0`` and ``False`` included -- or an id
+beside one path only, ``pair_id_mismatch`` for an id stated beside paths that are not
+its). One rule reads every pair statement, in a document's ``J`` line, a listing or a
+selector, and an empty path is a path (the engine hashes it too): ``answered_pair()`` and
+``GraphletStore.request_of()`` raise the ``PairIdError``, ``union_pairs()`` and
+``stitch()`` refuse the document with a ``CombineRefused`` of the same code and words,
+and the MCP tools answer that code.
 
 A document with paths is continued and replayed by its paths, which every server takes.
 A document with the id only is continued and replayed by its id, and the client decides
-how to send it, in one place (``TraverseClient.wire_request()``, which ``traverse_raw()``,
-``traverse()``, ``deepen()`` and the capabilities probe go through): with a
-``pair_resolver`` -- a function from an n1 id to ``(graph, graph_path,
-annotation_path)``, the caller's binding -- the id is resolved, the n1 id of the answer
-recomputed and compared, and the pair sent by its paths; without one it is sent by its id
-to a server that states ``multigraph.pair_id: "n1"``, and refused before anything is sent
-(``PairIdError`` ``pair_unresolved``) otherwise. ``capabilities_pair_resolver(doc)``
-builds a resolver from a ``GET /capabilities`` document that lists its pairs' paths. What
-the library answers names a pair by ``graph`` and ``pair_id``, never by a path: union
-provenance and refusal texts, a stitched graphlet's provenance, ``traverse_pairs()``'
-``expected_pairs`` and ``seqs_order`` keys, the MCP tools' answers
-(``request_without_paths()``, ``entry_without_paths()``).
+how to send it, in one place (``TraverseClient.wire_pair()``, through
+``wire_request()``, which ``traverse_raw()``, ``traverse()``, ``deepen()``,
+``traverse_pairs()`` and the capabilities probe go through), in this order:
+
+1. the caller's ``pair_resolver`` -- a function from an n1 id to ``(graph, graph_path,
+   annotation_path)``, or ``None`` for an id it does not know: the answer's n1 id is
+   recomputed and compared (``pair_id_mismatch`` otherwise) and the pair sent by its
+   paths;
+2. where the resolver does not know the id, or there is none: the id itself, to a server
+   that states ``multigraph.pair_id: "n1"`` in ``GET /capabilities``;
+3. else the paths that same server lists for the id in its own ``GET /capabilities``
+   (``capabilities_pair_resolver()`` over it, read once per server process, the n1 id
+   recomputed): paths go back only to the engine that stated them;
+4. else ``PairIdError`` ``pair_unresolved``, before any ``/traverse`` request or probe
+   is sent (the client has read ``GET /capabilities``; a server it cannot reach raises
+   its transport error instead). ``traverse_pairs()`` checks every pair this way before
+   it sends the first request, so a refusal loses no answer.
+
+So a client holding a document with the id only, and no resolver of its own, can read,
+union and stitch it with no server at all, and can re-ask a server for it when the server
+states ``multigraph.pair_id: "n1"`` (an engine with pair ids), or when it lists the pair's
+paths in its own ``GET /capabilities`` (an engine before ids, reached directly); a
+resolver the caller builds with ``capabilities_pair_resolver(doc)`` from such a document,
+or any other, comes first. Anything else is ``pair_unresolved``: a front end whose answers
+list no paths and state no ids leaves the client nothing to resolve by, and re-asks go
+through that front end, whose own clients carry its resolver (the service installs one on
+every client it creates).
+
+What the library answers names a pair by ``graph`` and ``pair_id``, never by a path it
+read from an engine or a document: union provenance and refusal texts, a stitched
+graphlet's provenance, ``traverse_pairs()``' ``expected_pairs`` and ``seqs_order`` keys,
+the MCP tools' answers (``request_without_paths()``, ``entry_without_paths()``), and the
+documents they hand out -- ``graphlet_export(format='mgt')`` and ``graphlet_save`` write
+the ``J`` line by ``{graph, pair_id}``, an old document's too
+(``document_without_paths()``; ``GraphletStore.save()``, ``standalone_text()`` and
+``save_body()`` with ``paths=False``); the body and its digest are unchanged, and the
+store's own files, ``Graphlet.save()`` and ``dump()`` keep what the document states. A
+pair the caller named by a path without its id (no id to compute) is echoed in the
+caller's own words.
 
 .. graphlet-example: client server
 
@@ -1913,7 +1945,17 @@ n1 id (``configured_pair_id()`` of the paths where no id is stated), so a docume
 with paths and its twin stored with the id give the same part key, tag and digest, and a
 union of both forms is one. Two descriptions name one pair by this rule, in this order: a
 differing ``index_meta_fp`` separates them, an ``index_fp`` both state decides, then the
-graph names, then the ids where both have one, else the paths where both state them. ``TraverseClient.traverse_pairs(seed, strategy, pairs=...)`` sends one
+graph names, then the ids where both have one, else the paths where both state them. A
+pair named by a path without its id (``{graph, graph_path}``, a ``(graph, graph_path)``
+key) is compared with a pair named by its id only through the paths another description
+in the same call states for that id (its old twin, a full pair object); with none they
+cannot be compared and do not match -- a caller's statement is refused ``pair_mismatch``,
+an expected pair is ``not_expected``, a ``seqs_order`` key certifies no pair -- so a
+certificate attaches only to the pair it was stated for, and one set of inputs gives one
+union in every order. A ``seqs_order`` key shaped as another scheme's id (``N1-...``,
+``n2-...``, ``P2-...``) is refused ``bad_seqs_order``. For one name with several pairs the
+parts and absent records are ordered by ``pair_id``.
+``TraverseClient.traverse_pairs(seed, strategy, pairs=...)`` sends one
 request per pair (``pairs=None``: every pair ``GET /capabilities`` lists; ``pairs=[]``: none,
 and nothing is sent) and returns all four (``PairResults``); a pair whose request failed
 (``TraverseError``; ``ResponseFormatError``, a ``TraverseError``, for an answer not shaped
@@ -1932,7 +1974,9 @@ given twice is one, and two retrievals of one pair are refused (``compare()`` re
 retrievals of one pair). A refusal is a ``CombineRefused`` (a ``ValueError``) with a
 ``code``, checked in this order: the arguments (``bad_expected``, ``bad_seqs_order``),
 then ``not_combinable`` (also a ``TypeError``), ``view_unsupported``, ``not_one_seed``,
-``result_has_graphlet``, ``no_graphlet``, ``no_seed``, ``pair_mismatch``, ``no_pair``,
+``result_has_graphlet``, ``no_graphlet``, ``no_seed``, a document's pair statement the
+library does not take (``p2_pair_id``, ``bad_pair_id``, ``pair_id_mismatch``),
+``pair_mismatch``, ``no_pair``,
 ``ambiguous_pair``, ``no_bases``, ``different_alphabet``, ``different_seed``,
 ``duplicate_pair`` and ``not_expected``; two ``seqs_order`` keys that give one pair two
 values are ``bad_seqs_order``, found among the keys first and otherwise right after
