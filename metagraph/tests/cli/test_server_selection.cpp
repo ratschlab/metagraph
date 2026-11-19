@@ -685,6 +685,13 @@ TEST(ServerSelection, PairIdProbes) {
         EXPECT_NE(std::string::npos,
                   refusal_of([&] { probe(route, { { "pair_id", kIdA } }); })
                           .find("needs ?graph=<name>"));
+        // pair_id and a path without ?graph=: the same words (the name is read first, as an
+        // object of pairs reads its graph first)
+        for (const char *path : { "graph_path", "annotation_path" }) {
+            EXPECT_EQ(refusal_of([&] { probe(route, { { "pair_id", kIdA } }); }),
+                      refusal_of([&] { probe(route, { { "pair_id", kIdA }, { path, "a.dbg" } }); }))
+                    << path;
+        }
         Json::Value body;
         EXPECT_EQ("pair_not_found", selection_code_of([&] {
             probe(route, { { "graph", "b" }, { "pair_id", kIdA } });
@@ -743,9 +750,9 @@ TEST(ServerSelection, CapabilitiesProbes) {
                   refusal_of([&] { probe(SelectionRoute::PATTERN, { { key, "a.dbg" } }); }))
                 << key;
     }
-    // the base's words, which named the parameters it had
+    // the base's words, the list the parameters a probe takes (the base's named the two it had)
     EXPECT_EQ("Bad request: unknown parameter 'x' of GET /pattern/capabilities (graph, "
-              "graph_path)",
+              "pair_id, graph_path, annotation_path)",
               refusal_of([] { probe(SelectionRoute::PATTERN, { { "graph", "a" }, { "x", "1" } }); }));
     EXPECT_EQ("Bad request: the parameter 'graph' is given twice",
               refusal_of([] { probe(SelectionRoute::TRAVERSE, { { "graph", "a" },

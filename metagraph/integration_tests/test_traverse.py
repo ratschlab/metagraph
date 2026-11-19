@@ -4901,9 +4901,14 @@ class TestTraverseMultiGraph(TestTraverseBase):
         for query, text, code in (
                 ('?graph=Z', "Bad request: unknown graph 'Z'", 'graph_unknown'),
                 ('?graph=A&x=1', "Bad request: unknown parameter 'x' of GET "
-                                 "/traverse/capabilities (graph, graph_path)", None),
+                                 "/traverse/capabilities (graph, pair_id, graph_path, "
+                                 "annotation_path)", None),
                 ('?graph=A&graph=B', "Bad request: the parameter 'graph' is given twice", None),
                 ('?graph_path=/nowhere', 'Bad request: in multi-graph mode GET '
+                 '/traverse/capabilities needs ?graph=<name> (and pair_id=<id> when the name '
+                 'holds several pairs); GET /capabilities lists them', None),
+                # pair_id and a path, no name: the name's text (fix round 1, n6)
+                ('?pair_id=n1-x&graph_path=/nowhere', 'Bad request: in multi-graph mode GET '
                  '/traverse/capabilities needs ?graph=<name> (and pair_id=<id> when the name '
                  'holds several pairs); GET /capabilities lists them', None),
                 ('?graph=B&graph_path=/nowhere',

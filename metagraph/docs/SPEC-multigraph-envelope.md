@@ -482,9 +482,14 @@ names cap's three texts, `{N}` the cap and `{M}` the names listed:
 - `/pattern`, and `/resolve` (which reads the cap since release 10) in the same words: `request.graphs: required on
   this server, which hosts {M} graph names (more than {N}; GET /capabilities lists them)`;
 - a capabilities probe without `?graph=` (also one with `pair_id`, `graph_path` or `annotation_path` but no
-  `graph`): `Bad request: in multi-graph mode GET <route> needs ?graph=<name> (and pair_id=<id> when the name holds
+  `graph`, `pair_id` beside a path included: the name is read first, as an object of `pairs` reads its `graph`
+  first): `Bad request: in multi-graph mode GET <route> needs ?graph=<name> (and pair_id=<id> when the name holds
   several pairs); GET /capabilities lists them` (train 8; before: `... needs ?graph=<name> (and graph_path=<path>
   when the name spans several graphs); GET /capabilities lists the graphs`).
+
+A probe's unknown parameter is refused `Bad request: unknown parameter '<key>' of GET <route> (graph, pair_id,
+graph_path, annotation_path)`, its list the parameters a probe takes (fix round 1 of train 8; before, the release-9
+words `... (graph, graph_path)`, the two that server took).
 The other texts kept: an unknown name on `/resolve`, `/traverse` and a probe `Bad request: unknown graph '<name>'`
 (on `/search` `Request with an uninitialized graph <name>`, on `/pattern` `request.graphs: unknown graph '<name>'
 (GET /capabilities lists the graphs)`), each now with `graph_unknown`; on `/search` an empty `graphs`, which the

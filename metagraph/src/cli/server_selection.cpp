@@ -808,16 +808,16 @@ select_pairs_from_parameters(SelectionRoute route,
                                          : key == "graph_path" ? &spec.graph_path
                                          : key == "annotation_path" ? &spec.annotation_path
                                                                     : nullptr;
-        // the base's words (which named the parameters it had), as every refusal it gave
+        // the base's words, its list the parameters a probe takes now (fix round 1, n1; the
+        // base's named the two it had, "(graph, graph_path)")
         if (!slot) {
             throw InvalidRequest("Bad request: unknown parameter " + in_quotes(key) + " of " + get
-                                 + " (graph, graph_path)");
+                                 + " (graph, pair_id, graph_path, annotation_path)");
         }
         if (*slot)
             throw InvalidRequest("Bad request: the parameter " + in_quotes(key) + " is given twice");
         *slot = value;
     }
-    check_one_form(spec, "Bad request: ");
     if (!name) {
         // A probe without parameters describes every pair (section 1), as a POST request
         // without a selection runs on every pair: up to the names cap. Beyond it, and with
@@ -831,6 +831,9 @@ select_pairs_from_parameters(SelectionRoute route,
         }
         return pairs_of(sorted_names(indexes), indexes);
     }
+    // after the name, as an object of pairs reads its graph first (fix round 1, n6: a probe
+    // with pair_id and a path but no ?graph= gets the text above)
+    check_one_form(spec, "Bad request: ");
     spec.name = *name;
     if (!spec.annotation_path && !spec.pair_id) {
         // ?graph= with graph_path= or alone: the base's choice and its texts, coded

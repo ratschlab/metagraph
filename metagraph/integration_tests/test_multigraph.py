@@ -729,7 +729,7 @@ class TestMultiGraphServer(TestingBase):
     def _m6_rewordings(self):
         """{train 8's text: the release-9 text} of the panels' refusals that named a configured
         path (SPEC-multigraph-envelope.md section 6, train 8): the pairs by their pair_id, no
-        path"""
+        path; and the probes' unknown parameter, whose list names the parameters they take"""
         ecoli, kleb = self.pairs['ecoli'][0], self.pairs['kleb'][0]
         words = {
             f"Bad request: index 'enterics' holds several pairs ({self.pid('enterics', 'ecoli')}, "
@@ -743,6 +743,10 @@ class TestMultiGraphServer(TestingBase):
             words[f'Bad request: in multi-graph mode GET /{route} needs ?graph=<name> (and '
                   f'pair_id=<id> when the name holds several pairs); GET /capabilities lists '
                   f'them'] = f'Bad request: in multi-graph mode GET /{route} {NEEDS_OLD}'
+            # the parameters a probe takes (fix round 1, n1; the release-9 list had two)
+            words[f"Bad request: unknown parameter 'x' of GET /{route} (graph, pair_id, "
+                  f"graph_path, annotation_path)"] = \
+                f"Bad request: unknown parameter 'x' of GET /{route} (graph, graph_path)"
         return words
 
     def _refusal_panel(self):
@@ -772,7 +776,8 @@ class TestMultiGraphServer(TestingBase):
                 ('GET', route, '?graph=enterics', 'pair_ambiguous', spans),
                 ('GET', route, '?graph=nope', 'graph_unknown', unknown),
                 ('GET', route, '?graph=kleb&x=1', None,
-                 f"Bad request: unknown parameter 'x' of GET /{route} (graph, graph_path)"),
+                 f"Bad request: unknown parameter 'x' of GET /{route} (graph, pair_id, "
+                 f"graph_path, annotation_path)"),
                 ('GET', route, '?graph=kleb&graph=ecoli', None,
                  "Bad request: the parameter 'graph' is given twice"),
                 ('GET', route, '?graph_path=x', None, needs),
