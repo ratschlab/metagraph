@@ -882,6 +882,25 @@ class TestPartialDescriptions(unittest.TestCase):
         u = union_pairs([self.old], seqs_order={(GRAPH, 'graph-1.dbg'): 'verified'})
         self.assertEqual(u.parts[0].seqs_order, 'unknown')
 
+    def test_a_caller_path_is_echoed_where_there_is_no_id(self):
+        # review nits n4, n5: a pair the caller stated by a path without its id is shown in
+        # its own words -- in refusal texts (two such pairs read apart) and in provenance,
+        # pair and replay request alike; a pair with an id never shows a path
+        from metagraph.traverse import union_pairs
+        with self.assertRaises(CombineRefused) as cm:
+            union_pairs([{'pair': {'graph': GRAPH, 'graph_path': GP}, 'error': 'x'},
+                         {'pair': {'graph': GRAPH, 'graph_path': GP2}, 'error': 'y'}],
+                        expected_pairs=[GRAPH], seed='ACGT')
+        self.assertEqual(cm.exception.code, 'ambiguous_pair')
+        self.assertIn(GP, str(cm.exception))
+        self.assertIn(GP2, str(cm.exception))
+        u = union_pairs([{'pair': {'graph': GRAPH, 'graph_path': GP}, 'graphlet': self.old}])
+        (part,) = [e for e in u.provenance() if e['kind'] == 'part']
+        self.assertEqual((part['pair']['graph_path'], part['request']['graph_path']), (GP, GP))
+        self.assertIsNone(part['pair']['annotation_path'])
+        u = union_pairs([{'pair': {'graph': GRAPH}, 'graphlet': self.old}])
+        self.assertNotIn(GP, json.dumps(u.provenance()))
+
     def test_a_fan_out_pair_by_path_takes_the_answering_pair_id(self):
         from metagraph.traverse import union_pairs
         seed = 'ACGTACGTACGTACGTACGTACGTACGTACGTAC'

@@ -1410,6 +1410,11 @@ The sorting is total: every element becomes a part, an absent record, or a refus
 
 ### A.2 Refusal texts
 
+A pair in these texts is its bare name or its description as compact JSON: by `{graph, pair_id}` (with release and
+the index fields it states) wherever it has an id, an old document's computed from its paths; a pair the caller stated
+by a path without its id (no id to compute) in the caller's own words. No path the library read from an engine or a
+document is shown. `provenance()` follows the same rule: its `pair` and `request` echo a caller's path only there.
+
 | code | text |
 |---|---|
 | `bad_expected` | `expected_pairs= takes a list of the pairs the request was sent to, as graph names or {graph, graph_path, annotation_path} objects; %s is not one` (a string: `expected_pairs= is a string: pass a list of graph names`) |

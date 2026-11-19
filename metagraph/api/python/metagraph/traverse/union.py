@@ -598,11 +598,13 @@ def _sort_key(key):
 
 
 def _show(d):
-    """Description |d| in a text: its members but the paths (no path in any response,
-    docs/DESIGN-pair-identity.md section 2; a pair named by its paths shows the n1 id of
-    them), or the bare name."""
-    d = {k: v for k, v in d.items()
-         if v is not None and k not in ('graph_path', 'annotation_path')}
+    """Description |d| in a text: its members, the paths only where it has no id (no path
+    in any response, docs/DESIGN-pair-identity.md section 2: a pair named by its paths shows
+    the n1 id of them; one stated by a path without its id -- a caller's, with no id to
+    compute -- shows what was stated, so that two such pairs read apart), or the bare
+    name."""
+    has_id = bool(d.get('pair_id'))
+    d = {k: v for k, v in d.items() if v is not None and not (has_id and k in _PATHS)}
     return C.canonical_json(d) if set(d) != {'graph'} else d['graph']
 
 
@@ -755,10 +757,11 @@ def union_pairs(results, *, seed=None, expected_pairs=None, seqs_order=None, bud
     another id is refused --, a (graph, graph_path[, annotation_path]) tuple or a
     client.Pair) -> 'verified' | 'count_only' | None, as GET /capabilities states it; a pair
     not given reads 'unknown', and a key by a path certifies a pair named by its id only
-    where the call states that id's paths (Appendix A.4, rule 3). budget= (local limits): the inputs' metadata (error strings, absent
-    results, stated pairs, envelopes) and the seed are charged before the seed checks, then
-    the trie pass; a stop raises with no partial. A budget smaller than the metadata and seed
-    therefore stops before the different_seed, duplicate_pair and not_expected refusals.
+    where the call states that id's paths (Appendix A.4, rule 3). budget= (local limits):
+    the inputs' metadata (error strings, absent results, stated pairs, envelopes) and the
+    seed are charged before the seed checks, then the trie pass; a stop raises with no
+    partial. A budget smaller than the metadata and seed therefore stops before the
+    different_seed, duplicate_pair and not_expected refusals.
     Refusals (CombineRefused, .code) in the order of Appendix A.2."""
     return _B.run_scoped(budget, 'union_pairs', (),
                          lambda b: PairUnion._build(results, seed, expected_pairs, seqs_order, b))
@@ -2090,7 +2093,7 @@ class PairUnion:
         for p in self.parts:
             g = _root(p.graphlet)
             pair = dict(zip(_KEY_FIELDS, p.key))
-            entry = {'tag': p.tag, 'kind': 'part', 'pair': _key_out(pair),
+            entry = {'tag': p.tag, 'kind': 'part', 'pair': _key_out(pair, p.pair_stated_by),
                      'pair_stated_by': p.pair_stated_by, 'identity': p.identity,
                      'seed_id': ((g.seed_summary or {}).get('seed') or {}).get('seed_id'),
                      'digest': p.digest,
@@ -2106,7 +2109,7 @@ class PairUnion:
             out.append(entry)
         for a in self.absent:
             out.append({'tag': a.tag, 'kind': 'absent',
-                        'pair': _key_out(dict(zip(_KEY_FIELDS, a.key))),
+                        'pair': _key_out(dict(zip(_KEY_FIELDS, a.key)), a.pair_stated_by),
                         'pair_stated_by': a.pair_stated_by, 'category': a.category,
                         'detail': a.detail, 'seed_check': a.seed_check})
         for f in self._failures:
@@ -2116,9 +2119,13 @@ class PairUnion:
         return out
 
 
-def _key_out(pair):
-    """A pair key as provenance() states it: the key's members, its paths None (a key holds
-    paths only for a caller's pair without an id; no path in any response)."""
+def _key_out(pair, stated_by):
+    """A pair key as provenance() states it: the key's members, its paths None -- but where
+    the caller stated the pair by a path without its id (a key holds paths only then): the
+    caller's own words, as the entry's replay request names them too. No configured path
+    the library read from an engine or a document is in a response."""
+    if stated_by == 'caller' and not pair.get('pair_id'):
+        return dict(pair)
     return dict(pair, graph_path=None, annotation_path=None)
 
 
