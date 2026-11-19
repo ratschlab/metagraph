@@ -1336,7 +1336,9 @@ class TraverseClient:
         is continued by that id: `pairs: [{graph, pair_id}]`."""
         if answered_pair(getattr(graphlet, 'envelope', None)) is None \
                 and not any(k in overrides for k in SELECTORS):
-            overrides.update((k, v) for k, v in zip(Pair._fields, self.selection()) if v)
+            # '' is a path here as in traverse() (pair_members()): only absent members drop
+            overrides.update((k, v) for k, v in zip(Pair._fields, self.selection())
+                             if v is not None)
         req = graphlet.next_request(arm, leaves, bp, **overrides)
         out = self.response(self.traverse_raw(req))
         out.notes = list(getattr(req, 'notes', ()))

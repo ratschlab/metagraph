@@ -953,6 +953,24 @@ class TestMalformedPairStatements(unittest.TestCase):
         u = union_pairs([a, b], seqs_order={(GRAPH, ''): 'verified'})
         self.assertEqual({p.seqs_order for p in u.parts}, {'unknown'})
 
+    def test_a_client_empty_path_is_deepened_as_sent(self):
+        # re-check R1: a client's own '' paths are a path in deepen() as in traverse(),
+        # for a graphlet whose envelope names no pair (a single-graph answer)
+        seed = 'ACGTACGTACGTACGTACGTACGTACGTACGTAC'
+        doc = T.doc_json('fork', 'graphlet')
+        single = MT.from_response(doc['results'][0], doc)
+        leaf = [single.walks('right')[0].path_id]
+        sel = [{'graph': GRAPH, 'graph_path': '', 'annotation_path': ''}]
+        c = _Engine(BEFORE_IDS, tagged(T.doc_json('fork', 'graphlet'), 'paths'),
+                    graph=GRAPH, graph_path='', annotation_path='')
+        c.traverse([seed], coordinates=None)
+        c.deepen(single, 'right', leaf)
+        self.assertEqual([r['pairs'] for r in c.posted()], [sel, sel])
+        # a client with a graph only still continues by its graph
+        c = _Engine(BEFORE_IDS, tagged(T.doc_json('fork', 'graphlet'), 'paths'), graph=GRAPH)
+        c.deepen(single, 'right', leaf)
+        self.assertEqual((c.posted()[0].get('graph'), 'pairs' in c.posted()[0]), (GRAPH, False))
+
 
 class TestPartialDescriptions(unittest.TestCase):
     """A description that names its pair by a path and no id (a caller's {graph,
