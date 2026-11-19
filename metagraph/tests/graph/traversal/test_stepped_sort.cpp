@@ -198,6 +198,43 @@ TEST(SteppedSort, TheHeapSortPastTheDepth) {
     }
 }
 
+// a range found sorted is left as it is, its elements passed once (a sorted input was partitioned
+// level by level, about twenty-five times std::sort's time at 10 million elements: lane T8-RL)
+TEST(SteppedSort, ASortedRangeIsPassedOnce) {
+    struct Run {
+        uint64_t begin;
+        uint64_t end;
+    };
+    auto by_begin = [](const Run &a, const Run &b) {
+        return a.begin != b.begin ? a.begin < b.begin : a.end < b.end;
+    };
+    for (size_t n : { 16385, 1000003 }) {
+        std::vector<uint64_t> sorted(n);
+        for (size_t i = 0; i < n; ++i) {
+            sorted[i] = i / 3;
+        }
+        Told told;
+        std::vector<uint64_t> got = sorted;
+        sort_in_steps(got.begin(), got.end(), std::less<uint64_t>(), told.step());
+        EXPECT_EQ(sorted, got);
+        EXPECT_EQ(n, told.sum) << n;
+        std::vector<Run> runs(n);
+        for (size_t i = 0; i < n; ++i) {
+            runs[i] = { i / 1000, i % 1000 };
+        }
+        Told run_told;
+        sort_in_steps(runs.begin(), runs.end(), by_begin, run_told.step());
+        EXPECT_EQ(n, run_told.sum) << n;
+        // not sorted at its last element: partitioned as any other range
+        std::vector<uint64_t> almost = sorted;
+        almost.back() = 0;
+        Told almost_told;
+        sort_in_steps(almost.begin(), almost.end(), std::less<uint64_t>(), almost_told.step());
+        EXPECT_TRUE(std::is_sorted(almost.begin(), almost.end()));
+        EXPECT_LT(n, almost_told.sum);
+    }
+}
+
 // a step that throws ends the sort where it is: the elements permuted, none lost
 TEST(SteppedSort, AThrowingStepLosesNothing) {
     std::mt19937_64 rng(5);

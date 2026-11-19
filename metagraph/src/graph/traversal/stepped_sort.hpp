@@ -197,6 +197,28 @@ It partition_by_copies(It first, It last, Comp &comp, Tell &tell, bool equal) {
     return write - 1;
 }
 
+// the end of the sorted prefix of [first, last) (std::is_sorted_until), each element passed
+// counted, kSortStepElements at a time
+template <class It, class Comp, class Count>
+It sorted_prefix(It first, It last, Comp &comp, Count &count) {
+    if (first == last)
+        return last;
+    // (the first element counted too: a sorted range is each of its elements a step)
+    count.add_counted(1);
+    for (It begin = first + 1; begin < last; ) {
+        const It end = begin + std::min<ptrdiff_t>(last - begin, kSortStepElements);
+        for (It i = begin; i < end; ++i) {
+            if (comp(*i, *(i - 1))) {
+                count.add_counted(i - begin + 1);
+                return i;
+            }
+        }
+        count.add_counted(end - begin);
+        begin = end;
+    }
+    return last;
+}
+
 // sort_in_steps with |max_depth| partitions of a range before it is heap-sorted (the tests reach
 // the heap sort with a small one)
 template <class It, class Comp, class Step>
@@ -219,6 +241,12 @@ void sort_ranges(It first, It last, Comp &comp, const Step &step, int max_depth)
             if (r.depth-- == 0) {
                 make_heap(r.first, r.last, comp, count);
                 sort_heap(r.first, r.last, comp, count);
+                r.first = r.last;
+                break;
+            }
+            // a range already sorted is left as it is (std::sort's is linear on one, a partition's
+            // is not: an element a step, each one passed until the first out of order)
+            if (sorted_prefix(r.first, r.last, comp, count) == r.last) {
                 r.first = r.last;
                 break;
             }
@@ -277,8 +305,9 @@ void sort_ranges(It first, It last, Comp &comp, const Step &step, int max_depth)
  * around the ninther of the range, the elements equal to a pivot that is the range's least moved
  * to its front in one more pass, a few elements of a side much smaller than an eighth of the
  * range swapped (pdqsort's guards against many equal elements and patterns): about as fast as
- * std::sort at 10 million elements (lane T8-RL, bench/sv); others (the grouping's candidates)
- * by Hoare's scheme around the median of three.
+ * std::sort at 10 million elements (lane T8-RL); others (the grouping's candidates) by Hoare's
+ * scheme around the median of three. A range found sorted before it is partitioned (a scan that
+ * ends at its first element out of order) is left as it is, as std::sort's own pass over it.
  */
 template <class It, class Comp, class Step>
 void sort_in_steps(It first, It last, Comp comp, const Step &step) {
