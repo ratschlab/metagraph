@@ -216,7 +216,10 @@ def sweep_every_response():
             if url.hostname in ('127.0.0.1', 'localhost') and url.port:
                 paths = _server_paths(url.port)
                 if paths:
-                    assert_no_configured_path(resp.text, paths, f'{request.method} {url.path}')
+                    # the bytes as UTF-8 (resp.text would guess an encoding over the whole
+                    # body where the server names no charset: seconds on a large answer)
+                    assert_no_configured_path(resp.content.decode('utf-8', 'replace'), paths,
+                                              f'{request.method} {url.path}')
         return resp
 
     swept._sweeps = True
