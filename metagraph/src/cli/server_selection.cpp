@@ -663,12 +663,31 @@ void check_pairs_alone(SelectionRoute route, const Json::Value &request) {
     }
 }
 
+// RESOLVE and TRAVERSE: `pair_id` or `annotation_path` at the top level of the request, where
+// only `graph`, `graphs` and `graph_path` select (they name a pair inside an object of `pairs`).
+// Refused before the selection, a plain 400 in one text that says where they go, whatever the
+// request names (fix round 1, m3: on /traverse a name of several pairs refused the request
+// traverse_single_pair before the parser reached the field, a name of one pair "request:
+// unknown field '<field>'"; /resolve always the latter)
+void refuse_top_level_pair_fields(const Json::Value &request) {
+    for (const char *field : { "pair_id", "annotation_path" }) {
+        if (request.isMember(field)) {
+            throw InvalidRequest(std::string("request: unknown field '") + field
+                                 + "': name the pair in an object of pairs, {graph, pair_id} "
+                                   "or {graph, graph_path?, annotation_path?} (GET "
+                                   "/capabilities lists the pairs)");
+        }
+    }
+}
+
 // RESOLVE, PATTERN and TRAVERSE: `pairs`, or the names of `graphs` (`graph` beside them on
 // RESOLVE and TRAVERSE, with `graph_path`), or every name up to the cap
 std::vector<SelectedPair> select_posted(SelectionRoute route, const Json::Value &request,
                                         const GraphIndexes &indexes, size_t max_names) {
     const bool by_graph = route != SelectionRoute::PATTERN;
     const bool traverse = route == SelectionRoute::TRAVERSE;
+    if (by_graph)
+        refuse_top_level_pair_fields(request);
     if (request.isMember("pairs")) {
         check_pairs_alone(route, request);
         std::vector<SelectedPair> selected = select_listed_pairs(request["pairs"], indexes);
@@ -766,6 +785,7 @@ void check_selection_shape(SelectionRoute route,
     if (route != SelectionRoute::RESOLVE && route != SelectionRoute::TRAVERSE)
         return;
     const Json::Value &object = object_or_empty(request);
+    refuse_top_level_pair_fields(object);
     if (object.isMember("pairs")) {
         check_pairs_alone(route, object);
         return;

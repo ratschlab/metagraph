@@ -184,6 +184,9 @@ extern const char kSearchGraphsEmpty[];
  *    without a code, as before; on RESOLVE, new in release 10, in /pattern's words).
  *  - TRAVERSE runs on exactly one pair: a selection of several is refused with
  *    traverse_single_pair and the selected pairs as the candidates.
+ *  - RESOLVE and TRAVERSE refuse `pair_id` and `annotation_path` at the top level of the
+ *    request (they go in an object of `pairs`) before the selection, a plain InvalidRequest in
+ *    one text, however many pairs the request names (check_selection_shape too).
  *  - Every request the release-9 server (8fa32e553) refused is refused in its words, byte for
  *    byte (a client matches them whole), the code added, apart from the texts that named a
  *    configured path (train 8: they name pairs by their pair_id, choose_traverse_pair): on

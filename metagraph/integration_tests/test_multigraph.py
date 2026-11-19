@@ -973,6 +973,34 @@ class TestMultiGraphServer(TestingBase):
         finally:
             single.stop()
 
+    def test_top_level_pair_fields_are_refused_alike(self):
+        """pair_id and annotation_path at the top level of a /resolve or /traverse request
+        (they go in an object of pairs) are refused 400 in one text, without a code, however
+        many pairs the request names (fix round 1, m3: a /traverse on 'enterics', two pairs, was
+        refused traverse_single_pair, one on 'kleb' "request: unknown field 'pair_id'")."""
+        seed = self.records['ecoli'][0][1000:1100]
+        t = {'seeds': [{'sequence': seed}],
+             'strategy': {'direction': 'right', 'bounds': {'max_extension_bp': 50}}}
+        r = {'sequence': seed, 'discover': {'max_labels': 5}}
+        kleb = self.pid('kleb')
+        for route, body in (('traverse', t), ('resolve', r)):
+            for field, selection in (
+                    ('pair_id', {'graph': 'enterics', 'pair_id': self.pid('enterics', 'kleb')}),
+                    ('pair_id', {'graph': 'kleb', 'pair_id': kleb}),
+                    ('pair_id', {'graphs': ['enterics'], 'pair_id': kleb}),
+                    ('pair_id', {'pair_id': kleb}),
+                    ('pair_id', {'pairs': [{'graph': 'kleb', 'pair_id': kleb}], 'pair_id': kleb}),
+                    ('annotation_path', {'graph': 'enterics', 'annotation_path': 'x'}),
+                    ('annotation_path', {'graph': 'kleb', 'annotation_path': 'x'})):
+                with self.subTest(route=route, selection=selection):
+                    ret = self.server.post(route, dict(body, **selection))
+                    self.assertEqual(400, ret.status_code, ret.text[:2000])
+                    self.assertEqual(
+                        {'error': f"request: unknown field '{field}': name the pair in an object "
+                                  "of pairs, {graph, pair_id} or {graph, graph_path?, "
+                                  "annotation_path?} (GET /capabilities lists the pairs)"},
+                        ret.json())
+
     def test_a_search_temp_file_that_fails_states_no_path(self):
         """/search writes a request's sequences to a file in the server's temporary directory
         (--disk-swap) before it queries them: one it cannot make fails the request 400 in a text

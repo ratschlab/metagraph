@@ -627,6 +627,42 @@ TEST(ServerSelection, PairIdSelector) {
     }));
 }
 
+// pair_id and annotation_path at the top level of a /resolve or /traverse request (they go in
+// an object of pairs): one plain 400 before the selection, whatever the request names (fix
+// round 1, m3: a /traverse on a name of several pairs was refused traverse_single_pair, one of
+// one pair as an unknown field); also before in_ram (check_selection_shape). /pattern leaves
+// them to its parser
+TEST(ServerSelection, TopLevelPairFieldsAreRefusedAlike) {
+    const GraphIndexes indexes = small_indexes();
+    const std::string id = kIdB1;
+    for (SelectionRoute route : { SelectionRoute::RESOLVE, SelectionRoute::TRAVERSE }) {
+        const std::vector<std::pair<std::string, std::string>> requests {
+            { R"({"graph": "b", "pair_id": ")" + id + R"("})", "pair_id" },
+            { R"({"graph": "a", "pair_id": ")" + id + R"("})", "pair_id" },
+            { R"({"graphs": ["b"], "pair_id": ")" + id + R"("})", "pair_id" },
+            { R"({"pair_id": ")" + id + R"("})", "pair_id" },
+            { R"({"pairs": [{"graph": "b", "pair_id": ")" + id + R"("}], "pair_id": "x"})",
+              "pair_id" },
+            { R"({"graph": "b", "graph_path": "b1.dbg", "pair_id": "x"})", "pair_id" },
+            { R"({"graph": "c", "annotation_path": "c1.anno"})", "annotation_path" },
+            { R"({"graph": "a", "annotation_path": "a.anno"})", "annotation_path" },
+        };
+        for (const auto &[request, field] : requests) {
+            const std::string text = "request: unknown field '" + field + "': name the pair in "
+                    "an object of pairs, {graph, pair_id} or {graph, graph_path?, "
+                    "annotation_path?} (GET /capabilities lists the pairs)";
+            EXPECT_EQ("(none)", selection_code_of([&] { select(route, request); })) << request;
+            EXPECT_EQ(text, refusal_of([&] { select(route, request); })) << request;
+            EXPECT_EQ(text, refusal_of([&] {
+                check_selection_shape(route, parse(request), indexes, 10);
+            })) << request;
+        }
+    }
+    // /pattern's parser refuses them as unknown fields (its invalid_request)
+    EXPECT_EQ(Pairs({ kB1, kB2 }), select(SelectionRoute::PATTERN,
+                                          R"({"graphs": ["b"], "pair_id": "x"})"));
+}
+
 // The probes by id: ?graph=<name>&pair_id=<id> names one pair, as an object of `pairs` does;
 // pair_id beside graph_path or annotation_path is a plain 400; pair_id without ?graph= is
 // refused in the words of a probe without ?graph=
