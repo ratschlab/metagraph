@@ -1,5 +1,6 @@
 import json
 import os
+import re
 import shlex
 import subprocess
 import unittest
@@ -64,9 +65,11 @@ def configured_paths(args):
     annotation's .seqs, the graph's mask and Bloom filter; the row_diff anchors start with the
     graph's path), the graph list's own path and the temporary directory (--disk-swap), each
     also as its real path (macOS: /private/var); and every file's basename (a single-graph GET
-    /stats states two, as master does: assert_no_configured_path exempts exactly those). A
-    directory alone is not looked for: the tests' labels are the paths of their input files,
-    which lie beside the configured ones"""
+    /stats states two, as master does: assert_no_configured_path exempts exactly those). Also
+    each file's directory and each file without its suffixes (`<dir>/graph` for
+    `<dir>/graph.dbg`, as utils::remove_suffix makes it), as BoundaryPath: these count only
+    where the spelling ends a path, since the tests' labels are the paths of input files that
+    lie beside the configured ones (`<dir>/input.fa`)"""
     listed, files = [], []
     if args and not args[0].startswith('-') and os.path.isfile(args[0]):
         listed.append(args[0])
@@ -92,7 +95,39 @@ def configured_paths(args):
         out.update((p, os.path.realpath(p)))
     out.update(os.path.basename(p) for p in files)
     out.discard('')
-    return sorted(out)
+    bounded = set()
+    for p in files:
+        for q in {p, os.path.realpath(p)}:
+            if not os.path.isabs(q):
+                continue
+            d = os.path.dirname(q)
+            # a directory of its own, not / or a top-level one (/tmp, /private)
+            if d.count('/') >= 2:
+                bounded.add(d)
+            stem, base = d, os.path.basename(q)
+            while '.' in base.lstrip('.'):
+                base = base[:base.rindex('.')]
+                bounded.add(os.path.join(stem, base))
+    return sorted(out) + sorted(BoundaryPath(p) for p in bounded - out)
+
+
+class BoundaryPath(str):
+    """A spelling of configured_paths that states a configured path only where it ends one: a
+    configured file's directory, or the file without its suffixes. An occurrence followed by a
+    path character (`<dir>/input.fa`, `<dir>/graph.fa`) is another file's path"""
+
+
+_PATH_CHAR = re.compile(r'[A-Za-z0-9._/~%+-]')
+
+
+def _states(text, spelling, bounded):
+    """The index of the first occurrence of |spelling| in |text| that states it (with
+    |bounded|, one not followed by a path character), or -1"""
+    at = text.find(spelling)
+    while bounded and at >= 0 and at + len(spelling) < len(text) \
+            and _PATH_CHAR.match(text[at + len(spelling)]):
+        at = text.find(spelling, at + 1)
+    return at
 
 
 # The two members of a single-graph GET /stats that state a configured file's basename, as
@@ -123,13 +158,72 @@ def assert_no_configured_path(text, paths, where):
         texts.append(json.dumps(body, ensure_ascii=False))
     for t in texts:
         for p in paths:
-            for spelling in {p, urllib.parse.quote(p), urllib.parse.quote(p, safe='')}:
-                if spelling in t:
-                    at = t.index(spelling)
+            bounded = isinstance(p, BoundaryPath)
+            for spelling in {str(p), urllib.parse.quote(p), urllib.parse.quote(p, safe='')}:
+                at = _states(t, spelling, bounded)
+                if at >= 0:
                     raise AssertionError(
-                        f'{where}: the response states the configured path {p!r}'
+                        f'{where}: the response states the configured path {str(p)!r}'
                         + (f' (as {spelling!r})' if spelling != p else '')
                         + f': ...{t[max(0, at - 300):at + len(spelling) + 100]}...')
+
+
+# port -> (pid, configured_paths of the server_query of this build listening there, or None)
+_SWEPT_SERVERS = {}
+
+
+def _server_paths(port):
+    """configured_paths of the server_query of this build (METAGRAPH_EXE) that a process of
+    this test started and that listens on |port|; None for another program, a base binary or no
+    such process. Read from the process's own command line, once per process"""
+    hit = _SWEPT_SERVERS.get(port)
+    if hit is not None and psutil.pid_exists(hit[0]):
+        return hit[1]
+    this = os.path.realpath(METAGRAPH_EXE)
+    for child in psutil.Process().children(recursive=True):
+        try:
+            listing = getattr(child, 'net_connections', None) or child.connections
+            if not any(c.status == psutil.CONN_LISTEN and c.laddr and c.laddr.port == port
+                       for c in listing(kind='tcp')):
+                continue
+            cmd = child.cmdline()
+        except psutil.Error:
+            continue
+        paths = None
+        if 'server_query' in cmd[1:]:
+            i = cmd.index('server_query')
+            if os.path.realpath(cmd[i - 1]) == this:
+                paths = configured_paths(cmd[i + 1:])
+        _SWEPT_SERVERS[port] = (child.pid, paths)
+        return paths
+    return None
+
+
+def sweep_every_response():
+    """Every response the requests package reads from a server_query of this build that this
+    test started, whichever helper started it (a Server class, start_server, a test's own
+    Popen), states none of its configured paths (assert_no_configured_path). A streamed
+    response is not read here. Installed once, on import"""
+    import requests
+    if getattr(requests.Session.send, '_sweeps', False):
+        return
+    send = requests.Session.send
+
+    def swept(self, request, **kw):
+        resp = send(self, request, **kw)
+        if not kw.get('stream'):
+            url = urllib.parse.urlsplit(request.url)
+            if url.hostname in ('127.0.0.1', 'localhost') and url.port:
+                paths = _server_paths(url.port)
+                if paths:
+                    assert_no_configured_path(resp.text, paths, f'{request.method} {url.path}')
+        return resp
+
+    swept._sweeps = True
+    requests.Session.send = swept
+
+
+sweep_every_response()
 
 
 def start_server(graph, annotation, host, port, extra_args=''):
