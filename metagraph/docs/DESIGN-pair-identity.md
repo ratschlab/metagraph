@@ -179,13 +179,21 @@ The id form carries continuation and union from this change on. This part is don
   refuses a service p2 id.
 - **Re-asking** (`pair_members`, continuations, replays of a stored request, `deepen`). A new document is re-asked
   by `pairs: [{graph, pair_id}]`. An old document is re-asked by its paths, as today; path selectors stay valid
-  input on every engine. Every re-ask passes one hook: with a caller's resolver (n1 to name and paths) the id is
-  resolved, checked and sent as paths, which every engine reads; without one it is sent as an id where
-  `GET /capabilities` states `multigraph.pair_id: "n1"`, and refused before anything is sent otherwise.
-- **Discovery** (`traverse_pairs`). It takes the pairs from `GET /capabilities` by `(graph, pair_id)` and sends
-  id selectors. Record-mapping certificates (`seqs_order`) may name a pair by `(graph, pair_id)` as well as by paths.
+  input on every engine. Every re-ask of a pair named by its id passes one hook (`wire_pair`), in this order: a
+  caller's resolver (n1 to name and paths) that knows the id, whose answer is checked (its n1 id recomputed) and sent
+  as paths, which every engine reads; else `{graph, pair_id}` where `GET /capabilities` states
+  `multigraph.pair_id: "n1"`; else the paths the same engine lists for that id in its own `GET /capabilities` (an
+  engine before ids; the paths go back only to the engine that stated them); else it is refused
+  (`pair_unresolved`) before anything is sent. A fan-out checks every pair before its first request.
+- **Discovery** (`traverse_pairs`). It takes the pairs from `GET /capabilities` by `(graph, pair_id)`: an engine that
+  names pairs by id is sent id selectors, an engine before ids that lists a pair with paths is sent those paths. A
+  caller's pair given without its annotation path takes the answering pair's id. Record-mapping certificates
+  (`seqs_order`) may name a pair by `(graph, pair_id)` as well as by paths.
 - **Union.** The match rule keeps its order: a differing `index_meta_fp` separates, an equal `index_fp` decides,
-  then the ids decide (an old document's computed id included), then the paths as today. The part key is the same
+  then the ids decide (an old document's computed id included), then the paths as today. A caller's description of
+  a pair by a path without an id matches an id only through the paths the call knows for that id; otherwise it is
+  refused, not guessed. Of several descriptions of one pair, the class takes one by a total order, so the union
+  does not depend on the order of its inputs. The part key is the same
   for both forms: it holds the pair's id, stated or computed, with the paths left out wherever there is an id. An
   old document and its id-form twin therefore give one key and one digest. The cost is a one-time move: every
   union digest and union resume token changes once with this library version, a union of old documents only
@@ -309,7 +317,7 @@ result cache lives in the process, and the restart that deploys it clears it.
 | Clients reading `graph_path` or `annotation_path` from any response, `GET /capabilities` included | the members are gone | read `pair_id`; bind it through their own configuration |
 | Clients matching selection texts whole | the texts change (section 3.4) | match the code; take the new wording |
 | Single-graph clients | `/search` cuts state `pair_id: null` instead of two null paths and gain `matched`; the registry's and `pair_summary`'s null tags likewise; the CLI's `--json` gains `cuts` | update strict key sets (this repository's `test_api.py`, the contract samples, the suite's cut keys) |
-| Readers of the service's downloadable documents | new documents carry `pair_id`, no paths; old ones keep theirs | read `pair_id`; the library reads both |
+| Readers of the service's downloadable documents | new documents carry `pair_id`, no paths; an old one keeps its paths where it is stored, and the library's tools hand it out (export, save) by `{graph, pair_id}`, its body and digest unchanged | read `pair_id`; the library reads both |
 | The service | binds ids from its manifest; two-way check; stores documents as they come; keeps p2 public | section 3.8 |
 | The library | reads ids, re-asks by id, discovers by id; every union digest changes once (section 5.3) | section 3.9 |
 | The suite | pinned key sets, texts and samples; it can no longer match graph-list rows to `GET /capabilities` by paths | accept both forms; match rows by their computed id |
@@ -355,7 +363,7 @@ result cache lives in the process, and the restart that deploys it clears it.
 | 4 | `matched`, and `cuts` in the CLI's JSON output | 0.5 |
 | 5 | Re-record the contract samples (29 of 52 state paths; the texts and `GET /capabilities` change; the `/search` ones gain `matched`) | 1 |
 | 6 | Specifications: the envelope spec, the core traversal spec, the pattern spec, the manual pages | 0.75 |
-| 7 | The library: done in train 7, ahead of the engine (section 3.9). What is left here: its tests against this engine's answers (an id-only `GET /capabilities` with `multigraph.pair_id: "n1"`, a name of several pairs), once train 7 is merged into this branch | 0.25 |
+| 7 | The library: done in train 7, ahead of the engine (section 3.9). What is left here: its tests against this engine's answers (an id-only `GET /capabilities` with `multigraph.pair_id: "n1"`, a name of several pairs), once train 7 is merged into this branch. Done: `integration_tests/test_multigraph.py` `test_the_library_on_this_engines_pair_ids`, with the cross-pair union and its discovery in `test_traverse_union_reads_a_pair_without_the_seed` | 0.25 |
 | 8 | Verification: all build targets for DNA and protein, unit and integration tests, Python tests, route and CLI comparisons against the current build, memory and timing, a GCC check, CI | 1.25 |
 | 9 | Review and fixes | 1 |
 
