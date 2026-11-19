@@ -24,7 +24,7 @@ import requests
 
 from base import NUM_THREADS, PROTEIN_MODE, TestingBase, METAGRAPH
 from base import REQUEST_TIMEOUT, log_tail, requests_time_out
-from base import configured_pair_id
+from base import assert_no_configured_path, configured_pair_id, configured_paths
 
 # The graphlet library (api/python, metagraph.traverse) reads what the writer produces
 # (DESIGN-traverse-graphlet.md §9, T37-T40). The test venv installs api/python editable;
@@ -4725,6 +4725,9 @@ class TestTraverseMultiGraph(TestTraverseBase):
 
     class _Server:
         def __init__(self, test, csv, wait=True, flags=()):
+            # no response states a configured path (train 8, SPEC-multigraph-envelope.md
+            # section 1.2): checked on every _post and _caps
+            self.paths = configured_paths([csv])
             self.port = _free_port()
             self.url = f'http://127.0.0.1:{self.port}'
             self.log_path = f'{test.tempdir.name}/multi-{self.port}.log'
@@ -4756,10 +4759,14 @@ class TestTraverseMultiGraph(TestTraverseBase):
                 return f.read()
 
     def _post(self, route, payload):
-        return requests.post(f'{self.server.url}/{route}', data=json.dumps(payload))
+        ret = requests.post(f'{self.server.url}/{route}', data=json.dumps(payload))
+        assert_no_configured_path(ret.text, self.server.paths, 'POST /' + route)
+        return ret
 
     def _caps(self, query=''):
-        return requests.get(f'{self.server.url}/traverse/capabilities{query}')
+        ret = requests.get(f'{self.server.url}/traverse/capabilities{query}')
+        assert_no_configured_path(ret.text, self.server.paths, 'GET /traverse/capabilities')
+        return ret
 
     def _entry(self, ret, graph, route='/traverse'):
         """The one entry of a multi-graph server's envelope (SPEC-multigraph-envelope.md
@@ -4860,20 +4867,17 @@ class TestTraverseMultiGraph(TestTraverseBase):
         quoted = requests.utils.quote(self._pid('B', self.pairs['two']), safe='')
         self.assertEqual(two, self._entry(self._caps(f'?graph=B&pair_id={quoted}'), 'B',
                                           '/traverse/capabilities'))
-        # one graph with two annotations is addressed by annotation_path (graph_path cannot
-        # choose), and a name listing only that is told so, not to pass graph_path
-        # (in the words of the release-9 server, byte for byte: a client matches them whole)
+        # one graph with two annotations is addressed by annotation_path or pair_id (graph_path
+        # cannot choose), in train 8's words, which name the pairs by their pair_id, no path
         quoted = requests.utils.quote(self.graph, safe='')
-        annotations = f"{self.anno}, {self.pairs['col'][1]}"
+        ids = f"{self._pid('C')}, {self._pid('C', self.pairs['col'])}"
         for query, text in (
                 (f'?graph=C&graph_path={quoted}',
-                 f"Bad request: graph_path '{self.graph}' names a graph with several annotations "
-                 f"under index 'C' ({annotations}): a traversal reads one annotation, which "
-                 f"graph_path cannot choose; list each annotation under a name of its own"),
+                 f"Bad request: the graph_path given names several pairs of index 'C' ({ids}); "
+                 f"name one by its pair_id"),
                 ('?graph=C',
-                 f"Bad request: index 'C' lists one graph ({self.graph}) with several annotations "
-                 f"({annotations}): a traversal reads one annotation, which graph_path cannot "
-                 f"choose; list each annotation under a name of its own")):
+                 f"Bad request: index 'C' holds several pairs ({ids}); name one by its pair_id "
+                 f"(GET /capabilities lists them)")):
             ret = self._caps(query)
             self.assertEqual(400, ret.status_code, ret.text)
             self.assertEqual(('pair_ambiguous', text),
@@ -4895,10 +4899,10 @@ class TestTraverseMultiGraph(TestTraverseBase):
                                  "/traverse/capabilities (graph, graph_path)", None),
                 ('?graph=A&graph=B', "Bad request: the parameter 'graph' is given twice", None),
                 ('?graph_path=/nowhere', 'Bad request: in multi-graph mode GET '
-                 '/traverse/capabilities needs ?graph=<name> (and graph_path=<path> when the '
-                 'name spans several graphs); GET /capabilities lists the graphs', None),
+                 '/traverse/capabilities needs ?graph=<name> (and pair_id=<id> when the name '
+                 'holds several pairs); GET /capabilities lists them', None),
                 ('?graph=B&graph_path=/nowhere',
-                 "Bad request: graph_path '/nowhere' is not part of index 'B'", 'pair_not_found')):
+                 "Bad request: the graph_path given is not part of index 'B'", 'pair_not_found')):
             ret = self._caps(query)
             self.assertEqual(400, ret.status_code, query)
             self.assertEqual(text, ret.json()['error'], query)
@@ -5300,11 +5304,12 @@ class TestTraverseMultiGraph(TestTraverseBase):
             for route in ('traverse/capabilities', 'pattern/capabilities'):
                 ret = requests.get(f'{server.url}/{route}')
                 self.assertEqual(400, ret.status_code, ret.text[:2000])
-                # the words of every probe without ?graph= before release 10, byte for byte
+                # train 8's words (before: those of every probe without ?graph= before
+                # release 10, which named graph_path=<path>)
                 self.assertEqual({'error': f'Bad request: in multi-graph mode GET /{route} needs '
-                                           f'?graph=<name> (and graph_path=<path> when the name '
-                                           f'spans several graphs); GET /capabilities lists the '
-                                           f'graphs'}, ret.json())
+                                           f'?graph=<name> (and pair_id=<id> when the name '
+                                           f'holds several pairs); GET /capabilities lists '
+                                           f'them'}, ret.json())
                 self._entry(requests.get(f'{server.url}/{route}?graph=A'), 'A', '/' + route)
         finally:
             server.close()

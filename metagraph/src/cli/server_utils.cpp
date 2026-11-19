@@ -2144,8 +2144,7 @@ std::vector<PairFileStamp> pair_file_stamps(const std::string &graph,
     return stamps;
 }
 
-std::string pair_files_changed(const std::vector<PairFileStamp> &stamps,
-                               const std::string &graph, const std::string &annotation) {
+std::optional<ChangedFile> changed_pair_file(const std::vector<PairFileStamp> &stamps) {
     for (const PairFileStamp &f : stamps) {
         const std::optional<FileStamp> now = file_stamp(f.path);
         if (now == f.stamp)
@@ -2157,19 +2156,47 @@ std::string pair_files_changed(const std::vector<PairFileStamp> &stamps,
                 : now->size != f.stamp->size ? "its size"
                 : now->mtime_ns != f.stamp->mtime_ns ? "its modification time"
                 : "its status change time";
-        return changed_file_text(f.path, f.role, graph, annotation, how);
+        return ChangedFile { f.path, f.role, how };
     }
-    return "";
+    return std::nullopt;
 }
 
-std::string changed_file_text(const std::string &path, const std::string &role,
-                              const std::string &graph, const std::string &annotation,
-                              const std::string &how) {
+std::string pair_files_changed(const std::vector<PairFileStamp> &stamps,
+                               const std::string &graph, const std::string &annotation) {
+    const std::optional<ChangedFile> changed = changed_pair_file(stamps);
+    return changed ? changed_file_log_text(changed->path, changed->role, graph, annotation,
+                                           changed->how)
+                   : std::string();
+}
+
+std::string changed_file_log_text(const std::string &path, const std::string &role,
+                                  const std::string &graph, const std::string &annotation,
+                                  const std::string &how) {
     return fmt::format("The file '{}' ({}) of the pair ('{}', '{}') changed on disk since the "
                        "server started ({}): a request does not load it into RAM, since the "
                        "answer would carry the start-up identity and certificates; restart onto "
                        "the new files, or send the request without in_ram", path, role, graph,
                        annotation, how);
+}
+
+std::string changed_file_text(const std::string &role, const std::string &pair,
+                              const std::string &how) {
+    return fmt::format("The {} file of the pair {} changed on disk since the server started "
+                       "({}): a request does not load it into RAM, since the answer would carry "
+                       "the start-up identity and certificates; restart onto the new files, or "
+                       "send the request without in_ram", role, pair, how);
+}
+
+std::string other_labels_text(const std::string &pair) {
+    return fmt::format("The annotation of the pair {} loaded into RAM for the request has other "
+                       "column labels than the one the server started with: restart onto the "
+                       "new files, or send the request without in_ram", pair);
+}
+
+std::string pair_load_failure_text(const std::string &route, const std::string &pair) {
+    return fmt::format("{}: pair {} could not be loaded: the load into RAM for the request "
+                       "failed (the server's log names the file and the reason); send the "
+                       "request without in_ram", route, pair);
 }
 
 Json::Value index_changed_json(const std::string &message) {

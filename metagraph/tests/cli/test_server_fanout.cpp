@@ -1218,8 +1218,10 @@ TEST(ServerFanout, NotAfterMsLeavesQueuedPairsUnreached) {
     const Json::Value &refusal = out.entries[1]["refusal"];
     EXPECT_EQ("not_reached", refusal["code"].asString());
     EXPECT_EQ("not_after_ms", refusal["reason"].asString());
-    EXPECT_EQ(0u, refusal["error"].asString().find("pattern: pair (b, b.dbg, b.anno) was not "
-                                                   "started: not_after_ms"));
+    // the pair named by its name and pair_id, no path
+    EXPECT_EQ(0u, refusal["error"].asString().find(
+            "pattern: pair (b, " + pair_id_of("b", { "b.dbg", "b.anno" }) + ") was not "
+            "started: not_after_ms"));
     // the held task runs later: it starts nothing
     for (auto &task : held) {
         threads.emplace_back(std::move(task));

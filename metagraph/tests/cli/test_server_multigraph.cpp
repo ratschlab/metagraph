@@ -1892,15 +1892,30 @@ TEST(MultiGraphInRam, PairFileStampsNameTheFileThatChanged) {
 // The refusal of a changed pair carries the code index_changed (the owner's decision of
 // 2026-11-11, asked by the async service): 400, the body {"error": the text, "code":
 // "index_changed"}, written error first as the intake refusals (/search, /traverse); its body is
-// a /resolve or /pattern pair's refusal block (http_status beside it, samples 43 and 44)
+// a /resolve or /pattern pair's refusal block (http_status beside it, samples 43 and 44). The
+// text names the pair by its name and pair_id, never a path (train 8); the log's names the file
 TEST(MultiGraphInRam, AChangedPairIsRefusedWithTheCodeIndexChanged) {
-    const std::string text = changed_file_text("d/anno.annodbg", "annotation", "d/graph.dbg",
-                                               "d/anno.annodbg", "it is another file");
+    const std::string pair = pair_label("d", { "d/graph.dbg", "d/anno.annodbg" });
+    EXPECT_EQ("(d, " + pair_id_of("d", { "d/graph.dbg", "d/anno.annodbg" }) + ")", pair);
+    const std::string text = changed_file_text("annotation", pair, "it is another file");
+    EXPECT_EQ("The annotation file of the pair " + pair + " changed on disk since the server "
+              "started (it is another file): a request does not load it into RAM, since the "
+              "answer would carry the start-up identity and certificates; restart onto the new "
+              "files, or send the request without in_ram", text);
     EXPECT_EQ("The file 'd/anno.annodbg' (annotation) of the pair ('d/graph.dbg', "
               "'d/anno.annodbg') changed on disk since the server started (it is another "
               "file): a request does not load it into RAM, since the answer would carry the "
               "start-up identity and certificates; restart onto the new files, or send the "
-              "request without in_ram", text);
+              "request without in_ram",
+              changed_file_log_text("d/anno.annodbg", "annotation", "d/graph.dbg",
+                                    "d/anno.annodbg", "it is another file"));
+    // a copy of other column labels, and a load that failed: the pair, no path
+    EXPECT_EQ("The annotation of the pair " + pair + " loaded into RAM for the request has "
+              "other column labels than the one the server started with: restart onto the new "
+              "files, or send the request without in_ram", other_labels_text(pair));
+    EXPECT_EQ("resolve: pair " + pair + " could not be loaded: the load into RAM for the request "
+              "failed (the server's log names the file and the reason); send the request "
+              "without in_ram", pair_load_failure_text("resolve", pair));
     const IndexChanged refusal(text);
     EXPECT_EQ(400, refusal.status());
     EXPECT_EQ(text, refusal.what());

@@ -3833,8 +3833,8 @@ class TestPatternSynthetic(PatternChecks, TestingBase):
             ret = server.get('pattern/capabilities?graph_path=x')
             self.assertEqual(400, ret.status_code)
             self.assertEqual({'error': 'Bad request: in multi-graph mode GET /pattern/capabilities '
-                                       'needs ?graph=<name> (and graph_path=<path> when the name '
-                                       'spans several graphs); GET /capabilities lists the graphs'},
+                                       'needs ?graph=<name> (and pair_id=<id> when the name '
+                                       'holds several pairs); GET /capabilities lists them'},
                              ret.json())
             # the multi-graph members of /capabilities, and not on a single-graph server (the
             # request registry's route is on both)

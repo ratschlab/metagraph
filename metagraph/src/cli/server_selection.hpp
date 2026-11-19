@@ -52,6 +52,11 @@ inline std::string pair_id_of(const SelectedPair &pair) { return pair_id_of(pair
 // paths too)
 Json::Value pair_ref_json(const SelectedPair &pair);
 
+// The pair as a text a client receives names it (docs/DESIGN-pair-identity.md section 3.4):
+// "(<name>, <pair_id>)", never by its paths (a log line names them)
+std::string pair_label(const std::string &name, const GraphPair &pair);
+inline std::string pair_label(const SelectedPair &pair) { return pair_label(pair.name, pair.pair); }
+
 // The pairs |name| holds, each once, in the graph list's order, as the candidates of a
 // refusal: [{graph, pair_id}]; an empty array for an unknown name
 Json::Value selection_candidates(const std::string &name, const GraphIndexes &indexes);
@@ -81,11 +86,15 @@ class SelectionRefusal : public HttpError {
 /**
  * The release-9 choice of one pair by a name and a graph_path (/resolve, /traverse and the GET
  * probes of 8fa32e553): |pair| when the name holds exactly one pair on |graph_path| (when
- * given), else |outcome| and |error|, the text the base answered for it, byte for byte (a
- * multi-graph client matches these texts whole; SPEC-multigraph-envelope.md section 6 adds a
- * code beside them, never a new wording), and |matching| the name's pairs the choice could
- * not decide between (SEVERAL_ANNOTATIONS: the pairs on that one graph; SPANS_GRAPHS: every
- * pair of the name), each once, in the graph list's order.
+ * given), else |outcome| and |error|, and |matching| the name's pairs the choice could not
+ * decide between (SEVERAL_ANNOTATIONS: the pairs on that one graph; SPANS_GRAPHS: every pair of
+ * the name), each once, in the graph list's order. The texts are the base's where it named no
+ * path ("Bad request: unknown graph 'n'"); those that named configured paths are train 8's,
+ * which name the pairs by their pair_id and no path (SPEC-multigraph-envelope.md section 6):
+ * "Bad request: index 'n' holds several pairs (<ids>); name one by its pair_id (GET
+ * /capabilities lists them)" (SPANS_GRAPHS, and SEVERAL_ANNOTATIONS without a graph_path),
+ * "Bad request: the graph_path given names several pairs of index 'n' (<ids>); name one by its
+ * pair_id" and "Bad request: the graph_path given is not part of index 'n'" (NOT_PART).
  */
 struct TraversePairChoice {
     enum Outcome { ONE, UNKNOWN_GRAPH, NOT_PART, SEVERAL_ANNOTATIONS, SPANS_GRAPHS };
@@ -176,12 +185,14 @@ extern const char kSearchGraphsEmpty[];
  *  - TRAVERSE runs on exactly one pair: a selection of several is refused with
  *    traverse_single_pair and the selected pairs as the candidates.
  *  - Every request the release-9 server (8fa32e553) refused is refused in its words, byte for
- *    byte (a client matches them whole), the code added: on RESOLVE and TRAVERSE without
- *    `pairs` the texts of traverse_graph_selection and choose_traverse_pair ("Bad request:
- *    unknown graph 'n'", "... spans several graphs ...", "... with several annotations ...",
- *    "... is not part of index ...", "'graphs' names the one graph a traversal reads: expected
- *    [name]", "'graph' (index name) is required in multi-graph mode", "give the graph as
- *    'graph' or as 'graphs', not both"); on PATTERN pattern_graph_names' texts.
+ *    byte (a client matches them whole), the code added, apart from the texts that named a
+ *    configured path (train 8: they name pairs by their pair_id, choose_traverse_pair): on
+ *    RESOLVE and TRAVERSE without `pairs` the texts of traverse_graph_selection and
+ *    choose_traverse_pair ("Bad request: unknown graph 'n'", "... holds several pairs ...",
+ *    "... the graph_path given names several pairs ...", "... the graph_path given is not part
+ *    of index ...", "'graphs' names the one graph a traversal reads: expected [name]", "'graph'
+ *    (index name) is required in multi-graph mode", "give the graph as 'graph' or as 'graphs',
+ *    not both"); on PATTERN pattern_graph_names' texts.
  *  - SEARCH reads `graphs` as POST /search always has (filter_graphs_from_list: a `graphs`
  *    that is no array selects nothing, every name is then read), an unknown name refused
  *    with its message and graph_unknown, and an empty list (which selects no pair; answered
@@ -221,10 +232,11 @@ void check_selection_shape(SelectionRoute route,
  * before release 10); pair_id beside graph_path or annotation_path is an InvalidRequest; without parameters, every pair in the
  * envelope's order, when the server hosts at most |max_names_without_selection| names: the
  * envelope over every pair answers such a probe (section 1); beyond the cap, and with
- * pair_id, graph_path or annotation_path but no ?graph=, the probe is refused in the words a probe
- * without ?graph= always had, byte for byte ("Bad request: in multi-graph mode GET <route>
- * needs ?graph=<name> (and graph_path=<path> when the name spans several graphs); GET
- * /capabilities lists the graphs"). |route| names the route in the messages: TRAVERSE for GET
+ * pair_id, graph_path or annotation_path but no ?graph=, the probe is refused ("Bad request: in
+ * multi-graph mode GET <route> needs ?graph=<name> (and pair_id=<id> when the name holds
+ * several pairs); GET /capabilities lists them", train 8: before, "... (and graph_path=<path>
+ * when the name spans several graphs); GET /capabilities lists the graphs"). |route| names the
+ * route in the messages: TRAVERSE for GET
  * /traverse/capabilities, PATTERN for GET /pattern/capabilities (CAPABILITIES names both). An
  * unknown or a repeated parameter (in the base's words), or a missing ?graph=, is an
  * InvalidRequest.

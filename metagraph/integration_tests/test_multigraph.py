@@ -47,6 +47,7 @@ import unittest
 import requests
 
 from base import PROTEIN_MODE, TestingBase, METAGRAPH, configured_pair_id
+from base import assert_no_configured_path, configured_paths
 from test_pattern import gate_block, jsoncpp_compact, members_once
 from test_traverse_forms import CHARGED
 
@@ -82,6 +83,10 @@ TAGS = ('graph', 'pair_id', 'index_fp', 'outcome')
 ENVELOPE = {'envelope_version', 'route', 'graphs', 'answered', 'refused', 'not_reached',
             'unfinished', 'request_id', 'server_instance', 'deadline', 'answers', 'timing',
             'work'}
+# the words of a probe without ?graph= before train 8, after its route (they named
+# graph_path=<path>; train 8's name pair_id=<id>)
+NEEDS_OLD = ('needs ?graph=<name> (and graph_path=<path> when the name spans several graphs); GET '
+             '/capabilities lists the graphs')
 # the deadline block of a request that gives neither not_after_ms nor finish_by_ms
 NO_DEADLINE = {'not_after_ms': None, 'finish_by_ms': None, 'effective_deadline_at': None,
                'cutoff_at': None}
@@ -127,10 +132,18 @@ def records_of(paths):
     return [seq for _, seq in named_records_of(paths)]
 
 
-def changed_file_refusal(path, role, graph, annotation, how):
+def changed_file_refusal(role, name, graph, annotation, how):
     """The refusal of a load into RAM for a request (in_ram) of a pair one of whose files changed
     on disk since the server started (GPT review 7 finding 4, SPEC-multigraph-envelope.md
-    section 10)"""
+    section 10): the pair named by |name| and its pair_id, no path (train 8)"""
+    return (f"The {role} file of the pair ({name}, {configured_pair_id(name, graph, annotation)}) "
+            f"changed on disk since the server started ({how}): a request does not load it into "
+            f"RAM, since the answer would carry the start-up identity and certificates; restart "
+            f"onto the new files, or send the request without in_ram")
+
+
+def changed_file_log(path, role, graph, annotation, how):
+    """The server's log line of that refusal: the file and the pair's paths, for the operator"""
     return (f"The file '{path}' ({role}) of the pair ('{graph}', '{annotation}') changed on disk "
             f"since the server started ({how}): a request does not load it into RAM, since the "
             f"answer would carry the start-up identity and certificates; restart onto the new "
@@ -217,10 +230,14 @@ def untimed(value):
 
 class Server:
     """A server_query process on a free port, ready once GET /stats answers 200; |threads| is
-    its -p (the graph pool the pairs of a request run on, and its HTTP threads)."""
+    its -p (the graph pool the pairs of a request run on, and its HTTP threads). Every response
+    of this build that post() and get() return is checked to state none of the configured paths
+    (train 8: no path in any response, SPEC-multigraph-envelope.md section 1.2); a base binary's
+    are not."""
 
     def __init__(self, args, log_path, timeout=300, threads=4, binary=None):
         os.environ['NO_PROXY'] = '127.0.0.1'
+        self.paths = [] if binary else configured_paths(args)
         for _ in range(20):
             self.port = free_port()
             self.log_path = log_path
@@ -251,10 +268,14 @@ class Server:
         return f'http://127.0.0.1:{self.port}/{route}'
 
     def post(self, route, payload):
-        return requests.post(self.url(route), data=json.dumps(payload), timeout=300)
+        ret = requests.post(self.url(route), data=json.dumps(payload), timeout=300)
+        assert_no_configured_path(ret.text, self.paths, 'POST /' + route)
+        return ret
 
     def get(self, route):
-        return requests.get(self.url(route), timeout=60)
+        ret = requests.get(self.url(route), timeout=60)
+        assert_no_configured_path(ret.text, self.paths, 'GET /' + route)
+        return ret
 
     def text(self):
         with open(self.log_path) as f:
@@ -615,11 +636,12 @@ class TestMultiGraphServer(TestingBase):
     def test_pattern_capabilities_name_a_pair(self):
         enterics = self.server.get('pattern/capabilities?graph=enterics')
         self.assertEqual(400, enterics.status_code)
-        # a name of two pairs: a probe names one (SPEC-multigraph-envelope.md section 6)
-        # (in the words of the release-9 server, which a client matches whole)
-        self.assertEqual(('pair_ambiguous', f"Bad request: index 'enterics' spans several graphs "
-                                            f"({self.pairs['ecoli'][0]}, {self.pairs['kleb'][0]}); "
-                                            f"pass 'graph_path' to pick one"),
+        # a name of two pairs: a probe names one (SPEC-multigraph-envelope.md section 6), in
+        # train 8's words, which name the pairs by their pair_id and no path
+        self.assertEqual(('pair_ambiguous', f"Bad request: index 'enterics' holds several pairs "
+                                            f"({self.pid('enterics', 'ecoli')}, "
+                                            f"{self.pid('enterics', 'kleb')}); name one by its "
+                                            f"pair_id (GET /capabilities lists them)"),
                          (enterics.json()['code'], enterics.json()['error']))
         self.assertEqual([{'graph': 'enterics', 'pair_id': self.pid('enterics', 'ecoli')},
                           {'graph': 'enterics', 'pair_id': self.pid('enterics', 'kleb')}],
@@ -650,18 +672,39 @@ class TestMultiGraphServer(TestingBase):
             self.assertEqual(400, ret.status_code, query)
             self.assertIn(words, ret.json()['error'], query)
 
+    def _m6_rewordings(self):
+        """{train 8's text: the release-9 text} of the panels' refusals that named a configured
+        path (SPEC-multigraph-envelope.md section 6, train 8): the pairs by their pair_id, no
+        path"""
+        ecoli, kleb = self.pairs['ecoli'][0], self.pairs['kleb'][0]
+        words = {
+            f"Bad request: index 'enterics' holds several pairs ({self.pid('enterics', 'ecoli')}, "
+            f"{self.pid('enterics', 'kleb')}); name one by its pair_id (GET /capabilities lists "
+            f"them)": f"Bad request: index 'enterics' spans several graphs ({ecoli}, {kleb}); pass "
+                      f"'graph_path' to pick one",
+            "Bad request: the graph_path given is not part of index 'enterics'":
+                "Bad request: graph_path '/nowhere' is not part of index 'enterics'",
+        }
+        for route in ('traverse/capabilities', 'pattern/capabilities'):
+            words[f'Bad request: in multi-graph mode GET /{route} needs ?graph=<name> (and '
+                  f'pair_id=<id> when the name holds several pairs); GET /capabilities lists '
+                  f'them'] = f'Bad request: in multi-graph mode GET /{route} {NEEDS_OLD}'
+        return words
+
     def _refusal_panel(self):
         """Requests the release-9 server (8fa32e553) refused on this list, each with the
         refusal text it gave, byte for byte (a multi-graph client matches these texts whole;
-        SPEC-multigraph-envelope.md section 6 adds a code beside them, never a new wording):
-        (method, route, payload or query, code, text)"""
-        ecoli, kleb = self.pairs['ecoli'][0], self.pairs['kleb'][0]
+        SPEC-multigraph-envelope.md section 6 adds a code beside them), but for the texts that
+        named a configured path, train 8's (_m6_rewordings): (method, route, payload or query,
+        code, text)"""
         seed = self.records['ecoli'][0][1000:1100]
         t = {'seeds': [{'sequence': seed}]}
         r = {'sequence': seed}
-        spans = (f"Bad request: index 'enterics' spans several graphs ({ecoli}, {kleb}); pass "
-                 f"'graph_path' to pick one")
-        not_part = "Bad request: graph_path '/nowhere' is not part of index 'enterics'"
+        kleb = self.pairs['kleb'][0]
+        spans = (f"Bad request: index 'enterics' holds several pairs ({self.pid('enterics', 'ecoli')}, "
+                 f"{self.pid('enterics', 'kleb')}); name one by its pair_id (GET /capabilities "
+                 f"lists them)")
+        not_part = "Bad request: the graph_path given is not part of index 'enterics'"
         unknown = "Bad request: unknown graph 'nope'"
         both = "Bad request: give the graph as 'graph' or as 'graphs', not both"
         one_name = "Bad request: 'graphs' names the one graph a traversal reads: expected [name]"
@@ -669,8 +712,8 @@ class TestMultiGraphServer(TestingBase):
         panel = []
         for route in ('traverse/capabilities', 'pattern/capabilities'):
             needs = (f'Bad request: in multi-graph mode GET /{route} needs ?graph=<name> (and '
-                     f'graph_path=<path> when the name spans several graphs); GET /capabilities '
-                     f'lists the graphs')
+                     f'pair_id=<id> when the name holds several pairs); GET /capabilities lists '
+                     f'them')
             panel += [
                 ('GET', route, '?graph=enterics', 'pair_ambiguous', spans),
                 ('GET', route, '?graph=nope', 'graph_unknown', unknown),
@@ -762,6 +805,120 @@ class TestMultiGraphServer(TestingBase):
                 self.assertEqual(text, body['error'])
                 self.assertEqual(code, body.get('code'))
 
+    def test_no_response_states_a_configured_path(self):
+        """Train 8 (docs/DESIGN-pair-identity.md section 3.1; SPEC-multigraph-envelope.md
+        section 1.2): no response states a configured path. Swept over every route, probe and
+        refusal of a multi-graph and a single-graph server: GET /capabilities, /stats,
+        /column_labels, the probes (every pair, one by name, by its paths, by its pair_id, and
+        their refusals), /search, /resolve, /traverse and /pattern (answers, with in_ram too, the
+        selection refusals of _refusal_panel and of the pairs selector, with a path or an id
+        that names no pair), GET /requests and /traverse/attempt, /align. A request that names a
+        pair by its paths is answered without them. Server.post and .get check every response of
+        this build the same way, so the other tests sweep the cut-off pairs (not_reached,
+        unfinished), the changed files (index_changed) and the names cap."""
+        quote = lambda p: requests.utils.quote(p, safe='')
+        seed = self.records['ecoli'][0][1000:1100]
+        (ecoli_g, ecoli_a), (kleb_g, kleb_a) = self.pairs['ecoli'], self.pairs['kleb']
+        by_id = self.pid('enterics', 'kleb')
+        t = {'seeds': [{'sequence': seed}],
+             'strategy': {'direction': 'right', 'bounds': {'max_extension_bp': 50},
+                          'output': {'detail': 'summary'}}}
+        r = {'sequence': seed, 'discover': {'max_labels': 5}}
+        p = {'patterns': [{'dna': seed[:20]}], 'mode': 'count'}
+        q = {'FASTA': f'>q\n{seed}\n', 'top_labels': 3}
+        gets = ['capabilities', 'stats', 'column_labels', 'column_labels?offset=0&limit=1',
+                'requests/never-sent', 'traverse/attempt/never-sent']
+        for route in ('traverse/capabilities', 'pattern/capabilities'):
+            gets += [route + query for query in (
+                '', '?graph=kleb', '?graph=enterics', f'?graph=enterics&graph_path={quote(ecoli_g)}',
+                f'?graph=enterics&annotation_path={quote(kleb_a)}', f'?graph=enterics&pair_id={by_id}',
+                '?graph=enterics&pair_id=n1-x', '?graph=enterics&graph_path=%2Fnowhere',
+                f'?graph=enterics&annotation_path={quote(ecoli_g)}', f'?graph_path={quote(kleb_g)}',
+                f'?graph=kleb&pair_id={by_id}&graph_path={quote(kleb_g)}', '?graph=nope',
+                '?graph=kleb&x=1')]
+        pairs = [[{'graph': 'enterics', 'graph_path': ecoli_g}],
+                 [{'graph': 'enterics', 'pair_id': by_id}],
+                 [{'graph': 'enterics', 'pair_id': by_id, 'graph_path': kleb_g}],
+                 [{'graph': 'enterics', 'annotation_path': ecoli_g}],
+                 [{'graph': 'enterics', 'graph_path': '/nowhere'}],
+                 [{'graph': 'enterics', 'pair_id': self.pid('kleb')}],
+                 [{'graph': 'enterics'}], [{'graph': 'nope'}], [{'graph': 'kleb', 'x': 1}],
+                 [{'graph': 'enterics', 'graph_path': ecoli_g}, {'graph': 'kleb'}]]
+        posts = [('search', dict(q, graphs=graphs)) for graphs in
+                 (['enterics', 'kleb'], ['nope'], [], 'kleb')]
+        posts += [('search', q), ('search', dict(q, graphs=['kleb'], in_ram=True)),
+                  ('search', dict(q, pairs=[{'graph': 'kleb'}])), ('align', q)]
+        for route, body in (('resolve', r), ('traverse', t), ('pattern', p)):
+            posts += [(route, dict(body, pairs=selector)) for selector in pairs]
+            posts += [(route, dict(body, graphs=['enterics'])), (route, dict(body, graphs=['kleb'])),
+                      (route, dict(body, graphs=['kleb'], in_ram=True)),
+                      (route, dict(body, graphs=['ecoli', 'kleb']))]
+            if route != 'pattern':
+                posts += [(route, dict(body, graph='enterics')),
+                          (route, dict(body, graph='enterics', graph_path=kleb_g)),
+                          (route, dict(body, graph='enterics', graph_path='/nowhere')),
+                          (route, dict(body, graph_path=kleb_g))]
+        posts += [('resolve', dict(r, graphs=['enterics'], request_id='nopath-resolve')),
+                  ('pattern', dict(p, graphs=['enterics'], request_id='nopath-pattern')),
+                  ('traverse', dict(t, graphs=['kleb'], attempt_id='nopath-traverse'))]
+        gets += ['requests/nopath-resolve', 'requests/nopath-pattern', 'requests/nopath-traverse',
+                 'traverse/attempt/nopath-traverse']
+        statuses = {}
+        for route, body in posts:
+            with self.subTest(route=route, body={k: v for k, v in body.items()
+                                                 if k not in ('seeds', 'sequence', 'FASTA')}):
+                statuses.setdefault(route, set()).add(self.server.post(route, body).status_code)
+        for method, route, request, _, _ in self._refusal_panel():
+            with self.subTest(route=route, request=request):
+                self._ask(self.server, method, route, request)
+        for route in gets:
+            with self.subTest(get=route):
+                statuses.setdefault(route.split('?')[0], set()).add(self.server.get(route).status_code)
+        # the sweep reached answers and refusals of every POST route
+        for route in ('search', 'resolve', 'traverse', 'pattern'):
+            self.assertEqual({200, 400}, statuses[route] & {200, 400}, route)
+        # the pairs GET /capabilities lists: named by graph and pair_id
+        caps = self.server.get('capabilities').json()
+        self.assertEqual('n1', caps['multigraph']['pair_id'])
+        for pair in caps['graph_summary']['pairs']:
+            self.assertEqual(configured_pair_id(pair['graph'], *self.pairs[self.chunk_of(pair)]),
+                             pair['pair_id'])
+            self.assertFalse({'graph_path', 'annotation_path'} & set(pair), pair)
+        # the start-up log binds each pair's id to its paths, once, in the answers' pair order
+        # (logs keep the paths: an operator reads there which files an id names)
+        with open(self.server.log_path, encoding='utf-8') as f:
+            bound = re.findall(r"\[Server\] Pair (\S+) (n1-[0-9a-f-]+): graph '([^']*)', "
+                               r"annotation '([^']*)'", f.read())
+        self.assertEqual([(p['graph'], p['pair_id'], *self.pairs[self.chunk_of(p)])
+                          for p in caps['graph_summary']['pairs']], bound)
+
+        # a single-graph server: the same routes, its pair's tags null
+        single = Server(['-i', kleb_g, '-a', kleb_a, '--mmap', '--mem-cap-gb', '1'],
+                        os.path.join(self.tempdir.name, 'server_nopath_single.log'))
+        try:
+            for route in ('capabilities', 'stats', 'column_labels', 'traverse/capabilities',
+                          'pattern/capabilities', 'traverse/capabilities?graph=kleb',
+                          'pattern/capabilities?graph_path=x', 'requests/never-sent'):
+                with self.subTest(single_get=route):
+                    single.get(route)
+            for route, body in (('search', q), ('search', dict(q, in_ram=True)),
+                                ('search', dict(q, pairs=[{'graph': 'kleb'}])), ('align', q),
+                                ('resolve', r), ('resolve', dict(r, graph='kleb')),
+                                ('resolve', dict(r, request_id='nopath-single')),
+                                ('traverse', t), ('traverse', dict(t, graph_path=kleb_g)),
+                                ('traverse', dict(t, pairs=[{'graph': 'kleb'}])),
+                                ('pattern', p), ('pattern', dict(p, graphs=['kleb']))):
+                with self.subTest(single=route, body=sorted(body)):
+                    single.post(route, body)
+            single.get('requests/nopath-single')
+            caps = single.get('capabilities').json()
+            self.assertEqual((None, None), (caps['pair_summary']['graph'],
+                                            caps['pair_summary']['pair_id']))
+            [answer] = single.post('search', q).json()
+            self.assertEqual([(None, None)], [(c['graph'], c['pair_id']) for c in answer['cuts']])
+        finally:
+            single.stop()
+
     def _names_cap_server(self, name, binary=None):
         return Server([self.csv, '--mmap', '--mem-cap-gb', '1', '--max-graphs-without-selection',
                        '1'], os.path.join(self.tempdir.name, f'server_cap_{name}.log'),
@@ -786,12 +943,13 @@ class TestMultiGraphServer(TestingBase):
              {'error': "Bad request: 'graph' (index name) is required in multi-graph mode"},
              True),
         ]
+        # train 8's words (no path): the release-9 server's were _m6_rewordings' old ones
         for route in ('traverse/capabilities', 'pattern/capabilities'):
             panel.append(('GET', route, '',
                           {'error': f'Bad request: in multi-graph mode GET /{route} needs '
-                                    f'?graph=<name> (and graph_path=<path> when the name spans '
-                                    f'several graphs); GET /capabilities lists the graphs'},
-                          True))
+                                    f'?graph=<name> (and pair_id=<id> when the name holds '
+                                    f'several pairs); GET /capabilities lists them'},
+                          False))
         return panel
 
     def test_the_names_cap_texts_are_those_before_release_10(self):
@@ -815,16 +973,21 @@ class TestMultiGraphServer(TestingBase):
         and error text for every request it answered (the code is release 10's addition)."""
         base = Server([self.csv, '--mmap', '--mem-cap-gb', '1'],
                       os.path.join(self.tempdir.name, 'server_base.log'), binary=BASE_BINARY)
+        # the texts that named a configured path are train 8's: the base answers the old ones
+        old_of = self._m6_rewordings()
         try:
             for method, route, request, code, text in self._refusal_panel():
                 with self.subTest(route=route, request=request):
                     a = self._ask(base, method, route, request)
                     b = self._ask(self.server, method, route, request)
-                    self.assertEqual((400, text), (a.status_code, a.json()['error']))
-                    self.assertEqual((a.status_code, a.json()['error']),
-                                     (b.status_code, b.json()['error']))
+                    self.assertEqual((400, old_of.get(text, text)),
+                                     (a.status_code, a.json()['error']))
+                    self.assertEqual((400, text), (b.status_code, b.json()['error']))
         finally:
             base.stop()
+        # every rewording was asked
+        asked = {text for *_, text in self._refusal_panel()}
+        self.assertEqual(set(old_of), set(old_of) & asked)
         base, new = self._names_cap_server('base', BASE_BINARY), self._names_cap_server('new2')
         try:
             for method, route, request, body, as_base in self._names_cap_panel():
@@ -3117,7 +3280,9 @@ class TestMultiGraphServer(TestingBase):
         args = [csv, '--mmap', '--mem-cap-gb', f'{cap_gb:.9f}']
         server = Server(args, os.path.join(d, 'server.log'))
         graph, anno = pairs['kleb']
-        refusal = changed_file_refusal(anno, 'annotation', graph, anno, 'its status change time')
+        refusal = changed_file_refusal('annotation', 'kleb', graph, anno, 'its status change time')
+        # the log's line names the file and the pair's paths
+        logged_line = changed_file_log(anno, 'annotation', graph, anno, 'its status change time')
         kleb = self.records['kleb'][0]
         seed = kleb[20000:20100]
         p = {'patterns': [{'dna': kleb[5000:5020]}], 'mode': 'count', 'graphs': ['kleb']}
@@ -3150,7 +3315,7 @@ class TestMultiGraphServer(TestingBase):
             refused_entry(server.post('resolve', dict(r, in_ram=True)), '/resolve')
             log = server.text()
             # refused before any load: no loader ran, nothing was loaded into RAM
-            logged = log.count(refusal)
+            logged = log.count(logged_line)
             self.assertGreaterEqual(logged, 1, log[-3000:])
             self.assertEqual(0, log.count(f"Cannot load annotation from '{anno}'"), log[-3000:])
             self.assertEqual(0, log.count('loaded into RAM for it'), log[-3000:])
@@ -3166,7 +3331,7 @@ class TestMultiGraphServer(TestingBase):
                     self.assertIn(words, ret.json()['error'])
                     self.assertNotIn(refusal, ret.text)
             log = server.text()
-            self.assertEqual(logged, log.count(refusal), log[-3000:])
+            self.assertEqual(logged, log.count(logged_line), log[-3000:])
             self.assertEqual(0, log.count('loaded into RAM for it'), log[-3000:])
 
             # the server lives: the pair without in_ram, the other pair with it (above the cap)
@@ -3252,7 +3417,7 @@ class TestMultiGraphServer(TestingBase):
         ret = self.server.post('traverse', dict(one, graphs=['enterics']))
         self.assertEqual(400, ret.status_code)
         self.assertEqual('traverse_single_pair', ret.json()['code'])
-        self.assertIn("Bad request: index 'enterics' spans several graphs", ret.json()['error'])
+        self.assertIn("Bad request: index 'enterics' holds several pairs", ret.json()['error'])
         self.assertEqual([('enterics', self.pid('enterics', 'ecoli')),
                           ('enterics', self.pid('enterics', 'kleb'))],
                          [(c['graph'], c['pair_id']) for c in ret.json()['candidates']])
@@ -4414,12 +4579,12 @@ class TestRecordMappingAtLoad(TestingBase):
             replace(os.path.join(self.d, 'swapped.seqs'), seqs)
             failed = server.post('search', dict(query, in_ram=True))
             assert_index_changed(self, failed, changed_file_refusal(
-                    seqs, 'coord_to_header', self.graph, anno, 'it is another file'))
+                    'coord_to_header', 'live', self.graph, anno, 'it is another file'))
             # the annotation replaced by one of three columns: refused, naming the annotation
             replace(os.path.join(self.d, 'three.column_coord.annodbg'), anno)
             failed = server.post('search', dict(query, in_ram=True))
             assert_index_changed(self, failed, changed_file_refusal(
-                    anno, 'annotation', self.graph, anno, 'it is another file'))
+                    'annotation', 'live', self.graph, anno, 'it is another file'))
             # the server runs on, its resident pair answering as before
             self.assertIsNone(server.process.poll())
             again = server.post('search', query)
@@ -4463,7 +4628,7 @@ class TestRecordMappingAtLoad(TestingBase):
             loaded = server.post('search', dict(query, in_ram=True))
             self.assertEqual((200, resident.json()), (loaded.status_code, loaded.json()))
             os.remove(anno)
-            refusal = changed_file_refusal(anno, 'annotation', self.graph, anno,
+            refusal = changed_file_refusal('annotation', 'gone', self.graph, anno,
                                            'it is gone or cannot be read')
             assert_index_changed(self, server.post('search', dict(query, in_ram=True)), refusal)
             ret = server.post('resolve', dict(resolve, in_ram=True))
@@ -4573,8 +4738,7 @@ class TestRecordMappingAtLoad(TestingBase):
                     loaded = server.post('search', dict(query, in_ram=True))
                     self.assertEqual((200, resident.json()), (loaded.status_code, loaded.json()))
                     change(graph, anno, seqs)
-                    refusal = changed_file_refusal(graph if role == 'graph' else anno, role,
-                                                   graph, anno, how)
+                    refusal = changed_file_refusal(role, 'live', graph, anno, how)
                     assert_index_changed(self, server.post('search', dict(query, in_ram=True)),
                                          refusal)
                     assert_index_changed(self, server.post('traverse', dict(bodies['traverse'],

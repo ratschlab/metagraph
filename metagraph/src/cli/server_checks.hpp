@@ -898,24 +898,49 @@ struct PairFileStamp {
  */
 std::vector<PairFileStamp> pair_file_stamps(const std::string &graph,
                                             const std::string &annotation, bool coord_mapping);
+// The first file of |stamps| that changed since its stamp was taken (GPT review 7 finding 4: an
+// answer computed on other files would carry the start-up identity, certificates and record
+// mapping): its path, its role and how it changed, |how| one of "it is another file", "its
+// size", "its modification time", "its status change time", "it is gone or cannot be read", "it
+// appeared"
+struct ChangedFile {
+    std::string path;
+    std::string role;
+    std::string how;
+};
+// none while every file of |stamps| has the stamp taken
+std::optional<ChangedFile> changed_pair_file(const std::vector<PairFileStamp> &stamps);
 /**
- * "" while every file of |stamps| has the stamp taken, else the refusal of a load of the pair
- * (|graph|, |annotation|) into RAM for a request, naming the first file that changed and how
- * (GPT review 7 finding 4: an answer computed on other files would carry the start-up identity,
- * certificates and record mapping): "The file '<path>' (<role>) of the pair ('<graph>',
- * '<annotation>') changed on disk since the server started (<how>): a request does not load it
- * into RAM, since the answer would carry the start-up identity and certificates; restart onto the
- * new files, or send the request without in_ram", <how> one of "it is another file", "its size",
- * "its modification time", "its status change time", "it is gone or cannot be read", "it
- * appeared".
+ * "" while every file of |stamps| has the stamp taken, else the log's text of the refusal of a
+ * load of the pair (|graph|, |annotation|) into RAM for a request, naming the first file that
+ * changed and how (changed_file_log_text): the operator's line, with the paths
  */
 std::string pair_files_changed(const std::vector<PairFileStamp> &stamps,
                                const std::string &graph, const std::string &annotation);
-// that refusal's text for the file |path| (|role|) of the pair (|graph|, |annotation|), changed
-// as |how| states
-std::string changed_file_text(const std::string &path, const std::string &role,
-                              const std::string &graph, const std::string &annotation,
+// The log's text for the file |path| (|role|) of the pair (|graph|, |annotation|), changed as
+// |how| states: "The file '<path>' (<role>) of the pair ('<graph>', '<annotation>') changed on
+// disk since the server started (<how>): a request does not load it into RAM, since the answer
+// would carry the start-up identity and certificates; restart onto the new files, or send the
+// request without in_ram"
+std::string changed_file_log_text(const std::string &path, const std::string &role,
+                                  const std::string &graph, const std::string &annotation,
+                                  const std::string &how);
+// The refusal's text a client receives (train 8: no path, SPEC-multigraph-envelope.md section
+// 10): "The <role> file of the pair <pair> changed on disk since the server started (<how>): a
+// request does not load it into RAM, since the answer would carry the start-up identity and
+// certificates; restart onto the new files, or send the request without in_ram", |pair| as
+// pair_label names it ("(<name>, <pair_id>)")
+std::string changed_file_text(const std::string &role, const std::string &pair,
                               const std::string &how);
+// The refusal of a copy of the pair |pair| (pair_label) whose annotation has other column labels
+// than the resident's (no path; the log names the annotation)
+std::string other_labels_text(const std::string &pair);
+// The text a client receives for a load of the pair |pair| (pair_label) into RAM for a request on
+// |route| ("search", "resolve", "pattern", "traverse") that failed: "<route>: pair <pair> could
+// not be loaded: the load into RAM for the request failed (the server's log names the file and
+// the reason); send the request without in_ram". The loader's own text names the file: it goes
+// to the log only
+std::string pair_load_failure_text(const std::string &route, const std::string &pair);
 
 // {"error": |message|, "code": "index_changed"}: the refusal of a load of a pair into RAM for a
 // request once a file of the pair changed on disk since the server started (pair_files_changed's

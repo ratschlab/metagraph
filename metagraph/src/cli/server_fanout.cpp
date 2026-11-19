@@ -740,10 +740,8 @@ class FanoutState {
         return settings.route.size() && settings.route[0] == '/' ? settings.route.substr(1)
                                                                  : settings.route;
     }
-    std::string label(size_t i) const {
-        const SelectedPair &p = settings.pairs[i];
-        return "(" + p.name + ", " + p.pair.first + ", " + p.pair.second + ")";
-    }
+    // the pair as a refusal's text names it: "(<name>, <pair_id>)", no path
+    std::string label(size_t i) const { return pair_label(settings.pairs[i]); }
     std::string fp(size_t i) const {
         return i < settings.index_fps.size() ? settings.index_fps[i] : std::string();
     }

@@ -764,12 +764,15 @@ std::string sample_text(const std::string &name) {
 }
 
 // The refusal of sample pair B (bact_pseudomonadota) whose annotation was replaced by another
-// file since the server started, the paths the sample's tags state
+// file since the server started: the pair named by its name and the pair_id of r237's paths, no
+// path (train 8)
 std::string changed_annotation_of_b() {
     const std::string graph = "/scratch/nvme10/refseq_r237/bact_pseudomonadota/graph.dbg";
     const std::string annotation = "/scratch/nvme10/refseq_r237/bact_pseudomonadota/"
                                    "annotation.row_diff_brwt_coord.annodbg";
-    return changed_file_text(annotation, "annotation", graph, annotation, "it is another file");
+    return changed_file_text("annotation",
+                             pair_label("bact_pseudomonadota", { graph, annotation }),
+                             "it is another file");
 }
 
 } // namespace

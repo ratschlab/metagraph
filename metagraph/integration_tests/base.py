@@ -54,6 +54,41 @@ def configured_pair_id(graph, graph_path, annotation_path):
     return 'n1-' + str(uuid.uuid5(PAIR_ID_NAMESPACE, name))
 
 
+def configured_paths(args):
+    """The configured paths of a server_query started with |args| (its graph list's graph,
+    annotation and manifest paths, or -i/-a), with the sidecars a pair's load reads beside them
+    (the annotation's .seqs, the graph's mask and Bloom filter; the row_diff anchors start with
+    the graph's path): no response may state one (SPEC-multigraph-envelope.md section 1.2, train
+    8: answers name a pair by its name and pair_id, logs keep the paths)"""
+    paths = []
+    if args and not args[0].startswith('-') and os.path.isfile(args[0]):
+        with open(args[0]) as f:
+            for line in f:
+                cells = line.strip().split(',')
+                paths += [c for c in cells[1:4] if c]
+    for flag in ('-i', '-a', '--index-manifest'):
+        if flag in args[:-1]:
+            paths.append(args[args.index(flag) + 1])
+    out = set()
+    for p in paths:
+        out.add(p)
+        if p.endswith('.annodbg'):
+            out.add(os.path.splitext(os.path.splitext(p)[0])[0] + '.seqs')
+        elif not p.endswith('.json'):
+            base = os.path.splitext(p)[0]
+            out.update((base + '.edgemask', base + '.bloom'))
+    return sorted(out)
+
+
+def assert_no_configured_path(text, paths, where):
+    """|text| (a response's body) states none of |paths| (configured_paths)"""
+    for p in paths:
+        if p in text:
+            at = text.index(p)
+            raise AssertionError(f'{where}: the response states the configured path {p!r}: '
+                                 f'...{text[max(0, at - 300):at + len(p) + 100]}...')
+
+
 def start_server(graph, annotation, host, port, extra_args=''):
     """Start `server_query` on the first free port from |port|: (process, port)."""
     for _ in range(100):
