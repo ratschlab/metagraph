@@ -171,13 +171,13 @@ _ID_LIKE = re.compile(r'[A-Za-z][A-Za-z0-9]{0,7}-[0-9A-Fa-f]{8}-?[0-9A-Fa-f]{4}-
 _M_NODE = 300           # a raw trie node: its children dict, its depth
 _M_EDGE = 420           # a raw edge: its five list slots, its reference, its cover dict
 _M_COVER = 144          # a cover entry of an edge (part -> (segment, offset)), walked or
-#                         copied by a split (measured: at most 120 B per entry, parts that
-#                         branch off one spine at 400 depths, CPython 3.14; 112 on 3.11)
+#                         copied by a split (measured: at most 128 B per entry, 2,000 parts
+#                         that branch off one spine, CPython 3.14; 119 on 3.11; 120 at 400)
 _M_SEG = 200            # a part segment's entries: its nodes, the walks and stubs below it
 _M_USEG = 1280          # a union segment: the object, its dicts and lists, node_in/out
 _M_PIECE = 320          # a raw edge's cover entry in its union segment: the segment's cover
 #                         and pieces entries, the piece (part, segment, from, to) and its list
-#                         (measured: at most 279 B, the same 400 depths on 3.14; 271 on 3.11)
+#                         (measured: at most 290 B, the same 2,000 parts on 3.14; 282 on 3.11)
 # The trie's work beside its 4 W_ELEM per part segment, fitted to its insertion and
 # compression (best of 5, parts branching off one spine at 400 depths, a comb walked by 300
 # one-segment spines; 3.11 and 3.14): an edge a segment walks past its first 0.42 us, a
