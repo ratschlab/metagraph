@@ -1617,7 +1617,8 @@ class TestBudgets(unittest.TestCase):
         price: a second call on the warm union charges the same. GPT review M4: also on
         long metadata, charged before it is serialized -- a 100,000-character ASCII tag, one
         of escaped and astral characters, a 1 MB error and an absent record whose error is
-        100,000 quotes (escaped twice in the digest)."""
+        100,000 quotes (escaped twice in the digest). The lane's sweep of GPT final review
+        M2: two parts of a 100,000-base seed (walks(spell=True) among the operations)."""
         import gc
         import tracemalloc
 
@@ -1657,6 +1658,13 @@ class TestBudgets(unittest.TestCase):
                 out.append({'pair': tag, 'graphlet': g})
             return out
 
+        def long_seeds():
+            # the lane's sweep of GPT final review M2: two parts of a 100,000-base seed, which
+            # each part's retrieval identity and the digest hold, and walks(spell=True),
+            # spell() and the exports write (to_gfa()'s S lines were not charged)
+            return [{'pair': 'gM', 'graphlet': long_seed(T.graphlet('merge'), 100000)},
+                    {'pair': 'gT', 'graphlet': long_seed(T.graphlet('merge_ties'), 100000)}]
+
         def peak(fn, warm):
             gc.collect()
             gc.disable()
@@ -1691,7 +1699,7 @@ class TestBudgets(unittest.TestCase):
         for name, make in (('split11', split11), ('r237', lambda: r237_union()[0]),
                            ('comb', comb), ('long tags', long_tags),
                            ('long errors', long_errors), ('escaped tag', escaped_tag),
-                           ('long names', long_names)):
+                           ('long names', long_names), ('long seed', long_seeds)):
             # the long statements never fit 4096 bytes: summary() is measured whole there
             ceiling[0] = 4096 if name in ('split11', 'r237', 'comb') else 1 << 21
             b = LocalBudget()

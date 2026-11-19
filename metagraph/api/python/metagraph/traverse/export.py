@@ -1237,6 +1237,10 @@ def union_gfa(u, with_seed, labels, at_bp, bud):
         t = u._arms[side]
         sname = 'seed_l' if side == 'left' else 'seed_r'
         if with_seed:
+            if bud is not None:
+                # the seed's S line, kept, and its copy in the joined text (the lane's sweep
+                # of GPT final review M2: the seed was not charged)
+                bud.charge(W_GFA_LINE + (len(seed) >> 8), 2 * (STR + 32 + len(seed)))
             segs_out.append('S\t%s\t%s\tLN:i:%d' % (sname, seed, len(seed)))
         # the stubs ending at each node: their merge tags
         stub_tags = {}

@@ -863,11 +863,15 @@ class PairUnion:
             # copies of its canonical JSON at its bound, and 1 lwu per 8 bytes of it; the
             # seed (seed=, else the first part's): its case-mapped copy, kept, and the
             # digest's JSON of it (the encoder's chunk and their join) and its UTF-8 bytes
-            # (Opus fix review N2)
+            # (Opus fix review N2); and per part the same four again: its retrieval
+            # identity's JSON, kept, holds the seed, and the digest serializes it (the
+            # lane's sweep of GPT final review M2: 2,169,236 B traced against 646,778 B
+            # charged for six parts of a 100,000-base seed)
             meta = sum(map(_elem_meta, elems)) + _json_bound(exp) + _json_bound(
                 [k for _, _, k in so])
             n = len(seed) if seed is not None else len(parts[0].graphlet.seed.sequence)
-            b.charge((meta >> 3) + (n >> 6), _M_META * meta + 4 * (STR + n))
+            b.charge((meta >> 3) + ((1 + len(parts)) * n >> 6),
+                     _M_META * meta + 4 * (1 + len(parts)) * (STR + n))
         # different_seed
         alphabet = parts[0].graphlet.alphabet if parts else None
         if parts:

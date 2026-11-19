@@ -683,7 +683,7 @@ whose order allows it (`walks()`, `segments()`, `carriers()`) carry a `Partial` 
 input is classified, its preparation, read from the inputs' counts and stated pairs (their descriptions, and each
 comparison of the matching passes, quadratic in the number of inputs; a description's hits are compared among
 themselves once that is charged); then, before the seed checks, the inputs' variable-length metadata (at a bound of its
-JSON) and the seed (four copies); then the trie pass. A budget smaller than the first charges therefore stops it before
+JSON) and the seed (four copies, and four more per part, whose retrieval identity holds it); then the trie pass. A budget smaller than the first charges therefore stops it before
 the refusals checked after them, such as `ambiguous_pair`, `different_seed`, `duplicate_pair` and `not_expected`.
 
 **The queries.**
