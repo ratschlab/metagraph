@@ -415,7 +415,8 @@ The answer keeps its upstream shape (a list of `{seq_description, results, ...}`
   "client_gone"`, with usage): on `/resolve` and `/pattern` the pairs whose work it stopped state what that work
   held and used, `usage.cpu_ms` its CPU time on its thread and `usage.memory_bytes` its modelled memory so far (on
   `/resolve` the work's peak, with the profile and the selection once they are made, as `work.memory_bytes` counts
-  them; on `/pattern` its account's peak), on a single-graph server's one pair (outcome `refused`, null tags) as on
+  them; on `/pattern` its account's peak, 0 while the work has charged nothing to it, as with `output.labels`
+  `"none"`), on a single-graph server's one pair (outcome `refused`, null tags) as on
   a multi-graph server's pairs *(lane T8-RL: before, a single-graph pair stated `cpu_ms` null and `memory_bytes` 0,
   and a multi-graph pair stopped by the client `memory_bytes` 0)*; a pair stopped before its work began holds
   nothing (`memory_bytes` 0). That holds for an error too: on `/resolve` and `/pattern` nothing is written to a

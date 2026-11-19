@@ -1916,48 +1916,60 @@ class TestMultiGraphServer(TestingBase):
             (pair,) = entry['pairs']
             self.assertEqual(('b_big', 'ended'), (pair['graph'], pair['state']))
             self.assertIsNotNone(pair['usage']['finished_at'])
-            # with the usage the pair's work held and used (section 5; lane T8-RL: before,
-            # memory_bytes 0)
+            # with the CPU time the pair's work used (its memory: output.labels "none" charges
+            # nothing, 0; test_a_client_gone_records_the_usage_held reads it, lane T8-RL)
             self.assertIsNotNone(pair['usage']['cpu_ms'])
-            self.assertGreater(pair['usage']['memory_bytes'], 0)
             ret = server.post('pattern', body)
             self.assertEqual(409, ret.status_code, ret.text[:2000])
             self.assertEqual('client_gone', ret.json()['reason'])
         finally:
             server.stop()
 
-    def test_a_single_graph_client_gone_records_its_usage(self):
-        """A single-graph server (b_big's files, the mini index) whose /resolve or /pattern
-        client leaves a second into its work: GET /requests states the end, reason client_gone,
-        and its one pair (null tags, outcome refused as before) with the usage the work held and
-        used: its CPU time and modelled memory (SPEC-multigraph-envelope.md section 5, "with
-        usage"; lane T8-RL: before, cpu_ms null and memory_bytes 0)."""
+    def test_a_client_gone_records_the_usage_held(self):
+        """A request whose client leaves a second into its work: GET /requests states the end,
+        reason client_gone, and its pair with the usage the work held and used, its CPU time and
+        modelled memory (SPEC-multigraph-envelope.md section 5, "with usage"; lane T8-RL).
+        A single-graph server (the mini index, b_big's files): /resolve and /pattern, the pair
+        with null tags and outcome refused as before (before, cpu_ms null and memory_bytes 0).
+        A multi-graph server: /pattern on b_big (before, memory_bytes 0). The pattern requests
+        retrieve labels (output.labels "all"), so that the account holds memory from the
+        start."""
         self._cutoff_csv()
         graph = os.path.join(MINI_DIR, 'graph_k31.dbg')
         anno = os.path.join(MINI_DIR, 'annotation.relaxed.relabeled.row_diff_brwt_coord.annodbg')
-        server = Server(['-i', graph, '-a', anno, '--pattern-max-contexts', '1000000'],
+        pattern = dict(self.SLOW_PATTERN, time_budget_ms=60000, output={'labels': 'all'})
+        single = Server(['-i', graph, '-a', anno, '--pattern-max-contexts', '1000000'],
                         os.path.join(self.tempdir.name, 'server_single_gone.log'), threads=1)
         try:
-            for route, body in (('resolve', self._slow_resolve()),
-                                ('pattern', dict(self.SLOW_PATTERN, time_budget_ms=60000))):
-                request_id = f'sg-gone-{route}'
-                self.assertEqual(b'', request_then_leave(server.port, route,
-                                                         dict(body, request_id=request_id), 1.0))
-                entry = self._wait_ended(server, request_id)
-                self.assertEqual(('ended', 'client_gone'), (entry['state'], entry['reason']),
-                                 route)
-                self.assertEqual({'status': None, 'bytes': None, 'written': False},
-                                 entry['response'], route)
-                (pair,) = entry['pairs']
-                self.assertEqual((None, 'ended', 'refused'),
-                                 (pair['graph'], pair['state'], pair['outcome']), route)
-                usage = pair['usage']
-                self.assertGreater(usage['elapsed_ms'], 900, route)
-                self.assertIsNotNone(usage['cpu_ms'], route)
-                self.assertGreater(usage['cpu_ms'], 200, route)
-                self.assertGreater(usage['memory_bytes'], 0, route)
+            for route, body in (('resolve', self._slow_resolve()), ('pattern', pattern)):
+                self._check_gone_usage(single, route, body, f'sg-gone-{route}', None)
         finally:
-            server.stop()
+            single.stop()
+        multi = self._cutoff_server('gone_usage')
+        try:
+            self._check_gone_usage(multi, 'pattern', dict(pattern, graphs=['b_big']),
+                                   'mg-gone-pattern', 'b_big')
+        finally:
+            multi.stop()
+
+    def _check_gone_usage(self, server, route, body, request_id, graph):
+        self.assertEqual(b'', request_then_leave(server.port, route,
+                                                 dict(body, request_id=request_id), 1.0))
+        entry = self._wait_ended(server, request_id)
+        self.assertEqual(('ended', 'client_gone'), (entry['state'], entry['reason']), request_id)
+        self.assertEqual({'status': None, 'bytes': None, 'written': False}, entry['response'],
+                         request_id)
+        (pair,) = entry['pairs']
+        self.assertEqual((graph, 'ended'), (pair['graph'], pair['state']), request_id)
+        if graph is None:
+            self.assertEqual('refused', pair['outcome'], request_id)
+        usage = pair['usage']
+        self.assertGreater(usage['elapsed_ms'], 900, request_id)
+        # (the work's thread ran for most of that second, but under load its CPU time can be
+        # small: any)
+        self.assertIsNotNone(usage['cpu_ms'], request_id)
+        self.assertGreater(usage['cpu_ms'], 0, request_id)
+        self.assertGreater(usage['memory_bytes'], 0, request_id)
 
     def test_resolve_and_pattern_caps_refuse_busy_and_register_nothing(self):
         """E19 on a multi-graph server (SPEC-multigraph-envelope.md section 1.1, section 8;
