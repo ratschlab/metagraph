@@ -320,10 +320,13 @@ Claim: which units are refused, with which `account` and `priced_mb`, and the st
 functions of (the request, the index, the server's flags). They never depend on the order in which threads, records
 or pairs run or charge.
 
-1. **A unit's values account** is charged only by its own record's work on its own pair, and only grows. Whether
-   some charge passes B depends only on the total of its charges, which is a function of the unit. This holds
-   whatever thread makes each charge. No member reports the charge that passed (`priced_mb` is not stated for
-   values), so the result does not depend on the order of a unit's own charges.
+1. **A unit's values account** is charged only by its own record's work on its own pair: one task, whose charges,
+   and the bytes it hands back as a column-label store's table frees its old buckets (`SearchAccount::lower_scratch`,
+   used again by its later charges), come in the order its code fixes. What the account holds only grows: it is the
+   most the unit held at once. So whether some charge passes B is a function of the unit, though no longer of the
+   total of its charges alone (lane T7-G4E, b3c1c1904; the Opus review of 0666c9815, n-C). This holds whatever
+   thread runs the task. No member reports the charge that passed (`priced_mb` is not stated for values), so the
+   result does not depend on which of the unit's charges passed.
 2. **A unit's object check** compares a price computed from the unit's result alone. The same holds for
    `priced_mb`.
 3. **The request's answer account** only grows. It receives a fixed set of charges:

@@ -130,7 +130,10 @@ class SearchAccount {
     // the difference kept as freed, which the task's later charges use before they raise held()
     // (and a scratch that grows again is charged again). Lane T7-G4E, the Opus review of
     // cf77380a0, MA-1: a column-label search's table frees its old buckets when it doubles,
-    // and the unit's values and rows charged after it use them, as the heap does
+    // and the unit's values and rows charged after it use them, as the heap does. Never the
+    // request's answer account, which every unit's task charges although it has threads 1:
+    // the freed bytes are used again by a plain load and store, which tasks charging at once
+    // would both use (asserted; the Opus review of 0666c9815, n-A)
     inline void lower_scratch(uint64_t bytes);
 
     uint64_t held() const { return held_.load(std::memory_order_relaxed); }
@@ -362,7 +365,7 @@ inline void SearchAccount::charge_scratch(uint64_t bytes) {
 }
 
 inline void SearchAccount::lower_scratch(uint64_t bytes) {
-    assert(threads_ == 1);
+    assert(threads_ == 1 && this != &budget_->answer());
     const uint64_t most = scratch_.load(std::memory_order_relaxed);
     if (bytes < most) {
         scratch_.store(bytes, std::memory_order_relaxed);

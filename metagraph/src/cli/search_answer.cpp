@@ -524,6 +524,8 @@ std::string search_answer_text(const Json::Value &answer, graph::SearchAccount &
     // gzip's compressed copy (at most about the text) and its state, and the cache's copy
     const uint64_t after_tree = text + alloc_bytes(length + kResponseHeadBytes)
                                 + kCompressorBytes + (cached ? text : 0);
+    // (held() is what the answer account was charged: it is never handed bytes back, so it has
+    // nothing freed that a charge would use first; SearchAccount::lower_scratch)
     if (after_tree > account.held())
         account.charge(after_tree - account.held());
     return json_text_of_length(answer, builder, length);

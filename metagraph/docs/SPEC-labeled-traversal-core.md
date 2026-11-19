@@ -414,8 +414,9 @@ deadline. `src/cli/traverse.cpp` `process_resolve_request`, `src/graph/traversal
 - **Not polled** — each a piece the deadline can fall into, so a stop comes up to one of them after the work
   deadline, and their overrun of the reserve is a 503: the request's parse; the mapping of the query's k-mers
   (one call, linear in the query, which `bounds.max_query_bp` and `--resolve-max-query-bp` bound); the
-  explicit labels' resolution and their query's setup (linear in their bytes, and no server limit caps their
-  number; an unknown label is refused before the deadline is first read, so a stop never hides one); one row
+  explicit labels' resolution and their query's setup (linear in their bytes; at most
+  `--resolve-max-explicit-labels` labels, 10,000 by default, 0 lifting the cap; an unknown label is refused before
+  the deadline is first read, so a stop never hides one); one row
   batch's decode (a row-diff row's whole path) and its accumulation (every label of its rows); a pass's setup (the
   next occurrence of every present k-mer, one hash pass); one piece of hits and its accumulation; the ranking sort of a discovery's labels, the
   name sort of its kept labels' runs of equal support (of the boundary's run only its kept part) and the candidates'
@@ -426,11 +427,14 @@ deadline. `src/cli/traverse.cpp` `process_resolve_request`, `src/graph/traversal
   `--resolve-max-explicit-seeds` × `--resolve-max-explicit-labels` names, 1,024 × 10,000); in `select_seeds`, the
   sort of the runs `max_support` gathers (and their sorted copy), each of a round's three sorts (of its runs, its
   candidate starts and its run ends: n log n of at most twice the runs), the de-duplication of its candidate starts
-  and of its run ends and the zeroing of its Fenwick counts (linear in them), and its sort of the picks (at most
-  `max_seeds`, which `--resolve-max-explicit-seeds` caps), a `longest_first` pick's copy of its candidate's labels,
-  a seed's two label sorts (the order of its labels, then of the names it keeps), its sequence's copy and its id
-  (linear in its length and in the names it keeps, at most `max_labels_per_seed`) and one row of the seeds'
-  overlaps (as many pairs as seeds, at most `--resolve-max-explicit-seeds`); in the answer's build, one object (its
+  and of its run ends and the zeroing of its Fenwick counts (linear in them), its vector of pieces each time it
+  grows past them (the pieces copied into a buffer of twice the size and the old one freed: fewer than the round's
+  pieces), and its sort of the picks (at most `max_seeds`, which `--resolve-max-explicit-seeds` caps), a
+  `longest_first` pick's copy of its candidate's labels, a seed's two label sorts (the order of its labels, then of
+  the names it keeps), its sequence's copy and its id (linear in its length and in the names it keeps, at most
+  `max_labels_per_seed`), one row of the seeds' overlaps (as many pairs as seeds, at most
+  `--resolve-max-explicit-seeds`) and the picks' free once the seeds are frozen (every name an explicit pick lists
+  as not covering, at most 1,024 × 9,999 names); in the answer's build, one object (its
   price, its tree, for an object of 64 KiB or more its size count, and its text), for a multi-graph pair the pricing
   pass over its `unknown_labels` before the first of them is written, and the model of the request's memory
   (`work.memory_bytes`: the profile's, as above, and the selection's, linear in its seeds' names); and the
@@ -442,7 +446,14 @@ deadline. `src/cli/traverse.cpp` `process_resolve_request`, `src/graph/traversal
   candidates' sort about 0.3 s at 3 million groups (10,000 labels of 300 runs of their own); the gathered runs'
   sort about 0.15 s at 3 million runs; a round's three sorts about 0.5, 0.3 and 0.15 s at 10 million pieces
   (10,000 labels of one run over the query, each clipped by 1,024 picks). A slower or loaded host takes a few
-  times that, up to about 1.5 s for a round's runs.
+  times that, up to about 1.5 s for a round's runs. Replicas of the other loops, on this laptop at load 55 to 60,
+  the least of three runs (the Opus review of 0666c9815, m-1 and n-F): the picks' free about 0.2 s at 1,024 picks
+  of 9,999 names of 32 characters (0.5 s in the slowest run); a round's vector grown about 15 to 30 ms at 5 to 10
+  million pieces (up to 0.1 s); the check of the explicit seeds under a stop about 0.5 s at 1,024 seeds of 10,000
+  profiled names, 1.2 s where the names are absent labels (each then looked up twice a pass; up to 2 s); the model
+  of the profile's memory about 2 ms at 3 million candidates. The list names the pieces the reviews found that can
+  take long at the caps; it does not prove that there are no others (freeing or copying a container is such a
+  piece, linear in what it holds).
 - **Capabilities.** Both GET routes carry the `resolve` block (§10.3). The field is not a `feature_level`: every
   `/resolve` and `/traverse` response states the level, so a bump would change every answer; a client gates
   on the block. An older server refuses the field (400 naming it).

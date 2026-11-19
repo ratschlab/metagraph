@@ -1949,6 +1949,8 @@ SeedSelection select_seeds(const SupportProfile &profile,
                     const uint64_t was = annot::matrix::buffer_bytes(runs.capacity(), sizeof(Run));
                     const uint64_t bytes = annot::matrix::buffer_bytes(grown, sizeof(Run));
                     charge(bytes);
+                    // (the copy of the pieces into the new buffer and the old one's free: a
+                    // piece the deadline is read around, listed in the spec's Not polled)
                     runs.reserve(grown);
                     answer_release(was);
                     scratch += bytes - was;
@@ -2117,16 +2119,19 @@ SeedSelection select_seeds(const SupportProfile &profile,
                                                sizeof(ExplicitSeed)));
             policy.explicit_seeds.reserve(policy_in.explicit_seeds.size());
             for (const ExplicitSeed &seed : policy_in.explicit_seeds) {
+                // every field named, so that one added to ExplicitSeed does not compile here
+                // until it is copied, as the policy's above (the Opus review of 0666c9815, n-E)
+                const auto &[kmers, labels] = seed;
                 poll(1);
                 // (its names: the most it can list as not covering). It stays charged with the
                 // seed's copy, which this prices (T5b-Y1), made now, a step a name; the pick's
                 // own lists are charged as the freeze starts (below)
-                charge(pick_bytes(seed.labels.size(), &seed.labels));
+                charge(pick_bytes(labels.size(), &labels));
                 ExplicitSeed &ex = policy.explicit_seeds.emplace_back();
-                ex.kmers = seed.kmers;
-                ex.labels.reserve(seed.labels.size());
-                scan(0, seed.labels.size(), [&](size_t i) {
-                    ex.labels.push_back(seed.labels[i]);
+                ex.kmers = kmers;
+                ex.labels.reserve(labels.size());
+                scan(0, labels.size(), [&](size_t i) {
+                    ex.labels.push_back(labels[i]);
                     return true;
                 });
                 if (ex.kmers.end > profile.num_kmers || ex.kmers.begin >= ex.kmers.end)
@@ -2330,7 +2335,9 @@ SeedSelection select_seeds(const SupportProfile &profile,
         // the order's copy and the temporaries, freed with the seed built
         answer_release(scratch);
     }
-    // the picks, frozen: freed, and their charge with them
+    // the picks, frozen: freed, and their charge with them (every name an explicit pick lists as
+    // not covering freed at once: a piece the deadline is read around, listed in the spec's Not
+    // polled; the Opus review of 0666c9815, m-1)
     std::vector<Picked>().swap(picked);
     answer_release(picks_charged);
 

@@ -482,8 +482,9 @@ constexpr char kSeedOrder[] = "rank";
 // else with its items takes them in pieces that end where the next reading falls: the readings
 // fall at the same steps, and the loop is tight between them (mi-3). What is not read inside
 // is listed in SPEC-labeled-traversal-core.md §4.5 (Not polled): the sorts, a round's
-// de-duplications and the zeroing of its Fenwick counts, a longest_first pick's copy of its
-// labels, a seed's sequence and id, one row of the overlaps
+// de-duplications and the zeroing of its Fenwick counts, the round's vector copied as it grows,
+// a longest_first pick's copy of its labels, a seed's sequence and id, one row of the overlaps,
+// the picks' free once the seeds are frozen (the Opus review of 0666c9815, m-1)
 //
 // |answer| (null: none): the answer account (AnswerAccount), charged with the selection's
 // scratch before it is allocated (a max_support selection's gathered runs, twice; the round's
