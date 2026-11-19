@@ -373,11 +373,17 @@ deadline. `src/cli/traverse.cpp` `process_resolve_request`, `src/graph/traversal
   pick, before they are copied); for explicit seeds each label put into the lookups of the profiled labels and of
   the pair's absent ones, a seed, each of its names priced and copied, each graph run and each name checked for it,
   and each run of a named label checked; a label and each of its runs, counted and then gathered for `max_support`,
-  and the runs before their sort; in a `max_support` round a run clipped by the picks before it and each pick it
-  meets, each of its pieces as its candidate starts are built and as its run ends are, a candidate start swept and
+  their sort (each element of its passes) and their sorted copy (a run each) *(lane T8-RL: before, the runs once
+  before their sort)*; in a `max_support` round a run clipped by the picks before it and each pick it meets, its
+  vector of pieces grown a piece a step, each element of its sort of the pieces, each of its pieces as its candidate
+  starts are built and as its run ends are, each element of their sorts and de-duplications and each Fenwick count
+  zeroed *(lane T8-RL: before, each of these a piece read around, about 0.5, 0.3 and 0.15 s for the three sorts at
+  10 million pieces)*, a candidate start swept and
   each run it adds, and a label and each of its runs checked for the winner; a merged pick and each label and run
   checked for it; a pick and each of its names not covering sized, a frozen seed and each of its labels and names at
-  each pass over them, a pair of seeds compared for `overlaps_with` — and once it is done; a loop that does nothing
+  each pass over them, a pick and each name it lists as not covering freed once the seeds are frozen *(lane T8-RL:
+  before, every pick's names freed at once, about 0.2 s at 1,024 picks of 9,999 names)*, a pair of seeds compared
+  for `overlaps_with` — and once it is done; a loop that does nothing
   else with its items takes them in pieces that end where the next reading falls, so that the readings fall at the
   same steps and the loop is as tight between them as one without readings *(the Opus review of cf77380a0, mi-3:
   a step taken item by item made those loops about three times slower)* *(GPT final review of trains 5a–7, m1:

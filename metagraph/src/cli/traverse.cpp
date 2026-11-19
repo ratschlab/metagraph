@@ -6281,7 +6281,25 @@ static std::string clamp_dropped_note(bool clamped, uint64_t requested, uint64_t
 // label that is not one of them
 static std::string explicit_selection_blocked(const SupportProfile &profile,
                                               const SelectionPolicy &policy, bool discover,
-                                              const std::string &clamp_note) {
+                                              const std::string &clamp_note,
+                                              const std::function<void()> &check) {
+    // read every kResolveCheckLabels steps as the selection is (select_seeds), a step each label
+    // put into the lookups, a seed, each graph run checked and each name looked up for it, at
+    // each of the two passes (lane T8-RL: before, nothing was read in it, about 0.5 s at 1,024
+    // seeds of 10,000 profiled names and 1.2 s where the names are absent labels). Only read:
+    // what it refuses and what it returns do not depend on the readings, and its first pass
+    // still checks every seed before the second leaves the selection unmade (a reading ends the
+    // request, nothing answered: V1-02 is kept)
+    uint64_t steps = 0;
+    uint64_t next_check = kResolveCheckLabels;
+    auto poll = [&](uint64_t units) {
+        steps += units;
+        if (steps >= next_check) {
+            next_check = steps + kResolveCheckLabels;
+            if (check)
+                check();
+        }
+    };
     // the whole query's k-mers and graph runs (the stop keeps them; without one, the profile's)
     const uint64_t query_kmers = profile.stop ? profile.stop->query_kmers : profile.num_kmers;
     const std::vector<KmerInterval> &query_graph_runs
@@ -6291,46 +6309,64 @@ static std::string explicit_selection_blocked(const SupportProfile &profile,
     // one (select_seeds lists it in labels_not_covering): it is neither unprofiled nor
     // undiscovered. The names are looked up in one set of those and one of the profiled labels'
     // (a linear search per name cost N^2 comparisons for seeds naming N labels, review 5 #6)
-    const std::unordered_set<std::string_view> unknown(profile.unknown_labels.begin(),
-                                                       profile.unknown_labels.end());
+    std::unordered_set<std::string_view> unknown;
+    unknown.reserve(profile.unknown_labels.size());
+    for (const std::string &name : profile.unknown_labels) {
+        unknown.insert(name);
+        poll(1);
+    }
     std::unordered_set<std::string_view> profiled_names;
     profiled_names.reserve(profile.labels.size());
     for (const LabelProfile &lp : profile.labels) {
         profiled_names.insert(lp.label.name);
+        poll(1);
     }
     auto absent = [&](const std::string &name) { return unknown.count(name) > 0; };
+    // a name neither profiled nor absent, a step each name looked up (|ex.labels.size()| if none)
+    auto first_unknown = [&](const ExplicitSeed &ex) {
+        for (size_t n = 0; n < ex.labels.size(); ++n) {
+            poll(1);
+            const std::string &name = ex.labels[n];
+            if (!profiled_names.count(name) && !absent(name))
+                return n;
+        }
+        return ex.labels.size();
+    };
     for (size_t i = 0; i < policy.explicit_seeds.size(); ++i) {
         const ExplicitSeed &ex = policy.explicit_seeds[i];
+        poll(1);
         if (ex.kmers.begin >= ex.kmers.end || ex.kmers.end > query_kmers)
             throw InvalidRequest("Explicit seed interval out of range");
-        const bool in_one_run = std::any_of(query_graph_runs.begin(), query_graph_runs.end(),
-            [&](const KmerInterval &run) {
-                return run.begin <= ex.kmers.begin && run.end >= ex.kmers.end;
-            });
+        bool in_one_run = false;
+        for (const KmerInterval &run : query_graph_runs) {
+            poll(1);
+            if (run.begin <= ex.kmers.begin && run.end >= ex.kmers.end) {
+                in_one_run = true;
+                break;
+            }
+        }
         if (!in_one_run)
             throw InvalidRequest("Explicit seed interval is not fully present in the graph");
         if (discover)
             continue;
-        for (const std::string &name : ex.labels) {
-            const bool profiled = profiled_names.count(name) > 0;
-            if (!profiled && !absent(name))
-                throw InvalidRequest("Explicit seed label was not profiled: '" + ::utils::clip_for_message(name) + "'");
+        const size_t n = first_unknown(ex);
+        if (n < ex.labels.size()) {
+            throw InvalidRequest("Explicit seed label was not profiled: '"
+                                 + ::utils::clip_for_message(ex.labels[n]) + "'");
         }
     }
     for (size_t i = 0; i < policy.explicit_seeds.size(); ++i) {
         const ExplicitSeed &ex = policy.explicit_seeds[i];
+        poll(1);
         const std::string seed = "select.seeds[" + std::to_string(i) + "]";
         if (ex.kmers.end > profile.num_kmers) {
             return seed + ".kmer_interval [" + std::to_string(ex.kmers.begin) + ", "
                     + std::to_string(ex.kmers.end) + ") ends past the k-mers resolved";
         }
-        for (const std::string &name : ex.labels) {
-            const bool profiled = profiled_names.count(name) > 0;
-            if (!profiled && !absent(name)) {
-                return seed + (profile.stop ? " names a label the resolved prefix did not keep"
-                                            : " names a label the capped discovery did not keep")
-                    + clamp_note;
-            }
+        if (first_unknown(ex) < ex.labels.size()) {
+            return seed + (profile.stop ? " names a label the resolved prefix did not keep"
+                                        : " names a label the capped discovery did not keep")
+                + clamp_note;
         }
     }
     return "";
@@ -6609,7 +6645,8 @@ static ResolveAnswer answer_resolve(
                                                               max_labels_clamped,
                                                               max_labels_requested,
                                                               req.options.discover_max_labels,
-                                                              profile));
+                                                              profile),
+                                                      after_work);
             // the selection reads the stop and the deadline as the answer's other loops do
             // (every kResolveCheckLabels steps): a stop abandons it, past the deadline the 503
             // deadline (GPT review 7, finding 1; T5a-X1)

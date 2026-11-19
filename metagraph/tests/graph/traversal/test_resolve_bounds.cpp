@@ -1940,9 +1940,10 @@ TEST(ResolveBounds, TheSelectionReadsTheDeadline) {
     EXPECT_EQ(3u, calls);
 
     // each max_support round sweeps every run (here 5,000 runs of one label), and reads the
-    // deadline inside it: a step a run clipped, a candidate start swept and each run it adds, the
-    // runs before each of its sorts, a label and each run checked for the winner -- five or six
-    // readings a round
+    // deadline inside it: a step a run clipped, a candidate start swept and each run it adds, an
+    // element of each of its sorts and de-duplications and each Fenwick count zeroed (lane
+    // T8-RL: before, the runs before each sort), a label and each run checked for the winner --
+    // about twelve readings a round
     LabelProfile gapped;
     gapped.label.kind = LabelKind::COLUMN;
     gapped.label.name = "G";
@@ -1958,8 +1959,8 @@ TEST(ResolveBounds, TheSelectionReadsTheDeadline) {
     calls = 0;
     const SeedSelection swept = select_seeds(profile, query, rounds, false, [&]() { ++calls; });
     EXPECT_EQ(5u, swept.seeds.size());
-    EXPECT_GE(calls, 5u * 5);
-    EXPECT_LE(calls, 5u * 7);
+    EXPECT_GE(calls, 5u * 10);
+    EXPECT_LE(calls, 5u * 16);
     calls = 0;
     EXPECT_THROW(select_seeds(profile, query, rounds, false, [&]() {
         if (++calls == 1)
@@ -2237,12 +2238,16 @@ TEST(ResolveBounds, TheSelectionReadsInsideALabelsRuns) {
 // covering one); the freeze: the pick and each name it lists as not covering sized, the frozen
 // seed, each of its labels at three passes (their names sized, their order's copy, the names
 // kept or dropped), each name not covering at two (sized, copied), each name kept or listed as
-// dropped sized; one row of overlaps. Then max_support over X labels of one run over the query
-// (one seed): its runs counted and gathered, a step a label and a run; the gathered runs before
-// their sort (one poll of X steps, which reads once); a round's step, each run clipped, each
-// piece as the candidate starts are built and as the run ends are, each candidate start swept
-// and each run it adds, each label and run checked for the winner; the freeze as above:
-// 13 X / kResolveCheckLabels + 1 readings
+// dropped sized; the pick freed, a step and a step each name it lists as not covering (lane
+// T8-RL: before, the names freed at once); one row of overlaps. Then max_support over X labels
+// of one run over the query (one seed), the sorts' elements told in pieces (stepped_sort.hpp: a
+// piece of up to kSortPieceElements elements sorted at once, each a step, which reads once): its
+// runs counted and gathered, a step a label and a run; their sort (X steps) and their copy (a
+// step a run); a round's step, each run clipped, the round's sort of its pieces (X steps), each
+// piece as the candidate starts are built, their sort and de-duplication (2 X steps each), as
+// the run ends are built, their sort and de-duplication (X each), the Fenwick counts zeroed (two
+// ends: 3 steps), each candidate start swept and each run it adds, each label and run checked for
+// the winner; the freeze and the pick freed as above
 TEST(ResolveBounds, TheSelectionTakesEachStepOnce) {
     const uint64_t K = kResolveCheckLabels;
     struct Shape {
@@ -2267,6 +2272,7 @@ TEST(ResolveBounds, TheSelectionTakesEachStepOnce) {
                 + x.covering * x.covering_runs + x.not_covering * x.not_covering_runs
                 + 1 + not_covering                                       // the pick sized
                 + 1 + 3 * x.covering + 2 * not_covering + kept + listed  // the seed frozen
+                + 1 + not_covering                                       // the pick freed
                 + 1;                                                     // the overlaps
     };
     auto readings_of = [&](const Shape &x) {
@@ -2385,7 +2391,10 @@ TEST(ResolveBounds, TheSelectionTakesEachStepOnce) {
     const SeedSelection got = select_seeds(profile, query, support, false, [&]() { ++calls; });
     ASSERT_EQ(1u, got.seeds.size());
     EXPECT_EQ(X, got.seeds[0].population.supporting_total);
-    EXPECT_EQ(13 * X / K + 1, calls);
+    // (21 X steps: 13 X as before lane T8-RL, and the runs' sort and copy, the round's sort of
+    // its pieces, the sorts and de-duplications of its starts and ends; the sorts of X and 2 X
+    // elements are each one piece of std::sort, told at once, which reads once)
+    EXPECT_EQ(38u, calls);
 }
 
 // The route (process_resolve_request): under bounds.time_budget_ms the selection of as many
@@ -2712,6 +2721,83 @@ TEST(ResolveBoundsRoute, TheGroupingReadsTheDeadlineByRuns) {
     // a deadline passed by then ends the request there
     parsed.options.finish_check = []() { throw std::runtime_error("deadline"); };
     EXPECT_THROW(resolve_support(oracle, q, parsed.options), std::runtime_error);
+}
+
+// Under a stop, an explicit selection is checked before it is made (explicit_selection_blocked:
+// each seed's interval in the graph and its names among the profiled labels): the check reads
+// the request's stop and deadline every kResolveCheckLabels steps, a step each label put into its
+// lookups, each seed, each graph run and each name looked up (lane T8-RL: before, nothing, about
+// 0.5 s at 1,024 seeds of 10,000 profiled names, 1.2 s where the names are absent labels).
+// 3,000 labels over the query's first part and one over its second, three seeds naming the
+// 3,000 and a fourth across the gap between the parts: the work stopped by time at its first
+// reading, the check refuses the fourth seed (400) after its readings. The answer's deadline
+// passing at the last clock read before that 400 is the 503 deadline there (before: the 400, as
+// the check read nothing)
+TEST(ResolveBoundsRoute, TheExplicitCheckUnderAStopReadsTheDeadline) {
+    const std::string qa = random_seq(120, 9191);
+    const std::string qb = random_seq(120, 9192);
+    const size_t n = 3000;
+    std::vector<std::string> seqs, names;
+    for (size_t l = 0; l < n; ++l) {
+        seqs.push_back(qa);
+        names.push_back("L" + std::to_string(l));
+    }
+    seqs.push_back(qb);
+    names.push_back("B");
+    auto anno = build_anno_graph<DBGSuccinct, annot::ColumnCompressed<>>(kK, seqs, names);
+    Json::Value request;
+    request["sequence"] = qa + qb;
+    for (const std::string &name : names) {
+        request["labels"].append(name);
+    }
+    request["select"]["policy"] = "explicit";
+    Json::Value &seeds = request["select"]["seeds"];
+    for (size_t i = 0; i < 4; ++i) {
+        // (the last one across the k-mers that span both parts, none in the graph)
+        const uint64_t begin = i < 3 ? 0 : qa.size() - kK - 2;
+        Json::Value seed;
+        seed["kmer_interval"].append(Json::UInt64(begin));
+        seed["kmer_interval"].append(Json::UInt64(begin + 10));
+        for (size_t l = 0; l < n; ++l) {
+            seed["labels"].append(names[l]);
+        }
+        seeds.append(seed);
+    }
+    request["bounds"]["time_budget_ms"] = 1000;
+    const cli::ResolveTimeLimits limits { 0, cli::kResolveFinalizeMs, 0, 0, 0, 0, 1024 };
+    // the request's start; then the work's deadline passed (800 of the 1000 ms, the work's
+    // ending at 750); from |late_from| on the answer's too
+    const auto base = std::chrono::steady_clock::now();
+    uint64_t reads = 0;
+    uint64_t late_from = std::numeric_limits<uint64_t>::max();
+    std::function<std::chrono::steady_clock::time_point()> clock = [&]() {
+        const uint64_t r = reads++;
+        return base + std::chrono::milliseconds(r >= late_from ? 3'600'000 : r ? 800 : 0);
+    };
+    auto run = [&]() {
+        reads = 0;
+        return cli::process_resolve_request(request, *anno, "r1", 0, nullptr, nullptr, limits,
+                                            nullptr, clock);
+    };
+    try {
+        run();
+        ADD_FAILURE() << "answered";
+    } catch (const cli::InvalidRequest &e) {
+        EXPECT_EQ("Explicit seed interval is not fully present in the graph",
+                  std::string(e.what()));
+    }
+    const uint64_t reads_refused = reads;
+    ASSERT_LE(2u, reads_refused);
+    late_from = reads_refused - 1;
+    try {
+        run();
+        ADD_FAILURE() << "answered";
+    } catch (const cli::ResolveDeadline &e) {
+        EXPECT_EQ("deadline", cli::resolve_deadline_body(e)["code"].asString());
+    } catch (const cli::InvalidRequest &e) {
+        ADD_FAILURE() << "refused after a check that read nothing: " << e.what();
+    }
+    EXPECT_EQ(reads_refused, reads);
 }
 
 // The labels a multi-graph server's pair does not hold (unknown_labels) are written name by name

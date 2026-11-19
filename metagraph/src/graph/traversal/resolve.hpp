@@ -467,12 +467,15 @@ constexpr char kSeedOrder[] = "rank";
 // candidate (and a pick's labels before they are copied); for explicit seeds each label put
 // into the name lookups, a seed, each of its names priced and copied, each graph run and each
 // name checked for it and each run of a named label checked; a label and each of its runs
-// counted, then gathered, for max_support and the runs before their sort; in a max_support
-// round a run clipped and each pick it meets, each of its pieces as its candidate starts are
-// built and as its run ends are, a candidate start swept and each run it adds, a label and each
-// of its runs checked for the winner; a merged pick and each label and run checked for it; a
-// pick and each of its names not covering sized, a frozen seed and each of its labels and names
-// at each pass over them, a pair of seeds compared for overlaps -- and throwing to abandon it
+// counted, then gathered, for max_support, each element of their sort's passes and each run of
+// their sorted copy; in a max_support round a run clipped and each pick it meets, a piece copied
+// as its vector grows, each element of its sort of the pieces, each of its pieces as its
+// candidate starts are built and as its run ends are, each element of their sorts and
+// de-duplications and each Fenwick count zeroed, a candidate start swept and each run it adds, a
+// label and each of its runs checked for the winner; a merged pick and each label and run
+// checked for it; a pick and each of its names not covering sized, a frozen seed and each of its
+// labels and names at each pass over them, a pick and each name it lists as not covering freed,
+// a pair of seeds compared for overlaps -- and throwing to abandon it
 // (GPT review 7, finding 1: the selection was read only once it was done, after every
 // overlapping pair was listed; T4-L1: once per max_support round, whose clip of every run by
 // every pick was O(runs x picks); GPT final review of trains 5a-7, m1: the count of
@@ -481,10 +484,11 @@ constexpr char kSeedOrder[] = "rank";
 // names priced and copied and a round's pieces built took no step). A loop that does nothing
 // else with its items takes them in pieces that end where the next reading falls: the readings
 // fall at the same steps, and the loop is tight between them (mi-3). What is not read inside
-// is listed in SPEC-labeled-traversal-core.md §4.5 (Not polled): the sorts, a round's
-// de-duplications and the zeroing of its Fenwick counts, the round's vector copied as it grows,
-// a longest_first pick's copy of its labels, a seed's sequence and id, one row of the overlaps,
-// the picks' free once the seeds are frozen (the Opus review of 0666c9815, m-1)
+// is listed in SPEC-labeled-traversal-core.md §4.5 (Not polled): the sort of the picks and of
+// the merged ones (at most max_seeds), a longest_first pick's copy of its labels, a seed's two
+// label sorts, its sequence and id, one row of the overlaps (lane T8-RL: the sorts of
+// max_support's runs and pieces, a round's de-duplications, Fenwick counts and growth, and the
+// picks' free are read inside now, stepped_sort.hpp; the Opus review of 0666c9815, m-1)
 //
 // |answer| (null: none): the answer account (AnswerAccount), charged with the selection's
 // scratch before it is allocated (a max_support selection's gathered runs, twice; the round's

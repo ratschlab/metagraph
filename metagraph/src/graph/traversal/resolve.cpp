@@ -19,6 +19,7 @@
 #include "graph/traversal/charged_table.hpp"
 #include "graph/traversal/kept_rows.hpp"
 #include "graph/traversal/seeded_hash.hpp"
+#include "graph/traversal/stepped_sort.hpp"
 #include "annotation/binary_matrix/row_diff/row_diff.hpp"
 #include "annotation/binary_matrix/row_diff/row_diff_cache.hpp"
 #include "common/seq_tools/reverse_complement.hpp"
@@ -686,6 +687,18 @@ SupportProfile resolve_support(LabelOracle &oracle,
         if (i && i % kResolveCheckLabels == 0)
             reading();
     };
+    // and the passes after the work that are not by labels (a discovery's ranking sort and its
+    // name sorts, stepped_sort.hpp): a reading once their elements since the last pass
+    // kResolveCheckRuns (lane T8-RL: before, each sort was one piece, about 0.1 s at 1,000,000
+    // tracked labels and more on a loaded host)
+    uint64_t sorted_unread = 0;
+    auto sorting = [&](uint64_t elements) {
+        sorted_unread += elements;
+        if (sorted_unread >= kResolveCheckRuns) {
+            sorted_unread = 0;
+            reading();
+        }
+    };
     profile.num_kmers = query.size() - profile.k + 1;
     checkpoint();
     std::vector<node_index> keys = oracle.keys_of_sequence(query);
@@ -1259,8 +1272,10 @@ SupportProfile resolve_support(LabelOracle &oracle,
         // holds them, so that a client can merge the discoveries of several graphs by
         // (support, name), and each cut states the tie group it went through
         // (LabelTruncation::tied_at_boundary, SPEC-multigraph-envelope.md §7).
-        std::sort(ranked.begin(), ranked.end(),
-                  [](const Ranked &a, const Ranked &b) { return a.kmers > b.kmers; });
+        // (in steps; the order among labels of equal support is the name sort's below, or, past
+        // the labels named, read by nothing: as with std::sort, which left it unspecified)
+        sort_in_steps(ranked.begin(), ranked.end(),
+                      [](const Ranked &a, const Ranked &b) { return a.kmers > b.kmers; }, sorting);
         const size_t kept = std::min(ranked.size(), options.discover_max_labels);
         // The labels named: the kept ones and the rest of the last kept label's tie group.
         // A name is a reference into the label encoder or the headers (no decoding), but
@@ -1293,11 +1308,13 @@ SupportProfile resolve_support(LabelOracle &oracle,
             while (end < named && ranked[end].kmers == ranked[begin].kmers) {
                 end++;
             }
+            // (in steps; by_name is a total order: the labels kept and their order are
+            // std::sort's and std::partial_sort's)
             if (end <= kept) {
-                std::sort(ranked.begin() + begin, ranked.begin() + end, by_name);
+                sort_in_steps(ranked.begin() + begin, ranked.begin() + end, by_name, sorting);
             } else {
-                std::partial_sort(ranked.begin() + begin, ranked.begin() + kept,
-                                  ranked.begin() + end, by_name);
+                partial_sort_in_steps(ranked.begin() + begin, ranked.begin() + kept,
+                                      ranked.begin() + end, by_name, sorting);
             }
             boundary = begin;
             begin = end;
@@ -1716,7 +1733,10 @@ struct Fenwick {
     size_t n;
     size_t top = 1;   // the largest power of two <= n (1 when n == 0)
 
-    explicit Fenwick(size_t size) : tree(size + 1, 0), n(size) {
+    // its counts zeroed in steps (assign_zeros_in_steps)
+    template <class Step>
+    Fenwick(size_t size, const Step &step) : n(size) {
+        assign_zeros_in_steps(tree, size + 1, step);
         while (top * 2 <= n) {
             top *= 2;
         }
@@ -1949,20 +1969,28 @@ SeedSelection select_seeds(const SupportProfile &profile,
                     const uint64_t was = annot::matrix::buffer_bytes(runs.capacity(), sizeof(Run));
                     const uint64_t bytes = annot::matrix::buffer_bytes(grown, sizeof(Run));
                     charge(bytes);
-                    // (the copy of the pieces into the new buffer and the old one's free: a
-                    // piece the deadline is read around, listed in the spec's Not polled)
-                    runs.reserve(grown);
+                    // the pieces copied into the new buffer a step each, the old one then freed
+                    // (lane T8-RL: before, one piece the deadline was read around)
+                    reserve_in_steps(runs, grown, poll);
                     answer_release(was);
                     scratch += bytes - was;
                 }
                 runs.push_back({ begin, end });
             };
-            poll(runs.size());
-            const std::vector<Run> all_runs = [&runs]() {
-                std::sort(runs.begin(), runs.end(),
-                          [](const Run &a, const Run &b) { return a.begin < b.begin; });
-                return runs;
-            }();
+            // the runs ordered by their begins (ties by their ends: a total order, so that the
+            // order does not depend on the sort; a round reads the runs beginning at or before a
+            // candidate start as a set, so its picks do not depend on their order either)
+            auto by_begin = [](const Run &a, const Run &b) {
+                return a.begin != b.begin ? a.begin < b.begin : a.end < b.end;
+            };
+            sort_in_steps(runs.begin(), runs.end(), by_begin, poll);
+            // their sorted copy, a step each run (reserved to them, as a copy of the vector)
+            std::vector<Run> all_runs;
+            all_runs.reserve(runs.size());
+            scan(0, runs.size(), [&](size_t r) {
+                all_runs.push_back(runs[r]);
+                return true;
+            });
 
             // intervals already claimed by a picked seed, as sorted disjoint ranges
             std::vector<KmerInterval> taken;
@@ -2000,8 +2028,7 @@ SeedSelection select_seeds(const SupportProfile &profile,
                     if (begin < run.end && run.end - begin >= min_kmers)
                         push_piece(begin, run.end);
                 }
-                std::sort(runs.begin(), runs.end(),
-                          [](const Run &a, const Run &b) { return a.begin < b.begin; });
+                sort_in_steps(runs.begin(), runs.end(), by_begin, poll);
                 if (runs.empty())
                     break;
 
@@ -2020,9 +2047,8 @@ SeedSelection select_seeds(const SupportProfile &profile,
                         candidate_a.push_back(runs[r].end - min_kmers);
                     return true;
                 });
-                std::sort(candidate_a.begin(), candidate_a.end());
-                candidate_a.erase(std::unique(candidate_a.begin(), candidate_a.end()),
-                                  candidate_a.end());
+                sort_in_steps(candidate_a.begin(), candidate_a.end(), std::less<uint64_t>(), poll);
+                unique_in_steps(candidate_a, poll);
 
                 std::optional<Picked> best;
                 size_t best_count = 0;
@@ -2036,16 +2062,17 @@ SeedSelection select_seeds(const SupportProfile &profile,
                     coords.push_back(runs[r].end);
                     return true;
                 });
-                // (each of the round's three sorts, n log n of at most twice its runs, the
-                // de-duplication after two of them and the zeroing of its Fenwick counts, linear
-                // in them, are pieces the deadline is read around, not inside)
-                std::sort(coords.begin(), coords.end());
-                coords.erase(std::unique(coords.begin(), coords.end()), coords.end());
+                // (each of the round's three sorts, the de-duplication after two of them and the
+                // zeroing of its Fenwick counts in steps, an element a step: lane T8-RL, before,
+                // pieces the deadline was read around, about 0.5, 0.3 and 0.15 s at 10 million
+                // pieces)
+                sort_in_steps(coords.begin(), coords.end(), std::less<uint64_t>(), poll);
+                unique_in_steps(coords, poll);
                 auto index_of = [&](uint64_t x) {
                     return static_cast<size_t>(std::lower_bound(coords.begin(), coords.end(), x)
                                                - coords.begin());
                 };
-                Fenwick ends(coords.size());
+                Fenwick ends(coords.size(), poll);
                 uint32_t inserted = 0;
                 for (uint64_t a : candidate_a) {
                     poll(1);
@@ -2335,9 +2362,20 @@ SeedSelection select_seeds(const SupportProfile &profile,
         // the order's copy and the temporaries, freed with the seed built
         answer_release(scratch);
     }
-    // the picks, frozen: freed, and their charge with them (every name an explicit pick lists as
-    // not covering freed at once: a piece the deadline is read around, listed in the spec's Not
-    // polled; the Opus review of 0666c9815, m-1)
+    // the picks, frozen: freed pick by pick, a step each and a step each name it lists as not
+    // covering (freed from the last), and their charge with them once all are (lane T8-RL:
+    // before, every name an explicit pick lists freed at once, a piece the deadline was read
+    // around, about 0.2 s at 1,024 picks of 9,999 names; the Opus review of 0666c9815, m-1)
+    for (Picked &p : picked) {
+        poll(1);
+        std::vector<std::string> &names = p.labels_not_covering;
+        scan(0, names.size(), [&](size_t) {
+            names.pop_back();
+            return true;
+        });
+        std::vector<std::string>().swap(names);
+        std::vector<LabelId>().swap(p.labels);
+    }
     std::vector<Picked>().swap(picked);
     answer_release(picks_charged);
 
