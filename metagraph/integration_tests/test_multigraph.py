@@ -1916,9 +1916,46 @@ class TestMultiGraphServer(TestingBase):
             (pair,) = entry['pairs']
             self.assertEqual(('b_big', 'ended'), (pair['graph'], pair['state']))
             self.assertIsNotNone(pair['usage']['finished_at'])
+            # with the usage the pair's work held and used (section 5; lane T8-RL: before,
+            # memory_bytes 0)
+            self.assertIsNotNone(pair['usage']['cpu_ms'])
+            self.assertGreater(pair['usage']['memory_bytes'], 0)
             ret = server.post('pattern', body)
             self.assertEqual(409, ret.status_code, ret.text[:2000])
             self.assertEqual('client_gone', ret.json()['reason'])
+        finally:
+            server.stop()
+
+    def test_a_single_graph_client_gone_records_its_usage(self):
+        """A single-graph server (b_big's files, the mini index) whose /resolve or /pattern
+        client leaves a second into its work: GET /requests states the end, reason client_gone,
+        and its one pair (null tags, outcome refused as before) with the usage the work held and
+        used: its CPU time and modelled memory (SPEC-multigraph-envelope.md section 5, "with
+        usage"; lane T8-RL: before, cpu_ms null and memory_bytes 0)."""
+        self._cutoff_csv()
+        graph = os.path.join(MINI_DIR, 'graph_k31.dbg')
+        anno = os.path.join(MINI_DIR, 'annotation.relaxed.relabeled.row_diff_brwt_coord.annodbg')
+        server = Server(['-i', graph, '-a', anno, '--pattern-max-contexts', '1000000'],
+                        os.path.join(self.tempdir.name, 'server_single_gone.log'), threads=1)
+        try:
+            for route, body in (('resolve', self._slow_resolve()),
+                                ('pattern', dict(self.SLOW_PATTERN, time_budget_ms=60000))):
+                request_id = f'sg-gone-{route}'
+                self.assertEqual(b'', request_then_leave(server.port, route,
+                                                         dict(body, request_id=request_id), 1.0))
+                entry = self._wait_ended(server, request_id)
+                self.assertEqual(('ended', 'client_gone'), (entry['state'], entry['reason']),
+                                 route)
+                self.assertEqual({'status': None, 'bytes': None, 'written': False},
+                                 entry['response'], route)
+                (pair,) = entry['pairs']
+                self.assertEqual((None, 'ended', 'refused'),
+                                 (pair['graph'], pair['state'], pair['outcome']), route)
+                usage = pair['usage']
+                self.assertGreater(usage['elapsed_ms'], 900, route)
+                self.assertIsNotNone(usage['cpu_ms'], route)
+                self.assertGreater(usage['cpu_ms'], 200, route)
+                self.assertGreater(usage['memory_bytes'], 0, route)
         finally:
             server.stop()
 
@@ -5071,6 +5108,8 @@ class TestResolveSelectionStops(TestingBase):
                 # working when its client left (a second in), ended right after
                 self.assertGreater(usage['elapsed_ms'], 900, name)
                 self.assertGreater(usage['cpu_ms'], 200, name)
+                # and the memory its work held (section 5; lane T8-RL: before, 0)
+                self.assertGreater(usage['memory_bytes'], 0, name)
                 self.assertLess(usage['elapsed_ms'], 1000 + 1000 * self.LATE_S, name)
         finally:
             server.stop()

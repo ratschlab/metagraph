@@ -50,6 +50,15 @@ class HttpError : public std::runtime_error {
 };
 
 // The client of the request is gone: nothing is written, and the connection is closed
+// What a /resolve or /pattern request held and used when it was abandoned at one of its readings
+// (a client gone, the fan-out's stop): its modelled memory so far (work.memory_bytes' model) and
+// its CPU time on its thread, the usage its registry entry states for the pair
+// (SPEC-multigraph-envelope.md section 5; lane T8-RL: before, none)
+struct AbandonedUsage {
+    uint64_t memory_bytes = 0;
+    std::optional<double> cpu_ms;
+};
+
 class ClientGone : public std::runtime_error {
   public:
     using std::runtime_error::runtime_error;

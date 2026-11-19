@@ -746,6 +746,8 @@ SupportProfile resolve_support(LabelOracle &oracle,
                               + profile.graph_runs.size() * sizeof(KmerInterval);
     auto note_memory = [&](uint64_t bytes) {
         profile.memory_peak = std::max(profile.memory_peak, query_held + bytes);
+        if (options.memory_seen)
+            *options.memory_seen = std::max(*options.memory_seen, profile.memory_peak);
     };
     note_memory(0);
     // the most the row passes held at once (a batch of rows and the rows kept)

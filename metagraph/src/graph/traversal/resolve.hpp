@@ -199,6 +199,10 @@ struct ResolveOptions {
     // CLI): the profile and the candidates are charged to it here, before the candidates are
     // grouped. Not a request field
     AnswerAccount *answer = nullptr;
+    // Raised to the profile's modelled memory (SupportProfile::memory_peak) each time that grows,
+    // so that a request abandoned inside resolve_support states what it held so far (null: not
+    // kept; the server's registry usage of an abandoned pair, lane T8-RL). Not a request field
+    uint64_t *memory_seen = nullptr;
 };
 
 // What a discovery charges against ResolveOptions::discover_max_memory for its accumulators

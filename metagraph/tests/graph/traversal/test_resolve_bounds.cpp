@@ -2519,6 +2519,48 @@ TEST(ResolveBoundsRoute, AStopInTheSelectionAbandonsTheRequest) {
     EXPECT_EQ(gone_from, reads);
 }
 
+// A request abandoned at one of its readings (a client gone, the fan-out's stop) tells its
+// delivery what it held and used (ResolveDelivery::abandoned_usage: the registry's usage of its
+// pair, SPEC-multigraph-envelope.md section 5; lane T8-RL: before, nothing, the pair's
+// memory_bytes 0 and cpu_ms null): the work's modelled memory so far — in the selection the
+// work's peak, in the answer's build the request's work.memory_bytes — and its CPU time on
+// this thread. An answered request tells nothing
+TEST(ResolveBoundsRoute, AnAbandonedRequestTellsItsUsage) {
+    const std::string q = random_seq(1000, 2311);
+    const auto anno = splitting_index(q, 200);
+    const cli::ResolveTimeLimits limits { 0, cli::kResolveFinalizeMs, 0, 0, 0, 0, 1024 };
+    const Json::Value request = max_support_request(q);
+    uint64_t reads = 0;
+    uint64_t gone_from = std::numeric_limits<uint64_t>::max();
+    const std::function<bool()> gone = [&]() { return ++reads >= gone_from; };
+    auto run = [&](cli::ResolveDelivery *delivery) {
+        reads = 0;
+        return cli::process_resolve_request(request, *anno, "r1", 0, nullptr, gone, limits,
+                                            delivery);
+    };
+    cli::ResolveDelivery answered;
+    const Json::Value all = run(&answered);
+    const uint64_t reads_all = reads;
+    EXPECT_FALSE(answered.abandoned_usage());
+    // in the selection (half its readings in: AStopInTheSelectionAbandonsTheRequest): the work's
+    // peak, not above the request's
+    gone_from = reads_all / 2;
+    cli::ResolveDelivery selecting;
+    EXPECT_THROW(run(&selecting), graph::traversal::AttemptAborted);
+    ASSERT_TRUE(selecting.abandoned_usage());
+    EXPECT_LT(0u, selecting.abandoned_usage()->memory_bytes);
+    EXPECT_GE(all["work"]["memory_bytes"].asUInt64(), selecting.abandoned_usage()->memory_bytes);
+    ASSERT_TRUE(selecting.abandoned_usage()->cpu_ms);
+    EXPECT_LE(0, *selecting.abandoned_usage()->cpu_ms);
+    // at the build's last reading: what the answer would have stated
+    gone_from = reads_all;
+    cli::ResolveDelivery building;
+    EXPECT_THROW(run(&building), graph::traversal::AttemptAborted);
+    ASSERT_TRUE(building.abandoned_usage());
+    EXPECT_EQ(all["work"]["memory_bytes"].asUInt64(), building.abandoned_usage()->memory_bytes);
+    EXPECT_TRUE(building.abandoned_usage()->cpu_ms);
+}
+
 // The objects |answer| holds as text in the order they were written (graph_runs, the labels,
 // the candidates, the seeds, unknown_labels' names), each with whether it is one of those read
 // every kResolveCheckLabels (a label, a candidate or a seed) and its text's bytes (a name's with
