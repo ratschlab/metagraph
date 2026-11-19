@@ -3,6 +3,7 @@
 
 #include <algorithm>
 #include <atomic>
+#include <cassert>
 #include <cstddef>
 #include <cstdint>
 #include <limits>
@@ -84,9 +85,11 @@ class SearchBudget;
  * One account of a /search request (SearchBudget): the request's answer (its JSON tree and
  * text; SearchBudget::answer()), or the values of one unit, a FASTA record on a pair (its rows
  * and their per-position values; lane T7-P1). Charged BEFORE what it prices is allocated, from
- * any thread; it only grows (nothing is released while it runs), so that whether a charge passes
- * the bound never depends on the order the threads charge in. A model of the heap (the deployed
- * build's sizes), never a measurement.
+ * any thread; what it holds (held()) only grows, so that whether a charge passes the bound never
+ * depends on the order the threads charge in. An account of one task alone (a unit's) may lower
+ * its scratch where that task frees some (lower_scratch): its later charges use those bytes
+ * first, so that held() is the most the task held at once, which depends on that one task's
+ * order only. A model of the heap (the deployed build's sizes), never a measurement.
  *
  * A charge that would take it past the bound:
  * - a unit's values account, with `partial_refusal`: marks the unit refused (sticky: every
@@ -123,10 +126,22 @@ class SearchAccount {
     // tasks running at once without charging a freed scratch again for every task; the total
     // it adds is the same in every order the tasks run in (lane T6-W2)
     inline void charge_scratch(uint64_t bytes);
+    // An account of one task (threads 1): its scratch lowered to |bytes| where it holds more,
+    // the difference kept as freed, which the task's later charges use before they raise held()
+    // (and a scratch that grows again is charged again). Lane T7-G4E, the Opus review of
+    // cf77380a0, MA-1: a column-label search's table frees its old buckets when it doubles,
+    // and the unit's values and rows charged after it use them, as the heap does. Never the
+    // request's answer account, which every unit's task charges although it has threads 1:
+    // the freed bytes are used again by a plain load and store, which tasks charging at once
+    // would both use (asserted; the Opus review of 0666c9815, n-A)
+    inline void lower_scratch(uint64_t bytes);
 
     uint64_t held() const { return held_.load(std::memory_order_relaxed); }
-    // the most one task's scratch took (charge_scratch), and how many run at once
+    // the most one task's scratch took (charge_scratch), lowered where a single task freed some
+    // (lower_scratch), and how many run at once
     uint64_t scratch() const { return scratch_.load(std::memory_order_relaxed); }
+    // what its one task freed and its charges have not used again (lower_scratch)
+    uint64_t freed() const { return freed_.load(std::memory_order_relaxed); }
     size_t threads() const { return threads_; }
     const char* name() const { return name_; }
     const std::string& where() const { return where_; }
@@ -148,6 +163,7 @@ class SearchAccount {
     size_t pair_index_ = 0;
     std::atomic<uint64_t> held_ { 0 };
     std::atomic<uint64_t> scratch_ { 0 };
+    std::atomic<uint64_t> freed_ { 0 };
     std::atomic<bool> refused_ { false };
 };
 
@@ -301,6 +317,15 @@ inline void SearchAccount::charge(uint64_t bytes) {
     budget_->check_open(*this);
     if (refused())
         throw SearchUnitRefused(name_);
+    // what the account's one task freed first (lower_scratch; zero for an account of more
+    // tasks): held already, it is used again before held() grows
+    if (const uint64_t freed = freed_.load(std::memory_order_relaxed)) {
+        const uint64_t used = std::min(freed, bytes);
+        freed_.store(freed - used, std::memory_order_relaxed);
+        bytes -= used;
+        if (!bytes)
+            return;
+    }
     const uint64_t max = budget_->max_bytes();
     uint64_t held = held_.load(std::memory_order_relaxed);
     do {
@@ -336,6 +361,15 @@ inline void SearchAccount::charge_scratch(uint64_t bytes) {
                        : raise * threads_);
             return;
         }
+    }
+}
+
+inline void SearchAccount::lower_scratch(uint64_t bytes) {
+    assert(threads_ == 1 && this != &budget_->answer());
+    const uint64_t most = scratch_.load(std::memory_order_relaxed);
+    if (bytes < most) {
+        scratch_.store(bytes, std::memory_order_relaxed);
+        freed_.fetch_add(most - bytes, std::memory_order_relaxed);
     }
 }
 
