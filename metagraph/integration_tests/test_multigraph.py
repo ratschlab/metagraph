@@ -43,6 +43,7 @@ import tempfile
 import threading
 import time
 import unittest
+import urllib.parse
 
 import requests
 
@@ -233,10 +234,15 @@ class Server:
     its -p (the graph pool the pairs of a request run on, and its HTTP threads). Every response
     of this build that post() and get() return is checked to state none of the configured paths
     (train 8: no path in any response, SPEC-multigraph-envelope.md section 1.2); a base binary's
-    are not."""
+    are not. This build runs with its temporary directory (--disk-swap, where /search writes a
+    request's sequences) beside the log, unless |args| names one, so that the sweep knows it."""
 
     def __init__(self, args, log_path, timeout=300, threads=4, binary=None):
         os.environ['NO_PROXY'] = '127.0.0.1'
+        if not binary and '--disk-swap' not in args:
+            swap = os.path.join(os.path.dirname(os.path.abspath(log_path)), 'swap')
+            os.makedirs(swap, exist_ok=True)
+            args = list(args) + ['--disk-swap', swap]
         self.paths = [] if binary else configured_paths(args)
         for _ in range(20):
             self.port = free_port()
@@ -301,6 +307,54 @@ def guard(condition, reason):
         cls.setUpClass = classmethod(fail)
         return cls
     return decorate
+
+
+class TestNoPathSweep(unittest.TestCase):
+    """The sweep every Server response goes through (base.configured_paths and
+    assert_no_configured_path; SPEC-multigraph-envelope.md section 1.2) finds a configured path
+    in each form a response could state it: whole, as its real path, JSON-escaped (a non-ASCII
+    directory), URL-encoded, as a file's basename, the graph list's own path and the temporary
+    directory of --disk-swap (a /search temp file's text). A single-graph GET /stats is exempt
+    for its two basenames only."""
+
+    def test_each_spelling_is_found(self):
+        with tempfile.TemporaryDirectory() as d:
+            ref = os.path.join(d, 'r\u00e9f')
+            os.makedirs(ref)
+            graph, anno = os.path.join(ref, 'g.dbg'), os.path.join(ref, 'g.column.annodbg')
+            csv = os.path.join(d, 'graphs.csv')
+            with open(csv, 'w') as f:
+                f.write(f'n,{graph},{anno}\n')
+            swap = os.path.join(d, 'swap')
+            paths = configured_paths([csv, '--mmap', '--disk-swap', swap])
+            clean = json.dumps({'graph': 'n', 'pair_id': configured_pair_id('n', graph, anno),
+                                'error': 'pair (n, n1-...) changed on disk'})
+            assert_no_configured_path(clean, paths, 'POST /search')
+            leaks = {
+                'the path': json.dumps({'error': f'file {graph}'}, ensure_ascii=False),
+                'JSON-escaped': json.dumps({'error': f'file {anno}'}),
+                'its real path': os.path.realpath(graph),
+                'URL-encoded': json.dumps({'route': urllib.parse.quote(anno, safe='')}),
+                'URL-encoded, slashes kept': urllib.parse.quote(graph),
+                'a basename': json.dumps({'error': 'The file g.column.annodbg changed'}),
+                'the graph list': f'cannot read {csv}',
+                'the temporary directory': json.dumps(
+                    {'error': f'Error: temp file {swap}/tmp.lesyea creation failed'}),
+            }
+            for kind, text in leaks.items():
+                with self.subTest(kind):
+                    with self.assertRaises(AssertionError):
+                        assert_no_configured_path(text, paths, 'POST /search')
+            stats = {'annotation': {'filename': 'g.column.annodbg', 'labels': 1},
+                     'graph': {'filename': 'g.dbg', 'k': 31}}
+            assert_no_configured_path(json.dumps(stats), paths, 'GET /stats')
+            # the two members only, on GET /stats only, a basename only
+            for where, body in (('GET /capabilities', stats),
+                                ('GET /stats', dict(stats, graph={'filename': graph})),
+                                ('GET /stats', dict(stats, note='g.dbg'))):
+                with self.subTest(where=where, body=body):
+                    with self.assertRaises(AssertionError):
+                        assert_no_configured_path(json.dumps(body), paths, where)
 
 
 @unittest.skipIf(PROTEIN_MODE, "the mini index is DNA")

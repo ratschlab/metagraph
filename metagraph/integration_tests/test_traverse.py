@@ -4726,8 +4726,13 @@ class TestTraverseMultiGraph(TestTraverseBase):
     class _Server:
         def __init__(self, test, csv, wait=True, flags=()):
             # no response states a configured path (train 8, SPEC-multigraph-envelope.md
-            # section 1.2): checked on every _post and _caps
-            self.paths = configured_paths([csv])
+            # section 1.2): checked on every _post and _caps; the temporary directory
+            # (--disk-swap) beside the log, so that the check knows it
+            swap = f'{test.tempdir.name}/swap'
+            os.makedirs(swap, exist_ok=True)
+            if '--disk-swap' not in flags:
+                flags = tuple(flags) + ('--disk-swap', swap)
+            self.paths = configured_paths([csv] + list(flags))
             self.port = _free_port()
             self.url = f'http://127.0.0.1:{self.port}'
             self.log_path = f'{test.tempdir.name}/multi-{self.port}.log'

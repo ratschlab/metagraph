@@ -1,3 +1,4 @@
+import json
 import os
 import shlex
 import subprocess
@@ -7,6 +8,7 @@ from tempfile import TemporaryDirectory
 import psutil
 import shutil
 import time
+import urllib.parse
 import uuid
 
 script_path = os.path.dirname(os.path.realpath(__file__))
@@ -55,38 +57,79 @@ def configured_pair_id(graph, graph_path, annotation_path):
 
 
 def configured_paths(args):
-    """The configured paths of a server_query started with |args| (its graph list's graph,
-    annotation and manifest paths, or -i/-a), with the sidecars a pair's load reads beside them
-    (the annotation's .seqs, the graph's mask and Bloom filter; the row_diff anchors start with
-    the graph's path): no response may state one (SPEC-multigraph-envelope.md section 1.2, train
-    8: answers name a pair by its name and pair_id, logs keep the paths)"""
-    paths = []
+    """The spellings no response of a server_query started with |args| may state
+    (SPEC-multigraph-envelope.md section 1.2, train 8: answers name a pair by its name and
+    pair_id, logs keep the paths): its configured paths (the graph list's graph, annotation and
+    manifest paths, or -i/-a) with the sidecars a pair's load reads beside them (the
+    annotation's .seqs, the graph's mask and Bloom filter; the row_diff anchors start with the
+    graph's path), the graph list's own path and the temporary directory (--disk-swap), each
+    also as its real path (macOS: /private/var); and every file's basename (a single-graph GET
+    /stats states two, as master does: assert_no_configured_path exempts exactly those). A
+    directory alone is not looked for: the tests' labels are the paths of their input files,
+    which lie beside the configured ones"""
+    listed, files = [], []
     if args and not args[0].startswith('-') and os.path.isfile(args[0]):
+        listed.append(args[0])
         with open(args[0]) as f:
             for line in f:
                 cells = line.strip().split(',')
-                paths += [c for c in cells[1:4] if c]
+                files += [c for c in cells[1:4] if c]
     for flag in ('-i', '-a', '--index-manifest'):
         if flag in args[:-1]:
-            paths.append(args[args.index(flag) + 1])
-    out = set()
-    for p in paths:
-        out.add(p)
+            files.append(args[args.index(flag) + 1])
+    for p in list(files):
         if p.endswith('.annodbg'):
-            out.add(os.path.splitext(os.path.splitext(p)[0])[0] + '.seqs')
+            files.append(os.path.splitext(os.path.splitext(p)[0])[0] + '.seqs')
         elif not p.endswith('.json'):
             base = os.path.splitext(p)[0]
-            out.update((base + '.edgemask', base + '.bloom'))
+            files += [base + '.edgemask', base + '.bloom']
+    files += listed
+    dirs = []
+    if '--disk-swap' in args[:-1] and args[args.index('--disk-swap') + 1]:
+        dirs.append(args[args.index('--disk-swap') + 1])
+    out = set()
+    for p in files + dirs:
+        out.update((p, os.path.realpath(p)))
+    out.update(os.path.basename(p) for p in files)
+    out.discard('')
     return sorted(out)
 
 
+# The two members of a single-graph GET /stats that state a configured file's basename, as
+# master's do: exempt from the sweep (they hold a basename, never a path)
+STATS_BASENAMES = (('graph', 'filename'), ('annotation', 'filename'))
+
+
 def assert_no_configured_path(text, paths, where):
-    """|text| (a response's body) states none of |paths| (configured_paths)"""
-    for p in paths:
-        if p in text:
-            at = text.index(p)
-            raise AssertionError(f'{where}: the response states the configured path {p!r}: '
-                                 f'...{text[max(0, at - 300):at + len(p) + 100]}...')
+    """|text| (a response's body) states none of |paths| (configured_paths): as sent, and with
+    a JSON body also as its strings read (an escaped spelling: \\u escapes, \\/), each
+    spelling also URL-encoded. On GET /stats the two members of STATS_BASENAMES are exempt
+    when each is a bare file name"""
+    texts = [text]
+    try:
+        body = json.loads(text)
+    except ValueError:
+        body = None
+    if body is not None:
+        if where.split('?')[0] == 'GET /stats' and isinstance(body, dict):
+            for member, field in STATS_BASENAMES:
+                value = body[member].get(field) if isinstance(body.get(member), dict) else None
+                if value is not None:
+                    assert isinstance(value, str) and '/' not in value and value in paths, \
+                        f'{where}: {member}.{field} is not a configured basename: {value!r}'
+                    body = dict(body, **{member: {k: v for k, v in body[member].items()
+                                                  if k != field}})
+            texts = [json.dumps(body)]
+        texts.append(json.dumps(body, ensure_ascii=False))
+    for t in texts:
+        for p in paths:
+            for spelling in {p, urllib.parse.quote(p), urllib.parse.quote(p, safe='')}:
+                if spelling in t:
+                    at = t.index(spelling)
+                    raise AssertionError(
+                        f'{where}: the response states the configured path {p!r}'
+                        + (f' (as {spelling!r})' if spelling != p else '')
+                        + f': ...{t[max(0, at - 300):at + len(spelling) + 100]}...')
 
 
 def start_server(graph, annotation, host, port, extra_args=''):
