@@ -2477,7 +2477,8 @@ default) nothing is budgeted and every answer is byte for byte what it was befor
   memory limit holds for each call; the work of the calls that share one budget adds
   up (an allowance). One exception to "charged before": a record of output text is
   charged as soon as it is built (its size is known only then), and so are the walk ids
-  a one-shot iterator gives ``to_fasta(leaves=)`` (copied as they are read).
+  a one-shot iterator gives ``to_fasta(leaves=)`` or ``walks_at()`` (copied as they are
+  read); a list of walk ids is admitted before it is copied.
 * ``LocalLimits(work_units=None, memory_mb=None, deadline_s=None)`` holds the limits
   (``None``: unlimited). ``deadline_s`` (elapsed seconds since the budget was made) and
   ``budget.cancel()`` (from another thread) stop a call at its next charge point; they

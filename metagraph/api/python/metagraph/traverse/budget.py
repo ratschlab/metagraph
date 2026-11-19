@@ -33,8 +33,9 @@ With a budget, a local call either completes or stops and says so (DESIGN §5.4)
   * Every charge is admitted before the work or allocation it pays for, with one stated
     exception: what has a size known only once it is built -- the lines of dump(), up
     to 64 at a time, a label set decoded during a parse, the walks a one-shot iterator
-    passes to to_fasta(leaves=) (a generator: copied into a list as it is read, per arm),
-    and the text of an exception given to union_pairs() as an input's error (str() of it)
+    passes to to_fasta(leaves=) (a generator: copied into a list as it is read, per arm)
+    or to walks_at(), and the text of an exception given to union_pairs() as an input's
+    error (str() of it)
     -- is charged as soon as it is built, so the account may run that far ahead of the
     check. The account itself
     never exceeds the limit. Cheap loops are admitted in blocks of rows (64) at their

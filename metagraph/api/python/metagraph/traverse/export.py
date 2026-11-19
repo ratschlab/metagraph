@@ -33,7 +33,7 @@ from . import derive
 from ._codec import REASON, UNLIMITED
 from .budget import (DICT, DICT_KEY, FLOAT, ID_SHIFT_PY, INT, JSON_ID, LIST, LIST_ITEM, STR,
                      W_ELEM, W_GFA_LINE, W_NODE, W_PAIR, W_RECORD, W_STEP, LocalBudgetExceeded,
-                     dict_bytes, list_bytes)
+                     dict_bytes, list_bytes, set_bytes)
 from .model import ARM_SIDES, MissingEnvelope
 
 _LEVERS = ('select_walks', 'narrow_arm', 'export_mgt')
@@ -722,6 +722,12 @@ def _to_fasta(g, arm, leaves, with_seed, orientation, width, bud, done=None,
             # admitted before the walks are resolved: the arm's paths (a Path per walk)
             # are built only once charged, so a refused export leaves none behind
             derive.uses(bud, g, a, 'leaves', 'paths', 'end_labels')
+            if lv is not None:
+                # the chosen walks resolved, their set of leaves and price lists, admitted
+                # before they are built (the lane's sweep of GPT final review M4: 33.8 MB
+                # before a 1 MiB budget's stop for 1,000,000 ids)
+                n = len(lv)
+                bud.charge(W_ELEM * n, 3 * list_bytes(n) + set_bytes(n) + 2 * n * INT)
         paths = derive.paths(a)
         chosen = paths if lv is None else [paths[ops.path_id(a, x)] for x in lv]
         if not chosen:

@@ -1491,19 +1491,36 @@ def walks_at(g, arm, path_ids, with_claims=False, *, budget=None, resume=None):
     b = _B.resolve(budget)
     if b is None and resume is None:
         return _walks_at(g, a, path_ids, with_claims, None)
+    if b is None:
+        return _walks_at_from(g, a, path_ids, with_claims, None, resume)
+    with b.scope('walks_at', ('select_walks',)):
+        return _walks_at_from(g, a, path_ids, with_claims, b, resume)
+
+
+def _walks_at_from(g, a, path_ids, with_claims, b, resume):
+    """walks_at() with its arguments bound for a resume token; with |b| (its scope open) the
+    copies of the ids -- the list, the token's arguments, the slice from the resumed
+    position and the token's JSON of them -- are admitted before they are made (the lane's
+    sweep of GPT final review M4: 30.8 MB before a zero budget's stop for 1,000,000 ids);
+    a one-shot iterator's ids are charged as soon as they are read (budget.py's stated
+    exception)."""
+    if not hasattr(path_ids, '__len__'):
+        path_ids = tuple(path_ids)
+    if b is not None:
+        n = len(path_ids)
+        b.charge(W_ELEM * n, 3 * list_bytes(n) + 2 * (STR + 24 * n))
     path_ids = list(path_ids)
     args = [a.side, [x if isinstance(x, int) else path_id(a, x) for x in path_ids],
             bool(with_claims)]
     k0, = _resume_pos(g, 'walks_at', args, resume, 1)
     if b is None:
         return _walks_at(g, a, path_ids[k0:], with_claims, None)
-    with b.scope('walks_at', ('select_walks',)):
-        out = []
-        try:
-            return _walks_at(g, a, path_ids[k0:], with_claims, b, out)
-        except LocalBudgetExceeded as e:
-            raise e.restate(Partial(out, _token(g, 'walks_at', args, k0 + len(out))),
-                            rows=len(out), position=k0 + len(out), of=len(path_ids))
+    out = []
+    try:
+        return _walks_at(g, a, path_ids[k0:], with_claims, b, out)
+    except LocalBudgetExceeded as e:
+        raise e.restate(Partial(out, _token(g, 'walks_at', args, k0 + len(out))),
+                        rows=len(out), position=k0 + len(out), of=len(path_ids))
 
 
 def _walks_at(g, a, path_ids, with_claims, b, out=None):

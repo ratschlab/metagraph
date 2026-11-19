@@ -297,8 +297,9 @@ class TestExportPeaks(unittest.TestCase):
 
 
 class TestSeedAndSelections(unittest.TestCase):
-    """The lane's sweep of the GPT final review (M2): an export that writes the seed charges
-    it."""
+    """The lane's sweep of the GPT final review (M2, M4): an export that writes the seed
+    charges it, and a call given a list of walks admits its copies of the list before it
+    makes them -- allocation measured before the stop, not only the stop."""
 
     @staticmethod
     def _long_seed(name, n=10 ** 6):
@@ -341,6 +342,42 @@ class TestSeedAndSelections(unittest.TestCase):
             gfa = [x for x in long_.to_gfa().split('\n') if not x.startswith('S\tseed')]
             self.assertEqual(gfa, [x for x in short.to_gfa().split('\n')
                                    if not x.startswith('S\tseed')])
+
+    def test_a_list_of_walks_is_admitted_before_it_is_copied(self):
+        """to_fasta(leaves=<list>) resolved the list, its set of leaves and price lists, and
+        ops.walks_at() copied its ids (the list, the token's arguments, the slice) before
+        the first charge: 1,000,000 ids allocated 33.8 MB and 31 MB before a 1 MiB budget
+        stopped them. Now the copies are admitted first: the traced peak before the stop
+        stays below 64 KB under 1 MiB, and under 2,000 lwu."""
+        import copy
+        ids = [0] * 10 ** 6
+        g = T.graphlet('fork')
+        for lim in ({'memory_mb': 1}, {'work_units': 2000}):
+            for name, fn in (
+                    ('to_fasta', lambda h: h.to_fasta('right', leaves=ids,
+                                                      budget=LocalBudget(**lim))),
+                    ('walks_at', lambda h: ops.walks_at(h, 'right', ids,
+                                                        budget=LocalBudget(**lim)))):
+                with self.subTest(name, **lim):
+                    xs = [copy.deepcopy(g), copy.deepcopy(g)]
+
+                    def call():
+                        try:
+                            fn(xs.pop())
+                        except MT.LocalBudgetExceeded:
+                            return 'stop'
+                    peak, out = _warm_peak(call, call)
+                    self.assertEqual(out, 'stop')
+                    self.assertLess(peak, 64 * 1024)
+        # within budget: the same answers
+        sel = [1, 0, 1, 0]
+        b = LocalBudget()
+        self.assertEqual(g.to_fasta('right', leaves=sel, budget=b),
+                         g.to_fasta('right', leaves=sel))
+        self.assertEqual([w.path_id for w in ops.walks_at(g, 'right', sel, budget=b)],
+                         [w.path_id for w in ops.walks_at(g, 'right', sel)])
+        self.assertEqual([w.path_id for w in ops.walks_at(g, 'right', iter(sel), budget=b)],
+                         sel)
 
 
 # ------------------------------------------------------------------ the comparison's scans
