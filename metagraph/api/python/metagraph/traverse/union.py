@@ -194,6 +194,13 @@ _M_DESC = 1536          # union_pairs()' preparation per input and expected pair
 _M_KEY = 256            # a seqs_order key's description and entry (fitted: at most 153 B)
 _W_MATCH = 4 * W_ELEM   # two pair descriptions matched (Appendix A.4's rule: up to seven
 #                         fields of each read)
+_W_INDEX = 6 * W_ELEM   # a matching pass per description it indexes or queries: its
+#                         signature, its facets, its lists, a count and a scan (a dozen
+#                         lookups each)
+_M_MATCH = 1024         # a matching pass per description, while it runs: its signature,
+#                         group, facets and the index's lists and entries, released after
+#                         the pass (fitted: at most 941 B on CPython 3.11 and 3.14, six
+#                         shapes of 200 and 2,000 descriptions)
 _M_FIG = 160            # a walk's figures: the record, whole_in and held_in, its slot
 _DERIVATION_CAUSES = {'no_carrier': 'no label carries the whole seed',
                       'no_trace_carrier': 'no label carries the whole seed by trace',
@@ -718,10 +725,11 @@ def _prep_price(results, expected_pairs, seqs_order):
     stated pairs before any of it runs (GPT final review M4): per input and expected pair its
     classification and descriptions (W_ROW, _M_DESC) and twice its stated pair's JSON bound
     (the tags and sort keys that copy a name); per seqs_order key its description (W_ROW,
-    _M_KEY); _W_MATCH per comparison of the passes quadratic in their number -- the keys
-    among themselves, every description against every other (ambiguous_pair), the pair
-    classes, the classes against the keys -- and 1 lwu per 8 bytes of the stated pairs. The
-    check of a description's hits among themselves is charged where it runs."""
+    _M_KEY); and 1 lwu per 8 bytes of the stated pairs. It is linear in the inputs: each
+    matching pass (the keys among themselves, ambiguous_pair and the pair classes, the
+    classes against the keys) is charged by the pass before it runs: its index once the
+    descriptions are built, its comparisons once their candidates are counted
+    (_Candidates, _index_price(), _compare_price())."""
     rs = results if isinstance(results, (list, tuple)) else ()
     ex = expected_pairs if isinstance(expected_pairs, (list, tuple)) else ()
     ks = seqs_order if isinstance(seqs_order, dict) else {}
@@ -729,9 +737,7 @@ def _prep_price(results, expected_pairs, seqs_order):
         _json_bound(p) for p in ex if isinstance(p, (str, dict))) + sum(
         _json_bound(k) for k in ks if isinstance(k, (str, tuple)))
     m, nk = len(rs) + len(ex), len(ks)
-    pairs = nk * (nk - 1) // 2 + m * m + m * (m - 1) // 2 + m * nk
-    return (W_ROW * (m + nk) + _W_MATCH * pairs + (names >> 3),
-            _M_DESC * m + _M_KEY * nk + 2 * names)
+    return (W_ROW * (m + nk) + (names >> 3), _M_DESC * m + _M_KEY * nk + 2 * names)
 
 
 def _err_text(e):
@@ -799,7 +805,7 @@ def union_pairs(results, *, seed=None, expected_pairs=None, seqs_order=None, bud
                          lambda b: PairUnion._build(results, seed, expected_pairs, seqs_order, b))
 
 
-def _check_args(results, seed, expected_pairs, seqs_order):
+def _check_args(results, seed, expected_pairs, seqs_order, b=None):
     if isinstance(expected_pairs, str):
         raise _refuse('bad_expected', 'bad_expected_str')
     exp = None
@@ -840,14 +846,7 @@ def _check_args(results, seed, expected_pairs, seqs_order):
         # two values for one pair, seen among the keys themselves (an argument error, so
         # before any result is read); a conflict only a result's pair shows is found once
         # the pairs are known (_seqs_of)
-        known = _known_paths([d for d, _, _ in so] + (exp or []))
-        for i in range(len(so)):
-            for j in range(i + 1, len(so)):
-                if so[i][1] != so[j][1] and _matches(so[i][0], so[j][0], known):
-                    raise _refuse('bad_seqs_order', None,
-                                  'seqs_order[%s] and seqs_order[%s] (two values for one pair)'
-                                  % (_key_text(so[i][2], so[i][0]),
-                                     _key_text(so[j][2], so[j][0])))
+        _check_keys(so, _known_paths([d for d, _, _ in so] + (exp or [])), b)
     if seed is not None and not isinstance(seed, str):
         raise TypeError('seed= is the oriented seed sequence (a string), not %r' % (seed,))
     if not isinstance(results, (list, tuple)):
@@ -905,10 +904,10 @@ class PairUnion:
     def _build(cls, results, seed, expected_pairs, seqs_order, b):
         self = cls.__new__(cls)
         if b is not None:
-            # the preparation (classification, descriptions, the matching passes), admitted
-            # before it runs (GPT final review M4)
+            # the preparation (classification, descriptions), admitted before it runs (GPT
+            # final review M4); each matching pass charges itself before it runs
             b.charge(*_prep_price(results, expected_pairs, seqs_order))
-        exp, so = _check_args(results, seed, expected_pairs, seqs_order)
+        exp, so = _check_args(results, seed, expected_pairs, seqs_order, b)
         elems = _classify(results)
         # view_unsupported
         for e in elems:
@@ -978,24 +977,12 @@ class PairUnion:
         for e in elems:
             if not e.desc.get('graph') and not e.desc.get('index_ns'):
                 raise _refuse('no_pair', None, e.pos)
-        # ambiguous_pair: a description matching two descriptions that do not match
-        descs = [(('result %d' % e.pos), e.desc) for e in elems] + \
-            [('expected_pairs[%d]' % i, d) for i, d in enumerate(exp or [])]
-        for name, d in descs:
-            hits = [x for _, x in descs if x is not d and _matches(d, x, known)]
-            if b is not None and len(hits) > 1:
-                # its hits matched among themselves: known only now (cubic where many
-                # inputs name one pair), charged before they are
-                b.charge(_W_MATCH * (len(hits) * (len(hits) - 1) // 2))
-            for i in range(len(hits)):
-                for j in range(i + 1, len(hits)):
-                    if not _matches(hits[i], hits[j], known):
-                        raise _refuse('ambiguous_pair', None, _show(d), _show(hits[i]),
-                                      _show(hits[j]))
-        classes = _classes([d for _, d in descs], known)
+        # ambiguous_pair (a description matching two descriptions that do not match), then
+        # the pair classes: each description compared with its candidates, charged first
+        classes = _pair_classes([e.desc for e in elems] + list(exp or []), known, b)
         cls_of = {id(d): c for c in classes for d in c['members']}
         tags = _tags(classes)
-        seqs = _seqs_of(classes, so, tags, known)
+        seqs = _seqs_of(classes, so, tags, known, b)
         self._b = b
         # no_bases, different_alphabet
         parts = [e for e in elems if e.kind == 'part']
@@ -2191,42 +2178,357 @@ class _SeedStandIn:
 
 # ------------------------------------------------------------------ pairs, tags, dedupe
 
-def _seqs_of(classes, so, tags, known=None):
+# The matching passes. Each compares a description only with its candidates (_Candidates):
+# the descriptions that _matches() can match it to, found by an index of what _matches()
+# reads. The candidates are a superset of the matches, so every pass finds what comparing
+# every description with every other found (the all-pairs code of 3e9a2c131, kept in
+# tests/test_traverse_union_matching.py): the same matches, classes, order and refusals.
+
+_NO_PATH = (None, None)
+
+
+def _plain(d):
+    """Whether description |d| can be indexed: its keys strings, its values strings or None,
+    its graph not ''. Any other description (a value that is not a string, which only an
+    envelope's release or index tags can bring) is compared with every description."""
+    if d.get('graph') == '':
+        return False
+    return all(isinstance(k, str) and (v is None or isinstance(v, str)) for k, v in d.items())
+
+
+def _facets(d, known):
+    """What _matches() reads of description |d| to find its matches, or None where it cannot
+    be indexed (_plain()): (index_fp, graph, pair_id, paths, bare, index_ns), the index_fp
+    and pair_id where they are truthy, the paths (graph_path, annotation_path) with those
+    |known| holds for an id stated without any (_with_paths()), |bare| whether |d| is a bare
+    name (_names_ns())."""
+    if not _plain(d):
+        return None
+    e = _with_paths(d, known)
+    p = (e.get('graph_path'), e.get('annotation_path'))
+    if not all(x is None or isinstance(x, str) for x in p):
+        return None
+    return (d.get('index_fp') or None, d.get('graph'), d.get('pair_id') or None, p,
+            set(d) == {'graph'}, d.get('index_ns'))
+
+
+class _Paths:
+    """The positions of descriptions that state a path, by their (graph_path,
+    annotation_path), by each of the two, and all of them: query(p) gives, as disjoint lists,
+    those whose paths agree with |p| wherever both state one."""
+    __slots__ = ('full', 'gp', 'ap', 'all')
+
+    def __init__(self):
+        self.full, self.gp, self.ap, self.all = {}, {}, {}, []
+
+    def add(self, p, i):
+        self.full.setdefault(p, []).append(i)
+        self.gp.setdefault(p[0], []).append(i)
+        self.ap.setdefault(p[1], []).append(i)
+        self.all.append(i)
+
+    def query(self, p):
+        x, y = p
+        if x is None and y is None:
+            return [self.all]
+        if y is None:
+            return [self.gp.get(x, ()), self.gp.get(None, ())]
+        if x is None:
+            return [self.ap.get(y, ()), self.ap.get(None, ())]
+        return [self.full.get(p, ()), self.full.get((x, None), ()),
+                self.full.get((None, y), ())]
+
+
+class _Candidates:
+    """Descriptions |descs| (by position) indexed by what _matches() reads, in its order, so
+    that query(d) gives, as disjoint lists in input order, every position whose description
+    can match description |d|: never one fewer than the matches.
+
+      * Two that state an index_fp match by it alone: ('fp', index_fp).
+      * Otherwise the graph names are equal (a missing name is one value) or one is a bare
+        name equal to the other's index_ns, the other naming no graph (_names_ns()):
+        ('bare', name), and ('ns', index_ns) of those that name no graph. Within one name,
+        apart for those that state an index_fp (two of them are decided by it):
+        * two that state a pair_id match only if it is equal: ('id', graph, has_fp, id);
+        * otherwise their paths (an id's own, or those |known| holds for it) agree wherever
+          both state one, and a description by its id with no path known matches one
+          without a pair_id only if that states no path either (_unverifiable()):
+          ('idonly', ...) and ('nopath', ...) hold the descriptions without a path, a
+          _Paths per (graph, has_fp, 'id' | 'noid') the others.
+      * A description that cannot be indexed (_facets()) is a candidate of every
+        description, and every description is one of its candidates.
+
+    release, index_ns and index_meta_fp are left out: _matches() reads them last, where both
+    state one, only to separate. Descriptions of one name and pair that differ only in them
+    are therefore candidates of one another (and compared)."""
+    __slots__ = ('n', 'known', 'wild', 'lists', 'paths')
+
+    def __init__(self, descs, known):
+        self.n, self.known, self.wild, self.lists, self.paths = len(descs), known, [], {}, {}
+        add = self._add
+        for i, d in enumerate(descs):
+            f = _facets(d, known)
+            if f is None:
+                self.wild.append(i)
+                continue
+            fp, g, pid, p, bare, ns = f
+            hf = fp is not None
+            if hf:
+                add(('fp', fp), i)
+            if pid is not None:
+                add(('id', g, hf, pid), i)
+                if p == _NO_PATH:
+                    add(('idonly', g, hf), i)
+                else:
+                    self._paths(g, hf, 'id').add(p, i)
+            elif p == _NO_PATH:
+                add(('nopath', g, hf), i)
+            else:
+                self._paths(g, hf, 'noid').add(p, i)
+            if bare:
+                add(('bare', g), i)
+            if g is None and isinstance(ns, str):
+                add(('ns', ns), i)
+
+    def _add(self, key, i):
+        self.lists.setdefault(key, []).append(i)
+
+    def _paths(self, g, hf, kind):
+        t = self.paths.get((g, hf, kind))
+        if t is None:
+            t = self.paths[g, hf, kind] = _Paths()
+        return t
+
+    def query(self, d):
+        f = _facets(d, self.known)
+        if f is None:
+            return [range(self.n)]
+        fp, g, pid, p, bare, ns = f
+        get, paths = self.lists.get, self.paths.get
+        out = [self.wild]
+        if fp is not None:
+            out.append(get(('fp', fp), ()))
+        for hf in (False,) if fp is not None else (False, True):
+            noid = paths((g, hf, 'noid'))
+            out.append(get(('nopath', g, hf), ()))
+            if pid is not None:
+                out.append(get(('id', g, hf, pid), ()))
+                if p != _NO_PATH and noid is not None:
+                    out += noid.query(p)
+            else:
+                withid = paths((g, hf, 'id'))
+                if p == _NO_PATH:
+                    out.append(get(('idonly', g, hf), ()))
+                if noid is not None:
+                    out += noid.query(p)
+                if withid is not None:
+                    out += withid.query(p)
+        if bare:
+            out.append(get(('ns', g), ()))
+        if g is None and isinstance(ns, str):
+            out.append(get(('bare', ns), ()))
+        return out
+
+    def count(self, d):
+        return sum(map(len, self.query(d)))
+
+
+def _index_price(b, entries, indexed):
+    """Charge |b| before a matching pass groups and indexes its descriptions, and return the
+    bytes it holds until it ends: _W_INDEX per description indexed or queried (|entries|),
+    _M_MATCH per description indexed (|indexed|)."""
+    b.charge(_W_INDEX * entries, _M_MATCH * indexed)
+    return _M_MATCH * indexed
+
+
+def _compare_price(b, compared, longest):
+    """Charge |b| before a matching pass compares: _W_MATCH per comparison (|compared|, read
+    from the candidates' counts), and the longest list of candidates (|longest|) one query
+    holds at a time; return those bytes."""
+    b.charge(_W_MATCH * compared, LIST_ITEM * longest)
+    return LIST_ITEM * longest
+
+
+def _check_keys(so, known, b=None):
+    """bad_seqs_order where two seqs_order keys give one pair two values, among the keys
+    themselves: the first such two in key order, each key compared with its candidates
+    after it. Charged before it runs: the index, then each pair of candidates once (a pair
+    with equal values is charged and not compared)."""
+    if len(so) < 2:
+        return
+    keys = [d for d, _, _ in so]
+    held = 0 if b is None else _index_price(b, len(keys), len(keys))
+    idx = _Candidates(keys, known)
+    if b is not None:
+        counts = [idx.count(d) for d in keys]
+        held += _compare_price(b, (sum(counts) - len(keys)) // 2, max(counts))
+    for i, (d, v, k) in enumerate(so):
+        for j in sorted(j for lst in idx.query(d) for j in lst if j > i and so[j][1] != v):
+            if _matches(d, so[j][0], known):
+                raise _refuse('bad_seqs_order', None,
+                              'seqs_order[%s] and seqs_order[%s] (two values for one pair)'
+                              % (_key_text(k, d), _key_text(so[j][2], so[j][0])))
+    if b is not None:
+        b.release(held)
+
+
+def _seqs_of(classes, so, tags, known=None, b=None):
     """id(class) -> its seqs_order value ('unknown' where seqs_order= names it not), by the
     one matching rule (a key by a path without an id certifies a pair named by its id only
     where the call knows that id's paths: only the pair it was stated for);
-    bad_seqs_order where two keys give one pair two values."""
+    bad_seqs_order where two keys give one pair two values (the first class in order, and
+    its first key in key order). Each class's description is compared with its candidate
+    keys, charged before it runs (the index, then the comparisons)."""
     seqs = {}
+    if not so:
+        return {id(c): 'unknown' for c in classes}
+    held = 0 if b is None else _index_price(b, len(so) + len(classes), len(so))
+    idx = _Candidates([d for d, _, _ in so], known)
+    if b is not None:
+        counts = [idx.count(c['desc']) for c in classes]
+        held += _compare_price(b, sum(counts), max(counts, default=0))
     for c in classes:
-        vals = {v for d, v, _ in so if _matches(d, c['desc'], known)}
+        hit = [i for lst in idx.query(c['desc']) for i in lst
+               if _matches(so[i][0], c['desc'], known)]
+        vals = {so[i][1] for i in hit}
         if len(vals) > 1:
-            d, k = next((d, k) for d, v, k in so if _matches(d, c['desc'], known))
+            d, _, k = so[min(hit)]
             raise _refuse('bad_seqs_order', None, 'seqs_order[%s] (two values for pair %s)'
                           % (_key_text(k, d), tags[id(c)]))
         seqs[id(c)] = vals.pop() if vals else 'unknown'
+    if b is not None:
+        b.release(held)
     return seqs
+
+
+def _sig(d):
+    """Description |d|'s content as a key, or None where it cannot be indexed (_plain()).
+    _matches() reads only a description's content, and two of one content match: they
+    match the same descriptions and each other."""
+    return tuple(sorted(d.items())) if _plain(d) else None
+
+
+def _groups(descs):
+    """|descs| grouped by content (_sig()): (pos, rep, of) -- pos[g] the positions of group g
+    in input order, the groups in the order of their first positions; rep[g] its first
+    description; of[i] the group of position i. A description that cannot be indexed is a
+    group of its own."""
+    pos, of, first = [], [], {}
+    for i, d in enumerate(descs):
+        s = _sig(d)
+        g = first.get(s) if s is not None else None
+        if g is None:
+            g = len(pos)
+            pos.append([i])
+            if s is not None:
+                first[s] = g
+        else:
+            pos[g].append(i)
+        of.append(g)
+    return pos, [descs[p[0]] for p in pos], of
+
+
+def _pair_classes(descs, known=None, b=None, check=True):
+    """ambiguous_pair (with |check|), then the pair classes of |descs| as _classes() states
+    them: what comparing every description with every other gave, in one scan of their
+    groups (_groups()) in input order, each against its candidates (_Candidates).
+
+    A description d is refused ambiguous_pair where two of its matches do not match: the
+    first such d in input order, and the first such two of its matches. Its matches are the
+    matches of its group's description, and the members of a group match one another, so
+    no description is refused exactly when the groups' match graph is a union of cliques.
+    The scan puts each group into the class of the first earlier class's founder it matches
+    (_classes()'s rule) or founds a class; then that holds exactly when every match joins
+    two groups of one class and every group matches all of its class. Only then do the
+    classes stand; otherwise _ambiguous() finds the refusal the all-pairs loop raised.
+
+    Charged before it runs: the groups and index, then each group against each of its
+    candidates (the matches are read from both ends of a pair, so the scan keeps no list of
+    them); _ambiguous() charges its comparisons as it makes them."""
+    held = 0 if b is None else _index_price(b, len(descs), len(descs))
+    pos, rep, of = _groups(descs)
+    n = len(rep)
+    idx = _Candidates(rep, known)
+    if b is not None:
+        counts = [idx.count(r) for r in rep]
+        held += _compare_price(b, sum(counts) - n, max(counts, default=0))
+    cls = [0] * n
+    founder = []            # class -> its first group
+    inside = [0] * n        # the group's matches in its own class
+    across = [False] * n    # whether the group matches one of another class
+    for s in range(n):
+        r = rep[s]
+        hits = [t for lst in idx.query(r) for t in lst if t != s and _matches(r, rep[t], known)]
+        c = min((cls[t] for t in hits if t < s and founder[cls[t]] == t), default=None)
+        if c is None:
+            c = len(founder)
+            founder.append(s)
+        cls[s] = c
+        for t in hits:
+            if t < s:   # each match counted once, at its later group, for both
+                if cls[t] == c:
+                    inside[t] += 1
+                    inside[s] += 1
+                else:
+                    across[t] = across[s] = True
+    members = [[] for _ in founder]
+    for s in range(n):
+        members[cls[s]].append(s)
+    if check:
+        covers = [inside[s] == len(members[cls[s]]) - 1 for s in range(n)]
+        if not all(covers[s] and not across[s] for s in range(n)):
+            _ambiguous(descs, pos, rep, idx, known, b, cls, members, covers, across)
+    classes = [{'members': []} for _ in founder]
+    for i, d in enumerate(descs):
+        classes[cls[of[i]]]['members'].append(d)
+    for c in classes:
+        c['desc'] = min(c['members'], key=lambda d: (-_fullness(d), _sort_key(_key(d)),
+                                                     not _has_path(d), C.canonical_json(d)))
+    if b is not None:
+        b.release(held)
+    return classes
+
+
+def _ambiguous(descs, pos, rep, idx, known, b, cls, members, covers, across):
+    """Raise the ambiguous_pair the all-pairs loop raised, which _pair_classes() found to
+    exist: the first group in input order whose matches include two that do not match.
+    A group that matches its class's groups only and all of them fails exactly when its
+    class is no clique (one of its groups does not match all of the class); any other
+    group's matches are compared among themselves, charged as they are."""
+    clique = [all(covers[t] for t in m) for m in members]
+    for s in range(len(rep)):
+        if covers[s] and not across[s]:
+            if clique[cls[s]]:
+                continue
+            hits = [t for t in members[cls[s]] if t != s]
+        else:
+            r = rep[s]
+            if b is not None:
+                b.charge(_W_MATCH * (idx.count(r) - 1))
+            hits = [t for lst in idx.query(r) for t in lst
+                    if t != s and _matches(r, rep[t], known)]
+        hits.sort()
+        for i in range(len(hits) - 1):
+            # the first match that does not match a later one, and the first such later
+            # one: groups in order of their first positions, so their first members
+            if b is not None:
+                b.charge(_W_MATCH * (len(hits) - 1 - i))
+            x = rep[hits[i]]
+            for j in range(i + 1, len(hits)):
+                if not _matches(x, rep[hits[j]], known):
+                    raise _refuse('ambiguous_pair', None, _show(descs[pos[s][0]]),
+                                  _show(descs[pos[hits[i]][0]]),
+                                  _show(descs[pos[hits[j]][0]]))
 
 
 def _classes(descs, known=None):
     """The pair classes of |descs| (match is transitive once ambiguous_pair passed):
-    [{'members': [desc...], 'desc': the fullest description}]. Of members equally full the
-    one with paths, then the first in canonical JSON: a total order, so the class's
-    description never depends on the order the results were given in (review M2)."""
-    classes = []
-    for d in descs:
-        hit = None
-        for c in classes:
-            if _matches(d, c['members'][0], known):
-                hit = c
-                break
-        if hit is None:
-            classes.append({'members': [d]})
-        else:
-            hit['members'].append(d)
-    for c in classes:
-        c['desc'] = min(c['members'], key=lambda d: (-_fullness(d), _sort_key(_key(d)),
-                                                     not _has_path(d), C.canonical_json(d)))
-    return classes
+    [{'members': [desc...], 'desc': the fullest description}], each description in the class
+    of the first class whose first member it matches, else in a class of its own. Of members
+    equally full the one with paths, then the first in canonical JSON: a total order, so the
+    class's description never depends on the order the results were given in (review
+    M2)."""
+    return _pair_classes(descs, known, check=False)
 
 
 def _fullness(d):
