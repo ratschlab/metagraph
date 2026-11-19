@@ -1528,6 +1528,12 @@ class StitchedGraphlet:
 
         def run(b):
             row = self._row(side, walk, False, b)
+            if b is not None:
+                # the text beyond its pieces: the joined flank, its reversal, the seed (in
+                # walking order reversed) and the joined text, at most three copies of the
+                # seed and flank (the seed was not charged: GPT final review M2's sibling)
+                n = row['length_bp'] + (len(self.seed.sequence) if with_seed else 0)
+                b.charge(n >> 8, 3 * (STR + n))
             w = self._spell_chain(side, row['chain'], orientation, b)
             if not with_seed:
                 return w

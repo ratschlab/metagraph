@@ -1713,6 +1713,29 @@ class TestBudgets(unittest.TestCase):
         zero = LocalBudget(work_units=0, memory_mb=0)
         self.assertIs(stitch(sg, budget=zero), sg)
 
+    def test_spell_charges_its_seed(self):
+        """spell(with_seed=True) joins the root seed to the flank (natural orientation) or its
+        reversal before it (walking order, left arm) and charges them before it spells:
+        GPT final review M2's sibling, found by the lane's sweep. With a 100,000-base root
+        seed, on both arms of the root alone and of a junction, in both orientations: the
+        account bounds the traced peak (warm free lists), and the text is unchanged."""
+        arm, p0, c0 = triple('keep_forbid')
+        for name, make in (('fork', lambda: stitch(_long_seed(T.graphlet('fork')))),
+                           ('keep_forbid', lambda: stitch(_long_seed(p0), copy.deepcopy(c0)))):
+            sg = make()
+            for side in sg.arms():
+                key = sg.walks(side, by='id')[0].key
+                for orientation in ('natural', 'walk'):
+                    with self.subTest(name, side=side, orientation=orientation):
+                        b = LocalBudget()
+                        text = sg.spell(side, key, orientation, True, budget=b)
+                        self.assertEqual(text, make().spell(side, key, orientation, True))
+                        self.assertIn(sg.seed.sequence if orientation == 'natural' or
+                                      side == 'right' else sg.seed.sequence[::-1], text)
+                        objs = [make(), make()]
+                        self.assertLessEqual(_peak(lambda: objs.pop().spell(
+                            side, key, orientation, True)), b.peak_bytes)
+
     def test_memory_counts_the_caches(self):
         arm, p, c = triple('comb_chain')
         sg = stitch(stitch(p, c), load('comb_chain', 'grandchild'))
