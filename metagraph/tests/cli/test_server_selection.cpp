@@ -716,6 +716,15 @@ TEST(ServerSelection, PairIdProbes) {
               refusal_of([] {
                   select(SelectionRoute::CAPABILITIES, R"({"graph": "c", "pair_id": 1})");
               }));
+    // pairs is not a probe's selector (no route reads this spelling: the text is the
+    // selection's own, review n2)
+    Json::Value body;
+    EXPECT_EQ("pairs_unsupported", selection_code_of([] {
+        select(SelectionRoute::CAPABILITIES, R"({"pairs": [{"graph": "c"}]})");
+    }, &body));
+    EXPECT_EQ("request: a capabilities probe selects one pair by graph and pair_id, or by "
+              "graph, graph_path and annotation_path: pairs is not accepted",
+              body["error"].asString());
 }
 
 // The GET probes: ?graph= (with graph_path= and annotation_path=) one pair, coded as an object

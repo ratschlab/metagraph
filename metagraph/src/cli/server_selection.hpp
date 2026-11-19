@@ -173,8 +173,8 @@ extern const char kSearchGraphsEmpty[];
  *    none (pair_not_found) or several (pair_ambiguous) refuse the request with the
  *    candidates; a pair named twice is selected once. `pairs` beside `graphs` (or, on RESOLVE and TRAVERSE,
  *    beside `graph` or `graph_path`) is a selection_conflict. SEARCH refuses it
- *    (pairs_unsupported), CAPABILITIES too (a probe selects by graph, graph_path and
- *    annotation_path).
+ *    (pairs_unsupported), CAPABILITIES too (a probe selects by graph and pair_id, or by
+ *    graph, graph_path and annotation_path; no route of the server reads this spelling).
  *  - `graphs` (a non-empty array of names; an unknown one graph_unknown, the first in the
  *    list's order) selects every pair of its names; RESOLVE and TRAVERSE also take `graph`
  *    (one name; with `graphs`, a selection_conflict) and `graph_path` beside one name, which

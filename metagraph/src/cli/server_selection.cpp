@@ -757,8 +757,9 @@ std::vector<SelectedPair> select_pairs(SelectionRoute route,
         case SelectionRoute::CAPABILITIES: {
             if (object.isMember("pairs")) {
                 throw SelectionRefusal("request: a capabilities probe selects one pair by "
-                                       "graph, graph_path and annotation_path: pairs is not "
-                                       "accepted", "pairs_unsupported");
+                                       "graph and pair_id, or by graph, graph_path and "
+                                       "annotation_path: pairs is not accepted",
+                                       "pairs_unsupported");
             }
             // the members that spell the probe's parameters; any other is the request's
             std::vector<std::pair<std::string, std::string>> parameters;
