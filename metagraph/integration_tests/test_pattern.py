@@ -3812,7 +3812,7 @@ class TestPatternSynthetic(PatternChecks, TestingBase):
             caps = server.get('capabilities').json()
             self.assertIn('pattern', caps['features'])
             self.assertEqual('POST /pattern', caps['routes']['pattern'])
-            self.assertEqual('GET /pattern/capabilities?graph={name}[&graph_path={path}]',
+            self.assertEqual('GET /pattern/capabilities?graph={name}[&pair_id={id}]',
                              caps['routes']['pattern_capabilities'])
             self.assertTrue(caps['pattern']['available'])
             self.assertIsNone(caps['pattern']['k'])

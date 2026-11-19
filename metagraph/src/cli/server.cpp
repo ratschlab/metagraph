@@ -3189,7 +3189,7 @@ int run_server(Config *config) {
             routes["resolve"] = "POST /resolve";
             routes["traverse"] = "POST /traverse";
             routes["traverse_capabilities"] = multi
-                ? "GET /traverse/capabilities?graph={name}[&graph_path={path}]"
+                ? "GET /traverse/capabilities?graph={name}[&pair_id={id}]"
                 : "GET /traverse/capabilities";
             routes["cancel"] = "POST /traverse/cancel";
             routes["attempt"] = "GET /traverse/attempt/{attempt_id}";
@@ -3204,7 +3204,7 @@ int run_server(Config *config) {
             // multi-graph server
             routes["pattern"] = "POST /pattern";
             routes["pattern_capabilities"] = multi
-                ? "GET /pattern/capabilities?graph={name}[&graph_path={path}]"
+                ? "GET /pattern/capabilities?graph={name}[&pair_id={id}]"
                 : "GET /pattern/capabilities";
             features.append("pattern");
             c["features"] = std::move(features);

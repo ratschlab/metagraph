@@ -3637,10 +3637,12 @@ search's routes, `POST /pattern` and `GET /pattern/capabilities`, are `SPEC-patt
 
     In multi-graph mode `mode` is `"multi"`, `graphs` the sorted list of the graph list's names, `align` is in
     neither `features` nor `routes` (it answers 400 there), and `routes.traverse_capabilities` is
-    `"GET /traverse/capabilities?graph={name}[&graph_path={path}]"`. `server_instance` is the attempts' (below).
+    `"GET /traverse/capabilities?graph={name}[&pair_id={id}]"` (fix round 1 of train 8; before
+    `...[&graph_path={path}]`; the probe's parameters are those the `multigraph` block's selectors list,
+    `SPEC-multigraph-envelope.md` section 8). `server_instance` is the attempts' (below).
     Both modes list the pattern search: `pattern` in `features`, `routes.pattern` and
     `routes.pattern_capabilities` (`"GET /pattern/capabilities"`; in multi-graph mode
-    `"GET /pattern/capabilities?graph={name}[&graph_path={path}]"`), and the `pattern` block
+    `"GET /pattern/capabilities?graph={name}[&pair_id={id}]"`), and the `pattern` block
     (`SPEC-pattern-search.md` §10, §23, §24; a multi-graph server's without a graph). Both state `in_ram` and,
     in multi-graph mode, `graph_summary` and `max_graphs_without_selection` (both `null` in single-graph mode;
     below, multi-graph mode), and in both modes `max_request_body_mb` (below, the caps: the largest request body

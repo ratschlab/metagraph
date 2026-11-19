@@ -1300,7 +1300,7 @@ It costs no step.
 - **`GET /pattern/capabilities`** (§23): the full block of §10.2, the document itself (not wrapped in an object).
 - **`GET /capabilities`**: `"pattern"` in `features`, `routes.pattern = "POST /pattern"`,
   `routes.pattern_capabilities = "GET /pattern/capabilities"` (on a multi-graph server
-  `"GET /pattern/capabilities?graph={name}[&graph_path={path}]"`), and the full block as its `pattern` member (on a
+  `"GET /pattern/capabilities?graph={name}[&pair_id={id}]"`), and the full block as its `pattern` member (on a
   multi-graph server without a graph, §24). The feature and the routes are listed whether or not this graph can be searched (as `align`
   is); `pattern.available` says whether it can. A client gates on both.
 - **`GET /traverse/capabilities`** (the document the service's probe reads): its `pattern` member is the gate
@@ -4131,7 +4131,7 @@ fields a client gates on.
     parameter, an unknown or repeated parameter a 400, as there.
 - **`GET /capabilities`** keeps the full block as its `pattern` member, and its `routes` gain
   `"pattern_capabilities": "GET /pattern/capabilities"` (on a multi-graph server
-  `"GET /pattern/capabilities?graph={name}[&graph_path={path}]"`, §24) beside `routes.pattern`.
+  `"GET /pattern/capabilities?graph={name}[&pair_id={id}]"`, §24) beside `routes.pattern`.
 - **`GET /traverse/capabilities`**: its `pattern` member is the **gate block**, `pattern_traverse_block` of the full
   block: every field of the table below with the full block's value (`caps` the caps the table names), and
   `details: "GET /pattern/capabilities"`, where the full block is; no other field. 503 while the single index

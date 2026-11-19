@@ -4923,7 +4923,7 @@ class TestTraverseMultiGraph(TestTraverseBase):
                          (c['mode'], c['graphs'], c['ready']))
         self.assertNotIn('align', c['features'])
         self.assertNotIn('align', c['routes'])
-        self.assertEqual('GET /traverse/capabilities?graph={name}[&graph_path={path}]',
+        self.assertEqual('GET /traverse/capabilities?graph={name}[&pair_id={id}]',
                          c['routes']['traverse_capabilities'])
         self.assertEqual(caps['attempts'], c['attempts'])
         # the library asks for one pair

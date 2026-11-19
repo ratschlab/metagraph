@@ -623,7 +623,7 @@ def multi_capabilities(doc):
     check('pattern' in doc['features'], doc['features'])
     check(doc['routes']['pattern'] == 'POST /pattern', doc['routes'])
     check(doc['routes']['pattern_capabilities']
-          == 'GET /pattern/capabilities?graph={name}[&graph_path={path}]', doc['routes'])
+          == 'GET /pattern/capabilities?graph={name}[&pair_id={id}]', doc['routes'])
     b = doc['pattern']
     check(b['available'] is True and b['unavailable_reason'] is None, b)
     check(all(b[f] is None for f in LOADING_NULL), b)

@@ -3727,7 +3727,7 @@ class TestPatternFixtures(unittest.TestCase):
             check.ok('pattern' in doc['features'], 'features')
             check.ok(doc['routes'].get('pattern') == 'POST /pattern', 'routes.pattern')
             check.ok(doc['routes'].get('pattern_capabilities')
-                     == (DETAILS + '?graph={name}[&graph_path={path}]' if multi else DETAILS),
+                     == (DETAILS + '?graph={name}[&pair_id={id}]' if multi else DETAILS),
                      'routes.pattern_capabilities')
             # the largest request body the server reads (--max-request-body-mb, MiB): an
             # integer of at least 1, or null when unlimited (the fixture servers)

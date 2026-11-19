@@ -499,7 +499,7 @@ class TestMultiGraphServer(TestingBase):
         self.assertEqual(['ecoli', 'enterics', 'kleb', 'pseudo'], caps['graphs'])
         self.assertIn('pattern', caps['features'])
         self.assertEqual('POST /pattern', caps['routes']['pattern'])
-        self.assertEqual('GET /pattern/capabilities?graph={name}[&graph_path={path}]',
+        self.assertEqual('GET /pattern/capabilities?graph={name}[&pair_id={id}]',
                          caps['routes']['pattern_capabilities'])
         self.assertEqual({'routes': ['pattern', 'resolve', 'search', 'traverse'], 'loads': True,
                           'mem_cap_gb': 1, 'budgets_start': 'after_load'}, caps['in_ram'])

@@ -551,7 +551,8 @@ joined by `\n`, no trailing newline; null when any pair has none; each loaded (g
 counted once, so a pair listed under two names counts once), `composite_rule` (that sentence), and a
 `multigraph` block advertising `envelope_version`, `pair_id` (`"n1"`, train 8: answers name a pair by `graph` and
 its n1 `pair_id`, section 1.2), the envelope routes, the selectors per route (a probe's `graph`, `graph_path`,
-`annotation_path` and `pair_id`),
+`annotation_path` and `pair_id`; `routes.traverse_capabilities` and `routes.pattern_capabilities` give the probe's
+template `GET <route>?graph={name}[&pair_id={id}]`, fix round 1 of train 8, before `[&graph_path={path}]`),
 `traverse_pairs_per_request`, the routes reading `not_after_ms`, `finish_by_ms` and `request_id`,
 `expect_server_instance` (F3b: `["/traverse", "/resolve", "/pattern"]`, the routes that take the field, section 5),
 the registry route,
