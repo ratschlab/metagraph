@@ -793,13 +793,16 @@ def union_pairs(results, *, seed=None, expected_pairs=None, seqs_order=None, bud
     client.Pair) -> 'verified' | 'count_only' | None, as GET /capabilities states it; a pair
     not given reads 'unknown', and a key by a path certifies a pair named by its id only
     where the call states that id's paths (Appendix A.4, rule 3). budget= (local limits):
-    first the preparation, from the inputs' counts and stated pairs before any input is
-    classified (per input its descriptions, and the comparisons of the matching passes,
-    quadratic in the number of inputs); then the inputs' metadata (error strings, absent
-    results, stated pairs, envelopes) and the seed, before the seed checks; then the trie
-    pass. A stop raises with no partial. A budget smaller than the preparation, metadata
-    and seed therefore stops before the refusals checked after them (no_pair,
-    ambiguous_pair, different_seed, duplicate_pair, not_expected, ...).
+    every charge is admitted before what it pays for runs. First the preparation, from the
+    inputs' counts and stated pairs before any input is classified (per input its
+    descriptions: linear); then each matching pass right before it runs (the seqs_order keys
+    among themselves, ambiguous_pair with the pair classes, the classes against the keys):
+    its index, then the comparisons its candidates need, counted from the index (linear
+    where the pairs are distinct); then the inputs' metadata (error strings, absent results,
+    stated pairs, envelopes) and the seed, before the seed checks; then the trie pass. A
+    stop raises with no partial. A budget too small for a charge stops there, before the
+    refusals checked after it: ambiguous_pair after its pass's charge, different_seed,
+    duplicate_pair, not_expected and the rest after the metadata's.
     Refusals (CombineRefused, .code) in the order of Appendix A.2."""
     return _B.run_scoped(budget, 'union_pairs', (),
                          lambda b: PairUnion._build(results, seed, expected_pairs, seqs_order, b))

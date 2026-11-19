@@ -682,12 +682,15 @@ class PairUnion:                          # budget= (keyword-only) where the wor
 **Budgets.** Every operation whose work grows with the walks or segments takes `budget=`, keyword-only (the list and
 the exempt accessors: F.1), with the library's semantics (`budget.py`): a stop raises `LocalBudgetExceeded`; the lists
 whose order allows it (`walks()`, `segments()`, `carriers()`) carry a `Partial` of whole rows with a resume token for
-`resume=`, and the others stop without one. `union_pairs()` charges construction to its `budget=`: first, before any
-input is classified, its preparation, read from the inputs' counts and stated pairs (their descriptions, and each
-comparison of the matching passes, quadratic in the number of inputs; a description's hits are compared among
-themselves once that is charged); then, before the seed checks, the inputs' variable-length metadata (at a bound of its
-JSON) and the seed (four copies, and four more per part, whose retrieval identity holds it); then the trie pass. A budget smaller than the first charges therefore stops it before
-the refusals checked after them, such as `ambiguous_pair`, `different_seed`, `duplicate_pair` and `not_expected`.
+`resume=`, and the others stop without one. `union_pairs()` charges construction to its `budget=`, each charge before
+what it pays for runs: first, before any input is classified, its preparation, read from the inputs' counts and stated
+pairs (their descriptions, linear in the number of inputs); then each matching pass right before it runs (the
+`seqs_order=` keys among themselves, `ambiguous_pair` with the pair classes, the classes against the keys), at its
+index and at the comparisons its candidates need (F.1); then, before the seed checks, the inputs' variable-length
+metadata (at a bound of its JSON) and the seed (four copies, and four more per part, whose retrieval identity holds it);
+then the trie pass. A budget too small for one of these charges stops there, before the refusals checked after it:
+`ambiguous_pair` after its pass's charge, and `different_seed`, `duplicate_pair` and `not_expected` after the
+metadata's.
 
 **The queries.**
 
@@ -2144,6 +2147,16 @@ graphlets.rst examples run in `run_examples.py` (CI's fixture-checks job).
   has at most as many segments as the parts together, plus one per point where a pair's spelling ends, merges or
   turns off and one per merge segment's start: for 11 parts of about 2,000 segments each, about 22,000 union
   segments, 5–10 MB [estimate].
+- **Matching.** The passes that compare pair descriptions (the `seqs_order=` keys among themselves, `ambiguous_pair`
+  with the pair classes, the classes against the keys) compare a description only with its candidates: those an index of
+  A.4's rule says can match it (an index_fp both state; else the graph name, or a bare name against an index_ns; then
+  the pair_id; then the paths, an unstated one matching any, an id's paths taken from the call). Descriptions with one
+  content are compared once. With distinct pairs the work is linear in the inputs: the service's largest seed (2,000
+  pairs, each an input and an expected pair with a `seqs_order=` key) is charged about 380,000 lwu for the whole
+  construction, where comparing every pair was priced at about 272 million. Many descriptions of one name that differ
+  only in release, index_ns or index_meta_fp (not indexed), or many distinct descriptions that all match one another,
+  are still compared pairwise, and finding the first `ambiguous_pair` among a description's matches can take the square
+  of their number. Every comparison is charged before it is made (§2.8).
 - **Labels.** Per (union segment, pair), the labels alive on the part segments it covers, as intervals. A part
   segment lies on one path, so its intervals do not depend on which walk passes it. In constrain mode they are built
   from the segment's entry set and its label changes (`derive.label_changes()`, `derive.py:72`), each change opening
