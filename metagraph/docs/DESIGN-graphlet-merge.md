@@ -2166,7 +2166,8 @@ spend.
   budget. A stitched part inside a union runs under the union call's budget as its ambient budget.
 - **`StitchedGraphlet`.** `stitch()`, `walks()`, `walk()`, `spell()`, `continuation()`, `next_request()`,
   `next_requests()`, `to_fasta()`, `summary()`, `evidence()` and `completeness()`. `walk()` charges the walk it builds
-  as `walks()` charges each; `summary()` reads the evidence under its own budget.
+  as `walks()` charges each; `summary()` reads the evidence under its own budget. `stitch()` admits each graphlet it
+  builds (its index, labels and digest) before building it, a plain parent's own wrapper included, inside its call.
 - **Exempt.** The accessors that return stored fields or measure the object: on `PairUnion` `arms()`,
   `provenance()`, `memory_bytes()` and the stored attributes (`parts`, `absent`, `pairs`, `expected`, `digest`,
   `seed`, `alphabet`); on `StitchedGraphlet` `arms()`, `arm_of()`, `label()`, `provenance()`, `memory_bytes()` and

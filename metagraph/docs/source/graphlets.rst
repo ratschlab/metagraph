@@ -1633,7 +1633,9 @@ budgets`_): ``stitch()``, ``walks()``, ``walk()``, ``spell()``, ``continuation()
 each junction's rule-check context, each walk's causes), and a call charges each at its
 cold price whether it is kept or not, so it charges the same, and stops at the same row,
 whatever earlier calls cached. ``walk()`` charges the walk it builds as ``walks()``
-charges each, and ``summary()`` reads the evidence under its own budget. The accessors
+charges each, and ``summary()`` reads the evidence under its own budget. ``stitch()``
+admits each graphlet it builds (its labels and its digest) before building it, a plain
+parent's own wrapper included: ``stitch(g)`` under a zero budget stops. The accessors
 that return stored fields or measure the object take no budget: ``arms()``,
 ``arm_of()``, ``label()``, ``provenance()``, ``memory_bytes()`` and the stored
 attributes ``parts``, ``root``, ``junctions``, ``labels``, ``identity``, ``digest``,
