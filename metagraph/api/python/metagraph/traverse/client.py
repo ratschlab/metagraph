@@ -198,7 +198,8 @@ class Pair(NamedTuple):
         the annotation path, which has no id to compute)."""
         if self.pair_id:
             return {'graph': self.graph, 'pair_id': self.pair_id}
-        return {k: v for k, v in zip(('graph', 'graph_path', 'annotation_path'), self) if v}
+        return {k: v for k, v in zip(('graph', 'graph_path', 'annotation_path'), self)
+                if v is not None}
 
 
 # an n1 id as the engine states it: "n1-" and a lowercase UUID of version 5 (RFC 4122 variant)
@@ -273,31 +274,32 @@ def pair_members(graph=None, graph_path=None, annotation_path=None, pair_id=None
     engine. {} without a graph: the request names no pair (a single-graph server, or a
     multi-graph server's only pair). A path or an id without a graph is a ValueError: the
     server needs the name; an id beside one path, or beside paths that are not its,
-    PairIdError."""
+    PairIdError. A path is any value but None, '' included (an empty path is a path, as in
+    configured_pair_id(): one rule for reading and writing a pair)."""
     if not graph:
-        if graph_path or annotation_path or pair_id is not None:
+        if graph_path is not None or annotation_path is not None or pair_id is not None:
             raise ValueError('graph_path, annotation_path and pair_id name a pair of a graph: '
                              'give the graph too')
         return {}
     if pair_id is not None:
         # any pair_id but None is an id to check: '', 0 or False is no absent one
         pid = check_pair_id(pair_id)
-        if not graph_path and not annotation_path:
+        if graph_path is None and annotation_path is None:
             return {'pairs': [{'graph': graph, 'pair_id': pid}]}
-        if not (graph_path and annotation_path):
+        if graph_path is None or annotation_path is None:
             raise PairIdError('bad_pair_id', 'name a pair by its pair_id or by its paths, '
                               'not by both')
         if configured_pair_id(graph, graph_path, annotation_path) != pid:
             raise PairIdError('pair_id_mismatch', 'pair_id %s is not the n1 id of the paths '
                               'given with it' % pid)
-    if annotation_path:
+    if annotation_path is not None:
         pair = {'graph': graph}
-        if graph_path:
+        if graph_path is not None:
             pair['graph_path'] = graph_path
         pair['annotation_path'] = annotation_path
         return {'pairs': [pair]}
     out = {'graph': graph}
-    if graph_path:
+    if graph_path is not None:
         out['graph_path'] = graph_path
     return out
 
@@ -332,7 +334,8 @@ def requested_pair(req):
                          p.get('pair_id'), 'request.pairs[0]')
         return None
     graph = _text(req.get('graph'))
-    return None if graph is None else Pair(graph, _text(req.get('graph_path')))
+    gp = req.get('graph_path')
+    return None if graph is None else Pair(graph, gp if isinstance(gp, str) else None)
 
 
 def request_without_paths(request):
@@ -347,8 +350,9 @@ def request_without_paths(request):
         return request
     out = []
     for i, p in enumerate(pairs):
-        if isinstance(p, dict) and _text(p.get('graph')) and _text(p.get('graph_path')) \
-                and _text(p.get('annotation_path')):
+        if isinstance(p, dict) and _text(p.get('graph')) \
+                and isinstance(p.get('graph_path'), str) \
+                and isinstance(p.get('annotation_path'), str):
             t = _pair(p['graph'], p['graph_path'], p['annotation_path'], p.get('pair_id'),
                       'request.pairs[%d]' % i)
             rest = {k: v for k, v in p.items() if k not in Pair._fields}
@@ -362,8 +366,8 @@ def entry_without_paths(entry):
     """A multi-graph entry's tags (an answer's, a probe's) as an output states them: graph
     and pair_id, no path -- the pair_id the n1 id of the paths an engine before ids states.
     Anything else is returned as it is."""
-    if not isinstance(entry, dict) or not (_text(entry.get('graph_path'))
-                                           or _text(entry.get('annotation_path'))):
+    if not isinstance(entry, dict) or not (isinstance(entry.get('graph_path'), str)
+                                           or isinstance(entry.get('annotation_path'), str)):
         return entry
     pair = answered_pair(entry)
     out = {k: v for k, v in entry.items() if k not in ('graph_path', 'annotation_path')}
@@ -875,7 +879,8 @@ class TraverseClient:
             # by its id to a server that takes it)
             sel = self.wire_pair(sel['graph'], sel['pair_id'])
         query = ['%s=%s' % (k, urllib.parse.quote(sel[k], safe=''))
-                 for k in ('graph', 'graph_path', 'annotation_path', 'pair_id') if sel.get(k)]
+                 for k in ('graph', 'graph_path', 'annotation_path', 'pair_id')
+                 if sel.get(k) is not None]
         # a multi-graph server's probe of one pair is an envelope of one entry
         return single_answer(self._request('GET', '/traverse/capabilities'
                                            + ('?' + '&'.join(query) if query else '')))

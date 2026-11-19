@@ -449,7 +449,8 @@ def _pair_desc(p):
         return {'graph': p} if p else None
     if isinstance(p, dict) and p and set(p) <= set(_PAIR_FIELDS) \
             and (p.get('graph') or p.get('index_ns')):
-        if p.get('pair_id') is not None and not isinstance(p['pair_id'], str):
+        if p.get('pair_id') is not None:
+            # any pair_id but None, '' included, is an id to check (client._pair())
             check_pair_id(p['pair_id'], 'the pair object\'s pair_id')
         if all(v is None or isinstance(v, str) for v in p.values()):
             return _with_id(_stated(p))
@@ -796,7 +797,7 @@ def _check_args(results, seed, expected_pairs, seqs_order):
                     fields = {'graph': k[0], 'pair_id': k[1]}
                 else:
                     fields = dict(zip(Pair._fields, k))
-                d = _stated_desc({kk: vv for kk, vv in fields.items() if vv},
+                d = _stated_desc({kk: vv for kk, vv in fields.items() if vv is not None},
                                  lambda t: _refuse('bad_seqs_order', None, t),
                                  'a seqs_order key of %r' % (k[0],))
             else:

@@ -803,6 +803,92 @@ class TestMalformedPairStatements(unittest.TestCase):
                                              'annotation_path': ''}]}}
         self.assertEqual(MT.client.capabilities_pair_resolver(caps)(want), (GRAPH, GP, ''))
 
+    def test_an_empty_path_is_written_as_it_is_read(self):
+        # fix review N1: one rule for '' -- a value, as configured_pair_id() hashes it -- in
+        # the writers too. An old document whose annotation path is "" loads, is re-asked,
+        # continued and deepened by its paths, and unions with provenance by its id
+        from metagraph.traverse import union_pairs
+        from metagraph.traverse.client import request_without_paths
+        from metagraph.traverse.mcp_tools import GraphletTools
+        want = configured_pair_id(GRAPH, GP, '')
+        old = _doc('paths', annotation_path='')
+        sel = [{'graph': GRAPH, 'graph_path': GP, 'annotation_path': ''}]
+        req = GraphletStore.request_of(old)
+        self.assertEqual(req['pairs'], sel)
+        self.assertEqual(request_without_paths(req)['pairs'],
+                         [{'graph': GRAPH, 'pair_id': want}])
+        leaf = [old.walks('right')[0].path_id]
+        self.assertEqual(old.next_request('right', leaf)['pairs'], sel)
+        for caps in (BEFORE_IDS, AFTER_IDS):
+            c = _Engine(caps, tagged(T.doc_json('fork', 'graphlet'), 'paths', ap=''))
+            c.deepen(old, 'right', leaf)
+            self.assertEqual(c.posted()[0]['pairs'], sel)
+        (part,) = [e for e in union_pairs([old]).provenance() if e['kind'] == 'part']
+        self.assertEqual(part['pair']['pair_id'], want)
+        self.assertEqual(part['request']['pairs'], [{'graph': GRAPH, 'pair_id': want}])
+        self.assertNotIn(GP, json.dumps(part))
+        with tempfile.TemporaryDirectory() as d:
+            tools = GraphletTools(GraphletStore(os.path.join(d, 's')), {}, export_dir=d)
+            path = os.path.join(d, 'old.mgt')
+            old.save(path)
+            out = tools.graphlet_load(path)
+            self.assertNotIn('error', out, out)
+            self.assertEqual(tools.store.get(out['handle']).request['pairs'], sel)
+        # a probe of that pair names its empty path
+        c = _Engine(BEFORE_IDS, None)
+        c.capabilities(GRAPH, GP, '')
+        self.assertEqual(c.probes(), ['/traverse/capabilities?graph=refseq&graph_path='
+                                      '%2Fdata%2Frefseq%2Fbact_other.dbg&annotation_path='])
+
+    def test_a_fan_out_sends_and_expects_one_pair(self):
+        # fix review N1: a pair object of empty paths is sent as given and expected by its
+        # id, so the fan-out's union reads its own results, before and after ids
+        from metagraph.traverse import union_pairs
+        want = configured_pair_id(GRAPH, '', '')
+        seed = 'ACGTACGTACGTACGTACGTACGTACGTACGTAC'
+        for caps, form in ((BEFORE_IDS, 'paths'), (AFTER_IDS, 'id')):
+            c = _Engine(caps, tagged(T.doc_json('fork', 'graphlet'), form, gp='', ap=''))
+            r = c.traverse_pairs(seed, pairs=[{'graph': GRAPH, 'graph_path': '',
+                                               'annotation_path': ''}], coordinates=None)
+            self.assertEqual(c.posted()[0]['pairs'],
+                             [{'graph': GRAPH, 'graph_path': '', 'annotation_path': ''}])
+            self.assertEqual(r.expected_pairs, ({'graph': GRAPH, 'pair_id': want},))
+            u = union_pairs(r.results, expected_pairs=r.expected_pairs)
+            self.assertEqual((u.expected, u.parts[0].key[3]), ((GRAPH,), want))
+
+    def test_a_caller_empty_path_is_a_value(self):
+        # fix review N1: a caller's '' in a union pair object is a path, not refused
+        from metagraph.traverse import union_pairs
+        old = _doc('paths', annotation_path='')
+        full = {'graph': GRAPH, 'graph_path': GP, 'annotation_path': ''}
+        u = union_pairs([{'pair': full, 'graphlet': old}], expected_pairs=[dict(full)])
+        self.assertEqual((u.parts[0].pair_stated_by, u.expected), ('caller', (GRAPH,)))
+        self.assertEqual(u.parts[0].key[3], configured_pair_id(GRAPH, GP, ''))
+        # and '' is not the old document's annotation path
+        with self.assertRaises(CombineRefused) as cm:
+            union_pairs([{'pair': full, 'graphlet': fixture('fork', 'paths')}])
+        self.assertEqual(cm.exception.code, 'pair_mismatch')
+
+    def test_an_empty_pair_id_is_refused_in_the_union(self):
+        # fix review N2: pair_id '' is an id to check, never read as a bare name
+        from metagraph.traverse import union_pairs
+        a = fixture('fork', 'paths')
+        for call, code in (
+                (lambda: union_pairs([{'pair': {'graph': GRAPH, 'pair_id': ''},
+                                       'graphlet': a}]), 'not_combinable'),
+                (lambda: union_pairs([a], expected_pairs=[{'graph': GRAPH, 'pair_id': ''}]),
+                 'bad_expected'),
+                (lambda: union_pairs([a], seqs_order={Pair(GRAPH, None, None, ''): 'verified'}),
+                 'bad_seqs_order')):
+            with self.assertRaises(CombineRefused) as cm:
+                call()
+            self.assertEqual(cm.exception.code, code)
+            self.assertIn('is not an n1 pair id', str(cm.exception))
+        # (graph, '') names the empty graph path: no pair of these has it
+        b = fixture('fork', 'paths', gp=GP2, ap=AP2)
+        u = union_pairs([a, b], seqs_order={(GRAPH, ''): 'verified'})
+        self.assertEqual({p.seqs_order for p in u.parts}, {'unknown'})
+
 
 class TestPartialDescriptions(unittest.TestCase):
     """A description that names its pair by a path and no id (a caller's {graph,
