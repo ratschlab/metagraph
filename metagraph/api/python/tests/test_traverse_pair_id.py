@@ -1087,5 +1087,35 @@ class TestToolOutputsWithoutPaths(unittest.TestCase):
             self.assertEqual(client.posted()[-1]['pairs'], BY_PATHS)
 
 
+    def test_exports_and_saves_state_no_path(self):
+        # graphlet_export(format=mgt) and graphlet_save write the J line by {graph, pair_id},
+        # an old document's too, with and without local limits; the body is the stored one
+        from metagraph.traverse.mcp_tools import GraphletTools, ToolLimits
+        old = fixture('fork', 'paths')
+        for limits in (None, ToolLimits()):
+            with tempfile.TemporaryDirectory() as d:
+                ex = os.path.join(d, 'exports')
+                tools = GraphletTools(GraphletStore(os.path.join(d, 's')), {},
+                                      export_dir=ex, local_limits=limits)
+                src = os.path.join(ex, 'old.mgt')
+                os.makedirs(ex)
+                old.save(src)
+                h = tools.graphlet_load(src)['handle']
+                outs = [tools.graphlet_export(h, format='mgt', path='e.mgt'),
+                        tools.graphlet_save(h, 's.mgt')]
+                for out in outs:
+                    self.assertNotIn('error', out, out)
+                    with open(out['path'], encoding='utf-8', newline='') as f:
+                        text = f.read()
+                    for path in (GP, AP):
+                        self.assertNotIn(path, text, limits)
+                    g = parse(text)
+                    self.assertEqual(answered_pair(g.envelope), Pair(GRAPH, None, None, ID))
+                    self.assertEqual(g.body_digest, old.body_digest)
+                    # loaded again, it is the same pair, re-asked by its id
+                    h2 = tools.graphlet_load(out['path'])['handle']
+                    self.assertEqual(GraphletStore.request_of(tools.store.graphlet(h2))
+                                     ['pairs'], BY_ID)
+
 if __name__ == '__main__':
     unittest.main()

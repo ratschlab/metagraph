@@ -108,9 +108,9 @@ from . import derive, export, ops
 from ._codec import GraphletFormatError
 from .budget import LocalBudget, LocalBudgetExceeded, LocalLimits
 from .client import (SELECTORS, AttemptAtBound, ServerInitializing, TraverseError,
-                     PairIdError, _ResponseCut, auto_coordinates, drop_coordinates_note,
-                     entry_without_paths, pair_members, request_without_paths,
-                     requested_pair, single_answer)
+                     PairIdError, _ResponseCut, auto_coordinates, document_without_paths,
+                     drop_coordinates_note, entry_without_paths, pair_members,
+                     request_without_paths, requested_pair, single_answer)
 from .model import (
     ARM_SIDES, AmbiguousLabel, IncompleteRecording, MissingEnvelope, NextRequest,
     UnknownLabel, UnverifiableLabelName,
@@ -2221,7 +2221,8 @@ class GraphletTools:
         """Write a complete export to a file in the export directory -> {path, bytes,
         records}: fasta, gfa, json (the full results[i]; what=compare with other=<handle>
         writes the complete comparison lists; what=walk with arm and walks writes the
-        complete segment chains of those walks), mgt (the standalone file). |path| is a
+        complete segment chains of those walks), mgt (the standalone file, its pair by
+        {graph, pair_id} in the J line, no path, as graphlet_save). |path| is a
         file name (default: <handle>.<ext>). The receipt is always returned: records,
         then bytes, are cut first (fields_cut). Without local limits the export has no
         work or allocation budget: the file is as large as the graphlet makes it. Under
@@ -2315,8 +2316,8 @@ class GraphletTools:
         else:
             from .parser import dump
             # a derived handle's graphlet carries its view: the file is the unchanged
-            # backing body with the view in J (§5)
-            text = dump(g, envelope=True)
+            # backing body with the view in J (§5); its pair by {graph, pair_id}, no path
+            text = document_without_paths(dump(g, envelope=True))
             records = text.count('\n')
         if call is not None:
             if format == 'json':
@@ -2344,7 +2345,7 @@ class GraphletTools:
         _check_receipt(_Receipt(dict({'path': path}, **_unvalidated(e)),
                                 _UNVALIDATED_OPTIONAL + ('records', 'bytes')),
                        self.max_bytes, 'use a shorter file name')
-        text = self.store.standalone_text(handle, budget=call.budget)
+        text = self.store.standalone_text(handle, budget=call.budget, paths=False)
         n = _write_text_charged(path, text, call.budget)
         return _Receipt(dict({'path': path, 'bytes': n, 'records': text.count('\n')},
                              **_unvalidated(e)),
@@ -2460,8 +2461,10 @@ class GraphletTools:
 
     @_tool
     def graphlet_save(self, handle, path, budget=None):
-        """The standalone .mgt file of an entry, written to the export directory. Under
-        local limits it is copied from the stored body without a parse."""
+        """The standalone .mgt file of an entry, written to the export directory, its J line
+        naming the pair by {graph, pair_id}, no path (an old document too: only the J line
+        differs from the stored one). Under local limits it is copied from the stored body
+        without a parse."""
         path = self._confined(path, [self._export_root()])
         _check_receipt(_Receipt({'path': path}, ('bytes',)), self.max_bytes,
                        'use a shorter file name')
@@ -2471,11 +2474,11 @@ class GraphletTools:
             _check_receipt(_Receipt(dict({'path': path}, **_unvalidated(e)),
                                     _UNVALIDATED_OPTIONAL + ('bytes',)),
                            self.max_bytes, 'use a shorter file name')
-            n = self.store.save_body(handle, path, budget=call.budget)
+            n = self.store.save_body(handle, path, budget=call.budget, paths=False)
             return _Receipt(dict({'path': path, 'bytes': n}, **_unvalidated(e)),
                             _UNVALIDATED_OPTIONAL + ('bytes',))
         try:
-            n = self.store.save(_handle(handle), path)
+            n = self.store.save(_handle(handle), path, paths=False)
         except LocalBudgetExceeded as e:
             # the save parses the stored body on demand: a stop on the store's parse
             # limits offered raise_local_budget, which no call's budget does
