@@ -1474,8 +1474,9 @@ class GraphletTools:
         request on the client's own graph reads the client's capabilities."""
         graph, graph_path, annotation_path, pair_id = requested_pair(req) or (None,) * 4
         if pair_id is not None and graph_path is None and annotation_path is None:
-            # a pair named by its id (a document that states no paths): probed by it
-            caps = self._backend(client.capabilities, graph, None, None, pair_id)
+            # a pair named by its id (a document that states no paths): probed by it, by
+            # keyword (a subclass's capabilities() may take fewer, as supports_coordinates())
+            caps = self._backend(lambda: client.capabilities(graph, pair_id=pair_id))
         elif annotation_path is not None:
             caps = self._backend(client.capabilities, graph, graph_path, annotation_path)
         elif graph_path is not None or (graph is not None
