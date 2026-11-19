@@ -90,7 +90,7 @@ except ImportError:          # Windows: the threads' lock only (stated in the mo
 from . import budget as _B
 from . import coords
 from ._codec import parse_int
-from .budget import LocalBudget, LocalBudgetExceeded, LocalLimits
+from .budget import STR, LocalBudget, LocalBudgetExceeded, LocalLimits
 from .parser import (_as_text, _check_transport, _frame, _replace_atomically, _write_all,
                      _write_user_file, dump, from_response, j_object, parse, seed_envelope,
                      utf8_bytes)
@@ -151,6 +151,8 @@ class Entry:
     # the bound standalone_text() charges its J line by (_j_bound()): set whenever the
     # entry is written or read, never stored in its file
     j_bound: int = field(default=0, repr=False, compare=False)
+    # its JSON atoms (the encoder's pieces up to 3.11, one per atom): set with j_bound
+    j_atoms: int = field(default=0, repr=False, compare=False)
 
     @property
     def graphlet(self):
@@ -170,7 +172,7 @@ class Entry:
 # the fields an entry file may carry (the Entry dataclass without its store); a file of
 # another version keeps what this one knows (an unknown key, such as 'parsed' read by an
 # older library, must not make the whole store fail to open)
-_ENTRY_FIELDS = frozenset(f.name for f in dataclasses.fields(Entry)) - {'store', 'j_bound'}
+_ENTRY_FIELDS = frozenset(f.name for f in dataclasses.fields(Entry)) - {'store', 'j_bound', 'j_atoms'}
 _ENTRY_REQUIRED = frozenset(f.name for f in dataclasses.fields(Entry)
                             if f.default is dataclasses.MISSING
                             and f.default_factory is dataclasses.MISSING)
@@ -181,7 +183,7 @@ _J_KEYS = len(',"results":[],"view":,"derived_from":')
 
 
 def _j_bound(e):
-    """An upper bound, in UTF-8 bytes, of the J line standalone_text() writes for |e|
+    """(bound, atoms): an upper bound, in UTF-8 bytes, of the J line standalone_text() writes for |e|
     (0 when it writes none): the line's sources -- the envelope, the seed summary, the
     view and derived_from -- as JSON with the spaces the line leaves out, plus the keys
     it puts them under. A function of what the entry holds only, so that the same export
@@ -191,10 +193,11 @@ def _j_bound(e):
     could stop one run of an export while an identical run answers."""
     if not (e.envelope or e.seed_summary or e.view is not None
             or e.derived_from is not None):
-        return 0
-    text = json.dumps([e.envelope, e.seed_summary, e.view, e.derived_from],
-                      ensure_ascii=False)
-    return _J_KEYS + (len(text) if text.isascii() else len(text.encode('utf-8')))
+        return 0, 0
+    x = [e.envelope, e.seed_summary, e.view, e.derived_from]
+    text = json.dumps(x, ensure_ascii=False)
+    return (_J_KEYS + (len(text) if text.isascii() else len(text.encode('utf-8'))),
+            _B.value_size(x)[0])
 
 
 def set_delivery(g, delivery):
@@ -453,7 +456,7 @@ class GraphletStore:
         if missing:
             raise ValueError('the entry lacks %s' % ', '.join(sorted(missing)))
         e = Entry(store=self, **{k: v for k, v in j.items() if k in _ENTRY_FIELDS})
-        e.j_bound = _j_bound(e)
+        e.j_bound, e.j_atoms = _j_bound(e)
         return e
 
     def _write_entry(self, e):
@@ -463,7 +466,7 @@ class GraphletStore:
                                         'parent')}
         if not e.parsed:
             j['parsed'] = False             # written only when false: older entries read True
-        e.j_bound = _j_bound(e)
+        e.j_bound, e.j_atoms = _j_bound(e)
         _write_atomic(self._entry_path(e.handle),
                       json.dumps(j, sort_keys=True, ensure_ascii=False).encode('utf-8'))
         # what the file now says: get() rewrites it once this lags by a tenth of the TTL
@@ -528,6 +531,19 @@ class GraphletStore:
         if self.parse_limits is not None:
             return LocalBudget(self.parse_limits)
         return None
+
+    @staticmethod
+    def _charged_read(b, nbytes, read):
+        """read() of a body of |nbytes| for a parse under |b| (in the parse's scope):
+        charged before it is read -- its bytes and their decoded text, the text held
+        through the parse; the read's work is the store's bookkeeping, as its digest check
+        (budget.py's "Not charged") -- so that a budget that cannot hold them stops with nothing
+        read (G4P's G13: a zero budget read and decoded 1 MB, 2.0 MB traced, before it
+        stopped)."""
+        b.charge(0, 2 * (nbytes + STR))
+        text = read()
+        b.release(nbytes + STR)
+        return text
 
     def _parsing(self, fn, pb):
         """fn(pb): a parse of the store under its own budget, or unbudgeted -- never
@@ -778,9 +794,12 @@ class GraphletStore:
             return got[0]
         if got is not None:
             self._drop_ram(handle)
-        # the stored body, checked against its digest: decoded as the text file read
-        # it (newline='': the same text)
-        body = self._read_body(handle, e).decode('utf-8')
+        pb = self._parse_budget(parse_budget)
+
+        def read():
+            # the stored body, checked against its digest: decoded as the text file read
+            # it (newline='': the same text)
+            return self._read_body(handle, e).decode('utf-8')
         # an entry stores {} for none: a graphlet had an envelope when either side holds
         # something (the rule of a J line, parser._attach_j)
         has_env = bool(e.envelope) or bool(e.seed_summary)
@@ -793,24 +812,27 @@ class GraphletStore:
         check = has_env and (not e.parsed or block)
 
         def parse_entry(b):
+            if b is not None:
+                with b.scope('parse', ('export_mgt',)):
+                    body = self._charged_read(b, e.bytes, read)
+                    g_ = parse(body, budget=b)
+                    if check:
+                        g_.envelope, g_.seed_summary = e.envelope, e.seed_summary
+                        coords.attach(g_, b)
+                    return g_
+            body = read()
             if not check:
-                return parse(body, budget=b)
+                return parse(body)
             # the first whole parse of an entry stored unparsed (its parse stopped on a
             # budget), or any parse of one with a block: its record coordinates are
             # validated with it, as from_response() would have -- one parse call, so
             # a stop in either keeps the entry as it was (unparsed, or parsed and not
             # resident)
-            if b is None:
-                g_ = parse(body)
-                g_.envelope, g_.seed_summary = e.envelope, e.seed_summary
-                coords.attach(g_)
-                return g_
-            with b.scope('parse', ('export_mgt',)):
-                g_ = parse(body, budget=b)
-                g_.envelope, g_.seed_summary = e.envelope, e.seed_summary
-                coords.attach(g_, b)
-                return g_
-        g = self._parsing(parse_entry, self._parse_budget(parse_budget))
+            g_ = parse(body)
+            g_.envelope, g_.seed_summary = e.envelope, e.seed_summary
+            coords.attach(g_)
+            return g_
+        g = self._parsing(parse_entry, pb)
         if not e.parsed:
             # the body now passed a whole parse: it is a graphlet like any other
             e.parsed = True
@@ -1205,10 +1227,11 @@ class GraphletStore:
                 # the J line, not in e.bytes: its text, its copy in the answer and the JSON
                 # encoder's pieces (a list of chunks up to Python 3.11), by the bound
                 # _j_bound() takes from the entry -- uncharged, an export of a small
-                # retrieval peaked above its account under 3.11
+                # retrieval peaked above its account under 3.11; with the pieces, one per
+                # atom (G4P's G14: an envelope list of 1e5 ints at 1.46x)
                 # (an id in place of the paths: at most a few bytes more)
                 jb = e.j_bound + (0 if paths else 64)
-                b.charge(jb >> 8, 4 * (jb + 49))
+                b.charge(jb >> 8, 4 * (jb + 49) + _B.DUMPS_ATOM * e.j_atoms)
         body = self.body_text(handle)
         head, first, last, lines = _frame(body)
         # the O record, rewritten in place when the entry records another delivery: the
@@ -1277,9 +1300,17 @@ class GraphletStore:
         parse on demand runs under the store's parse limits, which may refuse what the
         load's own budget admitted (graphlet_load would lose the handle of an entry it had
         stored)."""
-        with open(path, 'r', encoding='utf-8', newline='') as f:
-            text = f.read()
-        g = self._parsing(lambda b: parse(text, budget=b), self._parse_budget(parse_budget))
+        def read():
+            with open(path, 'r', encoding='utf-8', newline='') as f:
+                return f.read()
+
+        def read_parse(b):
+            if b is None:
+                return parse(read())
+            with b.scope('parse', ('export_mgt',)):
+                # the file's size before it is opened: a stop reads nothing
+                return parse(self._charged_read(b, os.stat(path).st_size, read), budget=b)
+        g = self._parsing(read_parse, self._parse_budget(parse_budget))
         h = self.put_graphlet(g, request if request is not None else
                               self.request_of(g, graph=graph, graph_path=graph_path,
                                               annotation_path=annotation_path,

@@ -20,10 +20,14 @@ With a budget, a local call either completes or stops and says so (DESIGN §5.4)
     uses, each charged at a size modelled on CPython (ASCII text at one byte per character
     plus its header, lists, sets, dicts and the slotted records at their measured sizes,
     a parse at a fit of its traced peak, a gzip load with its decompressor's buffers;
-    caller-sized metadata -- error strings, tags, names -- charged before it is serialized
-    or escaped, at its JSON- or %-escaped length, and text joined with a character beyond
-    ASCII at four bytes a character), released inside a call only where a loop drops a
-    temporary before its next step: the account bounds the call's peak. Every call also
+    caller-sized metadata -- error strings, tags, names, a seed id, a namespace or release,
+    a stop's message and actions -- charged before it is serialized, escaped, encoded or
+    front-coded, at its escaped bound (text_bytes()), a JSON value its sender sizes -- a
+    seed summary's work block, the envelope of a J line, a strategy and the keyword
+    overrides deep-copied -- by a walk charged as it goes (value_size(); the work of a
+    strategy of up to 128 nodes is within the call's base), and text joined with a
+    character beyond ASCII at four bytes a character), released inside a call only where a
+    loop drops a temporary before its next step: the account bounds the call's peak. Every call also
     carries a base (CALL_BASE bytes, W_CALL lwu) for its frames, temporaries and setup,
     charged with its first charge. It is a model, not a measurement: Python can
     allocate more (interpreter internals, fragmentation, other CPython versions, text
@@ -55,8 +59,9 @@ call leaves only complete caches and a later unbudgeted call answers byte for by
 the stop had not happened.
 
 Not charged (stated in the docs): the store's bookkeeping (refresh, cache_signature,
-cache_bytes, memory_bytes, its spool lock, and the digest check of a body it parses on
-demand: about 0.8 lwu per 256 bytes, against the parse's 32 per 256), the HTTP client's
+cache_bytes, memory_bytes, its spool lock, and the read and digest check of a body it parses
+on demand: about 0.8 lwu per 256 bytes, against the parse's 32 per 256; the bytes read and
+their text are charged before the read), the HTTP client's
 decoding of a response, cursor MACs,
 check_rules(), the tables of frames() (the library calls they make are charged), the MCP
 framework's serialisation of a result, and interpreter work outside the charge points.
@@ -254,6 +259,96 @@ def set_bytes(n):
 
 def dict_bytes(k):
     return DICT + DICT_KEY * k
+
+
+def text_bytes(s):
+    """A bound of the bytes the str |s| takes once escaped into a larger str, as json.dumps
+    (ensure_ascii=False) or repr() escapes it, read without escaping it: printable ASCII a
+    byte a character, its quotes and backslashes two; other ASCII six (\\u00XX); beyond
+    ASCII four bytes per character of the escaped form (CPython's widest str; its UTF-8 is at
+    most as long), forty where a character is not printable (repr's \\UXXXXXXXX). Its scan
+    costs len(s) >> TEXT_SHIFT lwu."""
+    n = len(s) + 2
+    if s.isprintable():
+        n += s.count('"') + s.count("'") + s.count('\\')
+        return n if s.isascii() else 4 * n
+    return 6 * n if s.isascii() else 40 * n
+
+
+# a container copied by copy.deepcopy(): its list built by appends (up to six slots over a
+# copy's), and the memo's record of it while the copy is built (an int key, its dict slot,
+# both of the dict's tables while it grows, a keep-alive slot); measured 198 B a one-item
+# list, 439 B a {k: [i]} (3.11 and 3.14)
+DEEPCOPY_SLACK = 6 * 8
+DEEPCOPY_MEMO = INT + 6 * DICT_KEY + 2 * LIST_ITEM
+# a JSON atom while json.dumps() builds its text: 3.11 keeps a str piece per atom and a slot
+# for it and for its separator, up to 100,000 pieces between joins (measured: 75 B an int of
+# a list of 50,000 beside the text; 3.14 writes into one buffer)
+DUMPS_ATOM = 80
+# the work of a container copied (deepcopy: about 0.5 us, its items 0.1 us each)
+W_CONTAINER = 3 * W_ELEM
+
+
+def value_size(x, b=None, free=0):
+    """(nodes, containers, copy_bytes, text) of a JSON-like value |x| -- dicts, lists and
+    tuples of strings, numbers, booleans and None, as json.loads or a caller's keyword
+    argument makes it -- read without copying or serializing it: its atoms, keys and
+    containers; its containers; the bytes a JSON copy of its containers holds (a list at its
+    length, LIST + LIST_ITEM a slot, a dict DICT + DICT_KEY a key; the atoms are shared); a
+    bound of its JSON or repr() text in bytes (text_bytes() per string, an int's digits, 24 per
+    float, 5 per other atom, two per container and item for the punctuation). Any other object counts as
+    an atom of its sys.getsizeof() and a 64-byte text. With |b| the walk is charged as it
+    goes: each container's items W_ELEM each before they are read (beyond the first |free|,
+    which the caller's base covers), a string longer than 4 KiB its scan before it is read.
+    A stack of iterators, one per level: any nesting, no copy."""
+    nodes = conts = copy = text = walked = 0
+    stack = [iter((x,))]
+    while stack:
+        for v in stack[-1]:
+            nodes += 1
+            if isinstance(v, str):
+                if b is not None and len(v) > 4096:
+                    b.charge(len(v) >> TEXT_SHIFT)
+                text += text_bytes(v)
+            elif v is None or isinstance(v, bool):
+                text += 5
+            elif isinstance(v, (int, float)):
+                # an int's digits: at most 5/16 of its bits (log10 2 = 0.301), its sign
+                text += 24 if isinstance(v, float) else ((v.bit_length() * 5) >> 4) + 2
+            elif isinstance(v, (dict, list, tuple)):
+                conts += 1
+                n = len(v)
+                if b is not None and walked + n > free:
+                    b.charge(W_ELEM * min(n, walked + n - free))
+                walked += n
+                text += 2 + 2 * n
+                if isinstance(v, dict):
+                    copy += dict_bytes(n)
+                    for k in v:
+                        nodes += 1
+                        if isinstance(k, str):
+                            if b is not None and len(k) > 4096:
+                                b.charge(len(k) >> TEXT_SHIFT)
+                            text += text_bytes(k)
+                        else:
+                            text += 24
+                    stack.append(iter(v.values()))
+                else:
+                    copy += list_bytes(n)
+                    stack.append(iter(v))
+                break
+            else:
+                copy += sys.getsizeof(v)
+                text += 64
+        else:
+            stack.pop()
+    return nodes, conts, copy, text
+
+
+def deepcopy_bytes(conts, copy):
+    """(held, memo) of a copy.deepcopy() of a value of |conts| containers whose JSON copy
+    holds |copy| bytes (value_size()): the copy, and the memo it drops on return."""
+    return copy + DEEPCOPY_SLACK * conts, DICT + LIST + DEEPCOPY_MEMO * conts
 
 
 def sort_work(n):

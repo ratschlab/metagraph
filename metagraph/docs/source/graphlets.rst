@@ -2562,7 +2562,13 @@ default) nothing is budgeted and every answer is byte for byte what it was befor
   Warm calls pay more than they spend.
 * **Memory** is a modelled account (``memory_bound: "model"``): the bytes of the rows,
   spellings, text and derived caches a call builds, each charged before it is made at a
-  size modelled on CPython. It is not a measurement: Python can allocate more than the
+  size modelled on CPython. Text and JSON values whose size their sender sets -- label
+  names, a seed id, a namespace or release, a stop's message and actions, a seed
+  summary's ``work`` block, an envelope written as a J line, a strategy and the keyword
+  overrides a continuation copies -- are charged at their escaped bound before they are
+  serialized, escaped, encoded or copied (text beyond ASCII at four bytes a character),
+  and a store's parse on demand or ``load()`` charges the body before it reads it, so a
+  budget that cannot hold it stops with nothing read. It is not a measurement: Python can allocate more than the
   model says (interpreter internals, fragmentation, another CPython version, text beyond
   ASCII), so in-process it is a soft bound; a hard bound needs process limits. The
   memory limit holds for each call; the work of the calls that share one budget adds

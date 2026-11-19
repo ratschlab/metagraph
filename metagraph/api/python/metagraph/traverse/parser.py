@@ -19,6 +19,7 @@ import json
 import os
 import re
 import secrets
+import sys
 import zlib
 from array import array
 
@@ -28,8 +29,8 @@ from ._codec import (
     CodecError, GraphletFormatError, LabelSetInterner, QUAL, REASON, REASON_ORDER,
     RESOURCE_CODES, decode_kvalue, decode_pairs, decode_ranges, decode_setexpr,
     encode_kvalue, encode_pairs, encode_ranges, encode_setexpr, end_token, fmt_bool,
-    fmt_int, fmt_num, front_decode_parts, front_encode, parse_bool, parse_end_token,
-    parse_int, parse_num, pct_escape, pct_unescape, tok as _tok,
+    fmt_int, fmt_num, front_decode_parts, front_encode, front_encode_bytes, parse_bool,
+    parse_end_token, parse_int, parse_num, pct_escape, pct_unescape, tok as _tok,
 )
 from .budget import (ARRAY, LIST, LIST_ITEM, STR, TEXT_LINE, W_DUMP_LINE, W_LINE,
                      LocalBudgetExceeded)
@@ -47,6 +48,9 @@ from .model import (
 # first time (the array and its key)
 _MODEL_PER_BYTE = 3.1
 _MODEL_PER_LINE = 540
+# per character of a text beyond ASCII and per byte of its width beyond the first (measured
+# on a name of 1M characters: 7.0 MB traced for BMP, 12.0 MB astral, 3.11 and 3.14)
+_MODEL_WIDE = 5
 _MODEL_PER_RECORD = (('\nG ', 950), ('\nT ', 640), ('\nR ', 65), ('\nV ', 71),
                      ('\nK ', 3950), ('\nX ', 2390))
 _MODEL_PER_SET = 124
@@ -272,7 +276,16 @@ class _Reader:
                 seq_id = None
             if f[4] == '' or not re.match(r'(?:0|[1-9][0-9]*)\Z', f[4]):
                 raise self.err('L prefix_len %s' % _tok(f[4]))
-            name = front_decode_parts(prev, f[4], f[5])
+            if self.b is not None and not prev.isascii() \
+                    and len(prev) + len(f[5]) > _LONG_NAMES:
+                # a long name beyond ASCII decoded from bytes: both names' UTF-8, the
+                # suffix's and the joined bytes, then the name
+                t = 4 * len(prev) + 16 * len(f[5])
+                self.b.charge(t >> _B.TEXT_SHIFT, t)
+                name = front_decode_parts(prev, f[4], f[5])
+                self.b.release(t)
+            else:
+                name = front_decode_parts(prev, f[4], f[5])
             g.labels.append(Label(len(g.labels), kind, column, seq_id, name))
             prev = name
         if g.mode == 'constrain' and g.seed.num_seed_labels > len(g.labels):
@@ -911,6 +924,12 @@ def _parse(text, b):
         model = _MODEL_PER_BYTE * len(text) + _MODEL_PER_LINE * n
         for tag, size in _MODEL_PER_RECORD:
             model += size * text.count(tag)
+        if not text.isascii():
+            # a text beyond ASCII is held at two or four bytes a character -- the text,
+            # its lines and their fields (G4P's G12: a name of 1M characters at 5.1x the
+            # account, 10.2x astral): its width from the str's own size, at no scan
+            k = 2 if sys.getsizeof(text) < 3 * len(text) else 4
+            model += _MODEL_WIDE * (k - 1) * len(text)
         b.charge(len(text) >> 10)
     # LF is the only record separator: names may hold VT, FF, NEL, LS, PS raw, so
     # str.splitlines() would cut records
@@ -975,6 +994,10 @@ def dump(g, envelope=None, *, budget=None):
             raise e.restate(records=done[0])
 
 
+# names whose front coding is charged on its own (shorter ones are within a line's base)
+_LONG_NAMES = 1024
+
+
 def _dump(g, envelope, b, done=None):
     out = []
     if b is None:
@@ -983,13 +1006,18 @@ def _dump(g, envelope, b, done=None):
         b.phase = 'records'
 
         pending = [0]
+        wide = [False]
 
         def w(line):
             # records are charged as soon as they are built (a text's size is known only
             # then), _LINE_BLOCK at a time: the account may run up to that many records
-            # ahead of the check
+            # ahead of the check; a line beyond ASCII at four bytes a character, and then
+            # the joined text too (wide[0])
             n = len(line)
             done[1] += n + 1
+            if not line.isascii():
+                n *= 4
+                wide[0] = True
             pending[0] += TEXT_LINE + n
             out.append(line)
             if len(out) % _LINE_BLOCK == 0:
@@ -1004,7 +1032,25 @@ def _dump(g, envelope, b, done=None):
         g.index_ns or '*', g.index_fp or '*', g.index_meta_fp or '*']))
     with_j = g.has_j if envelope is None else bool(envelope)
     if with_j and (g.has_envelope or g.view is not None or g.derived_from is not None):
-        w('J ' + j_text(g))
+        if b is None:
+            w('J ' + j_text(g))
+        else:
+            # the J line's JSON, sized by its sender, before it is built: its text bound
+            # (budget.value_size(), the walk charged as it goes), the encoder's pieces (one
+            # per atom up to 3.11), the text and its 'J ' copy -- then the line itself, at
+            # once (G4P's G10: an envelope list of 1e5 ints peaked at 3.4x the account)
+            jo = j_object(g)
+            nodes, _, _, jt = _B.value_size(jo, b)
+            temp = _B.DUMPS_ATOM * nodes + 2 * (STR + jt)
+            b.charge(jt >> _B.TEXT_SHIFT, temp)
+            line = 'J ' + json.dumps(jo, sort_keys=True, separators=(',', ':'),
+                                     ensure_ascii=False)
+            del jo
+            b.release(temp)
+            w(line)
+            b.charge(0, pending[0])
+            pending[0] = 0
+            del line
     s = g.seed
     w('S %s %d %d %d %s' % (s.validated_seed_id or '*', s.length_bp, s.num_kmers,
                             s.num_seed_labels, s.sequence))
@@ -1012,9 +1058,18 @@ def _dump(g, envelope, b, done=None):
         w('X %s %s %s' % (d.reason, encode_pairs(d.runs), pct_escape(d.name)))
     prev = ''
     for lab in g.labels:
+        if b is not None and len(prev) + len(lab.name) > _LONG_NAMES:
+            # a long name's front coding and escape, before they are made (G4P's G11: a
+            # name of 1M characters peaked at 1.5x the account, 3.1x with '%', 12x astral)
+            t = front_encode_bytes(prev, lab.name)
+            b.charge(t >> _B.TEXT_SHIFT, t)
+        else:
+            t = 0
         w('L %s %d %s %s' % (_inv(_KIND)[lab.kind], lab.column,
                              '*' if lab.seq_id is None else fmt_int(lab.seq_id),
                              front_encode(prev, lab.name)))
+        if t:
+            b.release(t)
         prev = lab.name
     o = g.outcome
     w('O %s %s %s %s' % (_inv(_O_WALKS)[o.walks], _inv(_O_BRANCH)[o.branch_diagnostics],
@@ -1038,7 +1093,7 @@ def _dump(g, envelope, b, done=None):
         done[0] = len(out)
         b.charge(0, pending[0])
         b.phase = 'join'
-        b.charge(done[1] >> 8, STR + done[1] + 16)
+        b.charge(done[1] >> 8, STR + (4 if wide[0] else 1) * done[1] + 16)
     out.append('Z %d' % n)
     # the final line feed joined with the rest: adding it to the joined text copied the
     # whole text once more at the peak
@@ -1136,8 +1191,20 @@ def _dump_arm(g, arm, w, bud=None):
             if c is not None:
                 line = 'C %d %s %d %s' % (c.n, fmt_num(c.loss_used), c.branches_used,
                                           encode_setexpr(_set(c.labels), end))
-                if c.sequence is not None and c.n > 0 and (
-                        s.walk is None or c.sequence != _derived_continuation(g, arm, s)):
+                if c.sequence is not None and c.n > 0 and s.walk is not None \
+                        and bud is not None:
+                    # an explicit sequence where the bases are known: written only when it
+                    # differs from the one they spell, which is spelled for the test -- the
+                    # leaf's walk (its chain and bases) and the continuation's bases, charged
+                    # before (G4P's G17)
+                    sp = 3 * (STR + s.end_bp + c.n + 1) + _B.list_bytes(s.depth + 1)
+                    bud.charge(_B.W_STEP * (s.depth + 1) + (s.end_bp >> _B.BASE_SHIFT), sp)
+                    differs = c.sequence != _derived_continuation(g, arm, s)
+                    bud.release(sp)
+                else:
+                    differs = c.sequence is not None and c.n > 0 and (
+                        s.walk is None or c.sequence != _derived_continuation(g, arm, s))
+                if differs:
                     line += ' ' + c.sequence
                 w(line)
     if bud is not None:

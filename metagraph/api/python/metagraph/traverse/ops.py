@@ -54,7 +54,7 @@ from ._codec import REASON, RESOURCE_CODES, UNLIMITED, GraphletFormatError
 from .budget import (
     BASE_SHIFT, DICT, DICT_KEY, ID_SHIFT_C, INT, LIST, LIST_ITEM, SET, SET_ITEM, STR, TUPLE,
     W_ELEM, W_ROW, W_STEP, LocalBudgetExceeded, Partial, dict_bytes, list_bytes, record_bytes,
-    set_bytes, sort_work, str_bytes,
+    set_bytes, sort_work, str_bytes, text_bytes,
 )
 from .model import (
     AmbiguousLabel, ARM_SIDES, BadSelector, Branch, Change, Claim, Comparison,
@@ -2599,16 +2599,6 @@ def _section(strategy, *path):
     return d
 
 
-# What a change_cost table costs a budgeted next_request() (work model 2: the entries'
-# copies are charged, or a table of 900 entries would leave the account at the 0-entry
-# figure while the traced peak is 9.8x it). Sizes as CPython makes them:
-# an entry copied by copy.deepcopy() -- its list of three, built by appends (four slots),
-# and its slot in the copied list: 97 B traced per entry -- and the memo's record of it
-# while the copy is built (an int key, its dict slot, both of the dict's tables while it
-# grows, a keep-alive slot: up to 128 B traced), dropped when deepcopy() returns
-_ENTRY_COPY = LIST + 4 * LIST_ITEM + 2 * LIST_ITEM
-_ENTRY_MEMO = INT + 6 * DICT_KEY + 2 * LIST_ITEM
-_W_ENTRY_COPY = 3 * W_ELEM          # measured 0.6 us per entry (3.14, M5 Max)
 # _switch_reach's table: a (from, to) key tuple, its float cost and its dict slot (a dict
 # keeps a third of its slots free); an explicit edge (to, cost) in its source's list; a heap
 # entry (loss, order, name) with its new float and int
@@ -2630,25 +2620,25 @@ def _entries_of(change_cost):
     return ()
 
 
-def _override_entries(strategy):
-    """The labels.change_cost entries a strategy, or the keyword overrides of
-    next_request(), carry; () where there are none or a section is not an object."""
-    lab = strategy.get('labels') if isinstance(strategy, dict) else None
-    return _entries_of(lab.get('change_cost')) if isinstance(lab, dict) else ()
+_SMALL_VALUE = 128
 
 
-def _charge_entry_copy(lb, k):
-    """Charge a deep copy of |k| change_cost entries before it is made: its work, the
-    copy (held by the caller until _release_entry_copy()) and the memo deepcopy() drops on
-    return."""
-    if k:
-        lb.charge(_W_ENTRY_COPY * k, list_bytes(k) + k * (_ENTRY_COPY + _ENTRY_MEMO))
-        lb.release(k * _ENTRY_MEMO)
-
-
-def _release_entry_copy(lb, k):
-    if k:
-        lb.release(list_bytes(k) + k * _ENTRY_COPY)
+def _charge_deepcopy(lb, x):
+    """Charge copy.deepcopy(|x|) (a strategy, the keyword overrides) before it is made ->
+    the bytes the copy holds, which the caller releases once it drops the copy: the walk
+    that sizes |x| (charged as it goes, budget.value_size()), W_CONTAINER per container, the
+    copy and the memo deepcopy() drops on return. A strategy's size is the caller's: a
+    change_cost table, labels.extra or any other list it gives (G4P's G7: 10,000 names at
+    13.3x the account). The work of a value of up to _SMALL_VALUE nodes -- every strategy
+    a server echoes, 104 nodes at most among the fixtures -- is within the call's base
+    (W_CALL), as it was: an ordinary continuation stops where it stopped."""
+    if x is None:
+        return 0
+    nodes, conts, copied, _ = _B.value_size(x, lb, _SMALL_VALUE)
+    held, memo = _B.deepcopy_bytes(conts, copied)
+    lb.charge(_B.W_CONTAINER * conts if nodes > _SMALL_VALUE else 0, held + memo)
+    lb.release(memo)
+    return held
 
 
 def _switch_reach(change_cost, sources, targets, budget, sinks=(), lb=None):
@@ -3023,15 +3013,13 @@ def _next_request(g, arm, leaves, bp, reduce_budget, reset_branches, lb, overrid
     # (three arguments without a budget: the tests replace this helper)
     conts, seeds = _continuation_seeds(g, a, leaves) if lb is None \
         else _continuation_seeds(g, a, leaves, lb)
-    # A change_cost table is the one part of the strategy whose size the caller sets: its
-    # entries are copied with the strategy (the request's copy, and the merged one the
-    # labels.extra rebuild reads), so each copy is charged -- uncharged, 900 entries would
-    # leave the account at the 0-entry figure while the traced peak is 9.8x it. The rest of
-    # the strategy is a fixed handful of fields
-    k_env = len(_override_entries(g.envelope.get('strategy'))) if lb is not None else 0
-    k_ov = len(_override_entries(overrides)) if lb is not None else 0
+    # The strategy and the overrides are sized by their senders (a change_cost table,
+    # labels.extra, any list): each deep copy -- the request's, and the merged one the
+    # labels.extra rebuild reads -- is charged before it is made (_charge_deepcopy()):
+    # uncharged, 900 entries would leave the account at the 0-entry figure while the traced
+    # peak is 9.8x it
     if lb is not None:
-        _charge_entry_copy(lb, k_env)
+        _charge_deepcopy(lb, g.envelope.get('strategy'))     # held with the request
     strategy = copy.deepcopy(g.envelope.get('strategy') or {})
     strategy.pop('clamped', None)
     strategy['direction'] = a.side
@@ -3080,8 +3068,7 @@ def _next_request(g, arm, leaves, bp, reduce_budget, reset_branches, lb, overrid
         if lb is not None:
             # both copies are held until the call returns (an override's entries replace
             # the retrieval's in |final| only once they are copied)
-            _charge_entry_copy(lb, k_env)
-            _charge_entry_copy(lb, k_ov)
+            final_held = _charge_deepcopy(lb, strategy) + _charge_deepcopy(lb, overrides)
         final = copy.deepcopy(strategy)
         _merge_overrides(final, {k: v for k, v in overrides.items()
                                  if k not in _REQUEST_LEVEL})
@@ -3110,6 +3097,9 @@ def _next_request(g, arm, leaves, bp, reduce_budget, reset_branches, lb, overrid
                              % (_num(effective), _num(budget), _num(top)))
         if 'extra' in given:
             # the caller's own list: the request carries it as given, unchecked
+            if lb is not None:
+                lb.charge(W_ELEM * len(given['extra'] or ()),
+                          list_bytes(len(given['extra'] or ())))
             extra = list(given['extra'] or [])
             per_walk = []
         else:
@@ -3269,7 +3259,7 @@ def _next_request(g, arm, leaves, bp, reduce_budget, reset_branches, lb, overrid
         request['release'] = overrides.pop('release')
     request.update(_pair_of_request(g, overrides))
     if lb is not None:
-        _charge_entry_copy(lb, k_ov)          # the request's own copy of the override's
+        _charge_deepcopy(lb, overrides)       # the request's own copy of the overrides'
     # the same merge as |final|'s (a model change replaces change_cost; None for an object
     # section is refused), in annotate mode too
     _merge_overrides(strategy, overrides)
@@ -3286,7 +3276,7 @@ def _next_request(g, arm, leaves, bp, reduce_budget, reset_branches, lb, overrid
     request['strategy'] = strategy
     if lb is not None and g.mode == 'constrain':
         # |final| is dropped on return; the request's copies stay with the request
-        _release_entry_copy(lb, k_env + k_ov)
+        lb.release(final_held)
     return request
 
 
@@ -3330,15 +3320,14 @@ def next_requests(g, arm, leaves, bp=None, reduce_budget=True, reset_branches=Fa
                               copy.deepcopy(overrides))
                 for x in leaves]
     out = []
-    k_ov = len(_override_entries(overrides))
     with lb.scope('next_requests', ('select_walks',)):
         for x in leaves:
             with lb.scope('next_request', ('select_walks',)):
                 # each walk's own copy of the overrides, dropped once its request is built
-                _charge_entry_copy(lb, k_ov)
+                held = _charge_deepcopy(lb, overrides)
                 out.append(_next_request(g, arm, [x], bp, reduce_budget, reset_branches,
                                          lb, copy.deepcopy(overrides)))
-                _release_entry_copy(lb, k_ov)
+                lb.release(held)
     return out
 
 
@@ -3469,6 +3458,12 @@ class GraphletView:
         if b is not None:
             # charged first: resolving names builds the name index
             _label_ids_b(backing, selectors, b)
+            # then, before they are made, the labels matched (a list), the view's selectors
+            # (a list, a dict and a ref string per label) and their id set (G4P's G9)
+            k = 1 if isinstance(selectors, (str, dict, int, Label)) \
+                else len(selectors) if selectors is not None else 0
+            b.charge(W_ELEM * 2 * k, 2 * list_bytes(k) + set_bytes(k)
+                     + k * (dict_bytes(1) + STR + 24))
         labs = labels_matching(backing, selectors)
         if not labs:
             # a view of no labels: None would crash with a TypeError, and [] in mode 'all'
@@ -3739,7 +3734,7 @@ COMPARE_REASONS = {
 }
 
 
-def _identity(a, b):
+def _identity(a, b, cb=None):
     """The identity and seed rule of compare() -> (comparable, phrase, statement): the
     verdict, its fixed phrase (COMPARE_REASONS) and the rule's whole statement (the
     phrase itself where that says everything). The index rule's proof of two indexes,
@@ -3747,8 +3742,8 @@ def _identity(a, b):
     without the seed rule, which stitching reads (parent and child seeds differ)."""
     proof = _index_proof(a, b)
     if proof is not None:
-        return _index_verdict(*proof)
-    return seed_rule(a, b) or _index_verdict(*_index_rest(a, b))
+        return _index_verdict(*proof, cb=cb)
+    return seed_rule(a, b) or _index_verdict(*_index_rest(a, b), cb=cb)
 
 
 def index_rule(a, b):
@@ -3805,8 +3800,18 @@ def _index_rest(a, b):
     return 'same', ()
 
 
-def _index_verdict(key, values):
-    """(comparable, phrase, statement) of an index rule's (key, values)."""
+def _index_verdict(key, values, cb=None):
+    """(comparable, phrase, statement) of an index rule's (key, values). |cb| (compare()'s
+    budget): a statement that carries values -- the caller's or the server's names,
+    namespaces, releases, of any length -- is charged before it is built: their repr()s and
+    the statement made of them, the statement held with the answer (G4P's G8: 4 MB traced
+    against 18 KB charged for two names of 1 MB)."""
+    if cb is not None and values:
+        cb.charge(sum(len(v) for v in values if isinstance(v, str)) >> _B.TEXT_SHIFT)
+        n = 128 + sum(text_bytes(v) if isinstance(v, str) else _B.value_size(v, cb)[3]
+                      for v in values)
+        cb.charge(n >> _B.TEXT_SHIFT, 2 * n)
+        cb.release(n)
     if key in ('ns', 'release'):
         return _valued(False, key, 'different index %s (%r vs %r)' % ((key,) + values))
     if key == 'names':
@@ -3821,7 +3826,8 @@ def _valued(comparable, key, statement):
     """A rule whose statement carries values (a namespace, a release, a label's names):
     the statement is the reason where it fits in 80 bytes, else the rule's fixed phrase
     with the statement in the notes."""
-    fits = len(statement.encode('utf-8')) <= 80
+    # (a long statement is never encoded to be measured)
+    fits = len(statement) <= 80 and len(statement.encode('utf-8')) <= 80
     return comparable, statement if fits else COMPARE_REASONS[key], statement
 
 
@@ -4101,7 +4107,7 @@ def _compare(a, b, arm, labels, mode, cb, state):
         cb.charge(W_ELEM * (2 * len(a.labels) + 2 * len(b.labels)),
                   dict_bytes(len(a.labels) + len(b.labels))
                   + (len(a.labels) + len(b.labels)) * (2 * STR + 24))
-    comparable, reason, statement = _identity(a, b)
+    comparable, reason, statement = _identity(a, b, cb)
     notes = [] if statement == reason else [statement]
     strategies = ((a.envelope or {}).get('strategy'), (b.envelope or {}).get('strategy'))
     if comparable is False:
@@ -4328,7 +4334,8 @@ def compare_cost(a, b, arm=None, mode='claims', *, labels=None):
                 'memory_bytes': {'at_least': t.peak, 'estimate': t.peak + extra_m},
                 'exact': exact, 'phases': dict(phases), 'unpriced': list(unpriced)}
 
-    comparable, _, _ = comparability(a, b)
+    # (with the statement its identity rule builds from values, as compare() charges it)
+    comparable, _, _ = _identity(a, b, t)
     if comparable is False:
         return result(True)
     sides, _ = _compare_sides(a, b, arm)
@@ -6333,10 +6340,40 @@ def _summary(g, arm, max_bytes, b):
                                'phase': q['phase'], 'actions': q['actions'],
                                'message': q['message']})
 
+    if b is not None:
+        # the caller-sized text the answer holds (shared, not copied: only each size()'s
+        # JSON and its UTF-8 copy hold it again): the seed id, the namespace, the top labels'
+        # names, the effects beyond their length counted above, the stop's message and
+        # actions -- each at its escaped bound (text_bytes()), its scan charged first
+        texts = [(g.seed_summary.get('seed') or {}).get('seed_id', ''), g.index_ns or '']
+        for side in sides:
+            texts += [t['name'] for t in out['arms'][side]['top_labels']]
+        if g.resource_stop is not None:
+            texts.append(g.resource_stop.message)
+            texts += g.resource_stop.actions
+        texts = [t for t in texts if isinstance(t, str)]
+        # (and the stop's actions copied into its caveat, a list held with the answer)
+        acts = len(g.resource_stop.actions) if g.resource_stop is not None else 0
+        b.charge(W_ELEM * len(texts) + (sum(map(len, texts)) >> _B.TEXT_SHIFT),
+                 list_bytes(len(texts)) + list_bytes(acts))
+        wide = sum(map(text_bytes, texts))
+        # each size() holds its text three times at its peak (3.11: a long string's
+        # escaped piece, the joined text and its UTF-8; 3.14: its writer's buffer, grown
+        # by a quarter, and the UTF-8), and its JSON pieces besides (3.11 keeps one per
+        # atom until the join): the caller's strings and the answer's own atoms, at most
+        # 256 here
+        pieces = _B.DUMPS_ATOM * (len(texts) + 256)
+        effects = [c['effect'] for c in out['caveats'] if isinstance(c.get('effect'), str)]
+        wide += sum(text_bytes(e) - len(e) for e in effects if not e.isascii())
+        b.release(list_bytes(len(texts)))
+        del texts, effects
+        text += wide
+        size_price = 32 + (text >> _B.TEXT_SHIFT)
+
     def size():
         if b is not None:
-            b.charge(size_price, 2 * text)
-            b.release(2 * text)
+            b.charge(size_price, 3 * text + pieces)
+            b.release(3 * text + pieces)
         return len(json.dumps(out, separators=(',', ':'), ensure_ascii=False).encode())
 
     # the effect texts are the longest and the most derivable part (they restate the
