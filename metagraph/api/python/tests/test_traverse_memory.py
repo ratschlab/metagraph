@@ -378,6 +378,29 @@ class TestSeedAndSelections(unittest.TestCase):
                          [w.path_id for w in ops.walks_at(g, 'right', sel)])
         self.assertEqual([w.path_id for w in ops.walks_at(g, 'right', iter(sel), budget=b)],
                          sel)
+        # a stop while the ids are admitted is still a list's stop: no rows, and the call's
+        # own resume= (None for a fresh call, the token it was given when resumed); the
+        # walks are made in chunks of 32, so a stop with rows needs more ids than that
+        sel = [1, 0] * 40
+        want = [w.path_id for w in ops.walks_at(g, 'right', sel)]
+        full = LocalBudget()
+        ops.walks_at(g, 'right', sel, budget=full)
+        token = None
+        for k in range(1, full.used_work):
+            try:
+                ops.walks_at(g, 'right', sel, budget=LocalBudget(work_units=k))
+            except MT.LocalBudgetExceeded as e:
+                if e.partial.rows:
+                    first, token = [w.path_id for w in e.partial.rows], e.partial.resume
+                    break
+        self.assertIsNotNone(token)
+        for head, resume in (([], None), (first, token)):
+            with self.assertRaises(MT.LocalBudgetExceeded) as cm:
+                ops.walks_at(g, 'right', sel, budget=LocalBudget(work_units=0), resume=resume)
+            self.assertEqual(cm.exception.partial.rows, [])
+            self.assertEqual(cm.exception.partial.resume, resume)
+            self.assertEqual(head + [w.path_id for w in ops.walks_at(g, 'right', sel,
+                                                                     resume=resume)], want)
 
 
 # ------------------------------------------------------------------ the comparison's scans

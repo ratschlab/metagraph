@@ -1486,7 +1486,8 @@ def walk_filter_reason(g, arm, walk, labels):
 def walks_at(g, arm, path_ids, with_claims=False, *, budget=None, resume=None):
     """The Walk objects of |path_ids|, in that order (claims only with with_claims).
     budget=: a stop raises LocalBudgetExceeded whose .partial holds the whole walks made
-    so far and a resume token (resume=)."""
+    so far and a resume token (resume=); a stop while the ids are admitted, before any walk,
+    holds the call's own resume= (None for a fresh call)."""
     a = g.arm(arm)
     b = _B.resolve(budget)
     if b is None and resume is None:
@@ -1503,12 +1504,17 @@ def _walks_at_from(g, a, path_ids, with_claims, b, resume):
     position and the token's JSON of them -- are admitted before they are made (the lane's
     sweep of GPT final review M4: 30.8 MB before a zero budget's stop for 1,000,000 ids);
     a one-shot iterator's ids are charged as soon as they are read (budget.py's stated
-    exception)."""
+    exception). A stop there has no token of these arguments yet: like claims()'s, it
+    resumes where the call began."""
     if not hasattr(path_ids, '__len__'):
         path_ids = tuple(path_ids)
     if b is not None:
         n = len(path_ids)
-        b.charge(W_ELEM * n, 3 * list_bytes(n) + 2 * (STR + 24 * n))
+        try:
+            b.charge(W_ELEM * n, 3 * list_bytes(n) + 2 * (STR + 24 * n))
+        except LocalBudgetExceeded as e:
+            # a stop before the call knew its arguments resumes where this call began
+            raise e.restate(Partial([], resume), rows=0, of=n)
     path_ids = list(path_ids)
     args = [a.side, [x if isinstance(x, int) else path_id(a, x) for x in path_ids],
             bool(with_claims)]

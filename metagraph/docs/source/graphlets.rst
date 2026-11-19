@@ -2503,9 +2503,11 @@ answers as on a fresh model.
   ``splits()``, ``walks(by='id')``, ``walks_at()`` -- put the whole rows they made, a
   prefix in their documented order, in ``e.partial.rows``, and a token in
   ``e.partial.resume`` that the same call takes as ``resume=`` to go on after the last
-  row. A token of another call, other arguments or another graphlet is refused: it
-  binds the digest of the graphlet's body (``Graphlet.body_digest``, made by the parse),
-  which the same body parsed again, or saved and loaded, shares.
+  row. A stop before the call has bound its arguments returns no rows and the call's
+  own ``resume=`` (``None`` for a fresh call): the same call with it starts where the
+  stopped one began. A token of another call, other arguments or another graphlet is
+  refused: it binds the digest of the graphlet's body (``Graphlet.body_digest``, made by
+  the parse), which the same body parsed again, or saved and loaded, shares.
 * **Ranked lists and summaries** -- ranked ``walks()``, ``rank_walks()``,
   ``label_summary()``, ``summary()``, ``support_profile()``, ``support_changes()``,
   ``subgraph()``, ``continuation()``, ``next_request()`` -- raise with no partial: a
