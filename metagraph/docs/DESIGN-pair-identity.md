@@ -1,9 +1,11 @@
 # Pair identity in multi-graph answers
 
-Status: proposal, revised after an outside review, 2026-11-17. It proposes how the staging server (branch
-`gr/labeled-traversal`, which the service below runs) takes two commits of `master`, 356fe1ee3 and 82137bee7, and
-how every party names a pair once no engine response states a file path. Nothing here is implemented yet. Section 2
-lists the owner's decisions; every other decision in section 3 is a recommendation the owner may overturn.
+Status: accepted, revised after an outside review on 2026-11-17 and updated on 2026-11-19. It states how the staging
+server (branch `gr/labeled-traversal`, which the service below runs) takes two commits of `master`, 356fe1ee3 and
+82137bee7, and how every party names a pair once no engine response states a file path. The library's part (section
+3.9) is implemented on its own, ahead of the engine, in train 7. The engine's part (steps 1 to 6 and 8 of section 8)
+is being implemented for train 8. Section 2 lists the owner's decisions; every other decision in section 3 is a
+recommendation the owner may overturn.
 
 ## 1. Context
 
@@ -163,19 +165,26 @@ These points are the service's own view, as its maintainers stated it.
 ### 3.9 The library
 
 The library reads both forms: an old document with paths, stored before this change, and a new one with only an id.
-The id form carries continuation and union from this change on.
+The id form carries continuation and union from this change on. This part is done ahead of the engine, in train 7
+(branch `gr/mg-t7-l1`), so that the service can vendor it before any engine changes.
 
 - **Identity.** A document's pair id is its `pair_id`, or, for an old document without one, the n1 id computed from
-  its name and paths. The library gets that function, tested with master's five vectors.
+  its name and paths. The library has that function, tested with master's five vectors. It reads n1 ids only and
+  refuses a service p2 id.
 - **Re-asking** (`pair_members`, continuations, replays of a stored request, `deepen`). A new document is re-asked
   by `pairs: [{graph, pair_id}]`. An old document is re-asked by its paths, as today; path selectors stay valid
-  input on every engine.
+  input on every engine. Every re-ask passes one hook: with a caller's resolver (n1 to name and paths) the id is
+  resolved, checked and sent as paths, which every engine reads; without one it is sent as an id where
+  `GET /capabilities` states `multigraph.pair_id: "n1"`, and refused before anything is sent otherwise.
 - **Discovery** (`traverse_pairs`). It takes the pairs from `GET /capabilities` by `(graph, pair_id)` and sends
   id selectors. Record-mapping certificates (`seqs_order`) may name a pair by `(graph, pair_id)` as well as by paths.
 - **Union.** The match rule keeps its order: a differing `index_meta_fp` separates, an equal `index_fp` decides,
-  then the ids decide (an old document's computed id included), then the paths as today. The part key of a new
-  document holds the id in place of the two paths; an old document keeps today's key, so its unions do not move.
-- **Stitching** compares pairs by id where both parts have one, by paths otherwise.
+  then the ids decide (an old document's computed id included), then the paths as today. The part key is the same
+  for both forms: it holds the pair's id, stated or computed, with the paths left out wherever there is an id. An
+  old document and its id-form twin therefore give one key and one digest. The cost is a one-time move: every
+  union digest and union resume token changes once with this library version, a union of old documents only
+  included (section 5.3).
+- **Stitching** compares pairs by id, stated or computed, so an old parent and an id-form child of one pair stitch.
 
 ## 4. The contract, before and after
 
@@ -256,7 +265,8 @@ capability profile's `support_fp` (it excludes identity).
 1. **The service's adapter.** It reads both forms (a current engine states paths; a new one states `pair_id` and
    `multigraph.pair_id`), binds ids, runs the two-way check and keeps path selectors.
 2. **The library**, vendored by the service, reading both forms, so that the service can continue and union the
-   id-only documents a new engine gives. Its code hash (`library_sha256`, which the service reports) moves.
+   id-only documents a new engine gives. Its code hash (`library_sha256`, which the service reports) moves. This
+   step is done in train 7, ahead of the engines.
 3. **The suite**, accepting both forms in its pins.
 4. **The engines**, on staging and then in production.
 
@@ -278,9 +288,11 @@ result cache lives in the process, and the restart that deploys it clears it.
 
 - Unchanged: a graphlet's body digest and the resume tokens of single-graphlet operations. They cover the records
   after the J line, so no tag is an input.
-- Changed for a union with at least one new document: its digest, its parts' tags, its export tags and its resume
-  tokens, because a new document's part key holds the id (section 3.9). A union of old documents only keeps its
-  digest, and its tokens stay valid.
+- Changed once, with the library version that reads both forms: every union digest and union resume token, and the
+  `~` tags of names with several pairs, because the part key now holds the pair's id and the expected pairs are
+  hashed as keys (section 3.9). A union of old documents only moves too: production RefSeq's union of old documents
+  moved from `9e369aca...` to `60531fdaf...`. After that move the form makes no difference: an old document and its
+  id-form twin give the same key, digest and tokens, so the service's switch to id-form documents moves nothing.
 - The library's code hash moves with its code.
 
 ### 5.4 What changes, for whom
@@ -292,7 +304,7 @@ result cache lives in the process, and the restart that deploys it clears it.
 | Single-graph clients | `/search` cuts state `pair_id: null` instead of two null paths and gain `matched`; the registry's and `pair_summary`'s null tags likewise; the CLI's `--json` gains `cuts` | update strict key sets (this repository's `test_api.py`, the contract samples, the suite's cut keys) |
 | Readers of the service's downloadable documents | new documents carry `pair_id`, no paths; old ones keep theirs | read `pair_id`; the library reads both |
 | The service | binds ids from its manifest; two-way check; stores documents as they come; keeps p2 public | section 3.8 |
-| The library | reads ids, re-asks by id, discovers by id; union digests of documents with ids change | section 3.9 |
+| The library | reads ids, re-asks by id, discovers by id; every union digest changes once (section 5.3) | section 3.9 |
 | The suite | pinned key sets, texts and samples; it can no longer match graph-list rows to `GET /capabilities` by paths | accept both forms; match rows by their computed id |
 | Requests near the `/search` memory bound | a row's tags get shorter (39 bytes instead of two paths), so the answer's price drops | none needed |
 
@@ -335,32 +347,37 @@ result cache lives in the process, and the restart that deploys it clears it.
 | 4 | `matched`, and `cuts` in the CLI's JSON output | 0.5 |
 | 5 | Re-record the contract samples (29 of 52 state paths; the texts and `GET /capabilities` change; the `/search` ones gain `matched`) | 1 |
 | 6 | Specifications: the envelope spec, the core traversal spec, the pattern spec, the manual pages | 0.75 |
-| 7 | The library: the id function, re-asks, discovery, union and stitch identity, fixtures in both forms | 1.75 |
+| 7 | The library: done in train 7, ahead of the engine (section 3.9). What is left here: its tests against this engine's answers (an id-only `GET /capabilities` with `multigraph.pair_id: "n1"`, a name of several pairs), once train 7 is merged into this branch | 0.25 |
 | 8 | Verification: all build targets for DNA and protein, unit and integration tests, Python tests, route and CLI comparisons against the current build, memory and timing, a GCC check, CI | 1.25 |
 | 9 | Review and fixes | 1 |
 
-About nine and a half working days in this repository. The service's own work (adapter, binding, two-way check) is
-not counted here; it no longer writes paths into documents. Tests to add beyond the updated ones:
+About eight working days in this repository, the library's step done separately. The service's own work (adapter,
+binding, two-way check) is not counted here; it no longer writes paths into documents. Tests to add beyond the
+updated ones:
 
 - Engine: the ids equal Python's `uuid5` for the pairs of a test graph list, an alias and a non-ASCII path included;
   **no response contains a configured path**, swept over every route, probe and refusal on single- and multi-graph
   servers (selection, not reached, unfinished, a changed file, a failed load); an id selector names the pair its
   paths name; `pair_id` with a path in one `pairs` object or one probe is a plain 400; single-graph cut keys and
   `matched` with no match, `top_labels: 0`, count ties, `abundance_sum`, and a unit refused by either account.
-- Library: an old and a new document of one pair have one id and one stitch identity, and are one pair in a union;
-  an old-only union keeps its digest; a new document is re-asked by id, an old one by its paths; discovery on an
-  id-only `GET /capabilities` with a name of several pairs; two aliases with manifests are one union pair.
+- Library (train 7): an old and a new document of one pair have one id and one stitch identity, and are one pair
+  in a union with one key and one digest; a new document is re-asked by id, an old one by its paths; discovery on an
+  id-only `GET /capabilities` with a name of several pairs; two aliases with manifests are one union pair. After the
+  engine: the same against this engine's answers.
 - Service (in its repository): stored J lines carry the n1 id and no paths, and p2 agrees with search answers by the
   join rule; continuation, union and replay of old and new documents; an extra engine pair, a missing one and a
   misspelled path each make the database `unknown`; an answer with an unknown id is refused; a content change (new
   `index_fp`, same paths) invalidates the caches; current and new capabilities in both orders, and an answer from an
   unexpected instance refused.
 
-**Timing.** Staging changes are deployed in batches called trains. The batch in preparation, train 7, is closed, so
-this change belongs in train 8. It should go after the pending change to how `/resolve` holds its answer as text,
-which touches the same files and one contract sample, and after the service's adapter.
+**Timing.** Staging changes are deployed in batches called trains. The engine's part started on 2026-11-19, in
+parallel with train 7's last fixes, on top of train 7 with its change to how `/resolve` holds its answer as text. It
+lands in train 8. Train 7 deploys first, with the library's part and the outside review's fixes. The service's
+adapter goes before the engines (section 5.1).
 
 ## 9. Open points
+
+Both points gate the rollout of the engines, not their implementation.
 
 1. **Kulkov** (the service's pair identity is his): may the service's search rows state the n1 id? Recommended: no;
    they keep the p2 id with the join rule of section 3.8, and `native_pair_id` goes into the token holder's traversal
