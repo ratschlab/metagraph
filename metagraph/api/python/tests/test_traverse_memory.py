@@ -296,6 +296,113 @@ class TestExportPeaks(unittest.TestCase):
                 self.assertGreaterEqual(b.peak_bytes, peak, name)
 
 
+class TestSeedAndSelections(unittest.TestCase):
+    """The lane's sweep of the GPT final review (M2, M4): an export that writes the seed
+    charges it, and a call given a list of walks admits its copies of the list before it
+    makes them -- allocation measured before the stop, not only the stop."""
+
+    @staticmethod
+    def _long_seed(name, n=10 ** 6):
+        """The fixture with |n| A's inserted in the middle of its seed: its first and last
+        15 bases (more than k - 1) unchanged."""
+        import copy
+        import dataclasses
+        g = copy.deepcopy(T.graphlet(name))
+        h = len(g.seed.sequence) // 2
+        s = g.seed.sequence[:h] + 'A' * n + g.seed.sequence[h:]
+        g.seed = dataclasses.replace(g.seed, sequence=s, length_bp=len(s),
+                                     num_kmers=len(s) - g.k + 1)
+        return g
+
+    def test_a_long_seed_is_charged(self):
+        """to_gfa() writes the seed's S line (uncharged: 26,912 B charged against 3.0 MB
+        traced for a 1 Mbp seed on the fork fixture) and to_json() spells each continuation
+        from seed and flank (the whole seed copied per leaf, 1.0 MB against 60 KB); now the
+        S line is charged with its copy in the joined text, and a continuation copies only
+        the bases it takes from the seed. The account bounds the warm traced peak; the
+        output is the one of the same graphlet's short seed where the seed is not written."""
+        import copy
+        for name in ('fork', 'merge', 'annotate'):
+            g0 = self._long_seed(name)
+            for op, fn in (('to_gfa', lambda g, **k: g.to_gfa(**k)),
+                           ('to_json', lambda g, **k: g.to_json(**k)),
+                           ('to_fasta', lambda g, **k: g.to_fasta(**k))):
+                with self.subTest(name, op=op):
+                    b = LocalBudget()
+                    got = fn(copy.deepcopy(g0), budget=b)
+                    self.assertEqual(got, fn(copy.deepcopy(g0)))
+                    xs = [copy.deepcopy(g0), copy.deepcopy(g0)]
+                    peak, _ = _warm_peak(lambda: fn(xs.pop()), lambda: fn(xs.pop()))
+                    self.assertLessEqual(peak, b.peak_bytes)
+            # a segment's context reads at most k - 1 bases of the seed, its last (its first
+            # on the left arm): the same as on the graphlet's own seed, whose ends the long
+            # one keeps
+            short, long_ = T.graphlet(name), self._long_seed(name)
+            self.assertLess(short.k - 1, len(short.seed.sequence) // 2)
+            gfa = [x for x in long_.to_gfa().split('\n') if not x.startswith('S\tseed')]
+            self.assertEqual(gfa, [x for x in short.to_gfa().split('\n')
+                                   if not x.startswith('S\tseed')])
+
+    def test_a_list_of_walks_is_admitted_before_it_is_copied(self):
+        """to_fasta(leaves=<list>) resolved the list, its set of leaves and price lists, and
+        ops.walks_at() copied its ids (the list, the token's arguments, the slice) before
+        the first charge: 1,000,000 ids allocated 33.8 MB and 31 MB before a 1 MiB budget
+        stopped them. Now the copies are admitted first: the traced peak before the stop
+        stays below 64 KB under 1 MiB, and under 2,000 lwu."""
+        import copy
+        ids = [0] * 10 ** 6
+        g = T.graphlet('fork')
+        for lim in ({'memory_mb': 1}, {'work_units': 2000}):
+            for name, fn in (
+                    ('to_fasta', lambda h: h.to_fasta('right', leaves=ids,
+                                                      budget=LocalBudget(**lim))),
+                    ('walks_at', lambda h: ops.walks_at(h, 'right', ids,
+                                                        budget=LocalBudget(**lim)))):
+                with self.subTest(name, **lim):
+                    xs = [copy.deepcopy(g), copy.deepcopy(g)]
+
+                    def call():
+                        try:
+                            fn(xs.pop())
+                        except MT.LocalBudgetExceeded:
+                            return 'stop'
+                    peak, out = _warm_peak(call, call)
+                    self.assertEqual(out, 'stop')
+                    self.assertLess(peak, 64 * 1024)
+        # within budget: the same answers
+        sel = [1, 0, 1, 0]
+        b = LocalBudget()
+        self.assertEqual(g.to_fasta('right', leaves=sel, budget=b),
+                         g.to_fasta('right', leaves=sel))
+        self.assertEqual([w.path_id for w in ops.walks_at(g, 'right', sel, budget=b)],
+                         [w.path_id for w in ops.walks_at(g, 'right', sel)])
+        self.assertEqual([w.path_id for w in ops.walks_at(g, 'right', iter(sel), budget=b)],
+                         sel)
+        # a stop while the ids are admitted is still a list's stop: no rows, and the call's
+        # own resume= (None for a fresh call, the token it was given when resumed); the
+        # walks are made in chunks of 32, so a stop with rows needs more ids than that
+        sel = [1, 0] * 40
+        want = [w.path_id for w in ops.walks_at(g, 'right', sel)]
+        full = LocalBudget()
+        ops.walks_at(g, 'right', sel, budget=full)
+        token = None
+        for k in range(1, full.used_work):
+            try:
+                ops.walks_at(g, 'right', sel, budget=LocalBudget(work_units=k))
+            except MT.LocalBudgetExceeded as e:
+                if e.partial.rows:
+                    first, token = [w.path_id for w in e.partial.rows], e.partial.resume
+                    break
+        self.assertIsNotNone(token)
+        for head, resume in (([], None), (first, token)):
+            with self.assertRaises(MT.LocalBudgetExceeded) as cm:
+                ops.walks_at(g, 'right', sel, budget=LocalBudget(work_units=0), resume=resume)
+            self.assertEqual(cm.exception.partial.rows, [])
+            self.assertEqual(cm.exception.partial.resume, resume)
+            self.assertEqual(head + [w.path_id for w in ops.walks_at(g, 'right', sel,
+                                                                     resume=resume)], want)
+
+
 # ------------------------------------------------------------------ the comparison's scans
 # restated without streaming: each walk spelled on its own
 

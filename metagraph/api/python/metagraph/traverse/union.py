@@ -42,8 +42,8 @@ from . import derive
 from . import ops as _ops
 from ._codec import REASON, GraphletFormatError
 from .attempts import TraverseResponse
-from .budget import (BASE_SHIFT, DICT, DICT_KEY, INT, LIST_ITEM, SET, SET_ITEM, STR, TUPLE,
-                     W_ELEM, W_ROW, W_STEP, LocalBudgetExceeded, Partial)
+from .budget import (DICT, DICT_KEY, INT, LIST_ITEM, SET, SET_ITEM, STR, TUPLE, W_ELEM, W_ROW,
+                     W_STEP, LocalBudgetExceeded, Partial)
 from ._stitch import _RANK as _CAUSE_RANK
 from ._stitch import StitchedGraphlet, part_name
 from .client import answered_pair
@@ -169,6 +169,13 @@ _M_META = 6             # copies of the inputs' metadata JSON at once: an absent
 #                         twice its size), its UTF-8 bytes and the encoder's chunks (fitted:
 #                         a detail of 100,000 quotes peaks at 1.08x five copies on 3.14)
 _M_LABEL_WORK = 260     # what _labels_for() holds per label while it runs
+_M_DESC = 1536          # union_pairs()' preparation per input and expected pair: its record,
+#                         its descriptions (the stated pair's, the one kept), its name in the
+#                         ambiguous_pair pass, its class and the dicts' entries (fitted: at
+#                         most 1,335 B on CPython 3.11, 1,134 on 3.14, 200 failed records)
+_M_KEY = 256            # a seqs_order key's description and entry (fitted: at most 153 B)
+_W_MATCH = 4 * W_ELEM   # two pair descriptions matched (Appendix A.4's rule: up to seven
+#                         fields of each read)
 _M_FIG = 160            # a walk's figures: the record, whole_in and held_in, its slot
 _DERIVATION_CAUSES = {'no_carrier': 'no label carries the whole seed',
                       'no_trace_carrier': 'no label carries the whole seed by trace',
@@ -574,6 +581,27 @@ def _elem_meta(e):
     return n
 
 
+def _prep_price(results, expected_pairs, seqs_order):
+    """(lwu, bytes) of union_pairs()' preparation, read from the inputs' counts and their
+    stated pairs before any of it runs (GPT final review M4): per input and expected pair its
+    classification and descriptions (W_ROW, _M_DESC) and twice its stated pair's JSON bound
+    (the tags and sort keys that copy a name); per seqs_order key its description (W_ROW,
+    _M_KEY); _W_MATCH per comparison of the passes quadratic in their number -- the keys
+    among themselves, every description against every other (ambiguous_pair), the pair
+    classes, the classes against the keys -- and 1 lwu per 8 bytes of the stated pairs. The
+    check of a description's hits among themselves is charged where it runs."""
+    rs = results if isinstance(results, (list, tuple)) else ()
+    ex = expected_pairs if isinstance(expected_pairs, (list, tuple)) else ()
+    ks = seqs_order if isinstance(seqs_order, dict) else {}
+    names = sum(_json_bound(x.get('pair')) for x in rs if isinstance(x, dict)) + sum(
+        _json_bound(p) for p in ex if isinstance(p, (str, dict))) + sum(
+        _json_bound(k) for k in ks if isinstance(k, (str, tuple)))
+    m, nk = len(rs) + len(ex), len(ks)
+    pairs = nk * (nk - 1) // 2 + m * m + m * (m - 1) // 2 + m * nk
+    return (W_ROW * (m + nk) + _W_MATCH * pairs + (names >> 3),
+            _M_DESC * m + _M_KEY * nk + 2 * names)
+
+
 def _err_text(e):
     return e if isinstance(e, str) else str(e)
 
@@ -624,10 +652,14 @@ def union_pairs(results, *, seed=None, expected_pairs=None, seqs_order=None, bud
     over the pairs given.
     seqs_order: pair (a graph name, or a (graph, graph_path, annotation_path) tuple) ->
     'verified' | 'count_only' | None, as GET /capabilities states it; a pair not given
-    reads 'unknown'. budget= (local limits): the inputs' metadata (error strings, absent
-    results, stated pairs, envelopes) and the seed are charged before the seed checks, then
-    the trie pass; a stop raises with no partial. A budget smaller than the metadata and seed
-    therefore stops before the different_seed, duplicate_pair and not_expected refusals.
+    reads 'unknown'. budget= (local limits): first the preparation, from the inputs' counts
+    and stated pairs before any input is classified (per input its descriptions, and the
+    comparisons of the matching passes, quadratic in the number of inputs); then the
+    inputs' metadata (error strings, absent results, stated pairs, envelopes) and the seed,
+    before the seed checks; then the trie pass. A stop raises with no partial. A budget
+    smaller than the preparation, metadata and seed therefore stops before the refusals
+    checked after them (no_pair, ambiguous_pair, different_seed, duplicate_pair,
+    not_expected, ...).
     Refusals (CombineRefused, .code) in the order of Appendix A.2."""
     return _B.run_scoped(budget, 'union_pairs', (),
                          lambda b: PairUnion._build(results, seed, expected_pairs, seqs_order, b))
@@ -725,6 +757,10 @@ class PairUnion:
     @classmethod
     def _build(cls, results, seed, expected_pairs, seqs_order, b):
         self = cls.__new__(cls)
+        if b is not None:
+            # the preparation (classification, descriptions, the matching passes), admitted
+            # before it runs (GPT final review M4)
+            b.charge(*_prep_price(results, expected_pairs, seqs_order))
         exp, so = _check_args(results, seed, expected_pairs, seqs_order)
         elems = _classify(results)
         # view_unsupported
@@ -788,6 +824,10 @@ class PairUnion:
             [('expected_pairs[%d]' % i, d) for i, d in enumerate(exp or [])]
         for name, d in descs:
             hits = [x for _, x in descs if x is not d and _matches(d, x)]
+            if b is not None and len(hits) > 1:
+                # its hits matched among themselves: known only now (cubic where many
+                # inputs name one pair), charged before they are
+                b.charge(_W_MATCH * (len(hits) * (len(hits) - 1) // 2))
             for i in range(len(hits)):
                 for j in range(i + 1, len(hits)):
                     if not _matches(hits[i], hits[j]):
@@ -823,11 +863,15 @@ class PairUnion:
             # copies of its canonical JSON at its bound, and 1 lwu per 8 bytes of it; the
             # seed (seed=, else the first part's): its case-mapped copy, kept, and the
             # digest's JSON of it (the encoder's chunk and their join) and its UTF-8 bytes
-            # (Opus fix review N2)
+            # (Opus fix review N2); and per part the same four again: its retrieval
+            # identity's JSON, kept, holds the seed, and the digest serializes it (the
+            # lane's sweep of GPT final review M2: 2,169,236 B traced against 646,778 B
+            # charged for six parts of a 100,000-base seed)
             meta = sum(map(_elem_meta, elems)) + _json_bound(exp) + _json_bound(
                 [k for _, _, k in so])
             n = len(seed) if seed is not None else len(parts[0].graphlet.seed.sequence)
-            b.charge((meta >> 3) + (n >> 6), _M_META * meta + 4 * (STR + n))
+            b.charge((meta >> 3) + ((1 + len(parts)) * n >> 6),
+                     _M_META * meta + 4 * (1 + len(parts)) * (STR + n))
         # different_seed
         alphabet = parts[0].graphlet.alphabet if parts else None
         if parts:
@@ -1694,9 +1738,17 @@ class PairUnion:
             length = figs[wid].length_bp
             if b is not None:
                 self._charge_walk(b, t, node, False)
-                b.charge(W_ROW + (length >> BASE_SHIFT if spell else 0),
-                         400 + (STR + length if spell else 0))
+                if spell:
+                    # the walk's text is the seed and its flank, spelled at spell()'s price:
+                    # three copies (the joined pieces, the reversed flank, the joined text),
+                    # two of them dropped once the walk is built (GPT final review M2)
+                    n = length + len(self._seed_seq)
+                    b.charge(W_ROW + W_STEP * t.nsegs(node) + (n >> 8), 400 + 3 * (STR + n))
+                else:
+                    b.charge(W_ROW, 400)
             out.append(self._walk(t, wid, node, False, spell, b=b))
+            if b is not None and spell:
+                b.release(2 * (STR + n))
         return out
 
     def _walk_by_id(self, side, walk):

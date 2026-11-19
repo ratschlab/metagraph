@@ -1633,7 +1633,9 @@ budgets`_): ``stitch()``, ``walks()``, ``walk()``, ``spell()``, ``continuation()
 each junction's rule-check context, each walk's causes), and a call charges each at its
 cold price whether it is kept or not, so it charges the same, and stops at the same row,
 whatever earlier calls cached. ``walk()`` charges the walk it builds as ``walks()``
-charges each, and ``summary()`` reads the evidence under its own budget. The accessors
+charges each, and ``summary()`` reads the evidence under its own budget. ``stitch()``
+admits each graphlet it builds (its labels and its digest) before building it, a plain
+parent's own wrapper included: ``stitch(g)`` under a zero budget stops. The accessors
 that return stored fields or measure the object take no budget: ``arms()``,
 ``arm_of()``, ``label()``, ``provenance()``, ``memory_bytes()`` and the stored
 attributes ``parts``, ``root``, ``junctions``, ``labels``, ``identity``, ``digest``,
@@ -2475,7 +2477,8 @@ default) nothing is budgeted and every answer is byte for byte what it was befor
   memory limit holds for each call; the work of the calls that share one budget adds
   up (an allowance). One exception to "charged before": a record of output text is
   charged as soon as it is built (its size is known only then), and so are the walk ids
-  a one-shot iterator gives ``to_fasta(leaves=)`` (copied as they are read).
+  a one-shot iterator gives ``to_fasta(leaves=)`` or ``walks_at()`` (copied as they are
+  read); a list of walk ids is admitted before it is copied.
 * ``LocalLimits(work_units=None, memory_mb=None, deadline_s=None)`` holds the limits
   (``None``: unlimited). ``deadline_s`` (elapsed seconds since the budget was made) and
   ``budget.cancel()`` (from another thread) stop a call at its next charge point; they
@@ -2500,9 +2503,11 @@ answers as on a fresh model.
   ``splits()``, ``walks(by='id')``, ``walks_at()`` -- put the whole rows they made, a
   prefix in their documented order, in ``e.partial.rows``, and a token in
   ``e.partial.resume`` that the same call takes as ``resume=`` to go on after the last
-  row. A token of another call, other arguments or another graphlet is refused: it
-  binds the digest of the graphlet's body (``Graphlet.body_digest``, made by the parse),
-  which the same body parsed again, or saved and loaded, shares.
+  row. A stop before the call has bound its arguments returns no rows and the call's
+  own ``resume=`` (``None`` for a fresh call): the same call with it starts where the
+  stopped one began. A token of another call, other arguments or another graphlet is
+  refused: it binds the digest of the graphlet's body (``Graphlet.body_digest``, made by
+  the parse), which the same body parsed again, or saved and loaded, shares.
 * **Ranked lists and summaries** -- ranked ``walks()``, ``rank_walks()``,
   ``label_summary()``, ``summary()``, ``support_profile()``, ``support_changes()``,
   ``subgraph()``, ``continuation()``, ``next_request()`` -- raise with no partial: a
