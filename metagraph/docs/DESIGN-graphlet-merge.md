@@ -1435,7 +1435,7 @@ document is shown. `provenance()` follows the same rule: its `pair` and `request
 | `no_seed` | `no result carries a graphlet, so the union has no seed sequence: pass seed= (the oriented seed the request sent)` |
 | MissingEnvelope | today's `require_envelope('union_pairs()')` text, as for `stitch()` (§3.1) |
 | `p2_pair_id`, `bad_pair_id`, `pair_id_mismatch` | `result %s: %s`, the second `%s` the words of `client.PairIdError` for the pair its envelope (the `J` line) states: a `pair_id` that is no n1 id (a p2 id; `''`, a non-string, anything else), an id beside one path only, or an id beside paths that are not its. One rule (`client._pair()`) with the same codes and words wherever a document's pair is read: `answered_pair()` and `GraphletStore.request_of()` raise the PairIdError, `stitch()` refuses it (B.1), the MCP tools answer its code (`graphlet_load`, replays) |
-| `bad_pair_tag` | `result %s: the envelope's %s is not a string (%s): a pair's release and index tags are strings`, naming the tag (`release` or `capabilities.release`; for a seed result without a graphlet also `index_ns`, `index_fp` and `index_meta_fp`, the envelope's or its capabilities': a part's index tags are its `H` line's) and its type. Checked with the pair statement, before any description is compared: every description holds strings only, as a caller's pair statement must (a list as a release raised `TypeError` before) |
+| `bad_pair_tag` | `result %s: the envelope's %s is not a string (%s): a pair's release and index tags are strings`, naming the tag (`release` or `capabilities.release`; for a seed result without a graphlet also `index_ns`, `index_fp` and `index_meta_fp`, the envelope's or its capabilities': a part's index tags are its `H` line's) and its type. Checked after the envelope's `pair_id` (whose refusals come first), before any description is compared: every description holds strings only, as a caller's pair statement must (before, a list as a release raised `TypeError`, a falsy one, `0`, `False`, `[]` or `{}`, read as unstated, and a non-string tag the description did not read, such as `capabilities.release` beside a top-level release, passed) |
 | `pair_mismatch` | `result %s was answered on pair %s, and the caller states pair %s: state the pair it was answered on, or none`; where the envelope names its pair by `pair_id` only and the caller by a path without one, and the call states no paths for that id (A.4, rule 3): `result %s was answered on pair %s, named by its pair_id only, and the caller states pair %s by a path without its pair_id: the two cannot be compared; state the pair_id it was answered on, or none` |
 | `no_pair` | `result %s names no pair (no graph tag, no index_ns): pass it as {pair, graphlet} or {pair, result}` |
 | `ambiguous_pair` | `pair %s matches both %s and %s: state its pair_id (or its paths), release or index_ns` |
@@ -2146,9 +2146,10 @@ graphlets.rst examples run in `run_examples.py` (CI's fixture-checks job).
   `memory_bytes()` is their sum plus the trie.
 - **The trie.** Built once, arm by arm, by one depth-first pass over each part's first-parent tree (walks and stubs,
   §2.4). Bases are read from the part's segments, not copied, so the comparisons are O(sum of the parts' bases),
-  linear on a comb too. Each raw edge holds a cover entry per pair spelling it (at most 120 bytes) and its union
-  segment a piece per such entry (at most 280 bytes), and its bases are a reference into a part (CPython 3.11 and
-  3.14, measured); a support holds its pieces and two counts, never a list of walks. The trie has at most as many
+  linear on a comb too. Each raw edge holds a cover entry per pair spelling it (about 120-130 bytes, up to about 172
+  where most covers were just resized; charged at 192) and its union segment a piece per such entry (at most 290
+  bytes), and its bases are a reference into a part (CPython 3.11 and 3.14, measured; the bound is the call's, the
+  per-entry figures are fits); a support holds its pieces and two counts, never a list of walks. The trie has at most as many
   segments as the parts together, plus one per point where a pair's spelling ends, merges or turns off and one per
   merge segment's start: for 11 parts of about 2,000 segments each, about 22,000 union segments, 5–10 MB
   [estimate]. Parts that split nothing add a cover entry per segment: 2,000 answers of one fixture hold 23 MB.

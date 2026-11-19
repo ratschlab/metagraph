@@ -351,9 +351,10 @@ def front_prefix_len(prev, name):
 
 def front_decode_parts(prev, p_tok, suffix_tok):
     p = parse_int(p_tok)
-    if prev.isascii():
-        # an ASCII name's bytes are its characters: no encoded copies, and the suffix as it
-        # is decoded when the name shares nothing
+    if prev.isascii() and suffix_tok.isascii():
+        # ASCII names' bytes are their characters: no encoded copies, and the suffix as it
+        # is decoded when the name shares nothing (a suffix beyond ASCII takes the bytes
+        # path, which refuses a lone surrogate as before)
         if p > len(prev):
             raise CodecError('front-coding prefix %d beyond the previous name' % p)
         u = pct_unescape(suffix_tok)

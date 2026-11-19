@@ -725,7 +725,11 @@ class TestRefusals(unittest.TestCase):
         index tag (its own, or its capabilities') is not a string is refused bad_pair_tag,
         naming the result and the tag, where a document's pair statement is checked: a
         list as a release raised TypeError in _tags(), a number was taken as a release. A
-        caller's pair statement with such a value was refused already (not a pair)."""
+        caller's pair statement with such a value was refused already (not a pair). A falsy
+        one (0, False, [], {}) was read as no release, and a capabilities tag beside a string
+        one was never read: refused too. The pair-id refusals of the same result come
+        first. Each case checks the code before the text (on a library without the code,
+        the case fails on what the call did)."""
         def caps(g, **kw):
             return with_env(g, capabilities=dict(g.envelope.get('capabilities') or {}, **kw))
         a, b = T.graphlet('merge'), T.graphlet('merge_ties')
@@ -733,20 +737,31 @@ class TestRefusals(unittest.TestCase):
             ([with_env(a, release=['r1', 'r2']), with_env(b, release='r3')], 0, 'release', 'list'),
             ([b, with_env(a, release=5)], 1, 'release', 'int'),
             ([caps(a, release={'id': 'r1'})], 0, 'capabilities.release', 'dict'),
-            ([{'pair': 'gM', 'graphlet': with_env(a, release=True)}], 0, 'release', 'bool')]
+            ([{'pair': 'gM', 'graphlet': with_env(a, release=True)}], 0, 'release', 'bool'),
+            ([with_env(a, release=0), b], 0, 'release', 'int'),
+            ([with_env(a, release=False), b], 0, 'release', 'bool'),
+            ([with_env(a, release=[]), b], 0, 'release', 'list'),
+            ([with_env(a, release={}), b], 0, 'release', 'dict'),
+            ([caps(with_env(a, release='r1'), release=7), b], 0, 'capabilities.release',
+             'int')]
         for results, pos, tag, kind in cases:
             with self.subTest(tag=tag, kind=kind):
-                refused(self, 'bad_pair_tag', lambda: union_pairs(results),
-                        U.TEXTS['bad_pair_tag'] % ('result %d' % pos, tag, kind))
+                got = refused(self, 'bad_pair_tag', lambda: union_pairs(results))
+                self.assertEqual(got, U.TEXTS['bad_pair_tag'] % ('result %d' % pos, tag, kind))
+        # within one result the pair-id refusals come first (graphlets.rst's order)
+        refused(self, 'p2_pair_id', lambda: union_pairs(
+            [with_env(T.graphlet('merge'), graph='g', pair_id='p2-0123456789abcdef',
+                      release=['x']), T.graphlet('merge_ties')]))
         # a response's seed result without a graphlet: its envelope states the index tags
         for k in ('index_ns', 'index_fp', 'index_meta_fp'):
             r = response_of(extra_results=[absent_result('not_in_graph', seed_len=30)])
             r.envelope = dict(r.envelope, capabilities=dict(
                 r.envelope.get('capabilities') or {}, **{k: 7}))
             with self.subTest(tag=k):
-                refused(self, 'bad_pair_tag', lambda: union_pairs(
-                    [{'response': r, 'index': 0}], seed='A' * 30),
-                    U.TEXTS['bad_pair_tag'] % ('result 0', 'capabilities.' + k, 'int'))
+                got = refused(self, 'bad_pair_tag', lambda: union_pairs(
+                    [{'response': r, 'index': 0}], seed='A' * 30))
+                self.assertEqual(got, U.TEXTS['bad_pair_tag'] % ('result 0', 'capabilities.' + k,
+                                                                'int'))
         # a part's index tags are its H line's: its envelope's are not read
         union_pairs([{'pair': 'gM', 'graphlet': caps(a, index_fp=7)},
                      {'pair': 'gT', 'graphlet': b}])

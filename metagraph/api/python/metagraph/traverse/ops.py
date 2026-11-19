@@ -54,7 +54,7 @@ from ._codec import REASON, RESOURCE_CODES, UNLIMITED, GraphletFormatError
 from .budget import (
     BASE_SHIFT, DICT, DICT_KEY, ID_SHIFT_C, INT, LIST, LIST_ITEM, SET, SET_ITEM, STR, TUPLE,
     W_ELEM, W_ROW, W_STEP, LocalBudgetExceeded, Partial, dict_bytes, list_bytes, record_bytes,
-    set_bytes, sort_work, str_bytes, text_bytes,
+    set_bytes, sort_work, str_bytes,
 )
 from .model import (
     AmbiguousLabel, ARM_SIDES, BadSelector, Branch, Change, Claim, Comparison,
@@ -2629,14 +2629,16 @@ def _charge_deepcopy(lb, x):
     that sizes |x| (charged as it goes, budget.value_size()), W_CONTAINER per container, the
     copy and the memo deepcopy() drops on return. A strategy's size is the caller's: a
     change_cost table, labels.extra or any other list it gives (G4P's G7: 10,000 names at
-    13.3x the account). The work of a value of up to _SMALL_VALUE nodes -- every strategy
-    a server echoes, 104 nodes at most among the fixtures -- is within the call's base
-    (W_CALL), as it was: an ordinary continuation stops where it stopped."""
+    13.3x the account). A value of up to _SMALL_VALUE items (list elements and dict
+    entries, the unit value_size()'s |free| counts) is not charged as work -- every strategy
+    a server echoes, 91-104 nodes among the fixtures, whose copy takes about 80-156 lwu of
+    time, 2-4 copies a call -- so that an ordinary continuation stops where it stopped; its
+    memory is charged."""
     if x is None:
         return 0
-    nodes, conts, copied, _ = _B.value_size(x, lb, _SMALL_VALUE)
+    _, conts, copied, _, _, items = _B.value_size(x, lb, _SMALL_VALUE)
     held, memo = _B.deepcopy_bytes(conts, copied)
-    lb.charge(_B.W_CONTAINER * conts if nodes > _SMALL_VALUE else 0, held + memo)
+    lb.charge(_B.W_CONTAINER * conts if items > _SMALL_VALUE else 0, held + memo)
     lb.release(memo)
     return held
 
@@ -2992,8 +2994,12 @@ def next_request(g, arm, leaves, bp=None, reduce_budget=True, reset_branches=Fal
     ValueError. A single-graph retrieval names no pair. Raises MissingEnvelope on
     a body-only graphlet. budget= (local limits) a LocalBudget, not the request's loss
     budget: the continuations, the rebuilt labels.extra and the switch searches are charged;
-    a stop raises, with no partial. Any other value of budget= is a keyword override like
-    the others (strategy['budget']); a local budget then comes from local_budget() only."""
+    a stop raises, with no partial. The deep copies of the strategy and of the overrides are
+    charged their memory, and their work only for a value of more than 128 items (list
+    elements and dict entries): a copy of a server's strategy (about 80-156 lwu of time each,
+    2-4 copies a call) is not charged as work, so an ordinary continuation stops where it
+    did; a caller's large list is charged whole. Any other value of budget= is a keyword
+    override like the others (strategy['budget']); a local budget then comes from local_budget() only."""
     lb = _local_or_override(budget, overrides)
     if lb is None:
         return _next_request(g, arm, leaves, bp, reduce_budget, reset_branches, None,
@@ -3808,8 +3814,12 @@ def _index_verdict(key, values, cb=None):
     against 18 KB charged for two names of 1 MB)."""
     if cb is not None and values:
         cb.charge(sum(len(v) for v in values if isinstance(v, str)) >> _B.TEXT_SHIFT)
-        n = 128 + sum(text_bytes(v) if isinstance(v, str) else _B.value_size(v, cb)[3]
-                      for v in values)
+        # repr() at its version-free bound (repr_bytes()); a value that is no string at ten
+        # times its JSON bound; one character beyond ASCII widens the whole statement
+        narrow = sum(_B.repr_bytes(v) for v in values if isinstance(v, str) and v.isascii())
+        rest = sum(_B.repr_bytes(v) if isinstance(v, str) else 10 * _B.value_size(v, cb)[3]
+                   for v in values if not (isinstance(v, str) and v.isascii()))
+        n = 128 + narrow + rest if not rest else 4 * (128 + narrow) + rest
         cb.charge(n >> _B.TEXT_SHIFT, 2 * n)
         cb.release(n)
     if key in ('ns', 'release'):
@@ -6345,29 +6355,36 @@ def _summary(g, arm, max_bytes, b):
         # JSON and its UTF-8 copy hold it again): the seed id, the namespace, the top labels'
         # names, the effects beyond their length counted above, the stop's message and
         # actions -- each at its escaped bound (text_bytes()), its scan charged first
-        texts = [(g.seed_summary.get('seed') or {}).get('seed_id', ''), g.index_ns or '']
-        for side in sides:
-            texts += [t['name'] for t in out['arms'][side]['top_labels']]
-        if g.resource_stop is not None:
-            texts.append(g.resource_stop.message)
-            texts += g.resource_stop.actions
-        texts = [t for t in texts if isinstance(t, str)]
-        # (and the stop's actions copied into its caveat, a list held with the answer)
+        def caller_texts():
+            yield (g.seed_summary.get('seed') or {}).get('seed_id', '')
+            yield g.index_ns or ''
+            for side_ in sides:
+                for t in out['arms'][side_]['top_labels']:
+                    yield t['name']
+            if g.resource_stop is not None:
+                yield g.resource_stop.message
+                yield from g.resource_stop.actions
+            for c in out['caveats']:
+                yield c.get('effect')
+        # counted first (a pass that makes nothing), then the list of them charged before
+        # it is made, with the stop's actions copied into its caveat (held with the answer)
+        k = scan = 0
+        for t in caller_texts():
+            k += 1
+            scan += len(t) if isinstance(t, str) else 0
         acts = len(g.resource_stop.actions) if g.resource_stop is not None else 0
-        b.charge(W_ELEM * len(texts) + (sum(map(len, texts)) >> _B.TEXT_SHIFT),
-                 list_bytes(len(texts)) + list_bytes(acts))
-        wide = sum(map(text_bytes, texts))
+        b.charge(W_ELEM * k + (scan >> _B.TEXT_SHIFT), list_bytes(k) + list_bytes(acts))
+        texts = [t for t in caller_texts() if isinstance(t, str)]
+        # one string beyond ASCII widens the whole JSON (joined_bytes())
+        text = _B.joined_bytes(text, texts)
         # each size() holds its text three times at its peak (3.11: a long string's
         # escaped piece, the joined text and its UTF-8; 3.14: its writer's buffer, grown
         # by a quarter, and the UTF-8), and its JSON pieces besides (3.11 keeps one per
         # atom until the join): the caller's strings and the answer's own atoms, at most
         # 256 here
         pieces = _B.DUMPS_ATOM * (len(texts) + 256)
-        effects = [c['effect'] for c in out['caveats'] if isinstance(c.get('effect'), str)]
-        wide += sum(text_bytes(e) - len(e) for e in effects if not e.isascii())
-        b.release(list_bytes(len(texts)))
-        del texts, effects
-        text += wide
+        b.release(list_bytes(k))
+        del texts
         size_price = 32 + (text >> _B.TEXT_SHIFT)
 
     def size():

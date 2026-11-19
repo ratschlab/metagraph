@@ -470,7 +470,7 @@ def _to_json(g, bud, done=None):
         if bud is not None:
             # a JSON value the server sends, copied whole: its containers before they are
             # copied (the walk that counts them charged as it goes)
-            nodes, conts, copied, _ = _B.value_size(work, bud)
+            _, conts, copied, _, _, _ = _B.value_size(work, bud)
             bud.charge(_B.W_CONTAINER * conts, copied)
         out['work'] = _json_copy(work)
     if g.seed_summary.get('duplicate'):

@@ -170,9 +170,12 @@ _ID_LIKE = re.compile(r'[A-Za-z][A-Za-z0-9]{0,7}-[0-9A-Fa-f]{8}-?[0-9A-Fa-f]{4}-
 # export, a comb), so that the budget's account bounds the call's peak (budget.py).
 _M_NODE = 300           # a raw trie node: its children dict, its depth
 _M_EDGE = 420           # a raw edge: its five list slots, its reference, its cover dict
-_M_COVER = 144          # a cover entry of an edge (part -> (segment, offset)), walked or
-#                         copied by a split (measured: at most 128 B per entry, 2,000 parts
-#                         that branch off one spine, CPython 3.14; 119 on 3.11; 120 at 400)
+_M_COVER = 192          # a cover entry of an edge (part -> (segment, offset)), walked or
+#                         copied by a split (measured: 128 B per entry, 2,000 parts that
+#                         branch off one spine, CPython 3.14, 119 on 3.11; up to about 172 B
+#                         where most covers were just resized, their tables half empty, and
+#                         the offsets above 256: a dict's worst fill 54 B, the tuple 64, the
+#                         offset's int 28, a slot; Opus review of b8fb7a8d6, m2)
 _M_SEG = 200            # a part segment's entries: its nodes, the walks and stubs below it
 _M_USEG = 1280          # a union segment: the object, its dicts and lists, node_in/out
 _M_PIECE = 320          # a raw edge's cover entry in its union segment: the segment's cover
@@ -548,14 +551,14 @@ def _env_desc(env, g=None, where='the result'):
     (_tags()) holds strings only, as a caller's (_pair_desc())."""
     env = env if isinstance(env, dict) else {}
     caps = env.get('capabilities') if isinstance(env.get('capabilities'), dict) else {}
+    d = {}
+    # the pair-id refusals first (p2_pair_id, bad_pair_id, pair_id_mismatch), then the tags
+    ap = answered_pair(env)
     for k in _ENV_TAGS if g is None else _ENV_TAGS[:1]:
         for src, name in ((env, k), (caps, 'capabilities.' + k)):
             v = src.get(k)
             if v is not None and not isinstance(v, str):
-                raise C.CombineRefused('bad_pair_tag', TEXTS['bad_pair_tag']
-                                       % (where, name, type(v).__name__))
-    d = {}
-    ap = answered_pair(env)
+                raise _refuse('bad_pair_tag', None, where, name, type(v).__name__)
     if ap is not None:
         d['graph'], d['graph_path'], d['annotation_path'], d['pair_id'] = ap
     d['release'] = env.get('release') or caps.get('release') or None
@@ -3035,7 +3038,14 @@ class _Trie:
             el = self.e_len[e]
             lim = min(el, n - i)
             self.bases_read += lim
-            if src.startswith(w[i:i + lim], o):
+            # (the slice compared is a copy of up to the segment's remaining bases, held
+            # for the compare: charged before it is made, its work in the segment's price)
+            if b is not None:
+                b.charge(0, STR + lim)
+            same = src.startswith(w[i:i + lim], o)
+            if b is not None:
+                b.release(STR + lim)
+            if same:
                 m = lim
             else:
                 m = 1

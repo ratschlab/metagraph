@@ -24,9 +24,10 @@ With a budget, a local call either completes or stops and says so (DESIGN §5.4)
     a stop's message and actions -- charged before it is serialized, escaped, encoded or
     front-coded, at its escaped bound (text_bytes()), a JSON value its sender sizes -- a
     seed summary's work block, the envelope of a J line, a strategy and the keyword
-    overrides deep-copied -- by a walk charged as it goes (value_size(); the work of a
-    strategy of up to 128 nodes is within the call's base), and text joined with a
-    character beyond ASCII at four bytes a character), released inside a call only where a
+    overrides deep-copied -- by a walk charged as it goes (value_size(); a copy of a
+    strategy of up to 128 items is not charged as work), and text joined with a
+    character beyond ASCII at four bytes a character, all of it; no bound reads the
+    interpreter's Unicode tables or object sizes), released inside a call only where a
     loop drops a temporary before its next step: the account bounds the call's peak. Every call also
     carries a base (CALL_BASE bytes, W_CALL lwu) for its frames, temporaries and setup,
     charged with its first charge. It is a model, not a measurement: Python can
@@ -69,6 +70,7 @@ framework's serialisation of a result, and interpreter work outside the charge p
 
 import contextvars
 import math
+import re
 import sys
 import time
 from contextlib import contextmanager
@@ -261,18 +263,44 @@ def dict_bytes(k):
     return DICT + DICT_KEY * k
 
 
+# the ASCII controls json.dumps() escapes as \u00XX (a fixed set, the same in every version)
+_JSON_CONTROL = re.compile('[\\x00-\\x1f]')
+
+
 def text_bytes(s):
-    """A bound of the bytes the str |s| takes once escaped into a larger str, as json.dumps
-    (ensure_ascii=False) or repr() escapes it, read without escaping it: printable ASCII a
-    byte a character, its quotes and backslashes two; other ASCII six (\\u00XX); beyond
-    ASCII four bytes per character of the escaped form (CPython's widest str; its UTF-8 is at
-    most as long), forty where a character is not printable (repr's \\UXXXXXXXX). Its scan
-    costs len(s) >> TEXT_SHIFT lwu."""
-    n = len(s) + 2
-    if s.isprintable():
-        n += s.count('"') + s.count("'") + s.count('\\')
-        return n if s.isascii() else 4 * n
-    return 6 * n if s.isascii() else 40 * n
+    """A bound of the bytes the str |s| takes once json.dumps (ensure_ascii=False) has
+    escaped it into a larger str, read without escaping it, the same on every interpreter
+    (no Unicode table is read: ASCII printability is fixed): printable ASCII a byte a
+    character, its quotes and backslashes two; other ASCII six (\\u00XX); beyond ASCII four
+    bytes per character of the escaped form (CPython's widest str; its UTF-8 is at most as
+    long), and six times that where an ASCII control is among them. Its scan costs
+    len(s) >> TEXT_SHIFT lwu."""
+    n = len(s) + 2 + s.count('"') + s.count('\\')
+    if s.isascii():
+        return n if s.isprintable() else 6 * n
+    return 4 * n if _JSON_CONTROL.search(s) is None else 24 * n
+
+
+def repr_bytes(s):
+    """text_bytes() for repr(): printable ASCII with its quotes and backslashes, other ASCII
+    four bytes a character (\\xNN), and any text beyond ASCII forty (\\UXXXXXXXX at four bytes
+    a character): which characters repr() escapes follows the interpreter's Unicode tables,
+    so the bound assumes all of them."""
+    n = len(s) + 2 + s.count("'") + s.count('"') + s.count('\\')
+    if s.isascii():
+        return n if s.isprintable() else 4 * n
+    return 40 * n
+
+
+def joined_bytes(fixed, texts):
+    """The bytes of a str joined from |fixed| ASCII bytes and the strings |texts|, each at
+    its text_bytes(): CPython gives the joined str the width of its widest character, so
+    one string beyond ASCII widens every character, the fixed part and the ASCII strings
+    too, to four bytes (as dump() charges its join)."""
+    texts = [t for t in texts if isinstance(t, str)]
+    if all(t.isascii() for t in texts):
+        return fixed + sum(map(text_bytes, texts))
+    return 4 * fixed + sum(text_bytes(t) * (4 if t.isascii() else 1) for t in texts)
 
 
 # a container copied by copy.deepcopy(): its list built by appends (up to six slots over a
@@ -289,38 +317,55 @@ DUMPS_ATOM = 80
 W_CONTAINER = 3 * W_ELEM
 
 
+# any other object in a caller's value (a copy and a text of fixed size: sys.getsizeof()
+# differs between interpreters, and charges must not)
+OBJECT_BYTES = 256
+
+
 def value_size(x, b=None, free=0):
-    """(nodes, containers, copy_bytes, text) of a JSON-like value |x| -- dicts, lists and
-    tuples of strings, numbers, booleans and None, as json.loads or a caller's keyword
-    argument makes it -- read without copying or serializing it: its atoms, keys and
+    """(nodes, containers, copy_bytes, text, wide, items) of a JSON-like value |x| -- dicts,
+    lists and tuples of strings, numbers, booleans and None, as json.loads or a caller's
+    keyword argument makes it -- read without copying or serializing it: its atoms, keys and
     containers; its containers; the bytes a JSON copy of its containers holds (a list at its
     length, LIST + LIST_ITEM a slot, a dict DICT + DICT_KEY a key; the atoms are shared); a
-    bound of its JSON or repr() text in bytes (text_bytes() per string, an int's digits, 24 per
-    float, 5 per other atom, two per container and item for the punctuation). Any other object counts as
-    an atom of its sys.getsizeof() and a 64-byte text. With |b| the walk is charged as it
-    goes: each container's items W_ELEM each before they are read (beyond the first |free|,
-    which the caller's base covers), a string longer than 4 KiB its scan before it is read.
-    A stack of iterators, one per level: any nesting, no copy."""
-    nodes = conts = copy = text = walked = 0
+    bound of its JSON text in bytes (text_bytes() per string, an int's digits, 24 per float,
+    5 per other atom, two per container and item for the punctuation; with |wide|, its text
+    holds a character beyond ASCII and the whole of it is four bytes a character); its items
+    (the list elements and dict entries walked). Any other object counts as an atom of
+    OBJECT_BYTES and a 64-byte text. With |b| the walk is charged as it goes: each
+    container's items W_ELEM each before they are read (beyond the first |free| items), a
+    string longer than 4 KiB its scan before it is read. A stack of iterators, one per
+    level: any nesting, no copy. A container met again inside itself (a cycle, which only a
+    caller's own value can hold) is not walked again: what reads the value (deepcopy's memo,
+    json's Circular reference) decides, as without a budget."""
+    nodes = conts = copy = text = items = 0
+    wide = 0                # the text of the strings beyond ASCII (at their own bound)
     stack = [iter((x,))]
+    path = [None]
+    on_path = set()
     while stack:
         for v in stack[-1]:
             nodes += 1
             if isinstance(v, str):
                 if b is not None and len(v) > 4096:
                     b.charge(len(v) >> TEXT_SHIFT)
-                text += text_bytes(v)
+                if v.isascii():
+                    text += text_bytes(v)
+                else:
+                    wide += text_bytes(v)
             elif v is None or isinstance(v, bool):
                 text += 5
             elif isinstance(v, (int, float)):
                 # an int's digits: at most 5/16 of its bits (log10 2 = 0.301), its sign
                 text += 24 if isinstance(v, float) else ((v.bit_length() * 5) >> 4) + 2
             elif isinstance(v, (dict, list, tuple)):
+                if id(v) in on_path:
+                    continue
                 conts += 1
                 n = len(v)
-                if b is not None and walked + n > free:
-                    b.charge(W_ELEM * min(n, walked + n - free))
-                walked += n
+                if b is not None and items + n > free:
+                    b.charge(W_ELEM * min(n, items + n - free))
+                items += n
                 text += 2 + 2 * n
                 if isinstance(v, dict):
                     copy += dict_bytes(n)
@@ -329,20 +374,28 @@ def value_size(x, b=None, free=0):
                         if isinstance(k, str):
                             if b is not None and len(k) > 4096:
                                 b.charge(len(k) >> TEXT_SHIFT)
-                            text += text_bytes(k)
+                            if k.isascii():
+                                text += text_bytes(k)
+                            else:
+                                wide += text_bytes(k)
                         else:
                             text += 24
                     stack.append(iter(v.values()))
                 else:
                     copy += list_bytes(n)
                     stack.append(iter(v))
+                path.append(id(v))
+                on_path.add(id(v))
                 break
             else:
-                copy += sys.getsizeof(v)
+                copy += OBJECT_BYTES
                 text += 64
         else:
             stack.pop()
-    return nodes, conts, copy, text
+            on_path.discard(path.pop())
+    if wide:
+        return nodes, conts, copy, 4 * text + wide, True, items
+    return nodes, conts, copy, text, False, items
 
 
 def deepcopy_bytes(conts, copy):

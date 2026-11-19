@@ -153,6 +153,9 @@ class Entry:
     j_bound: int = field(default=0, repr=False, compare=False)
     # its JSON atoms (the encoder's pieces up to 3.11, one per atom): set with j_bound
     j_atoms: int = field(default=0, repr=False, compare=False)
+    # whether its JSON holds a character beyond ASCII (the standalone text joined around it
+    # is then four bytes a character, body included)
+    j_wide: bool = field(default=False, repr=False, compare=False)
 
     @property
     def graphlet(self):
@@ -172,7 +175,8 @@ class Entry:
 # the fields an entry file may carry (the Entry dataclass without its store); a file of
 # another version keeps what this one knows (an unknown key, such as 'parsed' read by an
 # older library, must not make the whole store fail to open)
-_ENTRY_FIELDS = frozenset(f.name for f in dataclasses.fields(Entry)) - {'store', 'j_bound', 'j_atoms'}
+_ENTRY_FIELDS = frozenset(f.name for f in dataclasses.fields(Entry)) - {
+    'store', 'j_bound', 'j_atoms', 'j_wide'}
 _ENTRY_REQUIRED = frozenset(f.name for f in dataclasses.fields(Entry)
                             if f.default is dataclasses.MISSING
                             and f.default_factory is dataclasses.MISSING)
@@ -183,21 +187,21 @@ _J_KEYS = len(',"results":[],"view":,"derived_from":')
 
 
 def _j_bound(e):
-    """(bound, atoms): an upper bound, in UTF-8 bytes, of the J line standalone_text() writes for |e|
-    (0 when it writes none): the line's sources -- the envelope, the seed summary, the
-    view and derived_from -- as JSON with the spaces the line leaves out, plus the keys
-    it puts them under. A function of what the entry holds only, so that the same export
+    """(bound, atoms, wide): an upper bound, in UTF-8 bytes, of the J line standalone_text()
+    writes for |e| (0 when it writes none): the line's sources -- the envelope, the seed
+    summary, the view and derived_from -- as JSON with the spaces the line leaves out,
+    plus the keys it puts them under. A function of what the entry holds only, so that the same export
     of the same entry is charged the same on every run (budgets are deterministic). Not
     the entry file's size, which also holds the created and accessed times: their printed
     length follows the clock (1791204329.5 against 1791204329.6234567), so a memory limit
     could stop one run of an export while an identical run answers."""
     if not (e.envelope or e.seed_summary or e.view is not None
             or e.derived_from is not None):
-        return 0, 0
+        return 0, 0, False
     x = [e.envelope, e.seed_summary, e.view, e.derived_from]
     text = json.dumps(x, ensure_ascii=False)
     return (_J_KEYS + (len(text) if text.isascii() else len(text.encode('utf-8'))),
-            _B.value_size(x)[0])
+            _B.value_size(x)[0], not text.isascii())
 
 
 def set_delivery(g, delivery):
@@ -456,7 +460,7 @@ class GraphletStore:
         if missing:
             raise ValueError('the entry lacks %s' % ', '.join(sorted(missing)))
         e = Entry(store=self, **{k: v for k, v in j.items() if k in _ENTRY_FIELDS})
-        e.j_bound, e.j_atoms = _j_bound(e)
+        e.j_bound, e.j_atoms, e.j_wide = _j_bound(e)
         return e
 
     def _write_entry(self, e):
@@ -466,7 +470,7 @@ class GraphletStore:
                                         'parent')}
         if not e.parsed:
             j['parsed'] = False             # written only when false: older entries read True
-        e.j_bound, e.j_atoms = _j_bound(e)
+        e.j_bound, e.j_atoms, e.j_wide = _j_bound(e)
         _write_atomic(self._entry_path(e.handle),
                       json.dumps(j, sort_keys=True, ensure_ascii=False).encode('utf-8'))
         # what the file now says: get() rewrites it once this lags by a tenth of the TTL
@@ -533,15 +537,20 @@ class GraphletStore:
         return None
 
     @staticmethod
-    def _charged_read(b, nbytes, read):
-        """read() of a body of |nbytes| for a parse under |b| (in the parse's scope):
-        charged before it is read -- its bytes and their decoded text, the text held
-        through the parse; the read's work is the store's bookkeeping, as its digest check
-        (budget.py's "Not charged") -- so that a budget that cannot hold them stops with nothing
-        read (G4P's G13: a zero budget read and decoded 1 MB, 2.0 MB traced, before it
-        stopped)."""
-        b.charge(0, 2 * (nbytes + STR))
-        text = read()
+    def _charged_read(b, nbytes, read_bytes):
+        """The text of a body of |nbytes| read (read_bytes()) and decoded for a parse under
+        |b| (in the parse's scope), each step charged before it is made: the bytes, so that
+        a budget that cannot hold them stops with nothing read (G4P's G13: a zero budget
+        read and decoded 1 MB, 2.0 MB traced, before it stopped); then the text by its
+        width, read from the bytes before they are decoded -- a byte a character for ASCII,
+        else four (one astral character widens all of it) and the decoder's narrow buffer
+        up to where it widens -- held through the parse. The read's work is the store's
+        bookkeeping, as its digest check (budget.py's "Not charged")."""
+        b.charge(0, nbytes + STR)
+        raw = read_bytes()
+        b.charge(0, (1 if raw.isascii() else 5) * len(raw) + STR)
+        text = raw.decode('utf-8')
+        del raw
         b.release(nbytes + STR)
         return text
 
@@ -796,10 +805,13 @@ class GraphletStore:
             self._drop_ram(handle)
         pb = self._parse_budget(parse_budget)
 
+        def read_bytes():
+            # the stored body, checked against its digest
+            return self._read_body(handle, e)
+
         def read():
-            # the stored body, checked against its digest: decoded as the text file read
-            # it (newline='': the same text)
-            return self._read_body(handle, e).decode('utf-8')
+            # decoded as the text file read it (newline='': the same text)
+            return read_bytes().decode('utf-8')
         # an entry stores {} for none: a graphlet had an envelope when either side holds
         # something (the rule of a J line, parser._attach_j)
         has_env = bool(e.envelope) or bool(e.seed_summary)
@@ -814,7 +826,7 @@ class GraphletStore:
         def parse_entry(b):
             if b is not None:
                 with b.scope('parse', ('export_mgt',)):
-                    body = self._charged_read(b, e.bytes, read)
+                    body = self._charged_read(b, e.bytes, read_bytes)
                     g_ = parse(body, budget=b)
                     if check:
                         g_.envelope, g_.seed_summary = e.envelope, e.seed_summary
@@ -1234,6 +1246,10 @@ class GraphletStore:
                 jb = e.j_bound + (0 if paths else 64)
                 b.charge((jb >> 8) + _B.W_ELEM * e.j_atoms,
                          4 * (jb + 49) + _B.DUMPS_ATOM * e.j_atoms)
+                if e.j_wide:
+                    # a J line beyond ASCII widens the joined text, the body's part too:
+                    # four bytes a character for the whole of it
+                    b.charge(0, 4 * (e.bytes + jb))
         body = self.body_text(handle)
         head, first, last, lines = _frame(body)
         # the O record, rewritten in place when the entry records another delivery: the
@@ -1306,12 +1322,18 @@ class GraphletStore:
             with open(path, 'r', encoding='utf-8', newline='') as f:
                 return f.read()
 
+        def read_bytes():
+            # (its UTF-8 decoded whole: the text read() makes with newline='')
+            with open(path, 'rb') as f:
+                return f.read()
+
         def read_parse(b):
             if b is None:
                 return parse(read())
             with b.scope('parse', ('export_mgt',)):
                 # the file's size before it is opened: a stop reads nothing
-                return parse(self._charged_read(b, os.stat(path).st_size, read), budget=b)
+                return parse(self._charged_read(b, os.stat(path).st_size, read_bytes),
+                             budget=b)
         g = self._parsing(read_parse, self._parse_budget(parse_budget))
         h = self.put_graphlet(g, request if request is not None else
                               self.request_of(g, graph=graph, graph_path=graph_path,

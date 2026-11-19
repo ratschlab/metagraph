@@ -19,7 +19,6 @@ import json
 import os
 import re
 import secrets
-import sys
 import zlib
 from array import array
 
@@ -276,7 +275,7 @@ class _Reader:
                 seq_id = None
             if f[4] == '' or not re.match(r'(?:0|[1-9][0-9]*)\Z', f[4]):
                 raise self.err('L prefix_len %s' % _tok(f[4]))
-            if self.b is not None and not prev.isascii() \
+            if self.b is not None and not (prev.isascii() and f[5].isascii()) \
                     and len(prev) + len(f[5]) > _LONG_NAMES:
                 # a long name beyond ASCII decoded from bytes: both names' UTF-8, the
                 # suffix's and the joined bytes, then the name
@@ -906,8 +905,11 @@ def _parse(text, b):
             raise GraphletFormatError(0, 'not UTF-8: %s' % e) from None
     else:
         if b is not None:
-            b.charge(len(text) >> 10, len(text) + 33)
-            b.release(len(text) + 33)
+            # the UTF-8 check's encoded copy: a byte a character for ASCII, else the
+            # encoder's buffer of four bytes a character (it shrinks only once filled)
+            u = (1 if text.isascii() else 4) * len(text) + 33
+            b.charge(len(text) >> 10, u)
+            b.release(u)
         utf8_bytes(text)
     if not text.endswith('\n'):
         raise GraphletFormatError(0, 'truncated document: it does not end with a line feed')
@@ -927,10 +929,18 @@ def _parse(text, b):
         if not text.isascii():
             # a text beyond ASCII is held at two or four bytes a character -- the text,
             # its lines and their fields (G4P's G12: a name of 1M characters at 5.1x the
-            # account, 10.2x astral): its width from the str's own size, at no scan
-            k = 2 if sys.getsizeof(text) < 3 * len(text) else 4
+            # account, 10.2x astral): its width from its widest character (one C scan; not
+            # the str's size, whose header differs between interpreters)
+            k = 4 if max(text) > '\uffff' else 2
             model += _MODEL_WIDE * (k - 1) * len(text)
-        b.charge(len(text) >> 10)
+        else:
+            k = 1
+        # the line list is made at once, before any of its lines is read: its share of the
+        # model is charged before the split, the rest spread over the line blocks (the same
+        # total, admitted earlier: a limit below it stops before the copy is made)
+        split = k * len(text) + (STR + LIST_ITEM) * n + LIST
+        b.charge(len(text) >> 10, split)
+        model = max(0, model - split)
     # LF is the only record separator: names may hold VT, FF, NEL, LS, PS raw, so
     # str.splitlines() would cut records
     lines = text.split('\n')
@@ -1040,8 +1050,10 @@ def _dump(g, envelope, b, done=None):
             # per atom up to 3.11), the text and its 'J ' copy -- then the line itself, at
             # once (G4P's G10: an envelope list of 1e5 ints peaked at 3.4x the account)
             jo = j_object(g)
-            nodes, _, _, jt = _B.value_size(jo, b)
-            temp = _B.DUMPS_ATOM * nodes + 2 * (STR + jt)
+            nodes, _, _, jt, _, _ = _B.value_size(jo, b)
+            # (its text three times: 3.14's writer grows its buffer by a quarter before the
+            # 'J ' copy; jt is four bytes a character once any is beyond ASCII)
+            temp = _B.DUMPS_ATOM * nodes + 3 * (STR + jt)
             b.charge(jt >> _B.TEXT_SHIFT, temp)
             line = 'J ' + json.dumps(jo, sort_keys=True, separators=(',', ':'),
                                      ensure_ascii=False)
@@ -1198,7 +1210,8 @@ def _dump_arm(g, arm, w, bud=None):
                     # leaf's walk (its chain and bases) and the continuation's bases, charged
                     # before (G4P's G17)
                     sp = 3 * (STR + s.end_bp + c.n + 1) + _B.list_bytes(s.depth + 1)
-                    bud.charge(_B.W_STEP * (s.depth + 1) + (s.end_bp >> _B.BASE_SHIFT), sp)
+                    bud.charge(_B.W_STEP * (s.depth + 1) + ((s.end_bp + c.n) >> _B.BASE_SHIFT),
+                               sp)
                     differs = c.sequence != _derived_continuation(g, arm, s)
                     bud.release(sp)
                 else:

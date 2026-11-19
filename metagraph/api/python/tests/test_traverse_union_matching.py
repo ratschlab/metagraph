@@ -655,6 +655,15 @@ class TestCharges(unittest.TestCase):
                 fn = (lambda b=None: U._pair_classes(ds, known, b))
                 self.assertLessEqual(held(fn), account(fn))
 
+    def test_the_largest_pass_is_priced_above_its_fit(self):
+        """_M_MATCH covers the most a pass was measured to hold per description: 2,059 B at
+        174,763 distinct descriptions stating all seven fields, just past a resize of the
+        index's tables, on 3.14 (2,011 on 3.11; tools/match_2048.py). The traced test above
+        stops at 2,731 (1,862 B): at 174,763 a pass holds 350 MB and runs 40-60 s, too much
+        for this suite, so the fit is pinned here, with its margin (Opus review of
+        b8fb7a8d6, m5: 2,048 passed every test)."""
+        self.assertGreaterEqual(U._M_MATCH, 2059 * 11 // 10)
+
     def test_the_service_ceiling_is_admitted(self):
         """The service's 2,000-entry seed (each entry an input and an expected pair, one
         (graph, n1) key each: 4,000 descriptions) builds under its 200M lwu union budget,

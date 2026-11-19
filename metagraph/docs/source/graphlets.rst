@@ -2566,11 +2566,16 @@ default) nothing is budgeted and every answer is byte for byte what it was befor
   names, a seed id, a namespace or release, a stop's message and actions, a seed
   summary's ``work`` block, an envelope written as a J line, a strategy and the keyword
   overrides a continuation copies -- are charged at their escaped bound before they are
-  serialized, escaped, encoded or copied (text beyond ASCII at four bytes a character),
-  and a store's parse on demand or ``load()`` charges the body before it reads it, so a
-  budget that cannot hold it stops with nothing read. It is not a measurement: Python can allocate more than the
-  model says (interpreter internals, fragmentation, another CPython version, text beyond
-  ASCII), so in-process it is a soft bound; a hard bound needs process limits. The
+  serialized, escaped, encoded or copied; text joined from strings one of which is beyond
+  ASCII is charged at four bytes a character, all of it, the same on every interpreter.
+  ``next_request()`` charges its copies of the strategy their memory, and their work only
+  for a value of more than 128 items (list elements and dict entries): a server's strategy
+  (a copy takes about 80-156 lwu of time, 2-4 copies a call) is not charged as work. A
+  store's parse on demand or ``load()`` charges the body before it reads it, and its text
+  by its width before it decodes it, so a budget that cannot hold it stops with nothing
+  read. It is not a measurement: Python can allocate more than the model says
+  (interpreter internals, fragmentation, another CPython version, text beyond ASCII), so
+  in-process it is a soft bound; a hard bound needs process limits. The
   memory limit holds for each call; the work of the calls that share one budget adds
   up (an allowance). One exception to "charged before": a record of output text is
   charged as soon as it is built (its size is known only then), and so are the walk ids
