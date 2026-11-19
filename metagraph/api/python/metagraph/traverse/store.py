@@ -1228,10 +1228,12 @@ class GraphletStore:
                 # encoder's pieces (a list of chunks up to Python 3.11), by the bound
                 # _j_bound() takes from the entry -- uncharged, an export of a small
                 # retrieval peaked above its account under 3.11; with the pieces, one per
-                # atom (G4P's G14: an envelope list of 1e5 ints at 1.46x)
+                # atom, and the encoder's work per atom (G4P's G14: an envelope list of 1e5
+                # ints at 1.46x its account and 9.8x its work)
                 # (an id in place of the paths: at most a few bytes more)
                 jb = e.j_bound + (0 if paths else 64)
-                b.charge(jb >> 8, 4 * (jb + 49) + _B.DUMPS_ATOM * e.j_atoms)
+                b.charge((jb >> 8) + _B.W_ELEM * e.j_atoms,
+                         4 * (jb + 49) + _B.DUMPS_ATOM * e.j_atoms)
         body = self.body_text(handle)
         head, first, last, lines = _frame(body)
         # the O record, rewritten in place when the entry records another delivery: the
