@@ -1161,11 +1161,16 @@ class GraphletStore:
                 self._adopt(h)
         return [e.meta() for e in sorted(self._entries.values(), key=lambda x: x.created)]
 
-    def save(self, handle, path):
-        """The standalone .mgt file (H, J, body) of an entry."""
+    def save(self, handle, path, *, paths=True):
+        """The standalone .mgt file (H, J, body) of an entry. paths=False: its J line names
+        the pair by {graph, pair_id}, no path (client.document_without_paths(): a file
+        handed out, as the MCP tools write one)."""
         g = self.graphlet(handle)
-        from .parser import save
-        return save(g, path)
+        from .parser import _write_text, dump, save
+        if paths:
+            return save(g, path)
+        from .client import document_without_paths
+        return _write_text(document_without_paths(dump(g, envelope=True)), path)
 
     def body_text(self, handle):
         """The stored body, as received (no parse), checked against its digest: a body
@@ -1174,7 +1179,7 @@ class GraphletStore:
         # decoded as the text file did with newline='': the same text
         return self._read_body(handle, e).decode('utf-8')
 
-    def standalone_text(self, handle, *, budget=None):
+    def standalone_text(self, handle, *, budget=None, paths=True):
         """The entry's standalone .mgt text -- H, the entry's J line, the body -- built
         WITHOUT a parse (local limits: the escape hatch of an entry no parse can afford): byte
         for byte what save() writes for a canonical body (every body the store holds
@@ -1182,11 +1187,13 @@ class GraphletStore:
         into the O record as a parsed model would. The text of an unparsed entry
         (Entry.parsed false) was checked for its frame only (transport, H, Z), never
         validated record by record: a parse of it may still refuse it. budget=: the copy
-        is charged (a call of its own: with its base, CALL_BASE)."""
+        is charged (a call of its own: with its base, CALL_BASE). paths=False: the J line
+        names the pair by {graph, pair_id}, no path (client.entry_without_paths(): a file
+        handed out)."""
         return _B.run_scoped(budget, 'standalone_text', (),
-                             lambda b: self._standalone_text(handle, b))
+                             lambda b: self._standalone_text(handle, b, paths))
 
-    def _standalone_text(self, handle, b):
+    def _standalone_text(self, handle, b, paths=True):
         e = self.get(handle)
         has_env = bool(e.seed_summary) or bool(e.envelope)
         if b is not None:
@@ -1199,7 +1206,8 @@ class GraphletStore:
                 # encoder's pieces (a list of chunks up to Python 3.11), by the bound
                 # _j_bound() takes from the entry -- uncharged, an export of a small
                 # retrieval peaked above its account under 3.11
-                jb = e.j_bound
+                # (an id in place of the paths: at most a few bytes more)
+                jb = e.j_bound + (0 if paths else 64)
                 b.charge(jb >> 8, 4 * (jb + 49))
         body = self.body_text(handle)
         head, first, last, lines = _frame(body)
@@ -1221,6 +1229,9 @@ class GraphletStore:
             j['view'] = e.view
         if e.derived_from is not None:
             j['derived_from'] = e.derived_from
+        if not paths:
+            from .client import entry_without_paths
+            j = entry_without_paths(j)
         jt = json.dumps(j, sort_keys=True, separators=(',', ':'), ensure_ascii=False)
         pieces = [body[:first + 1], 'J ', jt, '\n']
         if new_o is None:
@@ -1230,16 +1241,16 @@ class GraphletStore:
         pieces.append('Z %d\n' % (lines + 1))
         return ''.join(pieces)
 
-    def save_body(self, handle, path, *, budget=None):
+    def save_body(self, handle, path, *, budget=None, paths=True):
         """standalone_text() written atomically to |path| (no parse) -> bytes written: a
         user's file, by the writer and with the permissions of save()
-        (parser._write_user_file())."""
+        (parser._write_user_file()). paths=False as standalone_text()."""
         b = _B.resolve(budget)
         if b is None:
-            data = self._standalone_text(handle, None).encode('utf-8')
+            data = self._standalone_text(handle, None, paths).encode('utf-8')
             return _write_user_file(os.path.abspath(path), data, '.mgt-')
         with b.scope('save_body'):
-            text = self._standalone_text(handle, b)
+            text = self._standalone_text(handle, b, paths)
             # its UTF-8 bytes, made beside it, as graphlet_export(format=mgt) charges them
             # (mcp_tools._write_text_charged()): left out, graphlet_save would peak above
             # its account on 28 of 34 retrievals

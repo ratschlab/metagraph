@@ -89,7 +89,8 @@ __all__ = ['TraverseClient', 'TraverseResponse', 'TraverseError', 'ServerInitial
            'auto_coordinates', 'drop_coordinates_note', 'strip_coordinate_cap',
            'SELECTORS', 'pair_members', 'answered_pair', 'requested_pair', 'PairResults',
            'PAIR_ID_NAMESPACE', 'configured_pair_id', 'check_pair_id', 'Pair', 'PairIdError',
-           'capabilities_pair_resolver', 'request_without_paths', 'entry_without_paths']
+           'capabilities_pair_resolver', 'request_without_paths', 'entry_without_paths',
+           'document_without_paths']
 
 ACCEPT_ENCODING = 'gzip, deflate'
 # the feature level of the tombstone's suppression (a cancel with not_after_ms,
@@ -369,6 +370,26 @@ def entry_without_paths(entry):
     if pair is not None and pair.pair_id:
         out['pair_id'] = pair.pair_id
     return out
+
+
+def document_without_paths(text):
+    """A standalone .mgt text (H, J, body) as the library hands it out -- an export, a
+    save to a caller's file, any download (docs/DESIGN-pair-identity.md section 2, the
+    owner's rule: no path in any response or downloadable document): its J line naming the
+    pair by {graph, pair_id} (entry_without_paths()), an old document's id computed from its
+    paths. Only the J line changes, so the body and its digest do not; a text without a J
+    line, or whose J line states no path, is returned as it is. The store's own files keep
+    what they were stored with."""
+    h_end = text.find('\n') + 1
+    if not h_end or not text.startswith('J ', h_end):
+        return text
+    j_end = text.find('\n', h_end) + 1 or len(text)
+    j = json.loads(text[h_end + 2:j_end].rstrip('\n'))
+    out = entry_without_paths(j)
+    if out is j:
+        return text
+    return ''.join((text[:h_end], 'J ', json.dumps(out, sort_keys=True, separators=(',', ':'),
+                                                   ensure_ascii=False), '\n', text[j_end:]))
 
 
 def capabilities_pair_resolver(capabilities):

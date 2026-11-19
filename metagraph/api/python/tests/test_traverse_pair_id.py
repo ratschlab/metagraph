@@ -1005,6 +1005,56 @@ class TestOutputsWithoutPaths(unittest.TestCase):
             self.assertEqual(entry_without_paths(same), same)
 
 
+class TestDocumentsHandedOut(unittest.TestCase):
+    """A document the library hands out names its pair by {graph, pair_id} in its J line,
+    an old one too (the owner's rule, review m5); the body and its digest do not change, and
+    the store's own files keep what they were stored with."""
+
+    def setUp(self):
+        self.d = tempfile.mkdtemp()
+        self.addCleanup(lambda: __import__('shutil').rmtree(self.d, ignore_errors=True))
+        self.store = GraphletStore(os.path.join(self.d, 'store'))
+        path = os.path.join(self.d, 'old.mgt')
+        fixture('fork', 'paths').save(path)
+        self.h = self.store.load(path)
+
+    def j(self, text):
+        return json.loads(next(line for line in text.split('\n') if line.startswith('J '))[2:])
+
+    def body(self, text):
+        return [line for line in text.split('\n') if not line.startswith('J ')]
+
+    def test_texts_and_files(self):
+        from metagraph.traverse.client import document_without_paths
+        kept = self.store.standalone_text(self.h)
+        self.assertEqual(self.j(kept)['graph_path'], GP)          # as stored
+        out = self.store.standalone_text(self.h, paths=False)
+        self.assertEqual(out, document_without_paths(kept))
+        j = self.j(out)
+        self.assertEqual((j['graph'], j['pair_id']), (GRAPH, ID))
+        self.assertNotIn('graph_path', j)
+        self.assertNotIn('annotation_path', j)
+        self.assertEqual(self.body(out), self.body(kept))
+        self.assertTrue(MT.is_canonical(out))
+        for write in (lambda p: self.store.save(self.h, p, paths=False),
+                      lambda p: self.store.save_body(self.h, p, paths=False),
+                      lambda p: self.store.save_body(self.h, p, paths=False,
+                                                     budget=MT.LocalBudget(MT.LocalLimits()))):
+            p = os.path.join(self.d, 'out.mgt')
+            write(p)
+            with open(p, encoding='utf-8', newline='') as f:
+                text = f.read()
+            for path in (GP, AP):
+                self.assertNotIn(path, text)
+            g = parse(text)
+            self.assertEqual(answered_pair(g.envelope), Pair(GRAPH, None, None, ID))
+            self.assertEqual(g.body_digest, parse(kept).body_digest)
+        # an id-form text, or one without a J line, is returned as it is
+        self.assertIs(document_without_paths(out), out)
+        bare = '\n'.join(self.body(kept))
+        self.assertIs(document_without_paths(bare), bare)
+
+
 class TestToolOutputsWithoutPaths(unittest.TestCase):
     """GraphletTools' answers name a pair by graph and pair_id, no path."""
 
