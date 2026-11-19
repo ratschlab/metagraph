@@ -865,6 +865,11 @@ def _to_gfa(g, with_seed, bud, done=None):
     seed = g.seed.sequence
     lines = ['H\tVN:Z:1.0']
     if with_seed:
+        if bud is not None:
+            # the seed's S line, before it is built, and its copy in the joined text (the
+            # lane's sweep of GPT final review M2: the seed was not charged)
+            bud.charge(W_GFA_LINE + (len(seed) >> 8), STR + 32 + len(seed))
+            total += 32 + len(seed)
         lines.append('S\tseed\t%s\tLN:i:%d' % (seed, len(seed)))
     links = []
     paths = []
@@ -873,6 +878,10 @@ def _to_gfa(g, with_seed, bud, done=None):
         if arm is None:
             continue
         segs = arm.segments
+        # the seed outward: a segment's context reads at most its last k-1 bases, so only
+        # they are taken, once per arm (the whole seed reversed and joined per segment was
+        # O(segments x seed), uncharged); the same context
+        seed_tail = (seed[-k1:] if side == 'right' else seed[:k1][::-1]) if k1 > 0 else ''
         if bud is not None:
             derive.uses(bud, g, arm, 'leaves', 'paths', 'end_labels')
             bud.phase = 'records'
@@ -890,8 +899,7 @@ def _to_gfa(g, with_seed, bud, done=None):
             # back only that far (spelling the whole chain per segment would be quadratic
             # in the depth)
             before = _chain_tail(segs, s.parents[0], k1) if s.parents and k1 > 0 else ''
-            outward_seed = seed if side == 'right' else seed[::-1]
-            ctx = (outward_seed + before)[-k1:] if k1 > 0 else ''
+            ctx = (seed_tail + before)[-k1:] if k1 > 0 else ''
             walk = ctx + s.walk
             text = walk if side == 'right' else walk[::-1]
             lines.append('S\t%s\t%s\tLN:i:%d' % (_seg_name(side, s.id), text, len(text)))

@@ -296,6 +296,53 @@ class TestExportPeaks(unittest.TestCase):
                 self.assertGreaterEqual(b.peak_bytes, peak, name)
 
 
+class TestSeedAndSelections(unittest.TestCase):
+    """The lane's sweep of the GPT final review (M2): an export that writes the seed charges
+    it."""
+
+    @staticmethod
+    def _long_seed(name, n=10 ** 6):
+        """The fixture with |n| A's inserted in the middle of its seed: its first and last
+        15 bases (more than k - 1) unchanged."""
+        import copy
+        import dataclasses
+        g = copy.deepcopy(T.graphlet(name))
+        h = len(g.seed.sequence) // 2
+        s = g.seed.sequence[:h] + 'A' * n + g.seed.sequence[h:]
+        g.seed = dataclasses.replace(g.seed, sequence=s, length_bp=len(s),
+                                     num_kmers=len(s) - g.k + 1)
+        return g
+
+    def test_a_long_seed_is_charged(self):
+        """to_gfa() writes the seed's S line (uncharged: 26,912 B charged against 3.0 MB
+        traced for a 1 Mbp seed on the fork fixture) and to_json() spells each continuation
+        from seed and flank (the whole seed copied per leaf, 1.0 MB against 60 KB); now the
+        S line is charged with its copy in the joined text, and a continuation copies only
+        the bases it takes from the seed. The account bounds the warm traced peak; the
+        output is the one of the same graphlet's short seed where the seed is not written."""
+        import copy
+        for name in ('fork', 'merge', 'annotate'):
+            g0 = self._long_seed(name)
+            for op, fn in (('to_gfa', lambda g, **k: g.to_gfa(**k)),
+                           ('to_json', lambda g, **k: g.to_json(**k)),
+                           ('to_fasta', lambda g, **k: g.to_fasta(**k))):
+                with self.subTest(name, op=op):
+                    b = LocalBudget()
+                    got = fn(copy.deepcopy(g0), budget=b)
+                    self.assertEqual(got, fn(copy.deepcopy(g0)))
+                    xs = [copy.deepcopy(g0), copy.deepcopy(g0)]
+                    peak, _ = _warm_peak(lambda: fn(xs.pop()), lambda: fn(xs.pop()))
+                    self.assertLessEqual(peak, b.peak_bytes)
+            # a segment's context reads at most k - 1 bases of the seed, its last (its first
+            # on the left arm): the same as on the graphlet's own seed, whose ends the long
+            # one keeps
+            short, long_ = T.graphlet(name), self._long_seed(name)
+            self.assertLess(short.k - 1, len(short.seed.sequence) // 2)
+            gfa = [x for x in long_.to_gfa().split('\n') if not x.startswith('S\tseed')]
+            self.assertEqual(gfa, [x for x in short.to_gfa().split('\n')
+                                   if not x.startswith('S\tseed')])
+
+
 # ------------------------------------------------------------------ the comparison's scans
 # restated without streaming: each walk spelled on its own
 
