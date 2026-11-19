@@ -239,17 +239,25 @@ def check_pair_id(v, where='pair_id'):
 
 
 def _pair(graph, graph_path, annotation_path, pair_id, where):
-    """Pair of tags as stated: an id checked (check_pair_id()), computed from both paths
-    where none is stated, and refused (pair_id_mismatch) where one is stated beside both
-    paths and is not theirs."""
-    gp, ap = _text(graph_path), _text(annotation_path)
-    pid = None if pair_id in (None, '') else check_pair_id(pair_id, where + ' pair_id')
+    """Pair of tags as stated -- the one rule for a pair statement, in a document (the J
+    line, an envelope), a listing or a selector: an id checked (check_pair_id(): any
+    pair_id but None that is no n1 id is refused, '' included), computed from both paths
+    where none is stated (an empty path is a path: configured_pair_id() hashes it as
+    "0:"), refused bad_pair_id where one is stated beside one path only and
+    pair_id_mismatch beside both paths that are not its."""
+    gp = graph_path if isinstance(graph_path, str) else None
+    ap = annotation_path if isinstance(annotation_path, str) else None
+    pid = None if pair_id is None else check_pair_id(pair_id, where + ' pair_id')
     if gp is not None and ap is not None:
         own = configured_pair_id(graph, gp, ap)
         if pid is not None and pid != own:
             raise PairIdError('pair_id_mismatch', '%s states pair_id %s beside paths whose n1 '
                               'id is %s' % (where, pid, own))
         pid = own
+    elif pid is not None and (gp is not None or ap is not None):
+        raise PairIdError('bad_pair_id', '%s states pair_id %s beside one path only: a pair '
+                          'is named by its pair_id, by both paths, or by both paths with their '
+                          'own id' % (where, pid))
     return Pair(graph, gp, ap, pid)
 
 
@@ -266,11 +274,12 @@ def pair_members(graph=None, graph_path=None, annotation_path=None, pair_id=None
     server needs the name; an id beside one path, or beside paths that are not its,
     PairIdError."""
     if not graph:
-        if graph_path or annotation_path or pair_id:
+        if graph_path or annotation_path or pair_id is not None:
             raise ValueError('graph_path, annotation_path and pair_id name a pair of a graph: '
                              'give the graph too')
         return {}
-    if pair_id:
+    if pair_id is not None:
+        # any pair_id but None is an id to check: '', 0 or False is no absent one
         pid = check_pair_id(pair_id)
         if not graph_path and not annotation_path:
             return {'pairs': [{'graph': graph, 'pair_id': pid}]}

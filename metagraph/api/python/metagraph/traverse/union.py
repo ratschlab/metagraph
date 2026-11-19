@@ -81,6 +81,9 @@ TEXTS = {
                    'with detail=\'graphlet\'',
     'no_seed': 'no result carries a graphlet, so the union has no seed sequence: pass seed= '
                '(the oriented seed the request sent)',
+    # p2_pair_id, bad_pair_id, pair_id_mismatch: a document's pair statement the library does
+    # not take, with the words of client.PairIdError
+    'bad_pair_statement': '%s: %s',
     'pair_mismatch': 'result %s was answered on pair %s, and the caller states pair %s: state '
                      'the pair it was answered on, or none',
     'no_pair': 'result %s names no pair (no graph tag, no index_ns): pass it as {pair, '
@@ -421,29 +424,41 @@ def _describe(x):
     return 'a %s' % type(x).__name__
 
 
+_PATHS = ('graph_path', 'annotation_path')
+
+
+def _stated(d):
+    """|d|'s members that state something: not None, and not '' but for a path (an empty
+    path is a path, client._pair())."""
+    return {k: v for k, v in d.items() if v is not None and (v != '' or k in _PATHS)}
+
+
 def _pair_desc(p):
     """A caller's pair (a graph name, or a dict of _PAIR_FIELDS naming a graph or, for a
     single-graph server, an index_ns) as a description (_with_id()), or None when it is
-    malformed; PairIdError for a pair_id the library does not take (a p2 id) or one stated
-    beside paths that are not its."""
+    malformed; PairIdError for a pair_id the library does not take (a p2 id, '', any
+    non-string), one beside one path only, or one beside paths that are not its."""
     if isinstance(p, str):
         return {'graph': p} if p else None
     if isinstance(p, dict) and p and set(p) <= set(_PAIR_FIELDS) \
-            and (p.get('graph') or p.get('index_ns')) \
-            and all(v is None or isinstance(v, str) for v in p.values()):
-        return _with_id({k: v for k, v in p.items() if v not in (None, '')})
+            and (p.get('graph') or p.get('index_ns')):
+        if p.get('pair_id') is not None and not isinstance(p['pair_id'], str):
+            check_pair_id(p['pair_id'], 'the pair object\'s pair_id')
+        if all(v is None or isinstance(v, str) for v in p.values()):
+            return _with_id(_stated(p))
     return None
 
 
 def _with_id(d):
     """Description |d| (in place) with its pair_id: as stated (an n1 id), or the n1 id of
     its graph and both paths (a pair named by its paths: an old document, a caller's full
-    pair object), so that the forms of one pair match and key alike."""
-    if d.get('graph') and (d.get('pair_id') or (d.get('graph_path') and d.get('annotation_path'))):
+    pair object), so that the forms of one pair match and key alike (client._pair(): an
+    id beside one path only, or beside paths that are not its, is PairIdError)."""
+    if d.get('graph') and ('pair_id' in d or all(d.get(k) is not None for k in _PATHS)):
         t = _pair(d['graph'], d.get('graph_path'), d.get('annotation_path'), d.get('pair_id'),
                   'the pair object')
         d['pair_id'] = t.pair_id
-    elif d.get('pair_id'):
+    elif 'pair_id' in d:
         check_pair_id(d['pair_id'], 'the pair object\'s pair_id')
     return d
 
@@ -465,6 +480,16 @@ def _stated_desc(p, refuse, where):
         raise refuse('%s (%s)' % (where, e)) from None
 
 
+def _env_of(env, g, where):
+    """_env_desc(|env|, |g|), a pair statement the library does not take (client._pair():
+    a p2 or malformed pair_id, an id beside one path, an id that is not its paths') refused
+    as a CombineRefused with the PairIdError's code and words, naming |where|."""
+    try:
+        return _env_desc(env, g)
+    except PairIdError as e:
+        raise C.CombineRefused(e.code, TEXTS['bad_pair_statement'] % (where, e)) from None
+
+
 def _env_desc(env, g=None):
     """The pair an envelope (and a body's H line) states."""
     env = env if isinstance(env, dict) else {}
@@ -480,7 +505,7 @@ def _env_desc(env, g=None):
         d['index_ns'] = env.get('index_ns') or caps.get('index_ns')
         d['index_fp'] = env.get('index_fp') or caps.get('index_fp')
         d['index_meta_fp'] = env.get('index_meta_fp') or caps.get('index_meta_fp')
-    return {k: v for k, v in d.items() if v not in (None, '')}
+    return _stated(d)
 
 
 def _matches(a, b):
@@ -506,7 +531,7 @@ def _matches(a, b):
     else:
         rest = ('graph_path', 'annotation_path', 'release', 'index_ns', 'index_meta_fp')
     for k in rest:
-        if a.get(k) and b.get(k) and a[k] != b[k]:
+        if a.get(k) is not None and b.get(k) is not None and a[k] != b[k]:
             return False
     return True
 
@@ -831,7 +856,7 @@ class PairUnion:
         for e in elems:
             if e.kind == 'part':
                 g0 = _root(e.graphlet)
-                env = _env_desc(g0.envelope, g0)
+                env = _env_of(g0.envelope, g0, 'result %d' % e.pos)
                 if e.stated is not None:
                     if answered_pair(g0.envelope) is not None or any(
                             e.stated.get(k) and env.get(k) and e.stated[k] != env[k]
@@ -847,7 +872,7 @@ class PairUnion:
                 else:
                     e.desc, e.by = env, 'envelope'
             elif e.form == 'response':
-                e.desc, e.by = _env_desc(e.env), 'envelope'
+                e.desc, e.by = _env_of(e.env, None, 'result %d' % e.pos), 'envelope'
             else:
                 e.desc, e.by = dict(e.stated), 'caller'
         # no_pair

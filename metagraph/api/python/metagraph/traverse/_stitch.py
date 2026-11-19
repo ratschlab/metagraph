@@ -42,7 +42,7 @@ from . import ops as _ops
 from ._codec import REASON
 from .budget import (STR, TUPLE, W_ELEM, W_ROW, W_STEP, LocalBudgetExceeded, Partial,
                      dict_bytes, list_bytes, record_bytes, set_bytes)
-from .client import answered_pair
+from .client import PairIdError, answered_pair
 from .composite import CombineRefused, NotCombinable
 from .model import (ARM_SIDES, AmbiguousLabel, BadSelector, Continuation, Graphlet, Label,
                     UnknownLabel)
@@ -74,6 +74,9 @@ _T_NO_WALK = ('walk= names no walk of the %s arm (%s): a stitched child is seede
               'walk\'s continuation (continuation(), next_request())')
 _T_DIFFERENT_PAIR = ('the child was answered on pair %s, its parent on pair %s: a '
                      'continuation runs on its parent\'s pair')
+# p2_pair_id, bad_pair_id, pair_id_mismatch: the parent's or the child's pair statement the
+# library does not take, with the words of client.PairIdError
+_T_BAD_PAIR_STATEMENT = '%s: %s'
 _T_DIFFERENT_GRAPH = ('the child\'s graph is not its parent\'s (%s %r vs %r): its walks '
                       'cannot continue the parent\'s')
 _T_DIFFERENT_MODE = ('the child was walked in %s mode with %s support, its parent in %s mode '
@@ -429,7 +432,9 @@ def stitch(parent, child=None, *, arm=None, walk=None, allow_unverified_index=Fa
     child's seed (several: ambiguous_walk). One junction per call.
 
     Refusals (CombineRefused with .code, in the order checked; Appendix B.1 has the texts):
-    not_combinable (also a TypeError), view_unsupported, MissingEnvelope, different_index,
+    not_combinable (also a TypeError), view_unsupported, MissingEnvelope, p2_pair_id,
+    bad_pair_id and pair_id_mismatch (a pair statement the library does not take, with the
+    PairIdError's words: client._pair()), different_index,
     index_unverifiable (a manifest digest on some parts only; allow_unverified_index=True
     stitches it and states the identity unverified), different_pair (the identity checks
     run against every part on both sides), different_graph, different_mode, not_one_arm,
@@ -450,6 +455,15 @@ def stitch(parent, child=None, *, arm=None, walk=None, allow_unverified_index=Fa
     for x in (parent,) if child is None else (parent, child):
         if isinstance(x, Graphlet):
             _K.require_envelope(x, 'stitch()')
+    # the pair each states, read by the one rule (client._pair()): a p2 or malformed
+    # pair_id, an id beside one path or beside paths that are not its is refused with the
+    # PairIdError's code and words (a StitchedGraphlet's parts were read when it was built)
+    for x, who in ((parent, 'the parent'), (child, 'the child')):
+        if isinstance(x, Graphlet):
+            try:
+                answered_pair(x.envelope)
+            except PairIdError as e:
+                raise CombineRefused(e.code, _T_BAD_PAIR_STATEMENT % (who, e)) from None
     base = parent if isinstance(parent, StitchedGraphlet) else \
         StitchedGraphlet._root_of(parent)
     if child is None:

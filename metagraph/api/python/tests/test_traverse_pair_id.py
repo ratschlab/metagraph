@@ -700,14 +700,108 @@ class TestUnionOfBothForms(unittest.TestCase):
                 call()
             self.assertEqual(cm.exception.code, code)
             self.assertIn("service's public pair id (p2)", str(cm.exception))
-        # a document whose J line states a p2 id
-        resp = tagged(T.doc_json('fork', 'graphlet'), 'id')
-        resp['pair_id'] = P2
-        bad = MT.from_response(resp['results'][0], resp)
+        # a document whose J line states a p2 id: TestMalformedPairStatements
+
+
+def _doc(form='id', **tags):
+    """fork's document in |form| with its J line's tags changed (None removes one)."""
+    resp = tagged(T.doc_json('fork', 'graphlet'), form)
+    for k, v in tags.items():
+        if v is None:
+            resp.pop(k, None)
+        else:
+            resp[k] = v
+    return MT.from_response(resp['results'][0], resp)
+
+
+class TestMalformedPairStatements(unittest.TestCase):
+    """One rule for a pair statement the library does not take (review m2, m3), whoever
+    reads it: a pair_id that is no n1 id ('', 0, False and a p2 id included), an id beside
+    one path only, an id beside paths that are not its. The client raises PairIdError,
+    union_pairs() and stitch() a CombineRefused with its code and words, GraphletTools the
+    tool error with its code."""
+
+    BAD = (({'pair_id': P2}, 'p2_pair_id'), ({'pair_id': ''}, 'bad_pair_id'),
+           ({'pair_id': 0}, 'bad_pair_id'), ({'pair_id': False}, 'bad_pair_id'),
+           ({'pair_id': ID, 'graph_path': GP}, 'bad_pair_id'),
+           ({'pair_id': ID, 'annotation_path': AP}, 'bad_pair_id'),
+           ({'pair_id': ID2, 'graph_path': GP, 'annotation_path': AP}, 'pair_id_mismatch'))
+
+    def test_a_falsy_pair_id_is_refused_not_a_key_error(self):
+        c = _Engine(AFTER_IDS, None)
+        for pid in ('', 0, False):
+            with self.assertRaises(PairIdError) as cm:
+                c.wire_request({'seeds': [], 'pairs': [{'graph': GRAPH, 'pair_id': pid}]})
+            self.assertEqual(cm.exception.code, 'bad_pair_id', pid)
+            with self.assertRaises(PairIdError) as cm:
+                pair_members(GRAPH, pair_id=pid)
+            self.assertEqual(cm.exception.code, 'bad_pair_id', pid)
         with self.assertRaises(PairIdError):
-            union_pairs([bad])
-        with self.assertRaises(PairIdError):
-            GraphletStore.request_of(bad)
+            MT.TraverseClient('localhost', 1, graph=GRAPH, pair_id='')
+        self.assertEqual(c.posted(), [])
+
+    def test_a_falsy_pair_id_through_the_tools(self):
+        from metagraph.traverse.mcp_tools import GraphletTools
+        with tempfile.TemporaryDirectory() as d:
+            client = _Engine(AFTER_IDS, tagged(T.doc_json('fork', 'graphlet'), 'id'))
+            tools = GraphletTools(GraphletStore(d), {'mini': client})
+            h = tools.traverse_fetch(seed={'sequence': 'ACGT'}, index='mini')['handle']
+            for pid in ('', 0, False):
+                out = tools.traverse_continue(h, 'right', 0, overrides={
+                    'pairs': [{'graph': GRAPH, 'pair_id': pid}]})
+                self.assertEqual(out['error'], 'bad_pair_id', (pid, out))
+
+    def test_every_reader_refuses_with_one_code(self):
+        from metagraph.traverse import union_pairs
+        from metagraph.traverse.mcp_tools import GraphletTools
+        good = fixture('fork', 'paths')
+        for tags, code in self.BAD:
+            doc = _doc('id', **tags)
+            with self.assertRaises(PairIdError) as cm:
+                answered_pair(doc.envelope)
+            self.assertEqual(cm.exception.code, code, tags)
+            words = str(cm.exception)
+            with self.assertRaises(PairIdError) as cm:
+                GraphletStore.request_of(doc)
+            self.assertEqual(cm.exception.code, code, tags)
+            for call in (lambda: union_pairs([doc]), lambda: union_pairs([good, doc]),
+                         lambda: union_pairs([{'pair': GRAPH, 'graphlet': doc}])):
+                with self.assertRaises(CombineRefused) as cm:
+                    call()
+                self.assertEqual(cm.exception.code, code, tags)
+                self.assertIn(words, str(cm.exception))
+                self.assertRegex(str(cm.exception), r'^result \d+: ')
+            for call, who in ((lambda: stitch(doc), 'the parent'),
+                              (lambda: stitch(good, doc), 'the child')):
+                with self.assertRaises(CombineRefused) as cm:
+                    call()
+                self.assertEqual(cm.exception.code, code, (tags, who))
+                self.assertEqual(str(cm.exception), '%s: %s' % (who, words))
+            with tempfile.TemporaryDirectory() as d:
+                path = os.path.join(d, 'bad.mgt')
+                doc.save(path)
+                out = GraphletTools(GraphletStore(d), {}).graphlet_load(path)
+                self.assertEqual(out.get('error'), code, (tags, out))
+            for path in (GP, AP):
+                self.assertNotIn(path, words)
+
+    def test_an_empty_path_is_a_path(self):
+        # master's vector 3 hashes an empty field as "0:"; a document stating an empty
+        # annotation path names the pair the engine names by that id
+        want = configured_pair_id(GRAPH, GP, '')
+        self.assertNotEqual(want, configured_pair_id(GRAPH, GP, None))
+        old = _doc('paths', annotation_path='')
+        self.assertEqual(answered_pair(old.envelope), Pair(GRAPH, GP, '', want))
+        twin = _doc('id', pair_id=want)
+        self.assertEqual(answered_pair(twin.envelope).identity, (GRAPH, want))
+        from metagraph.traverse import union_pairs
+        u1, u2 = union_pairs([old]), union_pairs([twin])
+        self.assertEqual((u1.parts[0].key, u1.digest), (u2.parts[0].key, u2.digest))
+        self.assertEqual(u1.parts[0].key[3], want)
+        # the engine's listing with the empty path resolves the id (n1 recomputed)
+        caps = {'graph_summary': {'pairs': [{'graph': GRAPH, 'graph_path': GP,
+                                             'annotation_path': ''}]}}
+        self.assertEqual(MT.client.capabilities_pair_resolver(caps)(want), (GRAPH, GP, ''))
 
 
 def configured_paths(*docs):
