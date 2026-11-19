@@ -919,7 +919,16 @@ class CutScratch {
         charge_search_scratch(account_, held_ + bytes);
         held_ += bytes;
     }
-    void release(uint64_t bytes) { held_ -= std::min(held_, bytes); }
+    void release(uint64_t bytes) {
+        held_ -= std::min(held_, bytes);
+        if (hand_back_ && account_)
+            account_->lower_scratch(held_);
+    }
+    // While on, what is released is handed back to the account, its scratch lowered to what
+    // this holds (SearchAccount::lower_scratch): for a scratch the account's one task holds
+    // alone, a column-label search's store as its keys go in (lane T7-G4E, the Opus review of
+    // cf77380a0, MA-1)
+    void hand_back(bool on) { hand_back_ = on; }
 
     // room for one more element in |v|, its capacity doubled (charged first)
     template <typename T>
@@ -946,6 +955,71 @@ class CutScratch {
   private:
     SearchAccount *account_;
     uint64_t held_ = 0;
+    bool hand_back_ = false;
+};
+
+/**
+ * The allocator of a column-label search's store when it is a hash table (utils::ValueStore
+ * from one million labels on): each allocation of the table (its bucket array at its reserve
+ * and at each doubling, the new array beside the old one while the entries move; a node of its
+ * overflow list) is charged to |scratch| BEFORE it is made, at what the table holds with it
+ * (CutScratch::grow: the unit's values account holds the most its scratch took), and released
+ * when it is freed (while the keys go in, handed back to the account: CutScratch::hand_back).
+ * Its keys are label ids under the identity hash: ids a multiple of a power of two apart
+ * collide, and so, rarely, do any at the reserve's 0.9 load, and the table grows past its
+ * reserve as they are put in (GPT final review of trains 5a-7, M1: the table was charged once
+ * its keys were in, after it had grown, and its doubling's old and new arrays together never;
+ * 1,835,008 B and 2,752,512 B for the 458,752 B charged, under a bound of 1 MiB). Propagated
+ * with its table, as ChargedAllocator (graph/traversal/charged_table.hpp); made only with a
+ * scratch (the Opus review of cf77380a0, n-1: no allocator that charges nothing by default)
+ */
+template <class T>
+class StoreAllocator {
+  public:
+    using value_type = T;
+    using propagate_on_container_copy_assignment = std::true_type;
+    using propagate_on_container_move_assignment = std::true_type;
+    using propagate_on_container_swap = std::true_type;
+    using is_always_equal = std::false_type;
+
+    explicit StoreAllocator(CutScratch *scratch) noexcept : scratch_(scratch) {
+        assert(scratch_);
+    }
+    template <class U>
+    StoreAllocator(const StoreAllocator<U> &other) noexcept : scratch_(other.scratch()) {}
+
+    T* allocate(size_t n) {
+        const uint64_t bytes = alloc_bytes(n * sizeof(T));
+        // (throws past the bound, before anything is allocated: the store is then discarded.
+        // tsl keeps its table on a throw where it copies the values, PresenceRuns; where it
+        // moves them back, CountRuns and PositionCoords, an entry it had put into the new
+        // table's overflow list may come back unfindable, which the discarded store never reads)
+        scratch_->grow(bytes);
+        try {
+            return std::allocator<T>().allocate(n);
+        } catch (...) {
+            scratch_->release(bytes);
+            throw;
+        }
+    }
+    void deallocate(T *p, size_t n) noexcept {
+        std::allocator<T>().deallocate(p, n);
+        scratch_->release(alloc_bytes(n * sizeof(T)));
+    }
+
+    CutScratch* scratch() const noexcept { return scratch_; }
+
+    template <class U>
+    bool operator==(const StoreAllocator<U> &other) const noexcept {
+        return scratch_ == other.scratch();
+    }
+    template <class U>
+    bool operator!=(const StoreAllocator<U> &other) const noexcept {
+        return scratch_ != other.scratch();
+    }
+
+  private:
+    CutScratch *scratch_;
 };
 
 // Append the rows of |rows| not seen yet to |distinct|, in the order of their first
@@ -1891,18 +1965,24 @@ Result filter_and_aggregate(const RowEnumerator &enumerate_rows,
     // (if any) as what it allocates before it is built: the dense index over the labels and the
     // values' buffer, or the hash table reserved for the labels kept (REVIEW 9726cb420 [P2],
     // lane T6-W2: the smaller of the two was charged, but the store picks its form by the
-    // labels alone)
+    // labels alone); a table that grows past its reserve as its keys are put in, at each of its
+    // allocations before it is made, through its allocator (StoreAllocator: GPT final review of
+    // trains 5a-7, M1). A doubling's old buckets, freed as the keys go in, are handed back to the
+    // account, whose later charges (the values, the rows' handover) use them: the account holds
+    // the most the table, the values and the rows held at once, not the doubling's peak beside
+    // them (the Opus review of cf77380a0, MA-1). The table the keys are in stays charged until
+    // the unit ends, as the store did before
     charge_search_scratch(values_account,
                           search_store_bytes<ValueType>(label_encoder.size(), counts.size()));
-    utils::ValueStore<Column, ValueType> value_store(label_encoder.size(), counts.size());
+    using Allocator = StoreAllocator<std::pair<Column, ValueType>>;
+    CutScratch store_scratch(values_account);
+    store_scratch.hand_back(true);
+    utils::ValueStore<Column, ValueType, Allocator> value_store(
+            label_encoder.size(), counts.size(), Allocator(&store_scratch));
     for (const auto &[j, count] : counts) {
         value_store.emplace(j, ValueType(num_kmers, values_account));
     }
-    // keys that collide in the table's hash (label ids chosen for it) can make it grow past its
-    // reserve: what it holds then, charged once its keys are in, before any value is added
-    if (values_account && !value_store.is_dense())
-        values_account->charge_scratch(
-                annot::matrix::hopscotch_held_bytes(value_store.sparse_values()));
+    store_scratch.hand_back(false);
 
     size_t i = 0;
     enumerate_rows([&](const auto &row) {

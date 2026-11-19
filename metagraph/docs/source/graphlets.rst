@@ -150,8 +150,8 @@ run), and an attempt stopped at its duration bound while its response was built 
 ``AttemptAtBound`` (a 503 with ``usage``: it ran, so it is not retried under the same
 ``attempt_id`` -- refused while the server holds the id, it would run again after that).
 ``capabilities()`` and ``resolve()`` call the other two routes (on a multi-graph server
-``capabilities(graph=..., graph_path=..., annotation_path=...)`` describes one of its
-pairs),
+``capabilities(graph=..., graph_path=..., annotation_path=...)``, or
+``capabilities(graph=..., pair_id=...)``, describes one of its pairs),
 ``server_capabilities()`` reads the server-wide document (``GET /capabilities``:
 the routes and features, ``feature_level``, the mode and graph names, the attempts),
 ``traverse_raw(request)`` sends a request you built yourself, and ``api_path`` is for a
@@ -164,9 +164,77 @@ picks one graph of a name with several, ``annotation_path`` one annotation of a 
 with several; the request carries ``graph`` and ``graph_path``, or, with an
 ``annotation_path``, one ``pairs`` object, the only place ``/traverse`` takes it. The
 server answers in the envelope of that pair; the client reads its entry, and each
-graphlet keeps the pair's tags (``graph``, ``graph_path``, ``annotation_path``) in its
-envelope. Its continuations and replays run on that pair (below), not on the client's
-own.
+graphlet keeps the pair's tags in its envelope. Its continuations and replays run on that
+pair (below), not on the client's own.
+
+**Pair identity** (``docs/DESIGN-pair-identity.md``). A server before pair ids tags an
+answer with ``graph``, ``graph_path`` and ``annotation_path``; one after, with ``graph``
+and ``pair_id``, the pair's n1 id and no path, and states ``multigraph.pair_id: "n1"``
+in ``GET /capabilities``. The library reads both forms. ``configured_pair_id(graph,
+graph_path, annotation_path)`` computes the n1 id as the engine does (``"n1-"`` and a
+UUIDv5 of the three fields as the graph list spells them), so a document stored with
+paths and its twin stored with the id name one pair: ``answered_pair(envelope)`` returns
+a ``Pair(graph, graph_path, annotation_path, pair_id)`` whose ``pair_id`` is the stated id
+or the id of the paths, and ``Pair.identity`` is ``(graph, pair_id)`` for both. A pair
+can be named by its id wherever paths are taken: ``traverse(..., graph=...,
+pair_id=...)``, ``TraverseClient(..., pair_id=...)``, ``capabilities(graph=...,
+pair_id=...)``, a ``{graph, pair_id}`` object in ``traverse_pairs(pairs=...)`` and
+``union_pairs()``; the request carries ``pairs: [{graph, pair_id}]``. An id is the
+engine's n1 id, never the service's public ``p2-`` id, which is refused
+(``PairIdError``, a ``ValueError`` with ``code`` ``p2_pair_id``; ``bad_pair_id`` for
+anything else that is not an n1 id -- ``''``, ``0`` and ``False`` included -- or an id
+beside one path only, ``pair_id_mismatch`` for an id stated beside paths that are not
+its). One rule reads every pair statement, in a document's ``J`` line, a listing, a
+selector or a pair object, and an empty path is a path wherever a pair is read or written
+(the engine hashes ``''`` too, apart from an absent path): ``answered_pair()`` and
+``GraphletStore.request_of()`` raise the ``PairIdError``, ``union_pairs()`` and
+``stitch()`` refuse the document with a ``CombineRefused`` of the same code and words,
+and the MCP tools answer that code.
+
+A document with paths is continued and replayed by its paths, which every server takes.
+A document with the id only is continued and replayed by its id, and the client decides
+how to send it, in one place (``TraverseClient.wire_pair()``, through
+``wire_request()``, which ``traverse_raw()``, ``traverse()``, ``deepen()``,
+``traverse_pairs()`` and the capabilities probe go through), in this order:
+
+1. the caller's ``pair_resolver`` -- a function from an n1 id to ``(graph, graph_path,
+   annotation_path)``, or ``None`` for an id it does not know: the answer's n1 id is
+   recomputed and compared (``pair_id_mismatch`` otherwise) and the pair sent by its
+   paths;
+2. where the resolver does not know the id, or there is none: the id itself, to a server
+   that states ``multigraph.pair_id: "n1"`` in ``GET /capabilities``;
+3. else the paths that same server lists for the id in its own ``GET /capabilities``
+   (``capabilities_pair_resolver()`` over it, read once per server process, the n1 id
+   recomputed; a listed entry the rule above refuses is left out and resolves nothing):
+   paths go back only to the engine that stated them;
+4. else ``PairIdError`` ``pair_unresolved``, before any ``/traverse`` request or probe
+   is sent (the client has read ``GET /capabilities``; a server it cannot reach raises
+   its transport error instead, which ``traverse_pairs()`` returns as that pair's
+   ``{pair, error}``). ``traverse_pairs()`` checks every pair this way, on its own read
+   of ``GET /capabilities``, before it sends the first request, so a refusal loses no
+   answer.
+
+So a client holding a document with the id only, and no resolver of its own, can read,
+union and stitch it with no server at all, and can re-ask a server for it when the server
+states ``multigraph.pair_id: "n1"`` (an engine with pair ids), or when it lists the pair's
+paths in its own ``GET /capabilities`` (an engine before ids, reached directly); a
+resolver the caller builds with ``capabilities_pair_resolver(doc)`` from such a document,
+or any other, comes first. Anything else is ``pair_unresolved``: a front end whose answers
+list no paths and state no ids leaves the client nothing to resolve by, and re-asks go
+through that front end, whose own clients carry its resolver (the service installs one on
+every client it creates).
+
+What the library answers names a pair by ``graph`` and ``pair_id``, never by a path it
+read from an engine or a document: union provenance and refusal texts, a stitched
+graphlet's provenance, ``traverse_pairs()``' ``expected_pairs`` and ``seqs_order`` keys,
+the MCP tools' answers (``request_without_paths()``, ``entry_without_paths()``), and the
+documents they hand out -- ``graphlet_export(format='mgt')`` and ``graphlet_save`` write
+the ``J`` line by ``{graph, pair_id}``, an old document's too
+(``document_without_paths()``; ``GraphletStore.save()``, ``standalone_text()`` and
+``save_body()`` with ``paths=False``); the body and its digest are unchanged, and the
+store's own files, ``Graphlet.save()`` and ``dump()`` keep what the document states. A
+pair the caller named by a path without its id (no id to compute) is echoed in the
+caller's own words.
 
 .. graphlet-example: client server
 
@@ -1390,10 +1458,11 @@ builds the resubmittable request: one seed per walk (its continuation, with its 
 named explicitly in ``constrain`` mode), the retrieval's normalized strategy with
 ``direction`` set to the arm, ``bounds.max_extension_bp = bp`` when given, and the
 keyword overrides deep-merged into the strategy (``release`` and the pair's selectors
-``graph``, ``graph_path``, ``annotation_path``, ``graphs`` and ``pairs`` go to the request
-level). The request runs on the pair the retrieval was answered on, which a multi-graph
-server's envelope names: ``graph`` and ``graph_path``, or a ``pairs`` object with the
-``annotation_path``. A selector among the overrides replaces that pair whole
+``graph``, ``graph_path``, ``annotation_path``, ``pair_id``, ``graphs`` and ``pairs`` go to
+the request level). The request runs on the pair the retrieval was answered on, which a
+multi-graph server's envelope names: ``graph`` and ``graph_path``, or a ``pairs`` object
+with the ``annotation_path`` (a document with paths) or with the ``pair_id`` (one with the
+id only). A selector among the overrides replaces that pair whole
 (``graph=None`` names none), and ``deepen()`` adds the client's own pair only to a
 graphlet that names none (a single-graph server's). ``labels.change_cost`` is merged as one unit: an
 override that names another ``model`` replaces the retrieval's whole (the server reads only
@@ -1633,7 +1702,9 @@ budgets`_): ``stitch()``, ``walks()``, ``walk()``, ``spell()``, ``continuation()
 each junction's rule-check context, each walk's causes), and a call charges each at its
 cold price whether it is kept or not, so it charges the same, and stops at the same row,
 whatever earlier calls cached. ``walk()`` charges the walk it builds as ``walks()``
-charges each, and ``summary()`` reads the evidence under its own budget. The accessors
+charges each, and ``summary()`` reads the evidence under its own budget. ``stitch()``
+admits each graphlet it builds (its labels and its digest) before building it, a plain
+parent's own wrapper included: ``stitch(g)`` under a zero budget stops. The accessors
 that return stored fields or measure the object take no budget: ``arms()``,
 ``arm_of()``, ``label()``, ``provenance()``, ``memory_bytes()`` and the stored
 attributes ``parts``, ``root``, ``junctions``, ``labels``, ``identity``, ``digest``,
@@ -1854,9 +1925,10 @@ Inputs
 ``union_pairs(results, *, seed=None, expected_pairs=None, seqs_order=None, budget=None)``
 takes everything one seed's request returned across pairs, in any order:
 
-* a ``Graphlet`` whose envelope names its pair (``graph``, ``graph_path``,
-  ``annotation_path``, ``index_fp``, ...), or ``{'pair': ..., 'graphlet': g}`` for a body
-  without one (a graph name or a pair object, stated by the caller);
+* a ``Graphlet`` whose envelope names its pair (``graph`` with ``graph_path`` and
+  ``annotation_path``, or with ``pair_id``; ``index_fp``, ...), or ``{'pair': ...,
+  'graphlet': g}`` for a body without one (a graph name or a pair object, stated by the
+  caller);
 * a ``StitchedGraphlet`` (experimental, `A stitched graphlet as a part`_), in either form:
   one pair's answer, its root and the continuations stitched to it;
 * a ``TraverseResponse`` of one seed (``{'response': r, 'index': i}`` picks one seed of
@@ -1870,7 +1942,26 @@ takes everything one seed's request returned across pairs, in any order:
 is ``not_included``, and without it every statement says that it covers only the pairs
 given. ``seqs_order=`` maps each pair to its record-mapping certificate as ``GET
 /capabilities`` states it (``'verified'``, ``'count_only'`` or ``None``); a pair not in it
-reads ``unknown``. ``TraverseClient.traverse_pairs(seed, strategy, pairs=...)`` sends one
+reads ``unknown``. A pair is a graph name or a pair object (``{graph, pair_id}`` or
+``{graph, graph_path, annotation_path}``, with ``release``, ``index_ns``, ``index_fp``,
+``index_meta_fp`` where known); a ``seqs_order`` key is a graph name or a tuple
+``(graph, pair_id)`` or ``(graph[, graph_path[, annotation_path]])``. A pair named by its
+paths and the same pair named by its id are one pair: the union keys each pair by its
+n1 id (``configured_pair_id()`` of the paths where no id is stated), so a document stored
+with paths and its twin stored with the id give the same part key, tag and digest, and a
+union of both forms is one. Two descriptions name one pair by this rule, in this order: a
+differing ``index_meta_fp`` separates them, an ``index_fp`` both state decides, then the
+graph names, then the ids where both have one, else the paths where both state them. A
+pair named by a path without its id (``{graph, graph_path}``, a ``(graph, graph_path)``
+key) is compared with a pair named by its id only through the paths another description
+in the same call states for that id (its old twin, a full pair object); with none they
+cannot be compared and do not match -- a caller's statement is refused ``pair_mismatch``,
+an expected pair is ``not_expected``, a ``seqs_order`` key certifies no pair -- so a
+certificate attaches only to the pair it was stated for, and one set of inputs gives one
+union in every order. A ``seqs_order`` key shaped as another scheme's id (``N1-...``,
+``n2-...``, ``P2-...``) is refused ``bad_seqs_order``. For one name with several pairs the
+parts and absent records are ordered by ``pair_id``.
+``TraverseClient.traverse_pairs(seed, strategy, pairs=...)`` sends one
 request per pair (``pairs=None``: every pair ``GET /capabilities`` lists; ``pairs=[]``: none,
 and nothing is sent) and returns all four (``PairResults``); a pair whose request failed
 (``TraverseError``; ``ResponseFormatError``, a ``TraverseError``, for an answer not shaped
@@ -1889,7 +1980,9 @@ given twice is one, and two retrievals of one pair are refused (``compare()`` re
 retrievals of one pair). A refusal is a ``CombineRefused`` (a ``ValueError``) with a
 ``code``, checked in this order: the arguments (``bad_expected``, ``bad_seqs_order``),
 then ``not_combinable`` (also a ``TypeError``), ``view_unsupported``, ``not_one_seed``,
-``result_has_graphlet``, ``no_graphlet``, ``no_seed``, ``pair_mismatch``, ``no_pair``,
+``result_has_graphlet``, ``no_graphlet``, ``no_seed``, a document's pair statement the
+library does not take (``p2_pair_id``, ``bad_pair_id``, ``pair_id_mismatch``),
+``pair_mismatch``, ``no_pair``,
 ``ambiguous_pair``, ``no_bases``, ``different_alphabet``, ``different_seed``,
 ``duplicate_pair`` and ``not_expected``; two ``seqs_order`` keys that give one pair two
 values are ``bad_seqs_order``, found among the keys first and otherwise right after
@@ -2475,7 +2568,8 @@ default) nothing is budgeted and every answer is byte for byte what it was befor
   memory limit holds for each call; the work of the calls that share one budget adds
   up (an allowance). One exception to "charged before": a record of output text is
   charged as soon as it is built (its size is known only then), and so are the walk ids
-  a one-shot iterator gives ``to_fasta(leaves=)`` (copied as they are read).
+  a one-shot iterator gives ``to_fasta(leaves=)`` or ``walks_at()`` (copied as they are
+  read); a list of walk ids is admitted before it is copied.
 * ``LocalLimits(work_units=None, memory_mb=None, deadline_s=None)`` holds the limits
   (``None``: unlimited). ``deadline_s`` (elapsed seconds since the budget was made) and
   ``budget.cancel()`` (from another thread) stop a call at its next charge point; they
@@ -2500,9 +2594,11 @@ answers as on a fresh model.
   ``splits()``, ``walks(by='id')``, ``walks_at()`` -- put the whole rows they made, a
   prefix in their documented order, in ``e.partial.rows``, and a token in
   ``e.partial.resume`` that the same call takes as ``resume=`` to go on after the last
-  row. A token of another call, other arguments or another graphlet is refused: it
-  binds the digest of the graphlet's body (``Graphlet.body_digest``, made by the parse),
-  which the same body parsed again, or saved and loaded, shares.
+  row. A stop before the call has bound its arguments returns no rows and the call's
+  own ``resume=`` (``None`` for a fresh call): the same call with it starts where the
+  stopped one began. A token of another call, other arguments or another graphlet is
+  refused: it binds the digest of the graphlet's body (``Graphlet.body_digest``, made by
+  the parse), which the same body parsed again, or saved and loaded, shares.
 * **Ranked lists and summaries** -- ranked ``walks()``, ``rank_walks()``,
   ``label_summary()``, ``summary()``, ``support_profile()``, ``support_changes()``,
   ``subgraph()``, ``continuation()``, ``next_request()`` -- raise with no partial: a
@@ -2595,9 +2691,11 @@ digits):
 * ``save(handle, path)`` / ``load(path)`` move entries through ``.mgt`` files
   (``load_graphlet(path)`` also returns the model it parsed, kept or not), and
   ``list()`` describes the entries. ``request_of(g, graph=..., graph_path=...,
-  annotation_path=...)`` keeps the pair of a multi-graph server in the replay request
-  (else the pair the envelope names, where a multi-graph server answered); a request
-  without one is valid on a single-graph server only;
+  annotation_path=..., pair_id=...)`` keeps the pair of a multi-graph server in the replay
+  request (else the pair the envelope names, where a multi-graph server answered: by its
+  paths, or by ``pairs: [{graph, pair_id}]`` for a document with the id only, which the
+  client sending it resolves); a request without one is valid on a single-graph server
+  only;
 * the disk TTL counts from the last use also across restarts (the entry file is
   rewritten once its recorded use lags by a tenth of the TTL). Processes may share a
   spool: a body is deleted only when no entry file names it any more, a handle another

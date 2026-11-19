@@ -762,11 +762,19 @@ def continuation_sequence(g, arm, leaf, walk=None):
         flank = natural_flank(arm, leaf)
     else:
         flank = walk if arm.side == 'right' else walk[::-1]
+    # only the bases the continuation takes from the seed are copied, not the whole seed
+    # (seed + flank per leaf, uncharged in to_json() and stitch(): the lane's sweep of GPT
+    # final review M2); the same text
+    seed = g.seed.sequence
+    m = c.n - len(flank)
     if arm.side == 'right':
-        whole = g.seed.sequence + flank
+        if m <= 0:
+            return flank[len(flank) - c.n:]
+        if m <= len(seed):
+            return seed[len(seed) - m:] + flank
+        whole = seed + flank
         return whole[len(whole) - c.n:]
-    whole = flank + g.seed.sequence
-    return whole[:c.n]
+    return flank[:c.n] if m <= 0 else flank + seed[:m]
 
 
 # ------------------------------------------------------------------ evidence (§5.1)

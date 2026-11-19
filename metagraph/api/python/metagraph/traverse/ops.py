@@ -1486,24 +1486,47 @@ def walk_filter_reason(g, arm, walk, labels):
 def walks_at(g, arm, path_ids, with_claims=False, *, budget=None, resume=None):
     """The Walk objects of |path_ids|, in that order (claims only with with_claims).
     budget=: a stop raises LocalBudgetExceeded whose .partial holds the whole walks made
-    so far and a resume token (resume=)."""
+    so far and a resume token (resume=); a stop while the ids are admitted, before any walk,
+    holds the call's own resume= (None for a fresh call)."""
     a = g.arm(arm)
     b = _B.resolve(budget)
     if b is None and resume is None:
         return _walks_at(g, a, path_ids, with_claims, None)
+    if b is None:
+        return _walks_at_from(g, a, path_ids, with_claims, None, resume)
+    with b.scope('walks_at', ('select_walks',)):
+        return _walks_at_from(g, a, path_ids, with_claims, b, resume)
+
+
+def _walks_at_from(g, a, path_ids, with_claims, b, resume):
+    """walks_at() with its arguments bound for a resume token; with |b| (its scope open) the
+    copies of the ids -- the list, the token's arguments, the slice from the resumed
+    position and the token's JSON of them -- are admitted before they are made (the lane's
+    sweep of GPT final review M4: 30.8 MB before a zero budget's stop for 1,000,000 ids);
+    a one-shot iterator's ids are charged as soon as they are read (budget.py's stated
+    exception). A stop there has no token of these arguments yet: like claims()'s, it
+    resumes where the call began."""
+    if not hasattr(path_ids, '__len__'):
+        path_ids = tuple(path_ids)
+    if b is not None:
+        n = len(path_ids)
+        try:
+            b.charge(W_ELEM * n, 3 * list_bytes(n) + 2 * (STR + 24 * n))
+        except LocalBudgetExceeded as e:
+            # a stop before the call knew its arguments resumes where this call began
+            raise e.restate(Partial([], resume), rows=0, of=n)
     path_ids = list(path_ids)
     args = [a.side, [x if isinstance(x, int) else path_id(a, x) for x in path_ids],
             bool(with_claims)]
     k0, = _resume_pos(g, 'walks_at', args, resume, 1)
     if b is None:
         return _walks_at(g, a, path_ids[k0:], with_claims, None)
-    with b.scope('walks_at', ('select_walks',)):
-        out = []
-        try:
-            return _walks_at(g, a, path_ids[k0:], with_claims, b, out)
-        except LocalBudgetExceeded as e:
-            raise e.restate(Partial(out, _token(g, 'walks_at', args, k0 + len(out))),
-                            rows=len(out), position=k0 + len(out), of=len(path_ids))
+    out = []
+    try:
+        return _walks_at(g, a, path_ids[k0:], with_claims, b, out)
+    except LocalBudgetExceeded as e:
+        raise e.restate(Partial(out, _token(g, 'walks_at', args, k0 + len(out))),
+                        rows=len(out), position=k0 + len(out), of=len(path_ids))
 
 
 def _walks_at(g, a, path_ids, with_claims, b, out=None):
@@ -2968,13 +2991,15 @@ def next_request(g, arm, leaves, bp=None, reduce_budget=True, reset_branches=Fal
     same labels, or no switch is possible); otherwise IncompatibleContinuations names
     next_requests(), one request per walk. Keyword overrides deep-merge into the
     strategy (labels.change_cost as described above); release and the pair's selectors
-    (graph, graph_path, annotation_path, graphs, pairs) are request-level. The request runs
-    on the pair the retrieval was answered on: a multi-graph server's envelope names it
-    (graph, graph_path, annotation_path; client.answered_pair()), written by
-    client.pair_members() -- `graph` and `graph_path`, or a `pairs` object with the
-    annotation_path, which /traverse takes there only. A selector in the overrides replaces
-    that selection whole (graph=None: no pair named); annotation_path or graph_path without
-    a graph is a ValueError. A single-graph retrieval names no pair. Raises MissingEnvelope on
+    (graph, graph_path, annotation_path, pair_id, graphs, pairs) are request-level. The
+    request runs on the pair the retrieval was answered on: a multi-graph server's envelope
+    names it (graph and graph_path, annotation_path before the engine named pairs by id,
+    graph and pair_id after; client.answered_pair()), written by client.pair_members() --
+    `graph` and `graph_path`, or a `pairs` object with the annotation_path (a document with
+    paths is continued by them), or with the pair_id (a document with the id only), which
+    /traverse takes there only. A selector in the overrides replaces that selection whole
+    (graph=None: no pair named); annotation_path, graph_path or pair_id without a graph is a
+    ValueError. A single-graph retrieval names no pair. Raises MissingEnvelope on
     a body-only graphlet. budget= (local limits) a LocalBudget, not the request's loss
     budget: the continuations, the rebuilt labels.extra and the switch searches are charged;
     a stop raises, with no partial. Any other value of budget= is a keyword override like
@@ -3271,21 +3296,23 @@ _REQUEST_LEVEL = ('release',) + _client.SELECTORS
 
 def _pair_of_request(g, overrides):
     """The selection members of a continuation (removed from |overrides|): the overrides'
-    selectors when they give any -- as given, a graph with its paths written by
-    pair_members() (`pairs` for an annotation_path), `graphs` and `pairs` passed on --
-    else the pair the retrieval was answered on (a multi-graph envelope's tags), else
-    none."""
+    selectors when they give any -- as given, a graph with its paths or its pair_id written
+    by pair_members() (`pairs` for an annotation_path or a pair_id), `graphs` and `pairs`
+    passed on -- else the pair the retrieval was answered on (a multi-graph envelope's
+    tags: its paths, or its pair_id where it states no paths), else none."""
     given = {k: overrides.pop(k) for k in _client.SELECTORS if k in overrides}
     if not given:
         pair = _client.answered_pair(g.envelope)
         return _client.pair_members(*pair) if pair else {}
     if 'graphs' in given or 'pairs' in given:
-        if given.get('annotation_path') is not None:
-            raise ValueError('annotation_path names the pair of graph; with graphs or pairs '
-                             'give it in the pair object')
-        return {k: v for k, v in given.items() if k != 'annotation_path' and v is not None}
+        for k in ('annotation_path', 'pair_id'):
+            if given.get(k) is not None:
+                raise ValueError('%s names the pair of graph; with graphs or pairs give it in '
+                                 'the pair object' % k)
+        return {k: v for k, v in given.items()
+                if k not in ('annotation_path', 'pair_id') and v is not None}
     return _client.pair_members(given.get('graph'), given.get('graph_path'),
-                                given.get('annotation_path'))
+                                given.get('annotation_path'), given.get('pair_id'))
 
 
 def next_requests(g, arm, leaves, bp=None, reduce_budget=True, reset_branches=False, *,

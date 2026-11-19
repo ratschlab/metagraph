@@ -216,7 +216,9 @@ before what it prices is built (the model of the deployed build's heap, as today
 
 1. **A unit's values account**, one per (record, pair). It is charged what today's pair account is charged, for
    that one record: its per-position values as their buffers grow, the store its column-label search gathers its
-   rows in (W2's `charge_scratch`; a unit is one task, `threads` 1), and its rows as its result is handed over
+   rows in (W2's `charge_scratch`; a unit is one task, `threads` 1; from one million labels on, a hash table charged
+   at each of its allocations before it is made, and a doubling's old buckets handed back once freed, which the
+   unit's later charges then use: lane T7-G4E), and its rows as its result is handed over
    (`search_record_rows_bytes`, now made in `query_sequence`, 3.2). If it would pass B, the unit is refused with
    `account: "values"`. With `partial_refusal` the request is not marked and the other units go on; without it,
    see 2.4.
@@ -231,9 +233,10 @@ before what it prices is built (the model of the deployed build's heap, as today
    text, the transport's or gzip's copy and the cache's copy. If it would pass B, the whole request is refused 400
    (2.4). With `partial_refusal`, every unit still running stops at its next charge, as today.
 
-Not charged, as today: the rows decoded before the top-N cut (an accepted risk, owner 2026-11-14 11:35Z;
-SPEC-multigraph-envelope.md section 3), the index (mmap pages, an `in_ram` load), the body (its 256 MiB cap), the
-query graph of the batched path. Section 5.1 lists what the model misses.
+Not charged, as today: the rows decoded before the top-N cut, and a counts search's store of the tied labels'
+abundances that its cut reads (`abundance_medians`, the same kind of table as the values' store; an accepted
+risk, owner 2026-11-14 11:35Z; SPEC-multigraph-envelope.md section 3), the index (mmap pages, an `in_ram` load),
+the body (its 256 MiB cap), the query graph of the batched path. Section 5.1 lists what the model misses.
 
 ### 3.2 The pipeline: one refusal site per record, and the object built when the unit completes
 
@@ -317,10 +320,13 @@ Claim: which units are refused, with which `account` and `priced_mb`, and the st
 functions of (the request, the index, the server's flags). They never depend on the order in which threads, records
 or pairs run or charge.
 
-1. **A unit's values account** is charged only by its own record's work on its own pair, and only grows. Whether
-   some charge passes B depends only on the total of its charges, which is a function of the unit. This holds
-   whatever thread makes each charge. No member reports the charge that passed (`priced_mb` is not stated for
-   values), so the result does not depend on the order of a unit's own charges.
+1. **A unit's values account** is charged only by its own record's work on its own pair: one task, whose charges,
+   and the bytes it hands back as a column-label store's table frees its old buckets (`SearchAccount::lower_scratch`,
+   used again by its later charges), come in the order its code fixes. What the account holds only grows: it is the
+   most the unit held at once. So whether some charge passes B is a function of the unit, though no longer of the
+   total of its charges alone (lane T7-G4E, b3c1c1904; the Opus review of 0666c9815, n-C). This holds whatever
+   thread runs the task. No member reports the charge that passed (`priced_mb` is not stated for values), so the
+   result does not depend on which of the unit's charges passed.
 2. **A unit's object check** compares a price computed from the unit's result alone. The same holds for
    `priced_mb`.
 3. **The request's answer account** only grows. It receives a fixed set of charges:
@@ -359,7 +365,8 @@ requests at once (at most H; the service sends at most 2 to refseq-experimental)
 - **bodies**: H x 256 MiB (`--max-request-body-mb`).
 
 These are totals of the model, not bounds on memory (review finding 6). What the model misses:
-- the rows decoded before the top-N cut, per running unit, unbounded (accepted risk);
+- the rows decoded before the top-N cut, per running unit, unbounded (accepted risk), and the store of the tied
+  labels' abundances a counts search's cut reads (`abundance_medians`; the Opus review of cf77380a0, n-3);
 - **plain modes**: rows without per-position values are built uncharged and charged once at the handover.
   `top_labels` has no cap (server_request.cpp:35), so a unit can hold more than B before it is refused;
 - **responses still being written** after the handler returns (`response->send`, server_utils.cpp:1082-1087): a
@@ -368,6 +375,13 @@ These are totals of the model, not bounds on memory (review finding 6). What the
   `SearchRequest.fasta`, and on disk a temp file per pair;
 - **gzip's output** is appended without a reserve (`compress_string`, server_utils.cpp:53-112), so incompressible
   text can take more than the charged copy;
+- **small allocations no account sees** (lane T7-G4E's sweep after the GPT final review of trains 5a-7, M1):
+  each `with_signature` value's empty mask (an sdsl word, 16 B at its size class), and its copy beside it while
+  a column-label search's table doubles (tsl copies the values, which are not nothrow-movable); after the cut, a
+  column-label search's list of the rows kept (16 B a row), and the coordinate path's table of the returned
+  records and its list of their hits (24 B a record); a value's `shrink()`, which allocates the shrunk buffer
+  beside the charged one, one value at a time. In the per-position modes too, the rows' labels and the result's
+  vector are built before the handover charge;
 - allocator slack. Y4 measured refused requests peaking slightly above the bound.
 
 ### 5.2 Staging (refseq-experimental, r237, 128 GiB container, about 18 GiB anonymous at rest)
@@ -551,7 +565,9 @@ pins, Linux fixtures, samples).
   and an answer-account 400 can come after most units ran, holding the pool threads /resolve and /pattern share
   (3.4). Without the field, the early stop on values is kept. Against an unbounded run, refusals still shorten a
   request; against 5b's refusal, a request with the field is longer.
-- R7. **The pre-cut decode stays unbounded per running unit** (accepted risk). P1 neither worsens nor bounds it.
+- R7. **The pre-cut decode stays unbounded per running unit** (accepted risk), with the store of the tied
+  labels' abundances a counts search's cut reads (`abundance_medians`, a hash table of the tied labels from one
+  million labels on). P1 neither worsens nor bounds it.
 - R8. **Master PR #765** (Kulkov, head 70c481b9f, not merged) rewrites the record fold in annotated_dbg.cpp:
   repeated rows are read once by record, the run buffers of records that can no longer be returned are freed, and
   past a fold budget (`kFoldValuesBudget`, 16 MiB in release builds at 70c481b9f; the coordinator's message said 64

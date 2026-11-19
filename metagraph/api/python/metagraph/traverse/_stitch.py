@@ -42,7 +42,7 @@ from . import ops as _ops
 from ._codec import REASON
 from .budget import (STR, TUPLE, W_ELEM, W_ROW, W_STEP, LocalBudgetExceeded, Partial,
                      dict_bytes, list_bytes, record_bytes, set_bytes)
-from .client import answered_pair
+from .client import PairIdError, answered_pair
 from .composite import CombineRefused, NotCombinable
 from .model import (ARM_SIDES, AmbiguousLabel, BadSelector, Continuation, Graphlet, Label,
                     UnknownLabel)
@@ -74,6 +74,9 @@ _T_NO_WALK = ('walk= names no walk of the %s arm (%s): a stitched child is seede
               'walk\'s continuation (continuation(), next_request())')
 _T_DIFFERENT_PAIR = ('the child was answered on pair %s, its parent on pair %s: a '
                      'continuation runs on its parent\'s pair')
+# p2_pair_id, bad_pair_id, pair_id_mismatch: the parent's or the child's pair statement the
+# library does not take, with the words of client.PairIdError
+_T_BAD_PAIR_STATEMENT = '%s: %s'
 _T_DIFFERENT_GRAPH = ('the child\'s graph is not its parent\'s (%s %r vs %r): its walks '
                       'cannot continue the parent\'s')
 _T_DIFFERENT_MODE = ('the child was walked in %s mode with %s support, its parent in %s mode '
@@ -429,16 +432,19 @@ def stitch(parent, child=None, *, arm=None, walk=None, allow_unverified_index=Fa
     child's seed (several: ambiguous_walk). One junction per call.
 
     Refusals (CombineRefused with .code, in the order checked; Appendix B.1 has the texts):
-    not_combinable (also a TypeError), view_unsupported, MissingEnvelope, different_index,
+    not_combinable (also a TypeError), view_unsupported, MissingEnvelope, p2_pair_id,
+    bad_pair_id and pair_id_mismatch (a pair statement the library does not take, with the
+    PairIdError's words: client._pair()), different_index,
     index_unverifiable (a manifest digest on some parts only; allow_unverified_index=True
     stitches it and states the identity unverified), different_pair (the identity checks
     run against every part on both sides), different_graph, different_mode, not_one_arm,
     wrong_arm, no_continuation, not_a_continuation, ambiguous_walk, already_continued (the
     same retrieval, or for a stitched child the same subtree, again at that walk is a
     no-op: the parent is returned), foreign_seed_labels. budget= (local limits): the identity
-    checks, the new graphlet's index and each junction's W1-W7 (computed once per pair of
-    parts) are charged; W8 runs per walk in the queries and is charged there. A stop raises
-    with no partial."""
+    checks, the new graphlet's index, labels and digest, and each junction's W1-W7 (computed
+    once per pair of parts) are charged, each before it is built; a plain parent's own
+    StitchedGraphlet is built inside the call and charged so (stitch(g) included); W8 runs
+    per walk in the queries and is charged there. A stop raises with no partial."""
     if not isinstance(allow_unverified_index, bool):
         raise ValueError('allow_unverified_index is True or False, not %r'
                          % (allow_unverified_index,))
@@ -450,13 +456,27 @@ def stitch(parent, child=None, *, arm=None, walk=None, allow_unverified_index=Fa
     for x in (parent,) if child is None else (parent, child):
         if isinstance(x, Graphlet):
             _K.require_envelope(x, 'stitch()')
-    base = parent if isinstance(parent, StitchedGraphlet) else \
-        StitchedGraphlet._root_of(parent)
-    if child is None:
-        return base
-    return _K.run_scoped(budget, 'stitch',
-                         lambda b: base._stitched(child, arm, walk, allow_unverified_index,
-                                                  b))
+    # the pair each states, read by the one rule (client._pair()): a p2 or malformed
+    # pair_id, an id beside one path or beside paths that are not its is refused with the
+    # PairIdError's code and words (a StitchedGraphlet's parts were read when it was built)
+    for x, who in ((parent, 'the parent'), (child, 'the child')):
+        if isinstance(x, Graphlet):
+            try:
+                answered_pair(x.envelope)
+            except PairIdError as e:
+                raise CombineRefused(e.code, _T_BAD_PAIR_STATEMENT % (who, e)) from None
+    if child is None and isinstance(parent, StitchedGraphlet):
+        return parent
+
+    def build(b):
+        # a plain parent's wrapper is built inside the call's scope, its labels and digest
+        # admitted first (GPT final review M3)
+        base = parent if isinstance(parent, StitchedGraphlet) else \
+            StitchedGraphlet._root_of(parent, b)
+        if child is None:
+            return base
+        return base._stitched(child, arm, walk, allow_unverified_index, b)
+    return _K.run_scoped(budget, 'stitch', build)
 
 
 # ------------------------------------------------------------------ the graphlet
@@ -507,13 +527,20 @@ class StitchedGraphlet:
     # ---------------------------------------------------------------- construction
 
     @classmethod
-    def _root_of(cls, g):
+    def _root_of(cls, g, b=None):
+        if b is not None:
+            w, m = _build_price([g])
+            b.charge(W_ROW + w, record_bytes(Part) + 200 + m)
         return cls([Part((), g, 0, _K.part_digest(g))], _identity_of([g], [], False))
 
     def _stitched(self, child, arm, walk, allow, b):
         """The checks of §3.1 in order, then the new graphlet (or self: a no-op)."""
         croot = child.root if isinstance(child, StitchedGraphlet) else child
         proot = self.root
+        if b is not None:
+            # the names check over the child's labels, and its seed, case-mapped to find the
+            # walk it continues (GPT final review M3: admitted before they run)
+            b.charge(W_ELEM * len(child.labels), STR + len(croot.seed.sequence))
         cparts = child.parts if isinstance(child, StitchedGraphlet) else \
             (Part((), child, 0, _K.part_digest(child)),)
         identity = self._check_index(cparts, child.labels, allow, b)
@@ -540,7 +567,7 @@ class StitchedGraphlet:
         pg = part.graphlet
         ckey = part.key + ((side, pid),)
         if ckey in self._by_key:
-            self._same_child(ckey, cparts, key, side, isinstance(child, StitchedGraphlet))
+            self._same_child(ckey, cparts, key, side, isinstance(child, StitchedGraphlet), b)
             return self
         leaf = derive.paths(pg.arms[side])[pid].leaf
         L = pg.arms[side].segments[leaf].end_bp
@@ -556,23 +583,30 @@ class StitchedGraphlet:
                     for p in cparts)
         parts = sorted(self._parts + new, key=lambda p: p.key)
         if b is not None:
-            # the new graphlet's own index (parts, keys, junctions); a junction's core is
-            # charged when it is computed (once per pair of parts), W8 in the queries
-            b.charge(W_ROW * len(parts), len(parts) * (record_bytes(Part) + 200))
+            # the new graphlet's own index (parts, keys, junctions), its labels and digest
+            # (_build_price); a junction's core is charged when it is computed (once per
+            # pair of parts), W8 in the queries
+            w, m = _build_price([p.graphlet for p in parts])
+            b.charge(W_ROW * len(parts) + w, len(parts) * (record_bytes(Part) + 200) + m)
         inherited = (self._jcore,) + ((child._jcore,) if isinstance(child, StitchedGraphlet)
                                       else ())
         return StitchedGraphlet(parts, identity, inherited, b)
 
-    def _same_child(self, ckey, cparts, key, side, subtree):
+    def _same_child(self, ckey, cparts, key, side, subtree, b=None):
         """At a continued walk: returns when the child is already there (a no-op), else
         already_continued. A stitched child (|subtree|) must be the whole subtree there, every
         part's key, body and retrieval identity equal; a plain graphlet the part at the walk,
         whatever continues it. The child's retrieval identity is computed, never cached: the
-        cache is keyed by the graphlets this one holds."""
+        cache is keyed by the graphlets this one holds. |b|: the identities' case-mapped
+        seeds, and the digest of the subtree a refusal names (_build_price), charged before
+        they are made."""
         tree = [(p.key[len(ckey):], p) for p in self._parts if p.key[:len(ckey)] == ckey]
         have = tree if subtree else [((), self._by_key[ckey])]
         new = [(p.key, p) for p in cparts]
         if [(k, p.digest) for k, p in have] == [(k, p.digest) for k, p in new]:
+            if b is not None:
+                b.charge(W_ROW * len(new), sum(STR + len(p.graphlet.seed.sequence)
+                                               for p in cparts))
             for (k, a), (_, c) in zip(have, new):
                 diff = _K.first_difference(self._rid(a.graphlet),
                                            _K.retrieval_identity(c.graphlet))
@@ -581,6 +615,8 @@ class StitchedGraphlet:
                         walk_name(key), side, diff if not k else '%s of part %s' % (
                             diff, part_name(ckey + k))))
             return
+        if b is not None:
+            b.charge(*_build_price([p.graphlet for _, p in tree]))
         raise CombineRefused('already_continued', _T_ALREADY % (
             walk_name(key), side, part_name(ckey), self._digest_of(tree)))
 
@@ -613,18 +649,19 @@ class StitchedGraphlet:
 
     def _check_pairs(self, cparts):
         """different_pair: a part of either side answered on another pair than a part of the
-        other (only pairs both state)."""
+        other (only pairs both state), compared by Pair.identity: by the n1 id where both
+        state one or have both paths (an old document and its id-form twin are one pair),
+        else by the paths."""
         mine = {answered_pair(p.graphlet.envelope) for p in self._parts} - {None}
         for p in cparts:
             cp = answered_pair(p.graphlet.envelope)
             if cp is None:
                 continue
             for pp in sorted(mine, key=lambda x: tuple('' if v is None else v for v in x)):
-                if pp != cp:
+                if pp.identity != cp.identity:
                     def show(x):
-                        return json.dumps({'graph': x[0], 'graph_path': x[1],
-                                           'annotation_path': x[2]},
-                                          separators=(',', ':'), ensure_ascii=False)
+                        # the pair by graph and n1 id, no path (Pair.named())
+                        return json.dumps(x.named(), separators=(',', ':'), ensure_ascii=False)
                     raise CombineRefused('different_pair', _T_DIFFERENT_PAIR % (show(cp),
                                                                                 show(pp)))
 
@@ -1506,6 +1543,12 @@ class StitchedGraphlet:
 
         def run(b):
             row = self._row(side, walk, False, b)
+            if b is not None:
+                # the text beyond its pieces: the joined flank, its reversal, the seed (in
+                # walking order reversed) and the joined text, at most three copies of the
+                # seed and flank (the seed was not charged: GPT final review M2's sibling)
+                n = row['length_bp'] + (len(self.seed.sequence) if with_seed else 0)
+                b.charge(n >> 8, 3 * (STR + n))
             w = self._spell_chain(side, row['chain'], orientation, b)
             if not with_seed:
                 return w
@@ -1856,9 +1899,12 @@ class StitchedGraphlet:
 
     def provenance(self):
         """One entry per part (§3.6): {key, role: root | child, junction: {arm, walk, at_bp,
-        overlap_bp} | None, pair: the pair it was answered on, identity, seed_id, digest,
-        request: the part's replay request as GraphletStore.request_of() builds it}. No
-        single request reproduces a stitched graphlet: replay each part and stitch again."""
+        overlap_bp} | None, pair: the pair it was answered on ({graph, pair_id}, no path;
+        None on a single-graph server), identity, seed_id, digest, request: the part's replay
+        request as GraphletStore.request_of() builds it, its pair named by {graph, pair_id}
+        (client.request_without_paths())}. No single request reproduces a stitched graphlet:
+        replay each part and stitch again."""
+        from .client import request_without_paths
         from .store import GraphletStore
         out = []
         for p in self._parts:
@@ -1869,10 +1915,12 @@ class StitchedGraphlet:
                 j = {'arm': jj.arm, 'walk': jj.walk, 'at_bp': jj.at_bp,
                      'overlap_bp': jj.overlap_bp}
             meta = (g.seed_summary or {}).get('seed') or {}
+            pair = answered_pair(g.envelope)
             out.append({'key': p.key, 'role': 'child' if p.key else 'root', 'junction': j,
-                        'pair': answered_pair(g.envelope), 'identity': _ops.index_identity(g),
+                        'pair': None if pair is None else pair.named(),
+                        'identity': _ops.index_identity(g),
                         'seed_id': meta.get('seed_id'), 'digest': p.digest,
-                        'request': GraphletStore.request_of(g)})
+                        'request': request_without_paths(GraphletStore.request_of(g))})
         return out
 
     def memory_bytes(self):
@@ -1935,6 +1983,30 @@ class StitchedGraphlet:
 
 
 # ------------------------------------------------------------------ identity
+
+# a label of a new StitchedGraphlet: its Label, its ref (a key of the by-ref index, made
+# twice while the labels are joined), its list and tuple slots and dict entry
+_M_LABEL = 320
+
+
+def _build_price(graphlets):
+    """(lwu, bytes) of building a StitchedGraphlet over the parts |graphlets|, beyond its
+    index: the labels joined (per label of each part an element and _M_LABEL) and the
+    digest (GPT final review M3): per part its retrieval identity -- its case-mapped seed,
+    kept -- and in the digest's canonical JSON its strategy, seed and seed labels at their
+    JSON bound, four copies (the encoder's chunks, the text, its UTF-8 bytes and the next
+    part's identity), and 1 lwu per 8 bytes of it."""
+    from .union import _json_bound     # union.py imports this module
+    nl = sum(len(g.labels) for g in graphlets)
+    meta = seeds = 0
+    for g in graphlets:
+        n = len(g.seed.sequence)
+        seeds += STR + n
+        meta += 600 + n + _json_bound((g.envelope or {}).get('strategy') or {}) + 32 * min(
+            g.seed.num_seed_labels, len(g.labels))
+    return (W_ELEM * nl + (meta >> 3) + (seeds >> 6),
+            _M_LABEL * nl + list_bytes(nl) + dict_bytes(nl) + seeds + 4 * (STR + meta))
+
 
 def _index_key(g):
     i = _ops.index_identity(g)

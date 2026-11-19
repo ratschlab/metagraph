@@ -11,6 +11,7 @@
 #include <string>
 #include <thread>
 #include <tuple>
+#include <type_traits>
 #include <vector>
 
 #include "gtest/gtest.h"
@@ -18,6 +19,8 @@
 #include "coordinate_test_graph.hpp"
 #include "annotation/binary_matrix/base/decode_budget.hpp"
 #include "annotation/binary_matrix/base/hopscotch_layout.hpp"
+#include "annotation/int_matrix/csr_matrix/csr_matrix.hpp"
+#include "annotation/representation/annotation_matrix/static_annotators_def.hpp"
 #include "annotation/representation/row_compressed/annotate_row_compressed.hpp"
 #include "cli/query.hpp"
 #include "common/algorithms.hpp"
@@ -876,6 +879,381 @@ TEST(SearchBudget, AColumnSearchChargesTheStoreItBuilds) {
             EXPECT_TRUE(small.passed());
         }
     }
+}
+
+// An annotation of |num_labels| labels named with seven digits (so that their names sort as their
+// ids, the order a column-label search puts rows of one count into its store) on which each
+// label of |ids| covers every k-mer of |sequence|, and no other label any
+std::unique_ptr<graph::AnnotatedDBG> labels_at(const std::string &sequence, size_t k,
+                                               size_t num_labels,
+                                               const std::vector<uint64_t> &ids) {
+    auto graph = std::make_shared<graph::DBGHashOrdered>(k);
+    graph->add_sequence(sequence);
+    Vector<annot::matrix::BinaryMatrix::SetBitPositions> rows(graph->max_index());
+    graph->call_nodes([&](auto node) {
+        for (uint64_t id : ids) {
+            rows[node - 1].push_back(id);
+        }
+    });
+    std::vector<std::string> labels;
+    labels.reserve(num_labels);
+    for (size_t j = 0; j < num_labels; ++j) {
+        std::string digits = std::to_string(j);
+        labels.push_back("L" + std::string(7 - std::min<size_t>(7, digits.size()), '0') + digits);
+    }
+    return std::make_unique<graph::AnnotatedDBG>(
+            graph, std::make_unique<annot::RowCompressed<>>(std::move(rows), labels));
+}
+
+// An annotation of |num_labels| labels named as labels_at's, of k-mer counts (row-major): each
+// label of |ids| counts 1 at every k-mer of |sequence|, no other label any
+std::unique_ptr<graph::AnnotatedDBG> counts_at(const std::string &sequence, size_t k,
+                                               size_t num_labels,
+                                               const std::vector<uint64_t> &ids) {
+    auto graph = std::make_shared<graph::DBGHashOrdered>(k);
+    graph->add_sequence(sequence);
+    Vector<annot::matrix::CSRMatrix::RowValues> rows(graph->max_index());
+    graph->call_nodes([&](auto node) {
+        for (uint64_t id : ids) {
+            rows[node - 1].emplace_back(id, 1);
+        }
+    });
+    annot::LabelEncoder<std::string> encoder;
+    for (size_t j = 0; j < num_labels; ++j) {
+        std::string digits = std::to_string(j);
+        encoder.insert_and_encode("L" + std::string(7 - std::min<size_t>(7, digits.size()), '0')
+                                  + digits);
+    }
+    return std::make_unique<graph::AnnotatedDBG>(
+            graph, std::make_unique<annot::IntRowAnnotator>(
+                    std::make_unique<annot::matrix::CSRMatrix>(std::move(rows), num_labels),
+                    encoder));
+}
+
+// What a hash table's allocations hold as it is used (each at its size class, as the values
+// account counts it): at their most, once its keys are in (|filled|), and, under |bound| (0:
+// none), the first allocation that takes them past it and what they held before it; the
+// elements each allocation is of, in order (|sizes|: 1, an overflow node), and with
+// |refuse_at|, the allocation of that number (from 1) throws TableRefused instead of being
+// made, as a refusing account's
+struct TableHeap {
+    uint64_t bound = 0;
+    size_t refuse_at = 0;
+    std::vector<size_t> sizes;
+    uint64_t held = 0;
+    uint64_t most = 0;
+    uint64_t filled = 0;
+    uint64_t before_passing = 0;
+    uint64_t passing = 0;
+};
+
+struct TableRefused {};
+
+constexpr char kTablePair[] = "pair (t, t.dbg, t.annodbg)";
+
+template <class T>
+class TableHeapAllocator {
+  public:
+    using value_type = T;
+    using propagate_on_container_copy_assignment = std::true_type;
+    using propagate_on_container_move_assignment = std::true_type;
+    using propagate_on_container_swap = std::true_type;
+    using is_always_equal = std::false_type;
+
+    explicit TableHeapAllocator(TableHeap *heap) noexcept : heap_(heap) {}
+    template <class U>
+    TableHeapAllocator(const TableHeapAllocator<U> &other) noexcept : heap_(other.heap()) {}
+
+    T* allocate(size_t n) {
+        const uint64_t bytes = alloc_bytes(n * sizeof(T));
+        heap_->sizes.push_back(n);
+        if (heap_->sizes.size() == heap_->refuse_at)
+            throw TableRefused();
+        if (heap_->bound && heap_->held + bytes > heap_->bound && !heap_->passing) {
+            heap_->before_passing = heap_->held;
+            heap_->passing = bytes;
+        }
+        heap_->held += bytes;
+        heap_->most = std::max(heap_->most, heap_->held);
+        return std::allocator<T>().allocate(n);
+    }
+    void deallocate(T *p, size_t n) noexcept {
+        heap_->held -= alloc_bytes(n * sizeof(T));
+        std::allocator<T>().deallocate(p, n);
+    }
+
+    TableHeap* heap() const noexcept { return heap_; }
+    template <class U>
+    bool operator==(const TableHeapAllocator<U> &other) const noexcept {
+        return heap_ == other.heap();
+    }
+    template <class U>
+    bool operator!=(const TableHeapAllocator<U> &other) const noexcept {
+        return heap_ != other.heap();
+    }
+
+  private:
+    TableHeap *heap_;
+};
+
+template <class Values>
+using HeapTable = tsl::hopscotch_map<annot::matrix::BinaryMatrix::Column, Values,
+                                     std::hash<annot::matrix::BinaryMatrix::Column>,
+                                     std::equal_to<annot::matrix::BinaryMatrix::Column>,
+                                     TableHeapAllocator<std::pair<
+                                             annot::matrix::BinaryMatrix::Column, Values>>>;
+
+// The heap of a column-label search's table (a store of one million labels or more) as the ids
+// |ids| are put into it in their order, reserved for them, each with a value of |Values| over
+// |num_kmers| positions: tsl's own table of the store's key and value
+template <class Values>
+TableHeap store_table_heap(const std::vector<uint64_t> &ids, size_t num_kmers,
+                           uint64_t bound = 0) {
+    TableHeap heap;
+    heap.bound = bound;
+    {
+        HeapTable<Values> table{ TableHeapAllocator<std::pair<
+                annot::matrix::BinaryMatrix::Column, Values>>(&heap) };
+        table.reserve(ids.size());
+        for (uint64_t id : ids) {
+            table.emplace(id, Values(num_kmers));
+        }
+        heap.filled = heap.held;
+    }
+    return heap;
+}
+
+// What |num_rows| values of |Values| over |num_kmers| positions charge as they grow, each set at
+// every position in order (count 1), as a column-label search builds the rows of labels that
+// cover the whole query
+template <class Values>
+uint64_t values_charge(size_t num_rows, size_t num_kmers) {
+    SearchBudget budget(kLarge);
+    SearchAccount account(&budget, "values");
+    for (size_t r = 0; r < num_rows; ++r) {
+        Values values(num_kmers, &account);
+        for (size_t i = 0; i < num_kmers; ++i) {
+            if constexpr (std::is_same_v<Values, PresenceRuns>) {
+                values.add(i);
+            } else {
+                values.add(i, 1);
+            }
+        }
+        values.shrink();
+    }
+    return account.held();
+}
+
+// The table checks of a column-label search on one million labels whose kept label ids are 256
+// apart (3,500 rows: the table doubles twice) or 2,048 apart (400 rows: an overflow node an id),
+// |query|(account) its rows; |Values|: its values' type
+template <class Values, class Query>
+void check_table_charges(size_t stride, size_t num_rows, size_t num_kmers, const Query &query) {
+    SCOPED_TRACE(::testing::Message() << "ids " << stride << " apart, " << num_rows << " rows");
+    std::vector<uint64_t> ids;
+    for (size_t r = 0; r < num_rows; ++r) {
+        ids.push_back(stride * r);
+    }
+    const uint64_t reserve = graph::search_store_bytes<Values>(1'000'000, num_rows);
+    const TableHeap table = store_table_heap<Values>(ids, num_kmers);
+    const uint64_t values = values_charge<Values>(num_rows, num_kmers);
+    // the table grows past its reserve
+    ASSERT_LT(reserve, table.most);
+
+    SearchBudget budget(kLarge);
+    SearchAccount account(&budget, "values");
+    const auto rows = query(&account);
+    ASSERT_EQ(num_rows, rows.size());
+    EXPECT_EQ(query(nullptr), rows);
+    // the account held the most the table held at once, or the table its keys are in beside
+    // the values, whichever is more: a doubling's old buckets, freed, are used again by the
+    // values; its scratch is the table its keys are in
+    EXPECT_EQ(std::max(table.most, table.filled + values), account.held());
+    EXPECT_EQ(table.filled, account.scratch());
+
+    // a bound halfway from the reserve to the table's most: refused at the allocation that
+    // passes it, charged what the table held then and that allocation
+    const uint64_t bound = (reserve + table.most) / 2;
+    const TableHeap passing = store_table_heap<Values>(ids, num_kmers, bound);
+    ASSERT_LT(0u, passing.passing);
+    SearchBudget small(bound);
+    SearchAccount refused(&small, "values");
+    EXPECT_THROW(query(&refused), SearchAnswerTooLarge);
+    ASSERT_TRUE(small.passed());
+    EXPECT_LE(small.first_held(), bound);
+    EXPECT_EQ(passing.before_passing + passing.passing,
+              small.first_held() + small.first_charge());
+
+    // with the field, a unit's account: the unit refused alone at that allocation
+    SearchBudget unit_budget(bound, true);
+    SearchAccount unit(&unit_budget, size_t(0), kTablePair);
+    EXPECT_THROW(query(&unit), SearchUnitRefused);
+    EXPECT_TRUE(unit.refused());
+    EXPECT_FALSE(unit_budget.passed());
+    ASSERT_EQ(1u, unit_budget.unit_refusals().size());
+    EXPECT_EQ(passing.before_passing + passing.passing,
+              unit_budget.unit_refusals()[0].held + unit_budget.unit_refusals()[0].charge);
+
+    if (stride == 256) {
+        // a bound one byte under the second doubling's peak (the old buckets beside the new),
+        // which the grown table and the values fit: refused (before M1, answered)
+        ASSERT_LT(table.filled + values, table.most);
+        SearchBudget peak(table.most - 1);
+        SearchAccount at_peak(&peak, "values");
+        EXPECT_THROW(query(&at_peak), SearchAnswerTooLarge);
+        // a bound of the peak: answered, and the old buckets, freed, take what is charged
+        // after the search (the rows' handover, query.cpp) up to the peak (the Opus review of
+        // cf77380a0, MA-1: they stayed charged, and the values and the handover were refused
+        // beside them)
+        SearchBudget at_most(table.most);
+        SearchAccount reused(&at_most, "values");
+        ASSERT_EQ(rows, query(&reused));
+        EXPECT_EQ(table.most, reused.held());
+        reused.charge(table.most - table.filled - values);
+        EXPECT_EQ(table.most, reused.held());
+        EXPECT_THROW(reused.charge(1), SearchAnswerTooLarge);
+    }
+}
+
+// GPT final review of trains 5a-7, M1: a column-label search's table (from one million labels on)
+// whose label ids collide in its hash grows past its reserve as its keys are put in. Ids 256
+// apart double its 4,096 buckets twice, 1.75 MiB, and 2.6 MiB at the second doubling, the old
+// buckets beside the new; ids 2,048 apart leave it at its 512 buckets and add an overflow node an
+// id. Each allocation is charged before it is made, and a bound the growth passes refuses the
+// search at the allocation that passes it (a unit alone with the field); the rows are those
+// without an account. Before, the table was charged once its keys were in, after it had grown
+// (a unit refused there had held 1.75 MiB under a bound of 1 MiB), and its doubling's peak
+// never. A doubling's old buckets, once freed, are used again by what the unit charges after them
+// (the Opus review of cf77380a0, MA-1). PresenceRuns (with_signature), which tsl copies when the
+// table doubles, and CountRuns (query_counts), which it moves
+TEST(SearchBudget, AColumnSearchChargesItsTableBeforeItGrows) {
+    std::mt19937 rng(37);
+    const std::string sequence = random_sequence(rng, 40);
+    const size_t k = 11;
+    const size_t num_kmers = sequence.size() - k + 1;
+    static_assert(!std::is_nothrow_move_constructible_v<PresenceRuns>);
+    static_assert(std::is_nothrow_move_constructible_v<CountRuns>);
+    static_assert(std::is_nothrow_move_constructible_v<PositionCoords>);
+    for (const auto &[stride, num_rows] : { std::pair<size_t, size_t>{ 256, 3500 },
+                                            std::pair<size_t, size_t>{ 2048, 400 } }) {
+        std::vector<uint64_t> ids;
+        for (size_t r = 0; r < num_rows; ++r) {
+            ids.push_back(stride * r);
+        }
+        auto signatures = labels_at(sequence, k, 1'000'000, ids);
+        check_table_charges<PresenceRuns>(stride, num_rows, num_kmers, [&](SearchAccount *a) {
+            return signatures->get_top_label_signatures(sequence, num_rows, 0, 0, nullptr, a);
+        });
+        auto counts = counts_at(sequence, k, 1'000'000, ids);
+        check_table_charges<CountRuns>(stride, num_rows, num_kmers, [&](SearchAccount *a) {
+            return counts->get_kmer_counts(sequence, num_rows, 0, 0, nullptr, a);
+        });
+    }
+}
+
+// The rehash of a column-label search's table refused partway (the Opus review of cf77380a0,
+// mi-1): tsl copies PresenceRuns into the doubled table and moves CountRuns and PositionCoords,
+// moving them back on a throw. Of 4,096 buckets: 400 keys past the table's least load, 62 that
+// fill its end (home 4,095, and 4,095 again in 8,192 buckets) and 62 its start (home 0, and
+// 4,096 in 8,192), then one at home 0 (0 in 8,192), which doubles it: the doubled table has no
+// room near 4,096 for both groups and puts the first group's keys but one into its overflow
+// list as it moves them, a node each. The tenth node is refused: nothing is allocated after it,
+// every key put before is still in the table with its value (iterated), and once it is
+// destroyed nothing is held. Where tsl copied, the table is as it was; where it moved them
+// back, the nine keys already in the new overflow list are no longer found (and size() is short
+// of them), which StoreAllocator states: the search discards its store when a charge throws
+template <class Values>
+void check_refused_rehash(size_t num_kmers) {
+    using Column = annot::matrix::BinaryMatrix::Column;
+    std::vector<Column> ids;
+    for (size_t i = 0; i < 400; ++i) {
+        ids.push_back(1000 + 2 * i);
+    }
+    for (size_t j = 0; j < 62; ++j) {
+        ids.push_back(4095 + 8192 * j);
+    }
+    for (size_t j = 0; j < 62; ++j) {
+        ids.push_back(4096 + 8192 * j);
+    }
+    ids.push_back(0);
+    auto value_of = [&](size_t r) {
+        Values values(num_kmers);
+        if constexpr (std::is_same_v<Values, PresenceRuns>) {
+            values.add(r % num_kmers);
+        } else {
+            values.add(r % num_kmers, uint64_t(r + 1));
+        }
+        return values;
+    };
+    using Allocator = TableHeapAllocator<std::pair<Column, Values>>;
+    // put the keys in their order, a table of 4,096 buckets (a store reserved for 3,500 rows),
+    // until one is refused: how many were put
+    auto fill = [&](HeapTable<Values> &table) {
+        table.reserve(3500);
+        size_t put = 0;
+        try {
+            for ( ; put < ids.size(); ++put) {
+                table.emplace(ids[put], value_of(put));
+            }
+        } catch (const TableRefused &) {}
+        return put;
+    };
+
+    TableHeap free_heap;
+    size_t doubled = 0;
+    {
+        HeapTable<Values> table{ Allocator(&free_heap) };
+        ASSERT_EQ(ids.size(), fill(table));
+        ASSERT_EQ(8192u, table.bucket_count());
+        // the reserve, the doubled table, then the first group but one into its overflow list
+        ASSERT_EQ(63u, free_heap.sizes.size());
+        ASSERT_LT(1u, free_heap.sizes[0]);
+        ASSERT_LT(1u, free_heap.sizes[1]);
+        doubled = 2;
+        for (size_t a = doubled; a < free_heap.sizes.size(); ++a) {
+            ASSERT_EQ(1u, free_heap.sizes[a]) << a;
+        }
+    }
+    ASSERT_EQ(0u, free_heap.held);
+
+    TableHeap heap;
+    heap.refuse_at = doubled + 10;
+    {
+        HeapTable<Values> table{ Allocator(&heap) };
+        const size_t put = fill(table);
+        // refused at the last key's rehash, nothing allocated after the refused node
+        ASSERT_EQ(ids.size() - 1, put);
+        EXPECT_EQ(heap.refuse_at, heap.sizes.size());
+        std::map<Column, const Values *> iterated;
+        for (auto it = table.begin(); it != table.end(); ++it) {
+            iterated[it->first] = &it->second;
+        }
+        ASSERT_EQ(put, iterated.size());
+        size_t not_found = 0;
+        for (size_t r = 0; r < put; ++r) {
+            ASSERT_EQ(1u, iterated.count(ids[r])) << r;
+            EXPECT_TRUE(*iterated[ids[r]] == value_of(r)) << r;
+            not_found += table.find(ids[r]) == table.end();
+        }
+        if constexpr (std::is_same_v<Values, PresenceRuns>) {
+            static_assert(!std::is_nothrow_move_constructible_v<Values>);
+            EXPECT_EQ(0u, not_found);
+            EXPECT_EQ(put, table.size());
+            EXPECT_EQ(0u, table.overflow_size());
+        } else {
+            static_assert(std::is_nothrow_move_constructible_v<Values>);
+            EXPECT_EQ(9u, not_found);
+            EXPECT_EQ(put - 9, table.size());
+            EXPECT_EQ(9u, table.overflow_size());
+        }
+    }
+    EXPECT_EQ(0u, heap.held);
+}
+
+TEST(SearchBudget, ARehashRefusedPartwayLeavesEveryKeyInTheTable) {
+    check_refused_rehash<PresenceRuns>(30);
+    check_refused_rehash<CountRuns>(30);
+    check_refused_rehash<PositionCoords>(30);
 }
 
 // ---------------------------------------------------------------------------------------------

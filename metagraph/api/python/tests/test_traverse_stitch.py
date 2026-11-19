@@ -5,6 +5,7 @@ retrieval at R + E) are in data/traverse/documents/stitch/, written by
 scripts/traversal/graphlet_fixtures.py (STITCH_FIXTURES)."""
 
 import copy
+import dataclasses
 import gc
 import json
 import os
@@ -25,6 +26,36 @@ from metagraph.traverse import (BadSelector, CombineRefused, Label, LocalBudget,
                                 from_response, ops, parse, stitch)
 from metagraph.traverse import composite as K  # noqa: E402
 from metagraph.traverse import derive  # noqa: E402
+
+
+def _long_seed(g, n=100000):
+    """A copy of graphlet |g| whose seed is |n| more bases long (A's before it): the arms and
+    their bases unchanged, as an engine answer for a long seed with short flanks."""
+    g = copy.deepcopy(g)
+    s = 'A' * n + g.seed.sequence
+    g.seed = dataclasses.replace(g.seed, sequence=s, length_bp=len(s),
+                                 num_kmers=len(s) - g.k + 1)
+    return g
+
+
+def _peak(fn):
+    """tracemalloc's peak of fn()'s second run (the first fills the interpreter's free lists),
+    the collector held off; a budget stop ends a run."""
+    gc.collect()
+    gc.disable()
+    try:
+        for i in range(2):
+            if i:
+                tracemalloc.start()
+                base = tracemalloc.get_traced_memory()[0]
+            try:
+                fn()
+            except LocalBudgetExceeded:
+                pass
+        return tracemalloc.get_traced_memory()[1] - base
+    finally:
+        tracemalloc.stop()
+        gc.enable()
 
 
 def rc(s):
@@ -327,9 +358,11 @@ class TestRefusals(unittest.TestCase):
     def test_different_pair(self):
         p = load('keep_forbid', 'parent', with_pair('g1', '/p/g1.dbg'))
         c = load('keep_forbid', 'child', with_pair('g2', '/p/g2.dbg'))
+        # (a pair stated without its annotation path has no n1 id: it is shown as stated;
+        # an engine states both paths or the id, test_traverse_pair_id)
         refused(self, 'different_pair', 'the child was answered on pair '
-                '{"graph":"g2","graph_path":"/p/g2.dbg","annotation_path":null}, its parent on '
-                'pair {"graph":"g1","graph_path":"/p/g1.dbg","annotation_path":null}: a '
+                '{"graph":"g2","graph_path":"/p/g2.dbg"}, its parent on '
+                'pair {"graph":"g1","graph_path":"/p/g1.dbg"}: a '
                 'continuation runs on its parent\'s pair', stitch, p, c)
         # one pair stated, or the same pair: not refused
         stitch(p, self.C)
@@ -1640,6 +1673,70 @@ class TestBudgets(unittest.TestCase):
         self.assertLessEqual(peak, b.peak_bytes)
         self.assertGreaterEqual(sg.memory_bytes(),
                                 K.models_memory_bytes([x.graphlet for x in sg.parts]))
+
+    def test_stitching_admits_what_it_builds(self):
+        """GPT final review M3: stitch() builds the wrapper of a plain parent inside its
+        budget's scope, and admits every graphlet it builds -- its labels and its digest, the
+        canonical JSON of each part's strategy and seed -- before building it. With a
+        1,000,000-character strategy label: a zero budget stops stitch(g) and stitch(g, c)
+        before the wrapper is built (the traced peak before the stop stays far below the
+        label), and an unlimited budget's account bounds the traced peak of stitch(g),
+        stitch(p, c) with the label on either side, and of a 100,000-base root seed (warm
+        free lists, as test_traverse_union does); the answers are the same with a budget."""
+        arm, p0, c0 = triple('keep_forbid')
+
+        def strategy(g):
+            g = copy.deepcopy(g)
+            g.envelope['strategy']['labels']['extra'] = ['A' * 10 ** 6]
+            return g
+        cases = {'stitch(g)': lambda: (strategy(p0),),
+                 'stitch(g, long seed)': lambda: (_long_seed(p0),),
+                 'stitch(p, c), p long': lambda: (strategy(p0), copy.deepcopy(c0)),
+                 'stitch(p, c), c long': lambda: (copy.deepcopy(p0), strategy(c0)),
+                 'stitch(p, c), long seed': lambda: (_long_seed(p0), copy.deepcopy(c0))}
+        for name, make in cases.items():
+            with self.subTest(name):
+                plain = stitch(*make())
+                b = LocalBudget()
+                got = stitch(*make(), budget=b)
+                self.assertEqual((got.digest, got.labels, got.identity),
+                                 (plain.digest, plain.labels, plain.identity))
+                args = [make(), make()]
+                self.assertLessEqual(_peak(lambda: stitch(*args.pop())), b.peak_bytes)
+                zero = LocalBudget(work_units=0, memory_mb=0)
+                with self.assertRaises(LocalBudgetExceeded):
+                    stitch(*make(), budget=zero)
+                self.assertEqual(zero.call_usage(), {'work_units': 0, 'memory_bytes': 0})
+                args = [make(), make()]
+                self.assertLess(_peak(lambda: stitch(*args.pop(), budget=LocalBudget(
+                    work_units=0, memory_mb=0))), 100000)
+        # a stitched parent with no child is returned as it is: nothing is built or charged
+        sg = stitch(p0, c0)
+        zero = LocalBudget(work_units=0, memory_mb=0)
+        self.assertIs(stitch(sg, budget=zero), sg)
+
+    def test_spell_charges_its_seed(self):
+        """spell(with_seed=True) joins the root seed to the flank (natural orientation) or its
+        reversal before it (walking order, left arm) and charges them before it spells:
+        GPT final review M2's sibling, found by the lane's sweep. With a 100,000-base root
+        seed, on both arms of the root alone and of a junction, in both orientations: the
+        account bounds the traced peak (warm free lists), and the text is unchanged."""
+        arm, p0, c0 = triple('keep_forbid')
+        for name, make in (('fork', lambda: stitch(_long_seed(T.graphlet('fork')))),
+                           ('keep_forbid', lambda: stitch(_long_seed(p0), copy.deepcopy(c0)))):
+            sg = make()
+            for side in sg.arms():
+                key = sg.walks(side, by='id')[0].key
+                for orientation in ('natural', 'walk'):
+                    with self.subTest(name, side=side, orientation=orientation):
+                        b = LocalBudget()
+                        text = sg.spell(side, key, orientation, True, budget=b)
+                        self.assertEqual(text, make().spell(side, key, orientation, True))
+                        self.assertIn(sg.seed.sequence if orientation == 'natural' or
+                                      side == 'right' else sg.seed.sequence[::-1], text)
+                        objs = [make(), make()]
+                        self.assertLessEqual(_peak(lambda: objs.pop().spell(
+                            side, key, orientation, True)), b.peak_bytes)
 
     def test_memory_counts_the_caches(self):
         arm, p, c = triple('comb_chain')

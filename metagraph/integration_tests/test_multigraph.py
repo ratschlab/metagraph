@@ -3587,10 +3587,15 @@ class TestMultiGraphServer(TestingBase):
         self.assertEqual((('ecoli', 'envelope'), ('kleb', 'envelope')),
                          ((part.tag, part.pair_stated_by), (absent.tag, absent.pair_stated_by)))
         self.assertEqual((('ecoli', 'kleb'), ()), (u.expected, u._not_included))
-        # (this branch's library keys a pair by its paths, which the engine no longer states
-        # (train 8): the train-7 library keys it by its pair_id, tested once train 7 is merged,
-        # docs/DESIGN-pair-identity.md section 8, step 7)
-        self.assertEqual((None, None), (part.key[3], absent.key[3]))
+        # each key names its pair by graph and the n1 id the envelope states, which the
+        # library's configured_pair_id computes alike from the list's line; the paths are key
+        # members only of a caller's pair without an id (DESIGN-graphlet-merge.md A.4)
+        self.assertEqual(tuple((name, graphlet_lib.configured_pair_id(name, *self.pairs[name]),
+                                None, None) for name in ('ecoli', 'kleb')),
+                         (part.key[2:6], absent.key[2:6]))
+        self.assertEqual((self.pid('ecoli'), self.pid('kleb')), (part.key[3], absent.key[3]))
+        # and no answer of the union states a configured path
+        self.assertNotIn(self.tempdir.name, json.dumps(u.provenance(), default=str))
         self.assertEqual(('seed_not_in_graph', 'sent'), (absent.category, absent.seed_check))
         self.assertEqual({'kmers': n, 'kmers_present': 0}, absent.detail['not_in_graph'])
         # each pair's record-mapping certificate as GET /capabilities states it

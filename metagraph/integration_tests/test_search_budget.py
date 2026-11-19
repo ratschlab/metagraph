@@ -32,6 +32,7 @@ import os
 import random
 import re
 import shlex
+import struct
 import subprocess
 import sys
 import threading
@@ -1173,6 +1174,137 @@ class TestSearchAnswerBudget(TestingBase):
         self.assertEqual([(0, self.pair_name('pa'), 'values')], [u[:3] for u in units])
         self.assertEqual((1, 2), (refused, built))
         self.stop(bounded)
+
+
+def write_legacy_rows(path, num_labels, rows):
+    """a row annotation (RowCompressed) in its legacy form: |num_labels| labels L0000000, L0000001,
+    ... (seven digits, so that their names sort as their ids), the graph's rows |rows| (each a
+    list of label ids), each row's ids + 1 and a 0 after them, 20 bits each"""
+    with open(path, 'wb') as out:
+        out.write(struct.pack('>Q', 0))       # obsolete string map keys
+        out.write(struct.pack('<QB', 0, 64))  # obsolete integer map values
+        out.write(struct.pack('>Q', num_labels))
+        out.write(b''.join(bytes([8]) + f'L{i:07}'.encode() for i in range(num_labels)))
+        out.write(struct.pack('>QQ', len(rows), num_labels))
+        values = [v for row in rows for v in [j + 1 for j in row] + [0]]
+        width = 20
+        assert max(values) < 1 << width
+        packed = sum(value << (width * i) for i, value in enumerate(values))
+        out.write(struct.pack('<QB', width * len(values), width))
+        out.write(packed.to_bytes(((width * len(values) + 63) // 64) * 8, 'little'))
+
+
+@unittest.skipIf(PROTEIN_MODE, "the fixture is DNA")
+class TestSearchColumnStoreGrowth(TestingBase):
+    """A search of a row annotation of one million labels keeps its rows' values in a hash table
+    keyed by their label ids, which grows past its reserve where the ids collide (GPT final
+    review of trains 5a-7, M1): the 3,500 labels 256 apart on the k-mer A^31 double its 4,096
+    buckets twice, 2,752,512 B at the second doubling, the old buckets beside the new. Each of
+    its allocations is charged to the unit's values account before it is made, and a doubling's
+    old buckets, once freed, are used again by what the unit charges after them, its values and
+    its rows' handover (the Opus review of cf77380a0, MA-1: they stayed charged, and under 3 MiB
+    2,800 and 3,000 rows, which the build before M1 answered, were refused). Under 3 MiB, 2,800
+    and 3,000 rows are answered in full with and without `partial_refusal`, as without a
+    budget; 3,500 rows pass the bound in the request's answer account, 400 "answer" either way.
+    Under 1 MiB the table's first doubling passes it in the unit's values account, before its
+    array is allocated: the account holds the reserve's 4,096 buckets, 458,752 B, and the doubled
+    8,192 buckets, 917,504 B, are the charge (before M1, the grown table's 1,376,256 B beyond the
+    reserve was charged once the table had grown to 1,835,008 B); with `partial_refusal` the unit
+    is refused alone, without it 400 "values"."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.tempdir = TemporaryDirectory()
+        d = cls.tempdir.name
+        with open(f'{d}/graph.fa', 'w') as f:
+            f.write('>a\n' + 'A' * 31 + '\n>c\n' + 'C' * 31 + '\n')
+        # one thread: the first k-mer, A^31, is the first row
+        res = subprocess.run(shlex.split(METAGRAPH) + [
+            'build', '-p', '1', '-k', '31', '--graph', 'hash', '-o', f'{d}/graph',
+            f'{d}/graph.fa'], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        assert res.returncode == 0, res.stderr.decode()
+        cls.graph = f'{d}/graph' + graph_file_extension['hash']
+        cls.anno = f'{d}/anno.row.annodbg'
+        write_legacy_rows(cls.anno, 1_000_000, [[256 * r for r in range(3500)], []])
+        cls.servers = []
+
+    @classmethod
+    def tearDownClass(cls):
+        for server in cls.servers:
+            server.stop()
+        cls.tempdir.cleanup()
+
+    def server(self, max_mb):
+        log = os.path.join(self.tempdir.name, f'server_{len(self.servers)}.log')
+        server = Server(['-i', self.graph, '-a', self.anno, '--threads-each', '1',
+                         '--http-threads', '1', '--cache-size', '0',
+                         '--search-max-answer-memory-mb', str(max_mb)], log, threads=1)
+        self.servers.append(server)
+        return server
+
+    @staticmethod
+    def body(top_labels, **more):
+        return dict({'FASTA': '>q\n' + 'A' * 31 + '\n', 'with_signature': True,
+                     'top_labels': top_labels, 'discovery_fraction': 0.0}, **more)
+
+    def logged(self, server, before, pattern):
+        return [m for m in pattern.finditer(server.text()) if m.start() >= before]
+
+    def test_the_table_grown_and_its_rows_within_the_bound(self):
+        unbounded = self.server(0)
+        bounded = self.server(3)
+        for top in (2800, 3000):
+            reference = unbounded.post('search', self.body(top))
+            self.assertEqual(200, reference.status_code, reference.text[:2000])
+            self.assertEqual(top, len(json.loads(reference.text)[0]['results']))
+            for field in ({}, {'partial_refusal': True}):
+                with self.subTest(top=top, **field):
+                    before = len(bounded.text())
+                    r = bounded.post('search', self.body(top, **field))
+                    self.assertEqual((200, reference.content), (r.status_code, r.content))
+                    lines = self.logged(bounded, before, CHARGE)
+                    self.assertEqual(1, len(lines), bounded.text()[-3000:])
+                    values, refused = int(lines[0].group(2)), int(lines[0].group(5))
+                    self.assertEqual(0, refused)
+                    # the second doubling's peak, held at once: within the bound
+                    self.assertLessEqual(2_752_512, values)
+                    self.assertLessEqual(values, 3 * MIB)
+
+    def test_3500_rows_pass_in_the_answer_account(self):
+        bounded = self.server(3)
+        for field in ({}, {'partial_refusal': True}):
+            with self.subTest(**field):
+                before = len(bounded.text())
+                r = bounded.post('search', self.body(3500, **field))
+                self.assertEqual((400, refusal_text(3, 'answer')), (r.status_code, r.text))
+                lines = self.logged(bounded, before, REFUSAL)
+                self.assertEqual(1, len(lines), bounded.text()[-3000:])
+                self.assertEqual('the answer account', lines[0].group(2))
+                self.assertEqual([], self.logged(bounded, before, UNIT))
+
+    def test_the_growth_past_the_bound_refuses_the_unit(self):
+        unbounded = self.server(0)
+        bounded = self.server(1)
+        reference = json.loads(unbounded.post('search', self.body(3500)).text)
+        before = len(bounded.text())
+        r = bounded.post('search', self.body(3500, partial_refusal=True))
+        self.assertEqual(200, r.status_code, r.text[:2000])
+        expected = dict(reference[0], results=[],
+                        cuts=[refused_entry(reference[0]['cuts'][0], 'values', 1)])
+        self.assertEqual(styled([expected]), r.text)
+        units = self.logged(bounded, before, UNIT)
+        self.assertEqual(1, len(units), bounded.text()[-3000:])
+        self.assertEqual(('0', 'the graph', 'values', '1'), units[0].group(2, 3, 4, 5))
+        # refused at the first doubling, before its array is allocated: the reserve held, the
+        # doubled array the charge
+        self.assertEqual((458_752, 917_504), (int(units[0].group(6)), int(units[0].group(8))))
+        before = len(bounded.text())
+        r = bounded.post('search', self.body(3500))
+        self.assertEqual((400, refusal_text(1, 'values')), (r.status_code, r.text))
+        lines = self.logged(bounded, before, REFUSAL)
+        self.assertEqual(1, len(lines), bounded.text()[-3000:])
+        self.assertEqual('the values account of record 0 on the graph', lines[0].group(2))
+        self.assertEqual((458_752, 917_504), (int(lines[0].group(4)), int(lines[0].group(6))))
 
 
 if __name__ == '__main__':

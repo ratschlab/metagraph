@@ -33,7 +33,7 @@ from . import derive
 from ._codec import REASON, UNLIMITED
 from .budget import (DICT, DICT_KEY, FLOAT, ID_SHIFT_PY, INT, JSON_ID, LIST, LIST_ITEM, STR,
                      W_ELEM, W_GFA_LINE, W_NODE, W_PAIR, W_RECORD, W_STEP, LocalBudgetExceeded,
-                     dict_bytes, list_bytes)
+                     dict_bytes, list_bytes, set_bytes)
 from .model import ARM_SIDES, MissingEnvelope
 
 _LEVERS = ('select_walks', 'narrow_arm', 'export_mgt')
@@ -722,6 +722,12 @@ def _to_fasta(g, arm, leaves, with_seed, orientation, width, bud, done=None,
             # admitted before the walks are resolved: the arm's paths (a Path per walk)
             # are built only once charged, so a refused export leaves none behind
             derive.uses(bud, g, a, 'leaves', 'paths', 'end_labels')
+            if lv is not None:
+                # the chosen walks resolved, their set of leaves and price lists, admitted
+                # before they are built (the lane's sweep of GPT final review M4: 33.8 MB
+                # before a 1 MiB budget's stop for 1,000,000 ids)
+                n = len(lv)
+                bud.charge(W_ELEM * n, 3 * list_bytes(n) + set_bytes(n) + 2 * n * INT)
         paths = derive.paths(a)
         chosen = paths if lv is None else [paths[ops.path_id(a, x)] for x in lv]
         if not chosen:
@@ -865,6 +871,11 @@ def _to_gfa(g, with_seed, bud, done=None):
     seed = g.seed.sequence
     lines = ['H\tVN:Z:1.0']
     if with_seed:
+        if bud is not None:
+            # the seed's S line, before it is built, and its copy in the joined text (the
+            # lane's sweep of GPT final review M2: the seed was not charged)
+            bud.charge(W_GFA_LINE + (len(seed) >> 8), STR + 32 + len(seed))
+            total += 32 + len(seed)
         lines.append('S\tseed\t%s\tLN:i:%d' % (seed, len(seed)))
     links = []
     paths = []
@@ -873,6 +884,10 @@ def _to_gfa(g, with_seed, bud, done=None):
         if arm is None:
             continue
         segs = arm.segments
+        # the seed outward: a segment's context reads at most its last k-1 bases, so only
+        # they are taken, once per arm (the whole seed reversed and joined per segment was
+        # O(segments x seed), uncharged); the same context
+        seed_tail = (seed[-k1:] if side == 'right' else seed[:k1][::-1]) if k1 > 0 else ''
         if bud is not None:
             derive.uses(bud, g, arm, 'leaves', 'paths', 'end_labels')
             bud.phase = 'records'
@@ -890,8 +905,7 @@ def _to_gfa(g, with_seed, bud, done=None):
             # back only that far (spelling the whole chain per segment would be quadratic
             # in the depth)
             before = _chain_tail(segs, s.parents[0], k1) if s.parents and k1 > 0 else ''
-            outward_seed = seed if side == 'right' else seed[::-1]
-            ctx = (outward_seed + before)[-k1:] if k1 > 0 else ''
+            ctx = (seed_tail + before)[-k1:] if k1 > 0 else ''
             walk = ctx + s.walk
             text = walk if side == 'right' else walk[::-1]
             lines.append('S\t%s\t%s\tLN:i:%d' % (_seg_name(side, s.id), text, len(text)))
@@ -1237,6 +1251,10 @@ def union_gfa(u, with_seed, labels, at_bp, bud):
         t = u._arms[side]
         sname = 'seed_l' if side == 'left' else 'seed_r'
         if with_seed:
+            if bud is not None:
+                # the seed's S line, kept, and its copy in the joined text (the lane's sweep
+                # of GPT final review M2: the seed was not charged)
+                bud.charge(W_GFA_LINE + (len(seed) >> 8), 2 * (STR + 32 + len(seed)))
             segs_out.append('S\t%s\t%s\tLN:i:%d' % (sname, seed, len(seed)))
         # the stubs ending at each node: their merge tags
         stub_tags = {}
