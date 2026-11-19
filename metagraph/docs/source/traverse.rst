@@ -13,7 +13,8 @@ Labeled traversal (experimental)
    output, cancellation and budgets. It walks a header label by membership unless the request
    sets ``support`` to ``trace``, and it resolves a name that is both a column and a header to
    the column. Several limits and their defaults differ too, the split limit of a path among
-   them. Its routes are specified in ``metagraph/docs/SPEC-labeled-traversal-core.md`` and
+   them. Like this page's server, it names each pair of a list by its ``graph`` and
+   ``pair_id``, never by its paths, and a request may select a pair by its ``pair_id``. Its routes are specified in ``metagraph/docs/SPEC-labeled-traversal-core.md`` and
    ``metagraph/docs/SPEC-multigraph-envelope.md``, its graphlet output in
    ``metagraph/docs/DESIGN-traverse-graphlet.md``. Where this page and those documents differ,
    the documents describe the staging server.

@@ -984,16 +984,19 @@ without changing those names leaves its ID unchanged. Content verification needs
 fingerprint.
 
 The ID is deterministic public metadata. Treat it as an identifier, never as a credential.
-It is an output field. Existing request selectors keep their documented names and syntax.
+A request can also name a pair by it: a ``pairs`` object or a capabilities probe
+(``?pair_id=``) takes ``pair_id`` in place of the pair's paths, never beside them. No response
+states a configured path. The server's start-up log names each pair's ID with its two paths.
 
 .. _search_cut_statements:
 
 Search result limits and pair identity
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-For each query sequence, ``POST /search`` returns ``results`` and a ``cuts`` array in match-count,
-presence-signature, k-mer-count and coordinate modes. Label-only and abundance-sum modes omit
-``cuts``. Each cut describes one configured pair, including a pair with no matching labels.
+For each query sequence, ``POST /search`` returns ``results`` and a ``cuts`` array in every mode:
+match count, abundance sum, presence signature, k-mer counts and coordinates. ``metagraph query
+--json`` states the same ``cuts`` for each record, except in the labels mode, which applies no
+label limit. Each cut describes one configured pair, including a pair with no matching labels.
 
 .. code-block:: json
 
@@ -1021,8 +1024,11 @@ presence-signature, k-mer-count and coordinate modes. Label-only and abundance-s
    * - ``tied_returned``
      - Labels with that count kept by the limit, or zero when ``nth_score`` is ``null``.
 
-Ties use the matching k-mer count only. A k-mer-count response does not certify median-abundance
-ordering or ties. ``complete`` refers to this pair's label limit only.
+On an annotation with k-mer counts, labels with the same matching k-mer count are ordered by
+their median abundance, and the cut also states ``nth_median`` and ``tied_same_median``. A record
+that the answer's memory bound refuses on one pair (the request's ``partial_refusal``) returns no
+rows there, and its cut states ``refused`` beside ``matched``. ``complete`` refers to this pair's
+label limit only.
 
 On a server with a list of graphs, each result row and cut also carries ``graph`` and ``pair_id``.
 Use both fields to associate rows with their cut. The :ref:`opaque pair ID <configured_pair_id>`
