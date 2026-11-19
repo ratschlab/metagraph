@@ -479,10 +479,13 @@ without a section 6 code (on `/pattern` the route's own `invalid_request`, as ev
 `pair_id` or an `annotation_path` at the top level of a `/resolve` or `/traverse` request (they go in an object of
 `pairs`): refused before the selection, whatever the request names, in one text, `request: unknown field
 '<field>': name the pair in an object of pairs, {graph, pair_id} or {graph, graph_path?, annotation_path?} (GET
-/capabilities lists the pairs)` (fix round 1 of train 8; before, a `/traverse` on a name of several pairs was
-refused `traverse_single_pair` with its candidates, any other such request `request: unknown field '<field>'`, the
-parser's words, which `/pattern` and a single-graph server keep). Without a selection a request runs on every
-pair, up to `max_graphs_without_selection` names (that refusal stays).
+/capabilities lists the pairs)` (fix round 1 of train 8). The refusal comes before every selection refusal, so
+such a request is no longer refused `graph_unknown`, `selection_conflict` or `traverse_single_pair`. Before, the
+selection ran first: an unknown name was `graph_unknown`, `graph` beside `graphs` `selection_conflict`, a
+`/traverse` naming several graphs or a name of several pairs `traverse_single_pair` with its candidates. A request
+that passed the selection got the parser's text, a malformed field's own text or `request: unknown field
+'<field>'`, as `/pattern` and a single-graph server still give. Without a selection a request runs on every pair,
+up to `max_graphs_without_selection` names (that refusal stays).
 
 The multi-graph 400 texts are those of before release 10 (8fa32e553), byte for byte, apart from those that named a
 configured path, reworded in train 8 (below): a request that server refused is refused in the same words, a section
