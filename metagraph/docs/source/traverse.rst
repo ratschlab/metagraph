@@ -92,7 +92,7 @@ them by name, as in ``/search``:
 .. code-block:: json
 
     {
-      "graphs": ["bacteria", "plants"],
+      "graphs": ["refseq", "plants"],
       "seeds": [{"sequence": "ATGGAATTGCCC...", "labels": ["NZ_CM008882.1"]}]
     }
 
@@ -107,14 +107,17 @@ Each entry of ``results`` then holds ``walks`` instead of one walk:
       "strategy": {...},
       "results": [
         {"walks": [
-          {"graph": "bacteria", "seed": {...}, "label_dict": [...], "arms": {...}, "elapsed_ms": 12.5}
+          {"graph": "refseq", "pair_id": "n1-0c8ac32d-6ec3-5dc6-85c0-6993b9c02020",
+           "seed": {...}, "label_dict": [...], "arms": {...}, "elapsed_ms": 12.5}
         ]}
       ]
     }
 
-A walk has the fields of `The response`_ and the name of its ``graph``. ``walks`` holds one walk
-per graph that has the seed and at least one of its labels. Each graph follows the labels it
-has. A graph adds no walk in these cases:
+A walk has the fields of `The response`_, its ``graph`` name, and an opaque ``pair_id``.
+The ID distinguishes configured graph/annotation pairs that share a name. Only a server with
+a list of graphs adds these two fields. See :ref:`configured_pair_id` for the ID contract.
+``walks`` holds one walk per graph that has the seed and at least one of its labels. Each graph
+follows the labels it has. A graph adds no walk in these cases:
 
 - A k-mer of the seed is not in the graph.
 - The graph has none of the named labels.
@@ -293,7 +296,8 @@ The response
             "labels_dropped": 0,
             "dropped_labels": [{"label": "562", "runs": [[0, 231]]}]
           },
-          "label_dict": [{"name": "NZ_CM008882.1", "kind": "header", "column": 6, "seq_id": 3}],
+          "label_dict": [{"name": "NZ_CM008882.1", "kind": "header", "column": 6, "seq_id": 3,
+                          "place": {"origin": 3648, "dir": 1}}],
           "arms": {
             "left": {...},
             "right": {
@@ -324,6 +328,18 @@ The seed:
 - ``seed.labels`` holds the names of the labels the walk follows.
 - ``labels_dropped`` counts the labels taken from the seed beyond ``max_seed_labels``.
 - ``dropped_labels`` lists the named labels that are not on every k-mer of the seed.
+
+Each header entry in ``label_dict`` gives the single seed occurrence chosen for that record
+in ``place``. Column entries have no ``place``.
+
+- ``origin`` is the zero-based coordinate of the seed's first k-mer, relative to the start of
+  that record.
+- ``dir`` is ``1`` when successive seed k-mer coordinates increase and ``-1`` when they decrease.
+  For ``-1``, ``origin`` is the rightmost k-mer's coordinate in the chosen occurrence. Only
+  canonical and primary graphs give ``dir: -1``. On a basic graph every place has ``dir: 1``.
+- The walk chooses the full-seed occurrence with the lowest leftmost coordinate, preferring
+  ``dir: 1`` on a tie. It follows that occurrence through the record, including later copies
+  of the seed. ``place`` does not list every seed occurrence.
 
 An arm:
 

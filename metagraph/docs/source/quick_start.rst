@@ -964,6 +964,71 @@ To load up a MetaGraph index in server mode for querying it with the Python API 
                            --port <PORT> \
                            --parallel <NUM_THREADS>
 
+.. _configured_pair_id:
+
+Pair identifiers in server responses
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Response records that identify a configured graph/annotation pair carry its ``graph`` name
+and ``pair_id``. The ID distinguishes pairs that share a name. For example:
+
+.. code-block:: json
+
+    {"graph": "refseq", "pair_id": "n1-0c8ac32d-6ec3-5dc6-85c0-6993b9c02020"}
+
+``pair_id`` is ``n1-`` followed by a lowercase UUIDv5. It identifies the exact graph name,
+configured graph path and configured annotation path. The encoding preserves every UTF-8
+byte, including case and path spelling. It applies no Unicode or path normalization and
+resolves no symlinks. Renaming a configured pair changes its ID. Replacing file contents
+without changing those names leaves its ID unchanged. Content verification needs a separate
+fingerprint.
+
+The ID is deterministic public metadata. Treat it as an identifier, never as a credential.
+It is an output field. Existing request selectors keep their documented names and syntax.
+
+.. _search_cut_statements:
+
+Search result limits and pair identity
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+For each query sequence, ``POST /search`` returns ``results`` and a ``cuts`` array in match-count,
+presence-signature, k-mer-count and coordinate modes. Label-only and abundance-sum modes omit
+``cuts``. Each cut describes one configured pair, including a pair with no matching labels.
+
+.. code-block:: json
+
+    {"cuts": [{
+      "graph": "shared", "pair_id": "n1-4018747a-c7fb-5096-8c3f-67a85618f56d",
+      "index_fp": null, "matched": 3, "returned": 1, "complete": false,
+      "nth_score": 9, "tied": 3, "tied_returned": 1
+    }]}
+
+.. list-table::
+   :header-rows: 1
+
+   * - Field
+     - Meaning
+   * - ``matched``
+     - Labels passing the query filters before the ``top_labels`` limit.
+   * - ``returned``
+     - Labels kept by that limit for this pair.
+   * - ``complete``
+     - Whether ``returned`` equals ``matched``.
+   * - ``nth_score``
+     - The last kept label's matching k-mer count when the limit drops labels and keeps at least one. Otherwise ``null``.
+   * - ``tied``
+     - Labels with that matching k-mer count before the limit, or zero when ``nth_score`` is ``null``.
+   * - ``tied_returned``
+     - Labels with that count kept by the limit, or zero when ``nth_score`` is ``null``.
+
+Ties use the matching k-mer count only. A k-mer-count response does not certify median-abundance
+ordering or ties. ``complete`` refers to this pair's label limit only.
+
+On a server with a list of graphs, each result row and cut also carries ``graph`` and ``pair_id``.
+Use both fields to associate rows with their cut. The :ref:`opaque pair ID <configured_pair_id>`
+distinguishes pairs sharing a graph name. On a single-index server, rows omit these pair tags,
+and cuts carry ``null`` for them.
+
 Using Python API
 ^^^^^^^^^^^^^^^^
 See :ref:`api`
