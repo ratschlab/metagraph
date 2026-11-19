@@ -3689,6 +3689,180 @@ class TestMultiGraphServer(TestingBase):
             graphlet_lib.union_pairs(lacking.results, expected_pairs=lacking.expected_pairs)
         self.assertEqual('no_seed', refused.exception.code)
 
+    def _old_form(self, text, chunk):
+        """|text| (a standalone .mgt the library wrote from this engine's answer) as a document
+        stored before the engine named pairs by id: its J line names the pair by the paths of
+        |chunk| as the graph list spells them, no pair_id; the body as it is"""
+        lines = text.split('\n')
+        i = next(i for i, line in enumerate(lines) if line.startswith('J '))
+        j = json.loads(lines[i][2:])
+        j.pop('pair_id')
+        j['graph_path'], j['annotation_path'] = self.pairs[chunk]
+        lines[i] = 'J ' + json.dumps(j, sort_keys=True, separators=(',', ':'),
+                                     ensure_ascii=False)
+        return '\n'.join(lines)
+
+    def test_the_library_on_this_engines_pair_ids(self):
+        """Design step 7 (docs/DESIGN-pair-identity.md section 8): the train-7 library against
+        this engine's answers. GET /capabilities lists every pair by graph and pair_id, no path,
+        and states multigraph.pair_id "n1", so its listing resolves no id to paths; the
+        library's re-ask of a pair named by id (wire_pair()) is {graph, pair_id} without a
+        resolver and with one that does not know the id, the paths with one that does, and
+        this engine answers that pair either way. A name of several pairs ('enterics') is two
+        pairs: discovered, traversed, expected and unioned by id, each continued (next_request,
+        deepen, the tools' continue) on the pair that answered it. The documents the library
+        hands out name the pair by {graph, pair_id} (L1's review m5): an old document's too,
+        by the id this engine states; an old document is re-asked by its paths and answered by
+        that id. No answer the library read states a configured path."""
+        def swept(where, *bodies):
+            for body in bodies:
+                assert_no_configured_path(body if isinstance(body, str) else
+                                          json.dumps(body, default=str), self.server.paths,
+                                          where)
+
+        client = graphlet_lib.TraverseClient('127.0.0.1', self.server.port)
+        name, (ce, ck) = SPLIT
+        e_id, k_id = self.pid(name, ce), self.pid(name, ck)
+        with self.subTest('GET /capabilities: an id-only listing'):
+            doc = client.server_capabilities()
+            swept('GET /capabilities', doc)
+            listed = doc['graph_summary']['pairs']
+            self.assertEqual(sorted([(c, self.pid(c)) for c, *_ in CHUNKS]
+                                    + [(name, e_id), (name, k_id)]),
+                             sorted((p['graph'], p['pair_id']) for p in listed))
+            self.assertEqual([], [p for p in listed
+                                  if {'graph_path', 'annotation_path'} & set(p)])
+            self.assertEqual('n1', doc['multigraph']['pair_id'])
+            self.assertTrue(client.states_pair_ids())
+            # the listing resolves no id to paths: it states none
+            listing = graphlet_lib.client.capabilities_pair_resolver(doc)
+            self.assertEqual([None] * len(listed), [listing(p['pair_id']) for p in listed])
+            # a probe by id answers that pair, by id
+            for pid in (e_id, k_id):
+                probe = client.capabilities(graph=name, pair_id=pid)
+                swept('GET /traverse/capabilities', probe)
+                self.assertEqual((name, pid), (probe['graph'], probe['pair_id']))
+        with self.subTest("the resolver default (L1's order) on this engine"):
+            knows = {k_id: (name,) + self.pairs[ck]}.get
+            by_id = {'graph': name, 'pair_id': k_id}
+            by_paths = dict(zip(('graph', 'graph_path', 'annotation_path'), knows(k_id)))
+            for resolver, wire in ((None, by_id), ({}.get, by_id), (knows, by_paths)):
+                c = graphlet_lib.TraverseClient('127.0.0.1', self.server.port,
+                                                pair_resolver=resolver)
+                self.assertEqual(wire, c.wire_pair(name, k_id))
+                # the probe of the id goes out so (the hook), and this engine answers that
+                # pair, by its id
+                probe = c.capabilities(graph=name, pair_id=k_id)
+                self.assertEqual((name, k_id), (probe['graph'], probe['pair_id']))
+            # a resolver whose answer is not the id's pair: refused, nothing sent
+            lying = graphlet_lib.TraverseClient('127.0.0.1', self.server.port,
+                                                pair_resolver={k_id: (name,) + self.pairs[ce]}.get)
+            with self.assertRaises(graphlet_lib.client.PairIdError) as cm:
+                lying.wire_pair(name, k_id)
+            self.assertEqual('pair_id_mismatch', cm.exception.code)
+
+        # an 80 bp seed of ecoli's record none of whose k-mers kleb or pseudo holds
+        others = self.kmers('kleb') | self.kmers('pseudo')
+        record = self.records['ecoli'][0]
+        start = next(i for i in range(30000, len(record) - 80, 500)
+                     if not any(record[i + j:i + j + K] in others for j in range(80 - K + 1)))
+        seed = record[start:start + 80]
+        strategy = {'direction': 'right', 'bounds': {'max_extension_bp': 60},
+                    'output': {'continuation_bp': 40}}
+        with self.subTest('a name of several pairs, by id'):
+            pairs = [{'graph': name, 'pair_id': e_id}, {'graph': name, 'pair_id': k_id}]
+            r = client.traverse_pairs(seed, strategy, pairs=pairs, timing=False)
+            self.assertEqual(tuple(pairs), r.expected_pairs)
+            swept('POST /traverse', *(x.raw for x in r.results))
+            self.assertEqual([graphlet_lib.client.Pair(name, None, None, pid)
+                              for pid in (e_id, k_id)],
+                             [graphlet_lib.client.answered_pair(x.envelope) for x in r.results])
+            self.assertIsNotNone(r.results[0].graphlets[0])
+            self.assertEqual([None], r.results[1].graphlets)
+            u = graphlet_lib.union_pairs(r.results, seed=r.seed,
+                                         expected_pairs=r.expected_pairs,
+                                         seqs_order=r.seqs_order)
+            (part,), (absent,) = u.parts, u.absent
+            self.assertEqual(((name, e_id, None, None), (name, k_id, None, None)),
+                             (part.key[2:6], absent.key[2:6]))
+            self.assertNotEqual(part.tag, absent.tag)
+            swept('the union', u.provenance(), u.to_fasta())
+            # discovery: one request per listed pair, both of the name's among them
+            every = client.traverse_pairs(seed, strategy, timing=False)
+            self.assertLessEqual(set(map(json.dumps, pairs)),
+                                 set(map(json.dumps, every.expected_pairs)))
+        g = client.traverse([seed], strategy, graph=name, pair_id=e_id).graphlets[0]
+        walk = next(w.path_id for w in g.walks('right')
+                    if g.continuation('right', w.path_id) is not None)
+        with self.subTest('continuations on the pair that answered'):
+            self.assertEqual(graphlet_lib.client.Pair(name, None, None, e_id),
+                             graphlet_lib.client.answered_pair(g.envelope))
+            req = g.next_request('right', [walk], bp=30)
+            self.assertEqual([{'graph': name, 'pair_id': e_id}], req['pairs'])
+            self.assertEqual(req['pairs'], client.wire_request(req)['pairs'])
+            out = client.deepen(g, 'right', [walk], bp=30)
+            swept('POST /traverse', out.raw)
+            self.assertEqual(graphlet_lib.client.Pair(name, None, None, e_id),
+                             graphlet_lib.client.answered_pair(out.envelope))
+            self.assertIsNotNone(out.graphlets[0])
+            # a caller's resolver sends it by the paths; the same pair answers
+            knows = graphlet_lib.TraverseClient(
+                '127.0.0.1', self.server.port,
+                pair_resolver={e_id: (name,) + self.pairs[ce]}.get)
+            self.assertEqual([dict(zip(('graph', 'graph_path', 'annotation_path'),
+                                       (name,) + self.pairs[ce]))],
+                             knows.wire_request(req)['pairs'])
+            again = knows.deepen(g, 'right', [walk], bp=30)
+            self.assertEqual(graphlet_lib.client.answered_pair(out.envelope),
+                             graphlet_lib.client.answered_pair(again.envelope))
+            self.assertEqual(out.graphlets[0].body_digest, again.graphlets[0].body_digest)
+        with self.subTest('documents handed out (m5), an old one re-asked by its paths'):
+            from metagraph.traverse.mcp_tools import GraphletTools
+            d = tempfile.mkdtemp(dir=self.tempdir.name)
+            ex = os.path.join(d, 'exports')
+            os.makedirs(ex)
+            pinned = graphlet_lib.TraverseClient('127.0.0.1', self.server.port, graph=name,
+                                                 pair_id=e_id)
+            tools = GraphletTools(graphlet_lib.GraphletStore(os.path.join(d, 'store')),
+                                  {'e': pinned}, export_dir=ex)
+            caps = tools.traverse_capabilities('e')['capabilities']
+            self.assertEqual((name, e_id), (caps['graph'], caps['pair_id']))
+            self.assertEqual(g.dump(envelope=True),
+                             graphlet_lib.client.document_without_paths(g.dump(envelope=True)))
+            # this engine's document, and the same document stored before ids (its paths)
+            new_path, old_path = os.path.join(ex, 'new.mgt'), os.path.join(ex, 'old.mgt')
+            g.save(new_path)
+            with open(new_path, encoding='utf-8', newline='') as f:
+                text = f.read()
+            with open(old_path, 'w', encoding='utf-8', newline='') as f:
+                f.write(self._old_form(text, ce))
+            for form, src in (('new', new_path), ('old', old_path)):
+                h = tools.graphlet_load(src)['handle']
+                outs = [tools.graphlet_export(h, format='mgt', path=f'{form}-e.mgt'),
+                        tools.graphlet_save(h, f'{form}-s.mgt')]
+                for o in outs:
+                    self.assertNotIn('error', o, o)
+                    with open(o['path'], encoding='utf-8', newline='') as f:
+                        handed = f.read()
+                    swept('a document handed out', handed)
+                    h2 = graphlet_lib.parse(handed)
+                    self.assertEqual(graphlet_lib.client.Pair(name, None, None, e_id),
+                                     graphlet_lib.client.answered_pair(h2.envelope), form)
+                    self.assertEqual(g.body_digest, h2.body_digest, form)
+                # re-asked: the new one by its id, the old one by its paths; this engine
+                # answers both on the pair of that id
+                stored = tools.store.graphlet(h)
+                sent = graphlet_lib.GraphletStore.request_of(stored)['pairs']
+                self.assertEqual([{'graph': name, 'pair_id': e_id}] if form == 'new' else
+                                 [dict(zip(('graph', 'graph_path', 'annotation_path'),
+                                           (name,) + self.pairs[ce]))], sent, form)
+                done = tools.traverse_continue(h, 'right', walk)
+                self.assertNotIn('error', done, done)
+                swept('a continuation through the tools', done)
+                child = tools.store.graphlet(done['handle'])
+                self.assertEqual(graphlet_lib.client.Pair(name, None, None, e_id),
+                                 graphlet_lib.client.answered_pair(child.envelope), form)
+
     # -------------------------------------------------------------------- POST /resolve
 
     def cli_resolve(self, chunk, request):
