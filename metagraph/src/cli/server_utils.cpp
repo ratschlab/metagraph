@@ -1360,21 +1360,33 @@ bool LoadReservations::reserve(size_t bytes, const std::function<bool()> &gone,
     std::unique_lock<std::mutex> lock(mutex_);
     if (!gone) {
         freed_.wait(lock, [&]() { return left_ >= bytes; });
-    } else {
-        while (left_ < bytes) {
-            // asked without the lock: a socket's peek, a flag
-            lock.unlock();
-            const bool abandoned = gone();
-            lock.lock();
-            if (abandoned)
-                return false;
-            if (left_ >= bytes)
-                break;
-            freed_.wait_for(lock, std::chrono::milliseconds(poll_ms));
-        }
+        left_ -= bytes;
+        return true;
+    }
+    bool waited = false;
+    while (left_ < bytes) {
+        waited = true;
+        // asked without the lock: a socket's peek, a flag
+        lock.unlock();
+        const bool abandoned = gone();
+        lock.lock();
+        if (abandoned)
+            return false;
+        if (left_ >= bytes)
+            break;
+        freed_.wait_for(lock, std::chrono::milliseconds(poll_ms));
     }
     left_ -= bytes;
-    return true;
+    if (!waited)
+        return true;
+    // a wait ends on the release that frees the memory, up to |poll_ms| after |gone| was last
+    // asked: asked once more with the bytes taken, so that a request stopped (its client gone)
+    // in that time gives them back here and starts no load (GPT review of train 7, P2)
+    lock.unlock();
+    if (!gone())
+        return true;
+    release(bytes);
+    return false;
 }
 
 void LoadReservations::release(size_t bytes) {

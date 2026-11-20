@@ -294,7 +294,10 @@ The answer keeps its upstream shape (a list of `{seq_description, results, ...}`
 - `finish_by_ms` (integer, ms since the epoch) is the completion deadline, on `/traverse`, `/resolve`, `/pattern`.
   Each route's deadline becomes the minimum of its own and `finish_by_ms - clock_skew_allowance_ms`. A `/resolve`
   without `bounds.time_budget_ms` gets the server maximum as its deadline. The in_ram memory wait is not entered
-  once `finish_by_ms` has passed and is given up when it passes; a load already started is not interrupted.
+  once `finish_by_ms` has passed and is given up when it passes; a load already started is not interrupted. A wait
+  (on every route, `/search`'s included) is asked once more when the memory is granted: one whose deadline passed or
+  whose client left since it was last asked gives the memory back and loads nothing (GPT review of train 7, P2:
+  such a wait loaded the index, minutes and gigabytes on a large pair, for nobody).
 - The EFFECTIVE envelope deadline is min(request arrival + the route's request budget, `finish_by_ms` -
   clock_skew_allowance_ms), the request budget being `/pattern`'s `time_budget_ms`, `/resolve`'s
   `bounds.time_budget_ms` or the server maximum, the attempt's bound for `/traverse`. The WORK CUTOFF is the

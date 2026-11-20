@@ -497,8 +497,9 @@ class LoadReservations {
     explicit LoadReservations(size_t capacity) : capacity_(capacity), left_(capacity) {}
     size_t capacity() const { return capacity_; }
     // Waits until |bytes| (at most capacity()) are free and takes them: true. |gone|, when
-    // given, is asked every |poll_ms| while it waits; true abandons the wait (false, nothing
-    // taken). Without it the wait is /search's: until the memory is free
+    // given, is asked every |poll_ms| while it waits, and once more after a wait with the bytes
+    // taken; true abandons the wait (false, nothing taken: the bytes given back). Without it
+    // the wait is /search's: until the memory is free
     bool reserve(size_t bytes, const std::function<bool()> &gone = nullptr,
                  uint64_t poll_ms = 100);
     void release(size_t bytes);
