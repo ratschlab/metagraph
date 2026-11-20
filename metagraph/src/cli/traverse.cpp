@@ -2522,8 +2522,9 @@ void charge_answer_text(AnswerAccount *answer) {
     answer->charge(annot::matrix::alloc_bytes(text + 1) - text, "answer");
     // writing the answer holds its objects' texts (each freed once copied, but a freed text
     // does not give its pages back), the body they are copied into, and one copy of the body
-    // (the transport's, reserved to its size; or the compressed body at its last growth, up to
-    // three times the compressed bytes, at most the text for this JSON), and the compressor's
+    // (the transport's, reserved to its size; or the compressed body, one block reserved to
+    // zlib's bound of which only the compressed bytes, at most about the text, are written:
+    // compress_string), and the compressor's
     // state: three copies of the text (T7-D3; before, the tree's text beside its copy at its
     // last growth, four). Each object is held at three copies of its text already
     // (settle_json), but an object of long strings at its price, about twice its text: such an

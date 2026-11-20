@@ -75,7 +75,21 @@ std::string compress_string(const std::string &str, int compressionlevel, bool g
 
     int ret;
     char outbuffer[32768];
+    // One block for the compressed bytes, reserved to zlib's bound on them for this text (the
+    // text and about 0.03 % more, with the container), so that the appends never move it. Before,
+    // the string grew by doubling and at its last growth held its old block beside the new one,
+    // up to three times the compressed bytes: more than the text when it compresses less than
+    // 3:1 (GPT review of train 7, known D3: 1,024 random names, 37 KB of text, 20 KB gzip), while
+    // the routes' accounts price one copy of about the text. Only the bytes written are touched
     std::string outstring;
+    if (str.size() <= std::numeric_limits<uLong>::max()) {
+        try {
+            outstring.reserve(deflateBound(&zs, static_cast<uLong>(str.size())));
+        } catch (...) {
+            deflateEnd(&zs);
+            throw;
+        }
+    }
 
     // retrieve the compressed bytes blockwise
     do {

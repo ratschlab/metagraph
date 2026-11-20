@@ -2880,6 +2880,58 @@ TEST(GraphletServer, CompressionTakesTheTextInPieces) {
     EXPECT_EQ(3u, calls);
 }
 
+// The compressed bytes are written into one block reserved to zlib's bound for the text
+// (deflateBound), so that the appends never move it (GPT review of train 7, known D3: before, the
+// string grew by doubling, and at its last growth held its old block beside the new one, up to
+// three times the compressed bytes, more than the text when it compresses less than 3:1; 4 MiB
+// of random bytes ended in a block of 8 MiB). The bytes are those of one deflate call over the
+// whole text into a buffer of that bound: on random bytes, random hexadecimal names and an
+// empty text, in both containers, at levels 1 and 9
+TEST(GraphletServer, CompressionReservesZlibsBound) {
+    std::mt19937_64 rng(13);
+    std::string random(size_t(4) << 20, '\0');
+    for (size_t i = 0; i + 8 <= random.size(); i += 8) {
+        const uint64_t x = rng();
+        memcpy(&random[i], &x, 8);
+    }
+    std::string names = "[";
+    for (size_t i = 0; names.size() < (size_t(1) << 20); ++i) {
+        names += i ? ",\"" : "\"";
+        for (size_t j = 0; j < 32; ++j) {
+            names.push_back("0123456789abcdef"[rng() % 16]);
+        }
+        names += "\"";
+    }
+    names += "]";
+    std::string empty;
+    for (const std::string *text : { &random, &names, &empty }) {
+        const std::string &t = *text;
+        for (bool gzip : { false, true }) {
+            for (int level : { 1, 9 }) {
+                z_stream zs;
+                memset(&zs, 0, sizeof(zs));
+                ASSERT_EQ(Z_OK, deflateInit2(&zs, level, Z_DEFLATED, 15 + (gzip ? 16 : 0), 8,
+                                             Z_DEFAULT_STRATEGY));
+                const size_t bound = deflateBound(&zs, t.size());
+                std::string reference(bound, '\0');
+                zs.next_in = reinterpret_cast<Bytef *>(const_cast<char *>(t.data()));
+                zs.avail_in = static_cast<uInt>(t.size());
+                zs.next_out = reinterpret_cast<Bytef *>(&reference[0]);
+                zs.avail_out = static_cast<uInt>(bound);
+                ASSERT_EQ(Z_STREAM_END, deflate(&zs, Z_FINISH));
+                reference.resize(bound - zs.avail_out);
+                deflateEnd(&zs);
+                const std::string got = compress_string(t, level, gzip);
+                const std::string what = std::to_string(t.size()) + (gzip ? " gzip " : " zlib ")
+                        + std::to_string(level);
+                EXPECT_EQ(reference, got) << what;
+                // (an allocator rounds a reserve up to its granule: 16 B with libc++)
+                EXPECT_LE(got.capacity(), bound + 16) << what;
+            }
+        }
+    }
+}
+
 // The server hands zlib its text in pieces of kCompressPieceBytes (4 MiB), so that the stop
 // check runs at least once per piece: on a text that compresses strongly the check per 32 KiB
 // block of output alone ran a few times over 64 MiB. The pieces are fed without a flush, so
