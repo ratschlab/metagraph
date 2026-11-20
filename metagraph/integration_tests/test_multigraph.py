@@ -1070,6 +1070,16 @@ class TestMultiGraphServer(TestingBase):
                                       {k: v for k, v in request.items()
                                        if k in ('graph', 'graphs')}):
                         self.assertEqual(expected(name), refused(method, route, request))
+        # a ledger-managed /traverse (attempt_id): the same refusal, with the attempt's usage
+        # beside it, as every managed selection refusal (review P2)
+        for name in ('kleb', 'enterics'):
+            with self.subTest(name=name, managed=True):
+                attempt_id = f'gp-managed-{name}'
+                body = refused('POST', 'traverse', dict(t, graph=name, graph_path='/nowhere',
+                                                        attempt_id=attempt_id))
+                self.assertEqual(['candidates', 'code', 'error', 'usage'], sorted(body))
+                self.assertEqual(expected(name), {k: v for k, v in body.items() if k != 'usage'})
+                self.assertEqual(attempt_id, body['usage']['attempt_id'])
         # its own graph_path selects the pair, as before
         for route, body in (('traverse', t), ('resolve', r)):
             out = self.server.post(route, dict(body, graph='kleb', graph_path=kleb_g))

@@ -469,10 +469,13 @@ The answer keeps its upstream shape (a list of `{seq_description, results, ...}`
 `pair_id` (section 1.2, train 8) or by its paths, not both. By its paths, `graph_path` may be omitted when the name
 has one graph, and `annotation_path` is required when the name's pairs share a graph. An id that no pair of the name
 has is refused `pair_not_found` with the name's pairs as the candidates. A probe takes the same forms as query
-parameters. A `graph_path` beside one name (`graph` or `graphs: [name]` on `/resolve` and `/traverse`, `?graph=`
-on a probe) keeps the name's pairs on that graph, and one that no pair of the name has is refused `pair_not_found`
-with the name's pairs as the candidates, on a name of one pair too (train 8, the owner's decision of 2026-11-20:
-before, a name of one pair answered on that pair and the path was ignored). `graphs` and `pairs` together are refused. Every selector refusal is a 400 before any pair starts,
+parameters. A `graph_path` beside one name (`graph` or `graphs: [name]` on `/resolve` and `/traverse`, `?graph=` on
+a probe) keeps the name's pairs on that graph, and one that no pair of the name has is refused `pair_not_found` with
+the name's pairs as the candidates, on a name of one pair too (train 8, the owner's decision of 2026-11-20: before,
+a name of one pair answered on that pair and the path was ignored). A path given, in an object of `pairs` as beside
+a name, is compared byte for byte with the path as the graph list spells it, with no normalisation (no trailing
+slash, `./` or symbolic link is resolved). `graphs` and `pairs` together are refused. Every selector refusal is a
+400 before any pair starts,
 `{error, code, candidates?}`, with `code` one of `selection_conflict`, `pair_not_found`, `pair_ambiguous`,
 `traverse_single_pair`, `graph_unknown`, `pairs_unsupported`; `candidates` lists the pairs to choose from where a
 choice exists, each `{graph, pair_id}`. The codes are for selection outcomes only: a malformed selector (`pairs` not
