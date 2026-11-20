@@ -1347,6 +1347,13 @@ int run_server(Config *config) {
                     *handle_holder = search_cache.acquire(
                         make_search_cache_key(search_request, graph_identity));
                     if (!handle_holder->is_miss()) {
+                        // a waiter attached to an identical request still computing: logged
+                        // before it waits, so that the attachment is seen before the
+                        // producer's STORE (GPT review of train 7, P2: a test inferred it)
+                        if (handle_holder->attached_pending()) {
+                            logger->info("[Server] Request {}: cache WAIT for an identical "
+                                         "request still computing", request_id);
+                        }
                         auto cached = handle_holder->get();
                         logger->info("[Server] Request {}: cache HIT  {:.1f} KB  "
                                      "(occupancy {:.1f}/{:.0f} MB, pinned {:.1f} MB, {} "
@@ -1382,7 +1389,9 @@ int run_server(Config *config) {
                 // its client is gone or the server stops, no further record, batch or pair
                 // starts (those running finish) and nothing is written. With the result cache
                 // (a handle) a client gone stops nothing: the request computes to its end and
-                // stores its answer, so that the client's retry is a hit (Fable review M1); a
+                // offers its answer to the cache, so that the client's retry is a hit while the
+                // cache retains it (Fable review M1; not an answer the cache BYPASSes, nor one
+                // evicted since: GPT review of train 7, P2); a
                 // shutdown stops it, its waiters with it (nothing is written to any of them).
                 // The reason is the one answered first
                 SearchStop stop([&, r = request.get()]() -> const char * {
@@ -1579,6 +1588,12 @@ int run_server(Config *config) {
                     serialized = budget
                             ? search_answer_text(result, budget->answer(), handle_holder != nullptr)
                             : Json::writeString(Json::StreamWriterBuilder(), result);
+                    // the tree freed once written: the answer account prices the text beside
+                    // the transport's and the cache's copies "once the tree is freed"
+                    // (search_answer_text), and the cache's copy (set_result) is made below
+                    // while the handler runs (GPT review of train 7, P1: the tree stayed beside
+                    // both copies until the handler returned)
+                    Json::Value().swap(result);
                   } catch (const SearchStopped &) {
                     // stopped (lane T7-P2): nothing is written (ClientGone; answer_request logs
                     // this text as "Request <id>: <text>; no response written") and nothing of

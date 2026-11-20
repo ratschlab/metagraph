@@ -161,8 +161,12 @@ The answer keeps its upstream shape (a list of `{seq_description, results, ...}`
   also each alignment and each batch's query graph; a record in progress finishes), writes nothing and closes the
   connection, as on `/traverse`, `/resolve` and `/pattern`. A request whose work has all started (every record on
   every pair) is not stopped: it is answered as before (to a gone client, a write that fails). With `--cache-size`
-  above 0 a client gone stops nothing: the request computes to its end and stores its answer, so that a retry is a
-  hit; only a shutdown stops it, and the identical requests waiting for it (written nothing either). The server logs
+  above 0 a client gone stops nothing: the request computes to its end and offers its answer to the cache, so that a
+  retry is a hit while the cache retains it (an identical request already waiting for it shares the answer; an answer
+  larger than `--cache-size`, or than the room the entries still being delivered leave, is delivered and not retained,
+  logged `BYPASS`, and a retained one can be evicted; an identical request that attaches to one still computing
+  logs `[Server] Request <id>: cache WAIT for an identical request still computing` before it waits); only a
+  shutdown stops it, and the identical requests waiting for it (written nothing either). The server logs
   `[Server] Request <id>: <client gone|shutdown>, /search stopped: <r> of <n> records started, <p> of <P> pairs
   started; no response written` (the reason the stop answered first; <r>: the most records one pair started, on the
   batched path the records whose query on their batch's query graph began; <n>: the request's records, with

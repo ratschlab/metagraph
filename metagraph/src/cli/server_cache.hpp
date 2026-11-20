@@ -78,6 +78,10 @@ class ServerQueryCache {
         // True if this caller is responsible for computing the result.
         bool is_miss() const { return static_cast<bool>(producer_); }
 
+        // A hit on an entry whose producer had not published yet when acquire() attached this
+        // waiter to it (read under the cache's mutex): get() waits for that producer
+        bool attached_pending() const { return attached_pending_; }
+
         // Wait for the result. Throws whatever the producer set via
         // set_exception(). On a miss must be called only after
         // set_result/set_exception, otherwise it deadlocks the producer.
@@ -99,13 +103,15 @@ class ServerQueryCache {
 
         Handle(ServerQueryCache *cache,
                std::shared_ptr<Entry> entry,
-               std::shared_ptr<std::promise<ResultPtr>> producer);
+               std::shared_ptr<std::promise<ResultPtr>> producer,
+               bool attached_pending = false);
 
         void release();
 
         ServerQueryCache *cache_ = nullptr;
         std::shared_ptr<Entry> entry_;
         std::shared_ptr<std::promise<ResultPtr>> producer_;  // non-null on miss only
+        bool attached_pending_ = false;
     };
 
     explicit ServerQueryCache(size_t max_size_bytes,
