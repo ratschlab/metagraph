@@ -21,8 +21,9 @@ namespace traversal {
  *
  * |step(n)| is told of n more elements handled, once they reach kSortStepElements since it was
  * last told: an element of a partition's pass (by copies, told every kSortStepElements of them;
- * by Hoare's scheme, at its swaps), an element of a heap sort, and each element of a range of at
- * most kSortPieceElements once std::sort sorted it. |step| may throw, and the sort then ends
+ * by Hoare's scheme, each element its scans compare), an element of a sorted range's check, a
+ * heap's levels for each sift of a heap sort (the comparisons it makes at most), and each element
+ * of a range of at most kSortPieceElements once std::sort sorted it. |step| may throw, and the sort then ends
  * where it is (the range's elements permuted, none lost): its caller abandons what it sorts.
  *
  * The order is std::sort's (std::partial_sort's), by the same strict weak order |comp|.
@@ -85,24 +86,36 @@ void sift_down(It first, ptrdiff_t root, ptrdiff_t size, Comp &comp) {
     }
 }
 
-// [first, last) as a max-heap by |comp|, an element counted each sift
+// the levels of a heap of |n| elements: what a sift passes at most (the steps counted a sift, so
+// that the steps told follow its comparisons: lane T8-RL review n2)
+inline size_t heap_levels(ptrdiff_t n) {
+    size_t levels = 1;
+    while (n >>= 1) {
+        ++levels;
+    }
+    return levels;
+}
+
+// [first, last) as a max-heap by |comp|, its levels counted each sift
 template <class It, class Comp, class Count>
 void make_heap(It first, It last, Comp &comp, Count &count) {
     const ptrdiff_t n = last - first;
+    const size_t levels = heap_levels(n);
     for (ptrdiff_t root = n / 2; root-- > 0; ) {
         sift_down(first, root, n, comp);
-        count();
+        count.add_counted(levels);
     }
 }
 
-// the max-heap [first, last) sorted ascending, an element counted each sift
+// the max-heap [first, last) sorted ascending, its levels counted each sift
 template <class It, class Comp, class Count>
 void sort_heap(It first, It last, Comp &comp, Count &count) {
+    const size_t levels = heap_levels(last - first);
     for (ptrdiff_t end = last - first; end > 1; ) {
         --end;
         std::iter_swap(first, first + end);
         sift_down(first, 0, end, comp);
-        count();
+        count.add_counted(levels);
     }
 }
 
@@ -124,19 +137,24 @@ void median_to_front(It first, It last, Comp &comp) {
 
 // [first, last) partitioned around *first (Hoare's scheme, the pivot left in place until the
 // end): returns cut with every element of [first, cut) not greater than *cut, the pivot, and
-// every element of (cut, last) not less than it. The elements the scans pass counted at each swap
+// every element of (cut, last) not less than it. Each element a scan compares counted (lane
+// T8-RL review n2: before, at each swap, so that a scan through a range already partitioned was
+// one piece)
 template <class It, class Comp, class Count>
 It partition_at_front(It first, It last, Comp &comp, Count &count) {
     It i = first;
     It j = last;
     while (true) {
-        const It i0 = i;
-        const It j0 = j;
         // (stops at last - 1 at the latest: median_to_front)
-        while (comp(*++i, *first)) {}
+        do {
+            ++i;
+            count();
+        } while (comp(*i, *first));
         // (stops at first at the latest: the pivot is not less than itself)
-        while (comp(*first, *--j)) {}
-        count.add_counted((i - i0) + (j0 - j));
+        do {
+            --j;
+            count();
+        } while (comp(*first, *j));
         if (!(i < j))
             break;
         std::iter_swap(i, j);
@@ -321,8 +339,8 @@ void sort_in_steps(It first, It last, Comp comp, const Step &step) {
 /**
  * std::partial_sort(first, middle, last, comp), in steps: the |middle - first| least elements of
  * [first, last) sorted at [first, middle), by a heap of them that each later element is offered
- * to (an element counted each one offered and each one sifted); the order of [middle, last) is
- * unspecified, as std::partial_sort's.
+ * to (an element counted each one offered, and the heap's levels each sift); the order of
+ * [middle, last) is unspecified, as std::partial_sort's.
  */
 template <class It, class Comp, class Step>
 void partial_sort_in_steps(It first, It middle, It last, Comp comp, const Step &step) {
@@ -331,12 +349,14 @@ void partial_sort_in_steps(It first, It middle, It last, Comp comp, const Step &
         return;
     Counter<Step> count(step);
     const ptrdiff_t m = middle - first;
+    const size_t levels = heap_levels(m);
     make_heap(first, middle, comp, count);
     for (It i = middle; i != last; ++i) {
         count();
         if (comp(*i, *first)) {
             std::iter_swap(i, first);
             sift_down(first, 0, m, comp);
+            count.add_counted(levels);
         }
     }
     sort_heap(first, middle, comp, count);

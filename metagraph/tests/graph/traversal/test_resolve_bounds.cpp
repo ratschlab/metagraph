@@ -2392,10 +2392,14 @@ TEST(ResolveBounds, TheSelectionTakesEachStepOnce) {
     const SeedSelection got = select_seeds(profile, query, support, false, [&]() { ++calls; });
     ASSERT_EQ(1u, got.seeds.size());
     EXPECT_EQ(X, got.seeds[0].population.supporting_total);
-    // (21 X steps: 13 X as before lane T8-RL, and the runs' sort and copy, the round's sort of
-    // its pieces, the sorts and de-duplications of its starts and ends; the sorts of X and 2 X
-    // elements are each one piece of std::sort, told at once, which reads once)
-    EXPECT_EQ(38u, calls);
+    // (13 X steps as before lane T8-RL, a reading each kResolveCheckLabels of them, and now also
+    // the runs' sort and copy, the round's sort of its pieces, the sorts and de-duplications of
+    // its starts and ends: 21 X steps at most. How many readings those come to depends on the
+    // sort's pieces (a range of at most kSortPieceElements told at once, a sorted range's check)
+    // and on the counter's rounding: 38 at kSortStepElements 4,096 and kSortPieceElements
+    // 16,384; pinned as bounds, more than before and at most one a kResolveCheckLabels steps)
+    EXPECT_LT(13 * X / kResolveCheckLabels, calls);
+    EXPECT_GE(21 * X / kResolveCheckLabels, calls);
 }
 
 // The route (process_resolve_request): under bounds.time_budget_ms the selection of as many
@@ -2804,12 +2808,27 @@ TEST(ResolveBoundsRoute, TheRowPassReadsTheDeadlineWithinABatch) {
     // the deadline true from the (skip + 1)-th reading on: the first that stops the work past
     // the query's first k-mer
     std::optional<uint64_t> resolved;
+    // the readings of the stop up to the one that ended the work (the stop is read first)
+    size_t stops_at = 0;
     for (size_t skip = 0; skip < 8 && !resolved; ++skip) {
         size_t calls = 0;
-        parsed.options.time_up = [&]() { return ++calls > skip; };
+        size_t stops = 0;
+        size_t stops_then = 0;
+        parsed.options.stop = [&]() {
+            ++stops;
+            return false;
+        };
+        parsed.options.time_up = [&]() {
+            if (++calls <= skip)
+                return false;
+            if (!stops_then)
+                stops_then = stops;
+            return true;
+        };
         const SupportProfile cut = resolve_support(oracle, q, parsed.options);
         ASSERT_TRUE(cut.stop) << skip;
         if (cut.stop->resolved_kmers) {
+            stops_at = stops_then;
             resolved = cut.stop->resolved_kmers;
             EXPECT_EQ(ResolveStop::ROWS, cut.stop->phase);
             EXPECT_EQ(ResolveStop::TIME, cut.stop->reason);
@@ -2821,6 +2840,56 @@ TEST(ResolveBoundsRoute, TheRowPassReadsTheDeadlineWithinABatch) {
     }
     ASSERT_TRUE(resolved);
     EXPECT_LT(*resolved, kResolveFirstBatchRows);
+    // A client gone noticed at that reading (the stop read first) abandons the request there:
+    // its modelled memory (ResolveOptions::memory_seen, the registry's usage of the pair) holds
+    // the batch's rows, at least the bytes used before the reading (lane T8-RL review M1:
+    // before, the query's bytes alone, about 3 KB here)
+    ASSERT_LT(0u, stops_at);
+    size_t stops = 0;
+    parsed.options.time_up = []() { return false; };
+    parsed.options.stop = [&]() { return ++stops >= stops_at; };
+    parsed.options.abandon = []() { throw std::runtime_error("abandoned"); };
+    uint64_t seen = 0;
+    parsed.options.memory_seen = &seen;
+    EXPECT_THROW(resolve_support(oracle, q, parsed.options), std::runtime_error);
+    EXPECT_LE(kResolveUseCheckBytes, seen);
+}
+
+// The in-batch reading counts a use as at least kResolveUseMinBytes, so that the uses of small
+// rows read it too, every 4,096 uses at most (lane T8-RL review m2: a row of up to 2 labels is 0
+// bytes under folly, and a batch's uses can pass its rows by far over repeated keys). A query of a
+// 50 bp unit 400 times, one label over it: 50 keys, all in the first batch, whose uses are the
+// query's 19,990 k-mers. A deadline seen at a reading after the pass's start ends the work inside
+// that batch, past its first 4,096 uses (before: at no reading inside it, so at its end, the
+// work complete)
+TEST(ResolveBoundsRoute, TheRowPassReadsSmallRowsByUses) {
+    const std::string unit = random_seq(50, 5151);
+    std::string q;
+    for (size_t i = 0; i < 400; ++i) {
+        q += unit;
+    }
+    auto anno = build_anno_graph<DBGSuccinct, annot::ColumnCompressed<>>(kK, { q }, { "L" });
+    Json::Value request;
+    request["sequence"] = q;
+    request["labels"].append("L");
+    cli::ResolveRequest parsed = cli::parse_resolve_request(request);
+    LabelOracle oracle(*anno);
+    const uint64_t num_kmers = q.size() - kK + 1;
+    // a row of one label: its uses since a reading pass kResolveUseCheckBytes only by the floor
+    ASSERT_GT(kResolveUseCheckBytes, num_kmers * annot::matrix::row_copy_bytes(
+            annot::matrix::BinaryMatrix::SetBitPositions(1)));
+    std::vector<uint64_t> resolved;
+    for (size_t skip = 0; skip < 8; ++skip) {
+        size_t calls = 0;
+        parsed.options.time_up = [&]() { return ++calls > skip; };
+        const SupportProfile cut = resolve_support(oracle, q, parsed.options);
+        if (cut.stop)
+            resolved.push_back(cut.stop->resolved_kmers);
+    }
+    const bool inside = std::any_of(resolved.begin(), resolved.end(), [&](uint64_t r) {
+        return r >= 4096 && r < num_kmers;
+    });
+    EXPECT_TRUE(inside) << ::testing::PrintToString(resolved);
 }
 
 // Under a stop, an explicit selection is checked before it is made (explicit_selection_blocked:
@@ -4013,11 +4082,13 @@ TEST(ResolveAnswer, TheGroupingReadsByRuns) {
     EXPECT_LE(1u, in_sort);
     EXPECT_EQ(in_walk + in_sort, finished_at.size());
     // the map's nodes freed while the groups are made: each a key, a vector and a tree node's
-    // pointers at least, all but the last's before its call
-    ASSERT_TRUE(first_group_heap && last_group_heap);
-    EXPECT_GE(*first_group_heap - *last_group_heap,
-              static_cast<int64_t>((groups - 1) * (sizeof(KmerInterval)
-                                                   + sizeof(std::vector<LabelId>))));
+    // pointers at least, all but the last's before its call (where the allocator's live bytes
+    // can be read, as the tests above)
+    if (first_group_heap && last_group_heap) {
+        EXPECT_GE(*first_group_heap - *last_group_heap,
+                  static_cast<int64_t>((groups - 1) * (sizeof(KmerInterval)
+                                                       + sizeof(std::vector<LabelId>))));
+    }
     ASSERT_EQ(groups, profile.candidates.size());
     for (size_t i = 0; i < groups; ++i) {
         ASSERT_EQ(plain.candidates[i].kmers, profile.candidates[i].kmers) << i;

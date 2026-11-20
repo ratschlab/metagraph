@@ -323,9 +323,10 @@ deadline. `src/cli/traverse.cpp` `process_resolve_request`, `src/graph/traversal
 - **The work stops at the budget less the reserve.** The deadline is read where the client's connection is
   checked during the work, after it: before the first row is read; between two batches of rows (a discovery's
   pass and the explicit labels' on the row paths: 64 rows, then up to 4,096 rows or about 64 MiB of rows, §4.2), and
-  within a batch once the rows its k-mers used since the last reading pass 1 MiB (`row_copy_bytes`, before the next
-  k-mer's use) *(lane T8-RL: before, only between batches; a batch of 4,000-label rows took about 0.8 s to use, and
-  the 503 of a budget of 700 to 1,000 ms came up to 0.43 s late, D3's open question)*; and,
+  within a batch once the rows its k-mers used since the last reading pass 1 MiB (`row_copy_bytes`, a use counted
+  as at least 256 bytes, so every 4,096 uses at most, before the next k-mer's use) *(lane T8-RL: before, only
+  between batches; a batch of 4,000-label rows took about 0.8 s to use, and the 503 of a budget of 700 to 1,000 ms
+  came up to 0.43 s late, D3's open question)*; and,
   on a direct-access annotation, before every 4,096 k-mers of the explicit labels' hits, which under a deadline
   are fetched in pieces of 4,096 k-mers (one fetch of the whole query, the path without a deadline, is a piece
   no clock read can end: it reads every k-mer's cell of every label). On the row paths the k-mers' hits are
@@ -438,7 +439,8 @@ deadline. `src/cli/traverse.cpp` `process_resolve_request`, `src/graph/traversal
   explicit labels' resolution and their query's setup (linear in their bytes; at most
   `--resolve-max-explicit-labels` labels, 10,000 by default, 0 lifting the cap; an unknown label is refused before
   the deadline is first read, so a stop never hides one); one row batch's decode (a row-diff row's whole path), and
-  within its uses one row's (every label of it, read before the next once 1 MiB of rows were used); a pass's setup
+  within its uses one row's (every label of it, read before the next once 1 MiB of rows or 4,096 uses were used);
+  a pass's setup
   (the next occurrence of every present k-mer, one hash pass); one piece of hits and its accumulation; a piece of a
   sort in steps (`stepped_sort.hpp`: at most 16,384 elements sorted by `std::sort`, 4,096 elements of its check that
   a range is sorted already (a sorted range is left as it is), a partition's 4,096 elements by copies, or, for the grouping's candidates, Hoare's scan between two swaps, linear in the range at most); the model

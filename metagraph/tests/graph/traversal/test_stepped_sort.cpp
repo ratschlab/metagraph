@@ -271,9 +271,10 @@ TEST(SteppedSort, PartialSortIsStdPartialSorts) {
             std::sort(expected.begin() + m, expected.end());
             std::sort(got.begin() + m, got.end());
             ASSERT_EQ(expected, got) << n << " " << shape;
-            // (each element offered to the heap, and each sift)
+            // (each element offered to the heap, and each sift its heap's levels: told once
+            // they pass kSortStepElements, by at most a sift's levels)
             EXPECT_LE(n - m, told.sum);
-            EXPECT_LE(told.largest, kSortStepElements);
+            EXPECT_LE(told.largest, kSortStepElements + 64);
         }
     }
 }

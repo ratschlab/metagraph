@@ -506,7 +506,8 @@ size_t for_each_row(const std::vector<node_index> &keys, BatchSizer sizer, uint6
             if (kit != kept.end()) {
                 if (!use(j, kit->second.row))
                     break;
-                used_unread += annot::matrix::row_copy_bytes(kit->second.row);
+                used_unread += std::max(annot::matrix::row_copy_bytes(kit->second.row),
+                                        kResolveUseMinBytes);
                 if (next_use[j] == kNever)
                     kept.last_use(kit);
                 continue;
@@ -515,7 +516,7 @@ size_t for_each_row(const std::vector<node_index> &keys, BatchSizer sizer, uint6
             RowT &row = batch[r];
             if (!use(j, row))
                 break;
-            used_unread += annot::matrix::row_copy_bytes(row);
+            used_unread += std::max(annot::matrix::row_copy_bytes(row), kResolveUseMinBytes);
             // occurring again after this batch (none of its k-mers after j has the key)
             if (next_use[j] != kNever && next_use[j] >= end) {
                 const uint64_t bytes = annot::matrix::row_copy_bytes(row);
@@ -674,10 +675,18 @@ SupportProfile resolve_support(LabelOracle &oracle,
 
     check_resolve_options(oracle, query, options);
 
+    // what a pass holds while it runs, noted into the modelled memory before the request is
+    // abandoned inside it (set once the pass's budget exists; ResolveOptions::memory_seen: a pair
+    // abandoned in its row pass states the rows and accumulators it held, not the query's bytes
+    // alone, lane T8-RL review M1)
+    std::function<void()> note_live_pass;
     // a phase boundary: the caller can abandon the request here (ResolveOptions::stop)
     auto checkpoint = [&]() {
-        if (options.stop && options.stop() && options.abandon)
+        if (options.stop && options.stop() && options.abandon) {
+            if (note_live_pass)
+                note_live_pass();
             options.abandon();
+        }
     };
     // A boundary of the work under a deadline (ResolveOptions::time_up): the client first, so
     // that a gone client is abandoned exactly where it was before; true ends the work here.
@@ -791,6 +800,11 @@ SupportProfile resolve_support(LabelOracle &oracle,
     // discover_max_memory, §4.6): unbounded without it, every read still the budget-aware one
     DecodeBudget budget(options.discover_max_memory ? options.discover_max_memory
                                                     : std::numeric_limits<uint64_t>::max());
+    // a pass abandoned while it runs: the next occurrence of every present k-mer and what its
+    // budget held at its most so far (the rows of a batch, the rows kept, the accumulators)
+    note_live_pass = [&]() {
+        note_memory(present_keys.size() * sizeof(size_t) + std::max(budget.peak(), rows_held));
+    };
     PassEnd pass_end = PassEnd::COMPLETE;
     // A batch's rows, charged to |budget|: by the budget-aware read where the annotation has
     // it (LabelOracle::decode_charged(): every buffer of the decode charged before it is
@@ -2025,12 +2039,12 @@ SeedSelection select_seeds(const SupportProfile &profile,
                 }
                 runs.push_back({ begin, end });
             };
-            // the runs ordered by their begins (ties by their ends: a total order, so that the
-            // order does not depend on the sort; a round reads the runs beginning at or before a
-            // candidate start as a set, so its picks do not depend on their order either)
-            auto by_begin = [](const Run &a, const Run &b) {
-                return a.begin != b.begin ? a.begin < b.begin : a.end < b.end;
-            };
+            // the runs ordered by their begins, as before (runs of one begin in no set order:
+            // a round reads the runs beginning at or before a candidate start as a set, its
+            // Fenwick counts, candidate starts and ends sorted and de-duplicated, so its picks do
+            // not depend on their order; ordering them by their ends as well cost about twice
+            // the sort, lane T8-RL review m1)
+            auto by_begin = [](const Run &a, const Run &b) { return a.begin < b.begin; };
             sort_in_steps(runs.begin(), runs.end(), by_begin, poll);
             // their sorted copy, a step each run (reserved to them, as a copy of the vector)
             std::vector<Run> all_runs;

@@ -46,6 +46,10 @@ constexpr uint64_t kResolveKeptBytes = uint64_t(256) << 20;
 // a row's use is the scatter of its hits, about its size: lane T8-RL, a batch of 4,000-label
 // rows took about 0.8 s to use, the work's deadline and a gone client read only after it)
 constexpr uint64_t kResolveUseCheckBytes = uint64_t(1) << 20;
+// and a use counted as at least kResolveUseMinBytes, so that the uses of small rows read it too,
+// every 4,096 uses at most (a row of up to 2 labels is 0 bytes under folly; a batch's uses can
+// pass its rows by far over repeated keys: lane T8-RL review m2)
+constexpr uint64_t kResolveUseMinBytes = kResolveUseCheckBytes / 4096;
 
 // A /resolve answer priced past its account (AnswerAccount): nothing partial is sent (the
 // server: 400 resolve_answer_too_large). |part| is what passed it: "profile", "candidates",
