@@ -420,7 +420,11 @@ deadline. `src/cli/traverse.cpp` `process_resolve_request`, `src/graph/traversal
   each object written as its text when it is built (§4.6), an answer of fewer than 4,096 objects was read only once
   complete — a 212 MB answer of 4,000 labels answered its 503 4.7 s past the budget, and noticed a client gone 3.8 s
   late)*, the body every 64 KiB as it is written (the CLI's identity check of its two texts as well, §4.6) and its
-  compression every block of output and every 4 MiB of text (the server's transport check, as `/pattern`'s). Past
+  compression every block of output and every 4 MiB of text (the server's transport check, as `/pattern`'s). Where
+  the readings are decides which of two failures surfaces when one depends on time: a 400 that only the work finds
+  (`resolve_answer_too_large` at a later object's charge, an explicit seed's 400 in the selection) is reached only
+  if the deadline has not passed at an earlier reading; past it the request is 503 `deadline`, which retains its id
+  where the 400 would have freed it (SPEC-multigraph-envelope.md section 5). Past
   the budget the answer is **503**
   `{"error": "resolve: the answer could not be built and written within bounds.time_budget_ms (… ms, the
   finalisation reserve of 250 ms included): nothing partial is sent", "code": "deadline"}`, never a partial

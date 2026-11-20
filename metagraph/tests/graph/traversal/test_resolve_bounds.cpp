@@ -3515,6 +3515,61 @@ TEST(ResolveAnswer, TheBuildIsReadEvery64KiBOfText) {
     }
 }
 
+// Which of two failures surfaces when one depends on time is decided by where the readings are
+// (GPT review of train 7, D3; SPEC-labeled-traversal-core.md §4.5): an answer refused at a later
+// object's charge (AnswerTooLarge, the server's 400 resolve_answer_too_large, which frees the
+// request's id) is refused so only if its check did not throw at an earlier reading. A deadline
+// passed at the last reading before that charge (the check throwing there: the server's 503
+// deadline, which retains the id) ends the build first; one passing after it does not. The
+// explicit seeds' 400s in the selection are pinned the same way by
+// ResolveBoundsRoute.TheExplicitCheckUnderAStopReadsTheDeadline
+TEST(ResolveAnswer, ADeadlineAtAnEarlierReadingComesBeforeTheAnswersRefusal) {
+    struct Deadline {};
+    auto [p, sel] = priced_profile(5000, 1, 12, 0, false);
+    p.candidates.clear();
+    // what the account holds at each reading of a build without a bound
+    std::vector<uint64_t> held_at;
+    {
+        AnswerAccount account(uint64_t(1) << 40);
+        cli::profile_answer(p, nullptr, "intervals", [&]() { held_at.push_back(account.held()); },
+                            &account);
+    }
+    ASSERT_LE(4u, held_at.size());
+    // a bound that refuses the build half way: after some readings
+    const uint64_t bound = held_at[held_at.size() / 2];
+    size_t readings_before = 0;
+    {
+        AnswerAccount account(bound);
+        try {
+            cli::profile_answer(p, nullptr, "intervals", [&]() { ++readings_before; }, &account);
+            ADD_FAILURE() << "not refused";
+        } catch (const AnswerTooLarge &e) {
+            EXPECT_EQ("answer", e.part());
+        }
+    }
+    ASSERT_LE(2u, readings_before);
+    // the deadline passed at the r-th reading: the deadline when it is one before the refusal,
+    // else the refusal
+    for (size_t r : { size_t(0), readings_before - 1, readings_before }) {
+        AnswerAccount account(bound);
+        size_t reads = 0;
+        bool deadline = false;
+        bool refused = false;
+        try {
+            cli::profile_answer(p, nullptr, "intervals", [&]() {
+                if (reads++ >= r)
+                    throw Deadline();
+            }, &account);
+        } catch (const Deadline &) {
+            deadline = true;
+        } catch (const AnswerTooLarge &) {
+            refused = true;
+        }
+        EXPECT_EQ(r < readings_before, deadline) << r;
+        EXPECT_EQ(r >= readings_before, refused) << r;
+    }
+}
+
 // What the account holds is never above what it held before T7-D3 (the Fable review of
 // 37b70685e, untested claim 2): before, an object stayed charged at its price (its tree and its
 // text) until the answer was written, so the account held every charge made (charged()); now

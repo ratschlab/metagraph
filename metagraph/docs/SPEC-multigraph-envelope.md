@@ -396,7 +396,10 @@ The answer keeps its upstream shape (a list of `{seq_description, results, ...}`
   HTTP-level 400 never holds a `request_id`: one that only the work can find (a seed not fully present in the graph,
   a seed label a discovery did not find, a fault of a seed after it, a `/pattern` the index cannot answer, a
   `/resolve` answer priced past `--resolve-max-discover-memory-mb`: `resolve_answer_too_large`, contract sample 39)
-  frees the id when it is answered, so `GET /requests/{id}` answers 404 and a retry runs. On a multi-graph server such a 400
+  frees the id when it is answered, so `GET /requests/{id}` answers 404 and a retry runs. Such a 400 is reached only
+  while the deadline has not passed at an earlier reading of the work: past it, the request is 503 `deadline`, which
+  retains its id (a retry under the same id is 409 until retention ends), so near its deadline a request at its
+  answer bound (or with an explicit seed the work refuses) gets either answer. On a multi-graph server such a 400
   of one pair is a refused entry (`refusal.http_status` 400) of a 200 envelope: the request was answered, its id
   is retained like any answered request's (`GET /requests/{id}` states it ended, that pair `refused`), and a
   corrected request takes a new id. A fan-out is never forgotten because one of its pairs gave 400; only a 400 of
