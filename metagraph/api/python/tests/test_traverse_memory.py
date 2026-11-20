@@ -907,6 +907,28 @@ class TestCallerSizedMetadata(unittest.TestCase):
                     peak, _ = _warm_peak(call, call)
                     self.assertLessEqual(peak, b.peak_bytes)
 
+    def test_many_overrides_grow_the_strategy(self):
+        """The merge writes every override into the strategy (and into the merged copy the
+        labels.extra rebuild reads): those dicts grow by its entries, charged with them (Opus
+        check of feda889fd, F1: 200,000 scalar entries charged as none, 660x under in a
+        section, 1,562x at the top level). The factor left (about 3x in a section, 7-9x at
+        the top level with the call's own **kwargs) is the dict model's (F2, a follow-up:
+        DICT_KEY's 16 bytes against about 38 for a dict built by insertion), so the bound
+        here is a floor, not traced <= account."""
+        n = 50_000
+        flat = {'k%d' % i: i for i in range(n)}
+        for name, kw, floor in (('a section', {'annotation': flat}, 4),
+                                ('the top level', dict(flat), 10)):
+            def call(b=None, kw=kw):
+                g = T.graphlet('merge')
+                return g.next_request('right', [0], **({} if b is None else {'budget': b}),
+                                      **kw)
+            with self.subTest(name):
+                b = LocalBudget(work_units=10**8)
+                call(b)
+                peak, _ = _warm_peak(call, call)
+                self.assertGreaterEqual(b.peak_bytes * floor, peak)
+
     def test_charges_are_the_same_on_every_interpreter(self):
         """No charge reads the interpreter's Unicode tables or object sizes (Opus review of
         b8fb7a8d6, M4): a character of Unicode 15 (U+1FAE8, unknown to 3.11's tables) and

@@ -2667,6 +2667,9 @@ def _charge_merge(lb, strategy, overrides):
         if items + n > _SMALL_VALUE:
             lb.charge(W_ELEM * min(n, items + n - _SMALL_VALUE))
         items += n
+        # the dict merged into, grown by the overrides' entries (held with it; Opus check
+        # of feda889fd, F1: 200,000 scalar entries were charged nothing against 19 MB)
+        copied += _B.dict_bytes(len(cur) + n)
         for k, v in ov.items():
             here = '%s.%s' % (path, k)
             c = cur.get(k)
