@@ -1369,7 +1369,7 @@ void process_serialized_request(std::shared_ptr<HttpServer::Response> &response,
 // ---------------------------------------------------------------- multi-graph servers
 
 bool LoadReservations::reserve(size_t bytes, const std::function<bool()> &gone,
-                               uint64_t poll_ms) {
+                               uint64_t poll_ms, bool ask_after_wait) {
     assert(bytes <= capacity_);
     std::unique_lock<std::mutex> lock(mutex_);
     if (!gone) {
@@ -1391,13 +1391,22 @@ bool LoadReservations::reserve(size_t bytes, const std::function<bool()> &gone,
         freed_.wait_for(lock, std::chrono::milliseconds(poll_ms));
     }
     left_ -= bytes;
-    if (!waited)
+    if (!waited || !ask_after_wait)
         return true;
     // a wait ends on the release that frees the memory, up to |poll_ms| after |gone| was last
     // asked: asked once more with the bytes taken, so that a request stopped (its client gone)
-    // in that time gives them back here and starts no load (GPT review of train 7, P2)
+    // in that time gives them back here and starts no load (GPT review of train 7, P2). The
+    // bytes are given back also when it throws (the Opus review of d6a6a4ab3, N1: they were
+    // lost for the process's life)
     lock.unlock();
-    if (!gone())
+    bool abandoned;
+    try {
+        abandoned = gone();
+    } catch (...) {
+        release(bytes);
+        throw;
+    }
+    if (!abandoned)
         return true;
     release(bytes);
     return false;

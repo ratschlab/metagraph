@@ -1747,7 +1747,10 @@ int run_server(Config *config) {
                 = control ? control->wait_predicate()
                 : expired ? std::function<bool()>([&]() { return gone() || expired(); })
                 : gone;
-        if (!reservations.reserve(bytes, wait)) {
+        // (a fan-out's pair is asked again by its control when the memory is granted, which
+        // names that case in its refusal: not by the reservation, the Opus review of d6a6a4ab3,
+        // N2)
+        if (!reservations.reserve(bytes, wait, 100, /* ask_after_wait */ !control)) {
             if (control)
                 throw PairNotStarted();
             if (expired && expired())
