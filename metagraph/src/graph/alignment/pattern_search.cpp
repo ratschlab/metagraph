@@ -4179,6 +4179,14 @@ class SegmentRun {
         const Pattern &model = orientation == Orientation::REVERSE ? rc_ : pattern_;
         Memo &right = right_[orientation];
         Memo left;
+        // the left states are released on every way out: an exception of an arm (a map's
+        // growth) or of the sink's extent() included, which left their charges in a sink that
+        // may serve a later search (GPT review of train 7, D1)
+        struct LeftRelease {
+            SegmentRun *run;
+            Memo *memo;
+            ~LeftRelease() { run->release(*memo); }
+        } left_release { this, &left };
         w.state = WindowState::EXTENDED;
         for (const Context &anchor : anchors) {
             if (!budget_.check_time()) {
@@ -4220,7 +4228,6 @@ class SegmentRun {
                 break;
             }
         }
-        release(left);
         if (w.state == WindowState::EXTENDED)
             horizon_[orientation] = s + 1;
     }
