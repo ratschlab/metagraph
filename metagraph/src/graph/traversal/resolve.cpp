@@ -675,10 +675,11 @@ SupportProfile resolve_support(LabelOracle &oracle,
 
     check_resolve_options(oracle, query, options);
 
-    // what a pass holds while it runs, noted into the modelled memory before the request is
-    // abandoned inside it (set once the pass's budget exists; ResolveOptions::memory_seen: a pair
-    // abandoned in its row pass states the rows and accumulators it held, not the query's bytes
-    // alone, lane T8-RL review M1)
+    // what the passes hold, noted into the modelled memory before the request is abandoned (set
+    // once the passes' budget exists, before the row pass's first reading, and cleared before the
+    // candidates' grouping: active at that reading, in the passes, and in the loops over the labels
+    // and a discovery's sorts after them; ResolveOptions::memory_seen: a pair abandoned there
+    // states the rows and accumulators held, not the query's bytes alone, lane T8-RL review M1)
     std::function<void()> note_live_pass;
     // a phase boundary: the caller can abandon the request here (ResolveOptions::stop)
     auto checkpoint = [&]() {
@@ -800,9 +801,10 @@ SupportProfile resolve_support(LabelOracle &oracle,
     // discover_max_memory, §4.6): unbounded without it, every read still the budget-aware one
     DecodeBudget budget(options.discover_max_memory ? options.discover_max_memory
                                                     : std::numeric_limits<uint64_t>::max());
-    // a pass abandoned while it runs: the next occurrence of every present k-mer and what its
-    // budget held at its most so far (the rows of a batch, the rows kept, the accumulators, as
-    // charged: with the decode's buffers, so possibly more than the model of a complete pass)
+    // a request abandoned from here until the grouping: the next occurrence of every present k-mer
+    // (counted at the first reading too, before it is made) and what the budget held at its most
+    // so far (the rows of a batch, the rows kept, the accumulators, as charged: with the decode's
+    // buffers, so possibly more than the model of a complete pass)
     note_live_pass = [&]() {
         note_memory(present_keys.size() * sizeof(size_t) + std::max(budget.peak(), rows_held));
     };
