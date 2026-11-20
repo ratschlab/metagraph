@@ -542,16 +542,18 @@ class GraphletStore:
         |b| (in the parse's scope), each step charged before it is made: the bytes, so that
         a budget that cannot hold them stops with nothing read (G4P's G13: a zero budget
         read and decoded 1 MB, 2.0 MB traced, before it stopped); then the text by its
-        width, read from the bytes before they are decoded -- a byte a character for ASCII,
-        else four (one astral character widens all of it) and the decoder's narrow buffer
-        up to where it widens -- held through the parse. The read's work is the store's
-        bookkeeping, as its digest check (budget.py's "Not charged")."""
+        width, read from the bytes before they are decoded (budget.decode_bytes(): one, two
+        or four bytes a character, one wide character widening all of it, and the
+        decoder's narrow buffer), so that a budget that holds the bytes and not the text
+        stops with nothing decoded; the text held through the parse. The read's work is
+        the store's bookkeeping, as its digest check (budget.py's "Not charged")."""
         b.charge(0, nbytes + STR)
         raw = read_bytes()
-        b.charge(0, (1 if raw.isascii() else 5) * len(raw) + STR)
+        held, narrow = _B.decode_bytes(raw)
+        b.charge(0, held + narrow + STR)
         text = raw.decode('utf-8')
         del raw
-        b.release(nbytes + STR)
+        b.release(nbytes + STR + narrow)
         return text
 
     def _parsing(self, fn, pb):
@@ -1250,7 +1252,19 @@ class GraphletStore:
                     # a J line beyond ASCII widens the joined text, the body's part too:
                     # four bytes a character for the whole of it
                     b.charge(0, 4 * (e.bytes + jb))
-        body = self.body_text(handle)
+        raw = self._read_body(handle, e)
+        if b is not None:
+            # a body beyond ASCII (its width read from the bytes before they are decoded):
+            # the decoder's narrow buffer, and the text and its slices at their width -- the
+            # joined text too unless the J line widened it above (Opus check of 0b2965d96,
+            # N2: one astral name in a 2 MB body traced 24 MB against 6 MB charged)
+            k = _B.utf8_width(raw)
+            if k:
+                jw = e.j_wide and (has_env or e.view is not None or e.derived_from is not None)
+                b.charge(0, e.bytes + (2 if jw else 3) * (k - 1) * e.bytes)
+        # decoded as the text file did with newline='': the same text
+        body = raw.decode('utf-8')
+        del raw
         head, first, last, lines = _frame(body)
         # the O record, rewritten in place when the entry records another delivery: the
         # text is one join of slices of the body around it, never a copy of the body
@@ -1295,7 +1309,8 @@ class GraphletStore:
             # its UTF-8 bytes, made beside it, as graphlet_export(format=mgt) charges them
             # (mcp_tools._write_text_charged()): left out, graphlet_save would peak above
             # its account on 28 of 34 retrievals
-            b.charge(0, 2 * (len(text) + 49))
+            # (2x: measured on ASCII bodies; beyond ASCII the encoder's buffer by width)
+            b.charge(0, max(2, _B.encode_factor(text)) * (len(text) + 49))
             data = text.encode('utf-8')
             return _write_user_file(os.path.abspath(path), data, '.mgt-')
 

@@ -897,7 +897,10 @@ def _parse(text, b):
         b.phase = 'setup'
     if isinstance(text, (bytes, bytearray)):
         if b is not None:
-            b.charge(len(text) >> 10, STR + len(text))
+            # the text at its width and the decoder's narrow buffer (budget.decode_bytes())
+            held, narrow = _B.decode_bytes(text)
+            b.charge(len(text) >> 10, STR + held + narrow)
+            b.release(narrow)
         try:
             # decoded in place: a bytearray (load() of a gzip file) is not copied first
             text = text.decode('utf-8')
@@ -906,16 +909,20 @@ def _parse(text, b):
     else:
         if b is not None:
             # the UTF-8 check's encoded copy: a byte a character for ASCII, else the
-            # encoder's buffer of four bytes a character (it shrinks only once filled)
-            u = (1 if text.isascii() else 4) * len(text) + 33
+            # encoder's buffer of two to four bytes a character (budget.encode_factor())
+            u = _B.encode_factor(text) * len(text) + 33
             b.charge(len(text) >> 10, u)
             b.release(u)
         utf8_bytes(text)
     if not text.endswith('\n'):
         raise GraphletFormatError(0, 'truncated document: it does not end with a line feed')
     if b is not None:
-        # the digest below: C-speed hashing and one chunk encoded at a time
-        chunk = 2 * (STR + min(len(text), _DIGEST_CHUNK))
+        # the digest below: C-speed hashing and one chunk at a time, its slice at the
+        # text's width and its UTF-8 in the encoder's buffer (a slice of 1 MiB characters
+        # of an astral text is 4 MB, its buffer another 4: Opus check of 0b2965d96)
+        k = _B.str_width(text)
+        c = min(len(text), _DIGEST_CHUNK)
+        chunk = 2 * STR + (k + (1 if text.isascii() else 4 if k == 4 else k + 1)) * c
         b.charge(len(text) >> 7, chunk)
         b.release(chunk)
     digest = body_digest(text)
@@ -930,11 +937,9 @@ def _parse(text, b):
             # a text beyond ASCII is held at two or four bytes a character -- the text,
             # its lines and their fields (G4P's G12: a name of 1M characters at 5.1x the
             # account, 10.2x astral): its width from its widest character (one C scan; not
-            # the str's size, whose header differs between interpreters)
-            k = 4 if max(text) > '\uffff' else 2
+            # the str's size, whose header differs between interpreters); a Latin-1 text
+            # is one byte a character, as ASCII (k: budget.str_width(), above)
             model += _MODEL_WIDE * (k - 1) * len(text)
-        else:
-            k = 1
         # the line list is made at once, before any of its lines is read: its share of the
         # model is charged before the split, the rest spread over the line blocks (the same
         # total, admitted earlier: a limit below it stops before the copy is made)

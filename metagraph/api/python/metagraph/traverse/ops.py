@@ -2633,10 +2633,12 @@ def _charge_deepcopy(lb, x):
     entries, the unit value_size()'s |free| counts) is not charged as work -- every strategy
     a server echoes, 91-104 nodes among the fixtures, whose copy takes about 80-156 lwu of
     time, 2-4 copies a call -- so that an ordinary continuation stops where it stopped; its
-    memory is charged."""
+    memory is charged. A container |x| holds more than once is counted once, as deepcopy's
+    memo copies it once (a shared value walked per path took 2^40 charges: Opus check of
+    0b2965d96, N1)."""
     if x is None:
         return 0
-    _, conts, copied, _, _, items = _B.value_size(x, lb, _SMALL_VALUE)
+    _, conts, copied, _, _, items = _B.value_size(x, lb, _SMALL_VALUE, shared=True)
     held, memo = _B.deepcopy_bytes(conts, copied)
     lb.charge(_B.W_CONTAINER * conts if items > _SMALL_VALUE else 0, held + memo)
     lb.release(memo)
@@ -6292,7 +6294,7 @@ def _summary(g, arm, max_bytes, b):
         n = len(g.labels)
         for side in sides:
             derive.uses(b, g, g.arms[side], 'leaves', 'paths')
-        text = 600 + sum(300 + len(l.effect) for l in g.limitations)
+        text = 600 + 300 * len(g.limitations)
         if _C.requested(g) or derive.partial_derivation(g) is not None:
             # the coordinates entry and the derivation statement (at most ~200 bytes)
             text += 200
@@ -6353,8 +6355,9 @@ def _summary(g, arm, max_bytes, b):
     if b is not None:
         # the caller-sized text the answer holds (shared, not copied: only each size()'s
         # JSON and its UTF-8 copy hold it again): the seed id, the namespace, the top labels'
-        # names, the effects beyond their length counted above, the stop's message and
-        # actions -- each at its escaped bound (text_bytes()), its scan charged first
+        # names, the caveats' effects (counted here only: Opus check of 0b2965d96, m-new-1),
+        # the stop's message and actions -- each at its escaped bound (text_bytes()), its
+        # scan charged first
         def caller_texts():
             yield (g.seed_summary.get('seed') or {}).get('seed_id', '')
             yield g.index_ns or ''

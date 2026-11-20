@@ -2571,9 +2571,11 @@ default) nothing is budgeted and every answer is byte for byte what it was befor
   ``next_request()`` charges its copies of the strategy their memory, and their work only
   for a value of more than 128 items (list elements and dict entries): a server's strategy
   (a copy takes about 80-156 lwu of time, 2-4 copies a call) is not charged as work. A
-  store's parse on demand or ``load()`` charges the body before it reads it, and its text
-  by its width before it decodes it, so a budget that cannot hold it stops with nothing
-  read. It is not a measurement: Python can allocate more than the model says
+  store's parse on demand or ``load()`` charges the body's bytes before it reads them,
+  and its text by its width (read from the bytes) before it decodes it, so a budget that
+  cannot hold the text stops with nothing decoded (nothing read, when not even the bytes
+  fit); ``standalone_text()`` and ``save_body()`` charge a body beyond ASCII at its width
+  too. It is not a measurement: Python can allocate more than the model says
   (interpreter internals, fragmentation, another CPython version, text beyond ASCII), so
   in-process it is a soft bound; a hard bound needs process limits. The
   memory limit holds for each call; the work of the calls that share one budget adds

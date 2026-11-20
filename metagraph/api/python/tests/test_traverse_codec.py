@@ -277,6 +277,11 @@ class TestFreeTextWithoutLists(unittest.TestCase):
             self.assertEqual(C.front_decode_parts(prev, p, suffix), name)
         with self.assertRaises(C.CodecError):
             C.front_decode_parts('ab', '3', 'x')
+        # a lone surrogate in a suffix is refused as the loops refused it (the fast path is
+        # for ASCII only: Opus review of b8fb7a8d6, nit), whether the name shares a prefix
+        for p in ('0', '1'):
+            with self.subTest(prefix=p), self.assertRaises(UnicodeEncodeError):
+                C.front_decode_parts('a', p, '\udc80')
 
 
 if __name__ == '__main__':

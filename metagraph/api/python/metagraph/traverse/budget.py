@@ -303,6 +303,44 @@ def joined_bytes(fixed, texts):
     return 4 * fixed + sum(text_bytes(t) * (4 if t.isascii() else 1) for t in texts)
 
 
+
+def str_width(s):
+    """The bytes a character of the str |s| takes (1, 2 or 4): CPython stores a str at its
+    widest character's width. One C scan of its characters (no interpreter table)."""
+    if s.isascii():
+        return 1
+    m = max(s)
+    return 4 if m > '\uffff' else 2 if m > '\xff' else 1
+
+
+def utf8_width(raw):
+    """str_width() of the str the UTF-8 bytes |raw| decode to, read from the bytes before
+    they are decoded (one C scan): a lead byte of 0xF0 or more starts a character beyond
+    U+FFFF, one of 0xC4 or more a character beyond U+00FF; 0 for ASCII (a byte a
+    character, decoded without a second buffer)."""
+    if raw.isascii():
+        return 0
+    m = max(raw)
+    return 4 if m >= 0xF0 else 2 if m >= 0xC4 else 1
+
+
+def decode_bytes(raw):
+    """(text, transient) bytes of decoding the UTF-8 bytes |raw| to a str: the str at its
+    width (utf8_width(); a byte gives at most one character), and the decoder's narrow
+    buffer, dropped once it returns (beyond ASCII it fills one byte a character until it
+    widens)."""
+    k = utf8_width(raw)
+    return (len(raw), 0) if not k else (k * len(raw), len(raw))
+
+
+def encode_factor(s):
+    """The bytes a character of the str |s| takes while str.encode('utf-8') runs: one for
+    ASCII; else the encoder's buffer, two, three or four bytes a character by str_width()
+    (it shrinks only once filled)."""
+    k = str_width(s)
+    return 1 if s.isascii() else 4 if k == 4 else k + 1
+
+
 # a container copied by copy.deepcopy(): its list built by appends (up to six slots over a
 # copy's), and the memo's record of it while the copy is built (an int key, its dict slot,
 # both of the dict's tables while it grows, a keep-alive slot); measured 198 B a one-item
@@ -322,7 +360,7 @@ W_CONTAINER = 3 * W_ELEM
 OBJECT_BYTES = 256
 
 
-def value_size(x, b=None, free=0):
+def value_size(x, b=None, free=0, shared=False):
     """(nodes, containers, copy_bytes, text, wide, items) of a JSON-like value |x| -- dicts,
     lists and tuples of strings, numbers, booleans and None, as json.loads or a caller's
     keyword argument makes it -- read without copying or serializing it: its atoms, keys and
@@ -337,12 +375,16 @@ def value_size(x, b=None, free=0):
     string longer than 4 KiB its scan before it is read. A stack of iterators, one per
     level: any nesting, no copy. A container met again inside itself (a cycle, which only a
     caller's own value can hold) is not walked again: what reads the value (deepcopy's memo,
-    json's Circular reference) decides, as without a budget."""
+    json's Circular reference) decides, as without a budget. With |shared| (a deepcopy's
+    price), a container met again anywhere counts once, as deepcopy's memo copies it once:
+    a value that holds one list twice at each of 40 levels is 41 containers, not 2^40
+    paths. Without it every path counts, as json.dumps() and repr() write every path."""
     nodes = conts = copy = text = items = 0
     wide = 0                # the text of the strings beyond ASCII (at their own bound)
     stack = [iter((x,))]
     path = [None]
     on_path = set()
+    seen = set() if shared else None
     while stack:
         for v in stack[-1]:
             nodes += 1
@@ -361,6 +403,10 @@ def value_size(x, b=None, free=0):
             elif isinstance(v, (dict, list, tuple)):
                 if id(v) in on_path:
                     continue
+                if seen is not None:
+                    if id(v) in seen:
+                        continue
+                    seen.add(id(v))
                 conts += 1
                 n = len(v)
                 if b is not None and items + n > free:
