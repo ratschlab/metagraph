@@ -801,7 +801,8 @@ SupportProfile resolve_support(LabelOracle &oracle,
     DecodeBudget budget(options.discover_max_memory ? options.discover_max_memory
                                                     : std::numeric_limits<uint64_t>::max());
     // a pass abandoned while it runs: the next occurrence of every present k-mer and what its
-    // budget held at its most so far (the rows of a batch, the rows kept, the accumulators)
+    // budget held at its most so far (the rows of a batch, the rows kept, the accumulators, as
+    // charged: with the decode's buffers, so possibly more than the model of a complete pass)
     note_live_pass = [&]() {
         note_memory(present_keys.size() * sizeof(size_t) + std::max(budget.peak(), rows_held));
     };
@@ -1615,6 +1616,8 @@ SupportProfile resolve_support(LabelOracle &oracle,
         }
     }
 
+    // (the passes ended, their peaks noted: what a pass's budget held is no longer live)
+    note_live_pass = nullptr;
     // ---- the answer account (§4.6, T4-L1): the profile as it is held, then its candidates
     if (options.answer)
         options.answer->charge(profile_held_bytes(profile), "profile");

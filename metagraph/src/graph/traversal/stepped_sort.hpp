@@ -322,8 +322,9 @@ void sort_ranges(It first, It last, Comp &comp, const Step &step, int max_depth)
  * max_support round, a discovery's ranking) are partitioned without branches (Lomuto's scheme)
  * around the ninther of the range, the elements equal to a pivot that is the range's least moved
  * to its front in one more pass, a few elements of a side much smaller than an eighth of the
- * range swapped (pdqsort's guards against many equal elements and patterns): about as fast as
- * std::sort at 10 million elements (lane T8-RL); others (the grouping's candidates) by Hoare's
+ * range swapped (pdqsort's guards against many equal elements and patterns): 0.45 to 1.03 times
+ * std::sort's time at 3 to 20 million elements of the caps' shapes, with Apple clang and GCC 13
+ * (lane T8-RL); others (the grouping's candidates) by Hoare's
  * scheme around the median of three. A range found sorted before it is partitioned (a scan that
  * ends at its first element out of order) is left as it is, as std::sort's own pass over it.
  */

@@ -380,9 +380,9 @@ deadline. `src/cli/traverse.cpp` `process_resolve_request`, `src/graph/traversal
   steps (`stepped_sort.hpp`): a range of more than 16,384 elements is partitioned, its pieces told every 4,096
   elements, a range of at most 16,384 sorted by `std::sort` and told at once; the order is `std::sort`'s by the
   same comparison, which is total where the answer depends on the order of equal elements, so the answer is the
-  same bytes (lane T8-RL; at 10 million elements about as fast as `std::sort`). Under a stop (or a discovery's
-  label cap), the check of the explicit seeds that decides whether the selection is made reads every 4,096 steps
-  as the selection does: a step each label put into its lookups of the profiled and the absent labels, each seed,
+  same bytes (lane T8-RL; at the caps' sizes, 3 to 20 million elements, 0.45 to 1.03 times `std::sort`'s time
+  with Apple clang and with GCC 13). Under a stop (or a discovery's label cap), the check of the explicit seeds
+  that decides whether the selection is made reads every 4,096 steps as the selection does: a step each label put into its lookups of the profiled and the absent labels, each seed,
   each graph run checked for it and each of its names looked up, at both passes *(lane T8-RL: before, nothing,
   about 0.4 s at 1,024 seeds of 10,000 profiled names, 0.7 to 1 s where the names are absent labels)*. The selection
   (`select_seeds`) every 4,096 steps, a step each item it takes — a `longest_first` candidate (and the labels of a
@@ -466,9 +466,10 @@ deadline. `src/cli/traverse.cpp` `process_resolve_request`, `src/graph/traversal
   3 ms (before, 0.27 to 0.37 s with the names profiled, 0.56 to 0.80 s with them absent); and of those left unread,
   the profile's candidates freed at 3 million 33 to 54 ms, a discovery's tracked labels freed at 1,000,000 24 to
   28 ms, the model of the profile's memory about 2 ms at 3 million candidates. On D3's shape (4,000 explicit labels
-  over a 6.5 kbp query 12 times, a 212 MB answer; 24 requests at a load of 12 to 20) the 503 of a budget of 700 to
-  1,400 ms comes 3 to 26 ms after it, once 102 ms (on a multi-graph server the pair's `deadline` refusal 3 to
-  30 ms; before, up to 453 ms and 707 ms), and a client gone is noticed within 11 ms after it left, as before. The
+  over a 6.5 kbp query 12 times, a 212 MB answer; 24 requests a server at a load of 17 to 31) the 503 of a budget
+  of 700 to 1,400 ms comes 4 to 22 ms after it (on a multi-graph server the pair's `deadline` refusal 4 to 18 ms;
+  before, up to 1,138 ms and 1,857 ms, half of them more than 30 ms late), and a client gone is noticed within
+  13 ms after it left, once 32 ms (before, up to 965 ms). The
   list names the pieces the reviews found that can take long at the caps; it does not prove that there are no
   others (freeing or copying a container is such a piece, linear in what it holds).
 - **Capabilities.** Both GET routes carry the `resolve` block (§10.3). The field is not a `feature_level`: every
