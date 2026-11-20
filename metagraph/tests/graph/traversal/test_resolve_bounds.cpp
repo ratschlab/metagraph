@@ -3037,6 +3037,48 @@ TEST(ResolveBoundsRoute, UnknownLabelsAreWrittenNameByName) {
     EXPECT_EQ(gone_from, reads);
 }
 
+// One long missing label is written in place into the reserved text (append_json_string), not
+// through a Json::Value, the writer's buffer and a copy of it (GPT review of train 7, D3: about
+// 3-4 times the name of scratch beside the text): a name of 8 MiB holding every kind of escape,
+// non-ASCII code points (one beyond the BMP) and a cut UTF-8 sequence at its end, beside a short
+// one, is the tree's text byte for byte
+TEST(ResolveBoundsRoute, ALongUnknownLabelIsWrittenInPlace) {
+    const Records r = make_records<DBGSuccinct, annot::ColumnCompressed<>>(40, 5, 3941);
+    const auto index = with_mapping(r);
+    const std::string piece = std::string("quote \" backslash \\ tab\t nl\n ")
+            + std::string("nul\0ctl\x01 ", 9) + "caf\xc3\xa9 \xf0\x9f\x98\x80 plain text ";
+    std::string longest;
+    while (longest.size() < (size_t(8) << 20)) {
+        longest += piece;
+    }
+    longest += "cut \xe2\x82";
+    const std::vector<std::string> names { "short", longest };
+    Json::Value request;
+    request["sequence"] = r.q;
+    for (const std::string &name : names) {
+        request["labels"].append(name);
+    }
+    const cli::ResolveTimeLimits limits;
+    // (the tree API checks its texts against the tree's: it throws where they differ)
+    const Json::Value out = cli::process_resolve_request(request, *index, "r1", 0, nullptr,
+                                                         nullptr, limits, nullptr, nullptr, true);
+    ASSERT_EQ(2u, out["unknown_labels"].size());
+    EXPECT_EQ(longest, out["unknown_labels"][1].asString());
+    cli::ResolveAnswer answer = cli::process_resolve_answer(request, *index, "r1", 0, nullptr,
+                                                            nullptr, limits, nullptr, nullptr,
+                                                            true);
+    std::string held;
+    for (const auto &[name, texts] : answer.held.members) {
+        if (name == "unknown_labels") {
+            for (const std::string &text : texts) {
+                held += text;
+            }
+        }
+    }
+    EXPECT_EQ(compact(out["unknown_labels"]), held);
+    EXPECT_LT(longest.size() + (size_t(1) << 20), held.size());
+}
+
 // Sample 38 (SPEC-labeled-traversal-core.md §4.1), a real run: more explicit seeds than the cap
 // (2 on the recording server), the route's own body for the sample's request and cap
 TEST(ResolveBoundsRoute, Sample38) {

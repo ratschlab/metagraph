@@ -2821,9 +2821,9 @@ static ResolveAnswer answer_of_profile(const SupportProfile &p, const SeedSelect
     }
     if (unknown_labels) {
         // the labels this pair does not hold (a multi-graph server's), held as the answer's
-        // other objects and read by bytes as they are; their text is written name by name by
-        // the same writer (`[`, each name's text, commas between them, `]`, as the writer
-        // writes their array) into one buffer reserved to their price's text, from above, and no
+        // other objects and read by bytes as they are; their text is written name by name in
+        // place (`[`, each name's JSON string, commas between them, `]`, as the writer writes
+        // their array) into one buffer reserved to their price's text, from above, and no
         // tree of them is built (the Fable review of 37b70685e, m2: their tree beside their text
         // while the request's labels and the profile's names were held put a pair of 100 MB of
         // names 88-152 MB above the base's peak RSS, which wrote their tree's text after the
@@ -2837,9 +2837,11 @@ static ResolveAnswer answer_of_profile(const SupportProfile &p, const SeedSelect
         for (size_t i = 0; i < p.unknown_labels.size(); ++i) {
             if (i)
                 text += ',';
-            const std::string name = writer.text(Json::Value(p.unknown_labels[i]));
-            text += name;
-            read_bytes(name.size() + (i > 0));
+            // the name's JSON string written in place (jsoncpp's escapes without emitUTF8, as
+            // the writer's), byte for byte: no Json::Value of it, no writer buffer and no copy
+            // of that, each as long as the name (GPT review of train 7, D3: a name of N bytes
+            // made about 3-4 N of scratch beside the reserved text)
+            read_bytes(append_json_string(&text, p.unknown_labels[i]) + (i > 0));
         }
         text += ']';
         settle_json(answer, price, text.size());
