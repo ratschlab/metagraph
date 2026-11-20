@@ -1498,7 +1498,8 @@ identities for one pair, more than five columns or a bad name refuses to start. 
 identity; two different pairs never state one `index_fp`. `GET /traverse/capabilities?graph=<name>&graph_path=<path>`
 describes one pair. A `graph_path` naming one graph listed with several annotations is refused: answering with the
 first annotation would silently narrow the question. There is no union oracle over several annotations. A name
-listing one pair twice needs no `graph_path`. `scripts/traversal/index_manifest.py --server-csv` writes one manifest
+listing one pair twice needs no `graph_path`; a `graph_path` the name lacks is refused, on a name of one pair too
+(train 8; before, that pair answered). `scripts/traversal/index_manifest.py --server-csv` writes one manifest
 per pair, every distinct file hashed once by parallel streams or taken from precomputed sha256 digests (`--digests`).
 
 ## 16.2 The identity inventory

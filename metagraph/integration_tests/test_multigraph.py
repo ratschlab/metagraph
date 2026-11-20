@@ -1021,6 +1021,84 @@ class TestMultiGraphServer(TestingBase):
                                   "annotation_path?} (GET /capabilities lists the pairs)"},
                         ret.json())
 
+    def test_a_one_pair_name_refuses_a_graph_path_it_lacks(self):
+        """A name of one pair ('kleb') with a graph_path that is not its graph (another name's
+        graph, or no graph of the list) is refused 400 pair_not_found on every route that reads
+        graph_path beside a name, in the body a name of several pairs gets ('enterics'): the
+        text "the graph_path given is not part of index '<name>'", the code, the name's pairs as
+        the candidates (train 8, the owner's decision of 2026-11-20; before, the pair answered
+        and the path was ignored). Its own graph_path still selects it. An object of pairs, and
+        a pair_id that names no pair of the name (a stale id), were refused pair_not_found
+        before, in their own words."""
+        seed = self.records['kleb'][0][1000:1100]
+        t = {'seeds': [{'sequence': seed}],
+             'strategy': {'direction': 'right', 'bounds': {'max_extension_bp': 50},
+                          'output': {'detail': 'summary'}}}
+        r = {'sequence': seed, 'discover': {'max_labels': 5}}
+        p = {'patterns': [{'dna': seed[:20]}], 'mode': 'count'}
+        ecoli_g, kleb_g = self.pairs['ecoli'][0], self.pairs['kleb'][0]
+
+        def expected(name):
+            pairs = [self.pid(name)] if name == 'kleb' else \
+                [self.pid(name, 'ecoli'), self.pid(name, 'kleb')]
+            return {'error': f"Bad request: the graph_path given is not part of index '{name}'",
+                    'code': 'pair_not_found',
+                    'candidates': [{'graph': name, 'pair_id': i} for i in pairs]}
+
+        def refused(method, route, request):
+            ret = self._ask(self.server, method, route, request)
+            self.assertEqual(400, ret.status_code, ret.text[:2000])
+            body = ret.json()
+            if route == 'pattern':
+                # /pattern's 400 may carry its own members beside the selection's
+                body = {k: v for k, v in body.items() if k in ('error', 'code', 'candidates')}
+            return body
+
+        for path in ('/nowhere', ecoli_g):
+            quoted = urllib.parse.quote(path, safe='')
+            for name in ('kleb', 'enterics'):
+                if name == 'enterics' and path == ecoli_g:
+                    continue  # enterics has ecoli's graph
+                asks = [('GET', route, f'?graph={name}&graph_path={quoted}')
+                        for route in ('traverse/capabilities', 'pattern/capabilities')]
+                for route, body in (('traverse', t), ('resolve', r)):
+                    asks += [('POST', route, dict(body, graph=name, graph_path=path)),
+                             ('POST', route, dict(body, graphs=[name], graph_path=path))]
+                for method, route, request in asks:
+                    with self.subTest(name=name, path=path, route=route,
+                                      request=request if method == 'GET' else
+                                      {k: v for k, v in request.items()
+                                       if k in ('graph', 'graphs')}):
+                        self.assertEqual(expected(name), refused(method, route, request))
+        # its own graph_path selects the pair, as before
+        for route, body in (('traverse', t), ('resolve', r)):
+            out = self.server.post(route, dict(body, graph='kleb', graph_path=kleb_g))
+            self.assertEqual(200, out.status_code, out.text[:2000])
+            self.assertEqual([('kleb', self.pid('kleb'))],
+                             [(e['graph'], e['pair_id']) for e in out.json()['answers']])
+        caps = single(self.server.get('traverse/capabilities?graph=kleb&graph_path='
+                                      + urllib.parse.quote(kleb_g, safe='')).json())
+        self.assertEqual(('kleb', self.pid('kleb')), (caps['graph'], caps['pair_id']))
+        # refused before this change: an object of pairs naming the pair by a path it lacks, and
+        # a pair_id the name does not have (a stale id: the pair's id under another graph path,
+        # as after a re-index moved the graph), on every route that takes pairs
+        stale = configured_pair_id('kleb', '/old/kleb/graph.dbg', self.pairs['kleb'][1])
+        candidates = [{'graph': 'kleb', 'pair_id': self.pid('kleb')}]
+        for route, body in (('traverse', t), ('resolve', r), ('pattern', p)):
+            for pair, given in (({'graph_path': '/nowhere'}, 'graph_path'),
+                                ({'pair_id': stale}, 'pair_id'),
+                                ({'pair_id': self.pid('enterics', 'kleb')}, 'pair_id')):
+                with self.subTest(route=route, pair=pair):
+                    self.assertEqual(
+                        {'error': f"request.pairs[0]: no pair of 'kleb' has the {given} given",
+                         'code': 'pair_not_found', 'candidates': candidates},
+                        refused('POST', route, dict(body, pairs=[dict(pair, graph='kleb')])))
+        for route in ('traverse/capabilities', 'pattern/capabilities'):
+            with self.subTest(route=route, pair_id='stale'):
+                self.assertEqual({'error': "no pair of graph 'kleb' has the pair_id given",
+                                  'code': 'pair_not_found', 'candidates': candidates},
+                                 refused('GET', route, f'?graph=kleb&pair_id={stale}'))
+
     def test_a_search_temp_file_that_fails_states_no_path(self):
         """/search writes a request's sequences to a file in the server's temporary directory
         (--disk-swap) before it queries them: one it cannot make fails the request 400 in a text

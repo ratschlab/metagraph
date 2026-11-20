@@ -469,7 +469,10 @@ The answer keeps its upstream shape (a list of `{seq_description, results, ...}`
 `pair_id` (section 1.2, train 8) or by its paths, not both. By its paths, `graph_path` may be omitted when the name
 has one graph, and `annotation_path` is required when the name's pairs share a graph. An id that no pair of the name
 has is refused `pair_not_found` with the name's pairs as the candidates. A probe takes the same forms as query
-parameters. `graphs` and `pairs` together are refused. Every selector refusal is a 400 before any pair starts,
+parameters. A `graph_path` beside one name (`graph` or `graphs: [name]` on `/resolve` and `/traverse`, `?graph=`
+on a probe) keeps the name's pairs on that graph, and one that no pair of the name has is refused `pair_not_found`
+with the name's pairs as the candidates, on a name of one pair too (train 8, the owner's decision of 2026-11-20:
+before, a name of one pair answered on that pair and the path was ignored). `graphs` and `pairs` together are refused. Every selector refusal is a 400 before any pair starts,
 `{error, code, candidates?}`, with `code` one of `selection_conflict`, `pair_not_found`, `pair_ambiguous`,
 `traverse_single_pair`, `graph_unknown`, `pairs_unsupported`; `candidates` lists the pairs to choose from where a
 choice exists, each `{graph, pair_id}`. The codes are for selection outcomes only: a malformed selector (`pairs` not
@@ -527,7 +530,7 @@ pairs' `pair_id`s in the list's order, joined by `, `):
 | --- | --- |
 | a name with pairs on several graphs, or with one graph and several annotations | `Bad request: index '<name>' holds several pairs (<ids>); name one by its pair_id (GET /capabilities lists them)` (before: `... spans several graphs (<graph paths>); pass 'graph_path' to pick one`, and `... lists one graph (<path>) with several annotations (<paths>): a traversal reads one annotation, which graph_path cannot choose; list each annotation under a name of its own`) |
 | a `graph_path` on several pairs of the name | `Bad request: the graph_path given names several pairs of index '<name>' (<ids>); name one by its pair_id` |
-| a `graph_path` not in the name | `Bad request: the graph_path given is not part of index '<name>'` |
+| a `graph_path` not in the name (a name of one pair too, train 8) | `Bad request: the graph_path given is not part of index '<name>'` |
 | a `pairs` object (`request.pairs[<i>]: `) or a probe with `pair_id` or `annotation_path` matching no pair | `<where>no pair of <subject> has the graph_path given` (likewise `the annotation_path given`, `the graph_path and annotation_path given`, `the pair_id given`) |
 | one matching several pairs on one graph | `<where><subject> has <n> pairs on the graph_path given: add annotation_path, or name the pair by pair_id` (no `graph_path` given: `on one graph`) |
 | one matching pairs on several graphs | `<where><subject> has <n> pairs[ with the annotation_path given] on <m> graphs: add graph_path[ and annotation_path], or name the pair by pair_id` |

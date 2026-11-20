@@ -4052,7 +4052,8 @@ search's routes, `POST /pattern` and `GET /pattern/capabilities`, are `SPEC-patt
     `--write-csv` the list with every line's manifest column filled with its pair's manifest.
   - **Routing** (since release 10: SPEC-multigraph-envelope.md section 6, which governs; the release-9 rules
     that stood here are superseded): `/traverse` runs on exactly ONE pair, named by `graph` (or `graphs`
-    resolving to one pair) with `graph_path`, or by one object of `pairs` (its `pair_id`, train 8, or its
+    resolving to one pair) with `graph_path` (a `graph_path` no pair of the name has is refused `pair_not_found`,
+    on a name of one pair too since train 8), or by one object of `pairs` (its `pair_id`, train 8, or its
     paths, `annotation_path` telling apart the annotations of one graph); a selection of several pairs is refused
     `traverse_single_pair` with the candidates (`{graph, pair_id}`), and a server holding one pair runs a request
     without a selector on it. `/resolve` runs on any number of pairs (the envelope, section 1 there). The
@@ -4136,7 +4137,8 @@ search's routes, `POST /pattern` and `GET /pattern/capabilities`, are `SPEC-patt
     (percent-decoded values); since release 10 by SPEC-multigraph-envelope.md section 6: the parameters name
     exactly one pair of the name -- its `pair_id` (train 8), or its paths, `annotation_path` telling apart the
     annotations of one graph; `pair_id` beside a path is a plain 400 --, else a coded 400 `{error, code,
-    candidates?}` (`graph_unknown`, `pair_not_found`, `pair_ambiguous`). Since release 10 it answers in the
+    candidates?}` (`graph_unknown`, `pair_not_found`, `pair_ambiguous`; a `graph_path` the name lacks is
+    `pair_not_found` on a name of one pair too, train 8: before, that pair was probed). Since release 10 it answers in the
     envelope of SPEC-multigraph-envelope.md section 1 (`envelope_version`, `route`, `graphs`, `answered`,
     `refused`, `server_instance`, `answers`), one entry: the probe tagged `graph`, `pair_id`, `index_fp`,
     `outcome` (train 8; release 10: `graph`, `graph_path`, `annotation_path`, `index_fp`, `outcome`; before: the

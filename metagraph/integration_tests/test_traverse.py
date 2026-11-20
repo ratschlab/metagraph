@@ -4912,7 +4912,11 @@ class TestTraverseMultiGraph(TestTraverseBase):
                  '/traverse/capabilities needs ?graph=<name> (and pair_id=<id> when the name '
                  'holds several pairs); GET /capabilities lists them', None),
                 ('?graph=B&graph_path=/nowhere',
-                 "Bad request: the graph_path given is not part of index 'B'", 'pair_not_found')):
+                 "Bad request: the graph_path given is not part of index 'B'", 'pair_not_found'),
+                # A's one pair (listed twice) and a graph_path it lacks: refused as on B (train
+                # 8, the owner's decision of 2026-11-20; before, A's pair answered)
+                ('?graph=A&graph_path=/nowhere',
+                 "Bad request: the graph_path given is not part of index 'A'", 'pair_not_found')):
             ret = self._caps(query)
             self.assertEqual(400, ret.status_code, query)
             self.assertEqual(text, ret.json()['error'], query)
