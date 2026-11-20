@@ -2826,7 +2826,13 @@ PatternAnswer answer_pattern(
      * as the finalisation's writing did before §31.
      */
     auto hold_results = [&](Answered &a) {
-        const bool withheld = a.labels && a.labels->withheld;
+        // withheld by its labels, or by the engine after it delivered a prefix (all_or_count
+        // stopped by the deadline in its delivery: "the prefix delivered is the caller's to
+        // discard", Extraction::withheld; the labelled retrieval then gave its descriptors back
+        // and withheld nothing itself). The entry lists none of it (entry_json): before, the
+        // prefix was written as texts that the assembly dropped (GPT review of train 7, known D2)
+        const bool withheld = (a.labels && a.labels->withheld)
+                || (a.result && a.result->extraction && a.result->extraction->withheld);
         if (a.charge) {
             // each object's charge falls from its price to its written text (held_result_bytes),
             // or to nothing when the list is withheld
@@ -2933,6 +2939,8 @@ PatternAnswer answer_pattern(
             hold_results(a);
             if (hooks && hooks->held_hook)
                 hooks->held_hook(answered.size(), before, account.held());
+            if (hooks && hooks->texts_hook)
+                hooks->texts_hook(answered.size(), a.held.built(), a.held.texts().size());
         }
         a.usage = pattern_usage.elapsed();
         a.memory_peak = account.peak();

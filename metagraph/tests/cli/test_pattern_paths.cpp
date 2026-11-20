@@ -1996,6 +1996,68 @@ TEST(PatternPaths, TheRouteCutPrecedesALaterTimeStopOfTheRelease) {
     }
 }
 
+// all_or_count with labels, the deadline passing while the engine delivers the paths: the engine
+// withholds the list (withheld deadline, stop {extraction, time}) after it delivered a prefix,
+// which is the caller's to discard; the labelled retrieval gives the prefix's descriptors back.
+// The prefix's result objects are then discarded unwritten (GPT review of train 7, known D2: they
+// were written as texts, uncharged, which the assembly dropped): built, none written. The entry
+// is the same: returned 0, results empty. Every reading of a counting clock is made the first
+// one past the work time in turn
+TEST(PatternPaths, AWithheldPrefixIsNotWritten) {
+    std::mt19937 rng(17);
+    std::vector<Record> records;
+    for (int i = 0; i < 6; ++i) {
+        std::string seq;
+        for (int j = 0; j < 120; ++j) {
+            seq += "ACGT"[rng() % 4];
+        }
+        records.push_back({ i % 2 ? "odd" : "even", "r" + std::to_string(i), seq });
+    }
+    Index idx = build<annot::RowDiffColumnAnnotator>(5, records, true);
+    const std::string spec = "{\"iupac\": \"ACNNNNNT\"}";
+    const std::string rest = "\"mode\": \"all_or_count\", \"time_budget_ms\": 1000";
+    auto readings = std::make_shared<uint64_t>(0);
+    auto at = std::make_shared<uint64_t>(UINT64_MAX);
+    auto clock = [readings, at]() {
+        ++*readings;
+        return Clock::time_point() + (*readings >= *at ? std::chrono::hours(1)
+                                                       : std::chrono::hours(0));
+    };
+    std::vector<std::pair<size_t, size_t>> texts;
+    RetrievalHooks hooks;
+    hooks.texts_hook = [&](size_t pattern, size_t built, size_t written) {
+        EXPECT_EQ(0u, pattern);
+        texts.emplace_back(built, written);
+    };
+    const Json::Value full = run_clocked(idx, body(spec, rest), hooks, clock);
+    const uint64_t paths = full["patterns"][0]["returned"].asUInt64();
+    ASSERT_GT(paths, 64u);
+    ASSERT_EQ(1u, texts.size());
+    EXPECT_EQ(std::make_pair(size_t(paths), size_t(paths)), texts[0]);
+    const uint64_t total = *readings;
+    size_t prefixes = 0;
+    for (uint64_t n = 1; n <= total; ++n) {
+        SCOPED_TRACE("reading " + std::to_string(n));
+        *readings = 0;
+        *at = n;
+        texts.clear();
+        const Json::Value out = run_clocked(idx, body(spec, rest), hooks, clock);
+        const Json::Value &e = out["patterns"][0];
+        ASSERT_FALSE(e.isMember("error")) << e;
+        ASSERT_EQ(1u, texts.size());
+        if (e["withheld"]["reason"] != "deadline")
+            continue;
+        EXPECT_EQ(0u, e["returned"].asUInt64());
+        EXPECT_EQ(0u, e["results"].size());
+        // nothing written of a withheld list
+        EXPECT_EQ(0u, texts[0].second);
+        if (e["stop"]["phase"] == "extraction" && texts[0].first)
+            ++prefixes;
+    }
+    // the deadline in the delivery, after a prefix was delivered
+    EXPECT_LT(0u, prefixes);
+}
+
 // max_memory_mb acts on a label-free path list (its kept walks and result objects, and in every
 // mode the extension's depth-first stack, SPEC §30), so named alone it leaves no
 // annotation_not_read note on the entry of a pattern answered by its paths, mode count
