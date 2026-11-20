@@ -24,6 +24,7 @@ import requests
 
 from base import NUM_THREADS, PROTEIN_MODE, TestingBase, METAGRAPH
 from base import REQUEST_TIMEOUT, log_tail, requests_time_out
+from base import assert_no_configured_path, configured_pair_id, configured_paths
 
 # The graphlet library (api/python, metagraph.traverse) reads what the writer produces
 # (DESIGN-traverse-graphlet.md §9, T37-T40). The test venv installs api/python editable;
@@ -2896,9 +2897,9 @@ class TestTraverseAPI(TestTraverseBase):
         self.assertEqual(('/resolve', 'ended', 'answered', 200),
                          (entry['route'], entry['state'], entry['reason'],
                           entry['response']['status']))
-        self.assertEqual([(None, None, None, 'ended', 'answered')],
-                         [(p['graph'], p['graph_path'], p['annotation_path'], p['state'],
-                           p['outcome']) for p in entry['pairs']])
+        self.assertEqual([(None, None, 'ended', 'answered')],
+                         [(p['graph'], p['pair_id'], p['state'], p['outcome'])
+                          for p in entry['pairs']])
         ret = self._post('resolve', dict(resolve, request_id='sg-resolve-1'))
         self.assertEqual(409, ret.status_code, ret.text)
         self.assertEqual('sg-resolve-1', ret.json()['request_id'])
@@ -3117,8 +3118,7 @@ class TestTraverseAPI(TestTraverseBase):
         self.assertEqual({'value': True, 'collisions': 0, 'examples': []}, c['labels_disjoint'])
         self.assertEqual(['/traverse', '/resolve', '/pattern'], c['expect_server_instance'])
         profile = c['pair_summary']
-        self.assertEqual((None, None, None), (profile['graph'], profile['graph_path'],
-                                              profile['annotation_path']))
+        self.assertEqual((None, None), (profile['graph'], profile['pair_id']))
         self.assertRegex(profile['support_fp'], r'^[0-9a-f]{16}$')
         self.assertEqual((6, 'single', None, None, None, None, True, 1),
                          (c['feature_level'], c['mode'], c['graphs'], c['graph_summary'],
@@ -4667,7 +4667,7 @@ class TestTraverseMultiGraph(TestTraverseBase):
                 'work'}
     GET_ENVELOPE = {'envelope_version', 'route', 'graphs', 'answered', 'refused',
                     'server_instance', 'answers'}
-    TAGS = ('graph', 'graph_path', 'annotation_path', 'index_fp', 'outcome')
+    TAGS = ('graph', 'pair_id', 'index_fp', 'outcome')
 
     SCRIPT = os.path.join(REPO, 'scripts', 'traversal', 'index_manifest.py')
 
@@ -4725,6 +4725,14 @@ class TestTraverseMultiGraph(TestTraverseBase):
 
     class _Server:
         def __init__(self, test, csv, wait=True, flags=()):
+            # no response states a configured path (train 8, SPEC-multigraph-envelope.md
+            # section 1.2): checked on every _post and _caps; the temporary directory
+            # (--disk-swap) beside the log, so that the check knows it
+            swap = f'{test.tempdir.name}/swap'
+            os.makedirs(swap, exist_ok=True)
+            if '--disk-swap' not in flags:
+                flags = tuple(flags) + ('--disk-swap', swap)
+            self.paths = configured_paths([csv] + list(flags))
             self.port = _free_port()
             self.url = f'http://127.0.0.1:{self.port}'
             self.log_path = f'{test.tempdir.name}/multi-{self.port}.log'
@@ -4756,10 +4764,14 @@ class TestTraverseMultiGraph(TestTraverseBase):
                 return f.read()
 
     def _post(self, route, payload):
-        return requests.post(f'{self.server.url}/{route}', data=json.dumps(payload))
+        ret = requests.post(f'{self.server.url}/{route}', data=json.dumps(payload))
+        assert_no_configured_path(ret.text, self.server.paths, 'POST /' + route)
+        return ret
 
     def _caps(self, query=''):
-        return requests.get(f'{self.server.url}/traverse/capabilities{query}')
+        ret = requests.get(f'{self.server.url}/traverse/capabilities{query}')
+        assert_no_configured_path(ret.text, self.server.paths, 'GET /traverse/capabilities')
+        return ret
 
     def _entry(self, ret, graph, route='/traverse'):
         """The one entry of a multi-graph server's envelope (SPEC-multigraph-envelope.md
@@ -4780,6 +4792,12 @@ class TestTraverseMultiGraph(TestTraverseBase):
         if graph_path:
             req['graph_path'] = graph_path
         return req
+
+    def _pid(self, name, pair=None):
+        """The n1 pair_id of the configured pair (name, graph path, annotation path); A's pair
+        when |pair| is not given"""
+        graph, anno = pair or (self.graph, self.anno)
+        return configured_pair_id(name, graph, anno)
 
     def test_multi_responses_state_their_pairs_identity(self):
         expected = {
@@ -4818,16 +4836,18 @@ class TestTraverseMultiGraph(TestTraverseBase):
         ret = self._post('traverse', self._request('C', self.pairs['col'][0]))
         self.assertEqual(400, ret.status_code, ret.text)
         self.assertEqual('traverse_single_pair', ret.json()['code'])
-        self.assertEqual([self.anno, self.pairs['col'][1]],
-                         [c['annotation_path'] for c in ret.json()['candidates']])
+        self.assertEqual([self._pid('C'), self._pid('C', self.pairs['col'])],
+                         [c['pair_id'] for c in ret.json()['candidates']])
 
     def test_multi_probe_describes_one_pair(self):
         ret = self._caps('?graph=A')
         self.assertEqual(self.GET_ENVELOPE, set(ret.json()))
         caps = self._entry(ret, 'A', '/traverse/capabilities')
-        self.assertEqual(('A', self.graph, self.anno, 'tinyA', self.index_fp, 6),
-                         (caps['graph'], caps['graph_path'], caps['annotation_path'],
-                          caps['index_ns'], caps['index_fp'], caps['feature_level']))
+        self.assertEqual(('A', self._pid('A'), 'tinyA', self.index_fp, 6),
+                         (caps['graph'], caps['pair_id'], caps['index_ns'], caps['index_fp'],
+                          caps['feature_level']))
+        for key in ('graph_path', 'annotation_path'):
+            self.assertNotIn(key, caps)
         for key in ('attempts', 'deadline_check', 'budgets', 'algorithm_version',
                     'compression_level', 'content_encodings', 'work_bound', 'coordinates'):
             self.assertIn(key, caps)
@@ -4841,54 +4861,58 @@ class TestTraverseMultiGraph(TestTraverseBase):
         ret = self._caps('?graph=B')
         self.assertEqual(400, ret.status_code)
         self.assertEqual('pair_ambiguous', ret.json()['code'])
-        self.assertEqual([self.pairs['two'][0], self.pairs['three'][0]],
-                         [c['graph_path'] for c in ret.json()['candidates']])
+        self.assertEqual([self._pid('B', self.pairs['two']), self._pid('B', self.pairs['three'])],
+                         [c['pair_id'] for c in ret.json()['candidates']])
         quoted = requests.utils.quote(self.pairs['two'][0], safe='')
         two = self._entry(self._caps(f'?graph=B&graph_path={quoted}'), 'B',
                           '/traverse/capabilities')
-        self.assertEqual((self.pairs['two'][0], self.pairs['two'][1], None, self.fp_two),
-                         (two['graph_path'], two['annotation_path'], two['index_ns'],
-                          two['index_fp']))
-        # one graph with two annotations is addressed by annotation_path (graph_path cannot
-        # choose), and a name listing only that is told so, not to pass graph_path
-        # (in the words of the release-9 server, byte for byte: a client matches them whole)
+        self.assertEqual((self._pid('B', self.pairs['two']), None, self.fp_two),
+                         (two['pair_id'], two['index_ns'], two['index_fp']))
+        # and by its pair_id
+        quoted = requests.utils.quote(self._pid('B', self.pairs['two']), safe='')
+        self.assertEqual(two, self._entry(self._caps(f'?graph=B&pair_id={quoted}'), 'B',
+                                          '/traverse/capabilities'))
+        # one graph with two annotations is addressed by annotation_path or pair_id (graph_path
+        # cannot choose), in train 8's words, which name the pairs by their pair_id, no path
         quoted = requests.utils.quote(self.graph, safe='')
-        annotations = f"{self.anno}, {self.pairs['col'][1]}"
+        ids = f"{self._pid('C')}, {self._pid('C', self.pairs['col'])}"
         for query, text in (
                 (f'?graph=C&graph_path={quoted}',
-                 f"Bad request: graph_path '{self.graph}' names a graph with several annotations "
-                 f"under index 'C' ({annotations}): a traversal reads one annotation, which "
-                 f"graph_path cannot choose; list each annotation under a name of its own"),
+                 f"Bad request: the graph_path given names several pairs of index 'C' ({ids}); "
+                 f"name one by its pair_id"),
                 ('?graph=C',
-                 f"Bad request: index 'C' lists one graph ({self.graph}) with several annotations "
-                 f"({annotations}): a traversal reads one annotation, which graph_path cannot "
-                 f"choose; list each annotation under a name of its own")):
+                 f"Bad request: index 'C' holds several pairs ({ids}); name one by its pair_id "
+                 f"(GET /capabilities lists them)")):
             ret = self._caps(query)
             self.assertEqual(400, ret.status_code, ret.text)
             self.assertEqual(('pair_ambiguous', text),
                              (ret.json()['code'], ret.json()['error']), query)
-            self.assertEqual([self.anno, self.pairs['col'][1]],
-                             [c['annotation_path'] for c in ret.json()['candidates']])
-        # the entry states its pair by all three tags (the pair's own block keeps graph and
+            self.assertEqual([self._pid('C'), self._pid('C', self.pairs['col'])],
+                             [c['pair_id'] for c in ret.json()['candidates']])
+        # the entry states its pair by its tags (the pair's own block keeps graph and
         # graph_path, the frozen probe's): C's two annotations tell apart by their identities,
         # A's (its manifest) and none (the second)
         for annotation, fp in ((self.anno, self.index_fp), (self.pairs['col'][1], None)):
             quoted = requests.utils.quote(annotation, safe='')
             entry = self._entry(self._caps(f'?graph=C&annotation_path={quoted}'), 'C',
                                 '/traverse/capabilities')
-            self.assertEqual(('C', self.graph, annotation, fp),
-                             (entry['graph'], entry['graph_path'], entry['annotation_path'],
-                              entry['index_fp']))
+            self.assertEqual(('C', self._pid('C', (self.graph, annotation)), fp),
+                             (entry['graph'], entry['pair_id'], entry['index_fp']))
         for query, text, code in (
                 ('?graph=Z', "Bad request: unknown graph 'Z'", 'graph_unknown'),
                 ('?graph=A&x=1', "Bad request: unknown parameter 'x' of GET "
-                                 "/traverse/capabilities (graph, graph_path)", None),
+                                 "/traverse/capabilities (graph, pair_id, graph_path, "
+                                 "annotation_path)", None),
                 ('?graph=A&graph=B', "Bad request: the parameter 'graph' is given twice", None),
                 ('?graph_path=/nowhere', 'Bad request: in multi-graph mode GET '
-                 '/traverse/capabilities needs ?graph=<name> (and graph_path=<path> when the '
-                 'name spans several graphs); GET /capabilities lists the graphs', None),
+                 '/traverse/capabilities needs ?graph=<name> (and pair_id=<id> when the name '
+                 'holds several pairs); GET /capabilities lists them', None),
+                # pair_id and a path, no name: the name's text (fix round 1, n6)
+                ('?pair_id=n1-x&graph_path=/nowhere', 'Bad request: in multi-graph mode GET '
+                 '/traverse/capabilities needs ?graph=<name> (and pair_id=<id> when the name '
+                 'holds several pairs); GET /capabilities lists them', None),
                 ('?graph=B&graph_path=/nowhere',
-                 "Bad request: graph_path '/nowhere' is not part of index 'B'", 'pair_not_found')):
+                 "Bad request: the graph_path given is not part of index 'B'", 'pair_not_found')):
             ret = self._caps(query)
             self.assertEqual(400, ret.status_code, query)
             self.assertEqual(text, ret.json()['error'], query)
@@ -4899,7 +4923,7 @@ class TestTraverseMultiGraph(TestTraverseBase):
                          (c['mode'], c['graphs'], c['ready']))
         self.assertNotIn('align', c['features'])
         self.assertNotIn('align', c['routes'])
-        self.assertEqual('GET /traverse/capabilities?graph={name}[&graph_path={path}]',
+        self.assertEqual('GET /traverse/capabilities?graph={name}[&pair_id={id}]',
                          c['routes']['traverse_capabilities'])
         self.assertEqual(caps['attempts'], c['attempts'])
         # the library asks for one pair
@@ -4916,12 +4940,21 @@ class TestTraverseMultiGraph(TestTraverseBase):
         (400 {error, code, candidates?}), a ledger-managed request's with its usage; /search
         refuses pairs."""
         two, three = self.pairs['two'], self.pairs['three']
+        pid_two, pid_three = self._pid('B', two), self._pid('B', three)
         by_graph = self._post('traverse', self._request('B', two[0]))
         req = self._request(None)
         del req['graph']
         by_pair = self._post('traverse', dict(req, pairs=[{'graph': 'B', 'graph_path': two[0]}]))
         # the same entry (the envelope's timing.elapsed_ms is the request's own)
         self.assertEqual(self._entry(by_graph, 'B'), self._entry(by_pair, 'B'))
+        # and by the pair_id its answer states
+        by_id = self._post('traverse', dict(req, pairs=[{'graph': 'B', 'pair_id': pid_two}]))
+        self.assertEqual(self._entry(by_graph, 'B'), self._entry(by_id, 'B'))
+        # an id together with a path in one pairs object: a plain 400, no code
+        ret = self._post('traverse', dict(req, pairs=[{'graph': 'B', 'pair_id': pid_two,
+                                                       'graph_path': two[0]}]))
+        self.assertEqual(400, ret.status_code, ret.text)
+        self.assertEqual({'error'}, set(ret.json()))
         # the second annotation of the base graph, under C, by its annotation_path alone
         col = self._post('traverse', dict(req, pairs=[{'graph': 'C',
                                                        'annotation_path': self.pairs['col'][1]}]))
@@ -4930,20 +4963,23 @@ class TestTraverseMultiGraph(TestTraverseBase):
         for payload, code, candidates in (
                 (dict(req, pairs=[{'graph': 'B', 'graph_path': two[0]},
                                   {'graph': 'B', 'graph_path': three[0]}]),
-                 'traverse_single_pair', [two[1], three[1]]),
+                 'traverse_single_pair', [pid_two, pid_three]),
                 (dict(req, pairs=[{'graph': 'C'}]), 'pair_ambiguous',
-                 [self.anno, self.pairs['col'][1]]),
+                 [self._pid('C'), self._pid('C', self.pairs['col'])]),
                 (dict(req, pairs=[{'graph': 'B', 'graph_path': '/nowhere'}]), 'pair_not_found',
-                 [two[1], three[1]]),
+                 [pid_two, pid_three]),
+                (dict(req, pairs=[{'graph': 'B', 'pair_id': self._pid('A')}]), 'pair_not_found',
+                 [pid_two, pid_three]),
                 (dict(req, graphs=['B'], pairs=[{'graph': 'B'}]), 'selection_conflict', None),
                 (dict(req, pairs=[{'graph': 'Z'}]), 'graph_unknown', None),
-                (dict(req, graphs=['A', 'B']), 'traverse_single_pair', [self.anno, two[1], three[1]])):
+                (dict(req, graphs=['A', 'B']), 'traverse_single_pair',
+                 [self._pid('A'), pid_two, pid_three])):
             with self.subTest(payload={k: v for k, v in payload.items() if k != 'seeds'}):
                 ret = self._post('traverse', payload)
                 self.assertEqual(400, ret.status_code, ret.text)
                 body = ret.json()
                 self.assertEqual(code, body['code'])
-                self.assertEqual(candidates, [c['annotation_path'] for c in body['candidates']]
+                self.assertEqual(candidates, [c['pair_id'] for c in body['candidates']]
                                  if 'candidates' in body else None)
                 self.assertEqual({'error', 'code'} | ({'candidates'} if candidates else set()),
                                  set(body))
@@ -5061,7 +5097,7 @@ class TestTraverseMultiGraph(TestTraverseBase):
         self.assertEqual({'not_after_ms': None, 'finish_by_ms': None,
                           'effective_deadline_at': None, 'cutoff_at': None}, out['deadline'])
         entry = self._entry(ret, 'B')
-        self.assertEqual(('B', two_graph, two_anno, self.fp_two, 'answered'),
+        self.assertEqual(('B', self._pid('B', self.pairs['two']), self.fp_two, 'answered'),
                          tuple(entry[k] for k in self.TAGS))
         self.assertEqual(entry['capabilities']['index_fp'], entry['index_fp'])
         self.assertNotIn('usage', entry)
@@ -5234,12 +5270,12 @@ class TestTraverseMultiGraph(TestTraverseBase):
         name once), each entry the pair's block tagged with its pair and index_fp; with
         ?graph= one entry; beyond --max-graphs-without-selection the probe without ?graph= is
         refused as before."""
-        order = [('A', self.graph, self.anno, self.index_fp),
-                 ('B', self.pairs['two'][0], self.pairs['two'][1], self.fp_two),
-                 ('B', self.pairs['three'][0], self.pairs['three'][1], None),
+        order = [('A', self._pid('A'), self.index_fp),
+                 ('B', self._pid('B', self.pairs['two']), self.fp_two),
+                 ('B', self._pid('B', self.pairs['three']), None),
                  # C lists A's pair (A's identity: one index) and the second annotation
-                 ('C', self.graph, self.anno, self.index_fp),
-                 ('C', self.pairs['col'][0], self.pairs['col'][1], None)]
+                 ('C', self._pid('C'), self.index_fp),
+                 ('C', self._pid('C', self.pairs['col']), None)]
         instance = requests.get(self.server.url + '/capabilities').json()['server_instance']
         for route in ('traverse/capabilities', 'pattern/capabilities'):
             ret = requests.get(f'{self.server.url}/{route}')
@@ -5249,8 +5285,8 @@ class TestTraverseMultiGraph(TestTraverseBase):
             self.assertEqual((1, '/' + route, ['A', 'B', 'C'], 5, 0, instance),
                              (out['envelope_version'], out['route'], out['graphs'],
                               out['answered'], out['refused'], out['server_instance']))
-            self.assertEqual(order, [(e['graph'], e['graph_path'], e['annotation_path'],
-                                      e['index_fp']) for e in out['answers']])
+            self.assertEqual(order, [(e['graph'], e['pair_id'], e['index_fp'])
+                                     for e in out['answers']])
             self.assertEqual({'answered'}, {e['outcome'] for e in out['answers']})
             one = self._entry(requests.get(f'{self.server.url}/{route}?graph=A'), 'A',
                               '/' + route)
@@ -5278,11 +5314,12 @@ class TestTraverseMultiGraph(TestTraverseBase):
             for route in ('traverse/capabilities', 'pattern/capabilities'):
                 ret = requests.get(f'{server.url}/{route}')
                 self.assertEqual(400, ret.status_code, ret.text[:2000])
-                # the words of every probe without ?graph= before release 10, byte for byte
+                # train 8's words (before: those of every probe without ?graph= before
+                # release 10, which named graph_path=<path>)
                 self.assertEqual({'error': f'Bad request: in multi-graph mode GET /{route} needs '
-                                           f'?graph=<name> (and graph_path=<path> when the name '
-                                           f'spans several graphs); GET /capabilities lists the '
-                                           f'graphs'}, ret.json())
+                                           f'?graph=<name> (and pair_id=<id> when the name '
+                                           f'holds several pairs); GET /capabilities lists '
+                                           f'them'}, ret.json())
                 self._entry(requests.get(f'{server.url}/{route}?graph=A'), 'A', '/' + route)
         finally:
             server.close()

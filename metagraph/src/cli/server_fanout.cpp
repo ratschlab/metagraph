@@ -73,8 +73,7 @@ std::optional<WallClock::time_point> parse_iso_utc(const Json::Value &iso) {
 Json::Value null_pair_ref() {
     Json::Value ref(Json::objectValue);
     ref["graph"] = Json::Value();
-    ref["graph_path"] = Json::Value();
-    ref["annotation_path"] = Json::Value();
+    ref["pair_id"] = Json::Value();
     return ref;
 }
 
@@ -741,10 +740,8 @@ class FanoutState {
         return settings.route.size() && settings.route[0] == '/' ? settings.route.substr(1)
                                                                  : settings.route;
     }
-    std::string label(size_t i) const {
-        const SelectedPair &p = settings.pairs[i];
-        return "(" + p.name + ", " + p.pair.first + ", " + p.pair.second + ")";
-    }
+    // the pair as a refusal's text names it: "(<name>, <pair_id>)", no path
+    std::string label(size_t i) const { return pair_label(settings.pairs[i]); }
     std::string fp(size_t i) const {
         return i < settings.index_fps.size() ? settings.index_fps[i] : std::string();
     }

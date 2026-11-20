@@ -25,7 +25,7 @@ all its answers, and the samples list them in this reading order):
 | `pattern_contract_version` | string | `/pattern` only, as before |
 | `graphs` | [string] | the selected names, in byte order |
 | `answered`, `refused` | int | entries by outcome; `answered + refused` = number of entries = selected pairs |
-| `not_reached` | [pair] | the pairs never started (section 4), `{graph, graph_path, annotation_path}` |
+| `not_reached` | [pair] | the pairs never started (section 4), `{graph, pair_id}` (section 1.2) |
 | `unfinished` | [pair] | the pairs started and cut at the work cutoff (section 4) |
 | `request_id` | string or null | the client's `request_id` (resolve, pattern) or `attempt_id` (traverse); null if none |
 | `server_instance` | string | this server process (the attempt ledger's value) |
@@ -35,10 +35,10 @@ all its answers, and the samples list them in this reading order):
 | `timing`, `work` | object | the request's (`work.memory_bytes`: the answered pairs' accounts summed); `timing.elapsed_ms` is always present, an entry's own `timing` follows its request's `output.timing` |
 
 An entry is either the pair's single-graph answer with the tags merged in, or a refusal:
-- answered: `{graph, graph_path, annotation_path, index_fp, outcome: "answered", ...the single-graph answer}`.
+- answered: `{graph, pair_id, index_fp, outcome: "answered", ...the single-graph answer}`.
   On `/traverse` the single-graph answer's `usage` moves to the envelope (it is the attempt's, and the attempt is
   the request's). The entry's `index_fp` equals the identity inside the answer (`capabilities.index_fp`).
-- refused: `{graph, graph_path, annotation_path, index_fp, outcome: "refused", refusal: {http_status, error,
+- refused: `{graph, pair_id, index_fp, outcome: "refused", refusal: {http_status, error,
   code?, reason?, usage?, max_memory_mb?}}`: what the pair alone would have been answered, or a `not_reached` /
   `unfinished` outcome (section 4). `code` where the refusal has one: the pair's own (a `/pattern` refusal's, a
   `/resolve` pair's `resolve_answer_too_large`), `not_reached` or `unfinished` (section 4), `index_changed` for a pair
@@ -50,8 +50,8 @@ An entry is either the pair's single-graph answer with the tags merged in, or a 
 The capabilities routes (`GET /traverse/capabilities`, `GET /pattern/capabilities`) answer without a pair
 selection with the envelope over every pair (up to `max_graphs_without_selection`): `envelope_version`, `route`,
 `graphs`, `answered`, `refused`, `server_instance`, `answers` (each entry the pair's capabilities block, tagged).
-With a pair selection (section 6) they answer a one-entry envelope. Beyond the cap a probe without `?graph=` keeps
-its 400 text of before release 10, byte for byte (section 6).
+With a pair selection (section 6) they answer a one-entry envelope. Beyond the cap a probe without `?graph=` is
+refused in section 6's words (train 8's).
 
 ### 1.1 `/traverse` (E10)
 
@@ -85,6 +85,29 @@ During a shutdown a request the cap would refuse is not answered (its connection
 A `/traverse` request runs on exactly one pair (until the graph-less traverse of a later release): a name with
 several pairs, or several pairs, is refused with the candidates (section 6).
 
+### 1.2 The pair's identity: `pair_id` (train 8)
+
+Every response names a configured pair by `graph` (its name) and `pair_id`, never by a path: the envelope's entries,
+`not_reached` and `unfinished`, `/search` rows and cuts (section 3), the request registry (section 5), selection
+`candidates` (section 6), `GET /capabilities` (`graph_summary.pairs`, the examples of `headers_unique` and
+`labels_disjoint`; sections 8 and 9) and every text a client receives (refusals and errors, a file changed on disk,
+a failed load, a `/search` temporary file that cannot be written, section 3). `pair_id` is master's n1 id (`src/common/configured_pair_id.hpp`; `docs/DESIGN-pair-identity.md`
+section 3.2): `n1-` and a lowercase UUIDv5 in the namespace `d3565c73-e7e9-5bca-b6a9-64cb5c4c9f93`, its name the
+graph list's name, graph path and annotation path as the list spells them, each written as its UTF-8 byte length,
+`:` and its bytes (an absent one `-1:`), nothing normalized. For example the line
+`refseq,/graphs/a.dbg,/annotations/a.annodbg` has the id `n1-0c8ac32d-6ec3-5dc6-85c0-6993b9c02020`. It is a
+configured identity, not a content one (`index_fp` is that): a pair listed under two names has two ids, and a path
+spelled another way gives another id. A single-graph server states `pair_id: null` where it tags its pair (a
+`/search` cut, `pair_summary`, the registry, the certificates' examples). `GET /capabilities` states
+`multigraph.pair_id: "n1"` (section 8), so a client knows the form before it reads an answer. Paths stay valid
+selectors, and `pair_id` is one too (section 6); no response echoes a path a request sent. One exception, master's
+form: a single-graph server's `GET /stats` keeps `graph.filename` and `annotation.filename`, the basenames of its
+two files (no directory).
+
+Log lines keep the paths, for the operator. At start-up a multi-graph server logs each pair's binding once, in the
+answers' pair order: `[Server] Pair <name> <pair_id>: graph '<graph path>', annotation '<annotation path>'`. Before
+train 8 the tags were the configured paths, `graph_path` and `annotation_path`, which no response states now.
+
 ## 2. Labels absent from a pair (E9)
 
 On a multi-graph server a request that names labels a pair does not hold is answered by that pair, not refused:
@@ -98,11 +121,15 @@ A single-graph server keeps the 400 "Label not found in the annotation".
 ## 3. `/search` (E1)
 
 The answer keeps its upstream shape (a list of `{seq_description, results, ...}`). Added:
-- multi-graph server: every row carries `graph`, `graph_path`, `annotation_path`; the rows of one query sequence
+- multi-graph server: every row carries `graph` and `pair_id` (section 1.2); the rows of one query sequence
   come in the index's pair order (not in the order the pairs finish);
 - every server: each query sequence's object has `cuts`, one entry per pair searched (empty pairs included) in pair
-  order: `{graph, graph_path, annotation_path, index_fp, returned, complete, nth_score, tied, tied_returned}`; on a
-  single-graph server one entry with null pair tags.
+  order: `{graph, pair_id, index_fp, matched, returned, complete, nth_score, tied, tied_returned}`; on a
+  single-graph server one entry with null pair tags (`graph` and `pair_id` null). The members master's server
+  states (`graph`, `pair_id`, `index_fp`, `matched`, `returned`, `complete`, `nth_score`, `tied`, `tied_returned`)
+  are byte-compatible with it; the others are this server's.
+  - `matched` (train 8, master's member): the number of labels above the request's thresholds before the
+    `top_labels` cut (an integer); `returned` equals it where nothing was cut (`complete` true);
   - `returned`: rows of this pair; `complete`: every match above the request's thresholds was returned (no cut):
     then `nth_score` null and `tied`, `tied_returned` 0; `complete: true` with nothing returned means nothing
     matched, and N = 0 with matches states `returned 0, complete false, nth_score null, tied 0`;
@@ -149,9 +176,20 @@ The answer keeps its upstream shape (a list of `{seq_description, results, ...}`
   order (section 8).
 - The CLI's `metagraph query --query-mode labels` (every label above the thresholds, no counts, no cut) keeps the
   annotation's column order, not the C5 order; `/search` has no such mode, so it is not reachable over HTTP.
+- The CLI's `metagraph query --json` (train 8, as master's CLI): each record states its `cuts` as a single-graph
+  server's `/search` states them (one entry, `graph`, `pair_id` and `index_fp` null, `matched` included), in every
+  mode but labels, which takes no cut and states none.
 - `/search` takes `graphs` only (no `pairs`; it has no re-ask): `pairs` is refused 400 `pairs_unsupported` on every
   server, single-graph included, before any cached answer is looked up. On a single-graph server the field used to
-  be ignored (a request it refused for `graphs` keeps that refusal).
+  be ignored (a request it refused for `graphs` keeps that refusal). `pair_id` is no `/search` selector either: as
+  every field `/search` does not read (master's parser), a top-level `pair_id` is ignored and the request searches
+  every pair of its `graphs`. A client tells the pairs apart by each row's and each cut's `pair_id`.
+- `/search` writes a request's sequences to a file in the server's temporary directory (`--disk-swap`, else the
+  system's) before it searches them. A file that cannot be made or written (the directory missing, full or out of
+  inodes) fails the request 400 `{"error": "search: the request's sequences could not be written to the server's
+  temporary directory (the server's log names the directory and the reason)"}` on every server, the file's path and
+  the reason in the log only (fix round 1 of train 8; before, the 400 stated the file's path, `Error: temp file
+  <path> creation failed`, and a write that failed was not noticed).
 - On a multi-graph server an empty `graphs` (`[]`) selects no pair: it is refused 400 `pair_not_found` (section 6),
   before any cached answer is looked up and before any pair is searched (train 4; it was answered 200 with the
   body `null`, nothing searched). A `graphs` that is not a list is still read as no field, and an unknown name
@@ -189,7 +227,8 @@ The answer keeps its upstream shape (a list of `{seq_description, results, ...}`
   result cache's key) decides how a unit past the bound is reported:
   - **With it**, a unit whose values or own object would pass the bound is **refused alone**. Its rows are
     absent, and its entry in its record's `cuts` states `returned` 0, `complete` false, `nth_score` null, `tied`
-    and `tied_returned` 0 (and, where the pair's cut states them, `nth_median` null and `tied_same_median` 0) and
+    and `tied_returned` 0 (and, where the pair's cut states them, `nth_median` null and `tied_same_median` 0),
+    `matched` the count its search computed, and
 
     ```json
     "refused": {"account": "values", "code": "search_answer_too_large", "max_memory_mb": 4096}
@@ -376,7 +415,7 @@ The answer keeps its upstream shape (a list of `{seq_description, results, ...}`
   `attempt_id` only.
 - `GET /requests/{request_id}` answers the entry: `{request_id, server_instance, route, state: "running" |
   "ended", received_at, finished_at, reason, response: {status, bytes, written} | null, retained_until, pairs:
-  [{graph, graph_path, annotation_path, state: "queued" | "waiting_memory" | "loading" | "running" | "ended" |
+  [{graph, pair_id, state: "queued" | "waiting_memory" | "loading" | "running" | "ended" |
   "never_started", outcome, usage}]}`; for `/traverse` also `attempt` (the object of
   `GET /traverse/attempt/{attempt_id}`). An entry is retained for a period and a count set by server flags, then
   the id is unknown. `GET /requests/{id}` answers 404 `{error, request_id, server_instance, server_time_ms}` for an
@@ -421,31 +460,54 @@ The answer keeps its upstream shape (a list of `{seq_description, results, ...}`
 
 | Route | `graphs` | `pairs` | Note |
 | --- | --- | --- | --- |
-| `/search` | yes | refused (`pairs_unsupported`) | also on a single-graph server |
+| `/search` | yes | refused (`pairs_unsupported`) | also on a single-graph server; a `pair_id` is ignored (section 3) |
 | `/resolve`, `/pattern` | yes | yes | any number of pairs |
 | `/traverse` | `graph`, or `graphs` resolving to ONE pair | exactly one pair | several pairs: `traverse_single_pair` |
-| `GET /traverse/capabilities`, `GET /pattern/capabilities` | `?graph=` | `?graph=&graph_path=&annotation_path=` | one pair per probe |
+| `GET /traverse/capabilities`, `GET /pattern/capabilities` | `?graph=` | `?graph=&pair_id=`, or `?graph=&graph_path=&annotation_path=` | one pair per probe |
 
-`pairs: [{graph, graph_path?, annotation_path?}]`: each object names exactly one pair of that name; `graph_path` may
-be omitted when the name has one graph, `annotation_path` is required when the name's pairs share a graph. `graphs`
-and `pairs` together are refused. Every selector refusal is a 400 before any pair starts, `{error, code,
-candidates?}`, with `code` one of `selection_conflict`, `pair_not_found`, `pair_ambiguous`, `traverse_single_pair`,
-`graph_unknown`, `pairs_unsupported`; `candidates` lists the pairs to choose from where a choice exists. The codes
-are for selection outcomes only: a malformed selector (`pairs` not a non-empty array of objects, an unknown member,
-a missing `graph`, a path that is no string, `graph_path` without `graph`) is a plain 400 without a section 6 code
-(on `/pattern` the route's own `invalid_request`, as every `/pattern` 400). Without a selection a request runs on
-every pair, up to `max_graphs_without_selection` names (that refusal stays).
+`pairs: [{graph, pair_id?, graph_path?, annotation_path?}]`: each object names exactly one pair of that name, by its
+`pair_id` (section 1.2, train 8) or by its paths, not both. By its paths, `graph_path` may be omitted when the name
+has one graph, and `annotation_path` is required when the name's pairs share a graph. An id that no pair of the name
+has is refused `pair_not_found` with the name's pairs as the candidates. A probe takes the same forms as query
+parameters. `graphs` and `pairs` together are refused. Every selector refusal is a 400 before any pair starts,
+`{error, code, candidates?}`, with `code` one of `selection_conflict`, `pair_not_found`, `pair_ambiguous`,
+`traverse_single_pair`, `graph_unknown`, `pairs_unsupported`; `candidates` lists the pairs to choose from where a
+choice exists, each `{graph, pair_id}`. The codes are for selection outcomes only: a malformed selector (`pairs` not
+a non-empty array of objects, an unknown member, a missing `graph`, a path or an id that is no string, `graph_path`
+without `graph`, `pair_id` beside `graph_path` or `annotation_path` in one object or one probe) is a plain 400
+without a section 6 code (on `/pattern` the route's own `invalid_request`, as every `/pattern` 400). So is a
+`pair_id` or an `annotation_path` at the top level of a `/resolve` or `/traverse` request (they go in an object of
+`pairs`): refused before the selection, whatever the request names, in one text, `request: unknown field
+'<field>': name the pair in an object of pairs, {graph, pair_id} or {graph, graph_path?, annotation_path?} (GET
+/capabilities lists the pairs)` (fix round 1 of train 8). The refusal comes before every selection refusal, so
+such a request is no longer refused `graph_unknown`, `selection_conflict` or `traverse_single_pair`. Before, the
+selection ran first: an unknown name was `graph_unknown`, `graph` beside `graphs` `selection_conflict`, a
+`/traverse` naming several graphs or a name of several pairs `traverse_single_pair` with its candidates. A request
+that passed the selection got the parser's text, a malformed field's own text or `request: unknown field
+'<field>'`, as `/pattern` and a single-graph server still give. Without a selection a request runs on every pair,
+up to `max_graphs_without_selection` names (that refusal stays).
 
-The multi-graph 400 texts are those of before release 10 (8fa32e553), byte for byte: a request that server refused
-is refused in the same words, a section 6 code being only an added member (a client matches these texts whole;
-any later change is announced first). The names cap's three texts, `{N}` the cap and `{M}` the names listed:
+The multi-graph 400 texts are those of before release 10 (8fa32e553), byte for byte, apart from those that named a
+configured path, reworded in train 8 (below): a request that server refused is refused in the same words, a section
+6 code being only an added member (a client matches these texts whole; any later change is announced first). The
+names cap's three texts, `{N}` the cap and `{M}` the names listed:
 - `/search`: `Bad request: requests without names (no "graphs" field) are only supported for small indexes
   (<={N} names)`;
 - `/pattern`, and `/resolve` (which reads the cap since release 10) in the same words: `request.graphs: required on
   this server, which hosts {M} graph names (more than {N}; GET /capabilities lists them)`;
-- a capabilities probe without `?graph=` (also one with `graph_path` or `annotation_path` but no `graph`):
-  `Bad request: in multi-graph mode GET <route> needs ?graph=<name> (and graph_path=<path> when the name spans
-  several graphs); GET /capabilities lists the graphs`.
+- a capabilities probe without `?graph=` (also one with `pair_id`, `graph_path` or `annotation_path` but no
+  `graph`, `pair_id` beside a path included: the name is read first, as an object of `pairs` reads its `graph`
+  first): `Bad request: in multi-graph mode GET <route> needs ?graph=<name> (and pair_id=<id> when the name holds
+  several pairs); GET /capabilities lists them` (train 8; before: `... needs ?graph=<name> (and graph_path=<path>
+  when the name spans several graphs); GET /capabilities lists the graphs`).
+
+A probe's unknown parameter is refused `Bad request: unknown parameter '<key>' of GET <route> (graph, pair_id,
+graph_path, annotation_path)`, its list the parameters a probe takes (fix round 1 of train 8; before, the release-9
+words `... (graph, graph_path)`, the two that server took). A single-graph server's probes refuse `graph` and
+`graph_path` (`Bad request: this server hosts a single graph; remove the 'graph' / 'graph_path' parameter`) and
+ignore every other parameter, `pair_id` and `annotation_path` included, as before train 8: it hosts one pair, and a
+client sends a `pair_id` only where `multigraph.pair_id` is stated (a single-graph server states no `multigraph`
+block).
 The other texts kept: an unknown name on `/resolve`, `/traverse` and a probe `Bad request: unknown graph '<name>'`
 (on `/search` `Request with an uninitialized graph <name>`, on `/pattern` `request.graphs: unknown graph '<name>'
 (GET /capabilities lists the graphs)`), each now with `graph_unknown`; on `/search` an empty `graphs`, which the
@@ -453,11 +515,25 @@ release-9 server answered 200 with the body `null`, is refused with `pair_not_fo
 `request.graphs: the list is empty: it selects no pair (name at least one graph; GET /capabilities lists them)`
 (on `/resolve` and `/traverse` an empty `graphs` keeps the release-9 text `... expected [name]` without a code, on
 `/pattern` `invalid_request`: there it is a malformed selector); on `/resolve`, `/traverse` and the probes
-without `pairs` or `annotation_path` the release-9 selection texts (`... spans several graphs (...); pass
-'graph_path' to pick one`, `... with several annotations ...`, `graph_path '<path>' is not part of index
-'<name>'`, `'graphs' names the one graph a traversal reads: expected [name]`, `'graph' (index name) is required
-in multi-graph mode`, `give the graph as 'graph' or as 'graphs', not both`), coded `traverse_single_pair`,
-`pair_ambiguous`, `pair_not_found` or `selection_conflict` where section 6 has a code. On a single-graph server
+without `pairs`, `pair_id` or `annotation_path` the release-9 selection texts that name no path (`'graphs' names the
+one graph a traversal reads: expected [name]`, `'graph' (index name) is required in multi-graph mode`, `give the
+graph as 'graph' or as 'graphs', not both`), coded `traverse_single_pair`, `pair_ambiguous`, `pair_not_found` or
+`selection_conflict` where section 6 has a code.
+
+The texts that named configured paths (train 8; the codes unchanged, the candidates `{graph, pair_id}`, `<ids>` the
+pairs' `pair_id`s in the list's order, joined by `, `):
+
+| Case | Text |
+| --- | --- |
+| a name with pairs on several graphs, or with one graph and several annotations | `Bad request: index '<name>' holds several pairs (<ids>); name one by its pair_id (GET /capabilities lists them)` (before: `... spans several graphs (<graph paths>); pass 'graph_path' to pick one`, and `... lists one graph (<path>) with several annotations (<paths>): a traversal reads one annotation, which graph_path cannot choose; list each annotation under a name of its own`) |
+| a `graph_path` on several pairs of the name | `Bad request: the graph_path given names several pairs of index '<name>' (<ids>); name one by its pair_id` |
+| a `graph_path` not in the name | `Bad request: the graph_path given is not part of index '<name>'` |
+| a `pairs` object (`request.pairs[<i>]: `) or a probe with `pair_id` or `annotation_path` matching no pair | `<where>no pair of <subject> has the graph_path given` (likewise `the annotation_path given`, `the graph_path and annotation_path given`, `the pair_id given`) |
+| one matching several pairs on one graph | `<where><subject> has <n> pairs on the graph_path given: add annotation_path, or name the pair by pair_id` (no `graph_path` given: `on one graph`) |
+| one matching pairs on several graphs | `<where><subject> has <n> pairs[ with the annotation_path given] on <m> graphs: add graph_path[ and annotation_path], or name the pair by pair_id` |
+
+`<where>` is `request.pairs[<i>]: ` for a `pairs` object and empty for a probe, `<subject>` `'<name>'` for a `pairs`
+object and `graph '<name>'` for a probe. No text echoes a path the request sent. On a single-graph server
 `pairs` is an unknown field, as before (`request: unknown field 'pairs'`).
 A body that is one JSON text but no object (an array, a string, a number, a boolean, `null`) is refused on
 `/resolve` and `/traverse` before any selector is read, 400 `{"error": "request: expected an object"}` without a code,
@@ -491,7 +567,10 @@ for its first `resolved_kmers` k-mers only; the rest of the sequence starts at `
 `GET /capabilities` on a multi-graph server adds `composite_fp` (sha256 over the pairs' `index_fp` sorted as bytes,
 joined by `\n`, no trailing newline; null when any pair has none; each loaded (graph_path, annotation_path) pair
 counted once, so a pair listed under two names counts once), `composite_rule` (that sentence), and a
-`multigraph` block advertising `envelope_version`, the envelope routes, the selectors per route,
+`multigraph` block advertising `envelope_version`, `pair_id` (`"n1"`, train 8: answers name a pair by `graph` and
+its n1 `pair_id`, section 1.2), the envelope routes, the selectors per route (a probe's `graph`, `graph_path`,
+`annotation_path` and `pair_id`; `routes.traverse_capabilities` and `routes.pattern_capabilities` give the probe's
+template `GET <route>?graph={name}[&pair_id={id}]`, fix round 1 of train 8, before `[&graph_path={path}]`),
 `traverse_pairs_per_request`, the routes reading `not_after_ms`, `finish_by_ms` and `request_id`,
 `expect_server_instance` (F3b: `["/traverse", "/resolve", "/pattern"]`, the routes that take the field, section 5),
 the registry route,
@@ -632,7 +711,7 @@ load verified of its column order (`seqs_order`), trace, charged reads, counts a
 absent from one pair) per request. `graph_representation` stays in `support_fp` although no answer of `/traverse`,
 `/resolve` or `/pattern` depends on it beyond what `alphabet` and `available` already state: pairs that run
 different code are probed apart (a wrong split costs one probe, a wrong merge carries one pair's outcome to
-another). The identity (`graph`, `graph_path`, `annotation_path`, `index_ns`, `index_fp`, `index_meta_fp`) and the
+another). The identity (`graph`, `pair_id`, `index_ns`, `index_fp`, `index_meta_fp`) and the
 size (`traversal.num_labels`) are left out; the pattern block's `dummy_fraction` (sampled from the graph's data) is
 not a member of the entry. The hashed text is a version line, then one line per field in this order (byte order of
 the names; a member of `traversal` named `traversal.<member>`), each line ending with `\n`:
@@ -669,7 +748,7 @@ Version 2 (H4) added `seqs_order`: it changes what a header answer on the pair c
 are profiled apart (as `traversal.has_coord_to_header` already parted pairs with and without a `.seqs`).
 
 A single-graph server states its pair's profile at the top level of `GET /capabilities` as `pair_summary`: the
-same entry, with `graph`, `graph_path` and `annotation_path` null (as its `headers_unique` tags its pair) and
+same entry, with `graph` and `pair_id` null (as its `headers_unique` tags its pair) and
 `index_ns`, `index_fp` from `--index-name` and `--index-manifest`; null while the index loads (`ready: false`). A
 multi-graph server has no top-level `pair_summary`. The server logs the number of distinct profiles at start-up
 (multi-graph: `N capability profile(s) (support_fp)`; single-graph: `Capability profile: <representation>
@@ -677,7 +756,8 @@ multi-graph server has no top-level `pair_summary`. The server logs the number o
 
 Reference instance: sample 12, whose pairs' profile members are recorded on eleven fixture pairs of r237's
 profile (succinct, k 31, basic, `row_diff_brwt_coord` with its `.seqs`, no mask) served under r237's names, their
-tags rewritten to sample 12's paths: `support_fp` is r237's (a client recomputes it from each entry),
+tags those of r237's pairs (each `pair_id` computed from r237's graph list): `support_fp` is r237's (a client
+recomputes it from each entry),
 `index_meta_fp` the fixture pairs' (r237's own are read from staging's `GET /capabilities` after the deploy).
 
 ## 9. headers_unique (E22)
@@ -697,7 +777,7 @@ collision is never counted).
   tags (as its `/search` cut); null while the index loads (`ready: false`).
 
 `{"value": true | false | null, "collisions": n, "examples": [{"header", "occurrences", "pairs": [{graph,
-graph_path, annotation_path, column}...]}...]}`:
+pair_id, column}...]}...]}`:
 
 | Member | Type | Meaning |
 | --- | --- | --- |
@@ -706,7 +786,7 @@ graph_path, annotation_path, column}...]}...]}`:
 | `examples` | [object] | up to 10 repeated headers, the byte-smallest ones (independent of the hash) |
 | `examples[].header` | string | the header |
 | `examples[].occurrences` | int | its number of records over the pairs |
-| `examples[].pairs` | [object] | its first 10 occurrences in pair order, then column order, then record order: `{graph, graph_path, annotation_path, column}`, `column` the column's label, as given to annotate; a header twice in one column lists that column twice |
+| `examples[].pairs` | [object] | its first 10 occurrences in pair order, then column order, then record order: `{graph, pair_id, column}`, `column` the column's label, as given to annotate; a header twice in one column lists that column twice |
 
 A header that occurs more than once is answered by its first occurrence: within a pair, the first in column order
 (`find_header`); a fan-out over pairs answers each pair's own first occurrence. `value: false` tells a client that a
@@ -747,8 +827,8 @@ Placed as `headers_unique`:
 - Single-graph server: `GET /capabilities` `labels_disjoint` at the top level, over its one pair, with null pair
   tags; null while the index loads (`ready: false`).
 
-`{"value": true | false | null, "collisions": n, "examples": [{"header", "records": [{graph, graph_path,
-annotation_path, column}...], "columns": [{graph, graph_path, annotation_path}...]}...]}`:
+`{"value": true | false | null, "collisions": n, "examples": [{"header", "records": [{graph, pair_id,
+column}...], "columns": [{graph, pair_id}...]}...]}`:
 
 | Member | Type | Meaning |
 | --- | --- | --- |
@@ -756,8 +836,8 @@ annotation_path, column}...], "columns": [{graph, graph_path, annotation_path}..
 | `collisions` | int | the number of distinct names that are a sequence header of a pair and a column name of a pair (the same pair or another). With `value` null it counts every pair's column names against the headers of the pairs that have a `.seqs` |
 | `examples` | [object] | up to 10 such names, the byte-smallest |
 | `examples[].header` | string | the name |
-| `examples[].records` | [object] | the pairs whose `.seqs` has a record with this header, in pair order (at most 10): `{graph, graph_path, annotation_path, column}`, `column` the column (by label) of the header's first record in the pair, the record a header label would select there were no column so named |
-| `examples[].columns` | [object] | the pairs with a column of this name, in pair order (at most 10): `{graph, graph_path, annotation_path}`; in each of them a label with this name selects the column |
+| `examples[].records` | [object] | the pairs whose `.seqs` has a record with this header, in pair order (at most 10): `{graph, pair_id, column}`, `column` the column (by label) of the header's first record in the pair, the record a header label would select there were no column so named |
+| `examples[].columns` | [object] | the pairs with a column of this name, in pair order (at most 10): `{graph, pair_id}`; in each of them a label with this name selects the column |
 
 The server logs the certificate at start-up (`labels_disjoint: true | false | null`), a clash as a warning naming
 one header (`labels_disjoint: false, N headers are also column names (one of them: '<name>'); a label with such a
@@ -841,16 +921,20 @@ replaced graph answered 200 with wrong coordinates. The refusal has the route's 
 400 `{"error": "<text>", "code": "index_changed"}` (sample 43), `/traverse` 400 the same (`usage` beside them on a
 managed attempt), both written in this order (error first, as the intake refusals), `/resolve` and `/pattern` the
 pair's entry `refused` with `refusal: {"http_status": 400, "error": "<text>", "code": "index_changed"}`, the other
-pairs answered and the envelope 200 (sample 44). The text: `The file '<path>' (<role>) of the pair ('<graph>',
-'<annotation>') changed on disk since the server started (<how>): a request does not load it into RAM, since the
-answer would carry the start-up identity and certificates; restart onto the new files, or send the request without
-in_ram`, `<role>` one of `graph`, `annotation`, `row_diff_anchors`, `row_diff_fork_succ`, `coord_to_header`,
-`graph_mask`, `graph_bloom`, `<how>` one of `it is another file`, `its size`, `its modification time`, `its status
-change time`, `it is gone or cannot be read`, `it appeared`. A copy whose labels differ from the resident's is
+pairs answered and the envelope 200 (sample 44). The text (train 8: no path, section 1.2; the log line names the
+file and the pair's paths): `The <role> file of the pair (<name>, <pair_id>) changed on disk since the server
+started (<how>): a request does not load it into RAM, since the answer would carry the start-up identity and
+certificates; restart onto the new files, or send the request without in_ram`, `<role>` one of `graph`,
+`annotation`, `row_diff_anchors`, `row_diff_fork_succ`, `coord_to_header`, `graph_mask`, `graph_bloom`, `<how>` one
+of `it is another file`, `its size`, `its modification time`, `its status change time`, `it is gone or cannot be
+read`, `it appeared`. A copy whose labels differ from the resident's is
 refused the same way, with the code (a check behind the stamps, which no copy of the stamped files fails): `The
-annotation '<annotation>' loaded into RAM for the request has other column labels than the one the server started
-with: restart onto the new files, or send the request without in_ram`. Nothing is reserved for a pair refused
-before its memory wait.
+annotation of the pair (<name>, <pair_id>) loaded into RAM for the request has other column labels than the one the
+server started with: restart onto the new files, or send the request without in_ram`. Nothing is reserved for a
+pair refused before its memory wait. A load into RAM that fails otherwise (the loader cannot read a file of the
+pair, whose stamps are unchanged) is refused with the route's failed-load status, without a code: `<route>: pair
+(<name>, <pair_id>) could not be loaded: the load into RAM for the request failed (the server's log names the file
+and the reason); send the request without in_ram`, the loader's own text, which names the file, in the log.
 
 The order of the refusals (T4's review R3, S3): a changed pair is refused when the request reaches it, before its
 memory wait's own refusals. A `/traverse` whose `finish_by_ms` (less the clock skew allowance) has passed is answered

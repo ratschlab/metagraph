@@ -392,11 +392,11 @@ SCHEMA = {
     'answer_multi': ['pattern_contract_version', 'graphs', 'answered', 'refused', 'answers',
                      'timing', 'work', 'envelope_version', 'route', 'not_reached',
                      'unfinished', 'request_id', 'server_instance', 'deadline'],
-    'answer_pair': ['graph', 'graph_path', 'annotation_path', 'index_fp', 'outcome', 'refusal'],
+    'answer_pair': ['graph', 'pair_id', 'index_fp', 'outcome', 'refusal'],
     # a refused entry's `refusal`: the body the pair alone would have been answered, with its
     # HTTP status (no code for an unexpected failure)
     'pair_refusal': ['http_status', 'error', 'code', 'reason', 'usage'],
-    'capabilities_pair': ['graph', 'graph_path'],
+    'capabilities_pair': ['graph', 'pair_id'],
     'graph_summary': ['columns_disjoint', 'shared_columns', 'pairs',
                       # whether every sequence header names one record (E22,
                       # SPEC-multigraph-envelope.md section 9; its members: HEADERS_UNIQUE)
@@ -404,7 +404,7 @@ SCHEMA = {
                       # whether no header equals a column name (H4, section 9.1; its
                       # members: LABELS_DISJOINT)
                       'labels_disjoint'],
-    'graph_summary_pair': ['graph', 'graph_path', 'annotation_path', 'index_ns', 'index_fp', 'k',
+    'graph_summary_pair': ['graph', 'pair_id', 'index_ns', 'index_fp', 'k',
                            'graph_mode', 'available', 'unavailable_reason', 'mask', 'counting',
                            'traversal',
                            # the pair's capability profile (E17, SPEC-multigraph-envelope.md
@@ -611,14 +611,17 @@ def support_fp(pair):
         h = ((h ^ byte) * 1099511628211) & 0xFFFFFFFFFFFFFFFF
     return '%016x' % h
 HEADERS_UNIQUE_EXAMPLE = ['header', 'occurrences', 'pairs']
-HEADERS_UNIQUE_OCCURRENCE = ['graph', 'graph_path', 'annotation_path', 'column']
+HEADERS_UNIQUE_OCCURRENCE = ['graph', 'pair_id', 'column']
 # GET /capabilities' labels_disjoint (H4, SPEC-multigraph-envelope.md section 9.1): the
 # certificate's members as headers_unique's, an example, a pair with the header's record (its
 # column) and a pair with a column of that name
 LABELS_DISJOINT = HEADERS_UNIQUE
 LABELS_DISJOINT_EXAMPLE = ['header', 'records', 'columns']
-LABELS_DISJOINT_RECORD = ['graph', 'graph_path', 'annotation_path', 'column']
-LABELS_DISJOINT_COLUMN = ['graph', 'graph_path', 'annotation_path']
+LABELS_DISJOINT_RECORD = ['graph', 'pair_id', 'column']
+LABELS_DISJOINT_COLUMN = ['graph', 'pair_id']
+# a pair's name in every answer of a multi-graph server: master's n1 id (UUIDv5) of its name and
+# its two paths, never the paths (SPEC-multigraph-envelope.md section 1.2, train 8)
+PAIR_ID = re.compile(r'n1-[0-9a-f]{8}-[0-9a-f]{4}-5[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}')
 SEQS_ORDERS = ('verified', 'count_only', None)
 
 
@@ -1719,7 +1722,7 @@ class Checker:
             self.ok(a['deadline'][field] == request.get(field), 'deadline.' + field,
                     'as the request gave it')
         for field in ('not_reached', 'unfinished'):
-            cut = [{k: x[k] for k in ('graph', 'graph_path', 'annotation_path')}
+            cut = [{k: x[k] for k in ('graph', 'pair_id')}
                    for x in a['answers'] if x.get('outcome') == 'refused'
                    and x['refusal'].get('code') == field]
             self.ok(a[field] == cut, field, 'the pairs whose refusal says so, in order')
@@ -1748,8 +1751,8 @@ class Checker:
         for i, x in enumerate(a['answers']):
             path = f'answers[{i}]'
             self.ok(set(tags) <= set(x), path, 'tagged with its pair')
-            self.ok(isinstance(x['graph_path'], str) and isinstance(x['annotation_path'], str),
-                    path + '.graph_path')
+            self.ok(isinstance(x['pair_id'], str) and PAIR_ID.fullmatch(x['pair_id']),
+                    path + '.pair_id', 'an n1 id')
             if x['outcome'] == 'refused':
                 self.keys(x, SCHEMA['answer_pair'], path)
                 self.ok(x['index_fp'] is None or isinstance(x['index_fp'], str),
@@ -3415,14 +3418,14 @@ class Checker:
 # pair's document tagged with ENVELOPE_TAGS
 GET_ENVELOPE = ['envelope_version', 'route', 'graphs', 'answered', 'refused', 'server_instance',
                 'answers']
-ENVELOPE_TAGS = ['graph', 'graph_path', 'annotation_path', 'index_fp', 'outcome']
+ENVELOPE_TAGS = ['graph', 'pair_id', 'index_fp', 'outcome']
 
 
 def probe_document(entry, route):
     """A probe's envelope entry as the probe of contract version 1 states the pair's document:
-    without the tags the envelope adds (annotation_path, outcome; on /pattern/capabilities also
-    index_fp, which the full block has not), its graph and graph_path kept (capabilities_pair)"""
-    drop = {'annotation_path', 'outcome'}
+    without the tags the envelope adds (outcome; on /pattern/capabilities also index_fp, which
+    the full block has not), its graph and pair_id kept (capabilities_pair)"""
+    drop = {'outcome'}
     if route == '/pattern/capabilities':
         drop.add('index_fp')
     return {k: v for k, v in entry.items() if k not in drop}
@@ -3724,7 +3727,7 @@ class TestPatternFixtures(unittest.TestCase):
             check.ok('pattern' in doc['features'], 'features')
             check.ok(doc['routes'].get('pattern') == 'POST /pattern', 'routes.pattern')
             check.ok(doc['routes'].get('pattern_capabilities')
-                     == (DETAILS + '?graph={name}[&graph_path={path}]' if multi else DETAILS),
+                     == (DETAILS + '?graph={name}[&pair_id={id}]' if multi else DETAILS),
                      'routes.pattern_capabilities')
             # the largest request body the server reads (--max-request-body-mb, MiB): an
             # integer of at least 1, or null when unlimited (the fixture servers)
@@ -3833,7 +3836,7 @@ class TestPatternFixtures(unittest.TestCase):
                         check.keys(o, HEADERS_UNIQUE_OCCURRENCE, f'{ep}.pairs[{j}]')
                         check.ok(isinstance(o['column'], str), f'{ep}.pairs[{j}].column')
                         check.ok(all((o[t] is None) is (not multi)
-                                     for t in ('graph', 'graph_path', 'annotation_path')),
+                                     for t in ('graph', 'pair_id')),
                                  f'{ep}.pairs[{j}]', 'the pair tags, null on one graph')
 
             def labels_disjoint(h, path):
@@ -3867,7 +3870,7 @@ class TestPatternFixtures(unittest.TestCase):
                         for j, o in enumerate(e[kind]):
                             check.keys(o, members, f'{ep}.{kind}[{j}]')
                             check.ok(all((o[t] is None) is (not multi)
-                                         for t in ('graph', 'graph_path', 'annotation_path')),
+                                         for t in ('graph', 'pair_id')),
                                      f'{ep}.{kind}[{j}]', 'the pair tags, null on one graph')
 
             def profile(p, path):
@@ -3876,7 +3879,7 @@ class TestPatternFixtures(unittest.TestCase):
                 check.keys(p, SCHEMA['graph_summary_pair'], path)
                 check.keys(p['traversal'], SCHEMA['graph_summary_traversal'], path + '.traversal')
                 check.ok(all((p[t] is None) is (not multi)
-                             for t in ('graph', 'graph_path', 'annotation_path')),
+                             for t in ('graph', 'pair_id')),
                          path, 'the pair tags, null on one graph')
                 for fp in ('index_meta_fp', 'support_fp'):
                     check.ok(isinstance(p[fp], str) and re.fullmatch('[0-9a-f]{16}', p[fp]),
@@ -4239,8 +4242,8 @@ class TestPatternFixtures(unittest.TestCase):
             self.capabilities_document(
                 Checker(Raising(), 'single'), f,
                 {'error': 'Bad request: in multi-graph mode GET /pattern/capabilities needs '
-                          '?graph=<name> (and graph_path=<path> when the name spans several '
-                          'graphs); GET /capabilities lists the graphs'})
+                          '?graph=<name> (and pair_id=<id> when the name holds several '
+                          'pairs); GET /capabilities lists them'})
 
     def test_probe_envelopes(self):
         """SPEC-multigraph-envelope.md section 1 (release 10): a multi-graph server's GET
@@ -4276,7 +4279,7 @@ class TestPatternFixtures(unittest.TestCase):
             ('pattern_capabilities_multi_graph', lambda d: d.update(answered=2), 'outcomes'),
             ('pattern_capabilities_multi_graph_no_graph', lambda d: d.update(graphs=[]),
              'graphs'),
-            ('traverse_capabilities_multi_graph', lambda d: d['answers'][0].pop('annotation_path'),
+            ('traverse_capabilities_multi_graph', lambda d: d['answers'][0].pop('pair_id'),
              'tags'),
             ('pattern_capabilities_multi_graph',
              lambda d: d['answers'][0].update(outcome='refused'), 'outcome'),
@@ -4314,7 +4317,8 @@ class TestPatternFixtures(unittest.TestCase):
             self.assertEqual(pair, self.bodies[name][1], name)
         name = 'multi_graph_count'
         cases = [
-            (lambda a: a['answers'][0].pop('annotation_path'), 'tagged'),
+            (lambda a: a['answers'][0].pop('pair_id'), 'tagged'),
+            (lambda a: a['answers'][0].update(pair_id='/w/graph.dbg'), 'an n1 id'),
             (lambda a: a['answers'][0].update(index_fp='0' * 64), 'index_fp'),
             (lambda a: a['graphs'].append('a_name'), 'byte order'),
             (lambda a: a['answers'].append(copy.deepcopy(a['answers'][0])), 'one per pair'),
@@ -4443,7 +4447,7 @@ class TestPatternFixtures(unittest.TestCase):
                 pair_summary=d['graph_summary']['pairs'][0]), 'in graph_summary only'),
             ('capabilities_multi_graph', multi(graph_representation='hash'),
              'recomputed from the entry'),
-            ('capabilities_multi_graph', multi(graph_path=None), 'null on one graph'),
+            ('capabilities_multi_graph', multi(pair_id=None), 'null on one graph'),
             ('capabilities_multi_graph', lambda d: d['graph_summary']['pairs'][0]['traversal']
              .pop('counts'), 'fields'),
         ]
@@ -4515,7 +4519,7 @@ class TestPatternFixtures(unittest.TestCase):
             (repeated, lambda d: d['headers_unique']['examples'][0].pop('occurrences'),
              'fields'),
             (repeated, occurrence(graph='x'), 'null on one graph'),
-            (repeated, occurrence(i=1, annotation_path='/a.annodbg'), 'null on one graph'),
+            (repeated, occurrence(i=1, pair_id='n1-x'), 'null on one graph'),
             (repeated, occurrence(drop='column'), 'fields'),
             (repeated, occurrence(column=None), r'\.column'),
         ]
@@ -4544,7 +4548,7 @@ class TestPatternFixtures(unittest.TestCase):
                 doc['labels_disjoint'].update(fields)
             return m
 
-        untagged = {'graph': None, 'graph_path': None, 'annotation_path': None}
+        untagged = {'graph': None, 'pair_id': None}
 
         def clash(mutate_example=None):
             # a single-graph server whose header e1.fa is its own column's name

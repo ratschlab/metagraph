@@ -96,19 +96,18 @@
    {
     "alphabet": "$ACGT",
     "annotation_form": "row_diff_brwt_coord",
-    "annotation_path": "{work}/masked/annotation.relaxed.relabeled.row_diff_brwt_coord.annodbg",
     "available": true,
     "counting": "exact",
     "decode_charged": true,
     "graph": "mini_refseq",
     "graph_mode": "basic",
-    "graph_path": "{work}/masked/graph_k31.dbg",
     "graph_representation": "succinct",
     "index_fp": null,
     "index_meta_fp": "7d99e33ed7315c3d",
     "index_ns": null,
     "k": 31,
     "mask": "file",
+    "pair_id": "n1-40d505e7-4711-5a2c-9779-3e49fcf051db",
     "seqs_order": "count_only",
     "support_fp": "ffb6b826d432321d",
     "traversal": {
@@ -190,6 +189,7 @@
    "/resolve",
    "/pattern"
   ],
+  "pair_id": "n1",
   "request_id": [
    "/resolve",
    "/pattern"
@@ -278,7 +278,8 @@
    "/pattern/capabilities": [
     "graph",
     "graph_path",
-    "annotation_path"
+    "annotation_path",
+    "pair_id"
    ],
    "/resolve": [
     "graphs",
@@ -295,7 +296,8 @@
    "/traverse/capabilities": [
     "graph",
     "graph_path",
-    "annotation_path"
+    "annotation_path",
+    "pair_id"
    ]
   },
   "traverse_pairs_per_request": 1,
@@ -537,13 +539,13 @@
   "capabilities": "GET /capabilities",
   "column_labels": "GET /column_labels",
   "pattern": "POST /pattern",
-  "pattern_capabilities": "GET /pattern/capabilities?graph={name}[&graph_path={path}]",
+  "pattern_capabilities": "GET /pattern/capabilities?graph={name}[&pair_id={id}]",
   "requests": "GET /requests/{request_id}",
   "resolve": "POST /resolve",
   "search": "POST /search",
   "stats": "GET /stats",
   "traverse": "POST /traverse",
-  "traverse_capabilities": "GET /traverse/capabilities?graph={name}[&graph_path={path}]"
+  "traverse_capabilities": "GET /traverse/capabilities?graph={name}[&pair_id={id}]"
  },
  "schema_version": 1,
  "server_instance": "9786130e8e4a268f"

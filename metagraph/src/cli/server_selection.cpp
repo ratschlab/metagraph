@@ -6,6 +6,7 @@
 
 #include <spdlog/fmt/fmt.h>
 
+#include "common/configured_pair_id.hpp"
 #include "traverse.hpp"
 
 
@@ -16,12 +17,19 @@ bool operator==(const SelectedPair &a, const SelectedPair &b) {
     return a.name == b.name && a.pair == b.pair;
 }
 
+std::string pair_id_of(const std::string &name, const GraphPair &pair) {
+    return common::configured_pair_id(name, pair.first, pair.second);
+}
+
 Json::Value pair_ref_json(const SelectedPair &pair) {
     Json::Value ref(Json::objectValue);
     ref["graph"] = pair.name;
-    ref["graph_path"] = pair.pair.first;
-    ref["annotation_path"] = pair.pair.second;
+    ref["pair_id"] = pair_id_of(pair);
     return ref;
+}
+
+std::string pair_label(const std::string &name, const GraphPair &pair) {
+    return "(" + name + ", " + pair_id_of(name, pair) + ")";
 }
 
 Json::Value selection_candidates(const std::string &name, const GraphIndexes &indexes) {
@@ -74,24 +82,28 @@ TraversePairChoice choose_traverse_pair(const std::string &name, const std::stri
         return choice;
     }
 
+    // the pairs' ids, as the texts name them (no path: SPEC-multigraph-envelope.md section 6)
+    auto ids_of = [&](const std::vector<GraphPair> &matching) {
+        std::string ids;
+        for (const GraphPair &pair : matching) {
+            ids += (ids.empty() ? "" : ", ") + pair_id_of(name, pair);
+        }
+        return ids;
+    };
     // a name whose pairs share one graph has several annotations, which graph_path cannot
     // choose between
     auto several_annotations = [&](const std::string &graph) {
-        std::string annotations;
         for (const GraphPair *pair : pairs) {
-            if (pair->first == graph) {
-                annotations += (annotations.empty() ? "" : ", ") + pair->second;
+            if (pair->first == graph)
                 choice.matching.push_back(*pair);
-            }
         }
         choice.outcome = TraversePairChoice::SEVERAL_ANNOTATIONS;
-        choice.error = "Bad request: " + (graph_path
-                           ? "graph_path '" + graph + "' names a graph"
-                           : "index '" + name + "' lists one graph (" + graph + ")")
-                       + " with several annotations" + (graph_path ? " under index '"
-                           + name + "'" : std::string()) + " (" + annotations
-                       + "): a traversal reads one annotation, which graph_path cannot "
-                       "choose; list each annotation under a name of its own";
+        choice.error = graph_path
+                ? "Bad request: the graph_path given names several pairs of index '" + name
+                      + "' (" + ids_of(choice.matching) + "); name one by its pair_id"
+                : "Bad request: index '" + name + "' holds several pairs ("
+                      + ids_of(choice.matching) + "); name one by its pair_id (GET "
+                      "/capabilities lists them)";
         return choice;
     };
     if (graph_path) {
@@ -106,8 +118,7 @@ TraversePairChoice choose_traverse_pair(const std::string &name, const std::stri
         }
         if (!found) {
             choice.outcome = TraversePairChoice::NOT_PART;
-            choice.error = "Bad request: graph_path '" + ::utils::clip_for_message(*graph_path)
-                           + "' is not part of index '" + name + "'";
+            choice.error = "Bad request: the graph_path given is not part of index '" + name + "'";
             return choice;
         }
         if (matching > 1)
@@ -122,16 +133,13 @@ TraversePairChoice choose_traverse_pair(const std::string &name, const std::stri
     }
     if (graphs.size() == 1)
         return several_annotations(graphs[0]);
-    std::string candidates;
-    for (const std::string &graph : graphs) {
-        candidates += (candidates.empty() ? "" : ", ") + graph;
-    }
     for (const GraphPair *pair : pairs) {
         choice.matching.push_back(*pair);
     }
     choice.outcome = TraversePairChoice::SPANS_GRAPHS;
-    choice.error = "Bad request: index '" + name + "' spans several graphs (" + candidates
-                   + "); pass 'graph_path' to pick one";
+    choice.error = "Bad request: index '" + name + "' holds several pairs ("
+                   + ids_of(choice.matching) + "); name one by its pair_id (GET /capabilities "
+                   "lists them)";
     return choice;
 }
 
@@ -197,6 +205,17 @@ std::vector<std::string> sorted_names(const GraphIndexes &indexes) {
     return names;
 }
 
+namespace {
+
+// A probe of a multi-graph server without ?graph= (beyond the names cap, or with a pair's
+// other parameters): train 8's text, which names no path
+std::string probe_needs_graph_text(const std::string &route) {
+    return "Bad request: in multi-graph mode GET " + route + " needs ?graph=<name> (and "
+           "pair_id=<id> when the name holds several pairs); GET /capabilities lists them";
+}
+
+} // namespace
+
 std::pair<std::string, std::optional<std::string>>
 probe_parameters(const std::vector<std::pair<std::string, std::string>> &query,
                  const std::string &route) {
@@ -214,11 +233,8 @@ probe_parameters(const std::vector<std::pair<std::string, std::string>> &query,
                                  + "' is given twice");
         *slot = value;
     }
-    if (!name) {
-        throw InvalidRequest("Bad request: in multi-graph mode GET " + route + " "
-                             "needs ?graph=<name> (and graph_path=<path> when the name "
-                             "spans several graphs); GET /capabilities lists the graphs");
-    }
+    if (!name)
+        throw InvalidRequest(probe_needs_graph_text(route));
     return { *name, graph_path };
 }
 
@@ -279,31 +295,39 @@ void check_names_cap(const GraphIndexes &indexes, size_t max_names,
                                 + std::to_string(max_names) + "; GET /capabilities lists them)");
 }
 
-// What names one pair of |name|: an object of `pairs`, or a probe's parameters
+// What names one pair of |name|: an object of `pairs`, or a probe's parameters: its pair_id,
+// or its paths (never both: check_one_form)
 struct PairSpec {
     std::string name;
+    std::optional<std::string> pair_id;
     std::optional<std::string> graph_path;
     std::optional<std::string> annotation_path;
 };
 
-// "graph_path 'g'", "annotation_path 'a'", or both
-std::string paths_text(const PairSpec &spec) {
-    std::string text;
-    if (spec.graph_path)
-        text = "graph_path " + in_quotes(*spec.graph_path);
-    if (spec.annotation_path) {
-        text += (text.empty() ? "" : " and ") + std::string("annotation_path ")
-              + in_quotes(*spec.annotation_path);
-    }
-    return text;
+// A pair named by its id and by a path at once: a malformed selector (a plain 400, no code)
+void check_one_form(const PairSpec &spec, const std::string &where) {
+    if (spec.pair_id && (spec.graph_path || spec.annotation_path))
+        throw InvalidRequest(where + "name a pair by pair_id or by its paths, not both");
 }
 
-// The pairs of |spec|'s name its paths keep, in the list's order, a pair once; the name is
-// known
+// "the graph_path given", "the annotation_path given", "the graph_path and annotation_path
+// given", "the pair_id given": what |spec| names a pair by, never the path itself (no response
+// echoes a path a request sent, SPEC-multigraph-envelope.md section 1.2)
+std::string paths_text(const PairSpec &spec) {
+    if (spec.pair_id)
+        return "the pair_id given";
+    return std::string("the ") + (spec.graph_path ? "graph_path" : "")
+           + (spec.graph_path && spec.annotation_path ? " and " : "")
+           + (spec.annotation_path ? "annotation_path" : "") + " given";
+}
+
+// The pairs of |spec|'s name its pair_id or its paths keep, in the list's order, a pair once;
+// the name is known
 std::vector<SelectedPair> matching_pairs(const PairSpec &spec, const GraphIndexes &indexes) {
     std::vector<SelectedPair> matching;
     for (SelectedPair &pair : pairs_of({ spec.name }, indexes)) {
-        if ((!spec.graph_path || pair.pair.first == *spec.graph_path)
+        if ((!spec.pair_id || pair_id_of(pair) == *spec.pair_id)
+                && (!spec.graph_path || pair.pair.first == *spec.graph_path)
                 && (!spec.annotation_path || pair.pair.second == *spec.annotation_path)) {
             matching.push_back(std::move(pair));
         }
@@ -323,9 +347,10 @@ void check_known(const std::string &name, const GraphIndexes &indexes,
 
 /**
  * The one pair |spec| names (section 6): its name known (graph_unknown), and exactly one of
- * the name's pairs on its graph_path and annotation_path (each when given): none is
- * pair_not_found with the name's pairs as the candidates, several pair_ambiguous with them
- * (graph_path to add where they span graphs, annotation_path where they share one).
+ * the name's pairs with its pair_id, or on its graph_path and annotation_path (each when
+ * given): none is pair_not_found with the name's pairs as the candidates, several (paths
+ * only: an id names one pair) pair_ambiguous with them (graph_path to add where they span
+ * graphs, annotation_path where they share one).
  * |where| prefixes the messages, |subject| names the name in them ("'n'" in an object of
  * `pairs`, "graph 'n'" in a probe).
  */
@@ -347,17 +372,20 @@ SelectedPair one_pair_of(const PairSpec &spec, const GraphIndexes &indexes,
     const std::string count = std::to_string(matching.size()) + " pairs";
     std::string error;
     if (graphs.size() == 1) {
-        // one graph with several annotations (sra-human): only annotation_path tells them apart
-        error = subject + " has " + count + " on graph_path " + in_quotes(graphs.front())
-              + ": add annotation_path";
+        // one graph with several annotations (sra-human): only annotation_path tells them
+        // apart, or the pair's id
+        error = subject + " has " + count + " on "
+              + (spec.graph_path ? "the graph_path given" : "one graph")
+              + ": add annotation_path, or name the pair by pair_id";
     } else {
         // no graph_path was given (one would leave a single graph): the pairs span graphs,
         // and where one of them carries several annotations annotation_path is needed too
         const bool shared = matching.size() > graphs.size();
         error = subject + " has " + count
-              + (spec.annotation_path ? " with " + paths_text(spec) : std::string()) + " on "
+              + (spec.annotation_path ? " with the annotation_path given" : "") + " on "
               + std::to_string(graphs.size()) + " graphs: add graph_path"
-              + (shared && !spec.annotation_path ? " and annotation_path" : "");
+              + (shared && !spec.annotation_path ? " and annotation_path" : "")
+              + ", or name the pair by pair_id";
     }
     throw SelectionRefusal(where + error, "pair_ambiguous", candidates_of(matching));
 }
@@ -378,21 +406,22 @@ std::vector<SelectedPair> select_listed_pairs(const Json::Value &pairs,
                                               const GraphIndexes &indexes) {
     if (!pairs.isArray() || pairs.empty()) {
         throw InvalidRequest("request.pairs: expected a non-empty array of pair objects "
-                             "{graph, graph_path?, annotation_path?} (GET /capabilities lists "
-                             "the pairs)");
+                             "{graph, pair_id?, graph_path?, annotation_path?} (GET "
+                             "/capabilities lists the pairs)");
     }
     std::set<std::pair<std::string, GraphPair>> named;
     for (Json::ArrayIndex i = 0; i < pairs.size(); ++i) {
         const std::string where = "request.pairs[" + std::to_string(i) + "]";
         const Json::Value &object = pairs[i];
         if (!object.isObject()) {
-            throw InvalidRequest(where + ": expected an object {graph, graph_path?, "
+            throw InvalidRequest(where + ": expected an object {graph, pair_id?, graph_path?, "
                                  "annotation_path?}");
         }
         for (const std::string &key : object.getMemberNames()) {
-            if (key != "graph" && key != "graph_path" && key != "annotation_path") {
+            if (key != "graph" && key != "pair_id" && key != "graph_path"
+                    && key != "annotation_path") {
                 throw InvalidRequest(where + ": unknown member " + in_quotes(key)
-                                     + " (graph, graph_path, annotation_path)");
+                                     + " (graph, pair_id, graph_path, annotation_path)");
             }
         }
         PairSpec spec;
@@ -401,8 +430,10 @@ std::vector<SelectedPair> select_listed_pairs(const Json::Value &pairs,
         if (!name)
             throw InvalidRequest(where + ".graph: required (the pair's graph name)");
         spec.name = *name;
+        spec.pair_id = string_member(object, "pair_id", where, "a string");
         spec.graph_path = string_member(object, "graph_path", where, "a string");
         spec.annotation_path = string_member(object, "annotation_path", where, "a string");
+        check_one_form(spec, where + ": ");
         SelectedPair pair = one_pair_of(spec, indexes, where + ": ", in_quotes(spec.name));
         named.emplace(std::move(pair.name), std::move(pair.pair));
     }
@@ -632,12 +663,31 @@ void check_pairs_alone(SelectionRoute route, const Json::Value &request) {
     }
 }
 
+// RESOLVE and TRAVERSE: `pair_id` or `annotation_path` at the top level of the request, where
+// only `graph`, `graphs` and `graph_path` select (they name a pair inside an object of `pairs`).
+// Refused before the selection, a plain 400 in one text that says where they go, whatever the
+// request names (fix round 1, m3: on /traverse a name of several pairs refused the request
+// traverse_single_pair before the parser reached the field, a name of one pair "request:
+// unknown field '<field>'"; /resolve always the latter)
+void refuse_top_level_pair_fields(const Json::Value &request) {
+    for (const char *field : { "pair_id", "annotation_path" }) {
+        if (request.isMember(field)) {
+            throw InvalidRequest(std::string("request: unknown field '") + field
+                                 + "': name the pair in an object of pairs, {graph, pair_id} "
+                                   "or {graph, graph_path?, annotation_path?} (GET "
+                                   "/capabilities lists the pairs)");
+        }
+    }
+}
+
 // RESOLVE, PATTERN and TRAVERSE: `pairs`, or the names of `graphs` (`graph` beside them on
 // RESOLVE and TRAVERSE, with `graph_path`), or every name up to the cap
 std::vector<SelectedPair> select_posted(SelectionRoute route, const Json::Value &request,
                                         const GraphIndexes &indexes, size_t max_names) {
     const bool by_graph = route != SelectionRoute::PATTERN;
     const bool traverse = route == SelectionRoute::TRAVERSE;
+    if (by_graph)
+        refuse_top_level_pair_fields(request);
     if (request.isMember("pairs")) {
         check_pairs_alone(route, request);
         std::vector<SelectedPair> selected = select_listed_pairs(request["pairs"], indexes);
@@ -707,12 +757,13 @@ std::vector<SelectedPair> select_pairs(SelectionRoute route,
         case SelectionRoute::CAPABILITIES: {
             if (object.isMember("pairs")) {
                 throw SelectionRefusal("request: a capabilities probe selects one pair by "
-                                       "graph, graph_path and annotation_path: pairs is not "
-                                       "accepted", "pairs_unsupported");
+                                       "graph and pair_id, or by graph, graph_path and "
+                                       "annotation_path: pairs is not accepted",
+                                       "pairs_unsupported");
             }
             // the members that spell the probe's parameters; any other is the request's
             std::vector<std::pair<std::string, std::string>> parameters;
-            for (const char *key : { "graph", "graph_path", "annotation_path" }) {
+            for (const char *key : { "graph", "pair_id", "graph_path", "annotation_path" }) {
                 if (!object.isMember(key))
                     continue;
                 if (!object[key].isString()) {
@@ -735,6 +786,7 @@ void check_selection_shape(SelectionRoute route,
     if (route != SelectionRoute::RESOLVE && route != SelectionRoute::TRAVERSE)
         return;
     const Json::Value &object = object_or_empty(request);
+    refuse_top_level_pair_fields(object);
     if (object.isMember("pairs")) {
         check_pairs_alone(route, object);
         return;
@@ -753,13 +805,15 @@ select_pairs_from_parameters(SelectionRoute route,
     std::optional<std::string> name;
     for (const auto &[key, value] : query) {
         std::optional<std::string> *slot = key == "graph" ? &name
+                                         : key == "pair_id" ? &spec.pair_id
                                          : key == "graph_path" ? &spec.graph_path
                                          : key == "annotation_path" ? &spec.annotation_path
                                                                     : nullptr;
-        // the base's words (which named the parameters it had), as every refusal it gave
+        // the base's words, its list the parameters a probe takes now (fix round 1, n1; the
+        // base's named the two it had, "(graph, graph_path)")
         if (!slot) {
             throw InvalidRequest("Bad request: unknown parameter " + in_quotes(key) + " of " + get
-                                 + " (graph, graph_path)");
+                                 + " (graph, pair_id, graph_path, annotation_path)");
         }
         if (*slot)
             throw InvalidRequest("Bad request: the parameter " + in_quotes(key) + " is given twice");
@@ -768,19 +822,21 @@ select_pairs_from_parameters(SelectionRoute route,
     if (!name) {
         // A probe without parameters describes every pair (section 1), as a POST request
         // without a selection runs on every pair: up to the names cap. Beyond it, and with
-        // graph_path or annotation_path but no ?graph=, the probe is refused in the words
-        // every probe without ?graph= had before release 10, byte for byte (a service tells a
-        // multi-graph host by them, matching the text whole)
-        if (spec.graph_path || spec.annotation_path
+        // pair_id, graph_path or annotation_path but no ?graph=, the probe is refused in train
+        // 8's words, which name no path (probe_needs_graph_text; before, the words every probe
+        // without ?graph= had before release 10, which a service matched whole to tell a
+        // multi-graph host)
+        if (spec.pair_id || spec.graph_path || spec.annotation_path
                 || indexes.size() > max_names_without_selection) {
-            throw InvalidRequest("Bad request: in multi-graph mode " + get + " needs "
-                                 "?graph=<name> (and graph_path=<path> when the name spans "
-                                 "several graphs); GET /capabilities lists the graphs");
+            throw InvalidRequest(probe_needs_graph_text(probe_route(route)));
         }
         return pairs_of(sorted_names(indexes), indexes);
     }
+    // after the name, as an object of pairs reads its graph first (fix round 1, n6: a probe
+    // with pair_id and a path but no ?graph= gets the text above)
+    check_one_form(spec, "Bad request: ");
     spec.name = *name;
-    if (!spec.annotation_path) {
+    if (!spec.annotation_path && !spec.pair_id) {
         // ?graph= with graph_path= or alone: the base's choice and its texts, coded
         const TraversePairChoice choice = choose_traverse_pair(
                 spec.name, spec.graph_path ? &*spec.graph_path : nullptr, indexes);
@@ -798,7 +854,8 @@ select_pairs_from_parameters(SelectionRoute route,
                                        candidates_of(selected_of(spec.name, choice.matching)));
         }
     }
-    // annotation_path (since release 10): exactly one pair of the name, as an object of pairs
+    // pair_id, or annotation_path (since release 10): exactly one pair of the name, as an
+    // object of pairs
     check_known_name(spec.name, indexes);
     return { one_pair_of(spec, indexes, "", "graph " + in_quotes(spec.name)) };
 }

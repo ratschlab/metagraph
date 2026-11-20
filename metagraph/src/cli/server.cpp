@@ -78,13 +78,15 @@ constexpr char kDecodeCacheRule[]
 /**
  * The pair a /search answer is computed on, as the answer states it
  * (SPEC-multigraph-envelope.md section 3): on a multi-graph server (|tagged|) its name and
- * paths, written on every row and on each query sequence's cut; on a single-graph server none,
- * the rows untagged and the cut's tags null. |index_fp|: the pair's identity (the server's on a
+ * |pair_id| (pair_id_of, computed once per pair and request), written on every row and on each
+ * query sequence's cut; on a single-graph server none, the rows untagged and the cut's tags
+ * null. Its paths only name it in the log. |index_fp|: the pair's identity (the server's on a
  * single-graph server), "" for none, stated null.
  */
 struct SearchSource {
     bool tagged = false;
     std::string graph;
+    std::string pair_id;
     std::string graph_path;
     std::string annotation_path;
     std::string index_fp;
@@ -143,10 +145,10 @@ Json::Value process_search_request(const SearchRequest &request,
     // writing to temporary file in order to reuse query code. This is not optimal and
     // may turn out to be an issue in production. However, adapting FastaParser to
     // work on strings seems non-trivial. An alternative would be to use
-    // read_fasta_from_string.
-    utils::TempFile tf(config.tmp_dir);
-    tf.ofstream() << request.fasta;
-    tf.ofstream().close();
+    // read_fasta_from_string. A file that cannot be made or written fails the request in a
+    // text without its path, which goes to the log (write_search_query_file)
+    const std::unique_ptr<utils::TempFile> tf
+            = write_search_query_file(config.tmp_dir, request.fasta);
 
     // Each record's object (its rows, tagged with their pair on a multi-graph server, and the
     // cut its top N was taken with: one entry, for this pair), built as its unit completes and
@@ -162,7 +164,7 @@ Json::Value process_search_request(const SearchRequest &request,
     // the most one record's object held while it was built and measured (charged as it grows)
     uint64_t transient_charged = 0;
     const size_t k = anno_graph.get_graph().get_k();
-    query_fasta(tf.name(),
+    query_fasta(tf->name(),
         [&](SeqSearchResult &&seq_result) {
             std::lock_guard<std::mutex> lock(result_mutex);
             if (budget) {
@@ -171,8 +173,8 @@ Json::Value process_search_request(const SearchRequest &request,
                     return;
                 if (!charge_search_unit(*budget, &transient_charged, &seq_result,
                                         config.verbose_output, source.tagged, source.graph,
-                                        source.graph_path, source.annotation_path,
-                                        source.index_fp, pair, source.index)) {
+                                        source.pair_id, source.index_fp, pair,
+                                        source.index)) {
                     return;
                 }
             }
@@ -180,17 +182,13 @@ Json::Value process_search_request(const SearchRequest &request,
             if (source.tagged) {
                 for (Json::Value &row : json["results"]) {
                     row["graph"] = source.graph;
-                    row["graph_path"] = source.graph_path;
-                    row["annotation_path"] = source.annotation_path;
+                    row["pair_id"] = source.pair_id;
                 }
             }
-            Json::Value cut = seq_result.cut_to_json();
-            cut["graph"] = string_or_null(source.tagged, source.graph);
-            cut["graph_path"] = string_or_null(source.tagged, source.graph_path);
-            cut["annotation_path"] = string_or_null(source.tagged, source.annotation_path);
-            cut["index_fp"] = string_or_null(!source.index_fp.empty(), source.index_fp);
-            json["cuts"] = Json::Value(Json::arrayValue);
-            json["cuts"].append(std::move(cut));
+            json["cuts"] = seq_result.cuts_json(
+                    string_or_null(source.tagged, source.graph),
+                    string_or_null(source.tagged, source.pair_id),
+                    string_or_null(!source.index_fp.empty(), source.index_fp));
             objects.emplace_back(seq_result.get_sequence().id, std::move(json));
         },
         config, anno_graph, aligner_config.get(), budget, pair, source.index, stop
@@ -763,7 +761,7 @@ static Json::Value multi_graph_summary(
     std::set<std::string> profiles;
     for (const auto &[name, pair] : ordered_pairs(indexes, sorted_names(indexes))) {
         Json::Value p = pair_summary_json(*graphs_cache.at(pair), identities.at(pair),
-                                          name, pair.first, pair.second);
+                                          name, pair_id_of(name, pair));
         masked += p["mask"].isString() && p["mask"].asString() != "absent";
         profiles.insert(p["support_fp"].asString());
         pairs.append(std::move(p));
@@ -805,7 +803,7 @@ static std::vector<HeaderPair> multi_graph_header_pairs(
         if (!seen.insert(pair).second)
             continue;
         const AnnotatedDBG &index = *graphs_cache.at(pair);
-        pairs.push_back({ name, pair.first, pair.second, index.get_coord_to_header(),
+        pairs.push_back({ name, pair_id_of(name, pair), index.get_coord_to_header(),
                           &index.get_annotator().get_label_encoder().get_labels() });
     }
     return pairs;
@@ -903,22 +901,25 @@ int run_server(Config *config) {
     // seqs_order, composite_fp) and the resident record mapping, and a replaced graph answered
     // silently wrong. Thrown as IndexChanged: the route's 400 with the refusal's text and the
     // code index_changed (the owner's decision of 2026-11-11), logged for the operator
-    auto refuse_changed_pair = [&](const GraphPair &pair) {
-        if (std::string why = pair_files_changed(pair_stamps.at(pair), pair.first, pair.second);
-                !why.empty()) {
-            logger->warn("[Server] in_ram refused: {}", why);
-            throw IndexChanged(why);
+    // The client's text names the pair by |name| and its pair_id, the log's by its paths
+    // (SPEC-multigraph-envelope.md sections 1.2 and 10)
+    auto refuse_changed_pair = [&](const std::string &name, const GraphPair &pair) {
+        if (const std::optional<ChangedFile> changed = changed_pair_file(pair_stamps.at(pair))) {
+            logger->warn("[Server] in_ram refused: {}",
+                         changed_file_log_text(changed->path, changed->role, pair.first,
+                                               pair.second, changed->how));
+            throw IndexChanged(changed_file_text(changed->role, pair_label(name, pair),
+                                                 changed->how));
         }
     };
     // the refusal of a copy whose annotation has other column labels than the resident's,
     // logged for the operator as refuse_changed_pair's (T4 review R3, N4)
-    auto other_labels = [&](const GraphPair &pair) {
-        const std::string why = fmt::format(
-                "The annotation '{}' loaded into RAM for the request has other column labels "
-                "than the one the server started with: restart onto the new files, or send the "
-                "request without in_ram", pair.second);
-        logger->warn("[Server] in_ram refused: {}", why);
-        return IndexChanged(why);
+    auto other_labels = [&](const std::string &name, const GraphPair &pair) {
+        logger->warn("[Server] in_ram refused: The annotation '{}' loaded into RAM for the "
+                     "request has other column labels than the one the server started with: "
+                     "restart onto the new files, or send the request without in_ram",
+                     pair.second);
+        return IndexChanged(other_labels_text(pair_label(name, pair)));
     };
     // A copy of |pair| loaded into RAM for one request: with the resident pair's record mapping
     // (the .seqs the stamps vouch for, checked at start-up), so that no request reads a .seqs
@@ -929,39 +930,48 @@ int run_server(Config *config) {
     // from other files.
     // The status change time in the stamps makes a file swapped in and back within one load
     // differ too (it takes a rename or a link, which sets it); a directory or a symlink on the
-    // path swapped and back does not. |load|(mapping) loads it
-    auto load_copy = [&](const GraphPair &pair, const AnnotatedDBG &resident,
+    // path swapped and back does not. |load|(mapping) loads it. A load that fails otherwise is
+    // refused in the words of pair_load_failure_text (the pair as |name| and its pair_id, on
+    // |route|), the loader's text, which names the file, logged
+    auto load_copy = [&](const std::string &route, const std::string &name,
+                         const GraphPair &pair, const AnnotatedDBG &resident,
                          const std::function<std::unique_ptr<AnnotatedDBG>(
                                  std::shared_ptr<const annot::CoordToHeader>)> &load) {
-        refuse_changed_pair(pair);
+        refuse_changed_pair(name, pair);
         std::unique_ptr<AnnotatedDBG> copy;
         try {
             copy = load(resident.share_coord_to_header());
         } catch (const RecordMappingMismatch &) {
             // the annotation loaded has another column count than the resident's mapping (it
             // was replaced during the load): refused, its .seqs never read (T4 review R3, S1)
-            refuse_changed_pair(pair);
-            throw other_labels(pair);
+            refuse_changed_pair(name, pair);
+            throw other_labels(name, pair);
+        } catch (const std::exception &e) {
+            logger->warn("[Server] in_ram load of ({}, {}) failed: {}", pair.first, pair.second,
+                         ::utils::escape_for_log(e.what()));
+            throw std::runtime_error(pair_load_failure_text(route, pair_label(name, pair)));
         }
-        refuse_changed_pair(pair);
+        refuse_changed_pair(name, pair);
         if (copy->get_annotator().get_label_encoder().get_labels()
                 != resident.get_annotator().get_label_encoder().get_labels())
-            throw other_labels(pair);
+            throw other_labels(name, pair);
         return copy;
     };
     // the bytes of |pair|'s graph and annotation, which an in_ram load reserves; a file that
     // cannot be stat'ed is refused as changed when it was there at start-up (it is gone)
-    auto pair_bytes = [&](const GraphPair &pair) -> size_t {
+    // (the client's text names the pair by |name| and its pair_id, the log the file)
+    auto pair_bytes = [&](const std::string &name, const GraphPair &pair) -> size_t {
         std::error_code graph_error;
         std::error_code annotation_error;
         const uintmax_t graph = std::filesystem::file_size(pair.first, graph_error);
         const uintmax_t annotation = std::filesystem::file_size(pair.second, annotation_error);
         if (graph_error || annotation_error) {
-            refuse_changed_pair(pair);
-            throw std::filesystem::filesystem_error(
-                    "Cannot read the size of the index file",
-                    graph_error ? pair.first : pair.second,
-                    graph_error ? graph_error : annotation_error);
+            refuse_changed_pair(name, pair);
+            const std::error_code &error = graph_error ? graph_error : annotation_error;
+            logger->warn("[Server] in_ram: cannot read the size of '{}': {}",
+                         graph_error ? pair.first : pair.second, error.message());
+            throw std::runtime_error("Cannot read the size of the index files of the pair "
+                                     + pair_label(name, pair) + ": " + error.message());
         }
         return graph + annotation;
     };
@@ -1007,7 +1017,7 @@ int run_server(Config *config) {
             build_header_index(*anno_graph, get_num_threads() * num_server_threads);
             // the one pair, with null tags as a single-graph server's /search cuts
             const std::vector<HeaderPair> header_pair { { Json::Value(), Json::Value(),
-                    Json::Value(), anno_graph->get_coord_to_header(),
+                    anno_graph->get_coord_to_header(),
                     &anno_graph->get_annotator().get_label_encoder().get_labels() } };
             single_headers_unique = headers_unique(header_pair,
                                                    get_num_threads() * num_server_threads);
@@ -1015,7 +1025,7 @@ int run_server(Config *config) {
                                                      get_num_threads() * num_server_threads);
             // its profile, with null tags as its headers_unique
             single_pair_summary = pair_summary_json(*anno_graph, single_identity, Json::Value(),
-                                                    Json::Value(), Json::Value());
+                                                    Json::Value());
             logger->info("[Server] Capability profile: {} {} annotation, support_fp {}, "
                          "index_meta_fp {}", single_pair_summary["graph_representation"].asString(),
                          single_pair_summary["annotation_form"].asString(),
@@ -1098,6 +1108,12 @@ int run_server(Config *config) {
         }
         logger->info("[Server] Loaded a list of {} graphs for {} names: {}",
                      num_indexes, indexes.size(), fmt::join(names, ", "));
+        // each pair's binding, once, in the answers' pair order: no response states a path
+        // (answers name a pair by its name and pair_id, SPEC-multigraph-envelope.md section 1.2)
+        for (const auto &[name, pair] : ordered_pairs(indexes, sorted_names(indexes))) {
+            logger->info("[Server] Pair {} {}: graph '{}', annotation '{}'", name,
+                         pair_id_of(name, pair), pair.first, pair.second);
+        }
         if (loaded_with_mmap) {
             logger->info("[Server] Graphs will be loaded with mmap (--mmap set)."
                          " Make sure they're on a fast drive.");
@@ -1389,6 +1405,7 @@ int run_server(Config *config) {
                             const auto &[name, pair] = targets[t];
                             sources[t].tagged = true;
                             sources[t].graph = name;
+                            sources[t].pair_id = pair_id_of(name, pair);
                             sources[t].graph_path = pair.first;
                             sources[t].annotation_path = pair.second;
                             sources[t].index_fp = fp_of_pair(pair);
@@ -1432,7 +1449,8 @@ int run_server(Config *config) {
                                         std::unique_ptr<AnnotatedDBG> index_loaded;
                                         const AnnotatedDBG *index;
                                         bool in_ram = load_in_ram;
-                                        size_t index_size = in_ram ? pair_bytes({ graph_fname, anno_fname })
+                                        const std::string &name = targets[t].first;
+                                        size_t index_size = in_ram ? pair_bytes(name, { graph_fname, anno_fname })
                                                                    : -1;
                                         if (in_ram && index_size > memory_all) {
                                             logger->warn("Request {}: Graph of size {} GB is too large to fit into "
@@ -1444,7 +1462,7 @@ int run_server(Config *config) {
                                         if (in_ram) {
                                             // a pair whose files changed since start-up is
                                             // refused before its memory is waited for
-                                            refuse_changed_pair({ graph_fname, anno_fname });
+                                            refuse_changed_pair(name, { graph_fname, anno_fname });
                                             // the wait for the memory is abandoned once the
                                             // request stops (as lease_index's)
                                             if (!reservations.reserve(index_size,
@@ -1470,7 +1488,8 @@ int run_server(Config *config) {
                                             PatternPreparation preparation;
                                             preparation.progress = false;
                                             index_loaded = load_copy(
-                                                    { graph_fname, anno_fname }, resident,
+                                                    "search", name, { graph_fname, anno_fname },
+                                                    resident,
                                                     [&](auto mapping) {
                                                 return initialize_annotated_dbg(
                                                         config_copy, preparation, std::move(mapping));
@@ -1660,11 +1679,13 @@ int run_server(Config *config) {
     // worker holds them until it ends, whenever its request was answered. |expired| (/traverse
     // with finish_by_ms): the wait is not entered once it answers true and given up when it
     // does (LoadExpired)
-    auto lease_index = [&](const GraphPair &pair, bool in_ram, size_t request_id,
-                           const std::function<bool()> &gone, bool for_pattern,
-                           PairControl *control, const std::function<bool()> &expired) {
+    auto lease_index = [&](const SelectedPair &selected, const std::string &route, bool in_ram,
+                           size_t request_id, const std::function<bool()> &gone,
+                           bool for_pattern, PairControl *control,
+                           const std::function<bool()> &expired) {
+        const GraphPair &pair = selected.pair;
         const AnnotatedDBG &resident = *graphs_cache.at(pair);
-        const size_t bytes = in_ram && loaded_with_mmap ? pair_bytes(pair) : 0;
+        const size_t bytes = in_ram && loaded_with_mmap ? pair_bytes(selected.name, pair) : 0;
         const InRamPlan plan = in_ram_plan(in_ram, loaded_with_mmap, bytes, memory_all);
         if (plan == InRamPlan::RESIDENT_TOO_LARGE) {
             logger->warn("Request {}: Graph of size {} GB is too large to fit into RAM (reserved "
@@ -1678,7 +1699,7 @@ int run_server(Config *config) {
         }
         // a pair whose files changed since start-up is refused before its memory is waited
         // for (load_copy refuses it again after the wait, before and after the load)
-        refuse_changed_pair(pair);
+        refuse_changed_pair(selected.name, pair);
         const char *expired_text = "the request's finish_by_ms (less the clock skew allowance) "
                                    "passed while it waited for the memory to load its index";
         if (expired && expired())
@@ -1724,7 +1745,7 @@ int run_server(Config *config) {
             // again, so the operator's notice of a missing one is logged at start-up, not by
             // every request
             config_copy.no_coord_mapping = !resident.get_coord_to_header();
-            return load_copy(pair, resident, [&](auto mapping) {
+            return load_copy(route, selected.name, pair, resident, [&](auto mapping) {
                 return initialize_annotated_dbg(config_copy, preparation, std::move(mapping));
             });
         }, [&](std::unique_ptr<AnnotatedDBG> &&loaded, LoadReservation &&reservation) {
@@ -1872,7 +1893,7 @@ int run_server(Config *config) {
         }
         if (refs.empty()) {
             Json::Value ref(Json::objectValue);
-            for (const char *key : { "graph", "graph_path", "annotation_path" }) {
+            for (const char *key : { "graph", "pair_id" }) {
                 ref[key] = Json::Value();
             }
             refs.push_back(std::move(ref));
@@ -1980,9 +2001,9 @@ int run_server(Config *config) {
                                                       body);
             };
             try {
-                const auto lease = lease_index(pair, in_ram.value_or(false), request_id,
-                                               control.stop_predicate(), /* for_pattern */ true,
-                                               &control, nullptr);
+                const auto lease = lease_index(selected, "pattern", in_ram.value_or(false),
+                                               request_id, control.stop_predicate(),
+                                               /* for_pattern */ true, &control, nullptr);
                 const IndexIdentity identity = identity_of_pair(pair, lease->index());
                 // an inline pair is written under this handler's delivery (its own deadline,
                 // as a single-graph request); a pooled one under its own, the envelope's
@@ -2317,9 +2338,9 @@ int run_server(Config *config) {
                                                       body);
             };
             try {
-                const auto lease = lease_index(pair, in_ram.value_or(false), request_id,
-                                               control.stop_predicate(), /* for_pattern */ false,
-                                               &control, nullptr);
+                const auto lease = lease_index(selected, "resolve", in_ram.value_or(false),
+                                               request_id, control.stop_predicate(),
+                                               /* for_pattern */ false, &control, nullptr);
                 const IndexIdentity identity = identity_of_pair(pair, lease->index());
                 // an inline pair is written under this handler's delivery (its own deadline);
                 // a pooled one's check is its own, the envelope's writing the request's
@@ -2828,9 +2849,9 @@ int run_server(Config *config) {
                                 ? *finish_by - attempt_settings.clock_skew_ms : 0;
                         expired = [&attempts, limit]() { return attempts.now_ms() > limit; };
                     }
-                    lease = lease_index(pair, in_ram.value_or(false), request_id,
-                                        gone_of(request), /* for_pattern */ false, nullptr,
-                                        expired);
+                    lease = lease_index(*selected, "traverse", in_ram.value_or(false),
+                                        request_id, gone_of(request), /* for_pattern */ false,
+                                        nullptr, expired);
                     identity = identity_of_pair(pair, lease->index());
                 }
                 const AnnotatedDBG &index = lease ? lease->index() : *anno_graph.get();
@@ -3168,7 +3189,7 @@ int run_server(Config *config) {
             routes["resolve"] = "POST /resolve";
             routes["traverse"] = "POST /traverse";
             routes["traverse_capabilities"] = multi
-                ? "GET /traverse/capabilities?graph={name}[&graph_path={path}]"
+                ? "GET /traverse/capabilities?graph={name}[&pair_id={id}]"
                 : "GET /traverse/capabilities";
             routes["cancel"] = "POST /traverse/cancel";
             routes["attempt"] = "GET /traverse/attempt/{attempt_id}";
@@ -3183,7 +3204,7 @@ int run_server(Config *config) {
             // multi-graph server
             routes["pattern"] = "POST /pattern";
             routes["pattern_capabilities"] = multi
-                ? "GET /pattern/capabilities?graph={name}[&graph_path={path}]"
+                ? "GET /pattern/capabilities?graph={name}[&pair_id={id}]"
                 : "GET /pattern/capabilities";
             features.append("pattern");
             c["features"] = std::move(features);

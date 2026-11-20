@@ -2,6 +2,9 @@ import warnings
 
 import pandas as pd
 
+# master's n1 pair id (SPEC-multigraph-envelope.md section 1.2), as the traverse library computes it
+from metagraph.traverse.client import configured_pair_id as _configured_pair_id
+
 
 class SearchRefusedWarning(RuntimeWarning):
     """A /search answer in which the server refused some query sequences on some graphs (the
@@ -9,13 +12,27 @@ class SearchRefusedWarning(RuntimeWarning):
     from the data frame, which lists them in its attrs["refused"]."""
 
 
+def _pair_id_of(cut):
+    """A cut's pair_id: the one it states (a server of train 8), else the n1 id of the
+    graph_path and annotation_path an older server states, None where it names no pair (a
+    single-graph server)"""
+    if cut.get('pair_id') is not None:
+        return cut['pair_id']
+    graph, graph_path, annotation_path = (cut.get(k) for k in
+                                          ('graph', 'graph_path', 'annotation_path'))
+    if all(isinstance(v, str) for v in (graph, graph_path, annotation_path)):
+        return _configured_pair_id(graph, graph_path, annotation_path)
+    return None
+
+
 def refused_units(json_res):
     """The units (a query sequence on a graph) a /search answer refused alone: one dict per
     refused `cuts` entry, {"record": the query sequence's index in the answer,
-    "seq_description", "graph", "graph_path", "annotation_path", and the entry's `refused`
-    members: "account", "code", "max_memory_mb", and with the answer account "priced_mb"}, in
-    the answer's order. A refused unit never means that nothing matched: its rows were not
-    sent."""
+    "seq_description", "graph", "pair_id" (the entry's pair: its name and its opaque id,
+    null on a single-graph server; an older server's cut, which states the pair's paths in
+    its place, gets the id of its paths), and the entry's `refused` members: "account",
+    "code", "max_memory_mb", and with the answer account "priced_mb"}, in the answer's order.
+    A refused unit never means that nothing matched: its rows were not sent."""
     refused = []
     for i, result in enumerate(json_res or []):
         for cut in result.get('cuts') or []:
@@ -23,8 +40,7 @@ def refused_units(json_res):
                 refused.append({'record': i,
                                 'seq_description': result.get('seq_description'),
                                 'graph': cut.get('graph'),
-                                'graph_path': cut.get('graph_path'),
-                                'annotation_path': cut.get('annotation_path'),
+                                'pair_id': _pair_id_of(cut),
                                 **cut['refused']})
     return refused
 
@@ -55,6 +71,7 @@ def df_from_search_result(json_res):
         named = '; '.join(
             f"record {u['record']} ({u['seq_description']!r}) on "
             + (f"graph {u['graph']!r}" if u['graph'] is not None else 'the graph')
+            + (f" (pair {u['pair_id']})" if u['pair_id'] is not None else '')
             + f" ({u['account']} account)" for u in refused)
         warnings.warn(f"the server refused {len(refused)} query sequence(s) on a graph alone, "
                       f"past its answer budget ({refused[0]['code']}; their rows are absent, "

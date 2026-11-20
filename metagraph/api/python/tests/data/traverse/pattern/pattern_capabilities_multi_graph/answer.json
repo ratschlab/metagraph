@@ -4,7 +4,6 @@
   {
    "alphabet": "$ACGT",
    "annotation": "budgeted",
-   "annotation_path": "{work}/masked/annotation.relaxed.relabeled.row_diff_brwt_coord.annodbg",
    "available": true,
    "caps": {
     "max_anchors": 1000,
@@ -75,7 +74,6 @@
    "graph": "mini_refseq",
    "graph_cleaned": "unknown",
    "graph_mode": "basic",
-   "graph_path": "{work}/masked/graph_k31.dbg",
    "in_ram": "accepted",
    "index_fp": null,
    "k": 31,
@@ -123,6 +121,7 @@
     "partial"
    ],
    "outcome": "answered",
+   "pair_id": "n1-40d505e7-4711-5a2c-9779-3e49fcf051db",
    "pattern_contract_version": 1,
    "placement": "record",
    "predicate": {

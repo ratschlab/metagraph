@@ -67,7 +67,7 @@ import unittest
 
 import requests
 
-from base import PROTEIN_MODE, TestingBase, METAGRAPH, TEST_DATA_DIR
+from base import PROTEIN_MODE, TestingBase, METAGRAPH, TEST_DATA_DIR, configured_pair_id
 
 
 MINI_DIR = os.environ.get('METAGRAPH_MINI_REFSEQ', os.path.join(os.getcwd(), 'mini_refseq'))
@@ -3793,16 +3793,17 @@ class TestPatternSynthetic(PatternChecks, TestingBase):
             self.assertEqual(['G1'], out['graphs'])
             self.assertEqual(1, len(out['answers']))
             answer = out['answers'][0]
-            self.assertEqual(('G1', self.graph_basic, self.anno_basic, None, 'answered'),
-                             (answer['graph'], answer['graph_path'], answer['annotation_path'],
-                              answer['index_fp'], answer['outcome']))
+            g1 = configured_pair_id('G1', self.graph_basic, self.anno_basic)
+            self.assertEqual(('G1', g1, None, 'answered'),
+                             (answer['graph'], answer['pair_id'], answer['index_fp'],
+                              answer['outcome']))
             self.assertEqual((1, 0), (out['answered'], out['refused']))
             # the pair's answer is the single-graph server's on the same files, apart from
             # the entry's tags and outcome (SPEC §24.1)
             alone = single.post('pattern', request).json()
             for a in (answer, alone):
                 a.pop('timing')
-            for key in ('graph', 'graph_path', 'annotation_path', 'index_fp', 'outcome'):
+            for key in ('graph', 'pair_id', 'index_fp', 'outcome'):
                 answer.pop(key)
             self.assertEqual(alone, answer)
             # nor is a refusal written to a client that left
@@ -3811,7 +3812,7 @@ class TestPatternSynthetic(PatternChecks, TestingBase):
             caps = server.get('capabilities').json()
             self.assertIn('pattern', caps['features'])
             self.assertEqual('POST /pattern', caps['routes']['pattern'])
-            self.assertEqual('GET /pattern/capabilities?graph={name}[&graph_path={path}]',
+            self.assertEqual('GET /pattern/capabilities?graph={name}[&pair_id={id}]',
                              caps['routes']['pattern_capabilities'])
             self.assertTrue(caps['pattern']['available'])
             self.assertIsNone(caps['pattern']['k'])
@@ -3823,9 +3824,8 @@ class TestPatternSynthetic(PatternChecks, TestingBase):
                              (envelope['route'], envelope['graphs'], envelope['answered'],
                               envelope['refused'], envelope['server_instance']))
             block = envelope['answers'][0]
-            self.assertEqual(('G1', self.graph_basic, self.anno_basic, None, 'answered'),
-                             tuple(block.pop(key) for key in ('graph', 'graph_path',
-                                                              'annotation_path', 'index_fp',
+            self.assertEqual(('G1', g1, None, 'answered'),
+                             tuple(block.pop(key) for key in ('graph', 'pair_id', 'index_fp',
                                                               'outcome')))
             self.assertEqual(single.get('pattern/capabilities').json(), block)
             probe = server.get('traverse/capabilities?graph=G1').json()['answers'][0]
@@ -3833,8 +3833,8 @@ class TestPatternSynthetic(PatternChecks, TestingBase):
             ret = server.get('pattern/capabilities?graph_path=x')
             self.assertEqual(400, ret.status_code)
             self.assertEqual({'error': 'Bad request: in multi-graph mode GET /pattern/capabilities '
-                                       'needs ?graph=<name> (and graph_path=<path> when the name '
-                                       'spans several graphs); GET /capabilities lists the graphs'},
+                                       'needs ?graph=<name> (and pair_id=<id> when the name '
+                                       'holds several pairs); GET /capabilities lists them'},
                              ret.json())
             # the multi-graph members of /capabilities, and not on a single-graph server (the
             # request registry's route is on both)
@@ -4435,10 +4435,8 @@ def assert_search_as_before(test, base, new, where):
     as_key = lambda row: json.dumps(row, sort_keys=True)
     for x, y in zip(a, b):
         [cut] = y.pop('cuts')
-        test.assertEqual({'graph': None, 'graph_path': None, 'annotation_path': None,
-                          'index_fp': None},
-                         {k: cut.pop(k) for k in ('graph', 'graph_path', 'annotation_path',
-                                                  'index_fp')}, where)
+        test.assertEqual({'graph': None, 'pair_id': None, 'index_fp': None},
+                         {k: cut.pop(k) for k in ('graph', 'pair_id', 'index_fp')}, where)
         rows_a, rows_b = x.pop('results'), y.pop('results')
         test.assertEqual(x, y, where)
         test.assertEqual(len(rows_a), len(rows_b), where)

@@ -140,7 +140,7 @@ class RequestEntry {
         std::function<WallClock::time_point()> wall;
     };
 
-    // |pairs|: {graph, graph_path, annotation_path} each (null tags on a single-graph server)
+    // |pairs|: {graph, pair_id} each (null tags on a single-graph server)
     RequestEntry(std::optional<std::string> request_id, std::string route,
                  std::string server_instance, WallClock::time_point received_wall,
                  std::vector<Json::Value> pairs, Clocks clocks = {});

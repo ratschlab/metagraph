@@ -56,8 +56,8 @@ const std::vector<std::string>& support_fields() {
     // graph representation, regime, alphabet, k, annotation form, coordinates, .seqs and what
     // its load verified of its column order (seqs_order: what a header answer certifies), trace,
     // decode charged, counts and the pattern fields (graph_mode, available,
-    // unavailable_reason, mask, counting); not the identity (graph, graph_path,
-    // annotation_path, index_ns, index_fp, index_meta_fp) nor the size (traversal.num_labels)
+    // unavailable_reason, mask, counting); not the identity (graph, pair_id, index_ns,
+    // index_fp, index_meta_fp) nor the size (traversal.num_labels)
     static const std::vector<std::string> kFields = {
         "alphabet",
         "annotation_form",
@@ -104,13 +104,11 @@ std::string support_fingerprint(const Json::Value &pair) {
 }
 
 Json::Value pair_summary_json(const graph::AnnotatedDBG &index, const IndexIdentity &identity,
-                              const Json::Value &graph, const Json::Value &graph_path,
-                              const Json::Value &annotation_path) {
+                              const Json::Value &graph, const Json::Value &pair_id) {
     const graph::DeBruijnGraph &dbg = index.get_graph();
     Json::Value p;
     p["graph"] = graph;
-    p["graph_path"] = graph_path;
-    p["annotation_path"] = annotation_path;
+    p["pair_id"] = pair_id;
     p["index_ns"] = string_or_null(identity.name);
     p["index_fp"] = string_or_null(identity.fp);
     p["index_meta_fp"] = identity.meta_fp;

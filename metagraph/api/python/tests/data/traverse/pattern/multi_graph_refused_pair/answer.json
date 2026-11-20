@@ -2,11 +2,10 @@
  "answered": 1,
  "answers": [
   {
-   "annotation_path": "{work}/hash/anno.column.annodbg",
    "graph": "hashed",
-   "graph_path": "{work}/hash/graph.orhashdbg",
    "index_fp": null,
    "outcome": "refused",
+   "pair_id": "n1-00939355-cca2-59e3-b771-e8856d7867a2",
    "refusal": {
     "code": "representation_unsupported",
     "error": "pattern: the graph is not a succinct graph (a DBGSuccinct, or a PRIMARY one wrapped in CanonicalDBG): the pattern lookup narrows BOSS ranges",
@@ -14,9 +13,7 @@
    }
   },
   {
-   "annotation_path": "{work}/masked/annotation.relaxed.relabeled.row_diff_brwt_coord.annodbg",
    "graph": "mini_refseq",
-   "graph_path": "{work}/masked/graph_k31.dbg",
    "index": {
     "alphabet": "$ACGT",
     "graph_mode": "basic",
@@ -41,6 +38,7 @@
    "mode": "count",
    "outcome": "answered",
    "output": null,
+   "pair_id": "n1-40d505e7-4711-5a2c-9779-3e49fcf051db",
    "pattern_contract_version": 1,
    "patterns": [
     {

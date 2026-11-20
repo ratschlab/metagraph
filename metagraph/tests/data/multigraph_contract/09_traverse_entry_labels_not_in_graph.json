@@ -1,7 +1,7 @@
 {
  "route": "POST /traverse",
  "status": 200,
- "note": "E9 on a multi-graph server: a seed whose labels are all absent from the pair gets no walk, outcome \"labels_not_in_graph\", the labels in unknown_labels and dropped_labels with reason not_in_graph; strategy.labels.extra labels absent from the pair are listed in the entry-level unknown_labels. A real run of the release binary on the integration fixture served as bact_pseudomonadota, tagged with that pair and identity; every time is the run's. The run was on macOS: timing.page_faults, stated where the platform reads it per thread (Linux), is absent, never 0.",
+ "note": "E9 on a multi-graph server: a seed whose labels are all absent from the pair gets no walk, outcome \"labels_not_in_graph\", the labels in unknown_labels and dropped_labels with reason not_in_graph; strategy.labels.extra labels absent from the pair are listed in the entry-level unknown_labels. A real run of the release binary on the integration fixture served as bact_pseudomonadota, tagged with that pair and identity; every time is the run's. The run was on macOS: timing.page_faults, stated where the platform reads it per thread (Linux), is absent, never 0. T8-M6 (train 8, pair identity; SPEC-multigraph-envelope.md section 1.2): each pair is named by graph and pair_id, master's n1 id of the name and the two paths as the graph list spells them (the paths this sample stated before), and no configured path is stated.",
  "request": {
   "seeds": [
    {
@@ -55,8 +55,7 @@
   "answers": [
    {
     "graph": "bact_pseudomonadota",
-    "graph_path": "/scratch/nvme10/refseq_r237/bact_pseudomonadota/graph.dbg",
-    "annotation_path": "/scratch/nvme10/refseq_r237/bact_pseudomonadota/annotation.row_diff_brwt_coord.annodbg",
+    "pair_id": "n1-f52c7f73-ec85-5d74-9e27-7ba198879d0b",
     "index_fp": "c9a9c34fa17d947caa08350e41652ee3506ff27f4141ff1717eb959bbb5064dc",
     "outcome": "answered",
     "algorithm_version": "traverse-0.2",

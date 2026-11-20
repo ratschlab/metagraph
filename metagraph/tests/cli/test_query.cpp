@@ -255,6 +255,7 @@ TEST(SeqSearchResult, cut_to_json_complete) {
 
 TEST(SeqSearchResult, cut_to_json_cut) {
     graph::SearchCut cut;
+    cut.matched = 3;
     cut.returned = 1;
     cut.complete = false;
     cut.nth_score = 12;
@@ -265,6 +266,8 @@ TEST(SeqSearchResult, cut_to_json_cut) {
     cut.tied_same_median = 1;
     cut.nth_median_read = true;
     Json::Value json = with_cut(cut).cut_to_json();
+    // matched (train 8, master's member): the labels before the top_labels cut
+    EXPECT_EQ(3u, json["matched"].asUInt64());
     EXPECT_EQ(1u, json["returned"].asUInt64());
     EXPECT_FALSE(json["complete"].asBool());
     EXPECT_EQ(12u, json["nth_score"].asUInt64());
@@ -272,7 +275,7 @@ TEST(SeqSearchResult, cut_to_json_cut) {
     EXPECT_EQ(1u, json["tied_returned"].asUInt64());
     EXPECT_EQ(7u, json["nth_median"].asUInt64());
     EXPECT_EQ(1u, json["tied_same_median"].asUInt64());
-    EXPECT_EQ(7u, json.size());
+    EXPECT_EQ(8u, json.size());
 
     // the N-th score of one label: no median read, none stated
     cut.tied = 1;
@@ -283,13 +286,13 @@ TEST(SeqSearchResult, cut_to_json_cut) {
     EXPECT_TRUE(json.isMember("nth_median"));
     EXPECT_TRUE(json["nth_median"].isNull());
     EXPECT_EQ(1u, json["tied_same_median"].asUInt64());
-    EXPECT_EQ(7u, json.size());
+    EXPECT_EQ(8u, json.size());
 
     cut.abundances = false;
     json = with_cut(cut).cut_to_json();
     EXPECT_EQ(12u, json["nth_score"].asUInt64());
     EXPECT_FALSE(json.isMember("nth_median"));
-    EXPECT_EQ(5u, json.size());
+    EXPECT_EQ(6u, json.size());
 }
 
 

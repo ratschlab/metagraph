@@ -964,6 +964,80 @@ To load up a MetaGraph index in server mode for querying it with the Python API 
                            --port <PORT> \
                            --parallel <NUM_THREADS>
 
+.. _configured_pair_id:
+
+Pair identifiers in server responses
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Response records that identify a configured graph/annotation pair carry its ``graph`` name
+and ``pair_id``. The ID distinguishes pairs that share a name. For example:
+
+.. code-block:: json
+
+    {"graph": "refseq", "pair_id": "n1-0c8ac32d-6ec3-5dc6-85c0-6993b9c02020"}
+
+``pair_id`` is ``n1-`` followed by a lowercase UUIDv5. It identifies the exact graph name,
+configured graph path and configured annotation path. The encoding preserves every UTF-8
+byte, including case and path spelling. It applies no Unicode or path normalization and
+resolves no symlinks. Renaming a configured pair changes its ID. Replacing file contents
+without changing those names leaves its ID unchanged. Content verification needs a separate
+fingerprint.
+
+The ID is deterministic public metadata. Treat it as an identifier, never as a credential.
+A request can also name a pair by it: a ``pairs`` object or a capabilities probe
+(``?pair_id=``) takes ``pair_id`` in place of the pair's paths, never beside them.
+``POST /search`` selects by ``graphs`` only: it ignores a ``pair_id`` and searches every pair of
+the names, so read each row's ``pair_id``. No response states a configured path, apart from
+master's ``graph.filename`` and ``annotation.filename`` in a single-graph server's ``GET /stats``,
+the two files' basenames. The server's start-up log names each pair's ID with its two paths.
+
+.. _search_cut_statements:
+
+Search result limits and pair identity
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+For each query sequence, ``POST /search`` returns ``results`` and a ``cuts`` array in every mode:
+match count, abundance sum, presence signature, k-mer counts and coordinates. ``metagraph query
+--json`` states the same ``cuts`` for each record, except in the labels mode, which applies no
+label limit. Each cut describes one configured pair, including a pair with no matching labels.
+
+.. code-block:: json
+
+    {"cuts": [{
+      "graph": "shared", "pair_id": "n1-4018747a-c7fb-5096-8c3f-67a85618f56d",
+      "index_fp": null, "matched": 3, "returned": 1, "complete": false,
+      "nth_score": 9, "tied": 3, "tied_returned": 1
+    }]}
+
+.. list-table::
+   :header-rows: 1
+
+   * - Field
+     - Meaning
+   * - ``matched``
+     - Labels passing the query filters before the ``top_labels`` limit.
+   * - ``returned``
+     - Labels kept by that limit for this pair.
+   * - ``complete``
+     - Whether ``returned`` equals ``matched``.
+   * - ``nth_score``
+     - The last kept label's matching k-mer count when the limit drops labels and keeps at least one. Otherwise ``null``.
+   * - ``tied``
+     - Labels with that matching k-mer count before the limit, or zero when ``nth_score`` is ``null``.
+   * - ``tied_returned``
+     - Labels with that count kept by the limit, or zero when ``nth_score`` is ``null``.
+
+On an annotation with k-mer counts, labels with the same matching k-mer count are ordered by
+their median abundance, and the cut also states ``nth_median`` and ``tied_same_median``. A record
+that the answer's memory bound refuses on one pair (the request's ``partial_refusal``) returns no
+rows there, and its cut states ``refused`` beside ``matched``. ``complete`` refers to this pair's
+label limit only.
+
+On a server with a list of graphs, each result row and cut also carries ``graph`` and ``pair_id``.
+Use both fields to associate rows with their cut. The :ref:`opaque pair ID <configured_pair_id>`
+distinguishes pairs sharing a graph name. On a single-index server, rows omit these pair tags,
+and cuts carry ``null`` for them.
+
 Using Python API
 ^^^^^^^^^^^^^^^^
 See :ref:`api`

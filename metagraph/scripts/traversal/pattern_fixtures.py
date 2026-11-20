@@ -74,7 +74,8 @@ a file whose blanked content did not change (so that rerunning does not churn th
 patterns after it are stopped by the same budget (SPEC §7.6: unknown counts, work zero), the
 same in every run, and compared as they are. Paths
 under the work directory are written as {work}/... (they would otherwise name a temporary
-directory). Each fixture also asserts the situation it exists to show (`expect` below), so a
+directory), and a multi-graph server's pair_id as the id of its name and those {work}/...
+paths. Each fixture also asserts the situation it exists to show (`expect` below), so a
 server change cannot silently turn a fixture into a different case.
 
 usage:
@@ -103,6 +104,7 @@ import tempfile
 import time
 import urllib.error
 import urllib.request
+import uuid
 
 REPO = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 DEFAULT_DIR = os.path.join(REPO, 'api', 'python', 'tests', 'data', 'traverse', 'pattern')
@@ -124,6 +126,22 @@ MULTI_GRAPH_NAME = 'mini_refseq'
 # the hash graph's name on the mixed multi-graph server (before mini_refseq in byte order: the
 # envelope's first entry)
 HASHED_NAME = 'hashed'
+
+# A multi-graph server names each pair by its name and master's n1 pair_id, the UUIDv5 of the
+# name and the two paths as its graph list spells them (SPEC-multigraph-envelope.md section
+# 1.2), never by its paths: the fixtures state the id of the {work}/... spelling
+PAIR_ID_NAMESPACE = uuid.UUID('d3565c73-e7e9-5bca-b6a9-64cb5c4c9f93')
+
+
+def configured_pair_id(graph, graph_path, annotation_path):
+    name = ''.join(f'{len(f.encode())}:{f}' for f in (graph, graph_path, annotation_path))
+    return 'n1-' + str(uuid.uuid5(PAIR_ID_NAMESPACE, name))
+
+
+MULTI_PAIR_ID = configured_pair_id(MULTI_GRAPH_NAME, '{work}/masked/' + MINI_GRAPH,
+                                   '{work}/masked/' + MINI_ANNO)
+HASHED_PAIR_ID = configured_pair_id(HASHED_NAME, '{work}/hash/graph.orhashdbg',
+                                    '{work}/hash/anno.column.annodbg')
 
 # ----------------------------------------------------------------------- the patterns
 #
@@ -605,7 +623,7 @@ def multi_capabilities(doc):
     check('pattern' in doc['features'], doc['features'])
     check(doc['routes']['pattern'] == 'POST /pattern', doc['routes'])
     check(doc['routes']['pattern_capabilities']
-          == 'GET /pattern/capabilities?graph={name}[&graph_path={path}]', doc['routes'])
+          == 'GET /pattern/capabilities?graph={name}[&pair_id={id}]', doc['routes'])
     b = doc['pattern']
     check(b['available'] is True and b['unavailable_reason'] is None, b)
     check(all(b[f] is None for f in LOADING_NULL), b)
@@ -646,7 +664,7 @@ def single_graph_selection(doc):
           {k: doc[k] for k in ('graph_summary', 'max_graphs_without_selection',
                                'max_request_body_mb')})
     profile = doc['pair_summary']
-    check(all(profile[t] is None for t in ('graph', 'graph_path', 'annotation_path')), profile)
+    check(all(profile[t] is None for t in ('graph', 'pair_id')), profile)
     profile_fields(profile)
     # what the server reads of a request (H1), at the top level, the limits the defaults
     intake = doc['request_intake']
@@ -712,13 +730,12 @@ def repeated_example(header, columns):
     """An example of headers_unique on a single-graph server: |header| once in each of
     |columns|, the pair tags null (as its /search cut's)"""
     return {'header': header, 'occurrences': len(columns),
-            'pairs': [{'graph': None, 'graph_path': None, 'annotation_path': None,
-                       'column': c} for c in columns]}
+            'pairs': [{'graph': None, 'pair_id': None, 'column': c} for c in columns]}
 
 
 def names_the_pair(doc):
-    """The block of one pair of a multi-graph server names it (graph, graph_path)"""
-    check(doc['graph'] == MULTI_GRAPH_NAME and doc['graph_path'].endswith(MINI_GRAPH), doc)
+    """The block of one pair of a multi-graph server names it (graph, pair_id)"""
+    check(doc['graph'] == MULTI_GRAPH_NAME and doc['pair_id'] == MULTI_PAIR_ID, doc)
 
 
 # The members of a GET capabilities envelope (SPEC-multigraph-envelope.md section 1, release 10:
@@ -729,10 +746,10 @@ GET_ENVELOPE = ['envelope_version', 'route', 'graphs', 'answered', 'refused', 's
 
 def probe_document(entry, route):
     """A probe's envelope entry as the probe of pattern contract version 1 states the pair's
-    document: without the tags the envelope adds (annotation_path, outcome; on
-    /pattern/capabilities also index_fp, which the full block has not), its graph and graph_path
-    kept (the entry's tags, the names version 1 adds)"""
-    drop = {'annotation_path', 'outcome'}
+    document: without the tags the envelope adds (outcome; on /pattern/capabilities also
+    index_fp, which the full block has not), its graph and pair_id kept (the entry's tags, the
+    names version 1 adds; train 8: pair_id, no path)"""
+    drop = {'outcome'}
     if route == '/pattern/capabilities':
         drop.add('index_fp')
     return {k: v for k, v in entry.items() if k not in drop}
@@ -748,9 +765,8 @@ def probe_envelope(route, inner):
                                                                         [MULTI_GRAPH_NAME]), doc)
         check((doc['answered'], doc['refused'], len(doc['answers'])) == (1, 0, 1), doc)
         e = doc['answers'][0]
-        check(e['graph'] == MULTI_GRAPH_NAME and e['graph_path'].endswith(MINI_GRAPH)
-              and e['annotation_path'].endswith(MINI_ANNO) and e['index_fp'] is None
-              and e['outcome'] == 'answered', e)
+        check(e['graph'] == MULTI_GRAPH_NAME and e['pair_id'] == MULTI_PAIR_ID
+              and e['index_fp'] is None and e['outcome'] == 'answered', e)
         inner(probe_document(e, route))
     return run
 
@@ -764,9 +780,9 @@ def multi_answers(*per_answer):
               (answer['answered'], answer['refused']))
         check(answer['graphs'] == sorted({a['graph'] for a in answer['answers']}), answer['graphs'])
         for a, c in zip(answer['answers'], per_answer):
-            check(a['graph'] == MULTI_GRAPH_NAME and a['graph_path'].endswith(MINI_GRAPH)
-                  and a['annotation_path'].endswith(MINI_ANNO) and a['index_fp'] is None
-                  and a['outcome'] == 'answered' and 'refusal' not in a, a)
+            check(a['graph'] == MULTI_GRAPH_NAME and a['pair_id'] == MULTI_PAIR_ID
+                  and a['index_fp'] is None and a['outcome'] == 'answered'
+                  and 'refusal' not in a, a)
             c(a)
     return run
 
@@ -781,17 +797,16 @@ def multi_refused_pair(per_answer):
         check((answer['answered'], answer['refused']) == (1, 1),
               (answer['answered'], answer['refused']))
         refused, answered = answer['answers']
-        check(set(refused) == {'graph', 'graph_path', 'annotation_path', 'index_fp', 'outcome',
-                               'refusal'}, sorted(refused))
-        check(refused['graph'] == HASHED_NAME and refused['graph_path'].endswith('.orhashdbg')
-              and refused['annotation_path'].endswith('.column.annodbg')
+        check(set(refused) == {'graph', 'pair_id', 'index_fp', 'outcome', 'refusal'},
+              sorted(refused))
+        check(refused['graph'] == HASHED_NAME and refused['pair_id'] == HASHED_PAIR_ID
               and refused['index_fp'] is None and refused['outcome'] == 'refused', refused)
         check(set(refused['refusal']) == {'http_status', 'error', 'code'}
               and refused['refusal']['http_status'] == 400
               and refused['refusal']['code'] == 'representation_unsupported', refused['refusal'])
-        check(answered['graph'] == MULTI_GRAPH_NAME and answered['graph_path'].endswith(MINI_GRAPH)
-              and answered['annotation_path'].endswith(MINI_ANNO) and answered['index_fp'] is None
-              and answered['outcome'] == 'answered' and 'refusal' not in answered, answered)
+        check(answered['graph'] == MULTI_GRAPH_NAME and answered['pair_id'] == MULTI_PAIR_ID
+              and answered['index_fp'] is None and answered['outcome'] == 'answered'
+              and 'refusal' not in answered, answered)
         per_answer(answered)
     return run
 
@@ -1002,8 +1017,8 @@ FIXTURES = [
     get('pattern_capabilities_multi_graph', 'multi',
         '/pattern/capabilities?graph=' + MULTI_GRAPH_NAME,
         'the multi-graph server on the route of the full block: the envelope of one entry, the '
-        'block of the pair ?graph= selects, tagged with the pair (graph, graph_path as version '
-        '1 names it, annotation_path, index_fp, outcome)',
+        'block of the pair ?graph= selects, tagged with the pair (graph and pair_id as version '
+        '1 names it, index_fp, outcome)',
         probe_envelope('/pattern/capabilities',
                        expect_all(full_block(True, mask='file', counting='exact'),
                                   names_the_pair))),
@@ -2293,8 +2308,8 @@ FIXTURES = [
     post('multi_graph_count', 'multi',
          {'patterns': [p(NDM_F)], 'mode': 'count', 'graphs': [MULTI_GRAPH_NAME]}, 200,
          'a multi-graph server answers the graphs a request names (graphs, as /search): one '
-         'answer per pair, each the single-graph answer tagged with graph, graph_path, '
-         'annotation_path and index_fp',
+         'answer per pair, each the single-graph answer tagged with graph, pair_id and '
+         'index_fp',
          multi_answers(entries(exact(24)))),
     post('multi_graph_in_ram', 'multi',
          {'patterns': [p(NDM_F)], 'mode': 'count', 'graphs': [MULTI_GRAPH_NAME],
@@ -3004,7 +3019,8 @@ def readme(fixtures):
         'the first `determinism: time_limited` pattern of an answer (and, when the clock cut its',
         'release, its `returned` and `results`; the later ones, stopped by the same budget, are',
         'compared as they are).',
-        'Paths under the generator\'s work directory read `{work}/...`. Three fixtures are',
+        'Paths under the generator\'s work directory read `{work}/...`, a multi-graph',
+        'server\'s `pair_id` the id of its name and those paths. Three fixtures are',
         'HAND-MADE (no server produces them on demand); their text is the code\'s. No fixture',
         'holds `primary_unwrapped` (server_query and the CLI always wrap a PRIMARY graph),',
         '`alphabet_unsupported` (a graph of another alphabet does not load in this build),',
@@ -3054,6 +3070,21 @@ def generate(args, fixtures):
     return out
 
 
+def pair_ids(work):
+    """[(the pair_id a multi-graph server states, the id of the {work}/... spelling)] of the
+    pairs of the multi-graph servers' graph lists"""
+    out = []
+    for listing in ('graphs.csv', 'mixed.csv'):
+        with open(os.path.join(work, listing)) as f:
+            for line in f.read().split('\n'):
+                if line:
+                    name, graph, annotation = line.split(',')[:3]
+                    out.append((configured_pair_id(name, graph, annotation),
+                                configured_pair_id(name, graph.replace(work, '{work}'),
+                                                   annotation.replace(work, '{work}'))))
+    return out
+
+
 def answered(args, by_server):
     """{name: (request, answer)} of the fixtures |by_server| as their servers answer now."""
     out = {}
@@ -3064,6 +3095,9 @@ def answered(args, by_server):
     prefixes = [(work, '{work}'), (mini, '{mini}')]
     try:
         build_indexes(args.metagraph, mini, work)
+        # a pair's id hashes its paths as the graph list spells them: the id of the {work}/...
+        # spelling stands for it, as {work}/... stands for the paths
+        prefixes += pair_ids(work)
         for name, todo in by_server.items():
             server = Server(args.metagraph, server_args(name, mini, work),
                             os.path.join(work, f'server_{name}.log'))

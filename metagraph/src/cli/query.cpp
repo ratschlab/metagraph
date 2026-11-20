@@ -419,6 +419,7 @@ Json::Value SeqSearchResult::cut_to_json() const {
     // a cut without an N-th row (complete, or N = 0, or a unit refused, whose counts refuse()
     // set to 0) states its score and median null
     const bool nth_row = !cut_.complete && cut_.returned;
+    cut["matched"] = Json::UInt64(cut_.matched);
     cut["returned"] = Json::UInt64(cut_.returned);
     cut["complete"] = cut_.complete;
     cut["nth_score"] = nth_row ? Json::Value(Json::UInt64(cut_.nth_score)) : Json::Value();
@@ -444,13 +445,25 @@ Json::Value SeqSearchResult::cut_to_json() const {
     return cut;
 }
 
+Json::Value SeqSearchResult::cuts_json(const Json::Value &graph, const Json::Value &pair_id,
+                                       const Json::Value &index_fp) const {
+    Json::Value cut = cut_to_json();
+    cut["graph"] = graph;
+    cut["pair_id"] = pair_id;
+    cut["index_fp"] = index_fp;
+    Json::Value cuts(Json::arrayValue);
+    cuts.append(std::move(cut));
+    return cuts;
+}
+
 void SeqSearchResult::refuse(graph::SearchCut::Refused account, uint64_t max_mb,
                              uint64_t priced_mb) {
     assert(account != graph::SearchCut::Refused::NO);
     // no row is sent: the rows and their values freed, the variant's type kept
     std::visit([](auto &rows) { std::decay_t<decltype(rows)>().swap(rows); }, result_);
     // the cut states no row (returned 0, not complete, no N-th row, no tie); |abundances|,
-    // the member set, is the computed cut's
+    // the member set, and |matched|, the labels its search found above the thresholds, are
+    // the computed cut's
     cut_.returned = 0;
     cut_.complete = false;
     cut_.nth_score = 0;
@@ -616,6 +629,7 @@ SeqSearchResult execute_query(QuerySequence&& sequence,
                                                presence_fraction);
                 cut.abundances = anno_graph.has_kmer_abundances();
                 cut.returned = std::get<SeqSearchResult::LabelVec>(result).size();
+                cut.matched = cut.returned;
                 break;
             }
         }
@@ -1362,8 +1376,14 @@ int query_graph(Config *config) {
 
         auto query_callback = [config, k](const SeqSearchResult &result) {
             if (config->output_json) {
+                // each record with its `cuts`, as a single-graph server's /search states them
+                // (SPEC-multigraph-envelope.md section 3), the pair tags and index_fp null; not
+                // in the labels mode, which takes no top-N cut (as master's CLI)
+                Json::Value json = result.to_json(config->verbose_output, k);
+                if (config->query_mode != LABELS)
+                    json["cuts"] = result.cuts_json(Json::Value(), Json::Value(), Json::Value());
                 std::ostringstream ss;
-                ss << result.to_json(config->verbose_output, k) << "\n";
+                ss << json << "\n";
                 std::cout << ss.str();
             } else {
                 std::cout << result.to_string(config->anno_labels_delimiter,

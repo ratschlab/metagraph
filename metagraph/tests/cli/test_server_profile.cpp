@@ -19,6 +19,7 @@
 #include "cli/config/config.hpp"
 #include "cli/load/load_annotation.hpp"
 #include "cli/server_profile.hpp"
+#include "cli/server_selection.hpp"
 #include "cli/traverse.hpp"
 #include "graph/representation/bitmap/dbg_bitmap.hpp"
 #include "graph/representation/hash/dbg_hash_fast.hpp"
@@ -68,8 +69,9 @@ std::vector<std::string> names(const std::string &prefix, size_t n) {
 Json::Value profile(const AnnotatedDBG &index, const std::string &name = "g") {
     IndexIdentity id;
     id.meta_fp = index_meta_fingerprint(LabelOracle(index));
-    return pair_summary_json(index, id, name, "/data/" + name + "/graph.dbg",
-                             "/data/" + name + "/annotation.annodbg");
+    return pair_summary_json(index, id, name,
+                             pair_id_of(name, { "/data/" + name + "/graph.dbg",
+                                                "/data/" + name + "/annotation.annodbg" }));
 }
 
 // The rule as the SPEC states it, implemented apart from the server's: FNV-1a-64 (offset
@@ -259,7 +261,10 @@ TEST(MultiGraphProfile, TwoPairsOfOneBuildShareTheirSupportFp) {
     EXPECT_EQ(p1["support_fp"], p2["support_fp"]);
     EXPECT_NE(p1["index_meta_fp"], p2["index_meta_fp"]);
     EXPECT_NE(p1["traversal"]["num_labels"], p2["traversal"]["num_labels"]);
-    EXPECT_NE(p1["graph_path"], p2["graph_path"]);
+    EXPECT_NE(p1["pair_id"], p2["pair_id"]);
+    // no path: the pair is named by its id
+    EXPECT_FALSE(p1.isMember("graph_path"));
+    EXPECT_FALSE(p1.isMember("annotation_path"));
 
     auto plain = test::build_anno_graph<DBGSuccinct, RowDiffColumnAnnotator>(
             21, random_sequences(3, 90, 1), names("SRR1", 3), DeBruijnGraph::BASIC, false);
@@ -312,9 +317,8 @@ TEST(MultiGraphProfile, ExactlyTheCapabilityFieldsEnterSupportFp) {
         }
         EXPECT_EQ(support_fingerprint(nulled), support_fingerprint(removed)) << name;
     }
-    for (const char *name : { "graph", "graph_path", "annotation_path", "index_ns", "index_fp",
-                              "index_meta_fp", "support_fp", "traversal.num_labels",
-                              "a_member_added_later" }) {
+    for (const char *name : { "graph", "pair_id", "index_ns", "index_fp", "index_meta_fp",
+                              "support_fp", "traversal.num_labels", "a_member_added_later" }) {
         Json::Value changed = p;
         member(changed, name) = "other";
         EXPECT_EQ(fp, support_fingerprint(changed)) << name;
@@ -372,8 +376,8 @@ TEST(MultiGraphProfile, EveryMemberIsHashedOrExcluded) {
     using namespace mtg::annot;
     using namespace mtg::graph;
     const std::set<std::string> excluded {
-        "graph", "graph_path", "annotation_path", "index_ns", "index_fp", "index_meta_fp",
-        "traversal.num_labels", "support_fp",
+        "graph", "pair_id", "index_ns", "index_fp", "index_meta_fp", "traversal.num_labels",
+        "support_fp",
     };
     const std::set<std::string> hashed(support_fields().begin(), support_fields().end());
     for (const std::string &name : excluded) {
@@ -392,8 +396,7 @@ TEST(MultiGraphProfile, EveryMemberIsHashedOrExcluded) {
         // a multi-graph server's entry, and a single-graph server's pair_summary (tags null)
         IndexIdentity id;
         id.meta_fp = index_meta_fingerprint(LabelOracle(*index));
-        const Json::Value single = pair_summary_json(*index, id, Json::Value(), Json::Value(),
-                                                     Json::Value());
+        const Json::Value single = pair_summary_json(*index, id, Json::Value(), Json::Value());
         for (const Json::Value &p : { profile(*index), single }) {
             ASSERT_TRUE(p.isObject());
             ASSERT_TRUE(p["traversal"].isObject());

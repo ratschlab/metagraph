@@ -4,7 +4,6 @@
   {
    "algorithm_version": "traverse-0.2",
    "alphabet": "$ACGT",
-   "annotation_path": "{work}/masked/annotation.relaxed.relabeled.row_diff_brwt_coord.annodbg",
    "attempts": {
     "allowance_ms": 10000,
     "bound": "SPEC-labeled-traversal-core.md section 6.8, the attempt's bound",
@@ -113,7 +112,6 @@
    "discovery_trace_scale": "traced",
    "feature_level": 6,
    "graph": "mini_refseq",
-   "graph_path": "{work}/masked/graph_k31.dbg",
    "graphlet_format": 1,
    "has_coord_to_header": true,
    "has_coordinates": true,
@@ -155,6 +153,7 @@
    "memory_bound": "soft",
    "num_labels": 9,
    "outcome": "answered",
+   "pair_id": "n1-40d505e7-4711-5a2c-9779-3e49fcf051db",
    "pattern": {
     "annotation": "budgeted",
     "available": true,

@@ -29,6 +29,7 @@ files, the k-mers of the chunk's records (the contexts of a pattern, a seed's k-
 and the server's answers without the new fields.
 """
 
+import copy
 import json
 import os
 import random
@@ -43,10 +44,12 @@ import tempfile
 import threading
 import time
 import unittest
+import urllib.parse
 
 import requests
 
-from base import PROTEIN_MODE, TestingBase, METAGRAPH
+from base import PROTEIN_MODE, TestingBase, METAGRAPH, configured_pair_id
+from base import assert_no_configured_path, configured_paths
 from test_pattern import gate_block, jsoncpp_compact, members_once
 from test_traverse_forms import CHARGED
 
@@ -74,13 +77,18 @@ CHUNKS = [
 ]
 # a name over two graphs, as a production list names an index's chunks
 SPLIT = ('enterics', ['ecoli', 'kleb'])
-# what an envelope entry carries beside the pair's own answer (SPEC §24.1)
-TAGS = ('graph', 'graph_path', 'annotation_path', 'index_fp', 'outcome')
+# what an envelope entry carries beside the pair's own answer (SPEC §24.1): the pair by its
+# name and pair_id (master's n1 id), no path
+TAGS = ('graph', 'pair_id', 'index_fp', 'outcome')
 # the members of every POST envelope (SPEC-multigraph-envelope.md section 1); /pattern adds
 # pattern_contract_version
 ENVELOPE = {'envelope_version', 'route', 'graphs', 'answered', 'refused', 'not_reached',
             'unfinished', 'request_id', 'server_instance', 'deadline', 'answers', 'timing',
             'work'}
+# the words of a probe without ?graph= before train 8, after its route (they named
+# graph_path=<path>; train 8's name pair_id=<id>)
+NEEDS_OLD = ('needs ?graph=<name> (and graph_path=<path> when the name spans several graphs); GET '
+             '/capabilities lists the graphs')
 # the deadline block of a request that gives neither not_after_ms nor finish_by_ms
 NO_DEADLINE = {'not_after_ms': None, 'finish_by_ms': None, 'effective_deadline_at': None,
                'cutoff_at': None}
@@ -126,10 +134,18 @@ def records_of(paths):
     return [seq for _, seq in named_records_of(paths)]
 
 
-def changed_file_refusal(path, role, graph, annotation, how):
+def changed_file_refusal(role, name, graph, annotation, how):
     """The refusal of a load into RAM for a request (in_ram) of a pair one of whose files changed
     on disk since the server started (GPT review 7 finding 4, SPEC-multigraph-envelope.md
-    section 10)"""
+    section 10): the pair named by |name| and its pair_id, no path (train 8)"""
+    return (f"The {role} file of the pair ({name}, {configured_pair_id(name, graph, annotation)}) "
+            f"changed on disk since the server started ({how}): a request does not load it into "
+            f"RAM, since the answer would carry the start-up identity and certificates; restart "
+            f"onto the new files, or send the request without in_ram")
+
+
+def changed_file_log(path, role, graph, annotation, how):
+    """The server's log line of that refusal: the file and the pair's paths, for the operator"""
     return (f"The file '{path}' ({role}) of the pair ('{graph}', '{annotation}') changed on disk "
             f"since the server started ({how}): a request does not load it into RAM, since the "
             f"answer would carry the start-up identity and certificates; restart onto the new "
@@ -216,10 +232,19 @@ def untimed(value):
 
 class Server:
     """A server_query process on a free port, ready once GET /stats answers 200; |threads| is
-    its -p (the graph pool the pairs of a request run on, and its HTTP threads)."""
+    its -p (the graph pool the pairs of a request run on, and its HTTP threads). Every response
+    of this build that post() and get() return is checked to state none of the configured paths
+    (train 8: no path in any response, SPEC-multigraph-envelope.md section 1.2); a base binary's
+    are not. This build runs with its temporary directory (--disk-swap, where /search writes a
+    request's sequences) beside the log, unless |args| names one, so that the sweep knows it."""
 
     def __init__(self, args, log_path, timeout=300, threads=4, binary=None):
         os.environ['NO_PROXY'] = '127.0.0.1'
+        if not binary and '--disk-swap' not in args:
+            swap = os.path.join(os.path.dirname(os.path.abspath(log_path)), 'swap')
+            os.makedirs(swap, exist_ok=True)
+            args = list(args) + ['--disk-swap', swap]
+        self.paths = [] if binary else configured_paths(args)
         for _ in range(20):
             self.port = free_port()
             self.log_path = log_path
@@ -250,10 +275,14 @@ class Server:
         return f'http://127.0.0.1:{self.port}/{route}'
 
     def post(self, route, payload):
-        return requests.post(self.url(route), data=json.dumps(payload), timeout=300)
+        ret = requests.post(self.url(route), data=json.dumps(payload), timeout=300)
+        assert_no_configured_path(ret.text, self.paths, 'POST /' + route)
+        return ret
 
     def get(self, route):
-        return requests.get(self.url(route), timeout=60)
+        ret = requests.get(self.url(route), timeout=60)
+        assert_no_configured_path(ret.text, self.paths, 'GET /' + route)
+        return ret
 
     def text(self):
         with open(self.log_path) as f:
@@ -279,6 +308,68 @@ def guard(condition, reason):
         cls.setUpClass = classmethod(fail)
         return cls
     return decorate
+
+
+class TestNoPathSweep(unittest.TestCase):
+    """The sweep every Server response goes through (base.configured_paths and
+    assert_no_configured_path; SPEC-multigraph-envelope.md section 1.2) finds a configured path
+    in each form a response could state it: whole, as its real path, JSON-escaped (a non-ASCII
+    directory), URL-encoded, as a file's basename, the graph list's own path and the temporary
+    directory of --disk-swap (a /search temp file's text), a configured file's directory or the
+    file without its suffixes where either ends a path (not an input file beside them). A
+    single-graph GET /stats is exempt for its two basenames only. The sweep runs on every
+    response the requests package reads from a server of this build (base.sweep_every_response),
+    whichever helper started it."""
+
+    def test_each_spelling_is_found(self):
+        with tempfile.TemporaryDirectory() as d:
+            ref = os.path.join(d, 'r\u00e9f')
+            os.makedirs(ref)
+            graph, anno = os.path.join(ref, 'g.dbg'), os.path.join(ref, 'g.column.annodbg')
+            csv = os.path.join(d, 'graphs.csv')
+            with open(csv, 'w') as f:
+                f.write(f'n,{graph},{anno}\n')
+            swap = os.path.join(d, 'swap')
+            paths = configured_paths([csv, '--mmap', '--disk-swap', swap])
+            clean = json.dumps({'graph': 'n', 'pair_id': configured_pair_id('n', graph, anno),
+                                'error': 'pair (n, n1-...) changed on disk'})
+            assert_no_configured_path(clean, paths, 'POST /search')
+            leaks = {
+                'the path': json.dumps({'error': f'file {graph}'}, ensure_ascii=False),
+                'JSON-escaped': json.dumps({'error': f'file {anno}'}),
+                'its real path': os.path.realpath(graph),
+                'URL-encoded': json.dumps({'route': urllib.parse.quote(anno, safe='')}),
+                'URL-encoded, slashes kept': urllib.parse.quote(graph),
+                'a basename': json.dumps({'error': 'The file g.column.annodbg changed'}),
+                'the graph list': f'cannot read {csv}',
+                'the temporary directory': json.dumps(
+                    {'error': f'Error: temp file {swap}/tmp.lesyea creation failed'}),
+                'a directory alone': json.dumps({'error': f'cannot list {ref}'}),
+                'a directory, URL-encoded': urllib.parse.quote(ref, safe='') + '&x=1',
+                'a file without its suffixes': f'cannot load {os.path.join(ref, "g")}: missing',
+                'an annotation without its suffixes': json.dumps(
+                    {'error': f'{os.path.join(ref, "g.column")} not loaded'}),
+            }
+            for kind, text in leaks.items():
+                with self.subTest(kind):
+                    with self.assertRaises(AssertionError):
+                        assert_no_configured_path(text, paths, 'POST /search')
+            # an input file beside the configured ones is not one of them
+            for text in (json.dumps({'labels': [os.path.join(ref, 'g.fa'),
+                                                os.path.join(ref, 'input.fa')]}),
+                         urllib.parse.quote(os.path.join(ref, 'g.fa'), safe='')):
+                with self.subTest(beside=text):
+                    assert_no_configured_path(text, paths, 'POST /search')
+            stats = {'annotation': {'filename': 'g.column.annodbg', 'labels': 1},
+                     'graph': {'filename': 'g.dbg', 'k': 31}}
+            assert_no_configured_path(json.dumps(stats), paths, 'GET /stats')
+            # the two members only, on GET /stats only, a basename only
+            for where, body in (('GET /capabilities', stats),
+                                ('GET /stats', dict(stats, graph={'filename': graph})),
+                                ('GET /stats', dict(stats, note='g.dbg'))):
+                with self.subTest(where=where, body=body):
+                    with self.assertRaises(AssertionError):
+                        assert_no_configured_path(json.dumps(body), paths, where)
 
 
 @unittest.skipIf(PROTEIN_MODE, "the mini index is DNA")
@@ -330,6 +421,18 @@ class TestMultiGraphServer(TestingBase):
         super().tearDownClass()
 
     # -------------------------------------------------------------------- helpers
+
+    def pid(self, name, chunk=None):
+        """The pair_id of |chunk|'s pair (the chunk |name| by default) under the name |name|,
+        as the answers name it (configured_pair_id of the list's line)"""
+        return configured_pair_id(name, *self.pairs[chunk or name])
+
+    def chunk_of(self, pair):
+        """The chunk of the pair an answer names by graph and pair_id"""
+        for chunk, files in self.pairs.items():
+            if configured_pair_id(pair['graph'], *files) == pair['pair_id']:
+                return chunk
+        self.fail(f'no chunk is the pair {pair}')
 
     def kmers(self, chunk):
         out = set()
@@ -411,7 +514,7 @@ class TestMultiGraphServer(TestingBase):
         self.assertEqual(['ecoli', 'enterics', 'kleb', 'pseudo'], caps['graphs'])
         self.assertIn('pattern', caps['features'])
         self.assertEqual('POST /pattern', caps['routes']['pattern'])
-        self.assertEqual('GET /pattern/capabilities?graph={name}[&graph_path={path}]',
+        self.assertEqual('GET /pattern/capabilities?graph={name}[&pair_id={id}]',
                          caps['routes']['pattern_capabilities'])
         self.assertEqual({'routes': ['pattern', 'resolve', 'search', 'traverse'], 'loads': True,
                           'mem_cap_gb': 1, 'budgets_start': 'after_load'}, caps['in_ram'])
@@ -428,15 +531,18 @@ class TestMultiGraphServer(TestingBase):
         summary = caps['graph_summary']
         # the chunks' columns are their FASTA files: no file in two chunks
         self.assertEqual((True, 0), (summary['columns_disjoint'], summary['shared_columns']))
-        listed = [(p['graph'], p['graph_path']) for p in summary['pairs']]
-        self.assertEqual([('ecoli', self.pairs['ecoli'][0]), ('enterics', self.pairs['ecoli'][0]),
-                          ('enterics', self.pairs['kleb'][0]), ('kleb', self.pairs['kleb'][0]),
-                          ('pseudo', self.pairs['pseudo'][0])], listed)
+        # each pair by its name and pair_id (master's n1 id of the list's line), no path
+        self.assertEqual('n1', caps['multigraph']['pair_id'])
+        listed = [(p['graph'], p['pair_id']) for p in summary['pairs']]
+        self.assertEqual([('ecoli', self.pid('ecoli')), ('enterics', self.pid('enterics', 'ecoli')),
+                          ('enterics', self.pid('enterics', 'kleb')), ('kleb', self.pid('kleb')),
+                          ('pseudo', self.pid('pseudo'))], listed)
         for p in summary['pairs']:
-            chunk = {v[0]: c for c, v in self.pairs.items()}[p['graph_path']]
+            chunk = self.chunk_of(p)
             masked = chunk == 'ecoli'
             with self.subTest(pair=(p['graph'], chunk)):
-                self.assertEqual(self.pairs[chunk][1], p['annotation_path'])
+                self.assertNotIn('graph_path', p)
+                self.assertNotIn('annotation_path', p)
                 self.assertEqual((K, 'basic', True, None), (p['k'], p['graph_mode'],
                                                             p['available'],
                                                             p['unavailable_reason']))
@@ -472,7 +578,7 @@ class TestMultiGraphServer(TestingBase):
         self.assertIn('2 capability profile(s) (support_fp)', log)
         by_chunk = {}
         for p in caps['graph_summary']['pairs']:
-            chunk = {v[0]: c for c, v in self.pairs.items()}[p['graph_path']]
+            chunk = self.chunk_of(p)
             with self.subTest(pair=(p['graph'], chunk)):
                 probe = single(self.server.get(f'traverse/capabilities?graph={chunk}').json())
                 self.assertEqual(probe['index_meta_fp'], p['index_meta_fp'])
@@ -489,8 +595,8 @@ class TestMultiGraphServer(TestingBase):
                     by_chunk[chunk] = p
         for p in caps['graph_summary']['pairs']:
             if p['graph'] == 'enterics':
-                chunk = {v[0]: c for c, v in self.pairs.items()}[p['graph_path']]
-                self.assertEqual(by_chunk[chunk], dict(p, graph=chunk))
+                chunk = self.chunk_of(p)
+                self.assertEqual(by_chunk[chunk], dict(p, graph=chunk, pair_id=self.pid(chunk)))
         self.assertEqual(by_chunk['kleb']['support_fp'], by_chunk['pseudo']['support_fp'])
         self.assertNotEqual(by_chunk['kleb']['index_meta_fp'], by_chunk['pseudo']['index_meta_fp'])
         self.assertNotEqual(by_chunk['kleb']['traversal']['num_labels'],
@@ -507,10 +613,8 @@ class TestMultiGraphServer(TestingBase):
             self.assertEqual(('/' + route, ['ecoli', 'enterics', 'kleb', 'pseudo'],
                               len(summary), 0),
                              (out['route'], out['graphs'], out['answered'], out['refused']))
-            self.assertEqual([(p['graph'], p['graph_path'], p['annotation_path'], p['index_fp'])
-                              for p in summary],
-                             [(e['graph'], e['graph_path'], e['annotation_path'], e['index_fp'])
-                              for e in out['answers']])
+            self.assertEqual([(p['graph'], p['pair_id'], p['index_fp']) for p in summary],
+                             [(e['graph'], e['pair_id'], e['index_fp']) for e in out['answers']])
             for entry in out['answers']:
                 if entry['graph'] == 'enterics':
                     continue
@@ -586,8 +690,9 @@ class TestMultiGraphServer(TestingBase):
                 self.assertEqual({'http_status', 'error', 'code'}, set(entry['refusal']))
                 self.assertEqual((400, 'representation_unsupported'),
                                  (entry['refusal']['http_status'], entry['refusal']['code']))
-                self.assertEqual((f'{out_dir}/graph.orhashdbg', f'{out_dir}/anno.column.annodbg', None),
-                                 (entry['graph_path'], entry['annotation_path'], entry['index_fp']))
+                self.assertEqual((configured_pair_id('hashed', f'{out_dir}/graph.orhashdbg',
+                                                     f'{out_dir}/anno.column.annodbg'), None),
+                                 (entry['pair_id'], entry['index_fp']))
                 if available:
                     self.assertEqual('answered', {a['graph']: a for a in out['answers']}
                                      ['ecoli']['outcome'])
@@ -600,23 +705,31 @@ class TestMultiGraphServer(TestingBase):
     def test_pattern_capabilities_name_a_pair(self):
         enterics = self.server.get('pattern/capabilities?graph=enterics')
         self.assertEqual(400, enterics.status_code)
-        # a name of two pairs: a probe names one (SPEC-multigraph-envelope.md section 6)
-        # (in the words of the release-9 server, which a client matches whole)
-        self.assertEqual(('pair_ambiguous', f"Bad request: index 'enterics' spans several graphs "
-                                            f"({self.pairs['ecoli'][0]}, {self.pairs['kleb'][0]}); "
-                                            f"pass 'graph_path' to pick one"),
+        # a name of two pairs: a probe names one (SPEC-multigraph-envelope.md section 6), in
+        # train 8's words, which name the pairs by their pair_id and no path
+        self.assertEqual(('pair_ambiguous', f"Bad request: index 'enterics' holds several pairs "
+                                            f"({self.pid('enterics', 'ecoli')}, "
+                                            f"{self.pid('enterics', 'kleb')}); name one by its "
+                                            f"pair_id (GET /capabilities lists them)"),
                          (enterics.json()['code'], enterics.json()['error']))
-        self.assertEqual([self.pairs['ecoli'][0], self.pairs['kleb'][0]],
-                         [c['graph_path'] for c in enterics.json()['candidates']])
+        self.assertEqual([{'graph': 'enterics', 'pair_id': self.pid('enterics', 'ecoli')},
+                          {'graph': 'enterics', 'pair_id': self.pid('enterics', 'kleb')}],
+                         enterics.json()['candidates'])
         kleb = single(self.server.get('pattern/capabilities?graph=kleb').json(),
                       '/pattern/capabilities')
         quoted = requests.utils.quote(self.pairs['kleb'][0], safe='')
         picked = single(self.server.get(f'pattern/capabilities?graph=enterics&graph_path={quoted}')
                         .json())
-        self.assertEqual(('kleb', self.pairs['kleb'][0]), (kleb.pop('graph'), kleb.pop('graph_path')))
-        self.assertEqual(('enterics', self.pairs['kleb'][0]),
-                         (picked.pop('graph'), picked.pop('graph_path')))
+        self.assertEqual(('kleb', self.pid('kleb')), (kleb.pop('graph'), kleb.pop('pair_id')))
+        self.assertEqual(('enterics', self.pid('enterics', 'kleb')),
+                         (picked.pop('graph'), picked.pop('pair_id')))
         self.assertEqual(kleb, picked)
+        # by its pair_id: the pair its graph_path names
+        by_id = single(self.server.get('pattern/capabilities?graph=enterics&pair_id='
+                                       + self.pid('enterics', 'kleb')).json())
+        self.assertEqual(('enterics', self.pid('enterics', 'kleb')),
+                         (by_id.pop('graph'), by_id.pop('pair_id')))
+        self.assertEqual(kleb, by_id)
         probe = single(self.server.get('traverse/capabilities?graph=kleb').json())
         # the pair's gate block (SPEC-pattern-search.md §23.2)
         self.assertEqual(gate_block(kleb), probe['pattern'])
@@ -628,18 +741,43 @@ class TestMultiGraphServer(TestingBase):
             self.assertEqual(400, ret.status_code, query)
             self.assertIn(words, ret.json()['error'], query)
 
+    def _m6_rewordings(self):
+        """{train 8's text: the release-9 text} of the panels' refusals that named a configured
+        path (SPEC-multigraph-envelope.md section 6, train 8): the pairs by their pair_id, no
+        path; and the probes' unknown parameter, whose list names the parameters they take"""
+        ecoli, kleb = self.pairs['ecoli'][0], self.pairs['kleb'][0]
+        words = {
+            f"Bad request: index 'enterics' holds several pairs ({self.pid('enterics', 'ecoli')}, "
+            f"{self.pid('enterics', 'kleb')}); name one by its pair_id (GET /capabilities lists "
+            f"them)": f"Bad request: index 'enterics' spans several graphs ({ecoli}, {kleb}); pass "
+                      f"'graph_path' to pick one",
+            "Bad request: the graph_path given is not part of index 'enterics'":
+                "Bad request: graph_path '/nowhere' is not part of index 'enterics'",
+        }
+        for route in ('traverse/capabilities', 'pattern/capabilities'):
+            words[f'Bad request: in multi-graph mode GET /{route} needs ?graph=<name> (and '
+                  f'pair_id=<id> when the name holds several pairs); GET /capabilities lists '
+                  f'them'] = f'Bad request: in multi-graph mode GET /{route} {NEEDS_OLD}'
+            # the parameters a probe takes (fix round 1, n1; the release-9 list had two)
+            words[f"Bad request: unknown parameter 'x' of GET /{route} (graph, pair_id, "
+                  f"graph_path, annotation_path)"] = \
+                f"Bad request: unknown parameter 'x' of GET /{route} (graph, graph_path)"
+        return words
+
     def _refusal_panel(self):
         """Requests the release-9 server (8fa32e553) refused on this list, each with the
         refusal text it gave, byte for byte (a multi-graph client matches these texts whole;
-        SPEC-multigraph-envelope.md section 6 adds a code beside them, never a new wording):
-        (method, route, payload or query, code, text)"""
-        ecoli, kleb = self.pairs['ecoli'][0], self.pairs['kleb'][0]
+        SPEC-multigraph-envelope.md section 6 adds a code beside them), but for the texts that
+        named a configured path, train 8's (_m6_rewordings): (method, route, payload or query,
+        code, text)"""
         seed = self.records['ecoli'][0][1000:1100]
         t = {'seeds': [{'sequence': seed}]}
         r = {'sequence': seed}
-        spans = (f"Bad request: index 'enterics' spans several graphs ({ecoli}, {kleb}); pass "
-                 f"'graph_path' to pick one")
-        not_part = "Bad request: graph_path '/nowhere' is not part of index 'enterics'"
+        kleb = self.pairs['kleb'][0]
+        spans = (f"Bad request: index 'enterics' holds several pairs ({self.pid('enterics', 'ecoli')}, "
+                 f"{self.pid('enterics', 'kleb')}); name one by its pair_id (GET /capabilities "
+                 f"lists them)")
+        not_part = "Bad request: the graph_path given is not part of index 'enterics'"
         unknown = "Bad request: unknown graph 'nope'"
         both = "Bad request: give the graph as 'graph' or as 'graphs', not both"
         one_name = "Bad request: 'graphs' names the one graph a traversal reads: expected [name]"
@@ -647,13 +785,14 @@ class TestMultiGraphServer(TestingBase):
         panel = []
         for route in ('traverse/capabilities', 'pattern/capabilities'):
             needs = (f'Bad request: in multi-graph mode GET /{route} needs ?graph=<name> (and '
-                     f'graph_path=<path> when the name spans several graphs); GET /capabilities '
-                     f'lists the graphs')
+                     f'pair_id=<id> when the name holds several pairs); GET /capabilities lists '
+                     f'them')
             panel += [
                 ('GET', route, '?graph=enterics', 'pair_ambiguous', spans),
                 ('GET', route, '?graph=nope', 'graph_unknown', unknown),
                 ('GET', route, '?graph=kleb&x=1', None,
-                 f"Bad request: unknown parameter 'x' of GET /{route} (graph, graph_path)"),
+                 f"Bad request: unknown parameter 'x' of GET /{route} (graph, pair_id, "
+                 f"graph_path, annotation_path)"),
                 ('GET', route, '?graph=kleb&graph=ecoli', None,
                  "Bad request: the parameter 'graph' is given twice"),
                 ('GET', route, '?graph_path=x', None, needs),
@@ -740,6 +879,176 @@ class TestMultiGraphServer(TestingBase):
                 self.assertEqual(text, body['error'])
                 self.assertEqual(code, body.get('code'))
 
+    def test_no_response_states_a_configured_path(self):
+        """Train 8 (docs/DESIGN-pair-identity.md section 3.1; SPEC-multigraph-envelope.md
+        section 1.2): no response states a configured path. Swept over every route, probe and
+        refusal of a multi-graph and a single-graph server: GET /capabilities, /stats,
+        /column_labels, the probes (every pair, one by name, by its paths, by its pair_id, and
+        their refusals), /search, /resolve, /traverse and /pattern (answers, with in_ram too, the
+        selection refusals of _refusal_panel and of the pairs selector, with a path or an id
+        that names no pair), GET /requests and /traverse/attempt, /align. A request that names a
+        pair by its paths is answered without them. Server.post and .get check every response of
+        this build the same way, so the other tests sweep the cut-off pairs (not_reached,
+        unfinished), the changed files (index_changed) and the names cap."""
+        quote = lambda p: requests.utils.quote(p, safe='')
+        seed = self.records['ecoli'][0][1000:1100]
+        (ecoli_g, ecoli_a), (kleb_g, kleb_a) = self.pairs['ecoli'], self.pairs['kleb']
+        by_id = self.pid('enterics', 'kleb')
+        t = {'seeds': [{'sequence': seed}],
+             'strategy': {'direction': 'right', 'bounds': {'max_extension_bp': 50},
+                          'output': {'detail': 'summary'}}}
+        r = {'sequence': seed, 'discover': {'max_labels': 5}}
+        p = {'patterns': [{'dna': seed[:20]}], 'mode': 'count'}
+        q = {'FASTA': f'>q\n{seed}\n', 'top_labels': 3}
+        gets = ['capabilities', 'stats', 'column_labels', 'column_labels?offset=0&limit=1',
+                'requests/never-sent', 'traverse/attempt/never-sent']
+        for route in ('traverse/capabilities', 'pattern/capabilities'):
+            gets += [route + query for query in (
+                '', '?graph=kleb', '?graph=enterics', f'?graph=enterics&graph_path={quote(ecoli_g)}',
+                f'?graph=enterics&annotation_path={quote(kleb_a)}', f'?graph=enterics&pair_id={by_id}',
+                '?graph=enterics&pair_id=n1-x', '?graph=enterics&graph_path=%2Fnowhere',
+                f'?graph=enterics&annotation_path={quote(ecoli_g)}', f'?graph_path={quote(kleb_g)}',
+                f'?graph=kleb&pair_id={by_id}&graph_path={quote(kleb_g)}', '?graph=nope',
+                '?graph=kleb&x=1')]
+        pairs = [[{'graph': 'enterics', 'graph_path': ecoli_g}],
+                 [{'graph': 'enterics', 'pair_id': by_id}],
+                 [{'graph': 'enterics', 'pair_id': by_id, 'graph_path': kleb_g}],
+                 [{'graph': 'enterics', 'annotation_path': ecoli_g}],
+                 [{'graph': 'enterics', 'graph_path': '/nowhere'}],
+                 [{'graph': 'enterics', 'pair_id': self.pid('kleb')}],
+                 [{'graph': 'enterics'}], [{'graph': 'nope'}], [{'graph': 'kleb', 'x': 1}],
+                 [{'graph': 'enterics', 'graph_path': ecoli_g}, {'graph': 'kleb'}]]
+        posts = [('search', dict(q, graphs=graphs)) for graphs in
+                 (['enterics', 'kleb'], ['nope'], [], 'kleb')]
+        posts += [('search', q), ('search', dict(q, graphs=['kleb'], in_ram=True)),
+                  ('search', dict(q, pairs=[{'graph': 'kleb'}])), ('align', q)]
+        for route, body in (('resolve', r), ('traverse', t), ('pattern', p)):
+            posts += [(route, dict(body, pairs=selector)) for selector in pairs]
+            posts += [(route, dict(body, graphs=['enterics'])), (route, dict(body, graphs=['kleb'])),
+                      (route, dict(body, graphs=['kleb'], in_ram=True)),
+                      (route, dict(body, graphs=['ecoli', 'kleb']))]
+            if route != 'pattern':
+                posts += [(route, dict(body, graph='enterics')),
+                          (route, dict(body, graph='enterics', graph_path=kleb_g)),
+                          (route, dict(body, graph='enterics', graph_path='/nowhere')),
+                          (route, dict(body, graph_path=kleb_g))]
+        posts += [('resolve', dict(r, graphs=['enterics'], request_id='nopath-resolve')),
+                  ('pattern', dict(p, graphs=['enterics'], request_id='nopath-pattern')),
+                  ('traverse', dict(t, graphs=['kleb'], attempt_id='nopath-traverse'))]
+        gets += ['requests/nopath-resolve', 'requests/nopath-pattern', 'requests/nopath-traverse',
+                 'traverse/attempt/nopath-traverse']
+        statuses = {}
+        for route, body in posts:
+            with self.subTest(route=route, body={k: v for k, v in body.items()
+                                                 if k not in ('seeds', 'sequence', 'FASTA')}):
+                statuses.setdefault(route, set()).add(self.server.post(route, body).status_code)
+        for method, route, request, _, _ in self._refusal_panel():
+            with self.subTest(route=route, request=request):
+                self._ask(self.server, method, route, request)
+        for route in gets:
+            with self.subTest(get=route):
+                statuses.setdefault(route.split('?')[0], set()).add(self.server.get(route).status_code)
+        # the sweep reached answers and refusals of every POST route
+        for route in ('search', 'resolve', 'traverse', 'pattern'):
+            self.assertEqual({200, 400}, statuses[route] & {200, 400}, route)
+        # the pairs GET /capabilities lists: named by graph and pair_id
+        caps = self.server.get('capabilities').json()
+        self.assertEqual('n1', caps['multigraph']['pair_id'])
+        for pair in caps['graph_summary']['pairs']:
+            self.assertEqual(configured_pair_id(pair['graph'], *self.pairs[self.chunk_of(pair)]),
+                             pair['pair_id'])
+            self.assertFalse({'graph_path', 'annotation_path'} & set(pair), pair)
+        # the start-up log binds each pair's id to its paths, once, in the answers' pair order
+        # (logs keep the paths: an operator reads there which files an id names)
+        with open(self.server.log_path, encoding='utf-8') as f:
+            bound = re.findall(r"\[Server\] Pair (\S+) (n1-[0-9a-f-]+): graph '([^']*)', "
+                               r"annotation '([^']*)'", f.read())
+        self.assertEqual([(p['graph'], p['pair_id'], *self.pairs[self.chunk_of(p)])
+                          for p in caps['graph_summary']['pairs']], bound)
+
+        # a single-graph server: the same routes, its pair's tags null
+        single = Server(['-i', kleb_g, '-a', kleb_a, '--mmap', '--mem-cap-gb', '1'],
+                        os.path.join(self.tempdir.name, 'server_nopath_single.log'))
+        try:
+            for route in ('capabilities', 'stats', 'column_labels', 'traverse/capabilities',
+                          'pattern/capabilities', 'traverse/capabilities?graph=kleb',
+                          'pattern/capabilities?graph_path=x', 'requests/never-sent'):
+                with self.subTest(single_get=route):
+                    single.get(route)
+            for route, body in (('search', q), ('search', dict(q, in_ram=True)),
+                                ('search', dict(q, pairs=[{'graph': 'kleb'}])), ('align', q),
+                                ('resolve', r), ('resolve', dict(r, graph='kleb')),
+                                ('resolve', dict(r, request_id='nopath-single')),
+                                ('traverse', t), ('traverse', dict(t, graph_path=kleb_g)),
+                                ('traverse', dict(t, pairs=[{'graph': 'kleb'}])),
+                                ('pattern', p), ('pattern', dict(p, graphs=['kleb']))):
+                with self.subTest(single=route, body=sorted(body)):
+                    single.post(route, body)
+            single.get('requests/nopath-single')
+            caps = single.get('capabilities').json()
+            self.assertEqual((None, None), (caps['pair_summary']['graph'],
+                                            caps['pair_summary']['pair_id']))
+            [answer] = single.post('search', q).json()
+            self.assertEqual([(None, None)], [(c['graph'], c['pair_id']) for c in answer['cuts']])
+        finally:
+            single.stop()
+
+    def test_top_level_pair_fields_are_refused_alike(self):
+        """pair_id and annotation_path at the top level of a /resolve or /traverse request
+        (they go in an object of pairs) are refused 400 in one text, without a code, however
+        many pairs the request names (fix round 1, m3: a /traverse on 'enterics', two pairs, was
+        refused traverse_single_pair, one on 'kleb' "request: unknown field 'pair_id'")."""
+        seed = self.records['ecoli'][0][1000:1100]
+        t = {'seeds': [{'sequence': seed}],
+             'strategy': {'direction': 'right', 'bounds': {'max_extension_bp': 50}}}
+        r = {'sequence': seed, 'discover': {'max_labels': 5}}
+        kleb = self.pid('kleb')
+        for route, body in (('traverse', t), ('resolve', r)):
+            for field, selection in (
+                    ('pair_id', {'graph': 'enterics', 'pair_id': self.pid('enterics', 'kleb')}),
+                    ('pair_id', {'graph': 'kleb', 'pair_id': kleb}),
+                    ('pair_id', {'graphs': ['enterics'], 'pair_id': kleb}),
+                    ('pair_id', {'pair_id': kleb}),
+                    ('pair_id', {'pairs': [{'graph': 'kleb', 'pair_id': kleb}], 'pair_id': kleb}),
+                    ('annotation_path', {'graph': 'enterics', 'annotation_path': 'x'}),
+                    ('annotation_path', {'graph': 'kleb', 'annotation_path': 'x'})):
+                with self.subTest(route=route, selection=selection):
+                    ret = self.server.post(route, dict(body, **selection))
+                    self.assertEqual(400, ret.status_code, ret.text[:2000])
+                    self.assertEqual(
+                        {'error': f"request: unknown field '{field}': name the pair in an object "
+                                  "of pairs, {graph, pair_id} or {graph, graph_path?, "
+                                  "annotation_path?} (GET /capabilities lists the pairs)"},
+                        ret.json())
+
+    def test_a_search_temp_file_that_fails_states_no_path(self):
+        """/search writes a request's sequences to a file in the server's temporary directory
+        (--disk-swap) before it queries them: one it cannot make fails the request 400 in a text
+        without the directory, on a multi-graph and a single-graph server alike, and the log
+        names the file (fix round 1, M1). Before, the 400 stated the file's path, which
+        Server.post's sweep finds (the directory lies under the test's)."""
+        missing = os.path.join(self.tempdir.name, 'no', 'such', 'swap')
+        q = {'FASTA': f'>q\n{self.records["kleb"][0][1000:1100]}\n'}
+        kleb_g, kleb_a = self.pairs['kleb']
+        text = ("search: the request's sequences could not be written to the server's temporary "
+                "directory (the server's log names the directory and the reason)")
+        for kind, args, body in (
+                ('multi', [self.csv, '--mmap', '--mem-cap-gb', '1'], dict(q, graphs=['enterics'])),
+                ('single', ['-i', kleb_g, '-a', kleb_a, '--mmap'], q)):
+            with self.subTest(kind):
+                server = Server(args + ['--disk-swap', missing],
+                                os.path.join(self.tempdir.name, f'server_tmpfile_{kind}.log'))
+                try:
+                    ret = server.post('search', body)
+                    self.assertEqual(400, ret.status_code, ret.text[:2000])
+                    self.assertEqual({'error': text}, ret.json())
+                    self.assertIn("[Server] /search: the temporary file of the request's "
+                                  f"sequences: Error: temp file {missing}/tmp.", server.text())
+                    # the request failed alone
+                    self.assertEqual(200, server.get('stats').status_code)
+                finally:
+                    server.stop()
+
     def _names_cap_server(self, name, binary=None):
         return Server([self.csv, '--mmap', '--mem-cap-gb', '1', '--max-graphs-without-selection',
                        '1'], os.path.join(self.tempdir.name, f'server_cap_{name}.log'),
@@ -764,12 +1073,13 @@ class TestMultiGraphServer(TestingBase):
              {'error': "Bad request: 'graph' (index name) is required in multi-graph mode"},
              True),
         ]
+        # train 8's words (no path): the release-9 server's were _m6_rewordings' old ones
         for route in ('traverse/capabilities', 'pattern/capabilities'):
             panel.append(('GET', route, '',
                           {'error': f'Bad request: in multi-graph mode GET /{route} needs '
-                                    f'?graph=<name> (and graph_path=<path> when the name spans '
-                                    f'several graphs); GET /capabilities lists the graphs'},
-                          True))
+                                    f'?graph=<name> (and pair_id=<id> when the name holds '
+                                    f'several pairs); GET /capabilities lists them'},
+                          False))
         return panel
 
     def test_the_names_cap_texts_are_those_before_release_10(self):
@@ -793,16 +1103,21 @@ class TestMultiGraphServer(TestingBase):
         and error text for every request it answered (the code is release 10's addition)."""
         base = Server([self.csv, '--mmap', '--mem-cap-gb', '1'],
                       os.path.join(self.tempdir.name, 'server_base.log'), binary=BASE_BINARY)
+        # the texts that named a configured path are train 8's: the base answers the old ones
+        old_of = self._m6_rewordings()
         try:
             for method, route, request, code, text in self._refusal_panel():
                 with self.subTest(route=route, request=request):
                     a = self._ask(base, method, route, request)
                     b = self._ask(self.server, method, route, request)
-                    self.assertEqual((400, text), (a.status_code, a.json()['error']))
-                    self.assertEqual((a.status_code, a.json()['error']),
-                                     (b.status_code, b.json()['error']))
+                    self.assertEqual((400, old_of.get(text, text)),
+                                     (a.status_code, a.json()['error']))
+                    self.assertEqual((400, text), (b.status_code, b.json()['error']))
         finally:
             base.stop()
+        # every rewording was asked
+        asked = {text for *_, text in self._refusal_panel()}
+        self.assertEqual(set(old_of), set(old_of) & asked)
         base, new = self._names_cap_server('base', BASE_BINARY), self._names_cap_server('new2')
         try:
             for method, route, request, body, as_base in self._names_cap_panel():
@@ -1062,8 +1377,8 @@ class TestMultiGraphServer(TestingBase):
         for answer in out['answers']:
             chunk = answer['graph']
             with self.subTest(chunk=chunk):
-                self.assertEqual(self.pairs[chunk], (answer['graph_path'],
-                                                     answer['annotation_path']))
+                self.assertEqual(self.pid(chunk), answer['pair_id'])
+                self.assertNotIn('graph_path', answer)
                 self.assertIsNone(answer['index_fp'])
                 self.assertEqual('answered', answer['outcome'])
                 tagless = {k: v for k, v in answer.items() if k not in TAGS}
@@ -1076,9 +1391,9 @@ class TestMultiGraphServer(TestingBase):
         self.assertEqual(('exact', len(expected)), (counted['relation'], counted['value']))
         # a name over two graphs: one answer per pair, in the list's order
         both = self.post('pattern', dict(request, graphs=['enterics']))
-        self.assertEqual([('enterics', self.pairs['ecoli'][0]),
-                          ('enterics', self.pairs['kleb'][0])],
-                         [(a['graph'], a['graph_path']) for a in both['answers']])
+        self.assertEqual([('enterics', self.pid('enterics', 'ecoli')),
+                          ('enterics', self.pid('enterics', 'kleb'))],
+                         [(a['graph'], a['pair_id']) for a in both['answers']])
         self.assertEqual(untimed(out['answers'][0]['patterns']),
                          untimed(both['answers'][0]['patterns']))
         # without graphs: every name of this small server
@@ -1120,8 +1435,7 @@ class TestMultiGraphServer(TestingBase):
                     for answer in out['answers']:
                         if answer['outcome'] == 'answered':
                             # the chunk of the pair (a name over two graphs names two chunks)
-                            chunk = next(c for c, (graph, _) in self.pairs.items()
-                                         if graph == answer['graph_path'])
+                            chunk = self.chunk_of(answer)
                             tagless = {k: v for k, v in answer.items() if k not in TAGS}
                             self.assertEqual(untimed(self.cli_pattern(chunk, single)),
                                              untimed(tagless))
@@ -1218,7 +1532,6 @@ class TestMultiGraphServer(TestingBase):
         cut = {c: self.records[c][0][4000:4100] for c in chunks}
         chunk_of_label = {os.path.basename(f): c for c in chunks for f in self.columns[c]}
         chunk_of_label.update({h.split()[0]: c for c in chunks for h, _ in self.named_records[c]})
-        chunk_of_graph = {self.pairs[c][0]: c for c in chunks}
         s = {'FASTA': ''.join(f'>{c}\n{cut[c]}\n' for c in chunks), 'discovery_fraction': 0.5}
         p = {'patterns': [{'dna': cut[c][:20]} for c in chunks], 'mode': 'count'}
 
@@ -1229,7 +1542,7 @@ class TestMultiGraphServer(TestingBase):
 
         def patterned(selection):
             out = self.post('pattern', dict(p, **selection))
-            return {chunk_of_graph[a['graph_path']] for a in out['answers']}
+            return {self.chunk_of(a) for a in out['answers']}
 
         for selection, expected in (({'graphs': ['ecoli']}, {'ecoli'}),
                                     ({'graphs': ['kleb']}, {'kleb'}),
@@ -1270,7 +1583,7 @@ class TestMultiGraphServer(TestingBase):
 
     def test_search_tags_rows_and_states_a_cut_per_pair(self):
         """SPEC-multigraph-envelope.md section 3 (E1): on a multi-graph server every /search
-        row carries its pair (graph, graph_path, annotation_path); the rows of a query sequence
+        row carries its pair (graph, pair_id: no path); the rows of a query sequence
         come in the index's pair order (the names in byte order, each name's pairs in the
         list's order); each query sequence states one cut per pair searched, in that order,
         empty pairs included, index_fp null for a pair without a manifest. The chunks' labels
@@ -1278,10 +1591,10 @@ class TestMultiGraphServer(TestingBase):
         chunks = [name for name, _, _, _ in CHUNKS]
         cut = {c: self.records[c][0][4000:4100] for c in chunks}
         s = {'FASTA': ''.join(f'>{c}\n{cut[c]}\n' for c in chunks), 'discovery_fraction': 0.5}
-        pair_tags = ('graph', 'graph_path', 'annotation_path')
+        pair_tags = ('graph', 'pair_id')
 
         def tags(name, chunk):
-            return dict(zip(pair_tags, (name,) + self.pairs[chunk]))
+            return {'graph': name, 'pair_id': self.pid(name, chunk)}
 
         # selected in any order: ecoli < enterics < kleb < pseudo, enterics' pairs as listed
         out = self.post('search', dict(s, graphs=['pseudo', 'enterics', 'ecoli']))
@@ -1305,15 +1618,16 @@ class TestMultiGraphServer(TestingBase):
                 # others may as well)
                 self.assertTrue({p for p in order if p[1] == chunk} <= set(seen), seen)
                 # one cut per pair, the empty ones included
-                self.assertEqual([dict(tags(*pair), index_fp=None, returned=returned.get(pair, 0),
-                                       complete=True, nth_score=None, tied=0, tied_returned=0)
+                self.assertEqual([dict(tags(*pair), index_fp=None, matched=returned.get(pair, 0),
+                                       returned=returned.get(pair, 0), complete=True,
+                                       nth_score=None, tied=0, tied_returned=0)
                                   for pair in order],
                                  query['cuts'])
                 empty += sum(1 for cut in query['cuts'] if cut['returned'] == 0)
                 # a pair under two names answers alike under each
                 untagged = lambda name: [{k: v for k, v in r.items() if k not in pair_tags}
                                          for r in rows if r['graph'] == name
-                                         and r['graph_path'] == self.pairs['ecoli'][0]]
+                                         and self.chunk_of(r) == 'ecoli']
                 self.assertEqual(untagged('ecoli'), untagged('enterics'))
         self.assertTrue(empty)
 
@@ -1341,7 +1655,7 @@ class TestMultiGraphServer(TestingBase):
                          complete['results'])
         [top] = self.post('search', dict(q, top_labels=1))
         self.assertEqual(complete['results'][:1], top['results'])
-        self.assertEqual([dict(tags('pseudo', 'pseudo'), index_fp=None, returned=1,
+        self.assertEqual([dict(tags('pseudo', 'pseudo'), index_fp=None, matched=2, returned=1,
                                complete=False, nth_score=scores[0], tied=2, tied_returned=1)],
                          top['cuts'])
 
@@ -1363,11 +1677,10 @@ class TestMultiGraphServer(TestingBase):
         self.assertNotIn('refusal', answered)
         tagless = {k: v for k, v in answered.items() if k not in TAGS}
         self.assertEqual(untimed(self.cli_pattern('ecoli', request)), untimed(tagless))
-        self.assertEqual({'graph', 'graph_path', 'annotation_path', 'index_fp', 'outcome',
-                          'refusal'}, set(refused))
-        self.assertEqual(('kleb', self.pairs['kleb'][0], self.pairs['kleb'][1], None, 'refused'),
-                         (refused['graph'], refused['graph_path'], refused['annotation_path'],
-                          refused['index_fp'], refused['outcome']))
+        self.assertEqual({'graph', 'pair_id', 'index_fp', 'outcome', 'refusal'}, set(refused))
+        self.assertEqual(('kleb', self.pid('kleb'), None, 'refused'),
+                         (refused['graph'], refused['pair_id'], refused['index_fp'],
+                          refused['outcome']))
         body = self.cli_refusal('kleb', request)
         self.assertEqual({'error', 'code'}, set(body))
         self.assertEqual('annotation_unbudgeted', body['code'])
@@ -1375,9 +1688,9 @@ class TestMultiGraphServer(TestingBase):
         self.assertIn("refused (400 annotation_unbudgeted)", self.server.text())
         # a name over two graphs: each pair's outcome, in the list's order
         both = self.post('pattern', dict(request, graphs=['enterics']))
-        self.assertEqual([('enterics', self.pairs['ecoli'][0], 'answered'),
-                          ('enterics', self.pairs['kleb'][0], 'refused')],
-                         [(a['graph'], a['graph_path'], a['outcome']) for a in both['answers']])
+        self.assertEqual([('enterics', self.pid('enterics', 'ecoli'), 'answered'),
+                          ('enterics', self.pid('enterics', 'kleb'), 'refused')],
+                         [(a['graph'], a['pair_id'], a['outcome']) for a in both['answers']])
         self.assertEqual((1, 1), (both['answered'], both['refused']))
         self.assertEqual(untimed(answered['patterns']), untimed(both['answers'][0]['patterns']))
         self.assertEqual(refused['refusal'], both['answers'][1]['refusal'])
@@ -1526,7 +1839,7 @@ class TestMultiGraphServer(TestingBase):
 
     @staticmethod
     def _ref(entry):
-        return {k: entry[k] for k in ('graph', 'graph_path', 'annotation_path')}
+        return {k: entry[k] for k in ('graph', 'pair_id')}
 
     def test_the_work_cutoff_keeps_the_completed_pair(self):
         """SPEC-multigraph-envelope.md section 4 (E4): the request's work cutoff is its
@@ -2776,9 +3089,9 @@ class TestMultiGraphServer(TestingBase):
         self.assertEqual('it-trv-1', entry['attempt']['attempt_id'])
         self.assertEqual(self.server.get('traverse/attempt/it-trv-1').json()['usage'],
                          entry['attempt']['usage'])
-        self.assertEqual([('ecoli', self.pairs['ecoli'][0], self.pairs['ecoli'][1], 'answered')],
-                         [(p['graph'], p['graph_path'], p['annotation_path'], p['outcome'])
-                          for p in entry['pairs']])
+        self.assertEqual([('ecoli', self.pid('ecoli'), 'answered')],
+                         [(p['graph'], p['pair_id'], p['outcome']) for p in entry['pairs']])
+        self.assertNotIn('graph_path', entry['pairs'][0])
         self.assertEqual({'status': 200, 'written': True},
                          {k: entry['response'][k] for k in ('status', 'written')})
 
@@ -2867,8 +3180,7 @@ class TestMultiGraphServer(TestingBase):
             self.post_to(server, 'traverse', t)
             entry = self._wait_ended(server, 'it-ret-1')
             (pair,) = entry['pairs']
-            self.assertEqual(('ecoli', self.pairs['ecoli'][0], self.pairs['ecoli'][1]),
-                             (pair['graph'], pair['graph_path'], pair['annotation_path']))
+            self.assertEqual(('ecoli', self.pid('ecoli')), (pair['graph'], pair['pair_id']))
             self.assertEqual('answered', pair['outcome'])
         finally:
             server.stop()
@@ -3099,7 +3411,9 @@ class TestMultiGraphServer(TestingBase):
         args = [csv, '--mmap', '--mem-cap-gb', f'{cap_gb:.9f}']
         server = Server(args, os.path.join(d, 'server.log'))
         graph, anno = pairs['kleb']
-        refusal = changed_file_refusal(anno, 'annotation', graph, anno, 'its status change time')
+        refusal = changed_file_refusal('annotation', 'kleb', graph, anno, 'its status change time')
+        # the log's line names the file and the pair's paths
+        logged_line = changed_file_log(anno, 'annotation', graph, anno, 'its status change time')
         kleb = self.records['kleb'][0]
         seed = kleb[20000:20100]
         p = {'patterns': [{'dna': kleb[5000:5020]}], 'mode': 'count', 'graphs': ['kleb']}
@@ -3132,7 +3446,7 @@ class TestMultiGraphServer(TestingBase):
             refused_entry(server.post('resolve', dict(r, in_ram=True)), '/resolve')
             log = server.text()
             # refused before any load: no loader ran, nothing was loaded into RAM
-            logged = log.count(refusal)
+            logged = log.count(logged_line)
             self.assertGreaterEqual(logged, 1, log[-3000:])
             self.assertEqual(0, log.count(f"Cannot load annotation from '{anno}'"), log[-3000:])
             self.assertEqual(0, log.count('loaded into RAM for it'), log[-3000:])
@@ -3148,7 +3462,7 @@ class TestMultiGraphServer(TestingBase):
                     self.assertIn(words, ret.json()['error'])
                     self.assertNotIn(refusal, ret.text)
             log = server.text()
-            self.assertEqual(logged, log.count(refusal), log[-3000:])
+            self.assertEqual(logged, log.count(logged_line), log[-3000:])
             self.assertEqual(0, log.count('loaded into RAM for it'), log[-3000:])
 
             # the server lives: the pair without in_ram, the other pair with it (above the cap)
@@ -3234,16 +3548,23 @@ class TestMultiGraphServer(TestingBase):
         ret = self.server.post('traverse', dict(one, graphs=['enterics']))
         self.assertEqual(400, ret.status_code)
         self.assertEqual('traverse_single_pair', ret.json()['code'])
-        self.assertIn("Bad request: index 'enterics' spans several graphs", ret.json()['error'])
-        self.assertEqual([('enterics', self.pairs['ecoli'][0]), ('enterics', self.pairs['kleb'][0])],
-                         [(c['graph'], c['graph_path']) for c in ret.json()['candidates']])
+        self.assertIn("Bad request: index 'enterics' holds several pairs", ret.json()['error'])
+        self.assertEqual([('enterics', self.pid('enterics', 'ecoli')),
+                          ('enterics', self.pid('enterics', 'kleb'))],
+                         [(c['graph'], c['pair_id']) for c in ret.json()['candidates']])
         picked = single(self.post('traverse', dict(one, graphs=['enterics'],
                                                    graph_path=self.pairs['ecoli'][0])))
         self.assertEqual(single(self.post('traverse', dict(one, graph='ecoli')))['results'],
                          picked['results'])
         # the pair the name and graph_path select is the entry's
-        self.assertEqual(('enterics',) + self.pairs['ecoli'],
-                         (picked['graph'], picked['graph_path'], picked['annotation_path']))
+        self.assertEqual(('enterics', self.pid('enterics', 'ecoli')),
+                         (picked['graph'], picked['pair_id']))
+        # and the pair its id selects
+        by_id = single(self.post('traverse', dict(one, pairs=[
+            {'graph': 'enterics', 'pair_id': self.pid('enterics', 'ecoli')}])))
+        self.assertEqual(picked['results'], by_id['results'])
+        self.assertEqual(('enterics', self.pid('enterics', 'ecoli')),
+                         (by_id['graph'], by_id['pair_id']))
         for payload, words, code in ((dict(one, graphs=['ecoli'], graph='ecoli'), 'not both',
                                       'selection_conflict'),
                                      (dict(one, graphs=['ecoli', 'kleb']), 'expected [name]',
@@ -3281,12 +3602,13 @@ class TestMultiGraphServer(TestingBase):
         self.assertEqual((('ecoli', 'envelope'), ('kleb', 'envelope')),
                          ((part.tag, part.pair_stated_by), (absent.tag, absent.pair_stated_by)))
         self.assertEqual((('ecoli', 'kleb'), ()), (u.expected, u._not_included))
-        # each key names its pair by graph and n1 id, computed from the paths the envelope
-        # states; the paths are key members only of a caller's pair without an id
-        # (DESIGN-graphlet-merge.md A.4)
+        # each key names its pair by graph and the n1 id the envelope states, which the
+        # library's configured_pair_id computes alike from the list's line; the paths are key
+        # members only of a caller's pair without an id (DESIGN-graphlet-merge.md A.4)
         self.assertEqual(tuple((name, graphlet_lib.configured_pair_id(name, *self.pairs[name]),
                                 None, None) for name in ('ecoli', 'kleb')),
                          (part.key[2:6], absent.key[2:6]))
+        self.assertEqual((self.pid('ecoli'), self.pid('kleb')), (part.key[3], absent.key[3]))
         # and no answer of the union states a configured path
         self.assertNotIn(self.tempdir.name, json.dumps(u.provenance(), default=str))
         self.assertEqual(('seed_not_in_graph', 'sent'), (absent.category, absent.seed_check))
@@ -3347,21 +3669,27 @@ class TestMultiGraphServer(TestingBase):
         self.assertEqual(u.digest, again.digest)
         # pairs=None: one request per pair GET /capabilities lists, every one expected and
         # included; ecoli's answer the same part, kleb and pseudo absent records whose seed
-        # this client sent
-        every = client.traverse_pairs(seed, strategy, timing=False)
-        listed_pairs = client.server_capabilities()['graph_summary']['pairs']
-        self.assertEqual(len({(p['graph'], p.get('graph_path'), p.get('annotation_path'))
-                              for p in listed_pairs}), len(every.expected_pairs))
-        self.assertEqual(len(every.expected_pairs), len(every.results))
-        whole = graphlet_lib.union_pairs(every.results, seed=every.seed,
-                                         expected_pairs=every.expected_pairs,
-                                         seqs_order=every.seqs_order)
-        self.assertEqual((len(every.results), ()),
-                         (len(whole.parts) + len(whole.absent), whole._not_included))
-        self.assertLessEqual({'kleb', 'pseudo'}, {a.tag for a in whole.absent})
-        self.assertTrue(all(a.seed_check == 'sent' for a in whole.absent))
-        (mine,) = [p for p in whole.parts if p.tag == 'ecoli']
-        self.assertEqual(u.parts[0].digest, mine.digest)
+        # this client sent. The library discovers the pairs by graph and pair_id, as
+        # GET /capabilities lists them, so the two pairs of 'enterics' are two requests
+        # (docs/DESIGN-pair-identity.md section 8, step 7). A library without check_pair_id
+        # discovers by paths and cannot tell them apart: that fails here, never skips.
+        with self.subTest('pairs=None discovery'):
+            self.assertTrue(hasattr(graphlet_lib.client, 'check_pair_id'),
+                            'discovery by pair_id needs the train-7 library (design step 7)')
+            every = client.traverse_pairs(seed, strategy, timing=False)
+            listed_pairs = client.server_capabilities()['graph_summary']['pairs']
+            self.assertEqual(len({(p['graph'], p['pair_id']) for p in listed_pairs}),
+                             len(every.expected_pairs))
+            self.assertEqual(len(every.expected_pairs), len(every.results))
+            whole = graphlet_lib.union_pairs(every.results, seed=every.seed,
+                                             expected_pairs=every.expected_pairs,
+                                             seqs_order=every.seqs_order)
+            self.assertEqual((len(every.results), ()),
+                             (len(whole.parts) + len(whole.absent), whole._not_included))
+            self.assertLessEqual({'kleb', 'pseudo'}, {a.tag for a in whole.absent})
+            self.assertTrue(all(a.seed_check == 'sent' for a in whole.absent))
+            (mine,) = [p for p in whole.parts if p.tag == 'ecoli']
+            self.assertEqual(u.parts[0].digest, mine.digest)
         # every pair lacks the seed: the arm-less union of absent records, built from seed=;
         # without seed= it is refused no_seed
         lacking = client.traverse_pairs(seed, strategy, pairs=['kleb', 'pseudo'], timing=False)
@@ -3375,6 +3703,201 @@ class TestMultiGraphServer(TestingBase):
         with self.assertRaises(graphlet_lib.CombineRefused) as refused:
             graphlet_lib.union_pairs(lacking.results, expected_pairs=lacking.expected_pairs)
         self.assertEqual('no_seed', refused.exception.code)
+
+    def _old_form(self, text, chunk):
+        """|text| (a standalone .mgt the library wrote from this engine's answer) as a document
+        stored before the engine named pairs by id: its J line names the pair by the paths of
+        |chunk| as the graph list spells them, no pair_id; the body as it is"""
+        lines = text.split('\n')
+        i = next(i for i, line in enumerate(lines) if line.startswith('J '))
+        j = json.loads(lines[i][2:])
+        j.pop('pair_id')
+        j['graph_path'], j['annotation_path'] = self.pairs[chunk]
+        lines[i] = 'J ' + json.dumps(j, sort_keys=True, separators=(',', ':'),
+                                     ensure_ascii=False)
+        return '\n'.join(lines)
+
+    def test_the_library_on_this_engines_pair_ids(self):
+        """Design step 7 (docs/DESIGN-pair-identity.md section 8): the train-7 library against
+        this engine's answers. GET /capabilities lists every pair by graph and pair_id, no path,
+        and states multigraph.pair_id "n1", so its listing resolves no id to paths; the
+        library's re-ask of a pair named by id (wire_pair()) is {graph, pair_id} without a
+        resolver and with one that does not know the id, the paths with one that does, and
+        this engine answers that pair either way. A name of several pairs ('enterics') is two
+        pairs: discovered, traversed, expected and unioned by id, each continued (next_request,
+        deepen, the tools' continue) on the pair that answered it. The documents the library
+        hands out name the pair by {graph, pair_id} (L1's review m5): an old document's too,
+        by the id this engine states; an old document is re-asked by its paths and answered by
+        that id. Every request the library sends is recorded (what goes on the wire) and every
+        answer it reads is swept for configured paths (Client below)."""
+        def swept(where, *bodies):
+            for body in bodies:
+                assert_no_configured_path(body if isinstance(body, str) else
+                                          json.dumps(body, default=str), self.server.paths,
+                                          where)
+
+        sent = []
+
+        class Client(graphlet_lib.TraverseClient):
+            """The library's client, its transport recorded and swept"""
+            def _request(self, method, path, payload=None, *args, **kw):
+                sent.append((method, path, copy.deepcopy(payload)))
+                out = super()._request(method, path, payload, *args, **kw)
+                swept(f'{method} {path.split("?")[0]}', out)
+                return out
+
+        client = Client('127.0.0.1', self.server.port)
+        name, (ce, ck) = SPLIT
+        e_id, k_id = self.pid(name, ce), self.pid(name, ck)
+        with self.subTest('GET /capabilities: an id-only listing'):
+            doc = client.server_capabilities()
+            swept('GET /capabilities', doc)
+            listed = doc['graph_summary']['pairs']
+            self.assertEqual(sorted([(c, self.pid(c)) for c, *_ in CHUNKS]
+                                    + [(name, e_id), (name, k_id)]),
+                             sorted((p['graph'], p['pair_id']) for p in listed))
+            self.assertEqual([], [p for p in listed
+                                  if {'graph_path', 'annotation_path'} & set(p)])
+            self.assertEqual('n1', doc['multigraph']['pair_id'])
+            self.assertTrue(client.states_pair_ids())
+            # the listing resolves no id to paths: it states none
+            listing = graphlet_lib.client.capabilities_pair_resolver(doc)
+            self.assertEqual([None] * len(listed), [listing(p['pair_id']) for p in listed])
+            # a probe by id answers that pair, by id
+            for pid in (e_id, k_id):
+                probe = client.capabilities(graph=name, pair_id=pid)
+                swept('GET /traverse/capabilities', probe)
+                self.assertEqual((name, pid), (probe['graph'], probe['pair_id']))
+        with self.subTest("the resolver default (L1's order) on this engine"):
+            knows = {k_id: (name,) + self.pairs[ck]}.get
+            by_id = {'graph': name, 'pair_id': k_id}
+            by_paths = dict(zip(('graph', 'graph_path', 'annotation_path'), knows(k_id)))
+            for resolver, wire in ((None, by_id), ({}.get, by_id), (knows, by_paths)):
+                c = Client('127.0.0.1', self.server.port, pair_resolver=resolver)
+                self.assertEqual(wire, c.wire_pair(name, k_id))
+                # the probe of the id goes out so on the wire (the hook), and this engine
+                # answers that pair, by its id
+                probe = c.capabilities(graph=name, pair_id=k_id)
+                self.assertEqual(('GET', '/traverse/capabilities?' + '&'.join(
+                    f'{k}={urllib.parse.quote(v, safe="")}' for k, v in wire.items()), None),
+                                 sent[-1])
+                self.assertEqual((name, k_id), (probe['graph'], probe['pair_id']))
+            # a resolver whose answer is not the id's pair: refused, nothing sent
+            lying = Client('127.0.0.1', self.server.port,
+                           pair_resolver={k_id: (name,) + self.pairs[ce]}.get)
+            with self.assertRaises(graphlet_lib.client.PairIdError) as cm:
+                lying.wire_pair(name, k_id)
+            self.assertEqual('pair_id_mismatch', cm.exception.code)
+
+        # an 80 bp seed of ecoli's record none of whose k-mers kleb or pseudo holds
+        others = self.kmers('kleb') | self.kmers('pseudo')
+        record = self.records['ecoli'][0]
+        start = next(i for i in range(30000, len(record) - 80, 500)
+                     if not any(record[i + j:i + j + K] in others for j in range(80 - K + 1)))
+        seed = record[start:start + 80]
+        strategy = {'direction': 'right', 'bounds': {'max_extension_bp': 60},
+                    'output': {'continuation_bp': 40}}
+        with self.subTest('a name of several pairs, by id'):
+            pairs = [{'graph': name, 'pair_id': e_id}, {'graph': name, 'pair_id': k_id}]
+            r = client.traverse_pairs(seed, strategy, pairs=pairs, timing=False)
+            self.assertEqual(tuple(pairs), r.expected_pairs)
+            swept('POST /traverse', *(x.raw for x in r.results))
+            self.assertEqual([graphlet_lib.client.Pair(name, None, None, pid)
+                              for pid in (e_id, k_id)],
+                             [graphlet_lib.client.answered_pair(x.envelope) for x in r.results])
+            self.assertIsNotNone(r.results[0].graphlets[0])
+            self.assertEqual([None], r.results[1].graphlets)
+            u = graphlet_lib.union_pairs(r.results, seed=r.seed,
+                                         expected_pairs=r.expected_pairs,
+                                         seqs_order=r.seqs_order)
+            (part,), (absent,) = u.parts, u.absent
+            self.assertEqual(((name, e_id, None, None), (name, k_id, None, None)),
+                             (part.key[2:6], absent.key[2:6]))
+            self.assertNotEqual(part.tag, absent.tag)
+            swept('the union', u.provenance(), u.to_fasta())
+            # discovery: one request per listed pair, both of the name's among them
+            every = client.traverse_pairs(seed, strategy, timing=False)
+            self.assertLessEqual(set(map(json.dumps, pairs)),
+                                 set(map(json.dumps, every.expected_pairs)))
+        g = client.traverse([seed], strategy, graph=name, pair_id=e_id).graphlets[0]
+        walk = next(w.path_id for w in g.walks('right')
+                    if g.continuation('right', w.path_id) is not None)
+        with self.subTest('continuations on the pair that answered'):
+            self.assertEqual(graphlet_lib.client.Pair(name, None, None, e_id),
+                             graphlet_lib.client.answered_pair(g.envelope))
+            req = g.next_request('right', [walk], bp=30)
+            self.assertEqual([{'graph': name, 'pair_id': e_id}], req['pairs'])
+            self.assertEqual(req['pairs'], client.wire_request(req)['pairs'])
+            out = client.deepen(g, 'right', [walk], bp=30)
+            last = [x for x in sent if x[0] == 'POST'][-1]
+            self.assertEqual(('POST', '/traverse', [{'graph': name, 'pair_id': e_id}]),
+                             last[:2] + (last[2]['pairs'],))
+            swept('POST /traverse', out.raw)
+            self.assertEqual(graphlet_lib.client.Pair(name, None, None, e_id),
+                             graphlet_lib.client.answered_pair(out.envelope))
+            self.assertIsNotNone(out.graphlets[0])
+            # a caller's resolver sends it by the paths; the same pair answers
+            knows = Client(
+                '127.0.0.1', self.server.port,
+                pair_resolver={e_id: (name,) + self.pairs[ce]}.get)
+            self.assertEqual([dict(zip(('graph', 'graph_path', 'annotation_path'),
+                                       (name,) + self.pairs[ce]))],
+                             knows.wire_request(req)['pairs'])
+            again = knows.deepen(g, 'right', [walk], bp=30)
+            self.assertEqual(knows.wire_request(req)['pairs'],
+                             [x for x in sent if x[0] == 'POST'][-1][2]['pairs'])
+            self.assertEqual(graphlet_lib.client.answered_pair(out.envelope),
+                             graphlet_lib.client.answered_pair(again.envelope))
+            self.assertEqual(out.graphlets[0].body_digest, again.graphlets[0].body_digest)
+        with self.subTest('documents handed out (m5), an old one re-asked by its paths'):
+            from metagraph.traverse.mcp_tools import GraphletTools
+            d = tempfile.mkdtemp(dir=self.tempdir.name)
+            ex = os.path.join(d, 'exports')
+            os.makedirs(ex)
+            pinned = Client('127.0.0.1', self.server.port, graph=name, pair_id=e_id)
+            tools = GraphletTools(graphlet_lib.GraphletStore(os.path.join(d, 'store')),
+                                  {'e': pinned}, export_dir=ex)
+            caps = tools.traverse_capabilities('e')['capabilities']
+            self.assertEqual((name, e_id), (caps['graph'], caps['pair_id']))
+            self.assertEqual(g.dump(envelope=True),
+                             graphlet_lib.client.document_without_paths(g.dump(envelope=True)))
+            # this engine's document, and the same document stored before ids (its paths)
+            new_path, old_path = os.path.join(ex, 'new.mgt'), os.path.join(ex, 'old.mgt')
+            g.save(new_path)
+            with open(new_path, encoding='utf-8', newline='') as f:
+                text = f.read()
+            with open(old_path, 'w', encoding='utf-8', newline='') as f:
+                f.write(self._old_form(text, ce))
+            for form, src in (('new', new_path), ('old', old_path)):
+                h = tools.graphlet_load(src)['handle']
+                outs = [tools.graphlet_export(h, format='mgt', path=f'{form}-e.mgt'),
+                        tools.graphlet_save(h, f'{form}-s.mgt')]
+                for o in outs:
+                    self.assertNotIn('error', o, o)
+                    with open(o['path'], encoding='utf-8', newline='') as f:
+                        handed = f.read()
+                    swept('a document handed out', handed)
+                    h2 = graphlet_lib.parse(handed)
+                    self.assertEqual(graphlet_lib.client.Pair(name, None, None, e_id),
+                                     graphlet_lib.client.answered_pair(h2.envelope), form)
+                    self.assertEqual(g.body_digest, h2.body_digest, form)
+                # re-asked: the new one by its id, the old one by its paths; this engine
+                # answers both on the pair of that id
+                stored = tools.store.graphlet(h)
+                sent_pairs = graphlet_lib.GraphletStore.request_of(stored)['pairs']
+                self.assertEqual([{'graph': name, 'pair_id': e_id}] if form == 'new' else
+                                 [dict(zip(('graph', 'graph_path', 'annotation_path'),
+                                           (name,) + self.pairs[ce]))], sent_pairs, form)
+                done = tools.traverse_continue(h, 'right', walk)
+                self.assertNotIn('error', done, done)
+                # and so it goes on the wire
+                last = [x for x in sent if x[0] == 'POST'][-1]
+                self.assertEqual(('POST', '/traverse', sent_pairs),
+                                 last[:2] + (last[2]['pairs'],), form)
+                swept('a continuation through the tools', done)
+                child = tools.store.graphlet(done['handle'])
+                self.assertEqual(graphlet_lib.client.Pair(name, None, None, e_id),
+                                 graphlet_lib.client.answered_pair(child.envelope), form)
 
     # -------------------------------------------------------------------- POST /resolve
 
@@ -3432,7 +3955,7 @@ class TestMultiGraphServer(TestingBase):
                           named['unfinished'], named['request_id'], named['deadline']))
         self.assertRegex(named['server_instance'], '^[0-9a-f]{16}$')
         (entry,) = named['answers']
-        self.assertEqual(('kleb', *self.pairs['kleb'], None, 'answered'),
+        self.assertEqual(('kleb', self.pid('kleb'), None, 'answered'),
                          tuple(entry[k] for k in TAGS))
         self.assertTrue(entry['labels'], entry)
         self.assertEqual(entry['work']['memory_bytes'], named['work']['memory_bytes'])
@@ -3458,13 +3981,17 @@ class TestMultiGraphServer(TestingBase):
                          (state['route'], [(p['graph'], p['outcome']) for p in state['pairs']]))
         # a name over two graphs: each pair; graph_path picks one
         both = self.post('resolve', dict(r, graph='enterics'))
-        self.assertEqual([('enterics', self.pairs['ecoli'][0]),
-                          ('enterics', self.pairs['kleb'][0])],
-                         [(a['graph'], a['graph_path']) for a in both['answers']])
+        self.assertEqual([('enterics', self.pid('enterics', 'ecoli')),
+                          ('enterics', self.pid('enterics', 'kleb'))],
+                         [(a['graph'], a['pair_id']) for a in both['answers']])
         self.assertEqual(untimed(tagless),
                          untimed({k: v for k, v in both['answers'][1].items() if k not in TAGS}))
         picked = self.post('resolve', dict(r, graph='enterics', graph_path=self.pairs['kleb'][0]))
-        self.assertEqual([self.pairs['kleb'][0]], [a['graph_path'] for a in picked['answers']])
+        self.assertEqual([self.pid('enterics', 'kleb')], [a['pair_id'] for a in picked['answers']])
+        # by its id, in an object of pairs
+        by_id = self.post('resolve', dict(r, pairs=[{'graph': 'enterics',
+                                                     'pair_id': self.pid('enterics', 'kleb')}]))
+        self.assertEqual(untimed(picked['answers']), untimed(by_id['answers']))
         # no selection: every name of this small server, each name's pairs
         every = self.post('resolve', r)
         self.assertEqual(['ecoli', 'enterics', 'kleb', 'pseudo'], every['graphs'])
@@ -3553,8 +4080,8 @@ class TestHeadersUnique(TestingBase):
             server.stop()
 
     def occurrence(self, name, file):
-        return {'graph': name, 'graph_path': self.pairs[name][0],
-                'annotation_path': self.pairs[name][1], 'column': file}
+        return {'graph': name, 'pair_id': configured_pair_id(name, *self.pairs[name]),
+                'column': file}
 
     def test_distinct_headers_are_certified(self):
         certificate, log = self.certificate(['a', 'b'])
@@ -3644,10 +4171,9 @@ class TestHeadersUnique(TestingBase):
         for occurrence, stated_occurrence in zip(example['pairs'], stated_example['pairs']):
             self.assertEqual(list(occurrence), list(stated_occurrence))
         # the sample's occurrences name pairs of its graph_summary
-        pairs = {(p['graph'], p['graph_path'], p['annotation_path']) for p in sample['pairs']}
+        pairs = {(p['graph'], p['pair_id']) for p in sample['pairs']}
         for occurrence in stated_example['pairs']:
-            self.assertIn((occurrence['graph'], occurrence['graph_path'],
-                           occurrence['annotation_path']), pairs)
+            self.assertIn((occurrence['graph'], occurrence['pair_id']), pairs)
 
     def test_a_pair_listed_under_two_names_is_counted_once(self):
         # a's pair also under a second name: its headers are no repeats of themselves, and its
@@ -3695,7 +4221,7 @@ class TestHeadersUnique(TestingBase):
                 if name == 'e':
                     e1, e2 = self.files['e']
                     # a single-graph server's pair tags are null, as its /search cuts'
-                    untagged = {'graph': None, 'graph_path': None, 'annotation_path': None}
+                    untagged = {'graph': None, 'pair_id': None}
                     self.assertEqual({'value': False, 'collisions': 1, 'examples': [
                         {'header': 'r9', 'occurrences': 2,
                          'pairs': [dict(untagged, column=e1), dict(untagged, column=e2)]}]},
@@ -3798,7 +4324,7 @@ class TestCapabilityProfile(TestingBase):
             p = self.entries[form]
             built = 'column' if form == 'chunk2' else form
             with self.subTest(form=form):
-                self.assertEqual(self.pairs[form], (p['graph_path'], p['annotation_path']))
+                self.assertEqual(configured_pair_id(form, *self.pairs[form]), p['pair_id'])
                 self.assertEqual(built, p['annotation_form'])
                 self.assertEqual(built in self.CHARGED, p['decode_charged'])
                 self.assertEqual('succinct', p['graph_representation'])
@@ -3871,8 +4397,7 @@ class TestCapabilityProfile(TestingBase):
             with self.subTest(form=form):
                 self.assertTrue(caps['ready'])
                 self.assertIsNone(caps['graph_summary'])
-                expected = dict(self.entries[form], graph=None, graph_path=None,
-                                annotation_path=None)
+                expected = dict(self.entries[form], graph=None, pair_id=None)
                 self.assertEqual(expected, caps['pair_summary'])
                 self.assertEqual(support_fp(caps['pair_summary']), caps['pair_summary']['support_fp'])
                 self.assertIn(f'Capability profile: succinct {form} annotation, support_fp '
@@ -4384,12 +4909,12 @@ class TestRecordMappingAtLoad(TestingBase):
             replace(os.path.join(self.d, 'swapped.seqs'), seqs)
             failed = server.post('search', dict(query, in_ram=True))
             assert_index_changed(self, failed, changed_file_refusal(
-                    seqs, 'coord_to_header', self.graph, anno, 'it is another file'))
+                    'coord_to_header', 'live', self.graph, anno, 'it is another file'))
             # the annotation replaced by one of three columns: refused, naming the annotation
             replace(os.path.join(self.d, 'three.column_coord.annodbg'), anno)
             failed = server.post('search', dict(query, in_ram=True))
             assert_index_changed(self, failed, changed_file_refusal(
-                    anno, 'annotation', self.graph, anno, 'it is another file'))
+                    'annotation', 'live', self.graph, anno, 'it is another file'))
             # the server runs on, its resident pair answering as before
             self.assertIsNone(server.process.poll())
             again = server.post('search', query)
@@ -4433,7 +4958,7 @@ class TestRecordMappingAtLoad(TestingBase):
             loaded = server.post('search', dict(query, in_ram=True))
             self.assertEqual((200, resident.json()), (loaded.status_code, loaded.json()))
             os.remove(anno)
-            refusal = changed_file_refusal(anno, 'annotation', self.graph, anno,
+            refusal = changed_file_refusal('annotation', 'gone', self.graph, anno,
                                            'it is gone or cannot be read')
             assert_index_changed(self, server.post('search', dict(query, in_ram=True)), refusal)
             ret = server.post('resolve', dict(resolve, in_ram=True))
@@ -4543,8 +5068,7 @@ class TestRecordMappingAtLoad(TestingBase):
                     loaded = server.post('search', dict(query, in_ram=True))
                     self.assertEqual((200, resident.json()), (loaded.status_code, loaded.json()))
                     change(graph, anno, seqs)
-                    refusal = changed_file_refusal(graph if role == 'graph' else anno, role,
-                                                   graph, anno, how)
+                    refusal = changed_file_refusal(role, 'live', graph, anno, how)
                     assert_index_changed(self, server.post('search', dict(query, in_ram=True)),
                                          refusal)
                     assert_index_changed(self, server.post('traverse', dict(bodies['traverse'],
@@ -4627,6 +5151,7 @@ class TestRecordMappingAtLoad(TestingBase):
                                      [r['sample'] for r in expected[0]['results']])
                     expected[0]['results'] = expected[0]['results'][:1]
                     expected[0]['cuts'][0]['returned'] = 1
+                    expected[0]['cuts'][0]['matched'] = 1
                     self.assertEqual(expected, ret.json())
             # a query of s1 alone matches no record
             ret = server.post('search', {'FASTA': f'>q\n{s1}', 'discovery_fraction': 0.0})
@@ -4774,8 +5299,7 @@ class TestLabelsDisjoint(TestingBase):
                                os.path.join(d, 'anno.column_coord.annodbg'))
 
     def tags(self, name):
-        return {'graph': name, 'graph_path': self.pairs[name][0],
-                'annotation_path': self.pairs[name][1]}
+        return {'graph': name, 'pair_id': configured_pair_id(name, *self.pairs[name])}
 
     def serve(self, names):
         csv = os.path.join(self.tempdir.name, '_'.join(names) + '.csv')
@@ -4819,7 +5343,7 @@ class TestLabelsDisjoint(TestingBase):
             caps = server.get('capabilities').json()
         finally:
             server.stop()
-        untagged = {'graph': None, 'graph_path': None, 'annotation_path': None}
+        untagged = {'graph': None, 'pair_id': None}
         # right alone: its own column y1.fa shadows its record y1.fa
         self.assertEqual({'value': False, 'collisions': 1, 'examples': [
             {'header': 'y1.fa', 'records': [dict(untagged, column='y2.fa')],
@@ -4986,8 +5510,7 @@ class TestResolveSelectionStops(TestingBase):
             self.assert_cut(entry, 'a_long')
             self.assertIn('GET /requests/x1-inline', entry['refusal']['error'])
             self.assertEqual((0, 1), (out['answered'], out['refused']))
-            self.assertEqual([{k: entry[k] for k in ('graph', 'graph_path', 'annotation_path')}],
-                             out['unfinished'])
+            self.assertEqual([{k: entry[k] for k in ('graph', 'pair_id')}], out['unfinished'])
             self.assertEqual(NO_DEADLINE, out['deadline'])
             self.assertGreater(took, 1.0)
             self.assertLess(took, 1.25 + self.LATE_S)

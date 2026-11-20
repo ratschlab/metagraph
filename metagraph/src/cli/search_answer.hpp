@@ -44,12 +44,11 @@ struct SearchRecordPrice {
     uint64_t tree = 0;
     uint64_t transient = 0;
 };
-// |tagged|: the rows and the cut carry the pair's tags (a multi-graph server); |index_fp|
-// empty: none (stated null)
+// |tagged|: the rows and the cut carry the pair's tags, |graph| and |pair_id| (a multi-graph
+// server); |index_fp| empty: none (stated null)
 SearchRecordPrice search_record_price(const SeqSearchResult &result, bool verbose_output,
                                       bool tagged, const std::string &graph,
-                                      const std::string &graph_path,
-                                      const std::string &annotation_path,
+                                      const std::string &pair_id,
                                       const std::string &index_fp);
 
 // What measuring one record's price (search_record_price) holds while it runs: the coordinate
@@ -68,16 +67,14 @@ uint64_t search_record_scratch(const SeqSearchResult &result, bool verbose_outpu
 SearchRecordPrice measure_search_record(graph::SearchAccount &answer, uint64_t *transient_charged,
                                         const SeqSearchResult &result, bool verbose_output,
                                         bool tagged, const std::string &graph,
-                                        const std::string &graph_path,
-                                        const std::string &annotation_path,
+                                        const std::string &pair_id,
                                         const std::string &index_fp);
 void charge_search_price(graph::SearchAccount &answer, uint64_t *transient_charged,
                          const SearchRecordPrice &price);
 SearchRecordPrice charge_search_record(graph::SearchAccount &answer, uint64_t *transient_charged,
                                        const SeqSearchResult &result, bool verbose_output,
                                        bool tagged, const std::string &graph,
-                                       const std::string &graph_path,
-                                       const std::string &annotation_path,
+                                       const std::string &pair_id,
                                        const std::string &index_fp);
 
 // One unit's object (a FASTA record on a pair; lane T7-P1), as process_search_request charges
@@ -94,9 +91,9 @@ SearchRecordPrice charge_search_record(graph::SearchAccount &answer, uint64_t *t
 // order). Past the request's bound throws graph::SearchAnswerTooLarge
 bool charge_search_unit(graph::SearchBudget &budget, uint64_t *transient_charged,
                         SeqSearchResult *result, bool verbose_output, bool tagged,
-                        const std::string &graph, const std::string &graph_path,
-                        const std::string &annotation_path, const std::string &index_fp,
-                        const std::string &pair, size_t pair_index = 0);
+                        const std::string &graph, const std::string &pair_id,
+                        const std::string &index_fp, const std::string &pair,
+                        size_t pair_index = 0);
 
 // The bytes of the per-position strings SeqSearchResult::to_json writes for a row (with
 // |verbose| as --verbose-output), computed without writing them: its signature's presence_mask,

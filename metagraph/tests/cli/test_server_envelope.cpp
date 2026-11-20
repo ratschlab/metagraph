@@ -98,9 +98,51 @@ std::optional<uint64_t> ms(const Json::Value &v) {
     return v.isNull() ? std::nullopt : std::optional<uint64_t>(v.asUInt64());
 }
 
+// The pairs the samples state (their reference graph lists: staging's r237 and the fixtures
+// the recorded samples ran on), as (graph path, annotation path) by name
+const std::vector<std::pair<std::string, GraphPair>>& sample_pairs() {
+    static const std::vector<std::pair<std::string, GraphPair>> pairs = [] {
+        std::vector<std::pair<std::string, GraphPair>> out;
+        auto r237 = [&](const std::string &name, const std::string &nvme) {
+            const std::string dir = "/scratch/nvme" + nvme + "/refseq_r237/" + name + "/";
+            out.push_back({ name, { dir + "graph.dbg",
+                                    dir + "annotation.row_diff_brwt_coord.annodbg" } });
+        };
+        r237("bact_other", "8");
+        r237("bact_pseudomonadota", "10");
+        r237("inv_insecta", "8");
+        r237("inv_other", "9");
+        r237("plant", "8");
+        r237("vm_laurasiatheria", "11");
+        r237("vm_other", "9");
+        r237("vo_actinopterygii", "9");
+        r237("vo_amphibia_lobefins", "11");
+        r237("vo_other", "10");
+        r237("vo_sauropsida", "10");
+        for (const char *name : { "bact_other", "bact_pseudomonadota", "inv_insecta" }) {
+            out.push_back({ name, { std::string(name) + "/graph.dbg",
+                                    std::string(name) + "/annotation.column_coord.annodbg" } });
+        }
+        for (const char *name : { "left", "right" }) {
+            out.push_back({ name, { std::string(name) + "/graph.dbg",
+                                    std::string(name) + "/anno.column_coord.annodbg" } });
+        }
+        return out;
+    }();
+    return pairs;
+}
+
+// The pair an entry names by its graph and pair_id, among the samples' pairs
 SelectedPair pair_of_entry(const Json::Value &entry) {
-    return { entry["graph"].asString(),
-             { entry["graph_path"].asString(), entry["annotation_path"].asString() } };
+    for (const auto &[name, pair] : sample_pairs()) {
+        if (name == entry["graph"].asString()
+                && pair_id_of(name, pair) == entry["pair_id"].asString()) {
+            return { name, pair };
+        }
+    }
+    ADD_FAILURE() << "no pair of the samples has the tags " << entry["graph"] << " "
+                  << entry["pair_id"];
+    return { entry["graph"].asString(), {} };
 }
 
 // Each entry of |body|'s answers built again from its parts by the entry builders: the
@@ -112,8 +154,7 @@ std::vector<Json::Value> rebuilt_entries(const Json::Value &body) {
         const std::string fp = entry["index_fp"].isNull() ? "" : entry["index_fp"].asString();
         Json::Value rebuilt;
         if (entry["outcome"] == "answered") {
-            rebuilt = envelope_entry_answered(pair, fp, without(entry, { "graph", "graph_path",
-                                                                         "annotation_path",
+            rebuilt = envelope_entry_answered(pair, fp, without(entry, { "graph", "pair_id",
                                                                          "index_fp",
                                                                          "outcome" }));
         } else {
@@ -425,7 +466,8 @@ TEST(ServerEnvelope, RequestLevelMembers) {
     EXPECT_EQ("Label not found", out["answers"][2]["refusal"]["error"].asString());
 
     const Json::Value refs = envelope_pair_ref(a);
-    EXPECT_EQ(parse(R"({"graph": "a", "graph_path": "a.dbg", "annotation_path": "a.anno"})"),
+    // the pair by its name and id, no path
+    EXPECT_EQ(parse(R"({"graph": "a", "pair_id": "n1-447c01c2-688e-5223-a385-02506961cb91"})"),
               refs);
 
     // ISO-8601 UTC with milliseconds (1793438457750 ms since the epoch is that instant)
@@ -644,7 +686,7 @@ TEST(ServerEnvelope, Sample25SearchCoordinateRowsAreTheWriters) {
         }
         return tuples;
     };
-    const std::vector<std::string> tags { "graph", "graph_path", "annotation_path" };
+    const std::vector<std::string> tags { "graph", "pair_id" };
     Json::ArrayIndex next = 0;
     size_t with_target = 0;
     size_t without_target = 0;
@@ -679,11 +721,15 @@ TEST(ServerEnvelope, Sample25SearchCoordinateRowsAreTheWriters) {
         }
         ASSERT_EQ(stated.size(), cut["returned"].asUInt64()) << cut["graph"];
         mtg::graph::SearchCut c;
+        c.matched = cut["matched"].asUInt64();
         c.returned = cut["returned"].asUInt64();
         c.complete = cut["complete"].asBool();
         c.nth_score = cut["nth_score"].isNull() ? 0 : cut["nth_score"].asUInt64();
         c.tied = cut["tied"].asUInt64();
         c.tied_returned = cut["tied_returned"].asUInt64();
+        // matched: every row where complete, else at least the rows above the cut and its tie
+        EXPECT_EQ(c.complete, c.matched == c.returned) << cut["graph"];
+        EXPECT_LE(c.returned + c.tied - c.tied_returned, c.matched) << cut["graph"];
         const SeqSearchResult written(QuerySequence { 0, query["seq_description"].asString(), "" },
                                       std::move(result), {}, c);
         const Json::Value json = written.to_json(false, 31);
@@ -692,8 +738,8 @@ TEST(ServerEnvelope, Sample25SearchCoordinateRowsAreTheWriters) {
         for (size_t i = 0; i < stated.size(); ++i) {
             EXPECT_EQ(text(stated[i]), text(json["results"][static_cast<Json::ArrayIndex>(i)])) << i;
         }
-        EXPECT_EQ(text(written.cut_to_json()), text(without(cut, { "graph", "graph_path",
-                                                                   "annotation_path", "index_fp" })));
+        EXPECT_EQ(text(written.cut_to_json()), text(without(cut, { "graph", "pair_id",
+                                                                   "index_fp" })));
         EXPECT_TRUE(cut["index_fp"].isString());
         EXPECT_LE(c.returned, n);
     }
@@ -722,12 +768,15 @@ std::string sample_text(const std::string &name) {
 }
 
 // The refusal of sample pair B (bact_pseudomonadota) whose annotation was replaced by another
-// file since the server started, the paths the sample's tags state
+// file since the server started: the pair named by its name and the pair_id of r237's paths, no
+// path (train 8)
 std::string changed_annotation_of_b() {
     const std::string graph = "/scratch/nvme10/refseq_r237/bact_pseudomonadota/graph.dbg";
     const std::string annotation = "/scratch/nvme10/refseq_r237/bact_pseudomonadota/"
                                    "annotation.row_diff_brwt_coord.annodbg";
-    return changed_file_text(annotation, "annotation", graph, annotation, "it is another file");
+    return changed_file_text("annotation",
+                             pair_label("bact_pseudomonadota", { graph, annotation }),
+                             "it is another file");
 }
 
 } // namespace
@@ -866,6 +915,8 @@ TEST(ServerEnvelope, Samples71To75PartialRefusal) {
                 EXPECT_EQ(answer, r.isMember("priced_mb"));
                 mtg::graph::SearchCut cut;
                 cut.abundances = entry.isMember("nth_median");
+                // the computed cut's matched, which the refused entry keeps
+                cut.matched = entry["matched"].asUInt64();
                 SeqSearchResult stub(QuerySequence { i, description, "" },
                                      SeqSearchResult::LabelVec(), std::nullopt, cut);
                 stub.refuse(answer ? mtg::graph::SearchCut::Refused::ANSWER
@@ -873,7 +924,7 @@ TEST(ServerEnvelope, Samples71To75PartialRefusal) {
                             r["max_memory_mb"].asUInt64(),
                             answer ? r["priced_mb"].asUInt64() : 0);
                 Json::Value expected = stub.cut_to_json();
-                for (const char *tag : { "graph", "graph_path", "annotation_path", "index_fp" }) {
+                for (const char *tag : { "graph", "pair_id", "index_fp" }) {
                     expected[tag] = entry[tag];
                 }
                 EXPECT_EQ(text(expected), text(entry));

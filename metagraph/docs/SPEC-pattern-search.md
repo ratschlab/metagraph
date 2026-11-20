@@ -207,7 +207,7 @@ What this build serves (milestone 1, and increment 3 where marked), against the 
 | `supported_paths_level` | `"best"` \| `"label_intersection"` | `"best"` | increment 5s (§20.1): the support level the supported-path search prunes on; `"best"` is `record_verified` where the index can verify, else `label_intersection`. With `require_support: "record_verified"` under `"supported_paths"`, `"label_intersection"` is 400 `invalid_request`. Accepted with any request; it acts only with `long_search: "supported_paths"` |
 | `predicate_scope` | `"context"` \| `"motif"` | `"context"` | §25: `"motif"` also asks the predicate once of each pattern of at most k bases as a whole, on the union of its contexts' labels (the entry's `motif`); `"context"` is §19's answer. `"motif"` needs a predicate (else 400 `invalid_request`); `"context"` is accepted with any request and acts only with a predicate |
 | `max_mismatches` | integer | `0` | increment 5m-3 (§21.2): the most substitutions an instance may hold, 0 to 3 (the contract's maximum); another integer, a fraction, `null` or another type is 400 `invalid_request`. Each pattern is checked against the cap applied to it (its kind's `mismatches.max` of the capabilities; 0 for a pattern longer than k, §21.16): above it the pattern is answered in its slot with `mismatches_above_cap` (§21.8), never lowered. Above 0 with `output.labels` `"all"` or `"predicate_only"`, a predicate or `long_search: "supported_paths"`: 400 `later_increment` (§21.16). `0` is the field's absence |
-| `graphs` | list of names | every name, on a server of at most 10 | a multi-graph server's selection, the graphs `/search`'s field selects, read more strictly (§24.1): non-empty, names of its graph list (deduplicated); on a single-graph server 400 `invalid_request`; since release 10 `pairs` (`[{graph, graph_path?, annotation_path?}]`, SPEC-multigraph-envelope.md section 6) selects pairs instead, refused beside `graphs` |
+| `graphs` | list of names | every name, on a server of at most 10 | a multi-graph server's selection, the graphs `/search`'s field selects, read more strictly (§24.1): non-empty, names of its graph list (deduplicated); on a single-graph server 400 `invalid_request`; since release 10 `pairs` (`[{graph, pair_id?, graph_path?, annotation_path?}]`, SPEC-multigraph-envelope.md section 6; `pair_id` since train 8) selects pairs instead, refused beside `graphs` |
 | `in_ram` | boolean | `false` | as `/search`'s (§24): `true` loads the selected pair into RAM for the request on a multi-graph server that runs on mmap, when it fits `--mem-cap-gb`; the request's budgets start after the load, `timing.load_ms` states it. Accepted on every server (a single-graph server answers from the index it holds) |
 
 - An integer is a JSON number with an integral value (`5.0` is 5). A negative or fractional value is 400
@@ -456,7 +456,7 @@ answered; the refusals that no pair decides (the body, `graphs`, `in_ram`, the r
 | 400 | `alphabet_untested` | the graph's alphabet is `$ACGTN` (a DNA5 build): no DNA5 build has passed the pattern tests yet (the owner's decision of 2026-10-07; §8.2), with its mask or without | none on this build; a later build that passes them serves it |
 | 400 | `alphabet_unsupported` | the graph's alphabet is neither `$ACGT` nor `$ACGTN` | none (Protein build: §29) |
 | 400 | `annotation_unbudgeted` | increment 3: `output.labels: "all"` in a retrieval mode, and the annotation has no budget-aware decode (capabilities `annotation: "unbudgeted"`: a column, BRWT, row or other annotation without row-diff, or `row_diff_int_disk` / `row_diff_disk_coord`; only the row-diff family has one, since E14 every deployed row-diff form); increment 5b: a request with a predicate on such an annotation, in every mode (its selection reads rows); increment 5s: a request with `long_search: "supported_paths"`, in every mode (its search reads rows) | set `allow_unbudgeted_annotation: true` to read it without a memory bound on the reads (§14.4; a selection then reads single cells for at most 16 labels where the annotation has direct access, `selection.access: "columns"`), or ask for `labels: "none"` or mode `count` (without a predicate) |
-| 400 | `graph_unknown`, `selection_conflict`, `pair_not_found`, `pair_ambiguous` | a multi-graph server's selection (§24.1; SPEC-multigraph-envelope.md section 6, its codes): an unknown name in `graphs` or `pairs`, `graphs` beside `pairs`, a pair object naming none or several pairs of its name; the body adds `candidates` (`[{graph, graph_path, annotation_path}]`) where a choice exists | fix the selection: GET /capabilities lists the pairs |
+| 400 | `graph_unknown`, `selection_conflict`, `pair_not_found`, `pair_ambiguous` | a multi-graph server's selection (§24.1; SPEC-multigraph-envelope.md section 6, its codes): an unknown name in `graphs` or `pairs`, `graphs` beside `pairs`, a pair object naming none or several pairs of its name; the body adds `candidates` (`[{graph, pair_id}]`) where a choice exists | fix the selection: GET /capabilities lists the pairs |
 | 503 | `deadline` | the answer could not be written by `time_budget_ms` (§7.6): nothing partial is sent | narrow the request: fewer patterns, a smaller `max_contexts` or `max_steps`; a larger budget helps only when it lets the work end early. The operator can raise `--pattern-finalize-ms` or lower the delivery rates (§4.5) |
 | 413 | `body_too_large` | H1: the body is longer than `--max-request-body-mb` (§24.4), refused from its `Content-Length` before it is read (a chunked body at the chunk that passes it), on every route: `{"error", "code", "max_request_body_mb"}`, `Connection: close`; nothing ran, a `request_id` is not held | send a shorter body (`GET /capabilities` states the limit) |
 | 503 | `busy` | E19: the server runs its most `/pattern` requests at once (`--pattern-max-concurrent`; `SPEC-multigraph-envelope.md` §1.1). Refused before the body is parsed, with `Retry-After: 1` and the server's `server_instance` in the body: nothing ran, its `request_id` is not registered | send it again after `Retry-After` (the same `request_id` is admitted) |
@@ -1300,7 +1300,7 @@ It costs no step.
 - **`GET /pattern/capabilities`** (§23): the full block of §10.2, the document itself (not wrapped in an object).
 - **`GET /capabilities`**: `"pattern"` in `features`, `routes.pattern = "POST /pattern"`,
   `routes.pattern_capabilities = "GET /pattern/capabilities"` (on a multi-graph server
-  `"GET /pattern/capabilities?graph={name}[&graph_path={path}]"`), and the full block as its `pattern` member (on a
+  `"GET /pattern/capabilities?graph={name}[&pair_id={id}]"`), and the full block as its `pattern` member (on a
   multi-graph server without a graph, §24). The feature and the routes are listed whether or not this graph can be searched (as `align`
   is); `pattern.available` says whether it can. A client gates on both.
 - **`GET /traverse/capabilities`** (the document the service's probe reads): its `pattern` member is the gate
@@ -1310,9 +1310,9 @@ It costs no step.
 - While the single index loads, `/pattern/capabilities` answers 200 with the block's graph fields `null`
   (`available: null`), `/capabilities` with `ready: false` and the same block; `/traverse/capabilities` answers
   503.
-- On a multi-graph server (§24): the block of one pair on `/pattern/capabilities?graph=NAME[&graph_path=PATH]`
-  (in the envelope of one entry since release 10, the entry tagged with its pair: SPEC-multigraph-envelope.md
-  section 1) and its gate block (§23.2) on `/traverse/capabilities?graph=NAME`; on
+- On a multi-graph server (§24): the block of one pair on `/pattern/capabilities?graph=NAME[&pair_id=ID]` (or
+  the pair's `graph_path` and `annotation_path`; in the envelope of one entry since release 10, the entry tagged
+  with its pair: SPEC-multigraph-envelope.md section 1) and its gate block (§23.2) on `/traverse/capabilities?graph=NAME`; on
   `/capabilities` the block without a graph (its graph fields `null`, `available` whether a pair is served),
   beside `graph_summary`, every pair's `available`, `mask`, `counting`, `k`, `graph_mode` and identity. Builds
   before §24 answered `{pattern_contract_version: 1, available: false, unavailable_reason:
@@ -1680,7 +1680,7 @@ a client may use it. (Milestone 1b, the edge mask, is in this build and its fixt
 | 5m-3: bounded mismatches, patterns of L ≤ k — **served in this build (§21)**; the owner's decisions of 2026-10-09 and 2026-10-11 | `max_mismatches` (0–3, default 0) | `limits.max_mismatches`; per entry `max_mismatches`, `mismatch_information_bits`, `min_anchor_mismatch_information_bits`; `counts.contexts.by_mismatches`; `work.steps_by_mismatches`; `stop.mismatch_level`; each result's `mismatches` and `substitutions` (`substitution`, `residue_substitution`); the slot `mismatches_above_cap` with `max_mismatches_cap`; the floor slot's `max_mismatches_within_floor`; the answer order (level first) for such requests; 400 `later_increment` for the combinations of §21.16 | `mismatches` {`max`, `default`, `unit`, `protein_substitutes`, `edits`, `order`, `levels_rule`, `later_increment`}, in the full block only |
 | 5m-4: bounded mismatches, patterns longer than k (later; §21.16) | `max_mismatches` above 0 with L > k (answered in the slot with `mismatches_above_cap`, `max_mismatches_cap` 0, in this build) | `counts.anchors.by_mismatches`, `counts.paths.by_mismatches`, `work.extension_steps_by_mismatches`, path results with `mismatches` and `substitutions` | `mismatches.later_increment` loses `"long_patterns"` |
 | 5m-5: substitutions with labels, predicates and supported paths (later; §21.16) | `max_mismatches` above 0 with `output.labels` `"all"` or `"predicate_only"`, a predicate or `long_search: "supported_paths"` (400 `later_increment` in this build) | `by_label[].min_mismatches`, `counts.selected.by_mismatches`, `counts.supported_paths.by_mismatches` | `mismatches.later_increment` loses `"labels"`, `"predicate"`, `"supported_paths"` |
-| 6: multi-graph — **`graphs` served (§24)**, as `/search` serves it: one answer per pair, tagged; the service merges | `graphs` (as `/search` names graphs and chunks); `budget_split` (not served) | each pair's answer carries `graph`, `graph_path`, `annotation_path`, `index_fp`; a merged view (`by_shard`, `per_shard`, the merged order of design §8) is the requester's | the block per pair (`?graph=`), `graph_summary` on `GET /capabilities` |
+| 6: multi-graph — **`graphs` served (§24)**, as `/search` serves it: one answer per pair, tagged; the service merges | `graphs` (as `/search` names graphs and chunks); `budget_split` (not served) | each pair's answer carries `graph`, `pair_id`, `index_fp`; a merged view (`by_shard`, `per_shard`, the merged order of design §8) is the requester's | the block per pair (`?graph=`), `graph_summary` on `GET /capabilities` |
 
 - What stays: every field of §8 with its type and meaning; the relations and their algebra; the absence licences
   of §9; the order of §7.9; the refusal envelope `{error, code}`; the answer to a request that does not use a
@@ -4125,12 +4125,13 @@ fields a client gates on.
     and re-probes for availability, never reading `null` as `false`. A query parameter `graph` or `graph_path` is
     a 400 `{"error": "Bad request: this server hosts a single graph; remove the 'graph' / 'graph_path'
     parameter"}`, as on `/traverse/capabilities`; any other parameter is ignored.
-  - On a multi-graph server (§24): the block of the pair `?graph=NAME[&graph_path=PATH]` selects (selected as
-    `/traverse/capabilities` selects it), with `graph` and `graph_path` naming it; without `graph` a 400 naming
-    the parameter, an unknown or repeated parameter a 400, as there.
+  - On a multi-graph server (§24): the block of the pair `?graph=NAME[&pair_id=ID]` (or `&graph_path=PATH`
+    `[&annotation_path=PATH]`) selects (selected as `/traverse/capabilities` selects it), with `graph` and
+    `pair_id` naming it (train 8: no answer states a configured path); without `graph` a 400 naming the
+    parameter, an unknown or repeated parameter a 400, as there.
 - **`GET /capabilities`** keeps the full block as its `pattern` member, and its `routes` gain
   `"pattern_capabilities": "GET /pattern/capabilities"` (on a multi-graph server
-  `"GET /pattern/capabilities?graph={name}[&graph_path={path}]"`, §24) beside `routes.pattern`.
+  `"GET /pattern/capabilities?graph={name}[&pair_id={id}]"`, §24) beside `routes.pattern`.
 - **`GET /traverse/capabilities`**: its `pattern` member is the **gate block**, `pattern_traverse_block` of the full
   block: every field of the table below with the full block's value (`caps` the caps the table names), and
   `details: "GET /pattern/capabilities"`, where the full block is; no other field. 503 while the single index
@@ -4348,7 +4349,7 @@ how the search service uses it; the route serves any number.
 | `timing` | object | `elapsed_ms`: the whole request, the loads and the pairs' work included; `cpu_ms` (and `page_faults` on Linux, §8.4): the request's own thread (the parse, the checks, the envelope) plus every pair's work on its pool thread, from its index lease to its entry — an answered pair's top-level `cpu_ms` and the work of a pair refused after its lease (the loads' own threads not counted). Varies between runs |
 | `envelope_version` | integer | 1: the multi-graph envelope of `SPEC-multigraph-envelope.md` section 1 |
 | `route` | string | `/pattern` |
-| `not_reached` | list of objects | the pairs never started (refusal `code: "not_reached"`), each `{graph, graph_path, annotation_path}`, in the order of `answers` |
+| `not_reached` | list of objects | the pairs never started (refusal `code: "not_reached"`), each `{graph, pair_id}`, in the order of `answers` |
 | `unfinished` | list of objects | the pairs started and cut at the work cutoff (refusal `code: "unfinished"`), likewise |
 | `request_id` | string \| null | the request's `request_id` (`SPEC-multigraph-envelope.md` section 5); `null` without one |
 | `server_instance` | string | this server process (the attempt ledger's value). Varies between runs |
@@ -4358,8 +4359,7 @@ how the search service uses it; the route serves any number.
 | field | type | meaning |
 |---|---|---|
 | `graph` | string | the name the pair was selected by |
-| `graph_path` | string | the pair's graph, as the list spells it |
-| `annotation_path` | string | the pair's annotation, likewise |
+| `pair_id` | string | the pair's id: master's n1 id of the name and the pair's two paths as the list spells them (`SPEC-multigraph-envelope.md` section 1.2); no answer states a configured path |
 | `index_fp` | string \| null | the pair's index identity (its `index.index_fp`): what a requester merging the answers of several pairs, or of several requests, joins on; `null` without a manifest in the list (joins unverifiable). A refused entry states it from the graph list's manifest alone |
 | `outcome` | string | `answered`: the entry is the pair's answer (§8) with these tags; `refused`: the pair alone would have been refused, the entry is these tags and `refusal`, nothing of an answer |
 | `refusal` | object | refused entries only: `pair_refusal` |
@@ -4408,28 +4408,31 @@ the other pairs.
   fork successors beside a `row_diff` annotation, the `.seqs`, the graph's mask and Bloom filter, stamped at
   start-up) is not loaded for a request: the copy's answer would carry the start-up identity and certificates (GPT
   review 7 finding 4). It is refused as a load that fails (below), before its memory wait, nothing reserved, its
-  `error` `The file '<path>' (<role>) of the pair ('<graph_path>', '<annotation_path>') changed on disk since the
-  server started (<how>): a request does not load it into RAM, since the answer would carry the start-up identity
-  and certificates; restart onto the new files, or send the request without in_ram` (SPEC-multigraph-envelope.md
-  §10 lists the roles and the hows), with `"code": "index_changed"` beside it in the refusal block (the owner's
-  decision of 2026-11-11; the loader's failures below have no code). A copy whose annotation has other column labels
-  than the resident's (a check behind the stamps) is refused the same way, with the code and the text `The
-  annotation '<annotation_path>' loaded into RAM for the request has other column labels than the one the server
-  started with: restart onto the new files, or send the request without in_ram` (T4's review R3, N5). The pair is
-  still answered without `in_ram` from the files it mapped at start-up.
+  `error` `The <role> file of the pair (<name>, <pair_id>) changed on disk since the server started (<how>): a
+  request does not load it into RAM, since the answer would carry the start-up identity and certificates; restart
+  onto the new files, or send the request without in_ram` (SPEC-multigraph-envelope.md §10 lists the roles and the
+  hows; the server's log names the file by its path), with `"code": "index_changed"` beside it in the refusal block
+  (the owner's decision of 2026-11-11; the loader's failures below have no code). A copy whose annotation has other
+  column labels than the resident's (a check behind the stamps) is refused the same way, with the code and the text
+  `The annotation of the pair (<name>, <pair_id>) loaded into RAM for the request has other column labels than the
+  one the server started with: restart onto the new files, or send the request without in_ram` (T4's review R3,
+  N5). The pair is still answered without `in_ram` from the files it mapped at start-up.
 - A load for the request that fails -- a file of the pair that cannot be read or that its loader refuses (truncated
   or corrupted), a `row_diff` annotation's anchors or fork successors (files beside the graph) that cannot be
   loaded, a graph and annotation that are not compatible -- is a failure of that pair while it is processed (§24.1):
-  its entry `refused` with `http_status` 400 and `error` the loader's message, which names the file and the step
+  its entry `refused` with `http_status` 400 and `error` `pattern: pair (<name>, <pair_id>) could not be loaded:
+  the load into RAM for the request failed (the server's log names the file and the reason); send the request
+  without in_ram` (no `code`), the other pairs answered and the request 200. The server's log line `[Server] in_ram
+  load of (<name>, <pair_id>) failed: <message>` holds the loader's message, which names the file and the step
   (`Cannot load annotation from '<annotation_path>': <cause>`, `Cannot load graph from '<graph_path>': <cause>`,
-  `Cannot load anchor from '<path>': <cause>`, `Cannot load fork
-  successor bitmap from '<path>': <cause>`, `Graph '<graph_path>' and annotation '<annotation_path>' are not
-  compatible`; `<cause>` the file's failure as the server sees it, such as `Permission denied (missing read
-  permission on this file)`, `No such file or directory` or `could not read contents (possibly corrupted or
-  incompatible)`; no `code`), the other pairs answered and the request 200. The memory reserved for the load is
+  `Cannot load anchor from '<path>': <cause>`, `Cannot load fork successor bitmap from '<path>': <cause>`, `Graph
+  '<graph_path>' and annotation '<annotation_path>' are not compatible`; `<cause>` the file's failure as the server
+  sees it, such as `Permission denied (missing read permission on this file)`, `No such file or directory` or `could
+  not read contents (possibly corrupted or incompatible)`); before train 8 that message was the `error`. The memory reserved for the load is
   released, nothing of the copy is kept, and the server runs on with its resident indexes (a pair whose files are
   unreadable now is still answered without `in_ram` from the index it loaded at start-up). On `/traverse` and
-  `/resolve` the same failure is the route's 400 with that `error` (SPEC-labeled-traversal-core.md §10.3). A load
+  `/resolve` the same failure is the route's 400 with that `error`, the route named (`traverse: pair ...`,
+  `resolve: pair ...`; SPEC-labeled-traversal-core.md §10.3). A load
   at start-up that fails exits the process: the server has nothing to serve without its indexes.
 - The capabilities state it: the block's `in_ram: "accepted"` and `resident_only: false` (§10.2), and
   `GET /capabilities`' `in_ram` (which routes accept it, whether this server loads, `--mem-cap-gb`,
@@ -4437,20 +4440,22 @@ the other pairs.
 
 ### 24.3 The block per pair
 
-- `GET /pattern/capabilities?graph=NAME[&graph_path=PATH][&annotation_path=PATH]`: the full block (§10.2) of the
-  pair the parameters select, selected as `/traverse/capabilities` selects it (SPEC-multigraph-envelope.md section
-  6: a name over several graphs needs `graph_path`, a graph with several annotations under the name
-  `annotation_path`; a selection of none or several is a coded 400 with the candidates). Since release 10 in the
-  envelope of
-  SPEC-multigraph-envelope.md section 1, one entry: the block tagged `graph`, `graph_path`, `annotation_path`,
-  `index_fp`, `outcome` (before: the block with the fields of `capabilities_pair`). Without any parameter the
-  envelope over every pair, up to `max_graphs_without_selection` names; above it, and for parameters without
-  `graph`, the 400 of before release 10, byte for byte: `{"error": "Bad request: in multi-graph mode GET
-  /pattern/capabilities needs ?graph=<name> (and graph_path=<path> when the name spans several graphs); GET
-  /capabilities lists the graphs"}`; an unknown or repeated parameter: 400 (every refusal text of before release
-  10 is kept, SPEC-multigraph-envelope.md section 6).
-- `GET /traverse/capabilities?graph=NAME[&graph_path=PATH]`: its `pattern` member is that pair's gate block
-  (§23.2) with `details`.
+- `GET /pattern/capabilities?graph=NAME[&pair_id=ID]` (or `[&graph_path=PATH][&annotation_path=PATH]`): the full
+  block (§10.2) of the pair the parameters select, selected as `/traverse/capabilities` selects it
+  (SPEC-multigraph-envelope.md section 6: a name of several pairs needs `pair_id`, or its paths -- `graph_path` for
+  a name over several graphs, `annotation_path` for a graph with several annotations under the name; `pair_id`
+  beside a path is a plain 400; a selection of none or several is a coded 400 with the candidates). Since release
+  10 in the envelope of SPEC-multigraph-envelope.md section 1, one entry: the block tagged `graph`, `pair_id`,
+  `index_fp`, `outcome` (train 8: `pair_id` in place of `graph_path` and `annotation_path`; before release 10: the
+  block with the fields of `capabilities_pair`). Without any parameter the envelope over every pair, up to
+  `max_graphs_without_selection` names; above it, and for parameters without `graph`, the 400 `{"error": "Bad request: in multi-graph mode GET
+  /pattern/capabilities needs ?graph=<name> (and pair_id=<id> when the name holds several pairs); GET
+  /capabilities lists them"}`
+  (train 8; before, the text of before release 10, `... (and graph_path=<path> when the name spans several graphs);
+  GET /capabilities lists the graphs`); an unknown or repeated parameter: 400 (the refusal texts of before release
+  10 are kept, but those that named a configured path, SPEC-multigraph-envelope.md section 6).
+- `GET /traverse/capabilities?graph=NAME[&pair_id=ID]` (or the pair's paths): its `pattern` member is that pair's
+  gate block (§23.2) with `details`.
 - `GET /capabilities`: its `pattern` member is the full block without a graph (as while a single index loads: the
   graph fields and `predicate.access` `null`), with `available` `true` when a pair is served (else `false`, with
   the first pair's reason); the pairs are `graph_summary`'s (§24.4). Its top-level `max_graphs_without_selection`
@@ -4473,7 +4478,7 @@ the other pairs.
 | field | type | meaning |
 |---|---|---|
 | `graph` | string | the name `?graph=` gave |
-| `graph_path` | string | the pair's graph, as the list spells it |
+| `pair_id` | string | the pair's id (`answer_pair`) |
 
 ### 24.4 `graph_summary` and `columns_disjoint` (`GET /capabilities`)
 
@@ -4496,8 +4501,7 @@ two thousand chunks (a name over many chunks repeats each chunk's entry); a clie
 | field | type | meaning |
 |---|---|---|
 | `graph` | string | the name |
-| `graph_path` | string | the pair's graph |
-| `annotation_path` | string | the pair's annotation |
+| `pair_id` | string | the pair's id (`answer_pair`), by which `?pair_id=` and a `pairs` object select it |
 | `index_ns` | string \| null | the list's `index_ns` column |
 | `index_fp` | string \| null | the pair's manifest digest (its `index_fp`) |
 | `k` | integer | the graph's k |
@@ -4526,7 +4530,7 @@ two thousand chunks (a name over many chunks repeats each chunk's entry); a clie
 | `counts` | string \| null | `"presence_only"` on a count annotation (read as presence, SPEC-labeled-traversal-core.md §10.3), null otherwise |
 
 A single-graph server states its pair's entry at the top level of `GET /capabilities` as `pair_summary`, its
-`graph`, `graph_path` and `annotation_path` null, `null` while the index loads (SPEC-multigraph-envelope.md §8.1).
+`graph` and `pair_id` null, `null` while the index loads (SPEC-multigraph-envelope.md §8.1).
 
 ### 24.5 The mask check at load
 
@@ -4548,7 +4552,8 @@ loading in parallel sample in parallel; about a second each on a warm page cache
   single-graph server is 400 `invalid_request` (it was 400 `later_increment`).
 - `in_ram` is accepted (it was 400 `resident_only`, now retired); `timing.load_ms` with it.
 - The block: `resident_only: false`, the new `in_ram: "accepted"`; a multi-graph server's block per pair
-  (`graph`, `graph_path` on `/pattern/capabilities`), and on `GET /capabilities` the `pattern` feature, its routes
+  (`graph`, `graph_path` on `/pattern/capabilities`; `graph`, `pair_id` since train 8, §32), and on `GET
+  /capabilities` the `pattern` feature, its routes
   with `?graph=`, the block without a graph and `graph_summary`. `multi_graph_later_increment` is answered by no
   route.
 - A request without `graphs` and `in_ram` to a single-graph server is answered byte for byte as before (`timing`
@@ -5001,8 +5006,9 @@ that it could not before: `Cannot load annotation from '<annotation_path>': <cau
 annotation '<annotation_path>' are not compatible`, and for a `row_diff` annotation's side files `Cannot load
 anchor from '<path>': <cause>` and `Cannot load fork successor bitmap from '<path>': <cause>`, `<cause>` the
 server's file-failure detail (such as `Permission denied (missing read permission on this file)`, `No such file or
-directory`, `could not read contents (possibly corrupted or incompatible)`). No answer of a load that succeeds
-changes. Tests: `MultiGraphInRam.AFailedLoadThrowsForTheRequest` (the per-request loader throws each failure with
+directory`, `could not read contents (possibly corrupted or incompatible)`); since train 8 these messages go to the
+server's log and the client receives `<route>: pair (<name>, <pair_id>) could not be loaded: ...` (§24.2, §32). No
+answer of a load that succeeds changes. Tests: `MultiGraphInRam.AFailedLoadThrowsForTheRequest` (the per-request loader throws each failure with
 its message: an annotation, a graph and a `.seqs` that cannot be read, the `.seqs` not read when the resident's
 mapping is shared, an annotation cut inside its label encoder, a graph and annotation that are not compatible, a
 `row_diff` annotation without its anchors and without its fork successors; the start-up loader exits with the
@@ -5338,3 +5344,26 @@ server's body, byte for byte, the CLI's tree text but for the clock, over every 
 gzip off and on, and the jsoncpp text of its own parse) and
 `TestMultiGraphServer.test_pattern_envelope_bytes_are_the_trees_text` (the envelope's bytes, every pair answered, one
 refused, every pair refused).
+
+## 32. Pairs named by their pair_id (train 8)
+
+Train 8 names a configured pair in every answer of a multi-graph server by its name and master's n1 `pair_id`
+(SPEC-multigraph-envelope.md section 1.2; docs/DESIGN-pair-identity.md), never by its paths: the server's logs keep
+the paths, no response states one. For `/pattern`:
+
+- The tags of an envelope entry (`answer_pair`) and of `not_reached` and `unfinished` are `graph` and `pair_id` in
+  place of `graph_path` and `annotation_path`; a probe's document (`capabilities_pair`) states `graph` and
+  `pair_id`; `graph_summary`'s pairs (`graph_summary_pair`) and a single-graph server's `pair_summary` likewise
+  (`pair_id` null on a single-graph server). The selection `candidates` are `{graph, pair_id}`.
+- A `pairs` object and a probe take `pair_id` as a selector beside the path selectors (`pair_id` with a path in one
+  object or probe is a plain 400); `GET /capabilities`' `multigraph.selectors` lists `pair_id` for the two probes,
+  and `multigraph.pair_id: "n1"` states the form.
+- The texts that named configured paths name the pair as `(<name>, <pair_id>)`, or say which parameter was given:
+  the changed-file and other-labels refusals of an `in_ram` load (`index_changed`, §24.2), a failed `in_ram` load
+  (the entry's `error`, the loader's message to the log), the probe without `?graph=` (§24.3), and the selection
+  texts of SPEC-multigraph-envelope.md section 6.
+
+The fixtures (`api/python/tests/data/traverse/pattern`): `pattern_fixtures.py` writes a multi-graph server's ids as
+the ids of the `{work}/...` spellings of its pairs, as it writes the paths; twelve answers changed (every pair tag;
+`capabilities_multi_graph` also the `multigraph` block), the README's three lines with them. `test_pattern_fixtures.py`
+reads the three tables above; it checks every entry's `pair_id` is an n1 id.

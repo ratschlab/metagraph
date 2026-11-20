@@ -256,8 +256,7 @@ uint64_t search_record_rows_bytes(const SeqSearchResult &result) {
 
 SearchRecordPrice search_record_price(const SeqSearchResult &result, bool verbose_output,
                                       bool tagged, const std::string &graph,
-                                      const std::string &graph_path,
-                                      const std::string &annotation_path,
+                                      const std::string &pair_id,
                                       const std::string &index_fp) {
     const QuerySequence &sequence = result.get_sequence();
     SearchRecordPrice price;
@@ -279,10 +278,9 @@ SearchRecordPrice search_record_price(const SeqSearchResult &result, bool verbos
     // the cut (cut_to_json), its pair tags and index_fp (null: no heap), and on a multi-graph
     // server its node in the merged answer (the pair's own left until the merge ends)
     price.tree += kJsonValueBytes + kJsonContainerBytes
-            + member("returned") + member("complete") + member("nth_score")
+            + member("matched") + member("returned") + member("complete") + member("nth_score")
             + member("tied") + member("tied_returned")
-            + member("graph") + member("graph_path") + member("annotation_path")
-            + member("index_fp");
+            + member("graph") + member("pair_id") + member("index_fp");
     if (result.get_cut().abundances)
         price.tree += member("nth_median") + member("tied_same_median");
     if (result.get_cut().refused != graph::SearchCut::Refused::NO) {
@@ -300,15 +298,12 @@ SearchRecordPrice search_record_price(const SeqSearchResult &result, bool verbos
     // the tags of a row or of the cut, and its node in the merged answer
     const uint64_t tags = tagged
             ? member("graph") + json_string(graph.size())
-              + member("graph_path") + json_string(graph_path.size())
-              + member("annotation_path") + json_string(annotation_path.size())
+              + member("pair_id") + json_string(pair_id.size())
               + kJsonValueBytes
             : 0;
     // the cut's tags (its members are priced above)
-    if (tagged) {
-        price.tree += json_string(graph.size()) + json_string(graph_path.size())
-                + json_string(annotation_path.size()) + kJsonValueBytes;
-    }
+    if (tagged)
+        price.tree += json_string(graph.size()) + json_string(pair_id.size()) + kJsonValueBytes;
 
     auto row = [&](const std::string &label, uint64_t extra, uint64_t transient) {
         const SearchRecordPrice l = label_price(label);
@@ -403,8 +398,7 @@ uint64_t search_record_scratch(const SeqSearchResult &result, bool verbose_outpu
 SearchRecordPrice measure_search_record(graph::SearchAccount &answer, uint64_t *transient_charged,
                                         const SeqSearchResult &result, bool verbose_output,
                                         bool tagged, const std::string &graph,
-                                        const std::string &graph_path,
-                                        const std::string &annotation_path,
+                                        const std::string &pair_id,
                                         const std::string &index_fp) {
     // the scratch of the price's measurement, before it is allocated
     const uint64_t scratch = search_record_scratch(result, verbose_output);
@@ -412,8 +406,7 @@ SearchRecordPrice measure_search_record(graph::SearchAccount &answer, uint64_t *
         answer.charge(scratch - *transient_charged);
         *transient_charged = scratch;
     }
-    return search_record_price(result, verbose_output, tagged, graph, graph_path,
-                               annotation_path, index_fp);
+    return search_record_price(result, verbose_output, tagged, graph, pair_id, index_fp);
 }
 
 void charge_search_price(graph::SearchAccount &answer, uint64_t *transient_charged,
@@ -427,21 +420,20 @@ void charge_search_price(graph::SearchAccount &answer, uint64_t *transient_charg
 SearchRecordPrice charge_search_record(graph::SearchAccount &answer, uint64_t *transient_charged,
                                        const SeqSearchResult &result, bool verbose_output,
                                        bool tagged, const std::string &graph,
-                                       const std::string &graph_path,
-                                       const std::string &annotation_path,
+                                       const std::string &pair_id,
                                        const std::string &index_fp) {
     const SearchRecordPrice price = measure_search_record(answer, transient_charged, result,
                                                           verbose_output, tagged, graph,
-                                                          graph_path, annotation_path, index_fp);
+                                                          pair_id, index_fp);
     charge_search_price(answer, transient_charged, price);
     return price;
 }
 
 bool charge_search_unit(graph::SearchBudget &budget, uint64_t *transient_charged,
                         SeqSearchResult *result, bool verbose_output, bool tagged,
-                        const std::string &graph, const std::string &graph_path,
-                        const std::string &annotation_path, const std::string &index_fp,
-                        const std::string &pair, size_t pair_index) {
+                        const std::string &graph, const std::string &pair_id,
+                        const std::string &index_fp, const std::string &pair,
+                        size_t pair_index) {
     // the unit's object alone past the bound (its own price |own|, a function of the unit
     // alone): with the field the unit is refused alone, its stub priced (no row: nothing to
     // measure); without it the request is refused on the answer side
@@ -468,14 +460,14 @@ bool charge_search_unit(graph::SearchBudget &budget, uint64_t *transient_charged
                 return false;
             charge_search_price(budget.answer(), transient_charged,
                                 search_record_price(*result, verbose_output, tagged, graph,
-                                                    graph_path, annotation_path, index_fp));
+                                                    pair_id, index_fp));
             budget.note_unit_built();
             return true;
         }
     }
     SearchRecordPrice price = measure_search_record(budget.answer(), transient_charged, *result,
-                                                    verbose_output, tagged, graph, graph_path,
-                                                    annotation_path, index_fp);
+                                                    verbose_output, tagged, graph, pair_id,
+                                                    index_fp);
     if (result->get_cut().refused == graph::SearchCut::Refused::NO) {
         // the unit's object check: its own object (a function of the unit alone), never an
         // increment over the pair's
@@ -484,8 +476,8 @@ bool charge_search_unit(graph::SearchBudget &budget, uint64_t *transient_charged
             if (!object_passed(own))
                 return false;
             // the stub's (no row: nothing measured)
-            price = search_record_price(*result, verbose_output, tagged, graph, graph_path,
-                                        annotation_path, index_fp);
+            price = search_record_price(*result, verbose_output, tagged, graph, pair_id,
+                                        index_fp);
         }
     }
     charge_search_price(budget.answer(), transient_charged, price);

@@ -372,6 +372,8 @@ search_top_n(const std::vector<size_t> &scores,
              SearchCut *cut) {
     SearchCut c;
     c.abundances = static_cast<bool>(medians);
+    // every candidate is above the request's thresholds (master's `matched`)
+    c.matched = scores.size();
 
     // (a label is the caller's, never copied but for the rows returned: a tie group at a cut
     // can hold millions of rows, all of them ordered by label)

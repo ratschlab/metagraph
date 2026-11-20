@@ -1,4 +1,6 @@
+import json
 import os
+import re
 import shlex
 import subprocess
 import unittest
@@ -7,6 +9,8 @@ from tempfile import TemporaryDirectory
 import psutil
 import shutil
 import time
+import urllib.parse
+import uuid
 
 script_path = os.path.dirname(os.path.realpath(__file__))
 
@@ -39,6 +43,219 @@ NUM_THREADS = 4
 
 MEMORY_MAPPING = True
 MMAP_FLAG = ' --mmap' if MEMORY_MAPPING else ''
+
+# master's n1 pair id (src/common/configured_pair_id.hpp; docs/DESIGN-pair-identity.md section
+# 3.2), computed apart from the server: "n1-" and the UUIDv5 in this namespace of the name, the
+# graph path and the annotation path as the graph list spells them, each "<UTF-8 bytes>:<text>"
+# ("-1:" for an absent one). A multi-graph server's answers name a pair by graph and this id
+PAIR_ID_NAMESPACE = uuid.UUID('d3565c73-e7e9-5bca-b6a9-64cb5c4c9f93')
+
+
+def configured_pair_id(graph, graph_path, annotation_path):
+    name = ''.join('-1:' if f is None else f'{len(f.encode())}:{f}'
+                   for f in (graph, graph_path, annotation_path))
+    return 'n1-' + str(uuid.uuid5(PAIR_ID_NAMESPACE, name))
+
+
+def configured_paths(args):
+    """The spellings no response of a server_query started with |args| may state
+    (SPEC-multigraph-envelope.md section 1.2, train 8: answers name a pair by its name and
+    pair_id, logs keep the paths): its configured paths (the graph list's graph, annotation and
+    manifest paths, or -i/-a) with the sidecars a pair's load reads beside them (the
+    annotation's .seqs, the graph's mask and Bloom filter; the row_diff anchors start with the
+    graph's path), the graph list's own path and the temporary directory (--disk-swap), each
+    also as its real path (macOS: /private/var); and every file's basename (a single-graph GET
+    /stats states two, as master does: assert_no_configured_path exempts exactly those). Also
+    each file's directory and each file without its suffixes (`<dir>/graph` for
+    `<dir>/graph.dbg`, as utils::remove_suffix makes it), as BoundaryPath: these count only
+    where the spelling ends a path, since the tests' labels are the paths of input files that
+    lie beside the configured ones (`<dir>/input.fa`)"""
+    listed, files = [], []
+    if args and not args[0].startswith('-') and os.path.isfile(args[0]):
+        listed.append(args[0])
+        with open(args[0]) as f:
+            for line in f:
+                cells = line.strip().split(',')
+                files += [c for c in cells[1:4] if c]
+    for flag in ('-i', '-a', '--index-manifest'):
+        if flag in args[:-1]:
+            files.append(args[args.index(flag) + 1])
+    for p in list(files):
+        if p.endswith('.annodbg'):
+            files.append(os.path.splitext(os.path.splitext(p)[0])[0] + '.seqs')
+        elif not p.endswith('.json'):
+            base = os.path.splitext(p)[0]
+            files += [base + '.edgemask', base + '.bloom']
+    files += listed
+    dirs = []
+    if '--disk-swap' in args[:-1] and args[args.index('--disk-swap') + 1]:
+        dirs.append(args[args.index('--disk-swap') + 1])
+    out = set()
+    for p in files + dirs:
+        out.update((p, os.path.realpath(p)))
+    out.update(os.path.basename(p) for p in files)
+    out.discard('')
+    bounded = set()
+    for p in files:
+        for q in {p, os.path.realpath(p)}:
+            if not os.path.isabs(q):
+                continue
+            d = os.path.dirname(q)
+            # a directory of its own, not / or a top-level one (/tmp, /private)
+            if d.count('/') >= 2:
+                bounded.add(d)
+            stem, base = d, os.path.basename(q)
+            while '.' in base.lstrip('.'):
+                base = base[:base.rindex('.')]
+                bounded.add(os.path.join(stem, base))
+    return sorted(out) + sorted(BoundaryPath(p) for p in bounded - out)
+
+
+class BoundaryPath(str):
+    """A spelling of configured_paths that states a configured path only where it ends one: a
+    configured file's directory, or the file without its suffixes. An occurrence followed by a
+    path character (`<dir>/input.fa`, `<dir>/graph.fa`) is another file's path"""
+
+
+_PATH_CHAR = re.compile(r'[A-Za-z0-9._/~%+-]')
+
+
+def _states(text, spelling, bounded):
+    """The index of the first occurrence of |spelling| in |text| that states it (with
+    |bounded|, one not followed by a path character), or -1. (An input file's label beside a
+    configured file repeats a bounded spelling once per row: where every occurrence is followed
+    by '/', '.', '_' or '-', counted in C, the occurrences are not walked one by one.)"""
+    at = text.find(spelling)
+    if not bounded or at < 0:
+        return at
+    if text.count(spelling) == sum(text.count(spelling + c) for c in '/._-'):
+        return -1
+    while at >= 0 and at + len(spelling) < len(text) \
+            and _PATH_CHAR.match(text[at + len(spelling)]):
+        at = text.find(spelling, at + 1)
+    return at
+
+
+# The two members of a single-graph GET /stats that state a configured file's basename, as
+# master's do: exempt from the sweep (they hold a basename, never a path)
+STATS_BASENAMES = (('graph', 'filename'), ('annotation', 'filename'))
+
+
+def assert_no_configured_path(text, paths, where):
+    """|text| (a response's body) states none of |paths| (configured_paths): as sent, and with
+    a JSON body also as its strings read (an escaped spelling: \\u escapes, \\/), each
+    spelling also URL-encoded. On GET /stats the two members of STATS_BASENAMES are exempt
+    when each is a bare file name"""
+    texts = [text]
+    try:
+        body = json.loads(text)
+    except ValueError:
+        body = None
+    if body is not None:
+        if where.split('?')[0] == 'GET /stats' and isinstance(body, dict):
+            for member, field in STATS_BASENAMES:
+                value = body[member].get(field) if isinstance(body.get(member), dict) else None
+                if value is not None:
+                    assert isinstance(value, str) and '/' not in value and value in paths, \
+                        f'{where}: {member}.{field} is not a configured basename: {value!r}'
+                    body = dict(body, **{member: {k: v for k, v in body[member].items()
+                                                  if k != field}})
+            texts = [json.dumps(body)]
+        texts.append(json.dumps(body, ensure_ascii=False))
+    def spellings(p):
+        return {str(p), urllib.parse.quote(p), urllib.parse.quote(p, safe='')}
+
+    # a path's spellings each start with its directory's (quote() maps characters one by one):
+    # a path whose directory the text does not state is skipped, so that a large answer is
+    # scanned for the few directories, not for every path
+    # Likewise every spelling holds its file name's last suffix ('.annodbg'), or the whole file
+    # name where it has none, which quote() leaves as it is: a path whose tail the text does
+    # not hold is skipped (a graph list of many pairs gives thousands of basenames)
+    def tail(p):
+        name = os.path.basename(p) or p
+        return name[name.rindex('.'):] if '.' in name.lstrip('.') else name
+
+    parents = {os.path.dirname(p) for p in paths if os.path.isabs(p)}
+    for t in texts:
+        stated = {d for d in parents if any(x in t for x in spellings(d))}
+        tails = {}
+        for p in paths:
+            if os.path.isabs(p) and os.path.dirname(p) not in stated:
+                continue
+            k = tail(p)
+            if k not in tails:
+                tails[k] = any(x in t for x in spellings(k))
+            if not tails[k]:
+                continue
+            bounded = isinstance(p, BoundaryPath)
+            for spelling in spellings(p):
+                at = _states(t, spelling, bounded)
+                if at >= 0:
+                    raise AssertionError(
+                        f'{where}: the response states the configured path {str(p)!r}'
+                        + (f' (as {spelling!r})' if spelling != p else '')
+                        + f': ...{t[max(0, at - 300):at + len(spelling) + 100]}...')
+
+
+# port -> (pid, configured_paths of the server_query of this build listening there, or None)
+_SWEPT_SERVERS = {}
+
+
+def _server_paths(port):
+    """configured_paths of the server_query of this build (METAGRAPH_EXE) that a process of
+    this test started and that listens on |port|; None for another program, a base binary or no
+    such process. Read from the process's own command line, once per process"""
+    hit = _SWEPT_SERVERS.get(port)
+    if hit is not None and psutil.pid_exists(hit[0]):
+        return hit[1]
+    this = os.path.realpath(METAGRAPH_EXE)
+    for child in psutil.Process().children(recursive=True):
+        try:
+            listing = getattr(child, 'net_connections', None) or child.connections
+            if not any(c.status == psutil.CONN_LISTEN and c.laddr and c.laddr.port == port
+                       for c in listing(kind='tcp')):
+                continue
+            cmd = child.cmdline()
+        except psutil.Error:
+            continue
+        paths = None
+        if 'server_query' in cmd[1:]:
+            i = cmd.index('server_query')
+            if os.path.realpath(cmd[i - 1]) == this:
+                paths = configured_paths(cmd[i + 1:])
+        _SWEPT_SERVERS[port] = (child.pid, paths)
+        return paths
+    return None
+
+
+def sweep_every_response():
+    """Every response the requests package reads from a server_query of this build that this
+    test started, whichever helper started it (a Server class, start_server, a test's own
+    Popen), states none of its configured paths (assert_no_configured_path). A streamed
+    response is not read here. Installed once, on import"""
+    import requests
+    if getattr(requests.Session.send, '_sweeps', False):
+        return
+    send = requests.Session.send
+
+    def swept(self, request, **kw):
+        resp = send(self, request, **kw)
+        if not kw.get('stream'):
+            url = urllib.parse.urlsplit(request.url)
+            if url.hostname in ('127.0.0.1', 'localhost') and url.port:
+                paths = _server_paths(url.port)
+                if paths:
+                    # the bytes as UTF-8 (resp.text would guess an encoding over the whole
+                    # body where the server names no charset: seconds on a large answer)
+                    assert_no_configured_path(resp.content.decode('utf-8', 'replace'), paths,
+                                              f'{request.method} {url.path}')
+        return resp
+
+    swept._sweeps = True
+    requests.Session.send = swept
+
+
+sweep_every_response()
 
 
 def start_server(graph, annotation, host, port, extra_args=''):

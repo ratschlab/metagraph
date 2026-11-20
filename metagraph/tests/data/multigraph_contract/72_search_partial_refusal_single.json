@@ -1,7 +1,7 @@
 {
  "route": "POST /search",
  "status": 200,
- "note": "T7-P1 (/search partial refusal per (record, pair); SPEC-multigraph-envelope.md section 3): sample 71's rule on a single-graph server (the wide pair alone): each record of the body is its own unit. q1 (the shared stretch, 2,000 rows of coordinates) is refused \"values\": its object has results [] and one cut entry, with null pair tags and refused; q2 (one row) is answered as without a budget. A real run, the bound 1 MiB; at the default bound the same request answered both records (176,678 bytes of text).",
+ "note": "T7-P1 (/search partial refusal per (record, pair); SPEC-multigraph-envelope.md section 3): sample 71's rule on a single-graph server (the wide pair alone): each record of the body is its own unit. q1 (the shared stretch, 2,000 rows of coordinates) is refused \"values\": its object has results [] and one cut entry, with null pair tags and refused; q2 (one row) is answered as without a budget. A real run, the bound 1 MiB; at the default bound the same request answered both records (176,678 bytes of text). T8-M6 (train 8, pair identity; SPEC-multigraph-envelope.md section 1.2): each pair is named by graph and pair_id, master's n1 id of the name and the two paths as the graph list spells them (the paths this sample stated before), and no configured path is stated; each cut states matched, the labels above the request's thresholds before the cut (master's member; returned where the cut is complete, the count the unit's search computed where it is refused).",
  "request": {
   "FASTA": ">q1\nCACGATACAATAAGAGTAGTGATTGGCCAGTTGTGATTGTAGGAACCCATGCCTGCCTGAACCTACAACTCCTGAGACTGGAGATCCCGCACAGCCTCGA\n>q2\nTCAGACGGTGCCTAGTCCAACACGATACAATAAGAGTAGTGATTGGCCAG\n",
   "top_labels": 10000,
@@ -12,12 +12,12 @@
   {
    "cuts": [
     {
-     "annotation_path": null,
      "complete": false,
      "graph": null,
-     "graph_path": null,
      "index_fp": null,
+     "matched": 2000,
      "nth_score": null,
+     "pair_id": null,
      "refused": {
       "account": "values",
       "code": "search_answer_too_large",
@@ -34,12 +34,12 @@
   {
    "cuts": [
     {
-     "annotation_path": null,
      "complete": true,
      "graph": null,
-     "graph_path": null,
      "index_fp": null,
+     "matched": 1,
      "nth_score": null,
+     "pair_id": null,
      "returned": 1,
      "tied": 0,
      "tied_returned": 0

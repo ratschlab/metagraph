@@ -3650,8 +3650,9 @@ search's routes, `POST /pattern` and `GET /pattern/capabilities`, are `SPEC-patt
     feature level 3,
     `algorithm_version`, `compression_level` (the zlib level of the traversal routes' compressed bodies) and
     `deadline_check` (below), from feature level 4 `decode_cache: {path_cache_mb, rule}` (the row-diff path cache
-    of the reads; `rule` a reference to §8.4); in multi-graph mode also `graph` and `graph_path`, the pair it
-    describes.
+    of the reads; `rule` a reference to §8.4); in multi-graph mode also `graph` and `pair_id`, the pair it
+    describes (train 8: master's n1 id of the name and the pair's paths, SPEC-multigraph-envelope.md section 1.2;
+    before, `graph_path`).
   - **`GET /capabilities`** (feature level 3; the owner's server-wide document, `DESIGN-traverse-graphlet.md`
     §17.1), small and index-free, answered while a single index still loads (`ready: false`; the routes that read
     the index answer 503 then, the cancel and state routes do not):
@@ -3674,10 +3675,12 @@ search's routes, `POST /pattern` and `GET /pattern/capabilities`, are `SPEC-patt
 
     In multi-graph mode `mode` is `"multi"`, `graphs` the sorted list of the graph list's names, `align` is in
     neither `features` nor `routes` (it answers 400 there), and `routes.traverse_capabilities` is
-    `"GET /traverse/capabilities?graph={name}[&graph_path={path}]"`. `server_instance` is the attempts' (below).
+    `"GET /traverse/capabilities?graph={name}[&pair_id={id}]"` (fix round 1 of train 8; before
+    `...[&graph_path={path}]`; the probe's parameters are those the `multigraph` block's selectors list,
+    `SPEC-multigraph-envelope.md` section 8). `server_instance` is the attempts' (below).
     Both modes list the pattern search: `pattern` in `features`, `routes.pattern` and
     `routes.pattern_capabilities` (`"GET /pattern/capabilities"`; in multi-graph mode
-    `"GET /pattern/capabilities?graph={name}[&graph_path={path}]"`), and the `pattern` block
+    `"GET /pattern/capabilities?graph={name}[&pair_id={id}]"`), and the `pattern` block
     (`SPEC-pattern-search.md` §10, §23, §24; a multi-graph server's without a graph). Both state `in_ram` and,
     in multi-graph mode, `graph_summary` and `max_graphs_without_selection` (both `null` in single-graph mode;
     below, multi-graph mode), and in both modes `max_request_body_mb` (below, the caps: the largest request body
@@ -4049,10 +4052,12 @@ search's routes, `POST /pattern` and `GET /pattern/capabilities`, are `SPEC-patt
     `--write-csv` the list with every line's manifest column filled with its pair's manifest.
   - **Routing** (since release 10: SPEC-multigraph-envelope.md section 6, which governs; the release-9 rules
     that stood here are superseded): `/traverse` runs on exactly ONE pair, named by `graph` (or `graphs`
-    resolving to one pair) with `graph_path`, or by one object of `pairs` (`annotation_path` telling apart the
-    annotations of one graph); a selection of several pairs is refused `traverse_single_pair` with the
-    candidates, and a server holding one pair runs a request without a selector on it. `/resolve` runs on any
-    number of pairs (the envelope, section 1 there). The refusals keep their release-9 texts (section 6 there).
+    resolving to one pair) with `graph_path`, or by one object of `pairs` (its `pair_id`, train 8, or its
+    paths, `annotation_path` telling apart the annotations of one graph); a selection of several pairs is refused
+    `traverse_single_pair` with the candidates (`{graph, pair_id}`), and a server holding one pair runs a request
+    without a selector on it. `/resolve` runs on any number of pairs (the envelope, section 1 there). The
+    refusals keep their release-9 texts, but those that named a configured path, which name the pairs by their
+    `pair_id` since train 8 (section 6 there): no response states a configured path.
     There is **no union oracle**: a traversal reads one pair, tagged in its envelope entry. The release id is
     server-wide (`--index-release ID`), in both modes.
   - **`graphs`** (the owner's decision of 2026-10-09): `/search`'s field, accepted by `/traverse` and `/resolve`
@@ -4083,17 +4088,20 @@ search's routes, `POST /pattern` and `GET /pattern/capabilities`, are `SPEC-patt
     graph, the annotation, a `row_diff` annotation's anchors and fork successors, the `.seqs`, the graph's mask and
     Bloom filter; stamped at start-up with their status change time) is not loaded: the copy's answer would carry
     the start-up identity and certificates (GPT review 7 finding 4). It is refused with a failed load's status,
-    before its memory wait and again before and after the load, the text naming the file and how it changed and
-    saying to restart onto the new files, and the code `index_changed` (the owner's decision of 2026-11-11): a
+    before its memory wait and again before and after the load, the text naming the pair by its name and
+    `pair_id`, the file by its role, and how it changed, and saying to restart onto the new files (the log names
+    the file's path), and the code `index_changed` (the owner's decision of 2026-11-11): a
     `/traverse` 400 `{"error", "code"}`, error first (`usage` beside them on a managed attempt), a `/resolve` pair's
     refusal block `{http_status: 400, error, code}` (`SPEC-multigraph-envelope.md` §10, samples 43 and 44), before
     the wait's own refusals (a passed `finish_by_ms`, a fan-out's `not_reached`: the envelope's §10 states the
     order and its timing at the cutoff). A load
     for the request that fails (a file of the
     pair that cannot be read or that its loader refuses, a `row_diff` annotation's anchors or fork successors that
-    cannot be loaded, a graph and annotation that are not compatible) is the route's 400 with the loader's message
-    as `error`, naming the file and the step (`usage` beside it on a managed attempt), the memory reserved for it
-    released and the server running on with its resident indexes. A file of the annotation that cannot be opened
+    cannot be loaded, a graph and annotation that are not compatible) is the route's 400 with `error` `<route>:
+    pair (<name>, <pair_id>) could not be loaded: the load into RAM for the request failed (the server's log names
+    the file and the reason); send the request without in_ram` (train 8; before, the loader's message, which names
+    the file and the step and now goes to the log; `usage` beside it on a managed attempt), the memory reserved
+    for it released and the server running on with its resident indexes. A file of the annotation that cannot be opened
     (the annotation's own, a `row_diff` annotation's anchors and fork successors) fails the load before the graph
     starts loading; any other failure is known only once the graph's load has ended, the memory reserved until then
     (the review of 2026-10-14: every failure waited for the graph). A load at start-up that fails exits the process
@@ -4101,7 +4109,7 @@ search's routes, `POST /pattern` and `GET /pattern/capabilities`, are `SPEC-patt
     states the pair's identity: `index_fp` and `index_meta_fp` are per (graph, annotation) pair.
   - **`GET /capabilities`** of a multi-graph server (the owner's decision of 2026-10-09): `graph_summary`, so that
     a service learns every pair with one probe — `{columns_disjoint, shared_columns, headers_unique,
-    labels_disjoint, pairs: [{graph, graph_path, annotation_path, index_ns, index_fp, index_meta_fp, k, alphabet,
+    labels_disjoint, pairs: [{graph, pair_id, index_ns, index_fp, index_meta_fp, k, alphabet,
     graph_representation, annotation_form, decode_charged, seqs_order, graph_mode, available, unavailable_reason,
     mask, counting, traversal: {regime, num_labels, has_coordinates, has_coord_to_header, supports_trace, counts},
     support_fp}]}` (the capability profile and `support_fp`, E17: `SPEC-multigraph-envelope.md` §8.1; the header
@@ -4123,20 +4131,23 @@ search's routes, `POST /pattern` and `GET /pattern/capabilities`, are `SPEC-patt
     routes state `in_ram`:
     `{"routes": ["pattern", "resolve", "search", "traverse"], "loads": <a multi-graph server on mmap with
     --mem-cap-gb above 0>, "mem_cap_gb": <--mem-cap-gb>, "budgets_start": "after_load"}`.
-  - **`GET /traverse/capabilities?graph=<name>[&graph_path=<path>][&annotation_path=<path>]`** (feature level 3;
-    a 400 before): the probe of the pair those parameters select by the rules above (percent-decoded values);
-    since release 10 by SPEC-multigraph-envelope.md section 6: the parameters name exactly one pair of the name,
-    `annotation_path` telling apart the annotations of one graph, else a coded 400 `{error, code, candidates?}`
-    (`graph_unknown`, `pair_not_found`, `pair_ambiguous`). Since release 10 it answers in
-    the envelope of SPEC-multigraph-envelope.md section 1 (`envelope_version`, `route`, `graphs`, `answered`,
-    `refused`, `server_instance`, `answers`), one entry: the probe tagged `graph`, `graph_path`,
-    `annotation_path`, `index_fp`, `outcome` (before: the probe itself with `graph` and `graph_path` added).
-    Without any parameter the envelope over every pair (in `graph_summary`'s order), up to
-    `max_graphs_without_selection` names; above it, and for parameters without `graph`, the 400 a probe without
-    `graph` always had, byte for byte (`Bad request: in multi-graph mode GET /traverse/capabilities needs
-    ?graph=<name> (and graph_path=<path> when the name spans several graphs); GET /capabilities lists the
-    graphs`); an unknown or repeated parameter is a 400 in its release-9 words (every refusal text of before
-    release 10 is kept, SPEC-multigraph-envelope.md section 6). A multi-graph server's `POST /traverse`
+  - **`GET /traverse/capabilities?graph=<name>[&pair_id=<id>]`** (or `[&graph_path=<path>][&annotation_path=
+    <path>]`; feature level 3; a 400 before): the probe of the pair those parameters select by the rules above
+    (percent-decoded values); since release 10 by SPEC-multigraph-envelope.md section 6: the parameters name
+    exactly one pair of the name -- its `pair_id` (train 8), or its paths, `annotation_path` telling apart the
+    annotations of one graph; `pair_id` beside a path is a plain 400 --, else a coded 400 `{error, code,
+    candidates?}` (`graph_unknown`, `pair_not_found`, `pair_ambiguous`). Since release 10 it answers in the
+    envelope of SPEC-multigraph-envelope.md section 1 (`envelope_version`, `route`, `graphs`, `answered`,
+    `refused`, `server_instance`, `answers`), one entry: the probe tagged `graph`, `pair_id`, `index_fp`,
+    `outcome` (train 8; release 10: `graph`, `graph_path`, `annotation_path`, `index_fp`, `outcome`; before: the
+    probe itself with `graph` and `graph_path` added). Without any parameter the envelope over every pair (in
+    `graph_summary`'s order), up to `max_graphs_without_selection` names; above it, and for parameters without
+    `graph`, the 400 `Bad request: in multi-graph mode GET /traverse/capabilities needs ?graph=<name> (and
+    pair_id=<id> when the name holds several pairs); GET /capabilities lists them` (train 8; before, the text a
+    probe without `graph` always had, `... (and graph_path=<path> when the name spans several graphs); GET
+    /capabilities lists the graphs`); an unknown or repeated parameter is a 400 in its release-9 words (the
+    refusal texts of before release 10 are kept, but those that named a configured path,
+    SPEC-multigraph-envelope.md section 6). A multi-graph server's `POST /traverse`
     answers HTTP 200 in that envelope too (section 1.1 there: the attempt's `usage` at its top level); its other
     statuses are unchanged. In single-graph mode `graph` and `graph_path` are a 400, any other parameter is
     ignored, as before.
@@ -4678,7 +4689,7 @@ search's routes, `POST /pattern` and `GET /pattern/capabilities`, are `SPEC-patt
     pool has threads: their fan-outs and searches share that pool, so more pairs end `not_reached` or `unfinished`
     at their cutoff and searches take longer.
   - A reverse proxy in front of the server must forward `POST /traverse/cancel`, `GET /traverse/attempt/*`,
-    `GET /capabilities` and `GET /traverse/capabilities` with their query strings (`?graph=…&graph_path=…`,
+    `GET /capabilities` and `GET /traverse/capabilities` with their query strings (`?graph=…&pair_id=…`,
     percent-encoded), must close its upstream connection when its client goes (the server stops a traversal whose
     client is gone; a proxy that keeps the upstream connection open hides that), must not buffer a request's
     answer past the client's own timeout, and must keep its read timeout at or above `hard_cap_ms` plus the

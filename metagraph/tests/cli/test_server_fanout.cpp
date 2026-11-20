@@ -451,8 +451,8 @@ TEST(ServerFanout, OnePairRunsInline) {
 }
 
 // Samples 03 and 16 name a not_reached or unfinished pair as the code does (contract F6 of
-// the release-10 review): "(name, graph_path, annotation_path)", the entry's own tags, since a
-// name may hold several pairs
+// the release-10 review): "(name, pair_id)", the entry's own tags, since a name may hold
+// several pairs (train 8: no path, before "(name, graph_path, annotation_path)")
 TEST(ServerFanout, SamplesNameThePairAsTheFanOutDoes) {
     size_t checked = 0;
     for (const char *name : { "03_resolve_envelope_cutoff.json",
@@ -466,8 +466,7 @@ TEST(ServerFanout, SamplesNameThePairAsTheFanOutDoes) {
             if (code != "not_reached" && code != "unfinished")
                 continue;
             const std::string label = "(" + entry["graph"].asString() + ", "
-                    + entry["graph_path"].asString() + ", "
-                    + entry["annotation_path"].asString() + ")";
+                    + entry["pair_id"].asString() + ")";
             EXPECT_EQ(0u, entry["refusal"]["error"].asString().find(route + ": pair " + label + " "))
                 << name << ": " << entry["refusal"]["error"].asString();
             ++checked;
@@ -1218,8 +1217,10 @@ TEST(ServerFanout, NotAfterMsLeavesQueuedPairsUnreached) {
     const Json::Value &refusal = out.entries[1]["refusal"];
     EXPECT_EQ("not_reached", refusal["code"].asString());
     EXPECT_EQ("not_after_ms", refusal["reason"].asString());
-    EXPECT_EQ(0u, refusal["error"].asString().find("pattern: pair (b, b.dbg, b.anno) was not "
-                                                   "started: not_after_ms"));
+    // the pair named by its name and pair_id, no path
+    EXPECT_EQ(0u, refusal["error"].asString().find(
+            "pattern: pair (b, " + pair_id_of("b", { "b.dbg", "b.anno" }) + ") was not "
+            "started: not_after_ms"));
     // the held task runs later: it starts nothing
     for (auto &task : held) {
         threads.emplace_back(std::move(task));
@@ -2843,9 +2844,12 @@ TEST(ServerFanout, TraverseRequestFromTheAttempt) {
     const uint64_t retention_s
             = sample("12_capabilities_multigraph.json")["body"]["attempts"]["retention_s"].asUInt64();
     EXPECT_EQ(3600u, retention_s);
-    const Json::Value pair = parse(R"({"graph": "bact_other",
-        "graph_path": "/scratch/nvme8/refseq_r237/bact_other/graph.dbg",
-        "annotation_path": "/scratch/nvme8/refseq_r237/bact_other/annotation.row_diff_brwt_coord.annodbg"})");
+    // the pair as the server names it (pair_ref_json): its graph and pair_id, no path
+    const Json::Value pair = pair_ref_json({ "bact_other",
+        { "/scratch/nvme8/refseq_r237/bact_other/graph.dbg",
+          "/scratch/nvme8/refseq_r237/bact_other/annotation.row_diff_brwt_coord.annodbg" } });
+    EXPECT_EQ(parse(R"({"graph": "bact_other",
+                        "pair_id": "n1-13a94733-667c-51eb-b3a9-aa435eacfdcd"})"), pair);
     const Json::Value j = traverse_request_json(s21["attempt"], pair, retention_s);
     EXPECT_EQ(members(s21), members(j));
     EXPECT_EQ(compact(s21), compact(j));
@@ -2864,6 +2868,8 @@ TEST(ServerFanout, TraverseRequestFromTheAttempt) {
     EXPECT_TRUE(r["response"].isNull());
     EXPECT_TRUE(r["retained_until"].isNull());
     EXPECT_TRUE(r["pairs"][0]["graph"].isNull());
+    EXPECT_TRUE(r["pairs"][0]["pair_id"].isNull());
+    EXPECT_FALSE(r["pairs"][0].isMember("graph_path"));
     EXPECT_TRUE(r["pairs"][0]["outcome"].isNull());
 }
 

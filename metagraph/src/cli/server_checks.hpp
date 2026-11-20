@@ -7,6 +7,7 @@
 #include <cstdint>
 #include <functional>
 #include <map>
+#include <memory>
 #include <mutex>
 #include <optional>
 #include <stdexcept>
@@ -16,6 +17,9 @@
 
 #include <json/json.h>
 
+namespace utils {
+class TempFile;
+} // namespace utils
 
 namespace mtg {
 namespace annot {
@@ -766,8 +770,9 @@ Json::Value column_labels_capabilities_json(uint64_t max_bytes, std::optional<ui
  * The envelope POST /pattern answers on a multi-graph server (SPEC §24.1): one entry per
  * selected (name, pair) in the answers' order, each the outcome of that pair alone.
  *  - pattern_pair_answered: the pair's single-graph answer |answer| (SPEC §8) tagged with its
- *    pair -- graph (the name it was selected by), graph_path, annotation_path, index_fp (null
- *    when |index_fp| is empty: no manifest in the graph list) -- and outcome "answered";
+ *    pair -- graph (the name it was selected by), pair_id (of the name and the pair's
+ *    |graph_path| and |annotation_path|, pair_id_of), index_fp (null when |index_fp| is empty:
+ *    no manifest in the graph list) -- and outcome "answered";
  *  - pattern_pair_refused: the same tags, outcome "refused", and `refusal`: |http_status| and
  *    the members of |body|, the body a single-graph server would have answered for the pair
  *    ({error, code} for a refusal, {error} for an unexpected failure);
@@ -814,8 +819,7 @@ ColumnOverlap column_overlap(const std::vector<std::vector<std::string>> &column
 // its column names
 struct HeaderPair {
     Json::Value graph;
-    Json::Value graph_path;
-    Json::Value annotation_path;
+    Json::Value pair_id;
     const annot::CoordToHeader *coord_to_header = nullptr;
     const std::vector<std::string> *columns = nullptr;
 };
@@ -830,7 +834,7 @@ struct HeaderPair {
  * (CoordToHeader::find_repeated_headers, which builds each pair's header index if not built
  * yet, on |num_threads| threads).
  *   {"value": true | false | null, "collisions": n, "examples": [{"header", "occurrences",
- *    "pairs": [{graph, graph_path, annotation_path, column}...]}...]}
+ *    "pairs": [{graph, pair_id, column}...]}...]}
  * value is null when a pair has no .seqs (collisions and examples then count the pairs that
  * have one); examples are the |max_examples| byte-smallest repeated headers, each listing its
  * first |max_listed| occurrences in pair, column and record order, its column by name.
@@ -848,8 +852,8 @@ Json::Value headers_unique_json(const std::vector<HeaderPair> &pairs, size_t num
  * of every pair with a .seqs (CoordToHeader::find_header, built if not built yet), on
  * |num_threads| threads (0: get_num_threads()); no lookup when no pair has a .seqs.
  *   {"value": true | false | null, "collisions": n, "examples": [{"header",
- *    "records": [{graph, graph_path, annotation_path, column}...],
- *    "columns": [{graph, graph_path, annotation_path}...]}...]}
+ *    "records": [{graph, pair_id, column}...],
+ *    "columns": [{graph, pair_id}...]}...]}
  * value is null when a pair has no .seqs (as headers_unique's; collisions and examples then
  * count every pair's columns against the headers of the pairs that have one); collisions is the
  * number of distinct names that are both; examples are the |max_examples| byte-smallest, each
@@ -898,24 +902,62 @@ struct PairFileStamp {
  */
 std::vector<PairFileStamp> pair_file_stamps(const std::string &graph,
                                             const std::string &annotation, bool coord_mapping);
+// The first file of |stamps| that changed since its stamp was taken (GPT review 7 finding 4: an
+// answer computed on other files would carry the start-up identity, certificates and record
+// mapping): its path, its role and how it changed, |how| one of "it is another file", "its
+// size", "its modification time", "its status change time", "it is gone or cannot be read", "it
+// appeared"
+struct ChangedFile {
+    std::string path;
+    std::string role;
+    std::string how;
+};
+// none while every file of |stamps| has the stamp taken
+std::optional<ChangedFile> changed_pair_file(const std::vector<PairFileStamp> &stamps);
 /**
- * "" while every file of |stamps| has the stamp taken, else the refusal of a load of the pair
- * (|graph|, |annotation|) into RAM for a request, naming the first file that changed and how
- * (GPT review 7 finding 4: an answer computed on other files would carry the start-up identity,
- * certificates and record mapping): "The file '<path>' (<role>) of the pair ('<graph>',
- * '<annotation>') changed on disk since the server started (<how>): a request does not load it
- * into RAM, since the answer would carry the start-up identity and certificates; restart onto the
- * new files, or send the request without in_ram", <how> one of "it is another file", "its size",
- * "its modification time", "its status change time", "it is gone or cannot be read", "it
- * appeared".
+ * "" while every file of |stamps| has the stamp taken, else the log's text of the refusal of a
+ * load of the pair (|graph|, |annotation|) into RAM for a request, naming the first file that
+ * changed and how (changed_file_log_text): the operator's line, with the paths
  */
 std::string pair_files_changed(const std::vector<PairFileStamp> &stamps,
                                const std::string &graph, const std::string &annotation);
-// that refusal's text for the file |path| (|role|) of the pair (|graph|, |annotation|), changed
-// as |how| states
-std::string changed_file_text(const std::string &path, const std::string &role,
-                              const std::string &graph, const std::string &annotation,
+// The log's text for the file |path| (|role|) of the pair (|graph|, |annotation|), changed as
+// |how| states: "The file '<path>' (<role>) of the pair ('<graph>', '<annotation>') changed on
+// disk since the server started (<how>): a request does not load it into RAM, since the answer
+// would carry the start-up identity and certificates; restart onto the new files, or send the
+// request without in_ram"
+std::string changed_file_log_text(const std::string &path, const std::string &role,
+                                  const std::string &graph, const std::string &annotation,
+                                  const std::string &how);
+// The refusal's text a client receives (train 8: no path, SPEC-multigraph-envelope.md section
+// 10): "The <role> file of the pair <pair> changed on disk since the server started (<how>): a
+// request does not load it into RAM, since the answer would carry the start-up identity and
+// certificates; restart onto the new files, or send the request without in_ram", |pair| as
+// pair_label names it ("(<name>, <pair_id>)")
+std::string changed_file_text(const std::string &role, const std::string &pair,
                               const std::string &how);
+// The refusal of a copy of the pair |pair| (pair_label) whose annotation has other column labels
+// than the resident's (no path; the log names the annotation)
+std::string other_labels_text(const std::string &pair);
+// The text a client receives for a load of the pair |pair| (pair_label) into RAM for a request on
+// |route| ("search", "resolve", "pattern", "traverse") that failed: "<route>: pair <pair> could
+// not be loaded: the load into RAM for the request failed (the server's log names the file and
+// the reason); send the request without in_ram". The loader's own text names the file: it goes
+// to the log only
+std::string pair_load_failure_text(const std::string &route, const std::string &pair);
+
+// The text a client receives when /search cannot write a request's sequences to its temporary
+// file (write_search_query_file): it names no directory, which the log does
+extern const char kSearchTempFileText[];
+// The temporary file /search writes a request's sequences (|fasta|) to before it queries them,
+// in |tmp_dir| (the server's --disk-swap; empty: the system's temporary directory): made,
+// written and closed. One that cannot be made or written (the directory missing, full or out
+// of inodes) fails the request with std::runtime_error(kSearchTempFileText), the route's 400,
+// which names no path (SPEC-multigraph-envelope.md section 1.2); the reason, with the file's
+// path, goes to the log. Before (fix round 1, M1) the 400 stated the file's path, and a write
+// that failed went unnoticed (the query read what had been written)
+std::unique_ptr<::utils::TempFile> write_search_query_file(const std::string &tmp_dir,
+                                                           const std::string &fasta);
 
 // {"error": |message|, "code": "index_changed"}: the refusal of a load of a pair into RAM for a
 // request once a file of the pair changed on disk since the server started (pair_files_changed's

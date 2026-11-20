@@ -15,18 +15,17 @@ namespace cli {
 
 namespace {
 
-// the tags of a pair's entry, set on |entry|
+// the tags of a pair's entry, set on |entry|: the pair named by its name and id, no path
 void tag_pair(Json::Value *entry, const SelectedPair &pair, const std::string &index_fp) {
     (*entry)["graph"] = pair.name;
-    (*entry)["graph_path"] = pair.pair.first;
-    (*entry)["annotation_path"] = pair.pair.second;
+    (*entry)["pair_id"] = pair_id_of(pair);
     (*entry)["index_fp"] = index_fp.empty() ? Json::Value() : Json::Value(index_fp);
 }
 
 // the pair an entry is tagged with, as not_reached and unfinished list it
 Json::Value ref_of_entry(const Json::Value &entry) {
     Json::Value ref(Json::objectValue);
-    for (const char *key : { "graph", "graph_path", "annotation_path" }) {
+    for (const char *key : { "graph", "pair_id" }) {
         ref[key] = entry[key];
     }
     return ref;
@@ -225,15 +224,20 @@ Json::Value multigraph_capabilities_json(uint64_t max_request_memory_mb, const R
                                      "/traverse/capabilities", "/pattern/capabilities" });
     // the selectors of section 6, as this release serves them: /search has no re-ask, so no
     // pairs; a /traverse request runs on one pair however it is named; a capabilities probe
-    // names its one pair by its parameters
+    // names its one pair by its parameters (by its pair_id, or by its paths)
     Json::Value selectors(Json::objectValue);
     selectors["/search"] = strings({ "graphs" });
     selectors["/resolve"] = strings({ "graphs", "pairs" });
     selectors["/pattern"] = strings({ "graphs", "pairs" });
     selectors["/traverse"] = strings({ "graph", "graphs", "pairs" });
-    selectors["/traverse/capabilities"] = strings({ "graph", "graph_path", "annotation_path" });
-    selectors["/pattern/capabilities"] = strings({ "graph", "graph_path", "annotation_path" });
+    selectors["/traverse/capabilities"]
+            = strings({ "graph", "graph_path", "annotation_path", "pair_id" });
+    selectors["/pattern/capabilities"]
+            = strings({ "graph", "graph_path", "annotation_path", "pair_id" });
     m["selectors"] = std::move(selectors);
+    // how every answer names a pair (section 1): `graph` and `pair_id`, master's n1 id
+    // (pair_id_of), never a path; a `pairs` object and a probe take the id as a selector
+    m["pair_id"] = "n1";
     m["traverse_pairs_per_request"] = 1;
     // the deadlines (section 4) and the request handle (section 5) by route: /traverse's
     // handle is its attempt_id
