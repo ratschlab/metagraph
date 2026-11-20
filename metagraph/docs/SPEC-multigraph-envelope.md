@@ -264,11 +264,15 @@ The answer keeps its upstream shape (a list of `{seq_description, results, ...}`
   charged, no object built), so that the account named is learned in every order. The refusals that need no
   work come first (the body cap, the body's JSON, the fields, the selection, a cached answer). Without
   `partial_refusal` a request refused by the budget is so refused whatever else its work raised (another pair's
-  error, a load refused `index_changed`). With it a refused unit is no error: another pair's error is answered
-  as without a budget (the first failing pair in pair order), and only the request's answer passing the bound
-  wins over it: a request whose answer passes the bound while its pairs work (the units' objects; its text is
-  priced only once every pair has answered, so a failed pair leaves it unpriced) is refused 400
-  `search_answer_too_large` (`account` `"answer"`) also when another pair failed. The same request is refused
+  error, a load refused `index_changed`, a record's own error on the same pair such as a label its answer cannot
+  format, `Label formatting error`). The records of a pair after such an error are still charged (no object
+  built), so a request that both fails a record and passes the bound is refused `search_answer_too_large` in every
+  order; before lane T7-P1 it was answered the record's error when that came before the bound passed. With it a
+  refused unit is no error: another pair's error is answered as without a budget (the first failing pair in pair
+  order), and only the request's answer passing the bound wins over it: a request whose answer passes the bound
+  while its pairs work (the units' objects; its text is priced only once every pair has answered, so a failed
+  pair leaves it unpriced) is refused 400 `search_answer_too_large` (`account` `"answer"`) also when another pair
+  failed. The same request is refused
   again (the code is final: change the request), and a 400 is not cached; a partly refused 200 is cached as any
   answer. `in_ram` changes nothing: the same charges, the same
   refusals. Below the bound every answer is the one without a budget, byte for byte, in both modes. Since lane

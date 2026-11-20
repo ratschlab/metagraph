@@ -163,6 +163,13 @@ Json::Value process_search_request(const SearchRequest &request,
     std::mutex result_mutex;
     // the most one record's object held while it was built and measured (charged as it grows)
     uint64_t transient_charged = 0;
+    // An object failed to build (a label its answer cannot format: "Label formatting error"):
+    // the pair's answer fails with that first error (query_fasta), so no further object is
+    // built, and the error is logged once, not once per record (GPT review of train 7, P1). The
+    // records after it are still charged: the budget's refusal, which takes precedence (SPEC-
+    // multigraph-envelope.md section 3), stays a function of the request, never of the order
+    // the records ran in
+    bool object_failed = false;
     const size_t k = anno_graph.get_graph().get_k();
     query_fasta(tf->name(),
         [&](SeqSearchResult &&seq_result) {
@@ -178,18 +185,26 @@ Json::Value process_search_request(const SearchRequest &request,
                     return;
                 }
             }
-            Json::Value json = seq_result.to_json(config.verbose_output, k);
-            if (source.tagged) {
-                for (Json::Value &row : json["results"]) {
-                    row["graph"] = source.graph;
-                    row["pair_id"] = source.pair_id;
+            if (object_failed)
+                return;
+            try {
+                Json::Value json = seq_result.to_json(config.verbose_output, k);
+                if (source.tagged) {
+                    for (Json::Value &row : json["results"]) {
+                        row["graph"] = source.graph;
+                        row["pair_id"] = source.pair_id;
+                    }
                 }
+                json["cuts"] = seq_result.cuts_json(
+                        string_or_null(source.tagged, source.graph),
+                        string_or_null(source.tagged, source.pair_id),
+                        string_or_null(!source.index_fp.empty(), source.index_fp));
+                objects.emplace_back(seq_result.get_sequence().id, std::move(json));
+            } catch (...) {
+                // rethrown to query_fasta, which keeps it as the pair's error
+                object_failed = true;
+                throw;
             }
-            json["cuts"] = seq_result.cuts_json(
-                    string_or_null(source.tagged, source.graph),
-                    string_or_null(source.tagged, source.pair_id),
-                    string_or_null(!source.index_fp.empty(), source.index_fp));
-            objects.emplace_back(seq_result.get_sequence().id, std::move(json));
         },
         config, anno_graph, aligner_config.get(), budget, pair, source.index, stop
     );
