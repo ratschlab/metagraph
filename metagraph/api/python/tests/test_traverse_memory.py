@@ -886,6 +886,27 @@ class TestCallerSizedMetadata(unittest.TestCase):
         self.assertEqual(B.value_size(x, b, shared=True)[1:3],
                          (41, 40 * B.list_bytes(2) + B.list_bytes(1)))
 
+    def test_values_shared_between_overrides(self):
+        """One value given under several keyword overrides is copied once per key: the merge
+        into the strategy deep-copies each override (or each entry of a section the strategy
+        holds) with a memo of its own, so each is charged (Opus check of 63e7fdaa3, R1: one
+        list as note0..note7 charged one copy, 7.5x under its traced peak; 3.75x for four
+        entries of the annotation section)."""
+        x = ['a'] * 100_000
+        cases = (('8 keys', {'note%d' % i: x for i in range(8)}),
+                 ('a section', {'annotation': {'n%d' % i: x for i in range(4)}}))
+        for name, kw in cases:
+            for op in ('next_request', 'next_requests'):
+                def call(b=None, kw=kw, op=op):
+                    g = T.graphlet('merge')
+                    extra = {} if b is None else {'budget': b}
+                    return getattr(g, op)('right', [0], **extra, **kw)
+                with self.subTest(name, op=op):
+                    b = LocalBudget(work_units=10**7)
+                    call(b)
+                    peak, _ = _warm_peak(call, call)
+                    self.assertLessEqual(peak, b.peak_bytes)
+
     def test_charges_are_the_same_on_every_interpreter(self):
         """No charge reads the interpreter's Unicode tables or object sizes (Opus review of
         b8fb7a8d6, M4): a character of Unicode 15 (U+1FAE8, unknown to 3.11's tables) and

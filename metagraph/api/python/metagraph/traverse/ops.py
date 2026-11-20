@@ -2645,6 +2645,48 @@ def _charge_deepcopy(lb, x):
     return held
 
 
+def _charge_merge(lb, strategy, overrides):
+    """Charge _merge_overrides(|strategy|, |overrides|)'s copies before they are made -> the
+    bytes they hold, which the caller releases once it drops them. The merge deep-copies
+    each override it does not merge into a section the strategy holds as a dict, each in a
+    copy.deepcopy() of its own (a fresh memo): a value given under k keys is copied k times,
+    so each is priced alone -- a container shared within one value once (its memo), a value
+    shared between values once per value (Opus check of 63e7fdaa3, R1: one list of 10^6
+    items as note0..note7 was charged one copy against eight traced). The walk follows
+    _merge_overrides(): into a dict section both hold, except a change_cost that names
+    another model (replaced whole). The _SMALL_VALUE allowance of _charge_deepcopy() holds
+    for the items of all of them together; each copy's memo is dropped before the next."""
+    if not overrides:
+        return 0
+    conts = copied = items = memo = 0
+    todo = [(strategy if isinstance(strategy, dict) else {}, overrides, 'strategy')]
+    while todo:
+        cur, ov, path = todo.pop()
+        # its entries, within the allowance as a single copy's are
+        n = len(ov)
+        if items + n > _SMALL_VALUE:
+            lb.charge(W_ELEM * min(n, items + n - _SMALL_VALUE))
+        items += n
+        for k, v in ov.items():
+            here = '%s.%s' % (path, k)
+            c = cur.get(k)
+            if isinstance(v, dict) and isinstance(c, dict) and not (
+                    here == 'strategy.labels.change_cost' and 'model' in v
+                    and v['model'] != c.get('model', 'forbid')):
+                todo.append((c, v, here))
+                continue
+            _, n, cp, _, _, it = _B.value_size(v, lb, max(0, _SMALL_VALUE - items),
+                                               shared=True)
+            conts += n
+            copied += cp
+            items += it
+            memo = max(memo, _B.deepcopy_bytes(n, cp)[1])
+    held = _B.deepcopy_bytes(conts, copied)[0]
+    lb.charge(_B.W_CONTAINER * conts if items > _SMALL_VALUE else 0, held + memo)
+    lb.release(memo)
+    return held
+
+
 def _switch_reach(change_cost, sources, targets, budget, sinks=(), lb=None):
     """{name: loss} for every name of |targets| that a chain of switches from a name of
     |sources| enters within |budget|, at the cheapest such chain's loss (summed left to
@@ -3076,7 +3118,7 @@ def _next_request(g, arm, leaves, bp, reduce_budget, reset_branches, lb, overrid
         if lb is not None:
             # both copies are held until the call returns (an override's entries replace
             # the retrieval's in |final| only once they are copied)
-            final_held = _charge_deepcopy(lb, strategy) + _charge_deepcopy(lb, overrides)
+            final_held = _charge_deepcopy(lb, strategy) + _charge_merge(lb, strategy, overrides)
         final = copy.deepcopy(strategy)
         _merge_overrides(final, {k: v for k, v in overrides.items()
                                  if k not in _REQUEST_LEVEL})
@@ -3267,7 +3309,7 @@ def _next_request(g, arm, leaves, bp, reduce_budget, reset_branches, lb, overrid
         request['release'] = overrides.pop('release')
     request.update(_pair_of_request(g, overrides))
     if lb is not None:
-        _charge_deepcopy(lb, overrides)       # the request's own copy of the overrides'
+        _charge_merge(lb, strategy, overrides)  # the request's own copy of the overrides'
     # the same merge as |final|'s (a model change replaces change_cost; None for an object
     # section is refused), in annotate mode too
     _merge_overrides(strategy, overrides)
