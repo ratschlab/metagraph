@@ -6612,6 +6612,11 @@ class TestTraverseWideIndex(TestingBase):
         for anno_type in ('row_diff', 'row_diff_brwt'):
             with self._server(index=self.variants[anno_type]) as server:
                 for extra in ({}, {'max_memory_mb': 4096}):
+                    # the requests whose longest piece was a read, whose rows the bound checks:
+                    # at least one with and one without the memory budget on row_diff (GPT
+                    # review of train 7, E1: a setup or finalisation piece longer than every
+                    # read left the bound unchecked, and the test passed without checking it)
+                    checked = []
                     for mode in ('constrain', 'annotate'):
                         for budget in (50, 200):
                             req = self._request(mode, budget, attempt_id=f'rd-{anno_type}-'
@@ -6640,10 +6645,14 @@ class TestTraverseWideIndex(TestingBase):
                             if anno_type == 'row_diff' and piece['kind'] in ('read', 'chunk',
                                                                              'rest'):
                                 self.assertLessEqual(piece['rows'], 128, what)
+                                checked.append(piece['rows'])
                             # The seed's CPU time: its walking thread's, which decodes its
                             # rows too, since the server runs with --parallel-each 1 (the
                             # default: "Threads per graph: 1", row-diff decoding on one thread)
                             self.assertLessEqual(timing['cpu_ms'], budget + 50 + 150, what)
+                    if anno_type == 'row_diff':
+                        self.assertTrue(checked, (anno_type, extra,
+                                                  'no request\'s longest piece was a read'))
 
     def test_wide_index_budget_is_kept_within_a_chunk(self):
         with self._server() as server:
