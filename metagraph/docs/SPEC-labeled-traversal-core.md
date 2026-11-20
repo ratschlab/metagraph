@@ -440,8 +440,8 @@ deadline. `src/cli/traverse.cpp` `process_resolve_request`, `src/graph/traversal
   the deadline is first read, so a stop never hides one); one row batch's decode (a row-diff row's whole path), and
   within its uses one row's (every label of it, read before the next once 1 MiB of rows were used); a pass's setup
   (the next occurrence of every present k-mer, one hash pass); one piece of hits and its accumulation; a piece of a
-  sort in steps (`stepped_sort.hpp`: at most 16,384 elements sorted by `std::sort`, a partition's 4,096 elements by
-  copies, or, for the grouping's candidates, Hoare's scan between two swaps, linear in the range at most); the model
+  sort in steps (`stepped_sort.hpp`: at most 16,384 elements sorted by `std::sort`, 4,096 elements of its check that
+  a range is sorted already (a sorted range is left as it is), a partition's 4,096 elements by copies, or, for the grouping's candidates, Hoare's scan between two swaps, linear in the range at most); the model
   of the profile's memory once it is complete (linear in its labels, candidates and absent labels: up to 3 million
   candidates at the caps); in `select_seeds`, its sort of the picks and of the merged ones (at most `max_seeds`,
   which `--resolve-max-explicit-seeds` caps), a `longest_first` pick's copy of its candidate's labels, a seed's two
@@ -455,17 +455,20 @@ deadline. `src/cli/traverse.cpp` `process_resolve_request`, `src/graph/traversal
   and the transport. The client's checks are where they were (§10.3); a reserve that these overrun is not adapted
   to them (the reserve is fixed). The request's stop (a client gone, the fan-out's stop) is read at the same
   readings, so it waits for these pieces too. At the server's caps, replicas of the loops on one laptop core at a
-  load of {LOAD} (lane T8-RL; the real loops where a route drives them): the longest
-  stretch between two readings of the pieces now read inside — a discovery's ranking and name sorts at 1,000,000
-  tracked labels {DISC}, the grouping at 3 million groups (10,000 labels of 300 runs of their own) {GROUP}, a
-  `max_support` round at 10 million pieces (10,000 labels of one run over the query, each clipped by 1,024 picks)
-  {ROUND}, the picks' free at 1,024 picks of 9,999 names {PICKS}, the check of 1,024 explicit seeds of 10,000
-  names under a stop {CHECK}; and of those left unread, the profile's candidates freed at 3 million {CFREE}, a
-  discovery's tracked labels freed at 1,000,000 {FFREE}, the model of the profile's memory about 2 ms at 3 million
-  candidates. On D3's shape (4,000 explicit labels over a 6.5 kbp query 12 times, a 212 MB answer) the 503 of a
-  budget of 700 to 1,400 ms comes {DL} after it and a client gone is noticed {GONE} after it left. The list names
-  the pieces the reviews found that can take long at the caps; it does not prove that there are no others (freeing
-  or copying a container is such a piece, linear in what it holds).
+  load of 16 to 19 (lane T8-RL; the real loops where a route drives them): the longest stretch between two readings
+  of the pieces now read inside — a discovery's ranking and name sorts at 1,000,000 tracked labels 6 to 8 ms
+  (before, 55 to 65 ms), the grouping at 3 million groups (10,000 labels of 300 runs of their own) 7 to 36 ms
+  (before, 0.37 to 0.42 s), a `max_support` round at 10 million pieces (10,000 labels of one run over the query,
+  each clipped by 1,024 picks) 23 to 24 ms (before, 0.37 to 0.42 s), the picks' free at 1,024 picks of 9,999 names
+  at most 9 ms (before, 0.13 to 0.16 s), the check of 1,024 explicit seeds of 10,000 names under a stop at most
+  3 ms (before, 0.27 to 0.37 s with the names profiled, 0.56 to 0.80 s with them absent); and of those left unread,
+  the profile's candidates freed at 3 million 33 to 54 ms, a discovery's tracked labels freed at 1,000,000 24 to
+  28 ms, the model of the profile's memory about 2 ms at 3 million candidates. On D3's shape (4,000 explicit labels
+  over a 6.5 kbp query 12 times, a 212 MB answer; 24 requests at a load of 12 to 20) the 503 of a budget of 700 to
+  1,400 ms comes 3 to 26 ms after it, once 102 ms (on a multi-graph server the pair's `deadline` refusal 3 to
+  30 ms; before, up to 453 ms and 707 ms), and a client gone is noticed within 11 ms after it left, as before. The
+  list names the pieces the reviews found that can take long at the caps; it does not prove that there are no
+  others (freeing or copying a container is such a piece, linear in what it holds).
 - **Capabilities.** Both GET routes carry the `resolve` block (§10.3). The field is not a `feature_level`: every
   `/resolve` and `/traverse` response states the level, so a bump would change every answer; a client gates
   on the block. An older server refuses the field (400 naming it).
