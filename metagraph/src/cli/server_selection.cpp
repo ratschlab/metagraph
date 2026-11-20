@@ -77,7 +77,10 @@ TraversePairChoice choose_traverse_pair(const std::string &name, const std::stri
             pairs.push_back(&pair);
         }
     }
-    if (pairs.size() == 1) {
+    // a name of one pair is that pair, unless a graph_path given is not its graph: that path is
+    // refused NOT_PART as on a name of several pairs (train 8, the owner's decision of
+    // 2026-11-20; before, the pair answered and the path was ignored)
+    if (pairs.size() == 1 && (!graph_path || pairs[0]->first == *graph_path)) {
         choice.pair = pairs[0];
         return choice;
     }

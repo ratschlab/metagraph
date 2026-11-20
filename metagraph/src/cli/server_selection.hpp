@@ -86,7 +86,9 @@ class SelectionRefusal : public HttpError {
 /**
  * The release-9 choice of one pair by a name and a graph_path (/resolve, /traverse and the GET
  * probes of 8fa32e553): |pair| when the name holds exactly one pair on |graph_path| (when
- * given), else |outcome| and |error|, and |matching| the name's pairs the choice could not
+ * given; a name of one pair whose graph is not |graph_path| is NOT_PART too since train 8,
+ * where 8fa32e553 answered that pair and ignored the path), else |outcome| and |error|, and
+ * |matching| the name's pairs the choice could not
  * decide between (SEVERAL_ANNOTATIONS: the pairs on that one graph; SPANS_GRAPHS: every pair of
  * the name), each once, in the graph list's order. The texts are the base's where it named no
  * path ("Bad request: unknown graph 'n'"); those that named configured paths are train 8's,

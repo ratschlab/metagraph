@@ -233,8 +233,11 @@ TEST(ServerSelection, Resolve) {
                         {"graph": "b", "pair_id": "n1-8176d21f-adfa-5871-bae9-b8069f414cf0"},
                         {"graph": "b", "pair_id": "n1-ed028e27-d777-5594-af59-3996be1274e8"}]})"),
               body);
-    // a name of one pair is that pair, whatever graph_path says, as the base answered it
-    EXPECT_EQ(Pairs({ kA }), select(route, R"({"graph": "a", "graph_path": "x.dbg"})"));
+    // a name of one pair refuses a graph_path it lacks too (train 8; the base answered the pair):
+    // OnePairNameRefusesAForeignGraphPath
+    EXPECT_EQ("pair_not_found", selection_code_of([&] {
+        select(route, R"({"graph": "a", "graph_path": "x.dbg"})");
+    }));
     EXPECT_EQ("selection_conflict", selection_code_of([&] {
         select(route, R"({"graph": "a", "graphs": ["a"]})");
     }, &body));
@@ -291,6 +294,7 @@ TEST(ServerSelection, ShapeBeforeInRam) {
         for (const char *request : { R"({"graph": "z"})", R"({"graphs": ["z"]})",
                                      R"({"graph": "b"})",
                                      R"({"graph": "b", "graph_path": "x.dbg"})",
+                                     R"({"graph": "a", "graph_path": "x.dbg"})",
                                      R"({"pairs": [{"graph": "z"}]})", R"({"pairs": 5})" }) {
             EXPECT_EQ("", refusal_of([&] { shape(route, request); })) << request;
             EXPECT_EQ("", selection_code_of([&] { shape(route, request); })) << request;
@@ -727,6 +731,125 @@ TEST(ServerSelection, PairIdProbes) {
               body["error"].asString());
 }
 
+// A name of one pair and a graph_path that is not its graph (train 8, the owner's decision of
+// 2026-11-20): refused pair_not_found on every route that reads graph_path beside a name, in the
+// body a name of several pairs gets (the text, the code, the name's pairs as the candidates);
+// before, the pair answered and the path was ignored. Its own graph_path still selects it; an
+// object of pairs and a probe with annotation_path or pair_id refused such a path already
+TEST(ServerSelection, OnePairNameRefusesAForeignGraphPath) {
+    const GraphIndexes indexes = small_indexes();
+    const std::string not_part = "Bad request: the graph_path given is not part of index 'a'";
+    const Json::Value expected = parse(std::string(R"({"error": ")") + not_part
+            + R"(", "code": "pair_not_found", "candidates": [{"graph": "a", "pair_id": ")"
+            + kIdA + R"("}]})");
+    EXPECT_EQ(selection_candidates("a", indexes), expected["candidates"]);
+    // the choice itself
+    for (const std::string &path : { std::string("x.dbg"), std::string("b1.dbg"),
+                                     std::string("a.anno"), std::string() }) {
+        const TraversePairChoice choice = choose_traverse_pair("a", &path, indexes);
+        EXPECT_EQ(TraversePairChoice::NOT_PART, choice.outcome) << path;
+        EXPECT_EQ(nullptr, choice.pair) << path;
+        EXPECT_EQ(not_part, choice.error) << path;
+        EXPECT_TRUE(choice.matching.empty()) << path;
+        EXPECT_EQ(not_part, refusal_of([&] { select_traverse_pair("a", &path, indexes); }));
+    }
+    const std::string own = "a.dbg";
+    EXPECT_EQ(TraversePairChoice::ONE, choose_traverse_pair("a", &own, indexes).outcome);
+    EXPECT_EQ(TraversePairChoice::ONE, choose_traverse_pair("a", nullptr, indexes).outcome);
+
+    // POST /resolve and POST /traverse: graph or graphs: [name], with graph_path; another
+    // name's graph and an empty path are paths the name lacks too
+    for (SelectionRoute route : { SelectionRoute::RESOLVE, SelectionRoute::TRAVERSE }) {
+        SCOPED_TRACE(route == SelectionRoute::RESOLVE ? "resolve" : "traverse");
+        for (const char *request : { R"({"graph": "a", "graph_path": "x.dbg"})",
+                                     R"({"graphs": ["a"], "graph_path": "x.dbg"})",
+                                     R"({"graphs": ["a", "a"], "graph_path": "x.dbg"})",
+                                     R"({"graph": "a", "graph_path": "b1.dbg"})",
+                                     R"({"graph": "a", "graph_path": ""})" }) {
+            Json::Value body;
+            EXPECT_EQ("pair_not_found",
+                      selection_code_of([&] { select(route, request); }, &body)) << request;
+            EXPECT_EQ(expected, body) << request;
+            // after in_ram, as the name of several pairs: the shape check passes it
+            EXPECT_EQ("", refusal_of([&] {
+                check_selection_shape(route, parse(request), indexes, 10);
+            })) << request;
+        }
+        EXPECT_EQ(Pairs({ kA }), select(route, R"({"graph": "a", "graph_path": "a.dbg"})"));
+        EXPECT_EQ(Pairs({ kA }), select(route, R"({"graphs": ["a"], "graph_path": "a.dbg"})"));
+        // the same body shape as a name of several pairs (its own name and pairs)
+        Json::Value several;
+        EXPECT_EQ("pair_not_found", selection_code_of([&] {
+            select(route, R"({"graph": "b", "graph_path": "x.dbg"})");
+        }, &several));
+        EXPECT_EQ(several.getMemberNames(), expected.getMemberNames());
+        EXPECT_EQ(selection_candidates("b", indexes), several["candidates"]);
+        // a graph_path is a string: another type stays the parser's refusal (not read here)
+        EXPECT_EQ(Pairs({ kA }), select(route, R"({"graph": "a", "graph_path": 2})"));
+    }
+    // a pair listed twice under the name is one pair: the same refusal
+    GraphIndexes twice = indexes;
+    twice["a"] = { { "a.dbg", "a.anno" }, { "a.dbg", "a.anno" } };
+    Json::Value body;
+    EXPECT_EQ("pair_not_found", selection_code_of([&] {
+        select_pairs(SelectionRoute::TRAVERSE, parse(R"({"graph": "a", "graph_path": "x.dbg"})"),
+                     twice, 10);
+    }, &body));
+    EXPECT_EQ(expected, body);
+
+    // the GET probes and the JSON spelling of one
+    for (SelectionRoute route : { SelectionRoute::TRAVERSE, SelectionRoute::PATTERN }) {
+        EXPECT_EQ("pair_not_found", selection_code_of([&] {
+            probe(route, { { "graph", "a" }, { "graph_path", "x.dbg" } });
+        }, &body));
+        EXPECT_EQ(expected, body);
+        EXPECT_EQ(Pairs({ kA }), probe(route, { { "graph", "a" }, { "graph_path", "a.dbg" } }));
+        // with annotation_path the probe names the pair as an object of pairs does: refused
+        // before this change too, in that form's words
+        EXPECT_EQ("pair_not_found", selection_code_of([&] {
+            probe(route, { { "graph", "a" }, { "graph_path", "x.dbg" },
+                           { "annotation_path", "a.anno" } });
+        }, &body));
+        EXPECT_EQ("no pair of graph 'a' has the graph_path and annotation_path given",
+                  body["error"].asString());
+        EXPECT_EQ(expected["candidates"], body["candidates"]);
+    }
+    EXPECT_EQ("pair_not_found", selection_code_of([&] {
+        select(SelectionRoute::CAPABILITIES, R"({"graph": "a", "graph_path": "x.dbg"})");
+    }, &body));
+    EXPECT_EQ(expected, body);
+
+    // an object of pairs refused it before this change too, in its own words, on every route
+    // that takes pairs
+    for (SelectionRoute route : { SelectionRoute::RESOLVE, SelectionRoute::PATTERN,
+                                  SelectionRoute::TRAVERSE }) {
+        EXPECT_EQ("pair_not_found", selection_code_of([&] {
+            select(route, R"({"pairs": [{"graph": "a", "graph_path": "x.dbg"}]})");
+        }, &body));
+        EXPECT_EQ("request.pairs[0]: no pair of 'a' has the graph_path given",
+                  body["error"].asString());
+        EXPECT_EQ(expected["candidates"], body["candidates"]);
+    }
+    // with a pair_id: unchanged. An id beside a path is a plain 400 in an object of pairs and in
+    // a probe; at the top level of /resolve and /traverse pair_id is refused first, whatever
+    // graph_path says
+    EXPECT_EQ("(none)", selection_code_of([&] {
+        probe(SelectionRoute::TRAVERSE, { { "graph", "a" }, { "pair_id", kIdA },
+                                          { "graph_path", "x.dbg" } });
+    }));
+    EXPECT_EQ("(none)", selection_code_of([&] {
+        select(SelectionRoute::TRAVERSE, std::string(R"({"pairs": [{"graph": "a", "pair_id": ")")
+               + kIdA + R"(", "graph_path": "x.dbg"}]})");
+    }));
+    EXPECT_EQ("request: unknown field 'pair_id': name the pair in an object of pairs, {graph, "
+              "pair_id} or {graph, graph_path?, annotation_path?} (GET /capabilities lists the "
+              "pairs)",
+              refusal_of([&] {
+                  select(SelectionRoute::RESOLVE, std::string(R"({"graph": "a", "graph_path": )"
+                         R"("x.dbg", "pair_id": ")") + kIdA + R"("})");
+              }));
+}
+
 // The GET probes: ?graph= (with graph_path= and annotation_path=) one pair, coded as an object
 // of pairs is; without ?graph= every pair, up to the names cap; the parameters' own refusals
 TEST(ServerSelection, CapabilitiesProbes) {
@@ -796,9 +919,10 @@ TEST(ServerSelection, CapabilitiesProbes) {
     EXPECT_EQ("Bad request: the graph_path given is not part of index 'b'",
               body["error"].asString());
     EXPECT_EQ(selection_candidates("b", small_indexes()), body["candidates"]);
-    // a name of one pair is that pair, whatever graph_path says, as before release 10
-    EXPECT_EQ(Pairs({ kA }), probe(SelectionRoute::PATTERN, { { "graph", "a" },
-                                                             { "graph_path", "x.dbg" } }));
+    // a name of one pair refuses a graph_path it lacks too (train 8; before, the pair answered)
+    EXPECT_EQ("pair_not_found", selection_code_of([] {
+        probe(SelectionRoute::PATTERN, { { "graph", "a" }, { "graph_path", "x.dbg" } });
+    }));
     // any range of (key, value): the server passes its query multimap
     const GraphIndexes indexes = small_indexes();
     const std::multimap<std::string, std::string> query { { "graph", "c" },
