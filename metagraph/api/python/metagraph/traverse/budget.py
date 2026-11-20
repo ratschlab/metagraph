@@ -20,10 +20,15 @@ With a budget, a local call either completes or stops and says so (DESIGN §5.4)
     uses, each charged at a size modelled on CPython (ASCII text at one byte per character
     plus its header, lists, sets, dicts and the slotted records at their measured sizes,
     a parse at a fit of its traced peak, a gzip load with its decompressor's buffers;
-    caller-sized metadata -- error strings, tags, names -- charged before it is serialized
-    or escaped, at its JSON- or %-escaped length, and text joined with a character beyond
-    ASCII at four bytes a character), released inside a call only where a loop drops a
-    temporary before its next step: the account bounds the call's peak. Every call also
+    caller-sized metadata -- error strings, tags, names, a seed id, a namespace or release,
+    a stop's message and actions -- charged before it is serialized, escaped, encoded or
+    front-coded, at its escaped bound (text_bytes()), a JSON value its sender sizes -- a
+    seed summary's work block, the envelope of a J line, a strategy and the keyword
+    overrides deep-copied -- by a walk charged as it goes (value_size(); a copy of a
+    strategy of up to 128 items is not charged as work), and text joined with a
+    character beyond ASCII at four bytes a character, all of it; no bound reads the
+    interpreter's Unicode tables or object sizes), released inside a call only where a
+    loop drops a temporary before its next step: the account bounds the call's peak. Every call also
     carries a base (CALL_BASE bytes, W_CALL lwu) for its frames, temporaries and setup,
     charged with its first charge. It is a model, not a measurement: Python can
     allocate more (interpreter internals, fragmentation, other CPython versions, text
@@ -55,8 +60,9 @@ call leaves only complete caches and a later unbudgeted call answers byte for by
 the stop had not happened.
 
 Not charged (stated in the docs): the store's bookkeeping (refresh, cache_signature,
-cache_bytes, memory_bytes, its spool lock, and the digest check of a body it parses on
-demand: about 0.8 lwu per 256 bytes, against the parse's 32 per 256), the HTTP client's
+cache_bytes, memory_bytes, its spool lock, and the read and digest check of a body it parses
+on demand: about 0.8 lwu per 256 bytes, against the parse's 32 per 256; the bytes read and
+their text are charged before the read), the HTTP client's
 decoding of a response, cursor MACs,
 check_rules(), the tables of frames() (the library calls they make are charged), the MCP
 framework's serialisation of a result, and interpreter work outside the charge points.
@@ -64,6 +70,7 @@ framework's serialisation of a result, and interpreter work outside the charge p
 
 import contextvars
 import math
+import re
 import sys
 import time
 from contextlib import contextmanager
@@ -131,17 +138,22 @@ __all__ = ['LocalLimits', 'LocalBudget', 'LocalStop', 'LocalBudgetExceeded', 'Pa
 #     indexed and _W_QUERY twice per one queried (its count and its scan), fitted as these
 #     weights are, and _M_MATCH per description of the pass (released when the pass ends),
 #     then before it compares 4 W_ELEM per comparison, counted from the index; an input
-#     refused ambiguous_pair has its first refusal searched by comparing a group's
-#     matches among themselves, charged row by row before each row; the trie is one
+#     refused ambiguous_pair has its first refusal searched by comparing a group's matches
+#     among themselves, charged row by row before each row (a group whose matches are found
+#     again: its count and scan, _W_QUERY each, and its comparisons first); the trie is one
 #     pass over each part's first-parent tree, charged per part and arm before the pass:
 #     4 W_ELEM per part segment (its element, the compare of its bases, at most two trie
-#     nodes, an edge and a cover entry) and 1 lwu per 16 of its bases; its memory at its
-#     bound (union.py's _M_* prices, fitted to the traced peak on CPython 3.11 and 3.14):
-#     a first part's segment one node, edge and cover entry, a later part's at most two
-#     nodes and edges and a copy of the split edge's cover; before the union segments are
-#     made, one per raw edge and a piece per cover entry; a record per part and absent or
-#     failed record; the parts' leaves, paths and path_of_leaf (derive.uses); the parts'
-#     own parses are the caller's (a union takes parsed models);
+#     nodes and edges, the cover entry of the first edge it walks) and 1 lwu per 16 of its
+#     bases, its memory at its bound (union.py's _M_* prices, fitted to the traced peak on
+#     CPython 3.11 and 3.14: a first part's segment one node, edge and cover entry, a later
+#     part's at most two nodes and edges and one cover entry); then, where it is made, each
+#     further cover entry: union.py's _W_EDGE per further edge a segment walks, _W_COPY per
+#     entry of the cover a split copies (parts that share a spelling and branch off it at
+#     different depths cover each other's edges, an entry per part and edge); before the
+#     union segments are made, one per raw edge and per cover entry a piece and _W_PIECE
+#     (the merge reads it); a record per part and absent or failed record; the parts'
+#     leaves, paths and path_of_leaf (derive.uses); the parts' own parses are the caller's
+#     (a union takes parsed models);
 #   * PairUnion's queries charge the parts' cold prices plus the trie work: an arm's walk
 #     figures (kind, length, whole_in, held_in: walks(), statements(), print(), summary(),
 #     the exports) at their cold price on every call, per union segment W_ELEM per pair (the
@@ -185,9 +197,10 @@ DEADLINE_POLL = 65536
 
 # ------------------------------------------------------------------ the weights
 # lwu per element; 1 lwu ~ 0.1 us of CPython 3.11 on the reference machine (Apple M5 Max).
-# Changing a weight moves stop points, and no unbudgeted answer: by itself it does not need
-# a new WORK_MODEL (the golden gate pins the unbudgeted outputs; union_pairs()' and stitch()'s
-# prices moved within model 2). A new WORK_MODEL is for a change in what is charged for.
+# WORK_MODEL changes only when a charge a golden test pins moves. A weight or a price
+# changed otherwise moves stop points and no unbudgeted answer (the golden gate pins the
+# unbudgeted outputs), and stays within the model: union_pairs()' and stitch()'s prices moved
+# within model 2.
 W_LINE = 48            # an MGT record line parsed (+ 1 lwu per 8 bytes of it)
 W_DUMP_LINE = 24       # an MGT record line written
 W_CALL = 200           # what any call costs beside its elements (its setup in Python)
@@ -248,6 +261,193 @@ def set_bytes(n):
 
 def dict_bytes(k):
     return DICT + DICT_KEY * k
+
+
+# the ASCII controls json.dumps() escapes as \u00XX (a fixed set, the same in every version)
+_JSON_CONTROL = re.compile('[\\x00-\\x1f]')
+
+
+def text_bytes(s):
+    """A bound of the bytes the str |s| takes once json.dumps (ensure_ascii=False) has
+    escaped it into a larger str, read without escaping it, the same on every interpreter
+    (no Unicode table is read: ASCII printability is fixed): printable ASCII a byte a
+    character, its quotes and backslashes two; other ASCII six (\\u00XX); beyond ASCII four
+    bytes per character of the escaped form (CPython's widest str; its UTF-8 is at most as
+    long), and six times that where an ASCII control is among them. Its scan costs
+    len(s) >> TEXT_SHIFT lwu."""
+    n = len(s) + 2 + s.count('"') + s.count('\\')
+    if s.isascii():
+        return n if s.isprintable() else 6 * n
+    return 4 * n if _JSON_CONTROL.search(s) is None else 24 * n
+
+
+def repr_bytes(s):
+    """text_bytes() for repr(): printable ASCII with its quotes and backslashes, other ASCII
+    four bytes a character (\\xNN), and any text beyond ASCII forty (\\UXXXXXXXX at four bytes
+    a character): which characters repr() escapes follows the interpreter's Unicode tables,
+    so the bound assumes all of them."""
+    n = len(s) + 2 + s.count("'") + s.count('"') + s.count('\\')
+    if s.isascii():
+        return n if s.isprintable() else 4 * n
+    return 40 * n
+
+
+def joined_bytes(fixed, texts):
+    """The bytes of a str joined from |fixed| ASCII bytes and the strings |texts|, each at
+    its text_bytes(): CPython gives the joined str the width of its widest character, so
+    one string beyond ASCII widens every character, the fixed part and the ASCII strings
+    too, to four bytes (as dump() charges its join)."""
+    texts = [t for t in texts if isinstance(t, str)]
+    if all(t.isascii() for t in texts):
+        return fixed + sum(map(text_bytes, texts))
+    return 4 * fixed + sum(text_bytes(t) * (4 if t.isascii() else 1) for t in texts)
+
+
+
+def str_width(s):
+    """The bytes a character of the str |s| takes (1, 2 or 4): CPython stores a str at its
+    widest character's width. One C scan of its characters (no interpreter table)."""
+    if s.isascii():
+        return 1
+    m = max(s)
+    return 4 if m > '\uffff' else 2 if m > '\xff' else 1
+
+
+def utf8_width(raw):
+    """str_width() of the str the UTF-8 bytes |raw| decode to, read from the bytes before
+    they are decoded (one C scan): a lead byte of 0xF0 or more starts a character beyond
+    U+FFFF, one of 0xC4 or more a character beyond U+00FF; 0 for ASCII (a byte a
+    character, decoded without a second buffer)."""
+    if raw.isascii():
+        return 0
+    m = max(raw)
+    return 4 if m >= 0xF0 else 2 if m >= 0xC4 else 1
+
+
+def decode_bytes(raw):
+    """(text, transient) bytes of decoding the UTF-8 bytes |raw| to a str: the str at its
+    width (utf8_width(); a byte gives at most one character), and the decoder's narrow
+    buffer, dropped once it returns (beyond ASCII it fills one byte a character until it
+    widens)."""
+    k = utf8_width(raw)
+    return (len(raw), 0) if not k else (k * len(raw), len(raw))
+
+
+def encode_factor(s):
+    """The bytes a character of the str |s| takes while str.encode('utf-8') runs: one for
+    ASCII; else the encoder's buffer, two, three or four bytes a character by str_width()
+    (it shrinks only once filled)."""
+    k = str_width(s)
+    return 1 if s.isascii() else 4 if k == 4 else k + 1
+
+
+# a container copied by copy.deepcopy(): its list built by appends (up to six slots over a
+# copy's), and the memo's record of it while the copy is built (an int key, its dict slot,
+# both of the dict's tables while it grows, a keep-alive slot); measured 198 B a one-item
+# list, 439 B a {k: [i]} (3.11 and 3.14)
+DEEPCOPY_SLACK = 6 * 8
+DEEPCOPY_MEMO = INT + 6 * DICT_KEY + 2 * LIST_ITEM
+# a JSON atom while json.dumps() builds its text: 3.11 keeps a str piece per atom and a slot
+# for it and for its separator, up to 100,000 pieces between joins (measured: 75 B an int of
+# a list of 50,000 beside the text; 3.14 writes into one buffer)
+DUMPS_ATOM = 80
+# the work of a container copied (deepcopy: about 0.5 us, its items 0.1 us each)
+W_CONTAINER = 3 * W_ELEM
+
+
+# any other object in a caller's value (a copy and a text of fixed size: sys.getsizeof()
+# differs between interpreters, and charges must not)
+OBJECT_BYTES = 256
+
+
+def value_size(x, b=None, free=0, shared=False):
+    """(nodes, containers, copy_bytes, text, wide, items) of a JSON-like value |x| -- dicts,
+    lists and tuples of strings, numbers, booleans and None, as json.loads or a caller's
+    keyword argument makes it -- read without copying or serializing it: its atoms, keys and
+    containers; its containers; the bytes a JSON copy of its containers holds (a list at its
+    length, LIST + LIST_ITEM a slot, a dict DICT + DICT_KEY a key; the atoms are shared); a
+    bound of its JSON text in bytes (text_bytes() per string, an int's digits, 24 per float,
+    5 per other atom, two per container and item for the punctuation; with |wide|, its text
+    holds a character beyond ASCII and the whole of it is four bytes a character); its items
+    (the list elements and dict entries walked). Any other object counts as an atom of
+    OBJECT_BYTES and a 64-byte text. With |b| the walk is charged as it goes: each
+    container's items W_ELEM each before they are read (beyond the first |free| items), a
+    string longer than 4 KiB its scan before it is read. A stack of iterators, one per
+    level: any nesting, no copy. A container met again inside itself (a cycle, which only a
+    caller's own value can hold) is not walked again: what reads the value (deepcopy's memo,
+    json's Circular reference) decides, as without a budget. With |shared| (a deepcopy's
+    price), a container met again anywhere counts once, as deepcopy's memo copies it once:
+    a value that holds one list twice at each of 40 levels is 41 containers, not 2^40
+    paths. Without it every path counts, as json.dumps() and repr() write every path."""
+    nodes = conts = copy = text = items = 0
+    wide = 0                # the text of the strings beyond ASCII (at their own bound)
+    stack = [iter((x,))]
+    path = [None]
+    on_path = set()
+    seen = set() if shared else None
+    while stack:
+        for v in stack[-1]:
+            nodes += 1
+            if isinstance(v, str):
+                if b is not None and len(v) > 4096:
+                    b.charge(len(v) >> TEXT_SHIFT)
+                if v.isascii():
+                    text += text_bytes(v)
+                else:
+                    wide += text_bytes(v)
+            elif v is None or isinstance(v, bool):
+                text += 5
+            elif isinstance(v, (int, float)):
+                # an int's digits: at most 5/16 of its bits (log10 2 = 0.301), its sign
+                text += 24 if isinstance(v, float) else ((v.bit_length() * 5) >> 4) + 2
+            elif isinstance(v, (dict, list, tuple)):
+                if id(v) in on_path:
+                    continue
+                if seen is not None:
+                    if id(v) in seen:
+                        continue
+                    seen.add(id(v))
+                conts += 1
+                n = len(v)
+                if b is not None and items + n > free:
+                    b.charge(W_ELEM * min(n, items + n - free))
+                items += n
+                text += 2 + 2 * n
+                if isinstance(v, dict):
+                    copy += dict_bytes(n)
+                    for k in v:
+                        nodes += 1
+                        if isinstance(k, str):
+                            if b is not None and len(k) > 4096:
+                                b.charge(len(k) >> TEXT_SHIFT)
+                            if k.isascii():
+                                text += text_bytes(k)
+                            else:
+                                wide += text_bytes(k)
+                        else:
+                            text += 24
+                    stack.append(iter(v.values()))
+                else:
+                    copy += list_bytes(n)
+                    stack.append(iter(v))
+                path.append(id(v))
+                on_path.add(id(v))
+                break
+            else:
+                copy += OBJECT_BYTES
+                text += 64
+        else:
+            stack.pop()
+            on_path.discard(path.pop())
+    if wide:
+        return nodes, conts, copy, 4 * text + wide, True, items
+    return nodes, conts, copy, text, False, items
+
+
+def deepcopy_bytes(conts, copy):
+    """(held, memo) of a copy.deepcopy() of a value of |conts| containers whose JSON copy
+    holds |copy| bytes (value_size()): the copy, and the memo it drops on return."""
+    return copy + DEEPCOPY_SLACK * conts, DICT + LIST + DEEPCOPY_MEMO * conts
 
 
 def sort_work(n):

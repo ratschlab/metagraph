@@ -720,6 +720,56 @@ class TestRefusals(unittest.TestCase):
         nameless = with_fields(T.graphlet('merge'), index_ns=None)
         refused(self, 'no_pair', lambda: union_pairs([nameless]), U.TEXTS['no_pair'] % 0)
 
+    def test_a_tag_that_is_not_a_string(self):
+        """G4Q's open question 3 (and the Opus review's answer): an envelope whose release or
+        index tag (its own, or its capabilities') is not a string is refused bad_pair_tag,
+        naming the result and the tag, where a document's pair statement is checked: a
+        list as a release raised TypeError in _tags(), a number was taken as a release. A
+        caller's pair statement with such a value was refused already (not a pair). A falsy
+        one (0, False, [], {}) was read as no release, and a capabilities tag beside a string
+        one was never read: refused too. The pair-id refusals of the same result come
+        first. Each case checks the code before the text (on a library without the code,
+        the case fails on what the call did)."""
+        def caps(g, **kw):
+            return with_env(g, capabilities=dict(g.envelope.get('capabilities') or {}, **kw))
+        a, b = T.graphlet('merge'), T.graphlet('merge_ties')
+        cases = [
+            ([with_env(a, release=['r1', 'r2']), with_env(b, release='r3')], 0, 'release', 'list'),
+            ([b, with_env(a, release=5)], 1, 'release', 'int'),
+            ([caps(a, release={'id': 'r1'})], 0, 'capabilities.release', 'dict'),
+            ([{'pair': 'gM', 'graphlet': with_env(a, release=True)}], 0, 'release', 'bool'),
+            ([with_env(a, release=0), b], 0, 'release', 'int'),
+            ([with_env(a, release=False), b], 0, 'release', 'bool'),
+            ([with_env(a, release=[]), b], 0, 'release', 'list'),
+            ([with_env(a, release={}), b], 0, 'release', 'dict'),
+            ([caps(with_env(a, release='r1'), release=7), b], 0, 'capabilities.release',
+             'int')]
+        for results, pos, tag, kind in cases:
+            with self.subTest(tag=tag, kind=kind):
+                got = refused(self, 'bad_pair_tag', lambda: union_pairs(results))
+                self.assertEqual(got, U.TEXTS['bad_pair_tag'] % ('result %d' % pos, tag, kind))
+        # within one result the pair-id refusals come first (graphlets.rst's order)
+        refused(self, 'p2_pair_id', lambda: union_pairs(
+            [with_env(T.graphlet('merge'), graph='g', pair_id='p2-0123456789abcdef',
+                      release=['x']), T.graphlet('merge_ties')]))
+        # a response's seed result without a graphlet: its envelope states the index tags
+        for k in ('index_ns', 'index_fp', 'index_meta_fp'):
+            r = response_of(extra_results=[absent_result('not_in_graph', seed_len=30)])
+            r.envelope = dict(r.envelope, capabilities=dict(
+                r.envelope.get('capabilities') or {}, **{k: 7}))
+            with self.subTest(tag=k):
+                got = refused(self, 'bad_pair_tag', lambda: union_pairs(
+                    [{'response': r, 'index': 0}], seed='A' * 30))
+                self.assertEqual(got, U.TEXTS['bad_pair_tag'] % ('result 0', 'capabilities.' + k,
+                                                                'int'))
+        # a part's index tags are its H line's: its envelope's are not read
+        union_pairs([{'pair': 'gM', 'graphlet': caps(a, index_fp=7)},
+                     {'pair': 'gT', 'graphlet': b}])
+        # None and strings ('' included) are taken as before
+        u = union_pairs([{'pair': 'gM', 'graphlet': with_env(a, release=None)},
+                         {'pair': 'gT', 'graphlet': with_env(b, release='')}])
+        self.assertEqual(len(u.parts), 2)
+
     def test_ambiguous_pair(self):
         a = with_fields(with_env(T.graphlet('merge'), graph='g2'), index_fp='f1')
         b = with_fields(with_env(T.graphlet('merge_ties'), graph='g2'), index_fp='f2')
@@ -2258,6 +2308,105 @@ def spine_part(n):
     g.envelope = copy.deepcopy(ref.envelope)
     g.seed_summary = copy.deepcopy(ref.seed_summary)
     return g
+
+
+def branch_part(n, d):
+    """The comb's spine 'A' + 'G' * n (n + 1 bp) split after |d| bases (1 <= d <= n) into a
+    1-bp leaf 'C' and the rest of the spine, three segments: parts of different |d| share
+    the spine and branch off it at different depths, so each part's segments walk an edge
+    per depth the others branch at (the Opus review of c8a0d5af2, Q5: the trie's covers
+    are quadratic in such parts)."""
+    from metagraph.traverse import parse
+    from tests.test_traverse_scale import COUNTERS
+    steps = n + 2
+    lines = ['H mgt 1 5 basic $ACGT a k k 1000 10 0 walk * * 0123456789abcdef',
+             'S aaaaaaaaaaaaaaaa 10 6 0 ACGTACGTAC',
+             'L c 0 * 0 left_samples', 'L c 1 * 5 right_samples', 'O c c c i',
+             'A r c %d p 0 0 1 2 0 %s * 0 * 3 0 2 1 0 %d'
+             % (n + 1, COUNTERS % (steps, steps, steps), steps),
+             'B 0 2 2 3 1 %d 1 0 1 0 0 0 0 .' % steps,
+             'G * 0 %d 0-1 * * * 0 * %s' % (d, 'A' + 'G' * (d - 1)), 'P 0 %d 2 !' % d,
+             'G 0 %d 1 0 * * * * * C' % d, 'P %d %d 1 0' % (d, d + 1), 'T D .',
+             'G 0 %d %d ! * * * * * %s' % (d, n + 1 - d, 'G' * (n + 1 - d)),
+             'P %d %d 2 !' % (d, n + 1), 'T D .']
+    lines.append('Z %d' % (len(lines) + 1))
+    g = parse('\n'.join(lines) + '\n')
+    ref = T.graphlet('merge')
+    g.envelope = copy.deepcopy(ref.envelope)
+    g.seed_summary = copy.deepcopy(ref.seed_summary)
+    return g
+
+
+class TestTrieCharges(unittest.TestCase):
+    """The Opus review of c8a0d5af2, Q5: the trie charges each cover entry where it is made
+    -- an edge a part's segment walks past its first, a split's copy of the edge's cover --
+    and the union segments' merge per cover entry, not a bound of every part before it per
+    segment (union.py's _Trie)."""
+
+    @staticmethod
+    def peak(make):
+        """tracemalloc's peak of union_pairs(make()) unbudgeted, warm (the same call first on
+        other fresh models, the collector held off: test_the_account_bounds_the_peak)."""
+        import gc
+        import tracemalloc
+        parts, other = make(), make()
+        gc.collect()
+        gc.disable()
+        try:
+            union_pairs(other)
+            tracemalloc.start()
+            base = tracemalloc.get_traced_memory()[0]
+            union_pairs(parts)
+            return tracemalloc.get_traced_memory()[1] - base
+        finally:
+            tracemalloc.stop()
+            gc.enable()
+
+    def charged(self, make):
+        """(lwu, account) of union_pairs(make()) under an unlimited budget, its digest the
+        unbudgeted one's."""
+        b = LocalBudget()
+        self.assertEqual(union_pairs(make(), budget=b).digest, union_pairs(make()).digest)
+        return b.used_work, b.peak_bytes
+
+    def test_identical_parts_split_nothing(self):
+        """2,000 answers of one fixture split nothing and walk one edge per segment: admitted
+        under the service's union limits (256 MiB, 200M lwu) and charged within a few times
+        their traced peak (the bound of every part before it per segment charged them 1.6 GB
+        against a 23 MB peak, and the service stopped them)."""
+        g = T.graphlet('merge')
+
+        def make():
+            return [{'pair': 'g%d' % i, 'graphlet': g} for i in range(2000)]
+        b = LocalBudget(work_units=200_000_000, memory_mb=256)
+        u = union_pairs(make(), budget=b)
+        self.assertEqual(u.digest, union_pairs(make()).digest)
+        got = self.peak(make)
+        self.assertLessEqual(got, b.peak_bytes)
+        self.assertLess(b.peak_bytes, 6 * got)
+
+    def test_shared_spellings_are_charged_as_they_grow(self):
+        """Parts that branch off one spine at as many depths (each split copying a cover:
+        branching deeper or shallower in turn), and one-segment spines over a comb of as many
+        splits, cover each other's edges, a cover entry per part and edge: twice the parts
+        charge at least three times the work and account (the bound per segment charged them
+        twice the work), and the account bounds the traced peak (the bound fell short of it on
+        the spines: 0.98 at 300 on CPython 3.14, 0.71 at 1,000)."""
+        shapes = {
+            'deeper': lambda n: lambda: [{'pair': 'b%d' % i, 'graphlet': branch_part(n + 1, i + 1)}
+                                        for i in range(n)],
+            'shallower': lambda n: lambda: [{'pair': 'b%d' % i,
+                                             'graphlet': branch_part(n + 1, n - i)}
+                                            for i in range(n)],
+            'spines': lambda n: lambda: [{'pair': 'C', 'graphlet': comb_part(n)}] + [
+                {'pair': 's%d' % i, 'graphlet': spine_part(n)} for i in range(n - 1)]}
+        for name, shape in shapes.items():
+            with self.subTest(name):
+                n = 300 if name == 'spines' else 200
+                small, big = self.charged(shape(n // 2)), self.charged(shape(n))
+                self.assertGreater(big[0], 3 * small[0], (small, big))
+                self.assertGreater(big[1], 3 * small[1], (small, big))
+                self.assertLessEqual(self.peak(shape(n)), big[1])
 
 
 class TestScale(unittest.TestCase):

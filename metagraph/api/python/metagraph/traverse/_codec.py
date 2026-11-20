@@ -269,7 +269,9 @@ def pct_escape(s):
     escaped, nothing else -- TAB, NUL, other controls and non-ASCII stay raw."""
     if '%' not in s and '\n' not in s and '\r' not in s:
         return s
-    return ''.join(_PCT.get(c, c) for c in s)
+    # '%' first, so that the escapes' own '%' stay as written; two strings at a time, never
+    # a list of every character
+    return s.replace('%', '%25').replace('\n', '%0A').replace('\r', '%0D')
 
 
 def pct_unescape(t):
@@ -277,6 +279,11 @@ def pct_unescape(t):
         raise CodecError('raw LF/CR in a free-text field')
     if '%' not in t:
         return t
+    if t.count('%') == t.count('%25') + t.count('%0A') + t.count('%0D'):
+        # every '%' begins one of the three escapes (each holds one '%', at its start):
+        # replaced, two strings at a time, never a list of every character; '%25' last, so
+        # that an escaped '%' followed by '0A' stays as written
+        return t.replace('%0A', '\n').replace('%0D', '\r').replace('%25', '%')
     out = []
     i = 0
     n = len(t)
@@ -309,11 +316,33 @@ def _front_prefix(pb, nb):
 def front_encode(prev, name):
     """-> '<prefix_len> <suffix>': the L record's tail after <seq_id|*>. prefix_len counts
     BYTES of the previous name's UTF-8, cut back to a character boundary. The separating
-    space is always written, so an empty suffix leaves the record ending in a space."""
+    space is always written, so an empty suffix leaves the record ending in a space.
+    Two ASCII names are compared as they are (their bytes are their characters): no
+    encoded copy of either."""
+    if prev.isascii() and name.isascii():
+        p = 0
+        m = min(len(prev), len(name))
+        while p < m and prev[p] == name[p]:
+            p += 1
+        return '%d %s' % (p, pct_escape(name[p:]))
     pb = prev.encode('utf-8')
     nb = name.encode('utf-8')
     p = _front_prefix(pb, nb)
     return '%d %s' % (p, pct_escape(nb[p:].decode('utf-8')))
+
+
+def front_encode_bytes(prev, name):
+    """A bound of what front_encode(prev, name) and the record line around it hold at
+    their peak beyond the line itself, read without encoding (measured on names of 1M
+    characters, 3.11 and 3.14): ASCII names the suffix, its escaped form (only where it
+    has a '%', LF or CR), the front-coded text: 2.0x the name, 4.0x with escapes; other
+    names also both names' UTF-8, the suffix's bytes and the suffix decoded, at four
+    bytes a character: up to 24x the name's characters (astral, 3.11)."""
+    n = len(name)
+    esc = '%' in name or '\n' in name or '\r' in name
+    if prev.isascii() and name.isascii():
+        return 3 * 49 + (6 * n if esc else 3 * n)
+    return 6 * 49 + 4 * len(prev) + (48 if esc else 28) * n
 
 
 def front_prefix_len(prev, name):
@@ -322,6 +351,14 @@ def front_prefix_len(prev, name):
 
 def front_decode_parts(prev, p_tok, suffix_tok):
     p = parse_int(p_tok)
+    if prev.isascii() and suffix_tok.isascii():
+        # ASCII names' bytes are their characters: no encoded copies, and the suffix as it
+        # is decoded when the name shares nothing (a suffix beyond ASCII takes the bytes
+        # path, which refuses a lone surrogate as before)
+        if p > len(prev):
+            raise CodecError('front-coding prefix %d beyond the previous name' % p)
+        u = pct_unescape(suffix_tok)
+        return prev[:p] + u if p else u
     pb = prev.encode('utf-8')
     if p > len(pb):
         raise CodecError('front-coding prefix %d beyond the previous name' % p)

@@ -450,6 +450,10 @@ def _to_json(g, bud, done=None):
                             for i, per in enumerate(summary)]
     if g.resource_stop is not None:
         q = g.resource_stop
+        if bud is not None:
+            # its dict, and its copy of the actions (a list of the stop's length)
+            bud.charge(W_NODE + W_ELEM * len(q.actions),
+                       dict_bytes(9) + list_bytes(len(q.actions)))
         out['resource_stop'] = {
             'scope': q.scope, 'resource': q.resource, 'phase': q.phase,
             'requested': value_json(q.requested), 'effective': value_json(q.effective),
@@ -462,7 +466,13 @@ def _to_json(g, bud, done=None):
         # JSON beside the body (SPEC §7.2.2): the seed's work.memory_bytes, its modelled
         # account at its peak -- the graphlet detail's, whose output is priced in the detail
         # requested, so another number than a detail: full response states
-        out['work'] = _json_copy(g.seed_summary['work'])
+        work = g.seed_summary['work']
+        if bud is not None:
+            # a JSON value the server sends, copied whole: its containers before they are
+            # copied (the walk that counts them charged as it goes)
+            _, conts, copied, _, _, _ = _B.value_size(work, bud)
+            bud.charge(_B.W_CONTAINER * conts, copied)
+        out['work'] = _json_copy(work)
     if g.seed_summary.get('duplicate'):
         out['duplicate'] = True
     if 'coordinates' in g.seed_summary:

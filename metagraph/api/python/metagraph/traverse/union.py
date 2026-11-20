@@ -84,6 +84,9 @@ TEXTS = {
     # p2_pair_id, bad_pair_id, pair_id_mismatch: a document's pair statement the library does
     # not take, with the words of client.PairIdError
     'bad_pair_statement': '%s: %s',
+    # a release or index tag of an envelope that is not a string (its type named)
+    'bad_pair_tag': '%s: the envelope\'s %s is not a string (%s): a pair\'s release and index '
+                    'tags are strings',
     'pair_mismatch': 'result %s was answered on pair %s, and the caller states pair %s: state '
                      'the pair it was answered on, or none',
     'pair_mismatch_unverifiable': 'result %s was answered on pair %s, named by its pair_id '
@@ -167,10 +170,25 @@ _ID_LIKE = re.compile(r'[A-Za-z][A-Za-z0-9]{0,7}-[0-9A-Fa-f]{8}-?[0-9A-Fa-f]{4}-
 # export, a comb), so that the budget's account bounds the call's peak (budget.py).
 _M_NODE = 300           # a raw trie node: its children dict, its depth
 _M_EDGE = 420           # a raw edge: its five list slots, its reference, its cover dict
-_M_COVER = 110          # a cover entry of an edge (part -> (segment, offset))
+_M_COVER = 192          # a cover entry of an edge (part -> (segment, offset)), walked or
+#                         copied by a split (measured: 128 B per entry, 2,000 parts that
+#                         branch off one spine, CPython 3.14, 119 on 3.11; up to about 172 B
+#                         where most covers were just resized, their tables half empty, and
+#                         the offsets above 256: a dict's worst fill 54 B, the tuple 64, the
+#                         offset's int 28, a slot; Opus review of b8fb7a8d6, m2)
 _M_SEG = 200            # a part segment's entries: its nodes, the walks and stubs below it
 _M_USEG = 1280          # a union segment: the object, its dicts and lists, node_in/out
-_M_PIECE = 200          # a piece of a union segment (part, segment, from, to)
+_M_PIECE = 320          # a raw edge's cover entry in its union segment: the segment's cover
+#                         and pieces entries, the piece (part, segment, from, to) and its list
+#                         (measured: at most 290 B, the same 2,000 parts on 3.14; 282 on 3.11)
+# The trie's work beside its 4 W_ELEM per part segment, fitted to its insertion and
+# compression (best of 5, parts branching off one spine at 400 depths, a comb walked by 300
+# one-segment spines; 3.11 and 3.14): an edge a segment walks past its first 0.42 us, a
+# cover entry a split copies 0.12 us, a raw edge's cover entry merged into a union segment
+# 0.32 us
+_W_EDGE = 3 * W_ELEM    # an edge a segment walks past its first: the compare, the cover entry
+_W_COPY = W_ELEM        # a cover entry a split copies to the edge's lower half
+_W_PIECE = 2 * W_ELEM   # a raw edge's cover entry merged: its piece, the segment's cover check
 _M_PART = 4096          # a part's record: its identity, retrieval identity, digests
 _M_RECORD = 1024        # an absent or failed record
 _M_SPAN = 900           # a PairSpan with its Route, merges and continues tuples
@@ -203,11 +221,13 @@ _W_GROUP = 13 * W_ELEM  # grouped by content: its signature, a lookup, its slot
 _W_INDEX = 21 * W_ELEM  # indexed: its facets, the lists it joins
 _W_QUERY = 15 * W_ELEM  # a query of the index (charged twice: the count and the scan): its
 #                         facets and a dozen lookups
-_M_MATCH = 2048         # a matching pass per description, while it runs: its signature,
+_M_MATCH = 2304         # a matching pass per description, while it runs: its signature,
 #                         group, facets and the index's lists, entries and paths, released
 #                         after the pass (fitted on every seqs_order key form and eleven
-#                         description shapes, 200 and 2,000 each, on 3.11 and 3.14: at most
-#                         1,741 B, distinct names that state all seven fields; Opus review M1)
+#                         description shapes, 400 to 174,763 each, on 3.11 and 3.14: it grows
+#                         with the index's tables, 1,741 B at 2,000, 1,862 at 2,731 and at
+#                         most 2,059 at 174,763 on 3.14, distinct names that state all seven
+#                         fields; Opus review M1, Opus check of dada7f430 N2)
 _M_FIG = 160            # a walk's figures: the record, whole_in and held_in, its slot
 _DERIVATION_CAUSES = {'no_carrier': 'no label carries the whole seed',
                       'no_trace_carrier': 'no label carries the whole seed by trace',
@@ -510,21 +530,35 @@ def _stated_desc(p, refuse, where):
 
 
 def _env_of(env, g, where):
-    """_env_desc(|env|, |g|), a pair statement the library does not take (client._pair():
-    a p2 or malformed pair_id, an id beside one path, an id that is not its paths') refused
-    as a CombineRefused with the PairIdError's code and words, naming |where|."""
+    """_env_desc(|env|, |g|, |where|), a pair statement the library does not take
+    (client._pair(): a p2 or malformed pair_id, an id beside one path, an id that is not its
+    paths') refused as a CombineRefused with the PairIdError's code and words, naming
+    |where|."""
     try:
-        return _env_desc(env, g)
+        return _env_desc(env, g, where)
     except PairIdError as e:
         raise C.CombineRefused(e.code, TEXTS['bad_pair_statement'] % (where, e)) from None
 
 
-def _env_desc(env, g=None):
-    """The pair an envelope (and a body's H line) states."""
+_ENV_TAGS = ('release', 'index_ns', 'index_fp', 'index_meta_fp')
+
+
+def _env_desc(env, g=None, where='the result'):
+    """The pair an envelope (and a body's H line) states. Its release and index tags (the
+    envelope's or its capabilities'; a graphlet's index tags are its H line's) are strings
+    or absent: one that is anything else is refused bad_pair_tag, naming |where| and the
+    tag, so that every description the matching passes compare, index (_Candidates) and tag
+    (_tags()) holds strings only, as a caller's (_pair_desc())."""
     env = env if isinstance(env, dict) else {}
     caps = env.get('capabilities') if isinstance(env.get('capabilities'), dict) else {}
     d = {}
+    # the pair-id refusals first (p2_pair_id, bad_pair_id, pair_id_mismatch), then the tags
     ap = answered_pair(env)
+    for k in _ENV_TAGS if g is None else _ENV_TAGS[:1]:
+        for src, name in ((env, k), (caps, 'capabilities.' + k)):
+            v = src.get(k)
+            if v is not None and not isinstance(v, str):
+                raise _refuse('bad_pair_tag', None, where, name, type(v).__name__)
     if ap is not None:
         d['graph'], d['graph_path'], d['annotation_path'], d['pair_id'] = ap
     d['release'] = env.get('release') or caps.get('release') or None
@@ -807,7 +841,9 @@ def union_pairs(results, *, seed=None, expected_pairs=None, seqs_order=None, bud
     its index, then the comparisons its candidates need, counted from the index (linear
     where the pairs are distinct); then, after no_bases and different_alphabet (which charge
     nothing), the inputs' metadata (error strings, absent results, stated pairs, envelopes)
-    and the seed, before the seed checks; then the trie pass. A stop raises with no partial.
+    and the seed, before the seed checks; then the trie pass: each part before it is
+    inserted, and each cover entry a part's segments add past their first (an edge walked, a
+    split's copy of a cover) where it is made. A stop raises with no partial.
     A budget too small for a charge stops there, before the refusals checked after it:
     ambiguous_pair after its pass's charge, no_bases and different_alphabet after the
     classes against the keys, different_seed, duplicate_pair, not_expected and the rest
@@ -2199,27 +2235,15 @@ class _SeedStandIn:
 _NO_PATH = (None, None)
 
 
-def _plain(d):
-    """Whether description |d| can be indexed: its keys strings, its values strings or None,
-    its graph not ''. Any other description (a value that is not a string, which only an
-    envelope's release or index tags can bring) is compared with every description."""
-    if d.get('graph') == '':
-        return False
-    return all(isinstance(k, str) and (v is None or isinstance(v, str)) for k, v in d.items())
-
-
 def _facets(d, known):
-    """What _matches() reads of description |d| to find its matches, or None where it cannot
-    be indexed (_plain()): (index_fp, graph, pair_id, paths, bare, index_ns), the index_fp
-    and pair_id where they are truthy, the paths (graph_path, annotation_path) with those
-    |known| holds for an id stated without any (_with_paths()), |bare| whether |d| is a bare
-    name (_names_ns())."""
-    if not _plain(d):
-        return None
+    """What _matches() reads of description |d| to find its matches: (index_fp, graph,
+    pair_id, paths, bare, index_ns), the index_fp and pair_id where they are truthy, the
+    paths (graph_path, annotation_path) with those |known| holds for an id stated without
+    any (_with_paths()), |bare| whether |d| is a bare name (_names_ns()). Every value of a
+    description is a string or None: a caller's pair statement is refused otherwise
+    (_pair_desc()), and so is an envelope's (_env_desc(), bad_pair_tag)."""
     e = _with_paths(d, known)
     p = (e.get('graph_path'), e.get('annotation_path'))
-    if not all(x is None or isinstance(x, str) for x in p):
-        return None
     return (d.get('index_fp') or None, d.get('graph'), d.get('pair_id') or None, p,
             set(d) == {'graph'}, d.get('index_ns'))
 
@@ -2267,23 +2291,17 @@ class _Candidates:
           without a pair_id only if that states no path either (_unverifiable()):
           ('idonly', ...) and ('nopath', ...) hold the descriptions without a path, a
           _Paths per (graph, has_fp, 'id' | 'noid') the others.
-      * A description that cannot be indexed (_facets()) is a candidate of every
-        description, and every description is one of its candidates.
 
     release, index_ns and index_meta_fp are left out: _matches() reads them last, where both
     state one, only to separate. Descriptions of one name and pair that differ only in them
     are therefore candidates of one another (and compared)."""
-    __slots__ = ('n', 'known', 'wild', 'lists', 'paths')
+    __slots__ = ('known', 'lists', 'paths')
 
     def __init__(self, descs, known):
-        self.n, self.known, self.wild, self.lists, self.paths = len(descs), known, [], {}, {}
+        self.known, self.lists, self.paths = known, {}, {}
         add = self._add
         for i, d in enumerate(descs):
-            f = _facets(d, known)
-            if f is None:
-                self.wild.append(i)
-                continue
-            fp, g, pid, p, bare, ns = f
+            fp, g, pid, p, bare, ns = _facets(d, known)
             hf = fp is not None
             if hf:
                 add(('fp', fp), i)
@@ -2299,7 +2317,7 @@ class _Candidates:
                 self._paths(g, hf, 'noid').add(p, i)
             if bare:
                 add(('bare', g), i)
-            if g is None and isinstance(ns, str):
+            if g is None and ns is not None:
                 add(('ns', ns), i)
 
     def _add(self, key, i):
@@ -2312,12 +2330,9 @@ class _Candidates:
         return t
 
     def query(self, d):
-        f = _facets(d, self.known)
-        if f is None:
-            return [range(self.n)]
-        fp, g, pid, p, bare, ns = f
+        fp, g, pid, p, bare, ns = _facets(d, self.known)
         get, paths = self.lists.get, self.paths.get
-        out = [self.wild]
+        out = []
         if fp is not None:
             out.append(get(('fp', fp), ()))
         for hf in (False,) if fp is not None else (False, True):
@@ -2337,7 +2352,7 @@ class _Candidates:
                     out += withid.query(p)
         if bare:
             out.append(get(('ns', g), ()))
-        if g is None and isinstance(ns, str):
+        if g is None and ns is not None:
             out.append(get(('bare', ns), ()))
         return out
 
@@ -2416,26 +2431,23 @@ def _seqs_of(classes, so, tags, known=None, b=None):
 
 
 def _sig(d):
-    """Description |d|'s content as a key, or None where it cannot be indexed (_plain()).
+    """Description |d|'s content as a key (its values are strings or None, _facets()).
     _matches() reads only a description's content, and two of one content match: they
     match the same descriptions and each other."""
-    return tuple(sorted(d.items())) if _plain(d) else None
+    return tuple(sorted(d.items()))
 
 
 def _groups(descs):
     """|descs| grouped by content (_sig()): (pos, rep, of) -- pos[g] the positions of group g
     in input order, the groups in the order of their first positions; rep[g] its first
-    description; of[i] the group of position i. A description that cannot be indexed is a
-    group of its own."""
+    description; of[i] the group of position i."""
     pos, of, first = [], [], {}
     for i, d in enumerate(descs):
         s = _sig(d)
-        g = first.get(s) if s is not None else None
+        g = first.get(s)
         if g is None:
-            g = len(pos)
+            g = first[s] = len(pos)
             pos.append([i])
-            if s is not None:
-                first[s] = g
         else:
             pos[g].append(i)
         of.append(g)
@@ -2511,7 +2523,8 @@ def _ambiguous(descs, pos, rep, idx, known, b, cls, members, covers, across):
     exist: the first group in input order whose matches include two that do not match.
     A group that matches its class's groups only and all of them fails exactly when its
     class is no clique (one of its groups does not match all of the class); any other
-    group's matches are compared among themselves, charged as they are."""
+    group's matches are found again (its count and its scan of the index, _W_QUERY each)
+    and compared among themselves, each charged before it runs."""
     clique = [all(covers[t] for t in m) for m in members]
     for s in range(len(rep)):
         if covers[s] and not across[s]:
@@ -2521,6 +2534,9 @@ def _ambiguous(descs, pos, rep, idx, known, b, cls, members, covers, across):
         else:
             r = rep[s]
             if b is not None:
+                # the group's count and scan of the index, then its comparisons with its
+                # candidates (Opus check of dada7f430, N3)
+                b.charge(2 * _W_QUERY)
                 b.charge(_W_MATCH * (idx.count(r) - 1))
             hits = [t for lst in idx.query(r) for t in lst
                     if t != s and _matches(r, rep[t], known)]
@@ -2938,9 +2954,12 @@ class _Trie:
             if fp_kids_of[pi] is not None:
                 self._below(pi, self.parts[pi].graphlet.arms[side], fp_kids_of[pi])
         if b is not None:
-            # the union segments at their bound: one per raw edge, a piece per cover entry
-            b.charge(W_ELEM * len(self.e_from),
-                     _M_USEG * len(self.e_from) + _M_PIECE * sum(map(len, self.e_cover)))
+            # the union segments at their bound: one per raw edge, a piece per cover entry;
+            # the merge reads each raw edge's cover (its pieces, the check that the next
+            # edge has the same pairs), so its work is charged per cover entry too
+            cov = sum(map(len, self.e_cover))
+            b.charge(W_ELEM * len(self.e_from) + _W_PIECE * cov,
+                     _M_USEG * len(self.e_from) + _M_PIECE * cov)
         self._compress(order)
 
     # ---------------------------------------------------------- insertion
@@ -2969,12 +2988,18 @@ class _Trie:
         self.e_cover.append(cover)
         return len(self.e_from) - 1
 
-    def _split(self, e, m):
-        """Split edge |e| after |m| bases -> the new middle node."""
+    def _split(self, e, m, b=None):
+        """Split edge |e| after |m| bases -> the new middle node. The copy of the edge's
+        cover for its lower half (an entry per part that walked it) is charged to |b|
+        before it is made: the node and the edge are in the segment's price
+        (_insert_part())."""
         f, t, n = self.e_from[e], self.e_to[e], self.e_len[e]
+        cover = self.e_cover[e]
+        if b is not None:
+            b.charge(_W_COPY * len(cover), _M_COVER * len(cover))
         mid = self._new_node(self.depth[f] + m)
         pi, seg, off = self.e_ref[e]
-        lower_cover = {k: (s, o + m) for k, (s, o) in self.e_cover[e].items()}
+        lower_cover = {k: (s, o + m) for k, (s, o) in cover.items()}
         low = self._new_edge(mid, t, n - m, (pi, seg, off + m), lower_cover)
         src, o = self._ref_walk(low)
         first = src[o]
@@ -2984,13 +3009,20 @@ class _Trie:
         self.e_len[e] = m
         return mid
 
-    def _insert_seg(self, pi, s, start):
-        """Insert part |pi|'s segment |s| at trie node |start| -> its end node."""
+    def _insert_seg(self, pi, s, start, b=None):
+        """Insert part |pi|'s segment |s| at trie node |start| -> its end node. Each edge it
+        walks gets the part's cover entry: the first is in the segment's price
+        (_insert_part()), each later one is charged to |b| before it is made, and so is a
+        split's copy of a cover (_split()). A segment walks as many edges as earlier parts
+        cut its spelling into: parts that share a locus and branch off it at different
+        depths cover each other's edges, a cover entry per part and edge."""
         w = s.walk
         n = len(w)
         node = start
         i = 0
         while i < n:
+            if i and b is not None:
+                b.charge(_W_EDGE, _M_COVER)
             ch = w[i]
             e = self.kids[node].get(ch)
             if e is None:
@@ -3006,14 +3038,21 @@ class _Trie:
             el = self.e_len[e]
             lim = min(el, n - i)
             self.bases_read += lim
-            if src.startswith(w[i:i + lim], o):
+            # (the slice compared is a copy of up to the segment's remaining bases, held
+            # for the compare: charged before it is made, its work in the segment's price)
+            if b is not None:
+                b.charge(0, STR + lim)
+            same = src.startswith(w[i:i + lim], o)
+            if b is not None:
+                b.release(STR + lim)
+            if same:
                 m = lim
             else:
                 m = 1
                 while m < lim and src[o + m] == w[i + m]:
                     m += 1
             if m < el:
-                self._split(e, m)
+                self._split(e, m, b)
             self.e_cover[e][pi] = (s.id, i)
             node = self.e_to[e]
             i += m
@@ -3025,14 +3064,16 @@ class _Trie:
         segs = a.segments
         if b is not None:
             # one pass over the part's first-parent tree: an element per segment, its bases
-            # compared, and at most two trie nodes, an edge and a cover entry per segment.
-            # Memory at its bound: the first part's segments each add one node and one edge
-            # (siblings start with distinct bases); a later part's segment at most two of
-            # each (a split) and a copy of the split edge's cover (one entry per part before
-            # it)
+            # compared, and at most two trie nodes, two edges and the cover entry of the
+            # first edge it walks. Memory at its bound: the first part's segments each add
+            # one node, edge and cover entry (siblings start with distinct bases); a later
+            # part's segment at most two nodes and edges (a split, then a new edge) and that
+            # cover entry. Each further edge a segment walks, and a split's copy of a
+            # cover, are charged where they happen (_insert_seg(), _split()): their number
+            # depends on how the parts before it cut the spelling
             n = sum(s.length_bp for s in segs)
             per = (_M_NODE + _M_EDGE + _M_COVER) if pi == 0 else \
-                2 * (_M_NODE + _M_EDGE) + _M_COVER * (pi + 1)
+                2 * (_M_NODE + _M_EDGE) + _M_COVER
             b.charge(W_ELEM * 4 * len(segs) + (n >> 4),
                      3 * DICT + len(segs) * (per + _M_SEG))
             derive.uses(b, g, a, 'leaves', 'paths', 'path_of_leaf')
@@ -3060,7 +3101,7 @@ class _Trie:
                         0, 'part %s: segments %d and %d of the %s arm both start with %r at %d '
                         'bp (sibling segments start with distinct bases)'
                         % (part.tag, other, sid, self.side, s.walk[0], s.from_bp))
-            end = self._insert_seg(pi, s, start)
+            end = self._insert_seg(pi, s, start, b)
             nodes[sid] = (start, end)
             if s.length_bp == 0:
                 self.zero_at.setdefault(end, []).append((pi, sid))

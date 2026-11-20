@@ -4,10 +4,12 @@ verbatim as the reference): the same matches, classes and class descriptions in 
 order, the same seqs_order values, and the same refusal -- code, the descriptions it names,
 its text -- for every input. Randomized with fixed seeds over descriptions that mix names,
 several pairs of one name, ids, both paths, one path, '' paths, known paths, index_fp,
-index_meta_fp, index_ns, release, single-graph pairs, values that are not strings, and
-seqs_order keys of every form; then whole union_pairs() calls (failed and absent records,
-parts in both document forms, expected pairs, keys) against union_pairs() run with the
-reference code; then the charges: each pass is charged before it runs, for what it runs."""
+index_meta_fp, index_ns, release, single-graph pairs, and seqs_order keys of every form
+(every value a string or None: a description holds no other, union.py's _facets()); then
+whole union_pairs() calls (failed and absent records, caller statements with a value that is
+not a string, parts in both document forms, expected pairs, keys) against union_pairs() run
+with the reference code; then the charges: each pass is charged before it runs, for what it
+runs."""
 
 import copy
 import random
@@ -132,10 +134,12 @@ def universe(rng):
     return out
 
 
-def view(rng, p, wild=True):
+def view(rng, p, wild=False):
     """A description of pair |p| in one of the forms a union reads, or of a nearby pair (a
     field changed), through the library's own constructors (_pair_desc(), _with_id());
-    with |wild|, now and then one with a value that is not a string."""
+    with |wild|, now and then one with a value that is not a string: a caller's pair
+    statement, which union_pairs() refuses before any pass reads it (no description holds
+    such a value: _pair_desc(), and an envelope's bad_pair_tag)."""
     p = dict(p)
     if rng.random() < 0.25:     # a nearby pair: one field differs
         k = rng.choice(('graph', 'graph_path', 'annotation_path', 'release', 'index_ns',
@@ -181,7 +185,7 @@ def view(rng, p, wild=True):
         out = U._pair_desc(d)
     except PairIdError:
         return None
-    if wild and out is not None and rng.random() < 0.04:   # not a string: compared with all
+    if wild and out is not None and rng.random() < 0.04:   # not a string: refused
         out = dict(out, **{rng.choice(('release', 'index_fp', 'index_meta_fp',
                                        'index_ns')): rng.choice((5, 0.5, ['x'], True,
                                                                  float('nan')))})
@@ -467,13 +471,15 @@ class TestWholeUnions(unittest.TestCase):
 # ---------------------------------------------------------------- the charges
 
 class _Recorder:
-    """A stand-in budget: the work charged so far."""
+    """A stand-in budget: the work charged so far, and each charge in |events|."""
 
-    def __init__(self):
+    def __init__(self, events=None):
         self.work = 0
+        self.events = events if events is not None else []
 
     def charge(self, work, nbytes=0):
         self.work += work
+        self.events.append(('charge', work))
 
     def release(self, nbytes):
         pass
@@ -484,10 +490,27 @@ class TestCharges(unittest.TestCase):
     def test_each_pass_is_charged_before_it_runs(self):
         """Admitted before it runs (budget.py), read from what each pass did, in order:
         before it groups, its groups are charged; before it builds an index, that index and
-        its queries are charged; at every comparison it has charged _W_MATCH for at least as
+        its queries are charged: one query per description the pass then counts, and no
+        more scans than that (Opus check of dada7f430, N1: a pass charging no queries
+        passed); in the refusal search (_ambiguous()) each group's count follows its own
+        query charge (N3); at every comparison it has charged _W_MATCH for at least as
         many; a pass that refuses nothing charges exactly the comparisons it makes (the
         keys' pairs with equal values are charged and not compared)."""
-        real, Index, groups = U._matches, U._Candidates, U._groups
+        real, Index, groups, ambiguous = U._matches, U._Candidates, U._groups, U._ambiguous
+
+        class Spy:
+            """The index, its counts and scans recorded."""
+
+            def __init__(self, ix, events):
+                self.ix, self.events = ix, events
+
+            def count(self, d):
+                self.events.append(('count',))
+                return self.ix.count(d)
+
+            def query(self, d):
+                self.events.append(('scan',))
+                return self.ix.query(d)
         for seed in range(3000):
             rng = random.Random(seed)
             descs, so = case(rng)
@@ -498,11 +521,11 @@ class TestCharges(unittest.TestCase):
                     ('keys', lambda b: U._check_keys(so, known, b)),
                     ('classes', lambda b: U._pair_classes(descs, known, b)),
                     ('seqs', lambda b: U._seqs_of(classes, so, tags, known, b))):
-                b = _Recorder()
                 events = []
+                b = _Recorder(events)
 
                 def index_price(b_, grouped, indexed, queried, held):
-                    events.append(('price', grouped, indexed))
+                    events.append(('price', grouped, indexed, queried))
                     return 0
 
                 def compare_price(b_, compared, longest):
@@ -515,16 +538,22 @@ class TestCharges(unittest.TestCase):
 
                 def index(ds, k):
                     events.append(('index', len(ds)))
-                    return Index(ds, k)
+                    return Spy(Index(ds, k), events)
+
+                def searched(*a):
+                    events.append(('ambiguous',))
+                    return ambiguous(*a)
 
                 def counted(x, y, k=None):
                     events.append(('match', b.work))
                     return real(x, y, k)
                 with mock.patch.multiple(U, _matches=counted, _compare_price=compare_price,
                                          _index_price=index_price, _Candidates=index,
-                                         _groups=grouping):
+                                         _groups=grouping, _ambiguous=searched):
                     r = outcome(run, b)
-                calls, priced = 0, []
+                calls, priced, queried = 0, [], None
+                counts = scans = 0
+                search, last = False, None
                 for e in events:
                     if e[0] == 'price':
                         priced.append(e)
@@ -534,10 +563,26 @@ class TestCharges(unittest.TestCase):
                         priced = []
                     elif e[0] == 'index':
                         self.assertIn(e[1], [p[2] for p in priced], (seed, name, events))
+                        # its queries, priced with it
+                        queried = sum(p[3] for p in priced)
                         priced = []
-                    else:
+                    elif e[0] == 'ambiguous':
+                        search = True
+                    elif e[0] in ('count', 'scan') and search:
+                        if e[0] == 'count':
+                            self.assertEqual(last, ('charge', 2 * U._W_QUERY), (seed, name))
+                    elif e[0] == 'count':
+                        counts += 1
+                    elif e[0] == 'scan':
+                        scans += 1
+                    elif e[0] == 'match':
                         calls += 1
                         self.assertLessEqual(U._W_MATCH * calls, e[1], (seed, name))
+                    last = e
+                if queried is not None:
+                    # every description the pass queries was charged a count and a scan
+                    self.assertEqual(counts, queried, (seed, name))
+                    self.assertLessEqual(scans, queried, (seed, name))
                 if r[0] == 'ok' and name != 'keys':
                     self.assertEqual(U._W_MATCH * calls, b.work, (seed, name))
 
@@ -576,7 +621,6 @@ class TestCharges(unittest.TestCase):
             gc.disable()
             try:
                 tracemalloc.start()
-                base = tracemalloc.get_traced_memory()[0]
                 out = fn()
                 cur, peak = tracemalloc.get_traced_memory()
             finally:
@@ -590,7 +634,9 @@ class TestCharges(unittest.TestCase):
             fn(b)
             return b.peak_bytes
 
-        n = 400
+        # n = 2,731: past a resize of the index's tables, where a pass holds 1,834-1,867 B a
+        # description (1,741 at 2,000)
+        n = 2731
         for f in range(len(key_forms(0))):
             so = U._check_args([], None, None,
                                {key_forms(i)[f]: 'verified' for i in range(n)})[1]
@@ -608,6 +654,15 @@ class TestCharges(unittest.TestCase):
             with self.subTest(form=desc_forms(0)[f], op='classes'):
                 fn = (lambda b=None: U._pair_classes(ds, known, b))
                 self.assertLessEqual(held(fn), account(fn))
+
+    def test_the_largest_pass_is_priced_above_its_fit(self):
+        """_M_MATCH covers the most a pass was measured to hold per description: 2,059 B at
+        174,763 distinct descriptions stating all seven fields, just past a resize of the
+        index's tables, on 3.14 (2,011 on 3.11; tools/match_2048.py). The traced test above
+        stops at 2,731 (1,862 B): at 174,763 a pass holds 350 MB and runs 40-60 s, too much
+        for this suite, so the fit is pinned here, with its margin (Opus review of
+        b8fb7a8d6, m5: 2,048 passed every test)."""
+        self.assertGreaterEqual(U._M_MATCH, 2059 * 11 // 10)
 
     def test_the_service_ceiling_is_admitted(self):
         """The service's 2,000-entry seed (each entry an input and an expected pair, one

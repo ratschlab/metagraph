@@ -1981,10 +1981,10 @@ retrievals of one pair). A refusal is a ``CombineRefused`` (a ``ValueError``) wi
 ``code``, checked in this order: the arguments (``bad_expected``, ``bad_seqs_order``),
 then ``not_combinable`` (also a ``TypeError``), ``view_unsupported``, ``not_one_seed``,
 ``result_has_graphlet``, ``no_graphlet``, ``no_seed``, a document's pair statement the
-library does not take (``p2_pair_id``, ``bad_pair_id``, ``pair_id_mismatch``),
-``pair_mismatch``, ``no_pair``,
-``ambiguous_pair``, ``no_bases``, ``different_alphabet``, ``different_seed``,
-``duplicate_pair`` and ``not_expected``; two ``seqs_order`` keys that give one pair two
+library does not take (``p2_pair_id``, ``bad_pair_id``, ``pair_id_mismatch``, and
+``bad_pair_tag`` for a release or index tag that is not a string), ``pair_mismatch``,
+``no_pair``, ``ambiguous_pair``, ``no_bases``, ``different_alphabet``,
+``different_seed``, ``duplicate_pair`` and ``not_expected``; two ``seqs_order`` keys that give one pair two
 values are ``bad_seqs_order``, found among the keys first and otherwise right after
 ``ambiguous_pair``, once the results name the pairs. A refusal names the first failing
 result in the order given. A part without its envelope raises ``MissingEnvelope``.
@@ -2562,9 +2562,22 @@ default) nothing is budgeted and every answer is byte for byte what it was befor
   Warm calls pay more than they spend.
 * **Memory** is a modelled account (``memory_bound: "model"``): the bytes of the rows,
   spellings, text and derived caches a call builds, each charged before it is made at a
-  size modelled on CPython. It is not a measurement: Python can allocate more than the
-  model says (interpreter internals, fragmentation, another CPython version, text beyond
-  ASCII), so in-process it is a soft bound; a hard bound needs process limits. The
+  size modelled on CPython. Text and JSON values whose size their sender sets -- label
+  names, a seed id, a namespace or release, a stop's message and actions, a seed
+  summary's ``work`` block, an envelope written as a J line, a strategy and the keyword
+  overrides a continuation copies -- are charged at their escaped bound before they are
+  serialized, escaped, encoded or copied; text joined from strings one of which is beyond
+  ASCII is charged at four bytes a character, all of it, the same on every interpreter.
+  ``next_request()`` charges its copies of the strategy their memory, and their work only
+  for a value of more than 128 items (list elements and dict entries): a server's strategy
+  (a copy takes about 80-156 lwu of time, 2-4 copies a call) is not charged as work. A
+  store's parse on demand or ``load()`` charges the body's bytes before it reads them,
+  and its text by its width (read from the bytes) before it decodes it, so a budget that
+  cannot hold the text stops with nothing decoded (nothing read, when not even the bytes
+  fit); ``standalone_text()`` and ``save_body()`` charge a body beyond ASCII at its width
+  too. It is not a measurement: Python can allocate more than the model says
+  (interpreter internals, fragmentation, another CPython version, text beyond ASCII), so
+  in-process it is a soft bound; a hard bound needs process limits. The
   memory limit holds for each call; the work of the calls that share one budget adds
   up (an allowance). One exception to "charged before": a record of output text is
   charged as soon as it is built (its size is known only then), and so are the walk ids

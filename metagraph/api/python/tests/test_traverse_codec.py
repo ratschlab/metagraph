@@ -226,5 +226,63 @@ class TestCodecIdentities(unittest.TestCase):
         self.assertEqual([], list(it.intern([])))
 
 
+class TestFreeTextWithoutLists(unittest.TestCase):
+    """pct_escape(), pct_unescape() and the front coding of ASCII names work on whole
+    strings (str.replace, slices), never a list per character or encoded copies (T8-PY1,
+    G4P's G11 and G12): the same text and the same refusals as the character loops they
+    replace, restated here, on random strings of the characters that matter."""
+
+    @staticmethod
+    def _escape(s):
+        return ''.join({'%': '%25', '\n': '%0A', '\r': '%0D'}.get(c, c) for c in s)
+
+    @staticmethod
+    def _unescape(t):
+        out, i = [], 0
+        while i < len(t):
+            if t[i] == '%':
+                e = t[i:i + 3]
+                if e not in ('%25', '%0A', '%0D'):
+                    return None
+                out.append({'%25': '%', '%0A': '\n', '%0D': '\r'}[e])
+                i += 3
+            else:
+                out.append(t[i])
+                i += 1
+        return ''.join(out)
+
+    def test_the_same_text(self):
+        rng = random.Random(7)
+        for _ in range(20000):
+            t = ''.join(rng.choice('%\n\r0AD25a\u00e9') for _ in range(rng.randint(0, 10)))
+            self.assertEqual(C.pct_escape(t), self._escape(t))
+            self.assertEqual(C.pct_unescape(C.pct_escape(t)), t)
+            u = ''.join(rng.choice(['%25', '%0A', '%0D', '%', '0', 'A', '2', '5', 'x'])
+                        for _ in range(rng.randint(0, 6)))
+            try:
+                got = C.pct_unescape(u)
+            except C.CodecError:
+                got = None
+            self.assertEqual(got, self._unescape(u), u)
+            prev = ''.join(rng.choice('ab\u00e9\U0001F600') for _ in range(rng.randint(0, 5)))
+            name = ''.join(rng.choice('ab%\u00e9') for _ in range(rng.randint(0, 5)))
+            p, suffix = C.front_encode(prev, name).split(' ', 1)
+            pb, nb = prev.encode('utf-8'), name.encode('utf-8')
+            want = 0
+            while want < min(len(pb), len(nb)) and pb[want] == nb[want]:
+                want += 1
+            while 0 < want < len(nb) and (nb[want] & 0xC0) == 0x80:
+                want -= 1
+            self.assertEqual(int(p), want)
+            self.assertEqual(C.front_decode_parts(prev, p, suffix), name)
+        with self.assertRaises(C.CodecError):
+            C.front_decode_parts('ab', '3', 'x')
+        # a lone surrogate in a suffix is refused as the loops refused it (the fast path is
+        # for ASCII only: Opus review of b8fb7a8d6, nit), whether the name shares a prefix
+        for p in ('0', '1'):
+            with self.subTest(prefix=p), self.assertRaises(UnicodeEncodeError):
+                C.front_decode_parts('a', p, '\udc80')
+
+
 if __name__ == '__main__':
     unittest.main()

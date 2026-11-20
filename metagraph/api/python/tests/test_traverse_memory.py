@@ -525,6 +525,479 @@ class TestComparisonScans(unittest.TestCase):
         self.assertEqual(_divergence_reference(a, seq, 0), ops._divergence(a, seq, 0))
 
 
+class TestCallerSizedMetadata(unittest.TestCase):
+    """G4P's sweep left these (T7/G4/VERIFY-python.md G5-G14): text and JSON values whose
+    size their sender sets -- a seed summary's work block, a stop's actions and message,
+    label names, a seed id, a namespace or release, a strategy's lists, an envelope -- were
+    copied, serialized, escaped or encoded beyond what was charged (up to 900x the account,
+    an astral name compared). Each is now charged before it is made: the account bounds the
+    warm traced peak, the answer is the unbudgeted one, and a store's parse stops before it
+    reads a body it cannot hold."""
+
+    N = 200_000
+
+    @staticmethod
+    def _named(name, names):
+        import dataclasses
+        g = T.graphlet(name)
+        g.labels = [dataclasses.replace(l, name=names[i]) if i < len(names) else l
+                    for i, l in enumerate(g.labels)]
+        g.cache.clear()
+        for a in g.arms.values():
+            a.cache.clear()
+        return g
+
+    def _bounded(self, make, fn, same=True):
+        b = LocalBudget()
+        got = fn(make(), b)
+        if same:
+            self.assertEqual(got, fn(make(), None))
+        xs = [make(), make()]
+        peak, _ = _warm_peak(lambda: fn(xs.pop(), None), lambda: fn(xs.pop(), None))
+        self.assertLessEqual(peak, b.peak_bytes)
+
+    def test_to_json_and_summary(self):
+        import copy
+        import dataclasses
+        n = self.N
+
+        def work():
+            g = T.graphlet('merge')
+            g.seed_summary = dict(g.seed_summary, work={'x': [[i] for i in range(n // 10)]})
+            return g
+
+        def stop(message='m', k=10_000):
+            def make():
+                g = T.graphlet('limits')
+                g.resource_stop = dataclasses.replace(
+                    g.resource_stop, message=message, actions=['a%05d' % i for i in range(k)])
+                return g
+            return make
+
+        def seed_id():
+            g = T.graphlet('merge')
+            g.seed_summary = copy.deepcopy(g.seed_summary)
+            g.seed_summary['seed']['seed_id'] = 'q' * n
+            return g
+
+        self.assertIsNotNone(T.graphlet('limits').resource_stop)
+        cases = [('to_json work', work, lambda g, b: g.to_json(budget=b)),
+                 ('to_json actions', stop(), lambda g, b: g.to_json(budget=b))]
+        for name, make in (
+                ('names', lambda: self._named('merge', ['N%d' % i * (n // 8)
+                                                        for i in range(4)])),
+                ('astral names', lambda: self._named('merge', ['\U0001F600' * (n // 4)] * 4)),
+                ('seed_id', seed_id), ('stop', stop('m' * n, 2_000))):
+            for cap in (1 << 24, 2048):
+                cases.append(('summary %s %d' % (name, cap), make,
+                              lambda g, b, cap=cap: g.summary(max_bytes=cap, budget=b)))
+        for name, make, fn in cases:
+            with self.subTest(name):
+                self._bounded(make, fn)
+
+    def test_next_request(self):
+        import copy
+        big = ['lab%07d' % i + 'y' * 90 for i in range(10_000)]
+
+        def kw(b):
+            # (budget=None would be a keyword override of the request's loss budget)
+            return {} if b is None else {'budget': b}
+        for fx in ('merge', 'annotate'):
+            def env_list(fx=fx):
+                g = T.graphlet(fx)
+                g.envelope = copy.deepcopy(g.envelope)
+                g.envelope['strategy']['labels']['extra'] = list(big)
+                return g
+            for name, make, fn in (
+                    ('extra override', lambda fx=fx: T.graphlet(fx),
+                     lambda g, b: g.next_request('right', [0], labels={'extra': big}, **kw(b))),
+                    ('note override', lambda fx=fx: T.graphlet(fx),
+                     lambda g, b: g.next_request('right', [0], note=big, **kw(b))),
+                    ('envelope list', env_list,
+                     lambda g, b: g.next_request('right', [0], **kw(b))),
+                    ('envelope list, per walk', env_list,
+                     lambda g, b: g.next_requests('right', [0], **kw(b)))):
+                with self.subTest(fx, case=name):
+                    self._bounded(make, fn)
+
+    def test_compare_and_subgraph(self):
+        n = self.N
+        for name, x, y in (('names', 'A' * n, 'B' * n),
+                           ('astral names', '\U0001F600' * n, '\U0001F601' * n)):
+            with self.subTest(name):
+                self._bounded(lambda: (self._named('merge', [x]), self._named('merge', [y])),
+                              lambda gg, b: gg[0].compare(gg[1], budget=b).notes)
+        for name, x, y in (('ns', 'n' * n, 'm' * n), ('release', 'r' * n, 's' * n)):
+            def pair(x=x, y=y, name=name):
+                out = []
+                for v in (x, y):
+                    g = T.graphlet('merge')
+                    if name == 'ns':
+                        g.index_ns = v
+                    else:
+                        g.envelope = dict(g.envelope, release=v)
+                    out.append(g)
+                return out
+            with self.subTest(name):
+                self._bounded(pair, lambda gg, b: gg[0].compare(gg[1], budget=b).notes)
+
+        from metagraph.traverse.model import Label
+
+        def many():
+            g = T.graphlet('merge')
+            k = len(g.labels)
+            g.labels = g.labels + [Label(k + i, 'column', 1000 + i, None, 'L%d' % i)
+                                   for i in range(20_000)]
+            return g
+        for sel in ([{'id': i} for i in range(20_000)],
+                    [{'name': 'L%d' % i} for i in range(20_000)]):
+            with self.subTest('subgraph', by=list(sel[0])[0]):
+                self._bounded(many, lambda g, b: ops.subgraph(g, sel, budget=b, of='x').selectors)
+
+    def test_the_writer_and_the_reader(self):
+        n = self.N
+
+        def env(value):
+            def make():
+                g = T.graphlet('merge')
+                g.envelope = dict(g.envelope, algorithm_version=value)
+                return g
+            return make
+        cases = [('J ints', env(list(range(300, 300 + n // 4))),
+                  lambda g, b: g.dump(envelope=True, budget=b)),
+                 ('J nested', env([{'k': [i]} for i in range(n // 20)]),
+                  lambda g, b: g.dump(envelope=True, budget=b))]
+        for cname, name in (('ascii', 'a' * n), ('ascii with %', 'a%' * (n // 2)),
+                            ('bmp', '一' * n), ('astral', '\U0001F600' * n)):
+            cases.append(('dump %s' % cname, lambda name=name: self._named('merge', [name]),
+                          lambda g, b: g.dump(budget=b)))
+            text = self._named('merge', [name]).dump(envelope=False)
+            cases.append(('parse %s' % cname, lambda text=text: text,
+                          lambda t, b: parse(t, budget=b).labels[0].name))
+
+        def explicit_c():
+            # a continuation whose explicit sequence differs from the one the walk spells
+            # (G17): the writer spells it to compare, here across a seed of n bases
+            g = TestSeedAndSelections._long_seed('merge', n)
+            arm = g.arms['right']
+            s = next(x for x in arm.segments if x.leaf is not None
+                     and x.leaf.continuation is not None and x.walk is not None)
+            c = s.leaf.continuation
+            c.n = len(g.seed.sequence) + s.end_bp
+            c.sequence = 'C' * c.n
+            return g
+        cases.append(('dump explicit C', explicit_c, lambda g, b: g.dump(budget=b)))
+        for name, make, fn in cases:
+            with self.subTest(name):
+                self._bounded(make, fn)
+        # G17's comparison spelling, pinned by its work: an explicit sequence equal to the
+        # one the walk spells writes the same text as none, and is charged the n bases it
+        # spells to compare (nothing was, so the peak above holds on the base too: the
+        # spelling is dropped before the join)
+        from metagraph.traverse import parser as P
+
+        def leaf(g):
+            arm = g.arms['right']
+            return arm, next(x for x in arm.segments if x.leaf is not None
+                             and x.leaf.continuation is not None and x.walk is not None)
+        same, none = explicit_c(), explicit_c()
+        arm, s = leaf(same)
+        s.leaf.continuation.sequence = P._derived_continuation(same, arm, s)
+        leaf(none)[1].leaf.continuation.sequence = None
+        b1, b2 = LocalBudget(), LocalBudget()
+        self.assertEqual(same.dump(budget=b1), none.dump(budget=b2))
+        self.assertGreaterEqual(b1.used_work - b2.used_work,
+                                (s.end_bp + s.leaf.continuation.n) >> 9)
+
+    def test_mixed_widths(self):
+        """One character beyond ASCII widens a whole joined str to four bytes a character,
+        the ASCII text beside it included: summary(), compare() and the J line charge all
+        of it so (Opus review of b8fb7a8d6, M2: 2.6-3.1x the account before), and the
+        store's parse reads a wide body only once its text fits."""
+        n = self.N
+        astral = '\U0001F600'
+
+        def seed_id_and_astral():
+            import copy
+            g = self._named('merge', ['x', astral])
+            g.seed_summary = copy.deepcopy(g.seed_summary)
+            g.seed_summary['seed']['seed_id'] = 'q' * n
+            return g
+
+        def releases(x, y):
+            def make():
+                out = []
+                for v in (x, y):
+                    g = T.graphlet('merge')
+                    g.envelope = dict(g.envelope, release=v)
+                    out.append(g)
+                return out
+            return make
+
+        def env(value):
+            def make():
+                g = T.graphlet('merge')
+                g.envelope = dict(g.envelope, algorithm_version=value)
+                return g
+            return make
+        for name, make, fn in (
+                ('summary seed_id and an astral name', seed_id_and_astral,
+                 lambda g, b: g.summary(max_bytes=1 << 24, budget=b)),
+                ('summary a long ASCII name and an astral one',
+                 lambda: self._named('merge', ['a' * n, astral]),
+                 lambda g, b: g.summary(max_bytes=1 << 24, budget=b)),
+                ('compare ASCII and astral releases', releases('r' * n, astral),
+                 lambda gg, b: gg[0].compare(gg[1], budget=b).notes),
+                ('J line ASCII and astral', env(['x' * n, astral]),
+                 lambda g, b: g.dump(envelope=True, budget=b)),
+                ('J line ASCII only', env('x' * n),
+                 lambda g, b: g.dump(envelope=True, budget=b))):
+            with self.subTest(name):
+                self._bounded(make, fn)
+        # under a limit: stopped before the wide text is made
+        for mb in (3, 5, 7):
+            g = env(['x' * n * 5, astral])()
+
+            def call():
+                try:
+                    g.dump(envelope=True, budget=LocalBudget(memory_mb=mb))
+                except MT.LocalBudgetExceeded:
+                    return 'stop'
+            peak, _ = _warm_peak(call, call)
+            with self.subTest('J line under a limit', mb=mb):
+                self.assertLess(peak, mb << 20)
+        with tempfile.TemporaryDirectory() as d:
+            st = GraphletStore(os.path.join(d, 'spool'), max_ram_mb=0)
+            resp = T.doc_json('merge', 'graphlet')
+            r = dict(resp['results'][0])
+            r['graphlet'] = self._named('merge', ['a' * 5 * n, astral]).dump(envelope=False)
+            r.pop('graphlet_bytes', None)
+            r.pop('graphlet_lines', None)
+            h = st.put(dict(resp, results=[r]), {'seeds': []})
+            for mb in (2, 6, 12):
+                def call():
+                    try:
+                        st.graphlet(h, parse_budget=LocalBudget(memory_mb=mb))
+                    except MT.LocalBudgetExceeded:
+                        return 'stop'
+                peak, out = _warm_peak(call, call)
+                with self.subTest('store parse of a wide body', mb=mb):
+                    self.assertEqual(out, 'stop')
+                    self.assertLess(peak, mb << 20)
+            # the body without a parse, at its width (Opus check of 0b2965d96, N2: 24 MB
+            # traced against 6 MB charged for this body, and a completed call 3x over its
+            # limit), and a wide J line beside an ASCII body
+            p = os.path.join(d, 'out.mgt')
+            rj = dict(resp, algorithm_version=['x' * n, astral])
+            hj = st.put(rj, {'seeds': []})
+            for name, fn in (('standalone_text', lambda b, h_=h: st.standalone_text(h_, budget=b)),
+                             ('save_body', lambda b, h_=h: st.save_body(h_, p, budget=b)),
+                             ('standalone_text, wide J line',
+                              lambda b: st.standalone_text(hj, budget=b))):
+                with self.subTest(name):
+                    b = LocalBudget()
+                    fn(b)
+                    peak, _ = _warm_peak(lambda: fn(None), lambda: fn(None))
+                    self.assertLessEqual(peak, b.peak_bytes)
+                for mb in (8, 12):
+                    def call():
+                        try:
+                            fn(LocalBudget(memory_mb=mb))
+                        except MT.LocalBudgetExceeded:
+                            return 'stop'
+                    peak, _ = _warm_peak(call, call)
+                    with self.subTest(name, mb=mb):
+                        self.assertLess(peak, mb << 20)
+        # parse() of UTF-8 bytes (a gzip file's load): the digest's chunk at the text's width
+        # (a 1 MB body), and the split charged before it is made, so that a limit that holds
+        # the decoded text and not its lines stops before the copy (a wide line of 3M
+        # characters: 24 MB traced under 20 MB when charged after)
+        for name, names, mbs in (('digest', ['a' * n * 5, astral], range(2, 16)),
+                                 ('split', ['a' * n * 15 + astral], range(16, 24, 2))):
+            data = self._named('merge', names).dump().encode('utf-8')
+            for mb in mbs:
+                def call():
+                    try:
+                        parse(data, budget=LocalBudget(memory_mb=mb))
+                    except MT.LocalBudgetExceeded:
+                        return 'stop'
+                peak, _ = _warm_peak(call, call)
+                with self.subTest('parse of wide bytes', case=name, mb=mb):
+                    self.assertLess(peak, mb << 20)
+
+    def test_cyclic_values(self):
+        """A caller's value that holds itself (a cycle no JSON can hold) is sized without
+        walking it twice: a budgeted call answers as the unbudgeted one -- the same
+        ValueError, or the same request -- where the walk never ended (Opus review of
+        b8fb7a8d6, M1). Each budget has a work limit, so that a walk that does not end
+        stops (a failure) instead of growing until killed."""
+        def lim():
+            return LocalBudget(work_units=10**7)
+        cyc = ['a']
+        cyc.append(cyc)
+        g = T.graphlet('merge')
+        for budget in (None, lim()):
+            kw = {} if budget is None else {'budget': budget}
+            with self.subTest('next_request labels.extra', budgeted=budget is not None):
+                with self.assertRaisesRegex(ValueError, 'labels.extra is a list of label names'):
+                    g.next_request('right', [0], labels={'extra': cyc}, **kw)
+        out = g.next_requests('right', [0], note=cyc,
+                              budget=LocalBudget(memory_mb=64, work_units=10**7))
+        self.assertEqual(repr(out), repr(g.next_requests('right', [0], note=cyc)))
+        h = T.graphlet('merge')
+        h.envelope = dict(h.envelope, algorithm_version=cyc)
+        for budget in (None, lim()):
+            with self.subTest('dump(envelope=True)', budgeted=budget is not None):
+                with self.assertRaisesRegex(ValueError, 'Circular reference detected'):
+                    h.dump(envelope=True, budget=budget)
+        from metagraph.traverse import budget as B
+        self.assertEqual(B.value_size(cyc, LocalBudget(work_units=10**6))[:4],
+                         (3, 1, B.list_bytes(2), 9))
+
+    def test_shared_values(self):
+        """A caller's value that holds one container more than once, without a cycle, is
+        priced as deepcopy copies it: each container once (its memo). 41 lists, each holding
+        the next twice, are 2^40 paths: a walk per path never ended under a budget, where
+        the unbudgeted call answers at once (Opus check of 0b2965d96, N1; a regression
+        from dada7f430). Work-limited, so that a regression fails instead of hanging."""
+        from metagraph.traverse import budget as B
+        x = ['a']
+        for _ in range(40):
+            x = [x, x]
+        g = T.graphlet('merge')
+
+        def plain(out):
+            # the requests without the note (whose repr() writes every path), and the
+            # note's copy: as deepcopy makes it, each level one list held twice
+            notes = [r['strategy'].pop('note') for r in out]
+            for n in notes:
+                for _ in range(40):
+                    self.assertIs(n[0], n[1])
+                    n = n[0]
+                self.assertEqual(n, ['a'])
+            return repr(out)
+        want = plain(g.next_requests('right', [0], note=x))
+        for kw in ({}, {'memory_mb': 64}):
+            b = LocalBudget(work_units=10**7, **kw)
+            with self.subTest(**kw):
+                self.assertEqual(plain(g.next_requests('right', [0], note=x, budget=b)), want)
+                self.assertLess(b.used_work, 10**4)
+        b = LocalBudget(work_units=10**6)
+        self.assertEqual(B.value_size(x, b, shared=True)[1:3],
+                         (41, 40 * B.list_bytes(2) + B.list_bytes(1)))
+
+    def test_values_shared_between_overrides(self):
+        """One value given under several keyword overrides is copied once per key: the merge
+        into the strategy deep-copies each override (or each entry of a section the strategy
+        holds) with a memo of its own, so each is charged (Opus check of 63e7fdaa3, R1: one
+        list as note0..note7 charged one copy, 7.5x under its traced peak; 3.75x for four
+        entries of the annotation section)."""
+        x = ['a'] * 100_000
+        cases = (('8 keys', {'note%d' % i: x for i in range(8)}),
+                 ('a section', {'annotation': {'n%d' % i: x for i in range(4)}}))
+        for name, kw in cases:
+            for op in ('next_request', 'next_requests'):
+                def call(b=None, kw=kw, op=op):
+                    g = T.graphlet('merge')
+                    extra = {} if b is None else {'budget': b}
+                    return getattr(g, op)('right', [0], **extra, **kw)
+                with self.subTest(name, op=op):
+                    b = LocalBudget(work_units=10**7)
+                    call(b)
+                    peak, _ = _warm_peak(call, call)
+                    self.assertLessEqual(peak, b.peak_bytes)
+
+    def test_many_overrides_grow_the_strategy(self):
+        """The merge writes every override into the strategy (and into the merged copy the
+        labels.extra rebuild reads): those dicts grow by its entries, charged with them (Opus
+        check of feda889fd, F1: 200,000 scalar entries charged as none, 660x under in a
+        section, 1,562x at the top level). The factor left (about 3x in a section, 7-9x at
+        the top level with the call's own **kwargs) is the dict model's (F2, a follow-up:
+        DICT_KEY's 16 bytes against about 38 for a dict built by insertion), so the bound
+        here is a floor, not traced <= account."""
+        n = 50_000
+        flat = {'k%d' % i: i for i in range(n)}
+        for name, kw, floor in (('a section', {'annotation': flat}, 4),
+                                ('the top level', dict(flat), 10)):
+            def call(b=None, kw=kw):
+                g = T.graphlet('merge')
+                return g.next_request('right', [0], **({} if b is None else {'budget': b}),
+                                      **kw)
+            with self.subTest(name):
+                b = LocalBudget(work_units=10**8)
+                call(b)
+                peak, _ = _warm_peak(call, call)
+                self.assertGreaterEqual(b.peak_bytes * floor, peak)
+
+    def test_charges_are_the_same_on_every_interpreter(self):
+        """No charge reads the interpreter's Unicode tables or object sizes (Opus review of
+        b8fb7a8d6, M4): a character of Unicode 15 (U+1FAE8, unknown to 3.11's tables) and
+        a short Latin-1 text are charged these figures on 3.11 and 3.14 alike. The figures
+        are literals: a change of these charges moves them -- re-pin them from a run on
+        both interpreters, which must agree (a figure only one of them gives is the bug
+        this test is for)."""
+        from metagraph.traverse import budget as B
+        new = '\U0001FAE8'
+        b = LocalBudget()
+        self._named('merge', [new * 10000]).summary(budget=b)
+        self.assertEqual((b.peak_bytes, b.used_work), (179808, 17738))
+        ga, gb = T.graphlet('merge'), T.graphlet('merge')
+        ga.envelope = dict(ga.envelope, release=new * 10000)
+        gb.envelope = dict(gb.envelope, release='r')
+        b = LocalBudget()
+        ga.compare(gb, budget=b)
+        self.assertEqual(b.peak_bytes, 818928)
+        for k, want in ((30, 16477), (34, 16485), (38, 16493)):
+            b = LocalBudget()
+            try:
+                parse('\u00e9' * k, budget=b)
+            except MT.GraphletFormatError:
+                pass
+            self.assertEqual(b.peak_bytes, want, k)
+        self.assertEqual(B.text_bytes(new * 1000), 4008)
+        self.assertEqual(B.repr_bytes(new * 1000), 40080)
+        self.assertEqual(B.value_size({'extra': [{1, 2, 3}, b'abc', object()]}),
+                         (6, 2, 1099, 211, False, 4))
+
+    def test_the_store(self):
+        """standalone_text()'s J line with the encoder's pieces, and a parse on demand or a
+        load that reads its body only once the parse's budget can hold it: a zero budget
+        stops with under 64 KB traced, where it read and decoded the body first (2 MB)."""
+        import copy
+        n = self.N
+        with tempfile.TemporaryDirectory() as d:
+            st = GraphletStore(os.path.join(d, 'spool'), max_ram_mb=0)
+            resp = T.doc_json('merge', 'graphlet')
+            r = dict(resp['results'][0])
+            r['graphlet'] = self._named('merge', ['a' * 5 * n]).dump(envelope=False)
+            r.pop('graphlet_bytes', None)
+            r.pop('graphlet_lines', None)
+            h = st.put(dict(resp, results=[r]), {'seeds': []})
+            path = os.path.join(d, 'x.mgt')
+            parse(r['graphlet']).save(path)
+            for name, fn in (('graphlet', lambda b: st.graphlet(h, parse_budget=b)),
+                             ('view', lambda b: st.view(h, parse_budget=b)),
+                             ('load', lambda b: st.load_graphlet(path, parse_budget=b))):
+                with self.subTest(name):
+                    def call():
+                        try:
+                            fn(LocalBudget(work_units=0, memory_mb=0))
+                        except MT.LocalBudgetExceeded:
+                            return 'stop'
+                    peak, out = _warm_peak(call, call)
+                    self.assertEqual(out, 'stop')
+                    self.assertLess(peak, 64 * 1024)
+            rr = copy.deepcopy(resp)
+            rr['algorithm_version'] = list(range(300, 300 + n // 4))
+            h2 = st.put(rr, {'seeds': []})
+            b = LocalBudget()
+            self.assertEqual(st.standalone_text(h2, budget=b), st.standalone_text(h2))
+            peak, _ = _warm_peak(lambda: st.standalone_text(h2), lambda: st.standalone_text(h2))
+            self.assertLessEqual(peak, b.peak_bytes)
+            # and its work: the J line's encoder per atom (b8fb7a8d6; 9.8x under before)
+            self.assertGreaterEqual(b.used_work, 2 * (n // 4))
+
+
 class TestWriteAccounts(unittest.TestCase):
     """The local-limits account of save() and of the MCP tools' writes is at least their
     traced peak: the files are written without a buffer (one write), and the JSON export's

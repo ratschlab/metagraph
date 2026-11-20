@@ -688,7 +688,9 @@ pairs (their descriptions, linear in the number of inputs); then each matching p
 `seqs_order=` keys among themselves, `ambiguous_pair` with the pair classes, the classes against the keys), at its
 index and at the comparisons its candidates need (F.1); then, after `no_bases` and `different_alphabet` (which charge
 nothing) and before the seed checks, the inputs' variable-length metadata (at a bound of its JSON) and the seed (four
-copies, and four more per part, whose retrieval identity holds it); then the trie pass. A budget too small for one of
+copies, and four more per part, whose retrieval identity holds it); then the trie pass: each part before it is
+inserted, and each cover entry its segments add past their first (an edge walked, a split's copy of a cover) where it
+is made (F.1). A budget too small for one of
 these charges stops there, before the refusals checked after it: `ambiguous_pair` after its pass's charge, `no_bases`
 and `different_alphabet` after the classes against the keys, and `different_seed`, `duplicate_pair` and
 `not_expected` after the metadata's.
@@ -1433,6 +1435,7 @@ document is shown. `provenance()` follows the same rule: its `pair` and `request
 | `no_seed` | `no result carries a graphlet, so the union has no seed sequence: pass seed= (the oriented seed the request sent)` |
 | MissingEnvelope | today's `require_envelope('union_pairs()')` text, as for `stitch()` (§3.1) |
 | `p2_pair_id`, `bad_pair_id`, `pair_id_mismatch` | `result %s: %s`, the second `%s` the words of `client.PairIdError` for the pair its envelope (the `J` line) states: a `pair_id` that is no n1 id (a p2 id; `''`, a non-string, anything else), an id beside one path only, or an id beside paths that are not its. One rule (`client._pair()`) with the same codes and words wherever a document's pair is read: `answered_pair()` and `GraphletStore.request_of()` raise the PairIdError, `stitch()` refuses it (B.1), the MCP tools answer its code (`graphlet_load`, replays) |
+| `bad_pair_tag` | `result %s: the envelope's %s is not a string (%s): a pair's release and index tags are strings`, naming the tag (`release` or `capabilities.release`; for a seed result without a graphlet also `index_ns`, `index_fp` and `index_meta_fp`, the envelope's or its capabilities': a part's index tags are its `H` line's) and its type. Checked after the envelope's `pair_id` (whose refusals come first), before any description is compared: every description holds strings only, as a caller's pair statement must (before, a list as a release raised `TypeError`, a falsy one, `0`, `False`, `[]` or `{}`, read as unstated, and a non-string tag the description did not read, such as `capabilities.release` beside a top-level release, passed) |
 | `pair_mismatch` | `result %s was answered on pair %s, and the caller states pair %s: state the pair it was answered on, or none`; where the envelope names its pair by `pair_id` only and the caller by a path without one, and the call states no paths for that id (A.4, rule 3): `result %s was answered on pair %s, named by its pair_id only, and the caller states pair %s by a path without its pair_id: the two cannot be compared; state the pair_id it was answered on, or none` |
 | `no_pair` | `result %s names no pair (no graph tag, no index_ns): pass it as {pair, graphlet} or {pair, result}` |
 | `ambiguous_pair` | `pair %s matches both %s and %s: state its pair_id (or its paths), release or index_ns` |
@@ -1449,7 +1452,7 @@ document is shown. `provenance()` follows the same rule: its `pair` and `request
 
 | operation | status | preconditions (all checked, in the order of the refusal tables) | refusal codes |
 |---|---|---|---|
-| cross-pair union `union_pairs(results)` | **offered**, phase 1a-U, **first** | results sorted into parts and absent records; every part a whole retrieval with an envelope and bases; one alphabet; one oriented seed, base for base; one answer per pair; expected pairs well formed (§2.3). Allowed and stated: different k, regime, release, database, strategies, radii, arm sets, unverified identity, caller-stated pairs | `bad_expected`, `not_combinable`, `view_unsupported`, `not_one_seed`, `result_has_graphlet`, `no_graphlet`, `no_seed`, MissingEnvelope, `p2_pair_id`, `bad_pair_id`, `pair_id_mismatch`, `pair_mismatch`, `no_pair`, `ambiguous_pair`, `no_bases`, `different_alphabet`, `different_seed`, `duplicate_pair`, `not_expected`; for queries `ambiguous_name`, `summary_too_small`, `not_offered` |
+| cross-pair union `union_pairs(results)` | **offered**, phase 1a-U, **first** | results sorted into parts and absent records; every part a whole retrieval with an envelope and bases; one alphabet; one oriented seed, base for base; one answer per pair; expected pairs well formed (§2.3). Allowed and stated: different k, regime, release, database, strategies, radii, arm sets, unverified identity, caller-stated pairs | `bad_expected`, `not_combinable`, `view_unsupported`, `not_one_seed`, `result_has_graphlet`, `no_graphlet`, `no_seed`, MissingEnvelope, `p2_pair_id`, `bad_pair_id`, `pair_id_mismatch`, `bad_pair_tag`, `pair_mismatch`, `no_pair`, `ambiguous_pair`, `no_bases`, `different_alphabet`, `different_seed`, `duplicate_pair`, `not_expected`; for queries `ambiguous_name`, `summary_too_small`, `not_offered` |
 | continuation stitching `stitch(parent, child)` | **offered**, phase 1a-S, after the union (OQ1) | both carry an envelope; same index (§3.1: `index_meta_fp`, `index_fp`, `index_ns`, release, names per ref; one-sided `index_fp` only with `allow_unverified_index=True`); same pair where both state one; same k, regime and alphabet; same mode and support; the child walks one arm; its seed equals the continuation of one walk of that arm of the parent; that walk is not yet continued by another body; in constrain mode its seed labels are alive at the walk's end | `not_combinable`, `view_unsupported`, MissingEnvelope, `p2_pair_id`, `bad_pair_id`, `pair_id_mismatch`, `different_index`, `index_unverifiable`, `different_pair`, `different_graph`, `different_mode`, `not_one_arm`, `wrong_arm`, `no_continuation`, `not_a_continuation`, `ambiguous_walk`, `already_continued`, `foreign_seed_labels` |
 | the two arms of one seed against a `direction: both` fetch | **later**, a validation helper (Appendix D.5) | as stitch's identity checks; one oriented seed | none designed yet |
 | two retrievals of one pair `union_retrievals(results)` | **later**: designed (§4.2), built when a user needs it | one oriented seed; retrievals told apart by retrieval identity; labels joined by ref only where `index_fp` agree | until then `union_pairs()` refuses them `duplicate_pair`, and `compare()` reads them |
@@ -2142,25 +2145,32 @@ graphlets.rst examples run in `run_examples.py` (CI's fixture-checks job).
   (DESIGN §7). r237's 11 parts with two arms each hold about 110 MB constrained, or 440–660 MB label-free.
   `memory_bytes()` is their sum plus the trie.
 - **The trie.** Built once, arm by arm, by one depth-first pass over each part's first-parent tree (walks and stubs,
-  §2.4). Bases are read from the part's segments, not copied, so the work is O(sum of the parts' bases), linear on a
-  comb too. A union segment costs about 200 bytes plus about 120 bytes per pair spelling it, and its bases are a
-  reference into a part [estimate]; a support holds its pieces and two counts, never a list of walks. The trie
-  has at most as many segments as the parts together, plus one per point where a pair's spelling ends, merges or
-  turns off and one per merge segment's start: for 11 parts of about 2,000 segments each, about 22,000 union
-  segments, 5–10 MB [estimate].
+  §2.4). Bases are read from the part's segments, not copied, so the comparisons are O(sum of the parts' bases),
+  linear on a comb too. Each raw edge holds a cover entry per pair spelling it (about 120-130 bytes, up to about 172
+  where most covers were just resized; charged at 192) and its union segment a piece per such entry (at most 290
+  bytes), and its bases are a reference into a part (CPython 3.11 and 3.14, measured; the bound is the call's, the
+  per-entry figures are fits); a support holds its pieces and two counts, never a list of walks. The trie has at most as many
+  segments as the parts together, plus one per point where a pair's spelling ends, merges or turns off and one per
+  merge segment's start: for 11 parts of about 2,000 segments each, about 22,000 union segments, 5–10 MB
+  [estimate]. Parts that split nothing add a cover entry per segment: 2,000 answers of one fixture hold 23 MB.
+  Parts that share a locus and branch off it at different depths cut each other's spellings, so each part walks an
+  edge per depth the others branch at: P such parts hold about P² cover entries and pieces (P = 400: 66 MB; P =
+  2,000: 1.6 GB). The trie charges each cover entry where it is made (an edge a segment walks, a split's copy of a
+  cover, the merge into union segments), so the account follows them and bounds the peak, and the service's union
+  limits (256 MiB, 200 million lwu) stop such a union in the trie.
 - **Matching.** The passes that compare pair descriptions (the `seqs_order=` keys among themselves, `ambiguous_pair`
-  with the pair classes, the classes against the keys) compare a description only with its candidates: those an index of
-  A.4's rule says can match it (an index_fp both state; else the graph name, or a bare name against an index_ns; then
-  the pair_id; then the paths, an unstated one matching any, an id's paths taken from the call). Descriptions with one
-  content are compared once. With distinct pairs the work is linear in the inputs: the service's largest seed (2,000
-  pairs, each an input and an expected pair with a `seqs_order=` key) is charged about 980,000 lwu for the whole
-  construction, where comparing every pair was priced at about 272 million. Many descriptions of one name that differ
-  only in release, index_ns or index_meta_fp (not indexed), or many distinct descriptions that all match one another,
-  are still compared pairwise. An input refused `ambiguous_pair` has its refusal searched group by group, each group's
-  matches compared among themselves (the square of their number), so the groups before the refused one can take up to
-  the cube of the inputs together, as comparing every pair did (600 names on one index_fp, refused at the last input:
-  about 868 million lwu before and after). Every comparison is charged before it is made (§2.8), so a budget stops the
-  search.
+  with the pair classes, the classes against the keys) compare a description only with its candidates: those an index
+  of A.4's rule says can match it (an index_fp both state; else the graph name, or a bare name against an index_ns;
+  then the pair_id; then the paths, an unstated one matching any, an id's paths taken from the call). Descriptions
+  with one content are compared once. With distinct pairs the work is linear in the inputs: the service's largest seed
+  (2,000 pairs, each an input and an expected pair with a `seqs_order=` key) is charged about 1,000,000 lwu for the
+  whole construction (976,117 with failed records, 1,001,117 with absent ones), where comparing every pair was priced
+  at about 272 million. Many descriptions of one name that differ only in release, index_ns or index_meta_fp (not
+  indexed), or many distinct descriptions that all match one another, are still compared pairwise. An input refused
+  `ambiguous_pair` has its refusal searched group by group, each group's matches compared among themselves (the square
+  of their number), so the groups before the refused one can take up to the cube of the inputs together, as comparing
+  every pair did (600 names on one index_fp, refused at the last input: about 868 million lwu before and after). Every
+  comparison and query is charged before it is made (§2.8), so a budget stops the search.
 - **Labels.** Per (union segment, pair), the labels alive on the part segments it covers, as intervals. A part
   segment lies on one path, so its intervals do not depend on which walk passes it. In constrain mode they are built
   from the segment's entry set and its label changes (`derive.label_changes()`, `derive.py:72`), each change opening
