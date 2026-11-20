@@ -322,4 +322,48 @@ TEST(SteppedSort, TheVectorPassesInSteps) {
     }
 }
 
+// The steps follow the comparisons (lane T8-RL, the Opus review's n2): at most about two
+// comparisons a step told, so at most about 2 kSortStepElements between two |step| calls, both
+// where a comparison is not a step of its own: the heap sort (a sift compares up to twice a heap
+// level; before, a sift was one step, about 155,000 comparisons between two calls at 1,000,000
+// elements) and Hoare's scans over a range already partitioned (before, told at a swap only:
+// the whole range's scans between two calls)
+TEST(SteppedSort, TheStepsFollowTheComparisons) {
+    // the comparisons since the last |step| call, and the most of them between two calls (or
+    // after the last one)
+    uint64_t since = 0;
+    uint64_t most = 0;
+    auto comp = [&](uint64_t a, uint64_t b) {
+        ++since;
+        return a < b;
+    };
+    auto step = [&](size_t) {
+        most = std::max(most, since);
+        since = 0;
+    };
+    const uint64_t bound = 2 * (kSortStepElements + 64);
+    const size_t n = 1000000;
+    std::mt19937_64 rng(8);
+    std::vector<uint64_t> v(n);
+    for (uint64_t &x : v) {
+        x = rng();
+    }
+    // the heap sort: the range past its depth at once
+    stepped_sort_detail::sort_ranges(v.begin(), v.end(), comp, step, 0);
+    most = std::max(most, since);
+    ASSERT_TRUE(std::is_sorted(v.begin(), v.end()));
+    EXPECT_LE(most, bound) << "heap sort";
+    // Hoare's partition of a sorted range around its median (median_to_front: the scans pass
+    // every element but the one swapped)
+    since = 0;
+    most = 0;
+    stepped_sort_detail::median_to_front(v.begin(), v.end(), comp);
+    since = 0;
+    stepped_sort_detail::Counter<decltype(step)> count(step);
+    stepped_sort_detail::partition_at_front(v.begin(), v.end(), comp, count);
+    count.flush();
+    most = std::max(most, since);
+    EXPECT_LE(most, bound) << "Hoare's partition";
+}
+
 } // namespace
