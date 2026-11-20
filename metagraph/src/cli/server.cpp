@@ -2000,18 +2000,18 @@ int run_server(Config *config) {
                 result.entry = envelope_entry_refused(selected, fp_of_pair(pair), http_status,
                                                       body);
             };
+            // an inline pair is written under this handler's delivery (its own deadline, as a
+            // single-graph request); a pooled one under its own, the envelope's writing being
+            // the request's
+            PatternDelivery own;
+            PatternDelivery *pair_delivery = control.inline_run() ? delivery : &own;
+            if (!control.inline_run())
+                own.set_abort(control.stop_predicate());
             try {
                 const auto lease = lease_index(selected, "pattern", in_ram.value_or(false),
                                                request_id, control.stop_predicate(),
                                                /* for_pattern */ true, &control, nullptr);
                 const IndexIdentity identity = identity_of_pair(pair, lease->index());
-                // an inline pair is written under this handler's delivery (its own deadline,
-                // as a single-graph request); a pooled one under its own, the envelope's
-                // writing being the request's
-                PatternDelivery own;
-                PatternDelivery *pair_delivery = control.inline_run() ? delivery : &own;
-                if (!control.inline_run())
-                    own.set_abort(control.stop_predicate());
                 if (const auto cap = control.deadline_cap())
                     pair_delivery->set_deadline_cap(*cap);
                 // a pooled pair's budget is capped at the work cutoff, stated when it binds
@@ -2041,6 +2041,9 @@ int run_server(Config *config) {
                 refused(e.status(), e.body());
             } catch (const graph::pattern::Aborted &) {
                 result.aborted = true;
+                // what the abandoned pair held (its usage in the registry; lane T8-RL)
+                if (const auto &used = pair_delivery->abandoned_usage())
+                    result.memory_bytes = used->memory_bytes;
             } catch (const LoadAbandoned &) {
                 result.aborted = true;
             } catch (const std::exception &e) {
@@ -2216,6 +2219,18 @@ int run_server(Config *config) {
                 PatternAnswer answer;
                 try {
                     answer = process_pattern_answer(json, index, *config, &identity, &delivery);
+                } catch (const graph::pattern::Aborted &) {
+                    // abandoned at a reading of its client: what it held and used as its pair's
+                    // usage (SPEC-multigraph-envelope.md section 5; lane T8-RL: before, none)
+                    if (entry) {
+                        entry->pair_outcome(0, "refused");
+                        if (const auto &used = delivery.abandoned_usage()) {
+                            entry->pair_ended(0, used->memory_bytes, used->cpu_ms);
+                        } else {
+                            entry->pair_ended(0);
+                        }
+                    }
+                    throw;
                 } catch (...) {
                     if (entry) {
                         entry->pair_outcome(0, "refused");
@@ -2337,15 +2352,15 @@ int run_server(Config *config) {
                 result.entry = envelope_entry_refused(selected, fp_of_pair(pair), http_status,
                                                       body);
             };
+            // an inline pair is written under this handler's delivery (its own deadline); a
+            // pooled one's check is its own, the envelope's writing the request's
+            ResolveDelivery own;
+            ResolveDelivery *pair_delivery = control.inline_run() ? &writing->delivery : &own;
             try {
                 const auto lease = lease_index(selected, "resolve", in_ram.value_or(false),
                                                request_id, control.stop_predicate(),
                                                /* for_pattern */ false, &control, nullptr);
                 const IndexIdentity identity = identity_of_pair(pair, lease->index());
-                // an inline pair is written under this handler's delivery (its own deadline);
-                // a pooled one's check is its own, the envelope's writing the request's
-                ResolveDelivery own;
-                ResolveDelivery *pair_delivery = control.inline_run() ? &writing->delivery : &own;
                 if (const auto cap = control.deadline_cap())
                     pair_delivery->set_deadline_cap(*cap);
                 // a pooled pair's budget is capped at the work cutoff, stated when it binds
@@ -2378,6 +2393,9 @@ int run_server(Config *config) {
                 result.aborted = true;
             } catch (const graph::traversal::AttemptAborted &) {
                 result.aborted = true;
+                // what the abandoned pair held (its usage in the registry; lane T8-RL)
+                if (const auto &used = pair_delivery->abandoned_usage())
+                    result.memory_bytes = used->memory_bytes;
             } catch (const ResolveDeadline &e) {
                 refused(503, resolve_deadline_body(e));
             } catch (const graph::traversal::AnswerTooLarge &e) {
@@ -2558,10 +2576,16 @@ int run_server(Config *config) {
                 writing.single = std::move(answer.held);
                 return std::move(out);
             } catch (...) {
-                // (an entry refused before its admission was never registered)
+                // (an entry refused before its admission was never registered) A request
+                // abandoned at a reading of its client states what it held and used as its pair's
+                // usage (SPEC-multigraph-envelope.md section 5; lane T8-RL: before, none)
                 if (tracked) {
                     tracked->pair_outcome(0, "refused");
-                    tracked->pair_ended(0);
+                    if (const auto &used = writing.delivery.abandoned_usage()) {
+                        tracked->pair_ended(0, used->memory_bytes, used->cpu_ms);
+                    } else {
+                        tracked->pair_ended(0);
+                    }
                 }
                 try {
                     throw;

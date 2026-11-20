@@ -286,11 +286,24 @@ class PatternDelivery {
         return cutoff_;
     }
 
+    /**
+     * What the request held and used when its answer was abandoned (AbandonedUsage: the
+     * account's peak and its CPU time on its thread), told by process_pattern_request as any
+     * exception unwinds it; the server reads it for an abandoned request (graph::pattern::
+     * Aborted: a client gone, the fan-out's stop), the registry's usage of its pair. Unset: the
+     * request did not end so, or ended before its work began
+     */
+    void set_abandoned_usage(uint64_t memory_bytes, std::optional<double> cpu_ms) {
+        abandoned_ = AbandonedUsage { memory_bytes, cpu_ms };
+    }
+    const std::optional<AbandonedUsage>& abandoned_usage() const { return abandoned_; }
+
   private:
     std::optional<graph::pattern::Deadline> deadline_;
     std::function<bool()> abort_;
     std::optional<graph::pattern::Deadline::Clock::time_point> cap_;
     std::optional<graph::pattern::Deadline::Clock::time_point> cutoff_;
+    std::optional<AbandonedUsage> abandoned_;
 };
 
 // The request body as JSON: one RFC 8259 JSON text with unique member names and nothing after

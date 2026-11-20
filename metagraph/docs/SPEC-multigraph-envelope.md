@@ -451,7 +451,16 @@ The answer keeps its upstream shape (a list of `{seq_description, results, ...}`
   clock rule applies). The expired 409's `server_time_ms` (section 4, since release 10) is unchanged: the clock
   that admission read.
 - A client gone, or a connection lost, stops the work as before; the entry records the end (`reason:
-  "client_gone"`, with usage). That holds for an error too: on `/resolve` and `/pattern` nothing is written to a
+  "client_gone"`, with usage): on `/resolve` and `/pattern` the pairs whose work it stopped state what that work
+  held and used, `usage.cpu_ms` its CPU time on its thread and `usage.memory_bytes` its modelled memory so far (on
+  `/resolve` the work's peak as `work.memory_bytes` counts it, with the profile and the selection once they are
+  made, and, for a stop inside a pass, what the pass's budget held at its most so far, as it charged it (the rows
+  decoded and kept, the accumulators, the decode's buffers: possibly more than a complete answer's
+  `work.memory_bytes` states); on `/pattern` its account's peak, 0 while the work has charged nothing to it, as with `output.labels`
+  `"none"`), on a single-graph server's one pair (outcome `refused`, null tags) as on
+  a multi-graph server's pairs *(lane T8-RL: before, a single-graph pair stated `cpu_ms` null and `memory_bytes` 0,
+  and a multi-graph pair stopped by the client `memory_bytes` 0)*; a pair stopped before its work began holds
+  nothing (`memory_bytes` 0). That holds for an error too: on `/resolve` and `/pattern` nothing is written to a
   client that left once the request has its entry, and the entry records `client_gone`; a delivered error stays
   `error`. An answer written but lost on the way is recorded `ended` with its status and bytes; results are not
   retained.

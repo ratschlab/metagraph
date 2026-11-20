@@ -41,6 +41,15 @@ constexpr size_t kResolveFirstBatchRows = 64;
 constexpr size_t kResolveBatchRows = 4096;
 constexpr uint64_t kResolveBatchBytes = uint64_t(64) << 20;
 constexpr uint64_t kResolveKeptBytes = uint64_t(256) << 20;
+// Within a batch, the uses of its k-mers' rows read the checkpoint (the request's stop, the
+// deadline) once the rows used since the last reading pass kResolveUseCheckBytes (row_copy_bytes;
+// a row's use is the scatter of its hits, about its size: lane T8-RL, a batch of 4,000-label
+// rows took about 0.8 s to use, the work's deadline and a gone client read only after it)
+constexpr uint64_t kResolveUseCheckBytes = uint64_t(1) << 20;
+// and a use counted as at least kResolveUseMinBytes, so that the uses of small rows read it too,
+// every 4,096 uses at most (a row of up to 2 labels is 0 bytes under folly; a batch's uses can
+// pass its rows by far over repeated keys: lane T8-RL review m2)
+constexpr uint64_t kResolveUseMinBytes = kResolveUseCheckBytes / 4096;
 
 // A /resolve answer priced past its account (AnswerAccount): nothing partial is sent (the
 // server: 400 resolve_answer_too_large). |part| is what passed it: "profile", "candidates",
@@ -159,8 +168,9 @@ struct ResolveOptions {
     // field.
     std::function<bool()> time_up;
     // Read every kResolveCheckLabels labels of the loops after the work (a discovery's ranking
-    // and naming, the profiles, the candidates' grouping, which reads every kResolveCheckRuns
-    // runs as well), after |stop|: throws to abandon a
+    // and naming, the profiles, the candidates' grouping, which reads every kResolveCheckLabels
+    // runs walked as well; their sorts, the grouping's count pass every kResolveCheckRuns
+    // elements), after |stop|: throws to abandon a
     // request whose answer can no longer be built and written in time (the server: 503
     // deadline). Not a request field.
     std::function<void()> finish_check;
@@ -193,6 +203,10 @@ struct ResolveOptions {
     // CLI): the profile and the candidates are charged to it here, before the candidates are
     // grouped. Not a request field
     AnswerAccount *answer = nullptr;
+    // Raised to the profile's modelled memory (SupportProfile::memory_peak) each time that grows,
+    // so that a request abandoned inside resolve_support states what it held so far (null: not
+    // kept; the server's registry usage of an abandoned pair, lane T8-RL). Not a request field
+    uint64_t *memory_seen = nullptr;
 };
 
 // What a discovery charges against ResolveOptions::discover_max_memory for its accumulators
@@ -283,10 +297,12 @@ constexpr uint64_t kResolveCheckKmers = 4096;
 // the answer's time (and a stop) is read within a few milliseconds of it
 constexpr size_t kResolveCheckLabels = 4096;
 
-// The candidates' grouping (group_candidates) reads them once in this many runs walked as well:
-// a run's step there is a map lookup and insertion (about 33 ns measured: 4,000 labels of about
-// 3,700 runs took about 0.5 s), so that few labels of many runs are read within a few
-// milliseconds too (the Opus review of d398357a9, N2)
+// The passes after the work that are not by labels read them once in this many steps: the
+// candidates' grouping (group_candidates) a run counted for its price, an element of its sort,
+// and a run walked into its map 16 steps (a reading every kResolveCheckLabels runs walked: a
+// map step is about 33 ns at few groups, about a microsecond at millions; 4,000 labels of about
+// 3,700 runs took about 0.5 s, the Opus review of d398357a9, N2; lane T8-RL), and a discovery's
+// ranking and name sorts an element of their passes (stepped_sort.hpp)
 constexpr uint64_t kResolveCheckRuns = uint64_t(1) << 16;
 
 // Where a deadline (ResolveOptions::time_up) ended a /resolve's work, and how far it got: the
@@ -446,8 +462,10 @@ bool next_key_uses(const std::vector<node_index> &keys, annot::matrix::DecodeBud
 // replaced by what the candidates hold (part "candidates"); the candidates are reserved, so
 // that no growth holds an old and a new buffer beside the grouping's map. |finishing| (unset:
 // none) is called with each label's index before its runs are grouped, then with each group's
-// index before it becomes a candidate; |reading| (unset: none) after every kResolveCheckRuns
-// runs walked (resolve_support: the request's stop, then its deadline)
+// index before it becomes a candidate, each group's map node freed as it is; |reading| (unset:
+// none) once kResolveCheckRuns steps passed since the last reading, a run counted for the price
+// a step, a run walked 16 and an element of the candidates' sort (stepped_sort.hpp) one
+// (resolve_support: the request's stop, then its deadline)
 void group_candidates(SupportProfile *profile, uint64_t min_block_kmers,
                       AnswerAccount *answer = nullptr,
                       const std::function<void(size_t)> &finishing = {},
@@ -467,12 +485,15 @@ constexpr char kSeedOrder[] = "rank";
 // candidate (and a pick's labels before they are copied); for explicit seeds each label put
 // into the name lookups, a seed, each of its names priced and copied, each graph run and each
 // name checked for it and each run of a named label checked; a label and each of its runs
-// counted, then gathered, for max_support and the runs before their sort; in a max_support
-// round a run clipped and each pick it meets, each of its pieces as its candidate starts are
-// built and as its run ends are, a candidate start swept and each run it adds, a label and each
-// of its runs checked for the winner; a merged pick and each label and run checked for it; a
-// pick and each of its names not covering sized, a frozen seed and each of its labels and names
-// at each pass over them, a pair of seeds compared for overlaps -- and throwing to abandon it
+// counted, then gathered, for max_support, each element of their sort's passes and each run of
+// their sorted copy; in a max_support round a run clipped and each pick it meets, a piece copied
+// as its vector grows, each element of its sort of the pieces, each of its pieces as its
+// candidate starts are built and as its run ends are, each element of their sorts and
+// de-duplications and each Fenwick count zeroed, a candidate start swept and each run it adds, a
+// label and each of its runs checked for the winner; a merged pick and each label and run
+// checked for it; a pick and each of its names not covering sized, a frozen seed and each of its
+// labels and names at each pass over them, a pick and each name it lists as not covering freed,
+// a pair of seeds compared for overlaps -- and throwing to abandon it
 // (GPT review 7, finding 1: the selection was read only once it was done, after every
 // overlapping pair was listed; T4-L1: once per max_support round, whose clip of every run by
 // every pick was O(runs x picks); GPT final review of trains 5a-7, m1: the count of
@@ -481,10 +502,11 @@ constexpr char kSeedOrder[] = "rank";
 // names priced and copied and a round's pieces built took no step). A loop that does nothing
 // else with its items takes them in pieces that end where the next reading falls: the readings
 // fall at the same steps, and the loop is tight between them (mi-3). What is not read inside
-// is listed in SPEC-labeled-traversal-core.md §4.5 (Not polled): the sorts, a round's
-// de-duplications and the zeroing of its Fenwick counts, the round's vector copied as it grows,
-// a longest_first pick's copy of its labels, a seed's sequence and id, one row of the overlaps,
-// the picks' free once the seeds are frozen (the Opus review of 0666c9815, m-1)
+// is listed in SPEC-labeled-traversal-core.md §4.5 (Not polled): the sort of the picks and of
+// the merged ones (at most max_seeds), a longest_first pick's copy of its labels, a seed's two
+// label sorts, its sequence and id, one row of the overlaps (lane T8-RL: the sorts of
+// max_support's runs and pieces, a round's de-duplications, Fenwick counts and growth, and the
+// picks' free are read inside now, stepped_sort.hpp; the Opus review of 0666c9815, m-1)
 //
 // |answer| (null: none): the answer account (AnswerAccount), charged with the selection's
 // scratch before it is allocated (a max_support selection's gathered runs, twice; the round's

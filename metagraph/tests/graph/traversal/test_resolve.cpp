@@ -1187,13 +1187,23 @@ TYPED_TEST(ResolveTest, DeadlineStopsTheExplicitHitsPass) {
     EXPECT_GT(count_phase(discovered, ResolveStop::ROWS), 3u);
 }
 
+// the runs of a profile's labels (the candidates' grouping walks them)
+size_t label_runs(const SupportProfile &profile) {
+    size_t runs = 0;
+    for (const LabelProfile &lp : profile.labels) {
+        runs += lp.runs.size();
+    }
+    return runs;
+}
+
 // The loops over the labels after the work read ResolveOptions::finish_check every
 // kResolveCheckLabels labels, and what it throws abandons the request. The reads are counted
 // exactly (a lower bound would let one of a discovery's loops lose its check unseen): a loop
 // over n labels reads it at the labels kResolveCheckLabels, 2 kResolveCheckLabels, ... below
 // n; a discovery has five such loops (the ranking, the names of the labels the order needs —
 // here every label, nothing is cut —, the kept labels, the profiles, the candidates'
-// grouping), explicit labels two (the profiles, the grouping)
+// grouping), explicit labels two (the profiles, the grouping); and the grouping reads it every
+// kResolveCheckLabels runs it walks (lane T8-RL), here a run a label
 TEST(Resolve, FinishCheckIsReadInTheLoopsOverTheLabels) {
     const std::string q = random_seq(200, 51);
     for (size_t n : { kResolveCheckLabels, kResolveCheckLabels + 1,
@@ -1218,7 +1228,8 @@ TEST(Resolve, FinishCheckIsReadInTheLoopsOverTheLabels) {
             opts.finish_check = [&reads]() { reads++; };
             const SupportProfile profile = resolve_support(oracle, q, opts);
             EXPECT_EQ(labels.size(), profile.labels.size());
-            EXPECT_EQ((discover ? 5 : 2) * per_loop, reads) << discover << " " << n;
+            EXPECT_EQ((discover ? 5 : 2) * per_loop + label_runs(profile) / kResolveCheckLabels,
+                      reads) << discover << " " << n;
             if (!per_loop)
                 continue;
             opts.finish_check = []() { throw std::runtime_error("late"); };
@@ -1263,7 +1274,8 @@ TEST(Resolve, TheStopIsReadInTheLoopsOverTheLabels) {
             opts.abandon = []() { throw Abandoned(); };
             const SupportProfile profile = resolve_support(oracle, q, opts);
             EXPECT_EQ(labels.size(), profile.labels.size());
-            EXPECT_EQ((discover ? 5 : 2) * per_loop, checks) << discover << " " << n;
+            EXPECT_EQ((discover ? 5 : 2) * per_loop + label_runs(profile) / kResolveCheckLabels,
+                      checks) << discover << " " << n;
             ASSERT_GE(stops, checks);
             if (!phases[discover])
                 phases[discover] = stops - checks;

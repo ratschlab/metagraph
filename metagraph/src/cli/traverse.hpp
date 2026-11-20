@@ -634,10 +634,19 @@ class ResolveDelivery {
         return cutoff_;
     }
 
+    // What the request held and used when it was abandoned (a client gone, the fan-out's stop),
+    // told by process_resolve_answer as the abandon unwinds (AbandonedUsage). Unset: not
+    // abandoned, or abandoned before its work began
+    void set_abandoned_usage(uint64_t memory_bytes, std::optional<double> cpu_ms) {
+        abandoned_ = AbandonedUsage { memory_bytes, cpu_ms };
+    }
+    const std::optional<AbandonedUsage>& abandoned_usage() const { return abandoned_; }
+
   private:
     std::function<void()> check_;
     std::optional<std::chrono::steady_clock::time_point> cap_;
     std::optional<std::chrono::steady_clock::time_point> cutoff_;
+    std::optional<AbandonedUsage> abandoned_;
 };
 
 // What POST /resolve writes its answer under: |control| (process_request's ResponseControl),

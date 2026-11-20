@@ -28,6 +28,7 @@
 #include "graph/traversal/kept_rows.hpp"
 #include "graph/traversal/seeded_hash.hpp"
 #include "annotation/binary_matrix/base/hopscotch_layout.hpp"
+#include "annotation/binary_matrix/row_diff/row_diff_cache.hpp"
 #include "graph/annotated_dbg.hpp"
 #include "annotation/coord_to_header.hpp"
 #include "annotation/representation/column_compressed/annotate_column_compressed.hpp"
@@ -1940,9 +1941,10 @@ TEST(ResolveBounds, TheSelectionReadsTheDeadline) {
     EXPECT_EQ(3u, calls);
 
     // each max_support round sweeps every run (here 5,000 runs of one label), and reads the
-    // deadline inside it: a step a run clipped, a candidate start swept and each run it adds, the
-    // runs before each of its sorts, a label and each run checked for the winner -- five or six
-    // readings a round
+    // deadline inside it: a step a run clipped, a candidate start swept and each run it adds, an
+    // element of each of its sorts and de-duplications and each Fenwick count zeroed (lane
+    // T8-RL: before, the runs before each sort), a label and each run checked for the winner --
+    // about twelve readings a round
     LabelProfile gapped;
     gapped.label.kind = LabelKind::COLUMN;
     gapped.label.name = "G";
@@ -1958,8 +1960,8 @@ TEST(ResolveBounds, TheSelectionReadsTheDeadline) {
     calls = 0;
     const SeedSelection swept = select_seeds(profile, query, rounds, false, [&]() { ++calls; });
     EXPECT_EQ(5u, swept.seeds.size());
-    EXPECT_GE(calls, 5u * 5);
-    EXPECT_LE(calls, 5u * 7);
+    EXPECT_GE(calls, 5u * 10);
+    EXPECT_LE(calls, 5u * 16);
     calls = 0;
     EXPECT_THROW(select_seeds(profile, query, rounds, false, [&]() {
         if (++calls == 1)
@@ -2237,12 +2239,16 @@ TEST(ResolveBounds, TheSelectionReadsInsideALabelsRuns) {
 // covering one); the freeze: the pick and each name it lists as not covering sized, the frozen
 // seed, each of its labels at three passes (their names sized, their order's copy, the names
 // kept or dropped), each name not covering at two (sized, copied), each name kept or listed as
-// dropped sized; one row of overlaps. Then max_support over X labels of one run over the query
-// (one seed): its runs counted and gathered, a step a label and a run; the gathered runs before
-// their sort (one poll of X steps, which reads once); a round's step, each run clipped, each
-// piece as the candidate starts are built and as the run ends are, each candidate start swept
-// and each run it adds, each label and run checked for the winner; the freeze as above:
-// 13 X / kResolveCheckLabels + 1 readings
+// dropped sized; the pick freed, a step and a step each name it lists as not covering (lane
+// T8-RL: before, the names freed at once); one row of overlaps. Then max_support over X labels
+// of one run over the query (one seed), the sorts' elements told in pieces (stepped_sort.hpp: a
+// piece of up to kSortPieceElements elements sorted at once, each a step, which reads once): its
+// runs counted and gathered, a step a label and a run; their sort (X steps) and their copy (a
+// step a run); a round's step, each run clipped, the round's sort of its pieces (X steps), each
+// piece as the candidate starts are built, their sort and de-duplication (2 X steps each), as
+// the run ends are built, their sort and de-duplication (X each), the Fenwick counts zeroed (two
+// ends: 3 steps), each candidate start swept and each run it adds, each label and run checked for
+// the winner; the freeze and the pick freed as above
 TEST(ResolveBounds, TheSelectionTakesEachStepOnce) {
     const uint64_t K = kResolveCheckLabels;
     struct Shape {
@@ -2267,6 +2273,7 @@ TEST(ResolveBounds, TheSelectionTakesEachStepOnce) {
                 + x.covering * x.covering_runs + x.not_covering * x.not_covering_runs
                 + 1 + not_covering                                       // the pick sized
                 + 1 + 3 * x.covering + 2 * not_covering + kept + listed  // the seed frozen
+                + 1 + not_covering                                       // the pick freed
                 + 1;                                                     // the overlaps
     };
     auto readings_of = [&](const Shape &x) {
@@ -2385,7 +2392,14 @@ TEST(ResolveBounds, TheSelectionTakesEachStepOnce) {
     const SeedSelection got = select_seeds(profile, query, support, false, [&]() { ++calls; });
     ASSERT_EQ(1u, got.seeds.size());
     EXPECT_EQ(X, got.seeds[0].population.supporting_total);
-    EXPECT_EQ(13 * X / K + 1, calls);
+    // (13 X steps as before lane T8-RL, a reading each kResolveCheckLabels of them, and now also
+    // the runs' sort and copy, the round's sort of its pieces, the sorts and de-duplications of
+    // its starts and ends: 21 X steps at most. How many readings those come to depends on the
+    // sort's pieces (a range of at most kSortPieceElements told at once, a sorted range's check)
+    // and on the counter's rounding: 38 at kSortStepElements 4,096 and kSortPieceElements
+    // 16,384; pinned as bounds, more than before and at most one a kResolveCheckLabels steps)
+    EXPECT_LT(13 * X / kResolveCheckLabels, calls);
+    EXPECT_GE(21 * X / kResolveCheckLabels, calls);
 }
 
 // The route (process_resolve_request): under bounds.time_budget_ms the selection of as many
@@ -2507,6 +2521,48 @@ TEST(ResolveBoundsRoute, AStopInTheSelectionAbandonsTheRequest) {
     gone_from = (before + reads_all) / 2;
     EXPECT_THROW(run(request), graph::traversal::AttemptAborted);
     EXPECT_EQ(gone_from, reads);
+}
+
+// A request abandoned at one of its readings (a client gone, the fan-out's stop) tells its
+// delivery what it held and used (ResolveDelivery::abandoned_usage: the registry's usage of its
+// pair, SPEC-multigraph-envelope.md section 5; lane T8-RL: before, nothing, the pair's
+// memory_bytes 0 and cpu_ms null): the work's modelled memory so far — in the selection the
+// work's peak, in the answer's build the request's work.memory_bytes — and its CPU time on
+// this thread. An answered request tells nothing
+TEST(ResolveBoundsRoute, AnAbandonedRequestTellsItsUsage) {
+    const std::string q = random_seq(1000, 2311);
+    const auto anno = splitting_index(q, 200);
+    const cli::ResolveTimeLimits limits { 0, cli::kResolveFinalizeMs, 0, 0, 0, 0, 1024 };
+    const Json::Value request = max_support_request(q);
+    uint64_t reads = 0;
+    uint64_t gone_from = std::numeric_limits<uint64_t>::max();
+    const std::function<bool()> gone = [&]() { return ++reads >= gone_from; };
+    auto run = [&](cli::ResolveDelivery *delivery) {
+        reads = 0;
+        return cli::process_resolve_request(request, *anno, "r1", 0, nullptr, gone, limits,
+                                            delivery);
+    };
+    cli::ResolveDelivery answered;
+    const Json::Value all = run(&answered);
+    const uint64_t reads_all = reads;
+    EXPECT_FALSE(answered.abandoned_usage());
+    // in the selection (half its readings in: AStopInTheSelectionAbandonsTheRequest): the work's
+    // peak, not above the request's
+    gone_from = reads_all / 2;
+    cli::ResolveDelivery selecting;
+    EXPECT_THROW(run(&selecting), graph::traversal::AttemptAborted);
+    ASSERT_TRUE(selecting.abandoned_usage());
+    EXPECT_LT(0u, selecting.abandoned_usage()->memory_bytes);
+    EXPECT_GE(all["work"]["memory_bytes"].asUInt64(), selecting.abandoned_usage()->memory_bytes);
+    ASSERT_TRUE(selecting.abandoned_usage()->cpu_ms);
+    EXPECT_LE(0, *selecting.abandoned_usage()->cpu_ms);
+    // at the build's last reading: what the answer would have stated
+    gone_from = reads_all;
+    cli::ResolveDelivery building;
+    EXPECT_THROW(run(&building), graph::traversal::AttemptAborted);
+    ASSERT_TRUE(building.abandoned_usage());
+    EXPECT_EQ(all["work"]["memory_bytes"].asUInt64(), building.abandoned_usage()->memory_bytes);
+    EXPECT_TRUE(building.abandoned_usage()->cpu_ms);
 }
 
 // The objects |answer| holds as text in the order they were written (graph_runs, the labels,
@@ -2676,8 +2732,8 @@ TEST(ResolveBoundsRoute, AnAnswerOfFewObjectsReadsTheStopWhileBuilt) {
 // The route's pass after the work reads its deadline in the candidates' grouping by runs (the
 // Opus review of d398357a9, N2): 40 records of a 60 kbp query with a SNP every 32 bp, named
 // explicitly, about 75,000 runs in 40 labels and some 1,900 groups, too few labels and groups
-// for a reading by count: resolve_support reads finish_check once every kResolveCheckRuns runs,
-// and a deadline passed there ends the request
+// for a reading by count: resolve_support reads finish_check once every kResolveCheckLabels runs
+// (before lane T8-RL, every kResolveCheckRuns), and a deadline passed there ends the request
 TEST(ResolveBoundsRoute, TheGroupingReadsTheDeadlineByRuns) {
     const std::string q = random_seq(60000, 6161);
     std::vector<std::string> seqs, names;
@@ -2708,10 +2764,209 @@ TEST(ResolveBoundsRoute, TheGroupingReadsTheDeadlineByRuns) {
     }
     ASSERT_LE(kResolveCheckRuns, runs);
     ASSERT_GT(kResolveCheckLabels, profile.candidates.size());
-    EXPECT_EQ(runs / kResolveCheckRuns, readings);
+    // once every kResolveCheckLabels runs walked (lane T8-RL: before, every kResolveCheckRuns),
+    // and at most once in the candidates' sort (fewer than kResolveCheckLabels of them, sorted
+    // as one piece)
+    EXPECT_LE(runs / kResolveCheckLabels, readings);
+    EXPECT_GE(runs / kResolveCheckLabels + 1, readings);
     // a deadline passed by then ends the request there
     parsed.options.finish_check = []() { throw std::runtime_error("deadline"); };
     EXPECT_THROW(resolve_support(oracle, q, parsed.options), std::runtime_error);
+}
+
+// The row pass reads its deadline within a batch's uses, once kResolveUseCheckBytes of rows were
+// used since its last reading (lane T8-RL, the follow-ups of T7-D3: before, only between
+// batches, and a batch of 4,000-label rows took about 0.8 s to use, the 503 of a small budget up
+// to 0.45 s late). 6,000 labels over the whole query: a row of 6,000 labels, the first batch's
+// 64 rows about 1.5 MiB. The deadline seen at the pass's first reading after its start ends the
+// work inside the first batch, at a k-mer, the profile that of the prefix before it (before: at
+// the first batch's end)
+TEST(ResolveBoundsRoute, TheRowPassReadsTheDeadlineWithinABatch) {
+    const std::string q = random_seq(300, 7171);
+    const size_t n = 6000;
+    std::vector<std::string> seqs(n, q);
+    std::vector<std::string> names;
+    for (size_t l = 0; l < n; ++l) {
+        names.push_back("L" + std::to_string(l));
+    }
+    auto anno = build_anno_graph<DBGSuccinct, annot::ColumnCompressed<>>(kK, seqs, names);
+    Json::Value request;
+    request["sequence"] = q;
+    for (const std::string &name : names) {
+        request["labels"].append(name);
+    }
+    cli::ResolveRequest parsed = cli::parse_resolve_request(request);
+    LabelOracle oracle(*anno);
+    const uint64_t num_kmers = q.size() - kK + 1;
+    ASSERT_LT(kResolveFirstBatchRows, num_kmers);
+    // the first batch's rows past the bytes between two readings
+    ASSERT_LT(kResolveUseCheckBytes, kResolveFirstBatchRows * annot::matrix::row_copy_bytes(
+            annot::matrix::BinaryMatrix::SetBitPositions(n)));
+    const SupportProfile whole = resolve_support(oracle, q, parsed.options);
+    ASSERT_EQ(n, whole.labels.size());
+    ASSERT_FALSE(whole.stop);
+    // the deadline true from the (skip + 1)-th reading on: the first that stops the work past
+    // the query's first k-mer
+    std::optional<uint64_t> resolved;
+    // the readings of the stop up to the one that ended the work (the stop is read first)
+    size_t stops_at = 0;
+    for (size_t skip = 0; skip < 8 && !resolved; ++skip) {
+        size_t calls = 0;
+        size_t stops = 0;
+        size_t stops_then = 0;
+        parsed.options.stop = [&]() {
+            ++stops;
+            return false;
+        };
+        parsed.options.time_up = [&]() {
+            if (++calls <= skip)
+                return false;
+            if (!stops_then)
+                stops_then = stops;
+            return true;
+        };
+        const SupportProfile cut = resolve_support(oracle, q, parsed.options);
+        ASSERT_TRUE(cut.stop) << skip;
+        if (cut.stop->resolved_kmers) {
+            stops_at = stops_then;
+            resolved = cut.stop->resolved_kmers;
+            EXPECT_EQ(ResolveStop::ROWS, cut.stop->phase);
+            EXPECT_EQ(ResolveStop::TIME, cut.stop->reason);
+            ASSERT_EQ(n, cut.labels.size());
+            for (const LabelProfile &lp : cut.labels) {
+                ASSERT_EQ(*resolved, lp.kmers_supported) << lp.label.name;
+            }
+        }
+    }
+    ASSERT_TRUE(resolved);
+    EXPECT_LT(*resolved, kResolveFirstBatchRows);
+    // A client gone noticed at that reading (the stop read first) abandons the request there:
+    // its modelled memory (ResolveOptions::memory_seen, the registry's usage of the pair) holds
+    // the batch's rows, at least the bytes used before the reading (lane T8-RL review M1:
+    // before, the query's bytes alone, about 3 KB here)
+    ASSERT_LT(0u, stops_at);
+    size_t stops = 0;
+    parsed.options.time_up = []() { return false; };
+    parsed.options.stop = [&]() { return ++stops >= stops_at; };
+    parsed.options.abandon = []() { throw std::runtime_error("abandoned"); };
+    uint64_t seen = 0;
+    parsed.options.memory_seen = &seen;
+    EXPECT_THROW(resolve_support(oracle, q, parsed.options), std::runtime_error);
+    EXPECT_LE(kResolveUseCheckBytes, seen);
+}
+
+// The in-batch reading counts a use as at least kResolveUseMinBytes, so that the uses of small
+// rows read it too, every 4,096 uses at most (lane T8-RL review m2: a row of up to 2 labels is 0
+// bytes under folly, and a batch's uses can pass its rows by far over repeated keys). A query of a
+// 50 bp unit 400 times, one label over it: 50 keys, all in the first batch, whose uses are the
+// query's 19,990 k-mers. A deadline seen at a reading after the pass's start ends the work inside
+// that batch, past its first 4,096 uses (before: at no reading inside it, so at its end, the
+// work complete)
+TEST(ResolveBoundsRoute, TheRowPassReadsSmallRowsByUses) {
+    const std::string unit = random_seq(50, 5151);
+    std::string q;
+    for (size_t i = 0; i < 400; ++i) {
+        q += unit;
+    }
+    auto anno = build_anno_graph<DBGSuccinct, annot::ColumnCompressed<>>(kK, { q }, { "L" });
+    Json::Value request;
+    request["sequence"] = q;
+    request["labels"].append("L");
+    cli::ResolveRequest parsed = cli::parse_resolve_request(request);
+    LabelOracle oracle(*anno);
+    const uint64_t num_kmers = q.size() - kK + 1;
+    // a row of one label: its uses since a reading pass kResolveUseCheckBytes only by the floor
+    ASSERT_GT(kResolveUseCheckBytes, num_kmers * annot::matrix::row_copy_bytes(
+            annot::matrix::BinaryMatrix::SetBitPositions(1)));
+    std::vector<uint64_t> resolved;
+    for (size_t skip = 0; skip < 8; ++skip) {
+        size_t calls = 0;
+        parsed.options.time_up = [&]() { return ++calls > skip; };
+        const SupportProfile cut = resolve_support(oracle, q, parsed.options);
+        if (cut.stop)
+            resolved.push_back(cut.stop->resolved_kmers);
+    }
+    const bool inside = std::any_of(resolved.begin(), resolved.end(), [&](uint64_t r) {
+        return r >= 4096 && r < num_kmers;
+    });
+    EXPECT_TRUE(inside) << ::testing::PrintToString(resolved);
+}
+
+// Under a stop, an explicit selection is checked before it is made (explicit_selection_blocked:
+// each seed's interval in the graph and its names among the profiled labels): the check reads
+// the request's stop and deadline every kResolveCheckLabels steps, a step each label put into its
+// lookups, each seed, each graph run and each name looked up (lane T8-RL: before, nothing, about
+// 0.5 s at 1,024 seeds of 10,000 profiled names, 1.2 s where the names are absent labels).
+// 3,000 labels over the query's first part and one over its second, three seeds naming the
+// 3,000 and a fourth across the gap between the parts: the work stopped by time at its first
+// reading, the check refuses the fourth seed (400) after its readings. The answer's deadline
+// passing at the last clock read before that 400 is the 503 deadline there (before: the 400, as
+// the check read nothing)
+TEST(ResolveBoundsRoute, TheExplicitCheckUnderAStopReadsTheDeadline) {
+    const std::string qa = random_seq(120, 9191);
+    const std::string qb = random_seq(120, 9192);
+    const size_t n = 3000;
+    std::vector<std::string> seqs, names;
+    for (size_t l = 0; l < n; ++l) {
+        seqs.push_back(qa);
+        names.push_back("L" + std::to_string(l));
+    }
+    seqs.push_back(qb);
+    names.push_back("B");
+    auto anno = build_anno_graph<DBGSuccinct, annot::ColumnCompressed<>>(kK, seqs, names);
+    Json::Value request;
+    request["sequence"] = qa + qb;
+    for (const std::string &name : names) {
+        request["labels"].append(name);
+    }
+    request["select"]["policy"] = "explicit";
+    Json::Value &seeds = request["select"]["seeds"];
+    for (size_t i = 0; i < 4; ++i) {
+        // (the last one across the k-mers that span both parts, none in the graph)
+        const uint64_t begin = i < 3 ? 0 : qa.size() - kK - 2;
+        Json::Value seed;
+        seed["kmer_interval"].append(Json::UInt64(begin));
+        seed["kmer_interval"].append(Json::UInt64(begin + 10));
+        for (size_t l = 0; l < n; ++l) {
+            seed["labels"].append(names[l]);
+        }
+        seeds.append(seed);
+    }
+    request["bounds"]["time_budget_ms"] = 1000;
+    const cli::ResolveTimeLimits limits { 0, cli::kResolveFinalizeMs, 0, 0, 0, 0, 1024 };
+    // the request's start; then the work's deadline passed (800 of the 1000 ms, the work's
+    // ending at 750); from |late_from| on the answer's too
+    const auto base = std::chrono::steady_clock::now();
+    uint64_t reads = 0;
+    uint64_t late_from = std::numeric_limits<uint64_t>::max();
+    std::function<std::chrono::steady_clock::time_point()> clock = [&]() {
+        const uint64_t r = reads++;
+        return base + std::chrono::milliseconds(r >= late_from ? 3'600'000 : r ? 800 : 0);
+    };
+    auto run = [&]() {
+        reads = 0;
+        return cli::process_resolve_request(request, *anno, "r1", 0, nullptr, nullptr, limits,
+                                            nullptr, clock);
+    };
+    try {
+        run();
+        ADD_FAILURE() << "answered";
+    } catch (const cli::InvalidRequest &e) {
+        EXPECT_EQ("Explicit seed interval is not fully present in the graph",
+                  std::string(e.what()));
+    }
+    const uint64_t reads_refused = reads;
+    ASSERT_LE(2u, reads_refused);
+    late_from = reads_refused - 1;
+    try {
+        run();
+        ADD_FAILURE() << "answered";
+    } catch (const cli::ResolveDeadline &e) {
+        EXPECT_EQ("deadline", cli::resolve_deadline_body(e)["code"].asString());
+    } catch (const cli::InvalidRequest &e) {
+        ADD_FAILURE() << "refused after a check that read nothing: " << e.what();
+    }
+    EXPECT_EQ(reads_refused, reads);
 }
 
 // The labels a multi-graph server's pair does not hold (unknown_labels) are written name by name
@@ -3775,9 +4030,14 @@ TEST(ResolveBoundsRoute, ASelectionThatFitsIsAnswered) {
 // The candidates' grouping reads by the runs it walks as well as by its labels and groups (the
 // Opus review of d398357a9, N2: before, few labels of many runs read nothing there, 4,000 labels
 // of about 3,700 runs for about 0.5 s): four labels of 3/4 kResolveCheckRuns runs each, read
-// once every kResolveCheckRuns runs walked (beside |finishing|'s calls by label and by group);
-// the candidates the same as without the readings; a reading that throws ends the grouping
-// there, inside the second label's runs
+// once every kResolveCheckLabels runs walked (a run 16 of the kResolveCheckRuns steps between two
+// readings; lane T8-RL: before, every kResolveCheckRuns runs, about 70 ms at millions of groups),
+// beside |finishing|'s calls by label and by group; read in the candidates' sort too, after the
+// last group is made (stepped_sort.hpp; before, the sort read nothing, about 0.3 s at 3 million
+// groups), and the map's nodes freed as the groups are made, in the loop that reads by group
+// (before, all of them after it, about 0.2 s at 3 million groups); the candidates the same as
+// without the readings; a reading that throws ends the grouping there, inside the first label's
+// runs
 TEST(ResolveAnswer, TheGroupingReadsByRuns) {
     SupportProfile profile;
     profile.k = kK;
@@ -3796,27 +4056,52 @@ TEST(ResolveAnswer, TheGroupingReadsByRuns) {
     }
     SupportProfile plain = profile;
     group_candidates(&plain, 1);
-    ASSERT_EQ(2 * per_label, plain.candidates.size());
+    const size_t groups = plain.candidates.size();
+    ASSERT_EQ(2 * per_label, groups);
     std::vector<size_t> finished;
-    size_t readings = 0;
-    group_candidates(&profile, 1, nullptr, [&](size_t i) { finished.push_back(i); },
-                     [&]() { ++readings; });
-    EXPECT_EQ(4 * per_label / kResolveCheckRuns, readings);
-    EXPECT_EQ(3u, readings);
-    EXPECT_EQ(4 + plain.candidates.size(), finished.size());
-    ASSERT_EQ(plain.candidates.size(), profile.candidates.size());
-    for (size_t i = 0; i < plain.candidates.size(); ++i) {
+    // at each reading, how many |finishing| calls came before it
+    std::vector<size_t> finished_at;
+    // the heap's live bytes at the first group's |finishing| call and at the last one's
+    std::optional<int64_t> first_group_heap;
+    std::optional<int64_t> last_group_heap;
+    group_candidates(&profile, 1, nullptr, [&](size_t i) {
+        finished.push_back(i);
+        if (finished.size() == 5)
+            first_group_heap = live_heap_bytes();
+        if (finished.size() == 4 + groups)
+            last_group_heap = live_heap_bytes();
+    }, [&]() { finished_at.push_back(finished.size()); });
+    EXPECT_EQ(4 + groups, finished.size());
+    // the walk: once every kResolveCheckLabels runs
+    const size_t in_walk = std::count_if(finished_at.begin(), finished_at.end(),
+                                         [](size_t f) { return f <= 4; });
+    EXPECT_EQ(4 * per_label / kResolveCheckLabels, in_walk);
+    // the sort, after every group was made a candidate: the candidates' passes, at least
+    // kResolveCheckRuns steps (each candidate at least once)
+    const size_t in_sort = std::count(finished_at.begin(), finished_at.end(), 4 + groups);
+    EXPECT_LE(1u, in_sort);
+    EXPECT_EQ(in_walk + in_sort, finished_at.size());
+    // the map's nodes freed while the groups are made: each a key, a vector and a tree node's
+    // pointers at least, all but the last's before its call (where the allocator's live bytes
+    // can be read, as the tests above)
+    if (first_group_heap && last_group_heap) {
+        EXPECT_GE(*first_group_heap - *last_group_heap,
+                  static_cast<int64_t>((groups - 1) * (sizeof(KmerInterval)
+                                                       + sizeof(std::vector<LabelId>))));
+    }
+    ASSERT_EQ(groups, profile.candidates.size());
+    for (size_t i = 0; i < groups; ++i) {
         ASSERT_EQ(plain.candidates[i].kmers, profile.candidates[i].kmers) << i;
         ASSERT_EQ(plain.candidates[i].labels, profile.candidates[i].labels) << i;
     }
-    // a stop at the first reading: within the second label's runs
+    // a stop at the first reading: within the first label's runs
     SupportProfile stopped = plain;
     stopped.candidates.clear();
     size_t labels_begun = 0;
     EXPECT_THROW(group_candidates(&stopped, 1, nullptr, [&](size_t) { ++labels_begun; },
                                   []() { throw std::runtime_error("stop"); }),
                  std::runtime_error);
-    EXPECT_EQ(2u, labels_begun);
+    EXPECT_EQ(1u, labels_begun);
     EXPECT_TRUE(stopped.candidates.empty());
 }
 

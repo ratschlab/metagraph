@@ -6281,7 +6281,25 @@ static std::string clamp_dropped_note(bool clamped, uint64_t requested, uint64_t
 // label that is not one of them
 static std::string explicit_selection_blocked(const SupportProfile &profile,
                                               const SelectionPolicy &policy, bool discover,
-                                              const std::string &clamp_note) {
+                                              const std::string &clamp_note,
+                                              const std::function<void()> &check) {
+    // read every kResolveCheckLabels steps as the selection is (select_seeds), a step each label
+    // put into the lookups, a seed, each graph run checked and each name looked up for it, at
+    // each of the two passes (lane T8-RL: before, nothing was read in it, about 0.5 s at 1,024
+    // seeds of 10,000 profiled names and 1.2 s where the names are absent labels). Only read:
+    // what it refuses and what it returns do not depend on the readings, and its first pass
+    // still checks every seed before the second leaves the selection unmade (a reading ends the
+    // request, nothing answered: V1-02 is kept)
+    uint64_t steps = 0;
+    uint64_t next_check = kResolveCheckLabels;
+    auto poll = [&](uint64_t units) {
+        steps += units;
+        if (steps >= next_check) {
+            next_check = steps + kResolveCheckLabels;
+            if (check)
+                check();
+        }
+    };
     // the whole query's k-mers and graph runs (the stop keeps them; without one, the profile's)
     const uint64_t query_kmers = profile.stop ? profile.stop->query_kmers : profile.num_kmers;
     const std::vector<KmerInterval> &query_graph_runs
@@ -6291,46 +6309,64 @@ static std::string explicit_selection_blocked(const SupportProfile &profile,
     // one (select_seeds lists it in labels_not_covering): it is neither unprofiled nor
     // undiscovered. The names are looked up in one set of those and one of the profiled labels'
     // (a linear search per name cost N^2 comparisons for seeds naming N labels, review 5 #6)
-    const std::unordered_set<std::string_view> unknown(profile.unknown_labels.begin(),
-                                                       profile.unknown_labels.end());
+    std::unordered_set<std::string_view> unknown;
+    unknown.reserve(profile.unknown_labels.size());
+    for (const std::string &name : profile.unknown_labels) {
+        unknown.insert(name);
+        poll(1);
+    }
     std::unordered_set<std::string_view> profiled_names;
     profiled_names.reserve(profile.labels.size());
     for (const LabelProfile &lp : profile.labels) {
         profiled_names.insert(lp.label.name);
+        poll(1);
     }
     auto absent = [&](const std::string &name) { return unknown.count(name) > 0; };
+    // a name neither profiled nor absent, a step each name looked up (|ex.labels.size()| if none)
+    auto first_unknown = [&](const ExplicitSeed &ex) {
+        for (size_t n = 0; n < ex.labels.size(); ++n) {
+            poll(1);
+            const std::string &name = ex.labels[n];
+            if (!profiled_names.count(name) && !absent(name))
+                return n;
+        }
+        return ex.labels.size();
+    };
     for (size_t i = 0; i < policy.explicit_seeds.size(); ++i) {
         const ExplicitSeed &ex = policy.explicit_seeds[i];
+        poll(1);
         if (ex.kmers.begin >= ex.kmers.end || ex.kmers.end > query_kmers)
             throw InvalidRequest("Explicit seed interval out of range");
-        const bool in_one_run = std::any_of(query_graph_runs.begin(), query_graph_runs.end(),
-            [&](const KmerInterval &run) {
-                return run.begin <= ex.kmers.begin && run.end >= ex.kmers.end;
-            });
+        bool in_one_run = false;
+        for (const KmerInterval &run : query_graph_runs) {
+            poll(1);
+            if (run.begin <= ex.kmers.begin && run.end >= ex.kmers.end) {
+                in_one_run = true;
+                break;
+            }
+        }
         if (!in_one_run)
             throw InvalidRequest("Explicit seed interval is not fully present in the graph");
         if (discover)
             continue;
-        for (const std::string &name : ex.labels) {
-            const bool profiled = profiled_names.count(name) > 0;
-            if (!profiled && !absent(name))
-                throw InvalidRequest("Explicit seed label was not profiled: '" + ::utils::clip_for_message(name) + "'");
+        const size_t n = first_unknown(ex);
+        if (n < ex.labels.size()) {
+            throw InvalidRequest("Explicit seed label was not profiled: '"
+                                 + ::utils::clip_for_message(ex.labels[n]) + "'");
         }
     }
     for (size_t i = 0; i < policy.explicit_seeds.size(); ++i) {
         const ExplicitSeed &ex = policy.explicit_seeds[i];
+        poll(1);
         const std::string seed = "select.seeds[" + std::to_string(i) + "]";
         if (ex.kmers.end > profile.num_kmers) {
             return seed + ".kmer_interval [" + std::to_string(ex.kmers.begin) + ", "
                     + std::to_string(ex.kmers.end) + ") ends past the k-mers resolved";
         }
-        for (const std::string &name : ex.labels) {
-            const bool profiled = profiled_names.count(name) > 0;
-            if (!profiled && !absent(name)) {
-                return seed + (profile.stop ? " names a label the resolved prefix did not keep"
-                                            : " names a label the capped discovery did not keep")
-                    + clamp_note;
-            }
+        if (first_unknown(ex) < ex.labels.size()) {
+            return seed + (profile.stop ? " names a label the resolved prefix did not keep"
+                                        : " names a label the capped discovery did not keep")
+                + clamp_note;
         }
     }
     return "";
@@ -6590,59 +6626,87 @@ static ResolveAnswer answer_resolve(
     SupportProfile profile;
     std::optional<SeedSelection> selection;
     std::string not_made;
+    // A request abandoned at one of its readings (a client gone, the fan-out's stop) tells its
+    // delivery what it held and used (ResolveDelivery::abandoned_usage, the registry's usage of
+    // its pair: SPEC-multigraph-envelope.md section 5; lane T8-RL: before, nothing): the work's
+    // modelled memory so far (resolve_support's, ResolveOptions::memory_seen; with the profile
+    // and the selection once they are made, as work.memory_bytes counts them) and its CPU time on
+    // this thread
+    uint64_t memory_seen = 0;
+    req.options.memory_seen = &memory_seen;
+    auto note_abandoned = [&]() {
+        if (!delivery)
+            return;
+        uint64_t memory = std::max(memory_seen, profile.memory_peak);
+        if (selection) {
+            memory = std::max(memory, graph::traversal::profile_bytes(profile)
+                                              + graph::traversal::selection_bytes(*selection));
+        }
+        const common::ThreadUsage used = request_usage.elapsed();
+        delivery->set_abandoned_usage(memory, used.has_cpu ? std::optional<double>(used.cpu_ms())
+                                                           : std::nullopt);
+    };
+    ResolveAnswer result;
     try {
-        profile = resolve_support(oracle, req.sequence, req.options);
-        if (client_gone && client_gone())
-            abandon();
-        if (req.select) {
-            req.policy.release_id = release;
-            // under a stop the selection is the prefix's, made from it unless an
-            // explicit seed reaches beyond what the prefix can tell; under a discovery's label
-            // cap, unless a seed names a label it did not keep (§4.6)
-            // (a cut whose ranking is exact kept the uncut discovery's labels: its seeds are
-            // judged as the uncut answer judges them, a label not kept refused as there)
-            if ((profile.stop || (profile.labels_capped && !profile.labels_capped->ranking_exact))
-                    && req.policy.policy == SelectionPolicy::EXPLICIT)
-                not_made = explicit_selection_blocked(profile, req.policy,
-                                                      req.options.discover,
-                                                      clamp_dropped_note(
-                                                              max_labels_clamped,
-                                                              max_labels_requested,
-                                                              req.options.discover_max_labels,
-                                                              profile));
-            // the selection reads the stop and the deadline as the answer's other loops do
-            // (every kResolveCheckLabels steps): a stop abandons it, past the deadline the 503
-            // deadline (GPT review 7, finding 1; T5a-X1)
-            if (not_made.empty()) {
-                selection = select_seeds(profile, req.sequence, req.policy,
-                                         oracle.regime() != Regime::BASIC,
-                                         after_work, req.options.answer);
+        try {
+            profile = resolve_support(oracle, req.sequence, req.options);
+            if (client_gone && client_gone())
+                abandon();
+            if (req.select) {
+                req.policy.release_id = release;
+                // under a stop the selection is the prefix's, made from it unless an
+                // explicit seed reaches beyond what the prefix can tell; under a discovery's label
+                // cap, unless a seed names a label it did not keep (§4.6)
+                // (a cut whose ranking is exact kept the uncut discovery's labels: its seeds are
+                // judged as the uncut answer judges them, a label not kept refused as there)
+                if ((profile.stop
+                            || (profile.labels_capped && !profile.labels_capped->ranking_exact))
+                        && req.policy.policy == SelectionPolicy::EXPLICIT)
+                    not_made = explicit_selection_blocked(profile, req.policy,
+                                                          req.options.discover,
+                                                          clamp_dropped_note(
+                                                                  max_labels_clamped,
+                                                                  max_labels_requested,
+                                                                  req.options.discover_max_labels,
+                                                                  profile),
+                                                          after_work);
+                // the selection reads the stop and the deadline as the answer's other loops do
+                // (every kResolveCheckLabels steps): a stop abandons it, past the deadline the 503
+                // deadline (GPT review 7, finding 1; T5a-X1)
+                if (not_made.empty()) {
+                    selection = select_seeds(profile, req.sequence, req.policy,
+                                             oracle.regime() != Regime::BASIC,
+                                             after_work, req.options.answer);
+                }
             }
+        } catch (const std::invalid_argument &e) {
+            std::string message = e.what();
+            // a seed's label that the answer-labels clamp may have left out: the discovery ranked
+            // more labels than the clamp kept, so the request's own max_labels might have kept it
+            // (§4.6); the refusal names the clamp (where it dropped nothing, the 400 is as before)
+            const std::string clamp_note = clamp_dropped_note(max_labels_clamped,
+                    max_labels_requested, req.options.discover_max_labels, profile);
+            if (!clamp_note.empty() && message.rfind(kSeedLabelNotProfiled, 0) == 0) {
+                const std::string effective = std::to_string(req.options.discover_max_labels);
+                message += clamp_note + ". Ask for at most " + effective
+                    + " labels and choose the seeds among them, or resolve with the seed's label "
+                      "named in labels";
+            }
+            throw InvalidRequest(message);
         }
-    } catch (const std::invalid_argument &e) {
-        std::string message = e.what();
-        // a seed's label that the answer-labels clamp may have left out: the discovery ranked
-        // more labels than the clamp kept, so the request's own max_labels might have kept it
-        // (§4.6); the refusal names the clamp (where it dropped nothing, the 400 is as before)
-        const std::string clamp_note = clamp_dropped_note(max_labels_clamped,
-                max_labels_requested, req.options.discover_max_labels, profile);
-        if (!clamp_note.empty() && message.rfind(kSeedLabelNotProfiled, 0) == 0) {
-            const std::string effective = std::to_string(req.options.discover_max_labels);
-            message += clamp_note + ". Ask for at most " + effective
-                + " labels and choose the seeds among them, or resolve with the seed's label "
-                  "named in labels";
-        }
-        throw InvalidRequest(message);
+        // and once the selection is done (or none was made)
+        if (after_work)
+            after_work();
+        // the answer: its objects held as text, each written once built (§4.6; T7-D3), and the
+        // labels this pair does not hold (a multi-graph server's: its answer is that of the others,
+        // and none of these is in it) held the same way, last; what follows adds to its head only
+        result = answer_of_profile(profile, selection ? &*selection : nullptr, req.run_format,
+                                   after_work, req.options.answer, trees,
+                                   labels_not_in_graph_dropped);
+    } catch (const graph::traversal::AttemptAborted &) {
+        note_abandoned();
+        throw;
     }
-    // and once the selection is done (or none was made)
-    if (after_work)
-        after_work();
-    // the answer: its objects held as text, each written once built (§4.6; T7-D3), and the
-    // labels this pair does not hold (a multi-graph server's: its answer is that of the others,
-    // and none of these is in it) held the same way, last; what follows adds to its head only
-    ResolveAnswer result = answer_of_profile(profile, selection ? &*selection : nullptr,
-                                             req.run_format, after_work, req.options.answer,
-                                             trees, labels_not_in_graph_dropped);
     Json::Value &out = result.head;
     if (!not_made.empty()) {
         out["selection"] = Json::Value();

@@ -19,6 +19,7 @@
 #include "graph/traversal/charged_table.hpp"
 #include "graph/traversal/kept_rows.hpp"
 #include "graph/traversal/seeded_hash.hpp"
+#include "graph/traversal/stepped_sort.hpp"
 #include "annotation/binary_matrix/row_diff/row_diff.hpp"
 #include "annotation/binary_matrix/row_diff/row_diff_cache.hpp"
 #include "common/seq_tools/reverse_complement.hpp"
@@ -298,7 +299,7 @@ uint64_t budget_left(const DecodeBudget &budget) {
 // How a pass over the rows (for_each_row) ended
 enum class PassEnd {
     COMPLETE,       // every key used
-    CHECKPOINT,     // the checkpoint ended it between two batches (a deadline)
+    CHECKPOINT,     // the checkpoint ended it between two batches or within one (a deadline)
     MEMORY,         // the budget: a k-mer's row read alone, or its use, did not fit
 };
 
@@ -373,8 +374,10 @@ uint64_t rows_bytes(const std::vector<RowT> &rows) {
  * next rows to decode, not its k-mers). A key's row is decoded once per batch, and a row whose
  * key occurs again after its batch is kept for that occurrence while the rows kept take at
  * most |kept_max| bytes (row_copy_bytes), dropped at its last occurrence; beyond that bound a
- * repeated row is decoded again. |checkpoint| runs between batches; true from it ends the pass
- * there (a deadline). What the request holds is one batch of rows and the rows kept.
+ * repeated row is decoded again. |checkpoint| runs between batches and within a batch's uses once
+ * the rows used since it last ran pass kResolveUseCheckBytes; true from it ends the pass there (a
+ * deadline), before the batch or the k-mer it ran at. What the request holds is one batch of rows
+ * and the rows kept.
  *
  * Every byte the pass holds is charged to |budget| (SPEC-labeled-traversal-core.md §4.6): its
  * setup (the next occurrence of each key, and the transient table that finds them: its model,
@@ -393,9 +396,9 @@ uint64_t rows_bytes(const std::vector<RowT> &rows) {
  * the uses of the k-mers before it hold: that k-mer does not depend on the batches, the rows
  * kept or the time. With an unbounded budget nothing is refused and the pass is the one it was.
  *
- * Returns how many of |keys| were used: all of them, or those before the batch the pass ended
- * at (a checkpoint) or the k-mer it stopped at (the budget) — a prefix, since the keys are used
- * in order —, and sets |*end| to why. |rows_held_peak|, when given, is raised to the most row
+ * Returns how many of |keys| were used: all of them, or those before the batch or the k-mer the
+ * pass ended at (a checkpoint) or the k-mer it stopped at (the budget) — a prefix, since the keys
+ * are used in order —, and sets |*end| to why. |rows_held_peak|, when given, is raised to the most row
  * bytes held at once (a batch and the rows kept, row_copy_bytes each:
  * SupportProfile::memory_peak)
  */
@@ -431,7 +434,10 @@ size_t for_each_row(const std::vector<node_index> &keys, BatchSizer sizer, uint6
     std::vector<RowT> batch;
     std::vector<uint64_t> held;
     std::vector<bool> moved;
+    // the row bytes used since the checkpoint last ran within a batch
+    uint64_t used_unread = 0;
     for (size_t begin = 0; begin < keys.size(); ) {
+        used_unread = 0;
         // the k-mers whose rows are kept or among the next |sizer.next| rows to decode
         in_batch.clear();
         batch_keys.clear();
@@ -485,11 +491,23 @@ size_t for_each_row(const std::vector<node_index> &keys, BatchSizer sizer, uint6
             budget.release(containers);
         };
         size_t j = begin;
+        // the checkpoint ended the pass inside the batch, before k-mer j
+        bool checked_out = false;
         for ( ; j < end; ++j) {
+            // (lane T8-RL: before, a batch's uses read nothing, about 0.8 s at 4,000-label rows)
+            if (used_unread >= kResolveUseCheckBytes) {
+                used_unread = 0;
+                if (checkpoint()) {
+                    checked_out = true;
+                    break;
+                }
+            }
             auto kit = kept.find(keys[j]);
             if (kit != kept.end()) {
                 if (!use(j, kit->second.row))
                     break;
+                used_unread += std::max(annot::matrix::row_copy_bytes(kit->second.row),
+                                        kResolveUseMinBytes);
                 if (next_use[j] == kNever)
                     kept.last_use(kit);
                 continue;
@@ -498,6 +516,7 @@ size_t for_each_row(const std::vector<node_index> &keys, BatchSizer sizer, uint6
             RowT &row = batch[r];
             if (!use(j, row))
                 break;
+            used_unread += std::max(annot::matrix::row_copy_bytes(row), kResolveUseMinBytes);
             // occurring again after this batch (none of its k-mers after j has the key)
             if (next_use[j] != kNever && next_use[j] >= end) {
                 const uint64_t bytes = annot::matrix::row_copy_bytes(row);
@@ -508,6 +527,10 @@ size_t for_each_row(const std::vector<node_index> &keys, BatchSizer sizer, uint6
             }
         }
         release_batch();
+        if (checked_out) {
+            finish(PassEnd::CHECKPOINT);
+            return j;
+        }
         if (j < end) {
             // the use of k-mer j did not fit: again from it without the rows kept, then with
             // its row alone; if neither leaves room, the pass ends before it
@@ -652,10 +675,18 @@ SupportProfile resolve_support(LabelOracle &oracle,
 
     check_resolve_options(oracle, query, options);
 
+    // what a pass holds while it runs, noted into the modelled memory before the request is
+    // abandoned inside it (set once the pass's budget exists; ResolveOptions::memory_seen: a pair
+    // abandoned in its row pass states the rows and accumulators it held, not the query's bytes
+    // alone, lane T8-RL review M1)
+    std::function<void()> note_live_pass;
     // a phase boundary: the caller can abandon the request here (ResolveOptions::stop)
     auto checkpoint = [&]() {
-        if (options.stop && options.stop() && options.abandon)
+        if (options.stop && options.stop() && options.abandon) {
+            if (note_live_pass)
+                note_live_pass();
             options.abandon();
+        }
     };
     // A boundary of the work under a deadline (ResolveOptions::time_up): the client first, so
     // that a gone client is abandoned exactly where it was before; true ends the work here.
@@ -686,6 +717,18 @@ SupportProfile resolve_support(LabelOracle &oracle,
         if (i && i % kResolveCheckLabels == 0)
             reading();
     };
+    // and the passes after the work that are not by labels (a discovery's ranking sort and its
+    // name sorts, stepped_sort.hpp): a reading once their elements since the last pass
+    // kResolveCheckRuns (lane T8-RL: before, each sort was one piece, about 0.1 s at 1,000,000
+    // tracked labels and more on a loaded host)
+    uint64_t sorted_unread = 0;
+    auto sorting = [&](uint64_t elements) {
+        sorted_unread += elements;
+        if (sorted_unread >= kResolveCheckRuns) {
+            sorted_unread = 0;
+            reading();
+        }
+    };
     profile.num_kmers = query.size() - profile.k + 1;
     checkpoint();
     std::vector<node_index> keys = oracle.keys_of_sequence(query);
@@ -712,6 +755,8 @@ SupportProfile resolve_support(LabelOracle &oracle,
                               + profile.graph_runs.size() * sizeof(KmerInterval);
     auto note_memory = [&](uint64_t bytes) {
         profile.memory_peak = std::max(profile.memory_peak, query_held + bytes);
+        if (options.memory_seen)
+            *options.memory_seen = std::max(*options.memory_seen, profile.memory_peak);
     };
     note_memory(0);
     // the most the row passes held at once (a batch of rows and the rows kept)
@@ -755,6 +800,12 @@ SupportProfile resolve_support(LabelOracle &oracle,
     // discover_max_memory, §4.6): unbounded without it, every read still the budget-aware one
     DecodeBudget budget(options.discover_max_memory ? options.discover_max_memory
                                                     : std::numeric_limits<uint64_t>::max());
+    // a pass abandoned while it runs: the next occurrence of every present k-mer and what its
+    // budget held at its most so far (the rows of a batch, the rows kept, the accumulators, as
+    // charged: with the decode's buffers, so possibly more than the model of a complete pass)
+    note_live_pass = [&]() {
+        note_memory(present_keys.size() * sizeof(size_t) + std::max(budget.peak(), rows_held));
+    };
     PassEnd pass_end = PassEnd::COMPLETE;
     // A batch's rows, charged to |budget|: by the budget-aware read where the annotation has
     // it (LabelOracle::decode_charged(): every buffer of the decode charged before it is
@@ -1259,8 +1310,10 @@ SupportProfile resolve_support(LabelOracle &oracle,
         // holds them, so that a client can merge the discoveries of several graphs by
         // (support, name), and each cut states the tie group it went through
         // (LabelTruncation::tied_at_boundary, SPEC-multigraph-envelope.md §7).
-        std::sort(ranked.begin(), ranked.end(),
-                  [](const Ranked &a, const Ranked &b) { return a.kmers > b.kmers; });
+        // (in steps; the order among labels of equal support is the name sort's below, or, past
+        // the labels named, read by nothing: as with std::sort, which left it unspecified)
+        sort_in_steps(ranked.begin(), ranked.end(),
+                      [](const Ranked &a, const Ranked &b) { return a.kmers > b.kmers; }, sorting);
         const size_t kept = std::min(ranked.size(), options.discover_max_labels);
         // The labels named: the kept ones and the rest of the last kept label's tie group.
         // A name is a reference into the label encoder or the headers (no decoding), but
@@ -1293,11 +1346,13 @@ SupportProfile resolve_support(LabelOracle &oracle,
             while (end < named && ranked[end].kmers == ranked[begin].kmers) {
                 end++;
             }
+            // (in steps; by_name is a total order: the labels kept and their order are
+            // std::sort's and std::partial_sort's)
             if (end <= kept) {
-                std::sort(ranked.begin() + begin, ranked.begin() + end, by_name);
+                sort_in_steps(ranked.begin() + begin, ranked.begin() + end, by_name, sorting);
             } else {
-                std::partial_sort(ranked.begin() + begin, ranked.begin() + kept,
-                                  ranked.begin() + end, by_name);
+                partial_sort_in_steps(ranked.begin() + begin, ranked.begin() + kept,
+                                      ranked.begin() + end, by_name, sorting);
             }
             boundary = begin;
             begin = end;
@@ -1561,6 +1616,8 @@ SupportProfile resolve_support(LabelOracle &oracle,
         }
     }
 
+    // (the passes ended, their peaks noted: what a pass's budget held is no longer live)
+    note_live_pass = nullptr;
     // ---- the answer account (§4.6, T4-L1): the profile as it is held, then its candidates
     if (options.answer)
         options.answer->charge(profile_held_bytes(profile), "profile");
@@ -1573,13 +1630,35 @@ SupportProfile resolve_support(LabelOracle &oracle,
 void group_candidates(SupportProfile *profile, uint64_t min_block_kmers, AnswerAccount *answer,
                       const std::function<void(size_t)> &finishing,
                       const std::function<void()> &reading) {
+    // Every pass of the grouping reads |reading| once kResolveCheckRuns of its steps passed since
+    // the last one: a run counted for its price, a run walked into the map (the Opus review of
+    // d398357a9, N2: 4,000 labels of about 3,700 runs each, 15 million map steps, went unread for
+    // about 0.5 s; a run walked is 16 steps, below) and an element of the candidates' sort
+    // (stepped_sort.hpp); the groups are
+    // read every 4,096 as they are made candidates (finishing), each one's map node freed as it
+    // is (lane T8-RL, the follow-ups of T7-D3: before, the count pass, the map's release and the
+    // sort read nothing, about 0.3 s for the sort alone at 3 million groups)
+    uint64_t unread = 0;
+    auto step = [&](uint64_t n) {
+        unread += n;
+        if (unread >= kResolveCheckRuns) {
+            unread = 0;
+            if (reading)
+                reading();
+        }
+    };
     // the grouping charged before it is built (kCandidateRunBytes a run grouped), replaced by
     // what the candidates hold once it is done
     uint64_t grouping = 0;
     if (answer) {
         for (const LabelProfile &lp : profile->labels) {
-            for (const auto &run : lp.runs) {
-                grouping += run.size() >= min_block_kmers;
+            const std::vector<KmerInterval> &runs = lp.runs;
+            for (size_t begin = 0; begin < runs.size(); begin += kResolveCheckLabels) {
+                const size_t end = std::min(runs.size(), begin + kResolveCheckLabels);
+                for (size_t r = begin; r < end; ++r) {
+                    grouping += runs[r].size() >= min_block_kmers;
+                }
+                step(end - begin);
             }
         }
         grouping *= kCandidateRunBytes;
@@ -1588,15 +1667,14 @@ void group_candidates(SupportProfile *profile, uint64_t min_block_kmers, AnswerA
 
     // ---- seed candidates: identical maximal runs grouped
     std::map<KmerInterval, std::vector<LabelId>> groups;
-    // read by the runs walked as well as by the labels (the Opus review of d398357a9, N2: 4,000
-    // labels of about 3,700 runs each, 15 million map steps, went unread for about 0.5 s)
-    uint64_t runs_walked = 0;
     for (LabelId l = 0; l < profile->labels.size(); ++l) {
         if (finishing)
             finishing(l);
         for (const auto &run : profile->labels[l].runs) {
-            if (reading && ++runs_walked % kResolveCheckRuns == 0)
-                reading();
+            // (a run walked kResolveCheckRuns / kResolveCheckLabels steps: a reading every
+            // kResolveCheckLabels runs, as a map step costs about a microsecond at millions of
+            // groups, lane T8-RL; before, every kResolveCheckRuns runs, about 70 ms there)
+            step(kResolveCheckRuns / kResolveCheckLabels);
             if (run.size() >= min_block_kmers)
                 groups[run].push_back(l);
         }
@@ -1611,25 +1689,29 @@ void group_candidates(SupportProfile *profile, uint64_t min_block_kmers, AnswerA
     uint64_t held = annot::matrix::buffer_bytes(profile->candidates.capacity(),
                                                 sizeof(SeedCandidate));
     size_t group = 0;
-    for (auto &[iv, labels] : groups) {
+    // each group's node freed once its labels are moved into its candidate, so that the map is
+    // released in the loop that reads (the order of the groups and the candidates as before)
+    for (auto it = groups.begin(); it != groups.end(); it = groups.erase(it)) {
         // read every 4,096 groups as the labels above (T5a-X1, Opus review 2026-11-13: at the
         // caps, 10,000 labels of 300 runs of their own, this pass over 3 million groups read
         // nothing for about 0.7 s)
         if (finishing)
             finishing(group++);
+        std::vector<LabelId> &labels = it->second;
         std::sort(labels.begin(), labels.end());
         held += annot::matrix::buffer_bytes(labels.capacity(), sizeof(LabelId));
-        profile->candidates.push_back({ iv, std::move(labels) });
+        profile->candidates.push_back({ it->first, std::move(labels) });
     }
-    std::map<KmerInterval, std::vector<LabelId>>().swap(groups);
-    std::sort(profile->candidates.begin(), profile->candidates.end(),
-              [](const SeedCandidate &a, const SeedCandidate &b) {
-                  if (a.kmers.size() != b.kmers.size())
-                      return a.kmers.size() > b.kmers.size();
-                  if (a.labels.size() != b.labels.size())
-                      return a.labels.size() > b.labels.size();
-                  return a.kmers.begin < b.kmers.begin;
-              });
+    // (in steps; the order is total: two candidates of the same length, label count and begin
+    // are the same interval, which one group holds)
+    sort_in_steps(profile->candidates.begin(), profile->candidates.end(),
+                  [](const SeedCandidate &a, const SeedCandidate &b) {
+                      if (a.kmers.size() != b.kmers.size())
+                          return a.kmers.size() > b.kmers.size();
+                      if (a.labels.size() != b.labels.size())
+                          return a.labels.size() > b.labels.size();
+                      return a.kmers.begin < b.kmers.begin;
+                  }, step);
     if (answer) {
         answer->release(grouping);
         // (within the grouping's price: a candidate and its label ids per run at most)
@@ -1716,7 +1798,10 @@ struct Fenwick {
     size_t n;
     size_t top = 1;   // the largest power of two <= n (1 when n == 0)
 
-    explicit Fenwick(size_t size) : tree(size + 1, 0), n(size) {
+    // its counts zeroed in steps (assign_zeros_in_steps)
+    template <class Step>
+    Fenwick(size_t size, const Step &step) : n(size) {
+        assign_zeros_in_steps(tree, size + 1, step);
         while (top * 2 <= n) {
             top *= 2;
         }
@@ -1949,20 +2034,28 @@ SeedSelection select_seeds(const SupportProfile &profile,
                     const uint64_t was = annot::matrix::buffer_bytes(runs.capacity(), sizeof(Run));
                     const uint64_t bytes = annot::matrix::buffer_bytes(grown, sizeof(Run));
                     charge(bytes);
-                    // (the copy of the pieces into the new buffer and the old one's free: a
-                    // piece the deadline is read around, listed in the spec's Not polled)
-                    runs.reserve(grown);
+                    // the pieces copied into the new buffer a step each, the old one then freed
+                    // (lane T8-RL: before, one piece the deadline was read around)
+                    reserve_in_steps(runs, grown, poll);
                     answer_release(was);
                     scratch += bytes - was;
                 }
                 runs.push_back({ begin, end });
             };
-            poll(runs.size());
-            const std::vector<Run> all_runs = [&runs]() {
-                std::sort(runs.begin(), runs.end(),
-                          [](const Run &a, const Run &b) { return a.begin < b.begin; });
-                return runs;
-            }();
+            // the runs ordered by their begins, as before (runs of one begin in no set order:
+            // a round reads the runs beginning at or before a candidate start as a set, its
+            // Fenwick counts, candidate starts and ends sorted and de-duplicated, so its picks do
+            // not depend on their order; ordering them by their ends as well cost about twice
+            // the sort, lane T8-RL review m1)
+            auto by_begin = [](const Run &a, const Run &b) { return a.begin < b.begin; };
+            sort_in_steps(runs.begin(), runs.end(), by_begin, poll);
+            // their sorted copy, a step each run (reserved to them, as a copy of the vector)
+            std::vector<Run> all_runs;
+            all_runs.reserve(runs.size());
+            scan(0, runs.size(), [&](size_t r) {
+                all_runs.push_back(runs[r]);
+                return true;
+            });
 
             // intervals already claimed by a picked seed, as sorted disjoint ranges
             std::vector<KmerInterval> taken;
@@ -2000,8 +2093,7 @@ SeedSelection select_seeds(const SupportProfile &profile,
                     if (begin < run.end && run.end - begin >= min_kmers)
                         push_piece(begin, run.end);
                 }
-                std::sort(runs.begin(), runs.end(),
-                          [](const Run &a, const Run &b) { return a.begin < b.begin; });
+                sort_in_steps(runs.begin(), runs.end(), by_begin, poll);
                 if (runs.empty())
                     break;
 
@@ -2020,9 +2112,8 @@ SeedSelection select_seeds(const SupportProfile &profile,
                         candidate_a.push_back(runs[r].end - min_kmers);
                     return true;
                 });
-                std::sort(candidate_a.begin(), candidate_a.end());
-                candidate_a.erase(std::unique(candidate_a.begin(), candidate_a.end()),
-                                  candidate_a.end());
+                sort_in_steps(candidate_a.begin(), candidate_a.end(), std::less<uint64_t>(), poll);
+                unique_in_steps(candidate_a, poll);
 
                 std::optional<Picked> best;
                 size_t best_count = 0;
@@ -2036,16 +2127,17 @@ SeedSelection select_seeds(const SupportProfile &profile,
                     coords.push_back(runs[r].end);
                     return true;
                 });
-                // (each of the round's three sorts, n log n of at most twice its runs, the
-                // de-duplication after two of them and the zeroing of its Fenwick counts, linear
-                // in them, are pieces the deadline is read around, not inside)
-                std::sort(coords.begin(), coords.end());
-                coords.erase(std::unique(coords.begin(), coords.end()), coords.end());
+                // (each of the round's three sorts, the de-duplication after two of them and the
+                // zeroing of its Fenwick counts in steps, an element a step: lane T8-RL, before,
+                // pieces the deadline was read around, about 0.5, 0.3 and 0.15 s at 10 million
+                // pieces)
+                sort_in_steps(coords.begin(), coords.end(), std::less<uint64_t>(), poll);
+                unique_in_steps(coords, poll);
                 auto index_of = [&](uint64_t x) {
                     return static_cast<size_t>(std::lower_bound(coords.begin(), coords.end(), x)
                                                - coords.begin());
                 };
-                Fenwick ends(coords.size());
+                Fenwick ends(coords.size(), poll);
                 uint32_t inserted = 0;
                 for (uint64_t a : candidate_a) {
                     poll(1);
@@ -2335,9 +2427,20 @@ SeedSelection select_seeds(const SupportProfile &profile,
         // the order's copy and the temporaries, freed with the seed built
         answer_release(scratch);
     }
-    // the picks, frozen: freed, and their charge with them (every name an explicit pick lists as
-    // not covering freed at once: a piece the deadline is read around, listed in the spec's Not
-    // polled; the Opus review of 0666c9815, m-1)
+    // the picks, frozen: freed pick by pick, a step each and a step each name it lists as not
+    // covering (freed from the last), and their charge with them once all are (lane T8-RL:
+    // before, every name an explicit pick lists freed at once, a piece the deadline was read
+    // around, about 0.2 s at 1,024 picks of 9,999 names; the Opus review of 0666c9815, m-1)
+    for (Picked &p : picked) {
+        poll(1);
+        std::vector<std::string> &names = p.labels_not_covering;
+        scan(0, names.size(), [&](size_t) {
+            names.pop_back();
+            return true;
+        });
+        std::vector<std::string>().swap(names);
+        std::vector<LabelId>().swap(p.labels);
+    }
     std::vector<Picked>().swap(picked);
     answer_release(picks_charged);
 

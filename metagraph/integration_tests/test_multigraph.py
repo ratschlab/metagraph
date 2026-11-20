@@ -2229,11 +2229,69 @@ class TestMultiGraphServer(TestingBase):
             (pair,) = entry['pairs']
             self.assertEqual(('b_big', 'ended'), (pair['graph'], pair['state']))
             self.assertIsNotNone(pair['usage']['finished_at'])
+            # with the CPU time the pair's work used (its memory: output.labels "none" charges
+            # nothing, 0; test_a_client_gone_records_the_usage_held reads it, lane T8-RL)
+            self.assertIsNotNone(pair['usage']['cpu_ms'])
             ret = server.post('pattern', body)
             self.assertEqual(409, ret.status_code, ret.text[:2000])
             self.assertEqual('client_gone', ret.json()['reason'])
         finally:
             server.stop()
+
+    def test_a_client_gone_records_the_usage_held(self):
+        """A request whose client leaves a second into its work: GET /requests states the end,
+        reason client_gone, and its pair with the usage the work held and used, its CPU time and
+        modelled memory (SPEC-multigraph-envelope.md section 5, "with usage"; lane T8-RL).
+        A single-graph server (the mini index, b_big's files): /resolve and /pattern, the pair
+        with null tags and outcome refused as before (before, cpu_ms null and memory_bytes 0).
+        A multi-graph server: /pattern on b_big (before, memory_bytes 0). The memory is at
+        least what the work held when it was abandoned: /resolve's (a second in, in its row pass
+        or later) the query's model (its bases, every k-mer's key, the present k-mers' keys and
+        positions) and the pass's next occurrence of every present k-mer, 32 bytes a k-mer
+        (lane T8-RL review M1: before the fix, a pair abandoned in the row pass stated the
+        query's model alone, 25 bytes a k-mer); /pattern's, whose requests retrieve labels
+        (output.labels "all"), its account's charges, a MiB within its first 30 ms on the mini
+        index."""
+        self._cutoff_csv()
+        graph = os.path.join(MINI_DIR, 'graph_k31.dbg')
+        anno = os.path.join(MINI_DIR, 'annotation.relaxed.relabeled.row_diff_brwt_coord.annodbg')
+        pattern = dict(self.SLOW_PATTERN, time_budget_ms=60000, output={'labels': 'all'})
+        resolve = self._slow_resolve()
+        resolve_kmers = len(resolve['sequence']) - K + 1
+        single = Server(['-i', graph, '-a', anno, '--pattern-max-contexts', '1000000'],
+                        os.path.join(self.tempdir.name, 'server_single_gone.log'), threads=1)
+        try:
+            for route, body, least in (('resolve', resolve, 32 * resolve_kmers),
+                                       ('pattern', pattern, 1 << 20)):
+                self._check_gone_usage(single, route, body, f'sg-gone-{route}', None, least)
+        finally:
+            single.stop()
+        multi = self._cutoff_server('gone_usage')
+        try:
+            self._check_gone_usage(multi, 'pattern', dict(pattern, graphs=['b_big']),
+                                   'mg-gone-pattern', 'b_big', 1 << 20)
+        finally:
+            multi.stop()
+
+    def _check_gone_usage(self, server, route, body, request_id, graph, least_memory):
+        self.assertEqual(b'', request_then_leave(server.port, route,
+                                                 dict(body, request_id=request_id), 1.0))
+        entry = self._wait_ended(server, request_id)
+        self.assertEqual(('ended', 'client_gone'), (entry['state'], entry['reason']), request_id)
+        self.assertEqual({'status': None, 'bytes': None, 'written': False}, entry['response'],
+                         request_id)
+        (pair,) = entry['pairs']
+        self.assertEqual((graph, 'ended'), (pair['graph'], pair['state']), request_id)
+        if graph is None:
+            self.assertEqual('refused', pair['outcome'], request_id)
+        usage = pair['usage']
+        # (the pair's time starts after the request's parse and admission: a margin for them)
+        self.assertGreater(usage['elapsed_ms'], 800, request_id)
+        # (the work's thread ran for most of that second, but under load its CPU time can be
+        # small: any)
+        self.assertIsNotNone(usage['cpu_ms'], request_id)
+        self.assertGreater(usage['cpu_ms'], 0, request_id)
+        self.assertLessEqual(least_memory, usage['memory_bytes'], request_id)
 
     def test_resolve_and_pattern_caps_refuse_busy_and_register_nothing(self):
         """E19 on a multi-graph server (SPEC-multigraph-envelope.md section 1.1, section 8;
@@ -5594,6 +5652,9 @@ class TestResolveSelectionStops(TestingBase):
                 # working when its client left (a second in), ended right after
                 self.assertGreater(usage['elapsed_ms'], 900, name)
                 self.assertGreater(usage['cpu_ms'], 200, name)
+                # and the memory its work held (section 5; lane T8-RL: before, 0): in the
+                # selection, at least the query's model, 25 bytes a k-mer
+                self.assertLessEqual(25 * (len(self.query) - K + 1), usage['memory_bytes'], name)
                 self.assertLess(usage['elapsed_ms'], 1000 + 1000 * self.LATE_S, name)
         finally:
             server.stop()

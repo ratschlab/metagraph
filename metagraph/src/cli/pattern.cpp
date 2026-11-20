@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <chrono>
 #include <cmath>
+#include <exception>
 #include <fstream>
 #include <iostream>
 #include <iterator>
@@ -1767,6 +1768,25 @@ PatternAnswer answer_pattern(
     retrieval::Account account(hooks && hooks->max_memory_bytes ? hooks->max_memory_bytes
                                                                  : req.retrieval.max_memory_bytes);
     budget.set_memory(&account);
+    // A request that ends by an exception tells its delivery what it held and used as it
+    // unwinds (PatternDelivery::abandoned_usage: the server reads it for an abandoned request,
+    // a client gone or the fan-out's stop, the registry's usage of its pair,
+    // SPEC-multigraph-envelope.md section 5; lane T8-RL: before, none): the account's peak, as
+    // work.memory_bytes states it, and its CPU time on this thread
+    struct UsageOnUnwind {
+        PatternDelivery *delivery;
+        const retrieval::Account &account;
+        const common::ThreadUsageMeter &meter;
+        const int exceptions = std::uncaught_exceptions();
+        ~UsageOnUnwind() {
+            if (!delivery || std::uncaught_exceptions() <= exceptions)
+                return;
+            const common::ThreadUsage used = meter.elapsed();
+            delivery->set_abandoned_usage(account.peak(), used.has_cpu
+                                                              ? std::optional<double>(used.cpu_ms())
+                                                              : std::nullopt);
+        }
+    } const usage_on_unwind { delivery, account, request_usage };
     // the admission of a label-free path list's result objects (answer_plain)
     retrieval::Admission plain(account);
     const PatternSearch search(graph);
