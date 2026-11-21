@@ -8,8 +8,14 @@ one line:
 
 so that its handler, its threads and its budget accounts are free for the next request long
 before the request would have ended. With the result cache on, a client gone stops nothing: the
-request computes to its end and stores its answer, so that the client's retry is a hit (Fable
-review M1); a shutdown stops it, and each identical request waiting for it logs
+request computes to its end and offers its answer to the cache, so that the client's retry is a
+hit while the cache retains it (Fable review M1); an identical request that attaches to it while
+it computes logs
+
+  [Server] Request <id>: cache WAIT for an identical request still computing
+
+before it waits (GPT review of train 7, P2), and a shutdown stops the producer, each identical
+request waiting for it logging
 
   [Server] Request <id>: shutdown, /search stopped while waiting for request <producer>; no
   response written
@@ -299,18 +305,29 @@ class TestSearchStop(TestingBase):
         note(f'shutdown: full {full_s:.2f} s; exited {exit_s:.2f} s after SIGTERM '
              f'({m.group(3)} of {m.group(4)} records started)')
 
-    def attached(self, server, request_id):
-        """where |request_id|'s parsed body is logged (-v): its handler acquires the cache entry
-        right after, with no wait between"""
-        m = re.search(rf'\[Server\] Request {request_id}: \{{', server.text())
-        self.assertTrue(m, f'no parsed body of request {request_id} (is the server on -v?)')
-        return m.start()
+    def attached(self, server, request_id, producer, timeout=30):
+        """waits until |request_id| is attached to |producer|'s pending entry, which its handler
+        logs before it waits ("cache WAIT"; GPT review of train 7, P2: inferred before from its
+        parsed body, after which a descheduled handler could attach once the answer was stored
+        and pass as a plain hit), and returns where; fails if |producer| stores first"""
+        deadline = time.monotonic() + timeout
+        while True:
+            text = server.text()
+            m = re.search(rf'\[Server\] Request {request_id}: cache WAIT for an identical '
+                          r'request still computing', text)
+            if m:
+                return m.start()
+            self.assertIsNone(re.search(rf'Request {producer}: cache STORE', text),
+                              f'request {producer} stored before {request_id} attached')
+            self.assertLess(time.monotonic(), deadline, text[-3000:])
+            time.sleep(0.02)
 
     def test_cache_waiter_gets_the_whole_answer(self):
         """--cache-size above 0: the producer computes on when its client leaves, and a duplicate
         that waits for its entry gets the answer byte for byte"""
         reference, full_s = self.single_reference()
-        attach_s = self.close_after(full_s)
+        # (the fixture runs long enough to observe a stop)
+        self.close_after(full_s)
         body = self.body(self.single_records)
         server = self.server(['--cache-size', '1', '-v'], p=2, e=2)
         before = len(server.text())
@@ -328,8 +345,9 @@ class TestSearchStop(TestingBase):
         while len(self.request_ids(server, before)) < 2:
             self.assertLess(time.monotonic(), deadline)
             time.sleep(0.02)
-        # the duplicate's handler parses its body and attaches to the entry within this
-        time.sleep(attach_s)
+        dup = self.request_ids(server, before)[1]
+        # the duplicate attached to the pending entry, then the producer's client leaves
+        attached_at = self.attached(server, dup, producer)
         sock.close()
         at_close = len(server.text())
         waiter.join(timeout=300)
@@ -342,17 +360,17 @@ class TestSearchStop(TestingBase):
         store = re.search(rf'Request {producer}: cache STORE', server.text())
         self.assertTrue(store, text[-3000:])
         self.assertGreaterEqual(store.start(), at_close)
-        dup = self.request_ids(server, before)[1]
         self.assertRegex(text, rf'Request {dup}: cache HIT')
         # and the duplicate had attached before the close, so before STORE: a waiter, not a hit
         # on the stored answer
-        self.assertLess(self.attached(server, dup), at_close)
+        self.assertLess(attached_at, at_close)
 
     def test_shutdown_with_a_waiter(self):
         """--cache-size above 0, SIGTERM while a duplicate waits for the producer: both are
         written nothing; the producer's line has the counts, the waiter's names the producer"""
         _, full_s = self.single_reference()
-        attach_s = self.close_after(full_s)
+        # (the fixture runs long enough to observe a stop)
+        self.close_after(full_s)
         body = self.body(self.single_records)
         server = self.server(['--cache-size', '1', '-v'], p=2, e=2)
         before = len(server.text())
@@ -364,9 +382,9 @@ class TestSearchStop(TestingBase):
             self.assertLess(time.monotonic(), deadline)
             time.sleep(0.02)
         producer, dup = self.request_ids(server, before)[:2]
-        time.sleep(attach_s)
+        attached_at = self.attached(server, dup, producer)
         at_signal = len(server.text())
-        self.assertLess(self.attached(server, dup), at_signal)
+        self.assertLess(attached_at, at_signal)
         server.process.send_signal(signal.SIGTERM)
         self.assertEqual(0, server.process.wait(timeout=60))
         for sock in socks:

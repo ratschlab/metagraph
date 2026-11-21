@@ -1491,7 +1491,8 @@ class TestMultiGraphServer(TestingBase):
 
     def test_pattern_envelope_bytes_are_the_trees_text(self):
         """SPEC-pattern-search.md §31: a multi-graph server writes /pattern's envelope from each
-        answered pair's held texts. Its body, with gzip off and on, is the text jsoncpp writes
+        answered pair's held texts. Its body, with gzip off and on (Content-Encoding gzip, GPT
+        review of train 7: the decoded body alone passed with gzip off), is the text jsoncpp writes
         for the tree it parses to (members in byte order, none twice, its escapes and number
         forms), and each answered pair's entry is the pair's single-graph answer but for the
         clock and the pair's tags: every pair answered (ids that need escapes), a refused pair
@@ -1513,6 +1514,9 @@ class TestMultiGraphServer(TestingBase):
                     ret = requests.post(self.server.url('pattern'), data=json.dumps(payload),
                                         headers={'Accept-Encoding': encoding}, timeout=300)
                     self.assertEqual(200, ret.status_code, ret.text[:2000])
+                    # (requests decodes a gzip body: compressed only when the header says so)
+                    self.assertEqual(None if encoding == 'identity' else 'gzip',
+                                     ret.headers.get('Content-Encoding'))
                     text = ret.content
                     out = json.loads(text, object_pairs_hook=members_once)
                     self.assertEqual(jsoncpp_compact(out).encode('ascii'), text)

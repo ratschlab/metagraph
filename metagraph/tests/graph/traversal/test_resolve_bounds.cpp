@@ -3037,6 +3037,48 @@ TEST(ResolveBoundsRoute, UnknownLabelsAreWrittenNameByName) {
     EXPECT_EQ(gone_from, reads);
 }
 
+// One long missing label is written in place into the reserved text (append_json_string), not
+// through a Json::Value, the writer's buffer and a copy of it (GPT review of train 7, D3: about
+// 3-4 times the name of scratch beside the text): a name of 8 MiB holding every kind of escape,
+// non-ASCII code points (one beyond the BMP) and a cut UTF-8 sequence at its end, beside a short
+// one, is the tree's text byte for byte
+TEST(ResolveBoundsRoute, ALongUnknownLabelIsWrittenInPlace) {
+    const Records r = make_records<DBGSuccinct, annot::ColumnCompressed<>>(40, 5, 3941);
+    const auto index = with_mapping(r);
+    const std::string piece = std::string("quote \" backslash \\ tab\t nl\n ")
+            + std::string("nul\0ctl\x01 ", 9) + "caf\xc3\xa9 \xf0\x9f\x98\x80 plain text ";
+    std::string longest;
+    while (longest.size() < (size_t(8) << 20)) {
+        longest += piece;
+    }
+    longest += "cut \xe2\x82";
+    const std::vector<std::string> names { "short", longest };
+    Json::Value request;
+    request["sequence"] = r.q;
+    for (const std::string &name : names) {
+        request["labels"].append(name);
+    }
+    const cli::ResolveTimeLimits limits;
+    // (the tree API checks its texts against the tree's: it throws where they differ)
+    const Json::Value out = cli::process_resolve_request(request, *index, "r1", 0, nullptr,
+                                                         nullptr, limits, nullptr, nullptr, true);
+    ASSERT_EQ(2u, out["unknown_labels"].size());
+    EXPECT_EQ(longest, out["unknown_labels"][1].asString());
+    cli::ResolveAnswer answer = cli::process_resolve_answer(request, *index, "r1", 0, nullptr,
+                                                            nullptr, limits, nullptr, nullptr,
+                                                            true);
+    std::string held;
+    for (const auto &[name, texts] : answer.held.members) {
+        if (name == "unknown_labels") {
+            for (const std::string &text : texts) {
+                held += text;
+            }
+        }
+    }
+    EXPECT_EQ(compact(out["unknown_labels"]), held);
+    EXPECT_LT(longest.size() + (size_t(1) << 20), held.size());
+}
+
 // Sample 38 (SPEC-labeled-traversal-core.md §4.1), a real run: more explicit seeds than the cap
 // (2 on the recording server), the route's own body for the sample's request and cap
 TEST(ResolveBoundsRoute, Sample38) {
@@ -3512,6 +3554,61 @@ TEST(ResolveAnswer, TheBuildIsReadEvery64KiBOfText) {
             }
             EXPECT_EQ(written, held) << what << " reading " << r;
         }
+    }
+}
+
+// Which of two failures surfaces when one depends on time is decided by where the readings are
+// (GPT review of train 7, D3; SPEC-labeled-traversal-core.md §4.5): an answer refused at a later
+// object's charge (AnswerTooLarge, the server's 400 resolve_answer_too_large, which frees the
+// request's id) is refused so only if its check did not throw at an earlier reading. A deadline
+// passed at the last reading before that charge (the check throwing there: the server's 503
+// deadline, which retains the id) ends the build first; one passing after it does not. The
+// explicit seeds' 400s in the selection are pinned the same way by
+// ResolveBoundsRoute.TheExplicitCheckUnderAStopReadsTheDeadline
+TEST(ResolveAnswer, ADeadlineAtAnEarlierReadingComesBeforeTheAnswersRefusal) {
+    struct Deadline {};
+    auto [p, sel] = priced_profile(5000, 1, 12, 0, false);
+    p.candidates.clear();
+    // what the account holds at each reading of a build without a bound
+    std::vector<uint64_t> held_at;
+    {
+        AnswerAccount account(uint64_t(1) << 40);
+        cli::profile_answer(p, nullptr, "intervals", [&]() { held_at.push_back(account.held()); },
+                            &account);
+    }
+    ASSERT_LE(4u, held_at.size());
+    // a bound that refuses the build half way: after some readings
+    const uint64_t bound = held_at[held_at.size() / 2];
+    size_t readings_before = 0;
+    {
+        AnswerAccount account(bound);
+        try {
+            cli::profile_answer(p, nullptr, "intervals", [&]() { ++readings_before; }, &account);
+            ADD_FAILURE() << "not refused";
+        } catch (const AnswerTooLarge &e) {
+            EXPECT_EQ("answer", e.part());
+        }
+    }
+    ASSERT_LE(2u, readings_before);
+    // the deadline passed at the r-th reading: the deadline when it is one before the refusal,
+    // else the refusal
+    for (size_t r : { size_t(0), readings_before - 1, readings_before }) {
+        AnswerAccount account(bound);
+        size_t reads = 0;
+        bool deadline = false;
+        bool refused = false;
+        try {
+            cli::profile_answer(p, nullptr, "intervals", [&]() {
+                if (reads++ >= r)
+                    throw Deadline();
+            }, &account);
+        } catch (const Deadline &) {
+            deadline = true;
+        } catch (const AnswerTooLarge &) {
+            refused = true;
+        }
+        EXPECT_EQ(r < readings_before, deadline) << r;
+        EXPECT_EQ(r >= readings_before, refused) << r;
     }
 }
 

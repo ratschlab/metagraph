@@ -1307,5 +1307,64 @@ class TestSearchColumnStoreGrowth(TestingBase):
         self.assertEqual((458_752, 917_504), (int(lines[0].group(4)), int(lines[0].group(6))))
 
 
+class TestSearchLabelErrorBesideTheBudget(TestingBase):
+    """A record whose label its answer cannot format (`toy;class`: a part after the first ';'
+    without '=', "Label formatting error") beside the answer budget (GPT review of train 7, P1;
+    SPEC-multigraph-envelope.md section 3). Without `partial_refusal` the budget's refusal takes
+    precedence over the record's error: each record's object is charged before it is built, and
+    the records after the first failure are still charged, so 500 three-base records refused at
+    1 MiB are 400 search_answer_too_large ("answer") in every order, while without a bound the
+    same request is 400 "Label formatting error" (train 6 answered the error at 1 MiB, its first
+    object failing before the bound passed). Either way the error is logged once, not once per
+    record (train 7 logged it for 433 of the 500)."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.tempdir = TemporaryDirectory()
+        d = cls.tempdir.name
+        rng = random.Random(1400)
+        reference = ''.join(rng.choice('ACGT') for _ in range(1400))
+        with open(f'{d}/ref.fa', 'w') as f:
+            f.write(f'>toy;class\n{reference}\n')
+        cls._build_graph(f'{d}/ref.fa', f'{d}/toy', 3, 'succinct', 'basic')
+        cls.graph = f'{d}/toy' + graph_file_extension['succinct']
+        cls._annotate_graph(f'{d}/ref.fa', cls.graph, f'{d}/toy', 'column', anno_type='header')
+        cls.anno = f'{d}/toy.column.annodbg'
+        cls.fasta = ''.join(f'>q{i}\n{reference[i:i + 3]}\n' for i in range(500))
+        cls.servers = []
+
+    @classmethod
+    def tearDownClass(cls):
+        for server in cls.servers:
+            server.stop()
+        cls.tempdir.cleanup()
+
+    def server(self, max_mb):
+        log = os.path.join(self.tempdir.name, f'server_{len(self.servers)}.log')
+        server = Server(['-i', self.graph, '-a', self.anno, '--threads-each', '2',
+                         '--http-threads', '2', '--cache-size', '0',
+                         '--search-max-answer-memory-mb', str(max_mb)], log, threads=2)
+        self.servers.append(server)
+        return server
+
+    def test_the_budget_refusal_before_the_label_error(self):
+        error_line = re.compile(r"Can't read key-value pair in part class of label toy;class\n")
+        for max_mb, expected in ((1, (400, refusal_text(1, 'answer'))),
+                                 (0, (400, {'error': 'Label formatting error'}))):
+            with self.subTest(max_mb=max_mb):
+                server = self.server(max_mb)
+                for _ in range(2):
+                    before = len(server.text())
+                    r = server.post('search', {'FASTA': self.fasta, 'discovery_fraction': 0.0})
+                    got = r.text if max_mb else json.loads(r.text)
+                    self.assertEqual(expected, (r.status_code, got))
+                    logged = server.text()[before:]
+                    self.assertEqual(1, len(error_line.findall(logged)), logged[-3000:])
+                    refusals = REFUSAL.findall(logged)
+                    self.assertEqual(1 if max_mb else 0, len(refusals), logged[-3000:])
+                    if max_mb:
+                        self.assertEqual('the answer account', refusals[0][1])
+
+
 if __name__ == '__main__':
     unittest.main()

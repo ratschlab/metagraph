@@ -18,15 +18,18 @@ namespace cli {
 
 ServerQueryCache::Handle::Handle(ServerQueryCache *cache,
                                  std::shared_ptr<Entry> entry,
-                                 std::shared_ptr<std::promise<ResultPtr>> producer)
+                                 std::shared_ptr<std::promise<ResultPtr>> producer,
+                                 bool attached_pending)
       : cache_(cache),
         entry_(std::move(entry)),
-        producer_(std::move(producer)) {}
+        producer_(std::move(producer)),
+        attached_pending_(attached_pending) {}
 
 ServerQueryCache::Handle::Handle(Handle &&other) noexcept
       : cache_(other.cache_),
         entry_(std::move(other.entry_)),
-        producer_(std::move(other.producer_)) {
+        producer_(std::move(other.producer_)),
+        attached_pending_(other.attached_pending_) {
     other.cache_ = nullptr;
 }
 
@@ -37,6 +40,7 @@ ServerQueryCache::Handle::operator=(Handle &&other) noexcept {
         cache_ = other.cache_;
         entry_ = std::move(other.entry_);
         producer_ = std::move(other.producer_);
+        attached_pending_ = other.attached_pending_;
         other.cache_ = nullptr;
     }
     return *this;
@@ -133,7 +137,11 @@ ServerQueryCache::Handle ServerQueryCache::acquire(const std::string &key) {
         if (entry->delivery.load(std::memory_order_acquire) == DeliveryState::PROTECTED) {
             entry->ready_at = std::chrono::steady_clock::now();
         }
-        return Handle(this, entry, /* producer = */ nullptr);
+        // attached to a producer still computing (its answer not published): the request
+        // waits for it (the server logs "cache WAIT")
+        const bool pending = entry->future.wait_for(std::chrono::seconds(0))
+                != std::future_status::ready;
+        return Handle(this, entry, /* producer = */ nullptr, pending);
     }
 
     // Miss. Create a fresh entry, attach it to the cache, and hand the

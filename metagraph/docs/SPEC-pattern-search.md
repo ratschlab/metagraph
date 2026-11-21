@@ -5303,7 +5303,14 @@ body grows with its pairs (the review of 66558cb1f; measured on its fixes, which
   24.7 MB) and 5.0 times in `all_or_count` (74.6 MB against 14.9 MB). The factor follows the text a result object has
   against its price: a path's price is 192 bytes per k-mer, its text about 2 × (digits + 1) bytes per k-mer for its
   `nodes` and `rows` arrays, so the longer a graph's node ids and rows (the larger the graph), the larger the text and
-  the factor. A client that reads an answer whole should expect a body of up to a third of the account.
+  the factor. That third holds only for the objects the account holds (labelled contexts and paths, label-free
+  paths, the supported paths: each written at most about a third of what the account holds for it), the measured
+  path workload above. Label-free contexts and label-free lists of anchors are not in the account
+  (`work.memory_bytes` 0, §8.1): their text is bounded by `max_contexts` (`max_anchors`) and the patterns only; nor
+  are the entries' heads and counts. A complete body can therefore exceed a third of `max_memory_mb` (the GPT review
+  of train 7: four two-base patterns, label-free contexts, `partial` at 1 MiB on a toy graph of 1,400 bases, the
+  information floor lowered to 0, an 888,388-byte body against a third of 349,525): size a buffer from
+  `max_contexts` and `max_paths`, or read the body as a stream.
 - Unchanged: the stack's stop (L-memory-0001: A^100000 on a self-loop, `long_search: "paths"`, `max_memory_mb` 1,
   still stops `{extension, max_memory}` at a level, in every mode), the walks' stop, every stop a pattern's own
   structures cause, and every count of a pattern the account does not bind.

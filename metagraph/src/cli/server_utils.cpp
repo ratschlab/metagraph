@@ -75,7 +75,21 @@ std::string compress_string(const std::string &str, int compressionlevel, bool g
 
     int ret;
     char outbuffer[32768];
+    // One block for the compressed bytes, reserved to zlib's bound on them for this text (the
+    // text and about 0.03 % more, with the container), so that the appends never move it. Before,
+    // the string grew by doubling and at its last growth held its old block beside the new one,
+    // up to three times the compressed bytes: more than the text when it compresses less than
+    // 3:1 (GPT review of train 7, known D3: 1,024 random names, 37 KB of text, 20 KB gzip), while
+    // the routes' accounts price one copy of about the text. Only the bytes written are touched
     std::string outstring;
+    if (str.size() <= std::numeric_limits<uLong>::max()) {
+        try {
+            outstring.reserve(deflateBound(&zs, static_cast<uLong>(str.size())));
+        } catch (...) {
+            deflateEnd(&zs);
+            throw;
+        }
+    }
 
     // retrieve the compressed bytes blockwise
     do {
@@ -1355,26 +1369,47 @@ void process_serialized_request(std::shared_ptr<HttpServer::Response> &response,
 // ---------------------------------------------------------------- multi-graph servers
 
 bool LoadReservations::reserve(size_t bytes, const std::function<bool()> &gone,
-                               uint64_t poll_ms) {
+                               uint64_t poll_ms, bool ask_after_wait) {
     assert(bytes <= capacity_);
     std::unique_lock<std::mutex> lock(mutex_);
     if (!gone) {
         freed_.wait(lock, [&]() { return left_ >= bytes; });
-    } else {
-        while (left_ < bytes) {
-            // asked without the lock: a socket's peek, a flag
-            lock.unlock();
-            const bool abandoned = gone();
-            lock.lock();
-            if (abandoned)
-                return false;
-            if (left_ >= bytes)
-                break;
-            freed_.wait_for(lock, std::chrono::milliseconds(poll_ms));
-        }
+        left_ -= bytes;
+        return true;
+    }
+    bool waited = false;
+    while (left_ < bytes) {
+        waited = true;
+        // asked without the lock: a socket's peek, a flag
+        lock.unlock();
+        const bool abandoned = gone();
+        lock.lock();
+        if (abandoned)
+            return false;
+        if (left_ >= bytes)
+            break;
+        freed_.wait_for(lock, std::chrono::milliseconds(poll_ms));
     }
     left_ -= bytes;
-    return true;
+    if (!waited || !ask_after_wait)
+        return true;
+    // a wait ends on the release that frees the memory, up to |poll_ms| after |gone| was last
+    // asked: asked once more with the bytes taken, so that a request stopped (its client gone)
+    // in that time gives them back here and starts no load (GPT review of train 7, P2). The
+    // bytes are given back also when it throws (the Opus review of d6a6a4ab3, N1: they were
+    // lost for the process's life)
+    lock.unlock();
+    bool abandoned;
+    try {
+        abandoned = gone();
+    } catch (...) {
+        release(bytes);
+        throw;
+    }
+    if (!abandoned)
+        return true;
+    release(bytes);
+    return false;
 }
 
 void LoadReservations::release(size_t bytes) {

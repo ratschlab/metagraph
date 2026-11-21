@@ -326,6 +326,9 @@ struct RetrievalHooks {
     // the account's held bytes before and after the objects' charges were settled (SPEC §12.1;
     // equal where they were settled one by one, a label-free path list, or nothing was charged)
     std::function<void(size_t pattern, uint64_t before, uint64_t after)> held_hook;
+    // then: the result objects the pattern built (also those dropped) and those written as text
+    // (none of a list withheld after its delivery, GPT review of train 7, known D2)
+    std::function<void(size_t pattern, size_t built, size_t written)> texts_hook;
     std::function<void(size_t item)> occurrences_hook;
     // the result objects stay charged at their price once written, not at their text (SPEC
     // §12.1): the cuts a test index reaches only so (its node ids short, its texts small): a

@@ -161,8 +161,12 @@ The answer keeps its upstream shape (a list of `{seq_description, results, ...}`
   also each alignment and each batch's query graph; a record in progress finishes), writes nothing and closes the
   connection, as on `/traverse`, `/resolve` and `/pattern`. A request whose work has all started (every record on
   every pair) is not stopped: it is answered as before (to a gone client, a write that fails). With `--cache-size`
-  above 0 a client gone stops nothing: the request computes to its end and stores its answer, so that a retry is a
-  hit; only a shutdown stops it, and the identical requests waiting for it (written nothing either). The server logs
+  above 0 a client gone stops nothing: the request computes to its end and offers its answer to the cache, so that a
+  retry is a hit while the cache retains it (an identical request already waiting for it shares the answer; an answer
+  larger than `--cache-size`, or than the room the entries still being delivered leave, is delivered and not retained,
+  logged `BYPASS`, and a retained one can be evicted; an identical request that attaches to one still computing
+  logs `[Server] Request <id>: cache WAIT for an identical request still computing` before it waits); only a
+  shutdown stops it, and the identical requests waiting for it (written nothing either). The server logs
   `[Server] Request <id>: <client gone|shutdown>, /search stopped: <r> of <n> records started, <p> of <P> pairs
   started; no response written` (the reason the stop answered first; <r>: the most records one pair started, on the
   batched path the records whose query on their batch's query graph began; <n>: the request's records, with
@@ -264,11 +268,15 @@ The answer keeps its upstream shape (a list of `{seq_description, results, ...}`
   charged, no object built), so that the account named is learned in every order. The refusals that need no
   work come first (the body cap, the body's JSON, the fields, the selection, a cached answer). Without
   `partial_refusal` a request refused by the budget is so refused whatever else its work raised (another pair's
-  error, a load refused `index_changed`). With it a refused unit is no error: another pair's error is answered
-  as without a budget (the first failing pair in pair order), and only the request's answer passing the bound
-  wins over it: a request whose answer passes the bound while its pairs work (the units' objects; its text is
-  priced only once every pair has answered, so a failed pair leaves it unpriced) is refused 400
-  `search_answer_too_large` (`account` `"answer"`) also when another pair failed. The same request is refused
+  error, a load refused `index_changed`, a record's own error on the same pair such as a label its answer cannot
+  format, `Label formatting error`). The records of a pair after such an error are still charged (no object
+  built), so a request that both fails a record and passes the bound is refused `search_answer_too_large` in every
+  order; before lane T7-P1 it was answered the record's error when that came before the bound passed. With it a
+  refused unit is no error: another pair's error is answered as without a budget (the first failing pair in pair
+  order), and only the request's answer passing the bound wins over it: a request whose answer passes the bound
+  while its pairs work (the units' objects; its text is priced only once every pair has answered, so a failed
+  pair leaves it unpriced) is refused 400 `search_answer_too_large` (`account` `"answer"`) also when another pair
+  failed. The same request is refused
   again (the code is final: change the request), and a 400 is not cached; a partly refused 200 is cached as any
   answer. `in_ram` changes nothing: the same charges, the same
   refusals. Below the bound every answer is the one without a budget, byte for byte, in both modes. Since lane
@@ -294,7 +302,10 @@ The answer keeps its upstream shape (a list of `{seq_description, results, ...}`
 - `finish_by_ms` (integer, ms since the epoch) is the completion deadline, on `/traverse`, `/resolve`, `/pattern`.
   Each route's deadline becomes the minimum of its own and `finish_by_ms - clock_skew_allowance_ms`. A `/resolve`
   without `bounds.time_budget_ms` gets the server maximum as its deadline. The in_ram memory wait is not entered
-  once `finish_by_ms` has passed and is given up when it passes; a load already started is not interrupted.
+  once `finish_by_ms` has passed and is given up when it passes; a load already started is not interrupted. A wait
+  (on every route, `/search`'s included) is asked once more when the memory is granted: one whose deadline passed or
+  whose client left since it was last asked gives the memory back and loads nothing (GPT review of train 7, P2:
+  such a wait loaded the index, minutes and gigabytes on a large pair, for nobody).
 - The EFFECTIVE envelope deadline is min(request arrival + the route's request budget, `finish_by_ms` -
   clock_skew_allowance_ms), the request budget being `/pattern`'s `time_budget_ms`, `/resolve`'s
   `bounds.time_budget_ms` or the server maximum, the attempt's bound for `/traverse`. The WORK CUTOFF is the
@@ -389,7 +400,10 @@ The answer keeps its upstream shape (a list of `{seq_description, results, ...}`
   HTTP-level 400 never holds a `request_id`: one that only the work can find (a seed not fully present in the graph,
   a seed label a discovery did not find, a fault of a seed after it, a `/pattern` the index cannot answer, a
   `/resolve` answer priced past `--resolve-max-discover-memory-mb`: `resolve_answer_too_large`, contract sample 39)
-  frees the id when it is answered, so `GET /requests/{id}` answers 404 and a retry runs. On a multi-graph server such a 400
+  frees the id when it is answered, so `GET /requests/{id}` answers 404 and a retry runs. Such a 400 is reached only
+  while the deadline has not passed at an earlier reading of the work: past it, the request is 503 `deadline`, which
+  retains its id (a retry under the same id is 409 until retention ends), so near its deadline a request at its
+  answer bound (or with an explicit seed the work refuses) gets either answer. On a multi-graph server such a 400
   of one pair is a refused entry (`refusal.http_status` 400) of a 200 envelope: the request was answered, its id
   is retained like any answered request's (`GET /requests/{id}` states it ended, that pair `refused`), and a
   corrected request takes a new id. A fan-out is never forgotten because one of its pairs gave 400; only a 400 of

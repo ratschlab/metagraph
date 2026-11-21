@@ -497,10 +497,13 @@ class LoadReservations {
     explicit LoadReservations(size_t capacity) : capacity_(capacity), left_(capacity) {}
     size_t capacity() const { return capacity_; }
     // Waits until |bytes| (at most capacity()) are free and takes them: true. |gone|, when
-    // given, is asked every |poll_ms| while it waits; true abandons the wait (false, nothing
-    // taken). Without it the wait is /search's: until the memory is free
+    // given, is asked every |poll_ms| while it waits, and, with |ask_after_wait|, once more
+    // after a wait with the bytes taken; true abandons the wait (false, nothing taken: the bytes
+    // given back, as when that last ask throws). A fan-out's pair passes false: its control asks
+    // again once the memory is granted (FanoutState::start), with the texts of that case.
+    // Without |gone| the wait is /search's: until the memory is free
     bool reserve(size_t bytes, const std::function<bool()> &gone = nullptr,
-                 uint64_t poll_ms = 100);
+                 uint64_t poll_ms = 100, bool ask_after_wait = true);
     void release(size_t bytes);
     // the bytes free now
     size_t left() const;

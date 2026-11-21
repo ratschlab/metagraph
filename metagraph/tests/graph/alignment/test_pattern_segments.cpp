@@ -28,6 +28,7 @@
 #include <memory>
 #include <optional>
 #include <random>
+#include <stdexcept>
 #include <string>
 #include <tuple>
 #include <vector>
@@ -1392,6 +1393,48 @@ TEST(PatternSegments, ArmStacksInTheSink) {
         EXPECT_EQ(c.peak - (c.what == "right" ? kRightArmLevelBytes : kLeftArmLevelBytes),
                   cut.peak);
     }
+}
+
+// The left arm's states memoised for a window are released however the window's extension
+// ends: here the sink's extent() throws at the root's extent, after the left arm memoised its
+// L - k states (GPT review of train 7, D1: the exception skipped their release, which left
+// (L - k) x kSegmentStateBytes held in the sink). Nothing stays held, and the same sink then
+// serves a search at the account of its peak (ArmStacksInTheSink's "left" case), which the
+// states left in it stopped at the arm's deepest level
+TEST(PatternSegments, TheLeftArmsStatesAreReleasedWhenTheSinkThrows) {
+    const uint32_t k = 5;
+    const uint32_t L = 40;
+    auto graph = build_graph<DBGSuccinct>(k, { std::string(60, 'A') });
+    const Pattern pattern = Pattern::parse(PatternKind::IUPAC, "N" + std::string(L - 1, 'A'));
+    SegmentPlan plan;
+    plan.choice = WindowChoice::ENDS;
+    Request request = segment_request(plan, Strands::FORWARD, 1000);
+    request.min_information_bits = 9;
+    const uint64_t peak = L + (L - k + 1) * kLeftArmLevelBytes;
+    GraphSegmentStore store(L, peak);
+    struct ThrowingSink : TeeSink {
+        using TeeSink::TeeSink;
+        bool extent(const SegmentExtent &) override {
+            ++thrown;
+            throw std::runtime_error("extent");
+        }
+        size_t thrown = 0;
+    } throwing(store);
+    PatternSearch search(*graph);
+    {
+        request.segment_sink = &throwing;
+        Budget budget(kManySteps, unbounded_deadline());
+        EXPECT_THROW(search.count(pattern, request, budget), std::runtime_error);
+    }
+    EXPECT_EQ(1u, throwing.thrown);
+    EXPECT_EQ(0u, store.held());
+    TeeSink sink(store);
+    request.segment_sink = &sink;
+    Budget budget(kManySteps, unbounded_deadline());
+    const Result again = search.count(pattern, request, budget);
+    EXPECT_FALSE(again.stop);
+    EXPECT_EQ(1u, sink.recorded.size());
+    EXPECT_EQ(store.size() * GraphSegmentStore::kGraphSegmentBytes, store.held());
 }
 
 TEST(PatternSegments, StopSweepMemoryAndMaxSegments) {

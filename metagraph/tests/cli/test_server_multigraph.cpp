@@ -5,6 +5,7 @@
 #include <chrono>
 #include <filesystem>
 #include <fstream>
+#include <future>
 #include <map>
 #include <memory>
 #include <new>
@@ -502,6 +503,91 @@ TEST(MultiGraphInRam, ReservationsWaitForTheMemory) {
     EXPECT_EQ(0u, r.left());
     r.release(100);
     EXPECT_EQ(100u, r.left());
+}
+
+// A waiter whose request stops after it was last asked, before the release that frees the memory:
+// the wait ends on that release (the poll is a minute away), and the waiter is asked once more
+// with the bytes taken, gives them back and starts no load (GPT review of train 7, P2: it took
+// the reservation and loaded the index for a client already gone)
+TEST(MultiGraphInRam, AWaiterGoneBeforeTheReleaseTakesNothing) {
+    LoadReservations r(100);
+    ASSERT_TRUE(r.reserve(100));
+    std::atomic<bool> stopped { false };
+    std::atomic<int> asked { 0 };
+    std::promise<void> first_asked;
+    std::atomic<int> result { -1 };
+    std::thread waiter([&]() {
+        result = r.reserve(100, [&]() {
+            // read before the first ask is announced, so the first answer is "not gone"
+            const bool gone = stopped.load();
+            if (asked++ == 0)
+                first_asked.set_value();
+            return gone;
+        }, /* poll_ms */ 60000);
+    });
+    first_asked.get_future().wait();
+    stopped = true;
+    r.release(100);
+    waiter.join();
+    EXPECT_EQ(0, result.load());
+    EXPECT_GE(asked.load(), 2);
+    EXPECT_EQ(100u, r.left());
+    // (a waiter that took the memory gives it back, so that what follows does not wait)
+    if (result.load() == 1)
+        r.release(100);
+    // and one still wanted takes the memory
+    EXPECT_TRUE(r.reserve(100, [&]() { return false; }, 1));
+    EXPECT_EQ(0u, r.left());
+}
+
+// The ask after a wait, with the bytes taken, gives them back when it throws (the Opus review of
+// d6a6a4ab3, N1: they were lost from the capacity for good, and every later load waited forever):
+// the exception leaves reserve(), the memory is free again and a later waiter takes it. Without
+// the ask after a wait (a fan-out's pair, whose control asks again itself) a waiter stopped
+// after its last ask takes the memory on the release, as before the review of train 7
+TEST(MultiGraphInRam, TheAskAfterAWaitGivesTheBytesBackWhenItThrows) {
+    struct Gone {};
+    LoadReservations r(100);
+    for (bool ask_after_wait : { true, false }) {
+        SCOPED_TRACE(ask_after_wait);
+        ASSERT_TRUE(r.reserve(100));
+        std::atomic<int> asked { 0 };
+        std::promise<void> first_asked;
+        std::atomic<int> result { -1 };
+        std::thread waiter([&]() {
+            try {
+                result = r.reserve(100, [&]() {
+                    if (asked++ == 0) {
+                        first_asked.set_value();
+                        return false;
+                    }
+                    throw Gone();
+                }, /* poll_ms */ 60000, ask_after_wait);
+            } catch (const Gone &) {
+                result = 2;
+            }
+        });
+        first_asked.get_future().wait();
+        r.release(100);
+        waiter.join();
+        if (ask_after_wait) {
+            EXPECT_EQ(2, result.load());
+            EXPECT_EQ(2, asked.load());
+            EXPECT_EQ(100u, r.left());
+        } else {
+            EXPECT_EQ(1, result.load());
+            EXPECT_EQ(1, asked.load());
+            EXPECT_EQ(0u, r.left());
+            r.release(100);
+        }
+        // a later waiter takes the memory
+        std::atomic<bool> taken { false };
+        std::thread later([&]() { taken = r.reserve(100, [&]() { return false; }, 1); });
+        later.join();
+        EXPECT_TRUE(taken.load());
+        r.release(100);
+        EXPECT_EQ(100u, r.left());
+    }
 }
 
 // What a load holds from reserve() on: an exception at any step gives the bytes back, once and

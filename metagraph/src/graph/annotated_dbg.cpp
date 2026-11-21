@@ -1136,8 +1136,12 @@ class RepeatedValues {
     RepeatedValues(const MultiIntMatrix &matrix, const annot::CoordToHeader &mapping,
                    const QueryRows &q, std::span<const size_t> positions,
                    const HeaderCounts &counts, bool count, CutScratch *scratch)
-          : q_(q), query_positions_(positions), hits_(counts.size()), scratch_(scratch) {
-        if (counts.empty())
+          : q_(q), query_positions_(positions),
+            // a table of the records' values at the repeated rows only when there are such
+            // rows: an empty vector a record (24 B) was not charged, and was made for every
+            // query (GPT review of train 7, M5)
+            hits_(q.repeated.empty() ? 0 : counts.size()), scratch_(scratch) {
+        if (hits_.empty())
             return;
         // the positions of each repeated row, ascending: those of row j are
         // positions_[offsets_[j], offsets_[j + 1])
@@ -1178,6 +1182,9 @@ class RepeatedValues {
     // query is shorter (a record at most rows of a periodic query).
     template <class Callback>
     void call_in_order(size_t r, const Callback &callback) {
+        // no repeated row: no value to visit
+        if (hits_.empty())
+            return;
         auto &hits = hits_[r];
         // by row, as call_selected_coords adds them, and at a row in ascending order
         assert(std::is_sorted(hits.begin(), hits.end()));
